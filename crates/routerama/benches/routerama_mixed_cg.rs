@@ -21,34 +21,48 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "returning boxed setup state excludes large resolver moves and teardown from measured paths"
+)]
 mod linux {
     use gungraun::prelude::*;
 
     include!("common/mixed_scenarios.rs");
 
     macro_rules! mixed_case {
-        ($name:ident, $run:ident) => {
+        ($name:ident, $scenario:ident) => {
             #[library_benchmark]
             #[bench::run(build_mixed_scenario())]
-            fn $name(router: MixedScenarioResolver) -> MixedScenarioResolver {
-                $run(&router);
+            fn $name(router: Box<MixedScenarioResolver>) -> Box<MixedScenarioResolver> {
+                std::hint::black_box(run_scenario(&router, Scenario::$scenario));
                 router
             }
         };
     }
 
-    mixed_case!(dispatch_static_hit, mixed_static_hit);
-    mixed_case!(dispatch_dynamic_fallback_hit, mixed_dynamic_hit);
-    mixed_case!(dispatch_complete_miss, mixed_complete_miss);
-    mixed_case!(dispatch_static_capture_error, mixed_static_capture_error);
+    mixed_case!(dispatch_short_static_hit, ShortStaticHit);
+    mixed_case!(dispatch_short_dynamic_hit, ShortDynamicHit);
+    mixed_case!(dispatch_short_miss, ShortMiss);
+    mixed_case!(dispatch_segments_17_static_hit, Deep17StaticHit);
+    mixed_case!(dispatch_segments_17_dynamic_hit, Deep17DynamicHit);
+    mixed_case!(dispatch_segments_17_miss, Deep17Miss);
+    mixed_case!(dispatch_segments_32_static_hit, Deep32StaticHit);
+    mixed_case!(dispatch_segments_32_dynamic_hit, Deep32DynamicHit);
+    mixed_case!(dispatch_segments_32_miss, Deep32Miss);
 
     library_benchmark_group!(
         name = dispatch;
         benchmarks =
-            dispatch_static_hit,
-            dispatch_dynamic_fallback_hit,
-            dispatch_complete_miss,
-            dispatch_static_capture_error
+            dispatch_short_static_hit,
+            dispatch_short_dynamic_hit,
+            dispatch_short_miss,
+            dispatch_segments_17_static_hit,
+            dispatch_segments_17_dynamic_hit,
+            dispatch_segments_17_miss,
+            dispatch_segments_32_static_hit,
+            dispatch_segments_32_dynamic_hit,
+            dispatch_segments_32_miss
     );
 }
 

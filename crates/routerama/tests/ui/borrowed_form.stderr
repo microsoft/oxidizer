@@ -1,0 +1,8 @@
+error: implementation of `FromQuery` is not general enough
+  --> tests/ui/borrowed_form.rs:22:5
+   |
+22 |     require_form_extractor::<Borrowed<'static>>();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FromQuery` is not general enough
+   |
+   = note: `Borrowed<'_>` must implement `FromQuery<'0>`, for any lifetime `'0`...
+   = note: ...but it actually implements `FromQuery<'1>`, for some specific lifetime `'1`

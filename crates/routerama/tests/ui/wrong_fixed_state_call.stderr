@@ -1,0 +1,16 @@
+error[E0308]: mismatched types
+  --> tests/ui/wrong_fixed_state_call.rs:20:40
+   |
+20 |     let _response = Api.route(request, &OtherState).await;
+   |                         -----          ^^^^^^^^^^^ expected `&AppState`, found `&OtherState`
+   |                         |
+   |                         arguments to this method are incorrect
+   |
+   = note: expected reference `&AppState`
+              found reference `&OtherState`
+note: method defined here
+  --> tests/ui/wrong_fixed_state_call.rs:10:1
+   |
+10 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: this error originates in the attribute macro `router` (in Nightly builds, run with -Z macro-backtrace for more info)

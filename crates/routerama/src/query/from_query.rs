@@ -4,8 +4,7 @@
 use super::parser::Parser;
 use super::{DecodeFields, Error, QueryDecoder as _, QueryLimits};
 
-// Callgrind favors fused scalar parsing below 40 bytes while longer values
-// recover the setup cost of vectorized scanning.
+// Short inputs avoid vectorized-scanner setup.
 const INPUT_SIMD_THRESHOLD: usize = 40;
 
 /// Parses a typed value from an `application/x-www-form-urlencoded` query.
@@ -64,7 +63,7 @@ fn parse<'q, T: DecodeFields<'q>, const WIDE: bool>(input: &'q str, limits: Quer
     let mut parser = Parser::<WIDE>::new(input, limits)?;
     let mut decoder = T::decoder();
     while let Some(pair) = parser.next_pair()? {
-        let claimed = decoder.decode_field(pair.key.as_ref(), pair.value, pair.offset, limits)?;
+        let claimed = decoder.decode_field(pair.key.as_ref(), pair.value, pair.offset, parser.decoded_total_mut(), limits)?;
         if !claimed && T::DENY_UNKNOWN_FIELDS {
             return Err(Error::unknown(pair.offset));
         }

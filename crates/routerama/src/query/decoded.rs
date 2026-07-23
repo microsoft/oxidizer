@@ -10,18 +10,6 @@ use super::{Error, ErrorKind};
 /// A decoded query component.
 pub type Decoded<'q> = Cow<'q, str>;
 
-/// Extracts a borrowed value without allocating.
-///
-/// # Errors
-///
-/// Returns [`ErrorKind::BorrowRequired`] when decoding allocated.
-pub fn parse_borrowed<'q>(value: &Decoded<'q>, parameter: &'static str, pair_offset: usize) -> Result<&'q str, Error> {
-    match value {
-        Cow::Borrowed(value) => Ok(*value),
-        Cow::Owned(_) => Err(Error::parsing(Some(parameter), pair_offset, ErrorKind::BorrowRequired)),
-    }
-}
-
 /// Returns a decoded borrowed-or-owned value.
 #[must_use]
 pub fn parse_cow(value: Decoded<'_>) -> Decoded<'_> {

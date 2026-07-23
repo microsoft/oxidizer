@@ -9,7 +9,9 @@
 /// # Examples
 ///
 /// ```
-/// use routerama::codegen_helpers::split_verb;
+/// # #[cfg(feature = "resolve")]
+/// # fn main() {
+/// use routerama::resolve::__private::split_verb;
 ///
 /// assert_eq!(
 ///     split_verb("/shelves/7:archive"),
@@ -22,6 +24,9 @@
 ///     split_verb("/shelves/a:b:archive"),
 ///     ("/shelves/a:b", Some("archive"))
 /// );
+/// # }
+/// # #[cfg(not(feature = "resolve"))]
+/// # fn main() {}
 /// ```
 #[must_use]
 #[inline]
@@ -58,7 +63,9 @@ pub fn split_verb(path: &str) -> (&str, Option<&str>) {
 /// # Examples
 ///
 /// ```
-/// use routerama::codegen_helpers::scan_segments;
+/// # #[cfg(feature = "resolve")]
+/// # fn main() {
+/// use routerama::resolve::__private::scan_segments;
 ///
 /// let path = "/shelves/7/books";
 /// let mut starts = [0_usize; 4];
@@ -69,6 +76,9 @@ pub fn split_verb(path: &str) -> (&str, Option<&str>) {
 /// assert_eq!(&path[starts[0]..ends[0]], "shelves");
 /// assert_eq!(&path[starts[1]..ends[1]], "7");
 /// assert_eq!(&path[starts[2]..ends[2]], "books");
+/// # }
+/// # #[cfg(not(feature = "resolve"))]
+/// # fn main() {}
 /// ```
 #[must_use]
 #[inline]

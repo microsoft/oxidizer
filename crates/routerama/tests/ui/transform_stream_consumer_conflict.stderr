@@ -1,0 +1,19 @@
+error: handler `create` declares a `#[body]` parameter, but its `#[transform]` consumes the body without a replacement, so there is nothing left to extract; return `BodyTransform<Wrapper<B>, R>` with a replacement that wraps the transport body for `#[body]` extraction
+  --> tests/ui/transform_stream_consumer_conflict.rs:17:7
+   |
+17 |     #[transform(stream, create)]
+   |       ^^^^^^^^^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_stream_consumer_conflict.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `BodyConsumed`, `BytesBody`, `RequestParts`, and `StatusCode`
+ --> tests/ui/transform_stream_consumer_conflict.rs:5:24
+  |
+5 | use routerama::route::{BodyConsumed, BytesBody, RequestParts, StatusCode, router};
+  |                        ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^

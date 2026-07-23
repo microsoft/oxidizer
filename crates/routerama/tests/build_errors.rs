@@ -11,12 +11,14 @@
 
 use std::error::Error as _;
 
-use routerama::{HttpMethod, resolver};
+use routerama::resolve::{HttpMethod, resolver};
 
 #[resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum Api {
+    #[route(dynamic)]
     Home,
+    #[route(dynamic)]
     Book { book: String },
 }
 
@@ -113,6 +115,7 @@ fn every_failure_surfaces_at_once() {
 #[resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum Pair {
+    #[route(dynamic)]
     Two { left: String, right: String },
 }
 
@@ -131,7 +134,9 @@ fn a_mismatch_between_an_empty_and_a_multi_capture_set_is_reported() {
 fn conflicting_dynamic_routes_are_reported_instead_of_using_registration_order() {
     #[resolver]
     enum Conflicting {
+        #[route(dynamic)]
         First,
+        #[route(dynamic)]
         Second,
     }
 

@@ -1,0 +1,5 @@
+error: `tower` requires Routerama's `tower` Cargo feature
+ --> tests/ui/tower_attribute_without_feature.rs:9:1
+  |
+9 | impl Api {
+  | ^^^^

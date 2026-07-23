@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use routerama::{HttpMethod, ResolveError, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, resolver};
 
 #[resolver]
 #[derive(Debug)]
@@ -148,7 +148,7 @@ fn multiple_routes_per_variant() {
 
 // A `pub` typed resolver must not leak the hidden raw enum across a module.
 mod sub {
-    use routerama::resolver;
+    use routerama::resolve::resolver;
     #[resolver]
     #[derive(Debug)]
     pub(crate) enum Route<'p> {
@@ -207,12 +207,9 @@ fn file_r() -> FileRouteResolver {
 #[derive(Debug, PartialEq, Eq)]
 enum Mixed {
     #[route(GET, "/numbers/{value}")]
-    Static {
-        value: u32,
-    },
-    Dynamic {
-        value: String,
-    },
+    Static { value: u32 },
+    #[route(dynamic)]
+    Dynamic { value: String },
 }
 
 #[test]
@@ -244,12 +241,9 @@ impl FromStr for Invariant<'_> {
 #[derive(Debug, PartialEq, Eq)]
 enum InvariantMixed<'p> {
     #[route(GET, "/static/{value}")]
-    Static {
-        value: Invariant<'p>,
-    },
-    Dynamic {
-        r#type: String,
-    },
+    Static { value: Invariant<'p> },
+    #[route(dynamic)]
+    Dynamic { r#type: String },
 }
 
 #[test]

@@ -1,0 +1,13 @@
+error: a method may declare only one `#[before]`, `#[after]`, or `#[transform]` interceptor annotation
+  --> tests/ui/interceptor_duplicate_marker.rs:17:14
+   |
+17 |     async fn both(&self, _ctx: &mut BeforeContext<'_>) -> Before<StatusCode> {
+   |              ^^^^
+
+warning: unused imports: `AfterContext`, `BeforeContext`, `Before`, and `StatusCode`
+ --> tests/ui/interceptor_duplicate_marker.rs:4:24
+  |
+4 | use routerama::route::{AfterContext, Before, BeforeContext, StatusCode, router};
+  |                        ^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

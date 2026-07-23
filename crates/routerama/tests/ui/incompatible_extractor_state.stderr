@@ -1,0 +1,19 @@
+error[E0277]: the trait bound `for<'__routerama_witness> OtherStateExtractor: FromRequestParts<'__routerama_witness, AppState>` is not satisfied
+  --> tests/ui/incompatible_extractor_state.rs:20:1
+   |
+20 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `FromRequestParts<'__routerama_witness, AppState>` is not implemented for `OtherStateExtractor`
+      but trait `FromRequestParts<'_, OtherState>` is implemented for it
+  --> tests/ui/incompatible_extractor_state.rs:10:1
+   |
+10 | impl FromRequestParts<'_, OtherState> for OtherStateExtractor {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `OtherState`, found `AppState`
+note: required by a bound in `__routerama_assert_parts`
+  --> tests/ui/incompatible_extractor_state.rs:20:1
+   |
+20 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `__routerama_assert_parts`
+   = note: this error originates in the attribute macro `router` (in Nightly builds, run with -Z macro-backtrace for more info)

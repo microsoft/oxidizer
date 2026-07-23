@@ -11,6 +11,8 @@ use http_path_template::ParseError;
 pub(crate) enum BuildErrorEntry {
     /// A dynamic variant's registration method was never called.
     MissingRoute { add_method: &'static str, variant: &'static str },
+    /// A dynamic route's method was not an RFC 9110 token.
+    InvalidMethod { variant: &'static str, method: String },
     /// A registered path failed to parse as a path template.
     InvalidTemplate {
         variant: &'static str,
@@ -32,7 +34,7 @@ impl BuildErrorEntry {
     pub(crate) fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         match self {
             Self::InvalidTemplate { source, .. } => Some(source),
-            Self::MissingRoute { .. } | Self::CaptureMismatch { .. } | Self::Conflict { .. } => None,
+            Self::MissingRoute { .. } | Self::InvalidMethod { .. } | Self::CaptureMismatch { .. } | Self::Conflict { .. } => None,
         }
     }
 }
@@ -43,6 +45,10 @@ impl fmt::Display for BuildErrorEntry {
             Self::MissingRoute { add_method, variant } => write!(
                 f,
                 "`{add_method}` was never called, but it is required to initialize the dynamic `{variant}` route",
+            ),
+            Self::InvalidMethod { variant, method } => write!(
+                f,
+                "the dynamic `{variant}` route was registered with `{method}`, which is not a valid RFC 9110 HTTP method token",
             ),
             Self::InvalidTemplate { variant, path, source } => write!(
                 f,

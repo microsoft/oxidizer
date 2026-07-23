@@ -1,0 +1,48 @@
+error[E0277]: the trait bound `MissingProjection: FromRef<AppState>` is not satisfied
+  --> tests/ui/missing_state_projection.rs:10:1
+   |
+10 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `FromRef<AppState>` is not implemented for `MissingProjection`
+  --> tests/ui/missing_state_projection.rs:7:1
+   |
+ 7 | struct MissingProjection;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `FromRequestParts<'_, S>` is implemented for `State<T>`
+  --> src/route/extract.rs
+   |
+   | / impl<S, T> FromRequestParts<'_, S> for State<T>
+   | | where
+   | |     S: ?Sized,
+   | |     T: FromRef<S>,
+   | |__________________^
+   = note: required for `State<MissingProjection>` to implement `FromRequestParts<'_, AppState>`
+   = note: this error originates in the attribute macro `router` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `MissingProjection: FromRef<AppState>` is not satisfied
+  --> tests/ui/missing_state_projection.rs:10:1
+   |
+10 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `FromRef<AppState>` is not implemented for `MissingProjection`
+  --> tests/ui/missing_state_projection.rs:7:1
+   |
+ 7 | struct MissingProjection;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `FromRequestParts<'_, S>` is implemented for `State<T>`
+  --> src/route/extract.rs
+   |
+   | / impl<S, T> FromRequestParts<'_, S> for State<T>
+   | | where
+   | |     S: ?Sized,
+   | |     T: FromRef<S>,
+   | |__________________^
+   = note: required for `State<MissingProjection>` to implement `for<'__routerama_witness> FromRequestParts<'__routerama_witness, AppState>`
+note: required by a bound in `__routerama_assert_parts`
+  --> tests/ui/missing_state_projection.rs:10:1
+   |
+10 | #[router(state = AppState)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `__routerama_assert_parts`
+   = note: this error originates in the attribute macro `router` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -19,6 +19,8 @@ pub(crate) enum FieldKind {
     Cow,
     /// any `T: FromStr` — decoded then parsed.
     Parse,
+    /// A built-in integer or Boolean — decoded and parsed without allocation.
+    Primitive,
 }
 
 /// Classifies a (non-`Option`) field type into its extraction strategy.
@@ -29,9 +31,34 @@ pub(crate) fn field_kind(ty: &Type) -> FieldKind {
         FieldKind::Owned
     } else if type_path_is_any(ty, &[&["Cow"], &["std", "borrow", "Cow"], &["alloc", "borrow", "Cow"]]) {
         FieldKind::Cow
+    } else if is_primitive(ty) {
+        FieldKind::Primitive
     } else {
         FieldKind::Parse
     }
+}
+
+fn is_primitive(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    path.qself.is_none()
+        && path.path.segments.len() == 1
+        && matches!(
+            &path.path.segments[0].ident,
+            ident
+                if ident == "bool"
+                    || ident == "u8"
+                    || ident == "u16"
+                    || ident == "u32"
+                    || ident == "u64"
+                    || ident == "u128"
+                    || ident == "usize"
+                    || ident == "i8"
+                    || ident == "i16"
+                    || ident == "i32"
+                    || ident == "i64"
+                    || ident == "i128"
+                    || ident == "isize"
+        )
 }
 
 /// Whether `ty` is an `Option<_>`.
@@ -175,7 +202,10 @@ mod tests {
         assert!(matches!(field_kind(&parse_quote!(&'p str)), FieldKind::Raw));
         assert!(matches!(field_kind(&parse_quote!(String)), FieldKind::Owned));
         assert!(matches!(field_kind(&parse_quote!(std::borrow::Cow<'p, str>)), FieldKind::Cow));
-        assert!(matches!(field_kind(&parse_quote!(u32)), FieldKind::Parse));
+        assert!(matches!(field_kind(&parse_quote!(u32)), FieldKind::Primitive));
+        assert!(matches!(field_kind(&parse_quote!(bool)), FieldKind::Primitive));
+        assert!(matches!(field_kind(&parse_quote!(std::primitive::u32)), FieldKind::Parse));
+        assert!(matches!(field_kind(&parse_quote!(<T as Trait>::Value)), FieldKind::Parse));
         assert!(matches!(field_kind(&parse_quote!(custom::String)), FieldKind::Parse));
         assert!(matches!(field_kind(&parse_quote!(custom::Cow<'p>)), FieldKind::Parse));
         assert!(!is_option(&parse_quote!(custom::Option<u32>)));

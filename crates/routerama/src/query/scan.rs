@@ -3,10 +3,7 @@
 
 /// Minimum input length for vector scanning.
 ///
-/// SSE2 and NEON process 16 bytes per iteration. Requiring two complete vectors
-/// amortizes vector setup while keeping the short, common-query benchmark on
-/// the lower-overhead scalar path. The long-ASCII query benchmark exercises the
-/// vector path; changing this value requires comparing both benchmark groups.
+/// Two complete SIMD vectors amortize scanner setup.
 pub(crate) const SIMD_THRESHOLD: usize = 32;
 
 #[inline]

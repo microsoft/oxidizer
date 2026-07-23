@@ -10,13 +10,17 @@
 #![allow(clippy::missing_panics_doc, reason = "test code")]
 #![allow(clippy::missing_assert_message, reason = "assertions carry a message")]
 #![allow(clippy::min_ident_chars, reason = "short names in test loops")]
+#![allow(
+    clippy::redundant_field_names,
+    reason = "the wide-table enum is declared through a macro, so the resolver macro's generated field initializers are attributed to it"
+)]
 
 use bolero::TypeGenerator;
 use http_path_template::{Grammar, PathTemplate};
-use routerama::__rt::{RawResolver, Route, RouteMatch};
-use routerama::{HttpMethod, ResolveError};
+use routerama::resolve::__private::{RawResolver, Route, RouteMatch};
+use routerama::resolve::{HttpMethod, ResolveError};
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ApiRoute<'p> {
     #[route(GET, "/books")]
@@ -246,7 +250,7 @@ impl core::str::FromStr for ShelfId {
     }
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum TypedStatic {
     #[route(GET, "/books")]
@@ -261,13 +265,18 @@ enum TypedStatic {
     GetFile { path: String },
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum TypedDyn {
+    #[route(dynamic)]
     ListBooks,
+    #[route(dynamic)]
     GetBook { book: String },
+    #[route(dynamic)]
     GetReview { book: String, review: u32 },
+    #[route(dynamic)]
     GetShelf { shelf: ShelfId },
+    #[route(dynamic)]
     GetFile { path: String },
 }
 
@@ -458,5 +467,183 @@ fn typed_static_and_dynamic_agree_on_coercion() {
         let expected = static_outcome(static_resolver.resolve(method, &path));
         let actual = dynamic_outcome(dynamic_resolver.resolve(method, &path));
         assert_eq!(expected, actual, "typed coercion disagreement on `{method} {path}`");
+    });
+}
+
+// Wide-fanout differential. A node carrying far more sibling literals than the
+// runtime matcher's linear-scan threshold must resolve exactly like the
+// generated static router, including the affix, single-wildcard, and rest
+// siblings that share the node.
+
+macro_rules! wide_routes {
+    ($($variant:ident => $literal:tt),+ $(,)?) => {
+        #[routerama::resolve::resolver]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum WideRoute<'p> {
+            $(
+                #[route(GET, $literal)]
+                $variant,
+            )+
+            #[route(GET, "/wide/img-{id}.png")]
+            Image { id: &'p str },
+            #[route(GET, "/wide/{name}")]
+            Single { name: &'p str },
+            #[route(GET, "/wide/{tail=**}")]
+            Rest { tail: &'p str },
+        }
+
+        /// The same route set, registered at run time.
+        fn wide_dynamic_resolver() -> RawResolver {
+            let rule = |name: &str, template: &str| {
+                Route::new(name, "GET", PathTemplate::parse(template, Grammar::default().with_segment_affixes()).unwrap())
+            };
+            RawResolver::new([
+                $( rule(stringify!($variant), $literal), )+
+                rule("Image", "/wide/img-{id}.png"),
+                rule("Single", "/wide/{name}"),
+                rule("Rest", "/wide/{tail=**}"),
+            ])
+        }
+
+        fn wide_static_name(route: WideRoute<'_>) -> &'static str {
+            match route {
+                $( WideRoute::$variant => stringify!($variant), )+
+                WideRoute::Image { .. } => "Image",
+                WideRoute::Single { .. } => "Single",
+                WideRoute::Rest { .. } => "Rest",
+            }
+        }
+    };
+}
+
+wide_routes! {
+    K00 => "/wide/k00",
+    K01 => "/wide/k01",
+    K02 => "/wide/k02",
+    K03 => "/wide/k03",
+    K04 => "/wide/k04",
+    K05 => "/wide/k05",
+    K06 => "/wide/k06",
+    K07 => "/wide/k07",
+    K08 => "/wide/k08",
+    K09 => "/wide/k09",
+    K10 => "/wide/k10",
+    K11 => "/wide/k11",
+    K12 => "/wide/k12",
+    K13 => "/wide/k13",
+    K14 => "/wide/k14",
+    K15 => "/wide/k15",
+    K16 => "/wide/k16",
+    K17 => "/wide/k17",
+    K18 => "/wide/k18",
+    K19 => "/wide/k19",
+    K20 => "/wide/k20",
+    K21 => "/wide/k21",
+    K22 => "/wide/k22",
+    K23 => "/wide/k23",
+    K24 => "/wide/k24",
+    K25 => "/wide/k25",
+    K26 => "/wide/k26",
+    K27 => "/wide/k27",
+    K28 => "/wide/k28",
+    K29 => "/wide/k29",
+    K30 => "/wide/k30",
+    K31 => "/wide/k31",
+    K32 => "/wide/k32",
+    K33 => "/wide/k33",
+    K34 => "/wide/k34",
+    K35 => "/wide/k35",
+    K36 => "/wide/k36",
+    K37 => "/wide/k37",
+    K38 => "/wide/k38",
+    K39 => "/wide/k39",
+}
+
+/// Returns a named capture of a wide-table match.
+fn wide_static_capture<'p>(route: WideRoute<'p>, field: &str) -> Option<&'p str> {
+    match route {
+        WideRoute::Image { id } => (field == "id").then_some(id),
+        WideRoute::Single { name } => (field == "name").then_some(name),
+        WideRoute::Rest { tail } => (field == "tail").then_some(tail),
+        _ => None,
+    }
+}
+
+/// A segment biased toward the wide table's keys, its affix shape, and the
+/// boundaries between them, while retaining arbitrary input.
+#[derive(Debug, TypeGenerator)]
+enum WideSeg {
+    /// `k00`..`k47`: the registered keys plus eight neighbouring misses.
+    Key(u8),
+    /// `img-N.png`, which only the affix sibling matches.
+    Image(u8),
+    /// `img-.png`, whose empty middle the affix guard rejects.
+    ImageEmpty,
+    /// A key prefix (`k0`) or extension (`k000`), which must not match.
+    Truncated,
+    Extended,
+    Arbitrary(String),
+}
+
+impl WideSeg {
+    fn to_segment(&self) -> String {
+        match self {
+            Self::Key(value) => format!("k{:02}", value % 48),
+            Self::Image(value) => format!("img-{value}.png"),
+            Self::ImageEmpty => "img-.png".to_string(),
+            Self::Truncated => "k0".to_string(),
+            Self::Extended => "k000".to_string(),
+            Self::Arbitrary(value) => value.clone(),
+        }
+    }
+}
+
+/// A request against the wide table: a method, the wide node's segment, and
+/// arbitrary trailing segments so the rest sibling is reachable.
+#[derive(Debug, TypeGenerator)]
+struct WideRequest {
+    method: Method,
+    segment: WideSeg,
+    tail: Vec<Seg>,
+}
+
+impl WideRequest {
+    fn path(&self) -> String {
+        let mut path = format!("/wide/{}", self.segment.to_segment());
+        for seg in &self.tail {
+            path.push('/');
+            path.push_str(seg.as_str());
+        }
+        path
+    }
+}
+
+#[test]
+fn wide_literal_fanout_matches_the_static_router() {
+    let resolver = wide_dynamic_resolver();
+    bolero::check!().with_type::<WideRequest>().for_each(|req: &WideRequest| {
+        let method = req.method.as_str();
+        let path = req.path();
+        let oracle = match WideRoute::resolver().resolve(method, &path) {
+            Err(ResolveError::InvalidPath(_) | ResolveError::NotFound(_)) => None,
+            Err(_) => unreachable!("WideRoute has only `&str` captures"),
+            Ok(route) => Some(route),
+        };
+        let dynamic = resolver.resolve(method, &path);
+
+        assert_eq!(
+            oracle.map(wide_static_name),
+            dynamic.as_ref().map(RouteMatch::name),
+            "name disagreement on `{method} {path}`"
+        );
+        if let (Some(route), Some(matched)) = (oracle, dynamic) {
+            for field in ["id", "name", "tail"] {
+                assert_eq!(
+                    wide_static_capture(route, field),
+                    matched.capture(field),
+                    "capture `{field}` disagreement on `{method} {path}`"
+                );
+            }
+        }
     });
 }

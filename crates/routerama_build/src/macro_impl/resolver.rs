@@ -17,38 +17,24 @@ use alloc::format;
 use alloc::string::{String, ToString as _};
 use alloc::vec::Vec;
 
-use http_path_template::Segment;
-use proc_macro_crate::{FoundCrate, crate_name};
+use http_path_template::{Grammar, PathTemplate, Segment};
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{ToTokens as _, quote};
 use syn::spanned::Spanned as _;
 use syn::{Error, Fields, ItemEnum};
 
 use super::field::{FieldKind, field_kind, is_capture_cow, is_capture_str_reference, is_option, is_str_reference, uses_capture_lifetime};
-use super::{declared_fields, has_capture_lifetime, has_route_attr, routes_for_variant};
+#[cfg(test)]
+use super::runtime::runtime_path_for;
+use super::runtime::{RuntimeCapability, runtime_path};
+use super::{RouteAttr, RouteDeclaration, RouteTarget, declared_fields, has_capture_lifetime, route_declaration, routes_for_variant};
+use crate::trie::depth_limit_error;
 use crate::{Generator, Route};
 
 /// A classified field of a resolver variant.
 struct TypedField {
     ident: Ident,
     kind: FieldKind,
-}
-
-pub(crate) fn runtime_path() -> TokenStream2 {
-    runtime_path_for(crate_name("routerama").ok())
-}
-
-fn runtime_path_for(found: Option<FoundCrate>) -> TokenStream2 {
-    match found {
-        Some(FoundCrate::Name(name)) => {
-            let name = name.replace('-', "_");
-            let ident = syn::parse_str::<Ident>(&name)
-                .or_else(|_| syn::parse_str::<Ident>(&format!("r#{name}")))
-                .expect("Cargo dependency aliases are valid Rust identifiers, possibly requiring raw syntax");
-            quote! { ::#ident }
-        }
-        Some(FoundCrate::Itself) | None => quote! { ::routerama },
-    }
 }
 
 /// A resolver variant: its name and (possibly empty) classified fields.
@@ -59,15 +45,29 @@ struct TypedVariant {
 
 #[cfg(test)]
 pub(crate) fn expand(item: ItemEnum) -> syn::Result<TokenStream2> {
-    expand_named(item, None)
+    expand_named(item, None, test_capability())
+}
+
+#[cfg(all(test, feature = "resolve"))]
+fn test_capability() -> RuntimeCapability {
+    RuntimeCapability::Resolve
+}
+
+#[cfg(all(test, not(feature = "resolve"), feature = "route"))]
+fn test_capability() -> RuntimeCapability {
+    RuntimeCapability::Route
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "the codegen assembles many independent token fragments in one place; splitting it would obscure the static/dynamic branching it orchestrates"
 )]
-pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Ident>) -> syn::Result<TokenStream2> {
-    let runtime = runtime_path();
+pub(crate) fn expand_named(
+    mut item: ItemEnum,
+    explicit_resolver_name: Option<Ident>,
+    capability: RuntimeCapability,
+) -> syn::Result<TokenStream2> {
+    let runtime = runtime_path(capability);
     let has_lifetime = has_capture_lifetime(&item.generics)?;
     if item.ident.to_string().starts_with("r#") {
         return Err(Error::new(
@@ -110,11 +110,26 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
     let mut static_variants: Vec<TypedVariant> = Vec::new();
     let mut dynamic_variants: Vec<TypedVariant> = Vec::new();
     for variant in &item.variants {
-        if has_route_attr(variant) {
-            static_routes.extend(routes_for_variant(variant)?);
-            static_variants.push(classify_static(variant)?);
-        } else {
-            dynamic_variants.push(classify_dynamic(variant)?);
+        #[cfg(feature = "resolve")]
+        if matches!(capability, RuntimeCapability::Resolve) {
+            reject_request_predicates(variant)?;
+        }
+        match route_declaration(&variant.attrs)? {
+            Some(RouteDeclaration::Static) => {
+                reject_deep_templates(variant)?;
+                static_routes.extend(routes_for_variant(variant)?);
+                static_variants.push(classify_static(variant)?);
+            }
+            Some(RouteDeclaration::Dynamic) => dynamic_variants.push(classify_dynamic(variant)?),
+            None => {
+                return Err(Error::new(
+                    variant.span(),
+                    format!(
+                        "route variant `{}` must declare `#[route(METHOD, \"path\")]` or `#[route(dynamic)]`",
+                        variant.ident
+                    ),
+                ));
+            }
         }
     }
     let mut generated_dynamic_names: Vec<(String, Ident)> = Vec::new();
@@ -151,7 +166,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         quote! { #enum_name }
     };
     let extractor_ty = quote! {
-        fn(&#runtime::__rt::Captures<'_, '_, '_>)
+        fn(&#runtime::Captures<'_, '_, '_>)
             -> ::core::result::Result<#schema_ty, #runtime::ResolveError<'static>>
     };
     let visibility = item.vis.to_token_stream();
@@ -177,7 +192,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         "Builds a resolver for [`{enum_name}`].\n\nRegister every dynamic variant with its generated `add_<variant>` method, then call [`build`](Self::build). Static routes are already compiled into the resolver and need no registration."
     );
     let dynamic_build_doc = format!(
-        "Validates the dynamic registrations and builds a [`{resolver_name}`].\n\n# Errors\n\nReturns `routerama::ConfigurationError` containing every invalid or missing dynamic route registration."
+        "Validates the dynamic registrations and builds a [`{resolver_name}`].\n\n# Errors\n\nReturns `routerama::resolve::ConfigurationError` containing every invalid or missing dynamic route registration."
     );
     let resolver_type_doc = format!("The generated resolver for [`{enum_name}`].");
     let (static_any_verb, static_has_captures) = static_routes.iter().fold((false, false), |state, route| {
@@ -191,12 +206,54 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                     .any(|segment| matches!(segment, Segment::Variable(_) | Segment::Affix { .. })),
         )
     });
+    let reserve_static_routes = match capability {
+        #[cfg(feature = "route")]
+        RuntimeCapability::Route => has_dynamic,
+        #[cfg(feature = "resolve")]
+        RuntimeCapability::Resolve => false,
+        #[cfg(feature = "query")]
+        RuntimeCapability::Query => false,
+    };
+    let static_reservations: Vec<TokenStream2> = if reserve_static_routes {
+        static_routes
+            .iter()
+            .map(|route| {
+                let method = route.method();
+                let path = route.template().to_string();
+                quote! {
+                    #runtime::DynBuilder::reserve(
+                        &mut __dyn,
+                        #method,
+                        #path,
+                        "generated static route",
+                    );
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let dynamic_builder_init = if static_reservations.is_empty() {
+        quote! {
+            let __dyn = #runtime::DynBuilder::new();
+        }
+    } else {
+        quote! {
+            let mut __dyn = #runtime::DynBuilder::new();
+            #( #static_reservations )*
+        }
+    };
 
     let raw_enum = Ident::new(&format!("__{enum_name}Raw"), enum_name.span());
-    let static_resolve_body = if has_static {
+    let static_max_segments = if has_static {
+        crate::trie::build_trie(&static_routes).max_segments
+    } else {
+        0
+    };
+    let static_resolve_fn = if has_static {
         let mut generator = Generator::new(raw_enum.to_string(), false);
         generator.full_api(false);
-        generator.runtime_path(quote! { #runtime::codegen_helpers });
+        generator.runtime_path(quote! { #runtime });
         generator.add_all(static_routes);
         let raw_impls = generator.generate();
 
@@ -214,23 +271,47 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
             fn __convert_static<'p>(__raw: #raw_ty) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
                 ::core::result::Result::Ok(match __raw { #(#arms)* })
             }
-            match #raw_enum::__resolve_checked(__method, __path) {
-                ::core::result::Result::Ok(::core::option::Option::Some(__raw)) => __convert_static(__raw),
-                ::core::result::Result::Ok(::core::option::Option::None) => {
-                    ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
+
+            fn __static_resolve<'p>(
+                __method: &str,
+                __path: &'p str,
+            ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
+                match #raw_enum::__resolve_checked(__method, __path) {
+                    ::core::result::Result::Ok(::core::option::Option::Some(__raw)) => __convert_static(__raw),
+                    ::core::result::Result::Ok(::core::option::Option::None) => {
+                        ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
+                    }
+                    ::core::result::Result::Err(_) => {
+                        ::core::result::Result::Err(#runtime::ResolveError::InvalidPath(__path))
+                    }
                 }
-                ::core::result::Result::Err(_) => {
-                    ::core::result::Result::Err(#runtime::ResolveError::InvalidPath(__path))
-                }
+            }
+
+        }
+    } else if !has_dynamic {
+        quote! {
+            fn __static_resolve<'p>(
+                _method: &str,
+                __path: &'p str,
+            ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
+                ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
             }
         }
     } else {
-        quote! { ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path)) }
+        quote! {}
     };
 
+    let method_type = match capability {
+        #[cfg(feature = "resolve")]
+        RuntimeCapability::Resolve => quote! { #runtime::HttpMethod },
+        #[cfg(feature = "route")]
+        RuntimeCapability::Route => quote! { impl ::core::convert::AsRef<str> },
+        #[cfg(feature = "query")]
+        RuntimeCapability::Query => quote! { impl ::core::convert::AsRef<str> },
+    };
     let add_methods: Vec<TokenStream2> = dynamic_variants
         .iter()
-        .map(|variant| add_method(variant, &enum_name, &schema_ty, &extractor_ty, &visibility, &runtime))
+        .map(|variant| add_method(variant, &enum_name, &schema_ty, &extractor_ty, &visibility, &runtime, &method_type))
         .collect();
     let dynamic_conversion_arms: Vec<TokenStream2> = dynamic_variants
         .iter()
@@ -270,7 +351,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
     let (state_ty, dynamic_resolve_fn) = if has_dynamic {
         (
             quote! {
-                #runtime::__rt::RawResolver<#runtime::__rt::DynRoute<#extractor_ty>>
+                #runtime::RawResolver<#runtime::DynRoute<#extractor_ty>>
             },
             quote! {
                 fn __convert_dynamic<'p>(__route: #schema_ty) -> #typed_ty {
@@ -281,21 +362,21 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 }
 
                 fn __dynamic_resolve<'p>(
-                    __dyn: &#runtime::__rt::RawResolver<#runtime::__rt::DynRoute<#extractor_ty>>,
+                    __dyn: &#runtime::RawResolver<#runtime::DynRoute<#extractor_ty>>,
                     __method: &str,
                     __path: &'p str,
                 ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
-                    match #runtime::__rt::RawResolver::resolve_scanned_checked(
+                    match #runtime::RawResolver::resolve_scanned_checked(
                         __dyn,
                         __method,
                         __path,
                         |__leaf, __route, __scanned| {
-                            let __caps = #runtime::__rt::Captures::new(
+                            let __caps = #runtime::Captures::new(
                                 __leaf,
                                 __scanned,
-                                #runtime::__rt::DynRoute::capture_order(__route),
+                                #runtime::DynRoute::capture_order(__route),
                             );
-                            match (*#runtime::__rt::DynRoute::extractor(__route))(&__caps) {
+                            match (*#runtime::DynRoute::extractor(__route))(&__caps) {
                                 ::core::result::Result::Ok(__r) => {
                                     ::core::result::Result::Ok(__convert_dynamic(__r))
                                 }
@@ -316,22 +397,45 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                         }
                     }
                 }
+
+                fn __dynamic_resolve_scanned<'p>(
+                    __dyn: &#runtime::RawResolver<#runtime::DynRoute<#extractor_ty>>,
+                    __method: &str,
+                    __path: &'p str,
+                    __verb: ::core::option::Option<&str>,
+                    __scanned: &#runtime::ScannedPath<'p, '_>,
+                ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
+                    match #runtime::RawResolver::resolve_scanned_path(
+                        __dyn,
+                        __method,
+                        __verb,
+                        __scanned,
+                        |__leaf, __route, __scanned| {
+                            let __caps = #runtime::Captures::new(
+                                __leaf,
+                                __scanned,
+                                #runtime::DynRoute::capture_order(__route),
+                            );
+                            match (*#runtime::DynRoute::extractor(__route))(&__caps) {
+                                ::core::result::Result::Ok(__r) => {
+                                    ::core::result::Result::Ok(__convert_dynamic(__r))
+                                }
+                                ::core::result::Result::Err(__err) => {
+                                    ::core::result::Result::Err(__err)
+                                }
+                            }
+                        },
+                    ) {
+                        ::core::option::Option::Some(__result) => __result,
+                        ::core::option::Option::None => {
+                            ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
+                        }
+                    }
+                }
             },
         )
     } else {
         (quote! { () }, quote! {})
-    };
-    let static_resolve_fn = if has_static || !has_dynamic {
-        quote! {
-            fn __static_resolve<'p>(
-                __method: &str,
-                __path: &'p str,
-            ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
-                #static_resolve_body
-            }
-        }
-    } else {
-        quote! {}
     };
 
     let builder_def = if has_dynamic {
@@ -339,7 +443,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
             #[doc = #dynamic_builder_doc]
             #[derive(Debug)]
             #visibility struct #builder_name {
-                __dyn: #runtime::__rt::DynBuilder<#extractor_ty>,
+                __dyn: #runtime::DynBuilder<#extractor_ty>,
                 #( #seen_decls, )*
             }
 
@@ -353,9 +457,9 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 ) -> ::core::result::Result<#resolver_name, #runtime::ConfigurationError> {
                     let mut __builder = self.__dyn;
                     #( #requires )*
-                    let mut __resolver = #runtime::__rt::DynBuilder::finish(__builder)?;
+                    let mut __resolver = #runtime::DynBuilder::finish(__builder)?;
                     // All routes must apply the same verb-splitting rule.
-                    #runtime::__rt::RawResolver::force_verb_split(&mut __resolver, #static_any_verb);
+                    #runtime::RawResolver::force_verb_split(&mut __resolver, #static_any_verb);
                     ::core::result::Result::Ok(#resolver_name { __state: __resolver })
                 }
             }
@@ -364,30 +468,62 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         quote! {}
     };
 
-    let resolve_body = if has_dynamic && has_static && !static_any_verb {
-        // A dynamic `:verb` route must not be consumed as a static capture.
-        quote! {
-            let __matched = if #runtime::__rt::RawResolver::splits_verbs(__state)
-                && #runtime::codegen_helpers::split_verb(__path).1.is_some()
-            {
-                ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
-            } else {
-                __static_resolve(__method, __path)
-            };
-            match __matched {
-                ::core::result::Result::Err(#runtime::ResolveError::NotFound(_)) => {
-                    __dynamic_resolve(__state, __method, __path)
+    let resolve_body = if has_dynamic && has_static {
+        let static_match = if static_any_verb {
+            quote! {
+                if let ::core::option::Option::Some(__raw) =
+                    #raw_enum::__resolve_scanned(__method, __scanned, __verb)
+                {
+                    return __convert_static(__raw);
                 }
-                __matched => __matched,
             }
-        }
-    } else if has_dynamic && has_static {
-        quote! {
-            match __static_resolve(__method, __path) {
-                ::core::result::Result::Err(#runtime::ResolveError::NotFound(_)) => {
-                    __dynamic_resolve(__state, __method, __path)
+        } else {
+            // A dynamic `:verb` route must not be consumed as a static capture.
+            quote! {
+                if __verb.is_none()
+                    && let ::core::option::Option::Some(__raw) =
+                        #raw_enum::__resolve_scanned(__method, __scanned, __verb)
+                {
+                    return __convert_static(__raw);
                 }
-                __matched => __matched,
+            }
+        };
+        let scan_path = if static_any_verb {
+            quote! {
+                let (__body, __verb) = #runtime::split_verb(__path);
+            }
+        } else {
+            quote! {
+                let (__body, __verb) = if #runtime::RawResolver::splits_verbs(__state) {
+                    #runtime::split_verb(__path)
+                } else {
+                    (__path, ::core::option::Option::None)
+                };
+            }
+        };
+        quote! {
+            #scan_path
+            match #runtime::with_scanned_path(
+                __body,
+                ::core::cmp::max(
+                    #static_max_segments,
+                    #runtime::RawResolver::max_segments(__state),
+                ),
+                |__scanned| {
+                    #static_match
+                    __dynamic_resolve_scanned(
+                        __state,
+                        __method,
+                        __path,
+                        __verb,
+                        __scanned,
+                    )
+                },
+            ) {
+                ::core::result::Result::Ok(__result) => __result,
+                ::core::result::Result::Err(_) => {
+                    ::core::result::Result::Err(#runtime::ResolveError::InvalidPath(__path))
+                }
             }
         }
     } else if has_dynamic {
@@ -402,8 +538,9 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 #[doc = #builder_method_doc]
                 #[must_use]
                 #visibility fn builder() -> #builder_name {
+                    #dynamic_builder_init
                     #builder_name {
-                        __dyn: #runtime::__rt::DynBuilder::new(),
+                        __dyn,
                         #( #seen_inits, )*
                     }
                 }
@@ -435,7 +572,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
             ///
             /// # Errors
             ///
-            /// Returns `routerama::ResolveError` when no route matches or a
+            /// Returns `routerama::resolve::ResolveError` when no route matches or a
             /// matched route's capture cannot be decoded or converted.
             #[inline]
             #visibility fn resolve<'p, P>(
@@ -444,7 +581,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 __path: &'p P,
             ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>>
             where
-                P: ::core::convert::AsRef<str> + ?Sized,
+                P: ::core::convert::AsRef<str> + ?::core::marker::Sized,
             {
                 #runtime::Resolver::resolve(self, __method, __path)
             }
@@ -461,7 +598,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 __path: &'p P,
             ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>>
             where
-                P: ::core::convert::AsRef<str> + ?Sized,
+                P: ::core::convert::AsRef<str> + ?::core::marker::Sized,
             {
                 let __state = &self.__state;
                 let __method = __method.as_ref();
@@ -482,6 +619,54 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         #enum_inherent
         #builder_def
     })
+}
+
+/// Rejects a template whose segment count would drive the code generator's
+/// per-segment recursion beyond [`crate::trie::MAX_TEMPLATE_SEGMENTS`].
+fn reject_deep_templates(variant: &syn::Variant) -> syn::Result<()> {
+    for attribute in variant.attrs.iter().filter(|attribute| attribute.path().is_ident("route")) {
+        let RouteAttr { target, .. } = attribute.parse_args()?;
+        let RouteTarget::Static { path, .. } = target else {
+            continue;
+        };
+        let path_value = path.value();
+        let Ok(template) = PathTemplate::parse(&path_value, Grammar::default().with_segment_affixes()) else {
+            // `routes_for_variant` reports the parse failure with its own diagnostic.
+            continue;
+        };
+        if let Some(message) = depth_limit_error(template.segments()) {
+            return Err(Error::new(path.span(), message));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "resolve")]
+fn reject_request_predicates(variant: &syn::Variant) -> syn::Result<()> {
+    for attribute in variant.attrs.iter().filter(|attribute| attribute.path().is_ident("route")) {
+        let parsed: RouteAttr = attribute.parse_args()?;
+        if let Some(priority) = parsed.priority {
+            return Err(Error::new(
+                priority.span,
+                "`priority` is HTTP route policy supported only by `#[router]`; `#[resolver]` resolves only methods and paths",
+            ));
+        }
+        if let Some(header) = parsed.static_headers.first() {
+            return Err(Error::new(
+                header.name.span(),
+                "static response headers are supported only by `#[router]`; `#[resolver]` resolves only methods and paths",
+            ));
+        }
+        if let Some((name, value)) = parsed.predicates.first() {
+            return Err(Error::new(
+                value.span(),
+                format!(
+                    "`{name}` is an HTTP request predicate supported only by `#[router]`; `#[resolver]` resolves only methods and paths"
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Classifies a static (`#[route]`) variant's named fields, rejecting `Option`.
@@ -524,7 +709,7 @@ fn classify_static(variant: &syn::Variant) -> syn::Result<TypedVariant> {
     })
 }
 
-/// Classifies an unannotated variant, whose fields must be owned.
+/// Classifies a `#[route(dynamic)]` variant, whose fields must be owned.
 fn classify_dynamic(variant: &syn::Variant) -> syn::Result<TypedVariant> {
     declared_fields(variant)?;
 
@@ -591,9 +776,10 @@ fn convert_arm(variant: &TypedVariant, raw_enum: &Ident, typed_enum: &Ident, run
         let key = id.to_string();
         let value = match field.kind {
             FieldKind::Raw => quote! { #id },
-            FieldKind::Owned => quote! { #runtime::__rt::coerce_owned(#id, #key)? },
-            FieldKind::Cow => quote! { #runtime::__rt::coerce_cow(#id, #key)? },
-            FieldKind::Parse => quote! { #runtime::__rt::coerce_parse(#id, #key)? },
+            FieldKind::Owned => quote! { #runtime::coerce_owned(#id, #key)? },
+            FieldKind::Cow => quote! { #runtime::coerce_cow(#id, #key)? },
+            FieldKind::Parse => quote! { #runtime::coerce_parse(#id, #key)? },
+            FieldKind::Primitive => quote! { #runtime::coerce_primitive(#id, #key)? },
         };
         quote! { #id: #value }
     });
@@ -613,14 +799,15 @@ fn dynamic_extractor(variant: &TypedVariant, typed_enum: &Ident, schema_ty: &Tok
             let key = unraw_ident(id);
             let helper = match field.kind {
                 FieldKind::Parse => quote! { parse },
+                FieldKind::Primitive => quote! { primitive },
                 FieldKind::Owned | FieldKind::Raw | FieldKind::Cow => quote! { owned },
             };
-            quote! { #id: #runtime::__rt::#helper(__caps, #index, #key)? }
+            quote! { #id: #runtime::#helper(__caps, #index, #key)? }
         });
         quote! { ::core::result::Result::Ok(#typed_enum::#name { #(#inits),* }) }
     };
     quote! {
-        fn __extract(__caps: &#runtime::__rt::Captures<'_, '_, '_>)
+        fn __extract(__caps: &#runtime::Captures<'_, '_, '_>)
             -> ::core::result::Result<#schema_ty, #runtime::ResolveError<'static>>
         {
             #body
@@ -648,6 +835,7 @@ fn add_method(
     extractor_ty: &TokenStream2,
     visibility: &TokenStream2,
     runtime: &TokenStream2,
+    method_type: &TokenStream2,
 ) -> TokenStream2 {
     let name = variant.ident.to_string();
     let method = Ident::new(&format!("add_{}", to_snake_case(&name)), variant.ident.span());
@@ -665,7 +853,11 @@ fn add_method(
     quote! {
         #[doc = #doc]
         #[must_use]
-        #visibility fn #method(mut self, method: #runtime::HttpMethod, path: impl ::core::convert::AsRef<str>) -> Self {
+        #visibility fn #method(
+            mut self,
+            method: #method_type,
+            path: impl ::core::convert::AsRef<str>,
+        ) -> Self {
             #extractor
             let __extractor: #extractor_ty = __extract;
             self.__dyn.add(
@@ -692,7 +884,7 @@ fn unraw_ident(ident: &Ident) -> String {
 }
 
 /// Converts an `UpperCamelCase` variant name into `snake_case`.
-fn to_snake_case(name: &str) -> String {
+pub(crate) fn to_snake_case(name: &str) -> String {
     let mut out = String::with_capacity(name.len() + 4);
     for (index, ch) in name.chars().enumerate() {
         if ch.is_ascii_uppercase() {
@@ -735,32 +927,73 @@ mod tests {
         let code = expand_str(item).expect("valid");
         assert!(code.contains("fn resolve"), "{code}");
         assert!(code.contains("struct RouteResolver"), "{code}");
-        assert!(code.contains("impl :: routerama :: Resolver for RouteResolver"), "{code}");
+        assert!(code.contains("__private :: Resolver for RouteResolver"), "{code}");
         assert!(code.contains("coerce_owned"), "{code}");
         assert!(code.contains("coerce_cow"), "{code}");
+        assert!(code.contains("coerce_primitive"), "{code}");
     }
 
     #[test]
     fn expands_a_dynamic_resolver() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Plugin { name: String, priority: u32 },
             }
         };
         let code = expand_str(item).expect("valid");
         assert!(code.contains("add_plugin"), "{code}");
         assert!(code.contains("RouteResolverBuilder"), "{code}");
-        assert!(code.contains("__rt :: parse"), "{code}");
+        assert!(code.contains("__private :: primitive"), "{code}");
+    }
+
+    #[test]
+    #[cfg(feature = "resolve")]
+    fn direct_resolvers_reject_http_request_predicates() {
+        for declaration in [
+            quote! { #[route(GET, "/", host = "api.example")] },
+            quote! { #[route(GET, "/", consumes = "application/json")] },
+            quote! { #[route(dynamic, produces = "application/json")] },
+            quote! { #[route(GET, "/", priority = 1)] },
+            quote! { #[route(GET, "/", headers(insert("x-route", "resolver")))] },
+        ] {
+            let item: ItemEnum = syn::parse2(quote! {
+                enum Route {
+                    #declaration
+                    Handler,
+                }
+            })
+            .expect("test enum syntax is valid");
+            let error = expand(item).expect_err("request predicates belong only on routers");
+            assert!(error.to_string().contains("supported only by `#[router]`"), "{error}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_variant_without_a_route_declaration() {
+        let item: ItemEnum = parse_quote! {
+            enum Route {
+                Plugin,
+            }
+        };
+        let error = expand_str(item).expect_err("every route variant must declare its route kind");
+        assert!(
+            error.contains("route variant `Plugin` must declare `#[route(METHOD, \"path\")]` or `#[route(dynamic)]`"),
+            "{error}"
+        );
     }
 
     #[test]
     fn uses_an_explicit_resolver_name_as_the_builder_root() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Plugin,
             }
         };
-        let code = expand_named(item, Some(parse_quote!(ApiResolver))).expect("valid").to_string();
+        let code = expand_named(item, Some(parse_quote!(ApiResolver)), test_capability())
+            .expect("valid")
+            .to_string();
         assert!(code.contains("struct ApiResolver"), "{code}");
         assert!(code.contains("struct ApiResolverBuilder"), "{code}");
         assert!(code.contains(":: core :: result :: Result < ApiResolver"), "{code}");
@@ -774,7 +1007,7 @@ mod tests {
                 Home,
             }
         };
-        let error = expand_named(item, Some(parse_quote!(Route))).expect_err("resolver and route names would collide");
+        let error = expand_named(item, Some(parse_quote!(Route)), test_capability()).expect_err("resolver and route names would collide");
         assert!(error.to_string().contains("must differ from the route enum name"), "{error}");
     }
 
@@ -795,6 +1028,7 @@ mod tests {
     fn generated_dynamic_api_is_documented() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Plugin { name: String },
             }
         };
@@ -842,6 +1076,7 @@ mod tests {
     fn route_variants_cannot_collide_with_builder() {
         let item = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 builder,
             }
         };
@@ -865,6 +1100,7 @@ mod tests {
     fn localized_helper_names_do_not_reserve_variant_names() {
         let item = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Plugin,
                 #[route(GET, "/static")]
                 __static_resolve,
@@ -894,6 +1130,7 @@ mod tests {
     fn dynamic_variant_borrowing_is_rejected() {
         let item: ItemEnum = parse_quote! {
             enum Route<'p> {
+                #[route(dynamic)]
                 Plugin { name: &'p str },
             }
         };
@@ -905,6 +1142,7 @@ mod tests {
     fn dynamic_variant_cow_is_rejected() {
         let item: ItemEnum = parse_quote! {
             enum Route<'p> {
+                #[route(dynamic)]
                 Plugin { name: std::borrow::Cow<'p, str> },
             }
         };
@@ -915,6 +1153,7 @@ mod tests {
     fn dynamic_variant_types_cannot_carry_the_request_lifetime() {
         let item: ItemEnum = parse_quote! {
             enum Route<'p> {
+                #[route(dynamic)]
                 Plugin { value: Invariant<'p> },
             }
         };
@@ -926,6 +1165,7 @@ mod tests {
     fn dynamic_variant_option_field_is_rejected() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Plugin { name: Option<String> },
             }
         };
@@ -961,6 +1201,7 @@ mod tests {
             enum Route<'p> {
                 #[route(GET, "/books/{book}")]
                 GetBook { book: &'p str },
+                #[route(dynamic)]
                 Plugin { name: String },
             }
         };
@@ -968,6 +1209,9 @@ mod tests {
         assert!(code.contains("add_plugin"), "{code}");
         assert!(code.contains("fn __static_resolve"), "{code}");
         assert!(code.contains("__dynamic_resolve"), "{code}");
+        assert!(code.contains("RawResolver :: resolve_scanned_path"), "{code}");
+        assert!(code.contains("RawResolver :: max_segments"), "{code}");
+        assert!(code.contains("return __convert_static (__raw)"), "{code}");
         assert!(code.contains("fn __convert_dynamic < 'p >"), "{code}");
         assert!(code.contains("Route :: Plugin { name } => Route :: Plugin { name }"), "{code}");
         assert!(code.contains("__convert_dynamic (__r)"), "{code}");
@@ -977,6 +1221,7 @@ mod tests {
     fn raw_dynamic_field_names_are_registered_without_the_raw_prefix() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Dynamic { r#type: String },
             }
         };
@@ -991,6 +1236,7 @@ mod tests {
             enum Route<'p> {
                 #[route(GET, "/static/{value}")]
                 Static { value: &'p str },
+                #[route(dynamic)]
                 Dynamic { callback: for<'p> fn(&'p str) },
             }
         };
@@ -1001,7 +1247,9 @@ mod tests {
     fn dynamic_variants_must_not_generate_the_same_method_name() {
         let item: ItemEnum = parse_quote! {
             enum Route {
+                #[route(dynamic)]
                 Foo,
+                #[route(dynamic)]
                 foo,
             }
         };
@@ -1055,15 +1303,32 @@ mod tests {
 
     #[test]
     fn runtime_path_uses_a_renamed_dependency() {
-        assert!(!runtime_path().is_empty());
-        assert_eq!(runtime_path_for(Some(FoundCrate::Name("rr".to_owned()))).to_string(), ":: rr");
-        assert_eq!(runtime_path_for(Some(FoundCrate::Itself)).to_string(), ":: routerama");
-        assert_eq!(runtime_path_for(None).to_string(), ":: routerama");
+        use proc_macro_crate::FoundCrate;
+
+        let capability = test_capability();
+        assert!(!runtime_path(capability).is_empty());
+        #[cfg(feature = "resolve")]
+        let expected = ":: rr :: resolve :: __private";
+        #[cfg(all(not(feature = "resolve"), feature = "route"))]
+        let expected = ":: rr :: route :: __private";
+        assert_eq!(
+            runtime_path_for(Some(FoundCrate::Name("rr".to_owned())), capability).to_string(),
+            expected
+        );
     }
 
     #[test]
     fn runtime_path_supports_a_keyword_dependency_alias() {
-        assert_eq!(runtime_path_for(Some(FoundCrate::Name("type".to_owned()))).to_string(), ":: r#type");
+        use proc_macro_crate::FoundCrate;
+
+        #[cfg(feature = "resolve")]
+        let expected = ":: r#type :: resolve :: __private";
+        #[cfg(all(not(feature = "resolve"), feature = "route"))]
+        let expected = ":: r#type :: route :: __private";
+        assert_eq!(
+            runtime_path_for(Some(FoundCrate::Name("type".to_owned())), test_capability()).to_string(),
+            expected
+        );
     }
 
     #[test]
@@ -1110,7 +1375,7 @@ mod tests {
         };
         let code = expand_str(item).expect("valid");
         assert!(code.contains("__StatRaw"), "{code}");
-        assert!(code.contains("coerce_parse"), "{code}");
+        assert!(code.contains("coerce_primitive"), "{code}");
         assert!(!code.contains("splits_verbs"), "{code}");
         assert!(!code.contains("__dynamic_resolve"), "{code}");
         assert!(!code.contains("route (GET"), "{code}");
@@ -1123,6 +1388,7 @@ mod tests {
             enum Scoped<'p> {
                 #[route(GET, "/static/{value}")]
                 Static { value: &'p str },
+                #[route(dynamic)]
                 Dynamic { value: String },
             }
         };
@@ -1194,6 +1460,7 @@ mod tests {
             enum Mix<'p> {
                 #[route(GET, "/a/{x}")]
                 A { x: &'p str },
+                #[route(dynamic)]
                 GetBook { book: String },
             }
         };
@@ -1212,6 +1479,7 @@ mod tests {
                 A { x: &'p str },
                 #[route(GET, "/b/{x}:archive")]
                 Archive { x: &'p str },
+                #[route(dynamic)]
                 Dynamic { x: String },
             }
         };
@@ -1226,6 +1494,7 @@ mod tests {
     fn a_pure_dynamic_resolver_never_verb_splits() {
         let item: ItemEnum = parse_quote! {
             enum Dyn {
+                #[route(dynamic)]
                 GetBook { book: String },
             }
         };

@@ -25,18 +25,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 all-features = true
 
 [features]
-default = ["codegen"]
+default = ["codegen", "query", "resolve", "route"]
 # Build-time code generation (the `Generator` API). Pulls in `proc-macro2`
 # / `quote`; without it only the framework-neutral routing trie (`trie` module,
 # used by the runtime dynamic router) is compiled.
 codegen = ["dep:proc-macro-crate", "dep:proc-macro2", "dep:quote", "dep:syn"]
+query = ["dep:proc-macro-crate", "dep:proc-macro2", "dep:quote", "dep:syn"]
+resolve = ["codegen"]
+route = ["codegen"]
+tower = ["route"]
 
 [dependencies]
 http_path_template = { workspace = true }
 proc-macro-crate = { workspace = true, optional = true }
 proc-macro2 = { workspace = true, optional = true }
 quote = { workspace = true, optional = true }
-syn = { workspace = true, optional = true, features = ["clone-impls", "parsing", "proc-macro", "printing", "derive", "full", "visit"] }
+syn = { workspace = true, optional = true, features = ["clone-impls", "parsing", "proc-macro", "printing", "derive", "full", "visit", "visit-mut"] }
 unicode-ident = { workspace = true }
 
 [dev-dependencies]

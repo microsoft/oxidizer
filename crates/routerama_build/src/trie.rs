@@ -1,22 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The framework-neutral routing trie — the shared matching IR.
+//! Framework-neutral routing trie shared by static code generation and runtime
+//! resolution.
 //!
-//! A route set is lowered into a [`Node`] trie whose edges encode the
-//! `google.api.http` matching precedence (literal → intra-segment affix →
-//! single-segment wildcard → `**` catch-all, deeper-before-shorter). The trie is
-//! consumed by **two backends** that must resolve identically:
-//!
-//! - the **static** backend (`crate::codegen`, behind the `codegen` feature)
-//!   lowers the trie to a compile-time `match`;
-//! - the **dynamic** backend (`routerama`'s runtime router) walks the same trie
-//!   at runtime.
-//!
-//! This module carries no `proc-macro2` / `quote` dependency, so the runtime
-//! interpreter can build the trie without pulling code-generation crates into a
-//! server binary. The precedence-sensitive edge ordering lives here
-//! ([`affix_edges_in_match_order`]) so both backends share one source of truth.
+//! Edge ordering implements literal, affix, single-segment, and catch-all
+//! precedence without depending on code-generation crates.
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -24,6 +13,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{format, vec};
+use core::fmt::Write as _;
 
 use http_path_template::{PathTemplate, Segment};
 
@@ -154,6 +144,35 @@ pub fn build_trie(routes: &[Route]) -> Trie {
     build_trie_with_templates(routes, &templates)
 }
 
+/// The most path segments one route template may declare.
+///
+/// Every code-generation walk over the trie — `emit_node`, `is_literal_only`,
+/// `fused_literal_chain`, `collect_route_groups` — and `Node`'s derived drop
+/// glue recurse once per segment, so an unbounded template overflows the
+/// compiler's stack instead of producing a diagnostic. The bound is well above
+/// any real URL template (they have far fewer than a hundred segments) and far
+/// below the depth at which those recursions become a risk.
+pub const MAX_TEMPLATE_SEGMENTS: usize = 256;
+
+/// The number of trie levels a template occupies: its segments with each
+/// variable expanded into its constituent atoms.
+#[must_use]
+pub fn template_depth(segments: &[Segment]) -> usize {
+    flatten(segments).0.len()
+}
+
+/// Reports a template that declares more segments than [`MAX_TEMPLATE_SEGMENTS`].
+///
+/// Returns the diagnostic to attribute to the offending template, or `None` when
+/// the template is within the bound.
+#[must_use]
+pub fn depth_limit_error(segments: &[Segment]) -> Option<String> {
+    let depth = template_depth(segments);
+    (depth > MAX_TEMPLATE_SEGMENTS).then(|| {
+        format!("path template declares {depth} segments, but a route may declare at most {MAX_TEMPLATE_SEGMENTS}; shorten the template")
+    })
+}
+
 pub(crate) fn build_trie_with_templates(routes: &[Route], templates: &[PathTemplate<'_>]) -> Trie {
     assert_eq!(routes.len(), templates.len(), "each route must have one parsed template");
     let mut root = Node::default();
@@ -170,8 +189,13 @@ pub(crate) fn build_trie_with_templates(routes: &[Route], templates: &[PathTempl
     }
 }
 
-/// Reports route sets that terminate at the same trie node with the same HTTP
-/// method and custom verb, making all but the first route unreachable.
+/// Reports route sets whose routes are not all reachable and unambiguous.
+///
+/// Two kinds of problem are reported: several routes terminating at the same
+/// trie node with the same HTTP method and custom verb, which makes all but the
+/// first unreachable; and intra-segment (affix) patterns that are equally
+/// specific yet can both match the same request, which makes the winner
+/// arbitrary.
 #[must_use]
 pub fn conflicts(root: &Node) -> Vec<String> {
     let mut conflicts = Vec::new();
@@ -184,6 +208,7 @@ pub fn conflicts(root: &Node) -> Vec<String> {
                 prefix.push_str(&component);
                 check_bucket(&node.exact, &prefix, false, &mut conflicts);
                 check_bucket(&node.rest, &prefix, true, &mut conflicts);
+                check_affix_siblings(node, &prefix, &mut conflicts);
 
                 pending.push(ConflictAction::Truncate(parent_len));
                 if let Some(single) = &node.single {
@@ -226,6 +251,193 @@ fn check_bucket(leaves: &[Leaf], prefix: &str, is_rest: bool, out: &mut Vec<Stri
             ));
         }
     }
+}
+
+/// Reports affix siblings of `node` that are equally specific yet can both match
+/// the same request, so the match-order tie-break between them is arbitrary.
+///
+/// Affix edges of *different* specificity are deliberately ordered longest
+/// literal prefix+suffix first (see [`affix_edges_in_match_order`]), so those
+/// overlaps have a documented winner and are not reported.
+fn check_affix_siblings(node: &Node, prefix: &str, out: &mut Vec<String>) {
+    let edges: Vec<(&(String, String), &Node)> = node.affix.iter().collect();
+    for (index, (left_key, left_child)) in edges.iter().enumerate() {
+        for (right_key, right_child) in edges.iter().skip(index + 1) {
+            let (left_prefix, left_suffix) = (left_key.0.as_str(), left_key.1.as_str());
+            let (right_prefix, right_suffix) = (right_key.0.as_str(), right_key.1.as_str());
+            if affix_specificity(left_prefix, left_suffix) != affix_specificity(right_prefix, right_suffix)
+                || !affix_edges_overlap((left_prefix, left_suffix), (right_prefix, right_suffix))
+            {
+                continue;
+            }
+
+            let left_shapes = leaf_shapes(left_child);
+            let right_shapes = leaf_shapes(right_child);
+            let ambiguous = left_shapes.iter().find_map(|left| {
+                right_shapes
+                    .iter()
+                    .find(|right| shapes_can_match_same_request(left, right))
+                    .map(|right| (left, right))
+            });
+            let Some((left, right)) = ambiguous else {
+                continue;
+            };
+
+            let left_edge = EdgeShape::Affix {
+                prefix: left_prefix,
+                suffix: left_suffix,
+            };
+            let right_edge = EdgeShape::Affix {
+                prefix: right_prefix,
+                suffix: right_suffix,
+            };
+            let method = &left.leaf.method;
+            let verb = left.leaf.verb.as_ref().map(|verb| format!(":{verb}")).unwrap_or_default();
+            out.push(format!(
+                "conflicting routes: `{method} {left_path}{verb}` ({left_name}) and `{method} {right_path}{verb}` ({right_name}) are equally specific and can both match the same request, so which one wins is arbitrary; give one of the two intra-segment patterns a longer literal prefix or suffix",
+                left_path = render_shape(prefix, left_edge, left),
+                left_name = left.leaf.name,
+                right_path = render_shape(prefix, right_edge, right),
+                right_name = right.leaf.name,
+            ));
+        }
+    }
+}
+
+/// Whether two affix edges can both match the same path segment.
+///
+/// A segment `t` matches an affix edge `(p, s)` when it starts with `p`, ends
+/// with `s`, and is strictly longer than `p` and `s` together — the capture is
+/// never empty and the prefix and suffix never overlap each other. Both edges
+/// therefore match `t` exactly when `t` starts with both prefixes and ends with
+/// both suffixes, which requires one prefix to be a prefix of the other and one
+/// suffix to be a suffix of the other. When that holds, the segment built from
+/// the longer prefix, one filler byte, and the longer suffix matches both, so
+/// the condition is sufficient as well as necessary: no length ever makes such a
+/// segment impossible, because the capture may be padded to any length.
+///
+/// Both comparisons are byte-wise, matching the runtime matcher, so affixes that
+/// differ only in case are disjoint.
+fn affix_edges_overlap((left_prefix, left_suffix): (&str, &str), (right_prefix, right_suffix): (&str, &str)) -> bool {
+    let prefixes_agree = left_prefix.starts_with(right_prefix) || right_prefix.starts_with(left_prefix);
+    let suffixes_agree = left_suffix.ends_with(right_suffix) || right_suffix.ends_with(left_suffix);
+    prefixes_agree && suffixes_agree
+}
+
+/// A trie edge, as the constraint it places on one path segment.
+#[derive(Clone, Copy)]
+enum EdgeShape<'a> {
+    Literal(&'a str),
+    Affix { prefix: &'a str, suffix: &'a str },
+    Single,
+}
+
+/// One route of a subtree: the edges walked from the root of that subtree to
+/// reach it, the leaf itself, and whether it terminates in a `**` catch-all.
+struct LeafShape<'a> {
+    edges: Vec<EdgeShape<'a>>,
+    leaf: &'a Leaf,
+    is_rest: bool,
+}
+
+/// Every route in `node`'s subtree, each with the edges leading to it.
+fn leaf_shapes(node: &Node) -> Vec<LeafShape<'_>> {
+    let mut shapes = Vec::new();
+    let mut pending = vec![(node, Vec::new())];
+    while let Some((node, edges)) = pending.pop() {
+        for (leaves, is_rest) in [(&node.exact, false), (&node.rest, true)] {
+            shapes.extend(leaves.iter().map(|leaf| LeafShape {
+                edges: edges.clone(),
+                leaf,
+                is_rest,
+            }));
+        }
+
+        let mut descend = |edge, child| {
+            let mut edges = edges.clone();
+            edges.push(edge);
+            pending.push((child, edges));
+        };
+        if let Some(single) = &node.single {
+            descend(EdgeShape::Single, single);
+        }
+        for ((prefix, suffix), child) in &node.affix {
+            descend(EdgeShape::Affix { prefix, suffix }, child);
+        }
+        for (literal, child) in &node.literals {
+            descend(EdgeShape::Literal(literal), child);
+        }
+    }
+    shapes
+}
+
+/// Whether some request matches both routes: same HTTP method and custom verb,
+/// and a path every edge pair can agree on.
+fn shapes_can_match_same_request(left: &LeafShape<'_>, right: &LeafShape<'_>) -> bool {
+    if left.leaf.method != right.leaf.method || left.leaf.verb != right.leaf.verb {
+        return false;
+    }
+    if !left.edges.iter().zip(&right.edges).all(|(l, r)| segments_can_agree(*l, *r)) {
+        return false;
+    }
+    // A `**` leaf matches any remainder, so it only needs the other route to be
+    // at least as deep; two exact leaves must be exactly as deep as each other.
+    match (left.is_rest, right.is_rest) {
+        (true, true) => true,
+        (true, false) => right.edges.len() >= left.edges.len(),
+        (false, true) => left.edges.len() >= right.edges.len(),
+        (false, false) => left.edges.len() == right.edges.len(),
+    }
+}
+
+/// Whether some path segment satisfies both edges' constraints.
+fn segments_can_agree(left: EdgeShape<'_>, right: EdgeShape<'_>) -> bool {
+    match (left, right) {
+        (EdgeShape::Literal(left), EdgeShape::Literal(right)) => left == right,
+        (EdgeShape::Literal(literal), EdgeShape::Affix { prefix, suffix })
+        | (EdgeShape::Affix { prefix, suffix }, EdgeShape::Literal(literal)) => {
+            literal.len() > prefix.len() + suffix.len() && literal.starts_with(prefix) && literal.ends_with(suffix)
+        }
+        (
+            EdgeShape::Affix {
+                prefix: left_prefix,
+                suffix: left_suffix,
+            },
+            EdgeShape::Affix {
+                prefix: right_prefix,
+                suffix: right_suffix,
+            },
+        ) => affix_edges_overlap((left_prefix, left_suffix), (right_prefix, right_suffix)),
+        // A single-segment wildcard matches any non-empty segment, and an affix
+        // segment is always non-empty.
+        (EdgeShape::Literal(literal), EdgeShape::Single) | (EdgeShape::Single, EdgeShape::Literal(literal)) => !literal.is_empty(),
+        (EdgeShape::Affix { .. } | EdgeShape::Single, EdgeShape::Single) | (EdgeShape::Single, EdgeShape::Affix { .. }) => true,
+    }
+}
+
+/// Renders a route's path: the node's own path, the affix edge reaching the
+/// subtree, and the edges leading to the leaf within it.
+fn render_shape(prefix: &str, edge: EdgeShape<'_>, shape: &LeafShape<'_>) -> String {
+    let mut path = String::from(prefix);
+    for edge in core::iter::once(edge).chain(shape.edges.iter().copied()) {
+        match edge {
+            EdgeShape::Literal(literal) => {
+                path.push('/');
+                path.push_str(literal);
+            }
+            EdgeShape::Affix {
+                prefix: affix_prefix,
+                suffix: affix_suffix,
+            } => {
+                let _ = write!(path, "/{affix_prefix}{{}}{affix_suffix}");
+            }
+            EdgeShape::Single => path.push_str("/*"),
+        }
+    }
+    if shape.is_rest {
+        path.push_str("/**");
+    }
+    path
 }
 
 /// Inserts one route into the trie, returning its path-segment (atom) count.
@@ -298,8 +510,12 @@ fn insert_route(root: &mut Node, route: &Route, template: &PathTemplate<'_>, rou
 }
 
 /// The affix edges of `node` in the order both backends must try them: longer
-/// literal prefix+suffix first (more specific wins), ties broken by key so the
-/// ordering is deterministic.
+/// literal prefix+suffix first, so the more specific edge wins.
+///
+/// Equally specific edges are ordered by key, which is only a determinism
+/// tie-break: [`conflicts`] rejects equally specific edges that can both match a
+/// segment and reach the same route, so their relative order never decides a
+/// match.
 #[must_use]
 pub fn affix_edges_in_match_order(node: &Node) -> Vec<(&(String, String), &Node)> {
     let mut affixes: Vec<_> = node.affix.iter().collect();
@@ -542,6 +758,24 @@ mod tests {
     }
 
     #[test]
+    fn the_segment_limit_reports_only_over_deep_templates() {
+        let shallow = PathTemplate::parse("/books/{book}/reviews", Grammar::default()).expect("valid template");
+        assert_eq!(template_depth(shallow.segments()), 3);
+        assert_eq!(depth_limit_error(shallow.segments()), None);
+
+        let at_limit = "/a".repeat(MAX_TEMPLATE_SEGMENTS);
+        let at_limit = PathTemplate::parse(&at_limit, Grammar::default()).expect("valid template");
+        assert_eq!(template_depth(at_limit.segments()), MAX_TEMPLATE_SEGMENTS);
+        assert_eq!(depth_limit_error(at_limit.segments()), None);
+
+        let too_deep = "/a".repeat(MAX_TEMPLATE_SEGMENTS + 1);
+        let too_deep = PathTemplate::parse(&too_deep, Grammar::default()).expect("valid template");
+        let message = depth_limit_error(too_deep.segments()).expect("a template past the limit is reported");
+        assert!(message.contains("declares 257 segments"), "{message}");
+        assert!(message.contains("at most 256"), "{message}");
+    }
+
+    #[test]
     fn build_trie_reports_max_segments_and_verb_usage() {
         let trie = build_trie(&[rule("A", "GET", "/books"), rule("B", "GET", "/books/{book}/reviews/{review}")]);
         assert_eq!(trie.max_segments, 4);
@@ -583,6 +817,92 @@ mod tests {
             .collect();
         assert_eq!(order[0], ("z".to_owned(), "bbbb".to_owned()));
         assert_eq!(order[1], ("aa".to_owned(), "dd".to_owned()));
+    }
+
+    #[test]
+    fn two_affix_edges_that_can_match_the_same_segment_are_reported_as_a_conflict() {
+        let trie = build_trie(&[ext_rule("First", "GET", "/a{x}"), ext_rule("Second", "GET", "/{y}b")]);
+        let conflicts = conflicts(&trie.root);
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert!(conflicts[0].contains("GET /{}b"), "{}", conflicts[0]);
+        assert!(conflicts[0].contains("GET /a{}"), "{}", conflicts[0]);
+        assert!(conflicts[0].contains("First"), "{}", conflicts[0]);
+        assert!(conflicts[0].contains("Second"), "{}", conflicts[0]);
+        assert!(conflicts[0].contains("equally specific"), "{}", conflicts[0]);
+    }
+
+    #[test]
+    fn equally_specific_affix_edges_with_disjoint_literals_are_not_a_conflict() {
+        // Same specificity, but no segment can start with both `a` and `b`, end
+        // with both `a` and `b`, or start with `a` while ending with `b` after a
+        // prefix of `c`.
+        let disjoint = [["/a{x}", "/b{y}"], ["/{x}a", "/{y}b"], ["/ab{x}", "/ac{y}"], ["/{x}ba", "/{y}ca"]];
+        for [left, right] in disjoint {
+            let trie = build_trie(&[ext_rule("Left", "GET", left), ext_rule("Right", "GET", right)]);
+            assert!(
+                conflicts(&trie.root).is_empty(),
+                "`{left}` and `{right}` cannot both match a segment"
+            );
+        }
+    }
+
+    #[test]
+    fn equally_specific_affix_edges_overlap_when_one_literal_extends_the_other() {
+        // `/ab{x}` and `/a{y}b` both match `abZb`, and `/a{x}` and `/{y}a` both
+        // match `aZa`, so both pairs are ambiguous.
+        let overlapping = [["/ab{x}", "/a{y}b"], ["/a{x}", "/{y}a"], ["/ab{x}", "/{y}cb"], ["/ab{x}", "/a{y}c"]];
+        for [left, right] in overlapping {
+            let trie = build_trie(&[ext_rule("Left", "GET", left), ext_rule("Right", "GET", right)]);
+            assert_eq!(conflicts(&trie.root).len(), 1, "`{left}` and `{right}` can both match a segment");
+        }
+    }
+
+    #[test]
+    fn affix_edges_that_can_match_the_same_segment_but_not_the_same_request_are_not_a_conflict() {
+        // A segment such as `a-b-c` matches both edges, but the tails differ, so
+        // the descent backtracks to exactly one route and nothing is arbitrary.
+        let trie = build_trie(&[
+            ext_rule("First", "GET", "/n/a-{id}/first"),
+            ext_rule("Second", "GET", "/n/{id}-c/second"),
+        ]);
+        assert!(conflicts(&trie.root).is_empty(), "{:?}", conflicts(&trie.root));
+
+        // Differing HTTP methods likewise keep the choice unambiguous.
+        let by_method = build_trie(&[ext_rule("Get", "GET", "/a{x}"), ext_rule("Put", "PUT", "/{y}b")]);
+        assert!(conflicts(&by_method.root).is_empty(), "{:?}", conflicts(&by_method.root));
+    }
+
+    #[test]
+    fn overlapping_affix_edges_conflict_through_deeper_matching_tails() {
+        // The tails agree only because `*` and `**` also match the literal, so
+        // the ambiguity is only visible below the affix edges themselves.
+        let single = build_trie(&[ext_rule("Left", "GET", "/a{x}/lit"), ext_rule("Right", "GET", "/{y}b/{z}")]);
+        assert_eq!(conflicts(&single.root).len(), 1, "{:?}", conflicts(&single.root));
+
+        let rest = build_trie(&[ext_rule("Left", "GET", "/a{x}/one/two"), ext_rule("Right", "GET", "/{y}b/**")]);
+        assert_eq!(conflicts(&rest.root).len(), 1, "{:?}", conflicts(&rest.root));
+
+        // A `**` matches a possibly empty remainder, so `/{y}b/**` is ambiguous
+        // with the single-segment `/a{x}`, but one that needs a further literal
+        // segment is deeper than `/a{x}` can ever be.
+        let too_shallow = build_trie(&[ext_rule("Left", "GET", "/a{x}"), ext_rule("Right", "GET", "/{y}b/lit/**")]);
+        assert!(conflicts(&too_shallow.root).is_empty(), "{:?}", conflicts(&too_shallow.root));
+    }
+
+    #[test]
+    fn affix_edges_of_different_specificity_are_left_to_the_precedence_order() {
+        // `/a{x}c` and `/a{y}` both match `abc`, but the longer literal wins by
+        // the documented specificity order, so this is not reported.
+        let trie = build_trie(&[ext_rule("Long", "GET", "/a{x}c"), ext_rule("Short", "GET", "/a{y}")]);
+        assert!(conflicts(&trie.root).is_empty(), "{:?}", conflicts(&trie.root));
+    }
+
+    #[test]
+    fn affix_literals_are_compared_case_sensitively_like_the_runtime_matcher() {
+        // The runtime matcher compares affix literals byte-wise, so no segment
+        // starts with both `a` and `A` and the two edges never both match.
+        let trie = build_trie(&[ext_rule("Lower", "GET", "/a{x}"), ext_rule("Upper", "GET", "/A{y}")]);
+        assert!(conflicts(&trie.root).is_empty(), "{:?}", conflicts(&trie.root));
     }
 
     #[test]

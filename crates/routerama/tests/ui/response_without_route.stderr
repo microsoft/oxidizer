@@ -1,0 +1,13 @@
+error[E0432]: unresolved import `routerama::route`
+ --> tests/ui/response_without_route.rs:4:16
+  |
+4 | use routerama::route::router;
+  |                ^^^^^ could not find `route` in `routerama`
+  |
+note: found an item that was configured out
+ --> src/lib.rs
+  |
+  | #[cfg(feature = "route")]
+  |       ----------------- the item is gated behind the `route` feature
+  | pub mod route;
+  |         ^^^^^

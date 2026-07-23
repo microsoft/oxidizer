@@ -2,7 +2,9 @@
 // Licensed under the MIT License.
 
 use alloc::vec;
+use alloc::vec::Vec;
 use core::fmt;
+use core::ops::Range;
 
 use super::scan::scan_segments_checked;
 
@@ -25,7 +27,15 @@ pub struct ScannedPath<'p, 's> {
     valid: bool,
 }
 
-impl<'p> ScannedPath<'p, '_> {
+/// A validated generated-resolver view over a scanned path.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ScannedPathPrefix<'a, 'p, 's> {
+    path: &'a ScannedPath<'p, 's>,
+    limit: usize,
+}
+
+impl<'p, 's> ScannedPath<'p, 's> {
     /// Returns the total number of path segments.
     #[must_use]
     #[inline]
@@ -39,6 +49,26 @@ impl<'p> ScannedPath<'p, '_> {
         self.valid
     }
 
+    pub(crate) const fn has_offsets_for(&self, max_segments: usize) -> bool {
+        self.capacity >= if self.count < max_segments { self.count } else { max_segments }
+    }
+
+    /// Validates that this scan contains every offset a generated route table
+    /// can access.
+    #[doc(hidden)]
+    #[must_use]
+    #[inline]
+    pub const fn for_resolver(&self, max_segments: usize) -> Option<ScannedPathPrefix<'_, 'p, 's>> {
+        if self.has_offsets_for(max_segments) {
+            Some(ScannedPathPrefix {
+                path: self,
+                limit: max_segments,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Returns one scanned segment.
     #[must_use]
     #[inline]
@@ -46,7 +76,12 @@ impl<'p> ScannedPath<'p, '_> {
     // offsets; valid and invalid ranges are covered directly below.
     #[cfg_attr(test, mutants::skip)]
     pub fn segment(&self, index: usize) -> Option<&'p str> {
-        if index >= self.count || index >= self.capacity {
+        self.segment_with_limit(index, self.capacity)
+    }
+
+    #[inline]
+    fn segment_with_limit(&self, index: usize, limit: usize) -> Option<&'p str> {
+        if index >= self.count || index >= limit {
             return None;
         }
         // SAFETY: the explicit length checks above cover the starts buffer.
@@ -63,16 +98,26 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn capture(&self, first: usize, last: usize) -> Option<&'p str> {
-        if first > last || last >= self.count || last >= self.capacity {
+        let range = self.capture_range(first, last)?;
+        // SAFETY: `capture_range` checks that both offsets came from this scan
+        // and delimit an ordered UTF-8 range in `body`.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn capture_range(&self, first: usize, last: usize) -> Option<Range<usize>> {
+        self.capture_range_with_limit(first, last, self.capacity)
+    }
+
+    #[inline]
+    fn capture_range_with_limit(&self, first: usize, last: usize, limit: usize) -> Option<Range<usize>> {
+        if first > last || last >= self.count || last >= limit {
             return None;
         }
         // SAFETY: the explicit length checks above cover the starts buffer.
         let start = unsafe { *self.starts.get_unchecked(first) };
         // SAFETY: the explicit length checks above cover the ends buffer.
         let end = unsafe { *self.ends.get_unchecked(last) };
-        // SAFETY: both offsets came from this scan, and ordered segment indices
-        // imply an ordered range with UTF-8-boundary endpoints.
-        Some(unsafe { self.body.get_unchecked(start..end) })
+        Some(start..end)
     }
 
     /// Returns a capture from `first` through the end of the path.
@@ -80,20 +125,30 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn rest(&self, first: usize) -> Option<&'p str> {
+        let range = self.rest_range(first)?;
+        // SAFETY: `rest_range` checks that the start offset came from this scan;
+        // both it and the string end are UTF-8 boundaries.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn rest_range(&self, first: usize) -> Option<Range<usize>> {
+        self.rest_range_with_limit(first, self.capacity)
+    }
+
+    #[inline]
+    fn rest_range_with_limit(&self, first: usize, limit: usize) -> Option<Range<usize>> {
         if first == self.count {
-            return Some("");
+            return Some(self.body.len()..self.body.len());
         }
         if first > self.count {
             return None;
         }
-        if first >= self.capacity {
+        if first >= limit {
             return None;
         }
         // SAFETY: `first` was checked against the starts buffer length.
         let start = unsafe { *self.starts.get_unchecked(first) };
-        // SAFETY: the start offset came from this scan and is therefore an
-        // in-bounds UTF-8 boundary; the string end is also a boundary.
-        Some(unsafe { self.body.get_unchecked(start..) })
+        Some(start..self.body.len())
     }
 
     /// Returns a segment capture after removing literal prefix and suffix bytes.
@@ -101,7 +156,18 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn affix(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<&'p str> {
-        if index >= self.count || index >= self.capacity {
+        let range = self.affix_range(index, prefix_len, suffix_len)?;
+        // SAFETY: `affix_range` checks bounds and UTF-8 boundaries.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn affix_range(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<Range<usize>> {
+        self.affix_range_with_limit(index, prefix_len, suffix_len, self.capacity)
+    }
+
+    #[inline]
+    fn affix_range_with_limit(&self, index: usize, prefix_len: usize, suffix_len: usize, limit: usize) -> Option<Range<usize>> {
+        if index >= self.count || index >= limit {
             return None;
         }
         // SAFETY: the explicit length checks above cover the starts buffer.
@@ -113,8 +179,48 @@ impl<'p> ScannedPath<'p, '_> {
         if start > end || !self.body.is_char_boundary(start) || !self.body.is_char_boundary(end) {
             return None;
         }
-        // SAFETY: bounds and UTF-8 boundaries were checked above.
-        Some(unsafe { self.body.get_unchecked(start..end) })
+        Some(start..end)
+    }
+}
+
+impl<'p> ScannedPathPrefix<'_, 'p, '_> {
+    #[must_use]
+    #[inline]
+    pub const fn count(&self) -> usize {
+        self.path.count
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn segment(&self, index: usize) -> Option<&'p str> {
+        self.path.segment_with_limit(index, self.limit)
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn capture(&self, first: usize, last: usize) -> Option<&'p str> {
+        let range = self.path.capture_range_with_limit(first, last, self.limit)?;
+        // SAFETY: the validated prefix and range helper establish ordered UTF-8
+        // boundaries produced by this scan.
+        Some(unsafe { self.path.body.get_unchecked(range) })
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn rest(&self, first: usize) -> Option<&'p str> {
+        let range = self.path.rest_range_with_limit(first, self.limit)?;
+        // SAFETY: the validated prefix and range helper establish UTF-8
+        // boundaries produced by this scan.
+        Some(unsafe { self.path.body.get_unchecked(range) })
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn affix(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<&'p str> {
+        let range = self.path.affix_range_with_limit(index, prefix_len, suffix_len, self.limit)?;
+        // SAFETY: the validated prefix and range helper check bounds and UTF-8
+        // boundaries.
+        Some(unsafe { self.path.body.get_unchecked(range) })
     }
 }
 
@@ -156,19 +262,35 @@ pub fn with_scanned_path<'p, R>(
     let mut inline_starts = [0_usize; INLINE_SEGMENTS];
     let mut inline_ends = [0_usize; INLINE_SEGMENTS];
     let inline_capacity = max_segments.min(INLINE_SEGMENTS);
-    let path = scan_path(body, &mut inline_starts[..inline_capacity], &mut inline_ends[..inline_capacity]);
-    if !path.is_valid() {
+    let initial = scan_segments_checked(body, &mut inline_starts[..inline_capacity], &mut inline_ends[..inline_capacity]);
+    if !initial.valid {
         return Err(InvalidPath);
     }
-    if max_segments <= INLINE_SEGMENTS || path.count() <= INLINE_SEGMENTS {
-        return Ok(resolve(&path));
-    }
 
-    let capacity = path.count().min(max_segments);
-    let mut offsets = vec![0_usize; capacity * 2];
-    let (starts, ends) = offsets.split_at_mut(capacity);
-    let path = scan_path(body, starts, ends);
-    debug_assert!(path.is_valid());
+    let mut offsets: Vec<usize>;
+    let (starts, ends, capacity, count) = if max_segments > INLINE_SEGMENTS && initial.count > INLINE_SEGMENTS {
+        let capacity = initial.count.min(max_segments);
+        offsets = vec![0_usize; capacity * 2];
+        let (starts, ends) = offsets.split_at_mut(capacity);
+        let result = scan_segments_checked(body, starts, ends);
+        debug_assert!(result.valid);
+        (&*starts, &*ends, capacity, result.count)
+    } else {
+        (
+            &inline_starts[..inline_capacity],
+            &inline_ends[..inline_capacity],
+            inline_capacity,
+            initial.count,
+        )
+    };
+    let path = ScannedPath {
+        body,
+        starts,
+        ends,
+        capacity,
+        count,
+        valid: true,
+    };
     Ok(resolve(&path))
 }
 
@@ -238,5 +360,18 @@ mod tests {
     fn bounded_scanner_rejects_query_and_fragment_delimiters() {
         assert_eq!(with_scanned_path("/books?sort=title", 2, |_| ()), Err(InvalidPath));
         assert_eq!(with_scanned_path("/books#reviews", 2, |_| ()), Err(InvalidPath));
+    }
+
+    #[test]
+    fn generated_resolver_view_validates_its_required_offsets() {
+        let mut starts = [0; 1];
+        let mut ends = [0; 1];
+        let path = scan_path("/a/b", &mut starts, &mut ends);
+
+        assert!(path.for_resolver(2).is_none());
+        let prefix = path.for_resolver(1).expect("one stored offset supports a one-segment route table");
+        assert_eq!(prefix.count(), 2);
+        assert_eq!(prefix.segment(0), Some("a"));
+        assert_eq!(prefix.segment(1), None);
     }
 }

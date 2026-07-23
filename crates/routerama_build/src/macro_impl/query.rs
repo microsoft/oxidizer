@@ -18,7 +18,7 @@ use syn::{
     parenthesized,
 };
 
-use super::resolver::runtime_path;
+use super::runtime::{RuntimeCapability, runtime_path};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Case {
@@ -450,16 +450,38 @@ fn standard_path(path: &syn::Path, name: &str, generic_types: &HashSet<String>) 
     }
 }
 
-fn parse_value(kind: ValueKind<'_>, runtime: &TokenStream, name: &str) -> TokenStream {
-    match kind {
-        ValueKind::Str => quote! { #runtime::query::parse_borrowed(&value, #name, pair_offset)? },
-        ValueKind::Cow => quote! { #runtime::query::parse_cow(value) },
-        ValueKind::String => quote! { #runtime::query::parse_owned(value) },
-        ValueKind::Other(ty) => quote! { #runtime::query::parse_value::<#ty>(&value, #name, pair_offset)? },
+fn value_parser(kind: ValueKind<'_>, runtime: &TokenStream, name: &str) -> (TokenStream, TokenStream) {
+    if let ValueKind::Other(ty) = kind
+        && let Some(method) = primitive_method(ty, "parse_")
+    {
+        return (
+            quote! {
+                let value = #runtime::#method(value, decoded_total, limits)?;
+            },
+            quote! { value.finish(#name, pair_offset)? },
+        );
     }
+
+    let finish = match kind {
+        ValueKind::Str => {
+            // A borrowing field cannot accept a decoded value, so the raw value
+            // is rejected before decoding materializes a string that would be
+            // discarded immediately.
+            return (TokenStream::new(), quote! { #runtime::parse_borrowed(&value, #name, pair_offset)? });
+        }
+        ValueKind::Cow => quote! { #runtime::parse_cow(value) },
+        ValueKind::String => quote! { #runtime::parse_owned(value) },
+        ValueKind::Other(ty) => quote! { #runtime::parse_value::<#ty>(&value, #name, pair_offset)? },
+    };
+    (
+        quote! {
+            let value = #runtime::decode_value(value, decoded_total, limits)?;
+        },
+        finish,
+    )
 }
 
-fn primitive_encoder(ty: &Type) -> Option<Ident> {
+fn primitive_method(ty: &Type, prefix: &str) -> Option<Ident> {
     const PRIMITIVES: &[&str] = &[
         "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
     ];
@@ -468,7 +490,19 @@ fn primitive_encoder(ty: &Type) -> Option<Ident> {
         return None;
     }
     let name = path.path.segments[0].ident.to_string();
-    PRIMITIVES.contains(&name.as_str()).then(|| format_ident!("pair_{name}"))
+    PRIMITIVES.contains(&name.as_str()).then(|| format_ident!("{prefix}{name}"))
+}
+
+fn primitive_encoder(ty: &Type) -> Option<Ident> {
+    primitive_method(ty, "pair_")
+}
+
+fn primitive_encoded_length(ty: &Type, runtime: &TokenStream, value: &TokenStream) -> Option<TokenStream> {
+    let encoder = primitive_encoder(ty)?;
+    let primitive = encoder.to_string();
+    let primitive = primitive.strip_prefix("pair_")?;
+    let method = format_ident!("encoded_{primitive}_length");
+    Some(quote! { #runtime::#method(*(#value)) })
 }
 
 fn encode_other(ty: &Type, parameter: &str, encoded_parameter: &str, value: &TokenStream) -> TokenStream {
@@ -512,7 +546,7 @@ fn unique_lifetime_marker(parsed: &QueryInput<'_>) -> Ident {
 )]
 pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parsed = QueryInput::parse(input, true)?;
-    let runtime = runtime_path();
+    let runtime = runtime_path(RuntimeCapability::Query);
     let name = &input.ident;
     let original_generics = &input.generics;
     let (_, type_generics, _) = original_generics.split_for_impl();
@@ -570,7 +604,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
     }
     for (decoder, ty) in &flatten_decoders {
         decoder_generics.make_where_clause().predicates.push(syn::parse_quote! {
-            #decoder: #runtime::query::QueryDecoder<#query_lifetime, Output = #ty>
+            #decoder: #runtime::QueryDecoder<#query_lifetime, Output = #ty>
         });
     }
     replace_self_in_generics(&mut decoder_generics, &outer_type);
@@ -585,7 +619,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                 Some(quote! { #ident: ::core::option::Option<#ty> })
             }
             FieldKind::Optional(_, inner) => Some(quote! { #ident: ::core::option::Option<#inner> }),
-            FieldKind::Repeated(_, inner) => Some(quote! { #ident: #runtime::query::Repeated<#inner> }),
+            FieldKind::Repeated(_, inner) => Some(quote! { #ident: #runtime::Repeated<#inner> }),
             FieldKind::Flatten => {
                 let decoder = flatten_decoder_names[flatten_index];
                 flatten_index += 1;
@@ -598,10 +632,10 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         let ident = field.ident;
         match &field.kind {
             FieldKind::Scalar(_) | FieldKind::Optional(_, _) => Some(quote! { #ident: ::core::option::Option::None }),
-            FieldKind::Repeated(_, _) => Some(quote! { #ident: #runtime::query::Repeated::new() }),
+            FieldKind::Repeated(_, _) => Some(quote! { #ident: #runtime::Repeated::new() }),
             FieldKind::Flatten => {
                 let ty = &field.field.ty;
-                Some(quote! { #ident: <#ty as #runtime::query::DecodeFields<#query_lifetime>>::decoder() })
+                Some(quote! { #ident: <#ty as #runtime::DecodeFields<#query_lifetime>>::decoder() })
             }
             FieldKind::Skip => None,
         }
@@ -621,29 +655,31 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
             .map(|value| LitStr::new(value, field.field.span()));
         let body = match field.kind {
             FieldKind::Scalar(kind) | FieldKind::Optional(kind, _) => {
-                let parse = parse_value(kind, &runtime, name);
+                let (prepare, finish) = value_parser(kind, &runtime, name);
                 quote! {
-                    if false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
-                        return ::core::result::Result::Err(#runtime::query::Error::ambiguous(pair_offset));
+                    #prepare
+                    if false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
+                        return ::core::result::Result::Err(#runtime::Error::ambiguous(pair_offset));
                     }
                     if self.#ident.is_some() {
-                        return ::core::result::Result::Err(#runtime::query::Error::duplicate(#name, pair_offset));
+                        return ::core::result::Result::Err(#runtime::Error::duplicate(#name, pair_offset));
                     }
-                    self.#ident = ::core::option::Option::Some(#parse);
+                    self.#ident = ::core::option::Option::Some(#finish);
                 }
             }
             FieldKind::Repeated(kind, inner) => {
-                let parse = parse_value(kind, &runtime, name);
+                let (prepare, finish) = value_parser(kind, &runtime, name);
                 quote! {
-                    if false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
-                        return ::core::result::Result::Err(#runtime::query::Error::ambiguous(pair_offset));
+                    #prepare
+                    if false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
+                        return ::core::result::Result::Err(#runtime::Error::ambiguous(pair_offset));
                     }
                     let repeated_len = self.#ident.len();
                     // Generated state starts empty and grows only through this guard.
                     if repeated_len == limits.max_repeated_values {
-                        return ::core::result::Result::Err(#runtime::query::Error::too_many_values(#name, pair_offset));
+                        return ::core::result::Result::Err(#runtime::Error::too_many_values(#name, pair_offset));
                     }
-                    let value = #parse;
+                    let value = #finish;
                     if repeated_len != 0 {
                         self.#ident.push(value);
                     } else {
@@ -655,7 +691,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                         } else {
                             1
                         };
-                        let mut values = #runtime::query::Repeated::with_capacity(initial_capacity);
+                        let mut values = #runtime::Repeated::with_capacity(initial_capacity);
                         values.push(value);
                         self.#ident = values;
                     }
@@ -682,10 +718,11 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         .map(|(index, field)| {
             let ident = field.ident;
             quote! {
-                if #runtime::query::QueryDecoder::claims_field(&self.#ident, key) {
+                if #runtime::QueryDecoder::claims_field(&self.#ident, key) {
                     if __routerama_claimant.is_some() {
+                        #runtime::discard_value(value, decoded_total, limits)?;
                         return ::core::result::Result::Err(
-                            #runtime::query::Error::ambiguous(pair_offset),
+                            #runtime::Error::ambiguous(pair_offset),
                         );
                     }
                     __routerama_claimant = ::core::option::Option::Some(#index);
@@ -700,11 +737,12 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         .map(|(index, field)| {
             let ident = field.ident;
             quote! {
-                ::core::option::Option::Some(#index) => #runtime::query::QueryDecoder::decode_field(
+                ::core::option::Option::Some(#index) => #runtime::QueryDecoder::decode_field(
                     &mut self.#ident,
                     key,
                     value,
                     pair_offset,
+                    decoded_total,
                     limits,
                 ),
             }
@@ -717,12 +755,12 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                 quote! { #ident: self.#ident.unwrap_or_default() }
             }
             FieldKind::Scalar(_) => quote! {
-                #ident: self.#ident.ok_or_else(|| #runtime::query::Error::missing(#field_name, end_offset))?
+                #ident: self.#ident.ok_or_else(|| #runtime::Error::missing(#field_name, end_offset))?
             },
             FieldKind::Optional(_, _) | FieldKind::Repeated(_, _) => quote! { #ident: self.#ident },
             FieldKind::Flatten => {
                 quote! {
-                    #ident: #runtime::query::QueryDecoder::finish(self.#ident, end_offset)?
+                    #ident: #runtime::QueryDecoder::finish(self.#ident, end_offset)?
                 }
             }
             FieldKind::Skip => quote! { #ident: ::core::default::Default::default() },
@@ -731,17 +769,17 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
 
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics #runtime::query::DecodeFields<#query_lifetime> for #name #type_generics #generated_where_clause {
+        impl #impl_generics #runtime::DecodeFields<#query_lifetime> for #name #type_generics #generated_where_clause {
             const DENY_UNKNOWN_FIELDS: bool = #deny_unknown_fields
-                #( || <#flattened_types as #runtime::query::DecodeFields<#query_lifetime>>::DENY_UNKNOWN_FIELDS )*;
+                #( || <#flattened_types as #runtime::DecodeFields<#query_lifetime>>::DENY_UNKNOWN_FIELDS )*;
 
-            fn decoder() -> impl #runtime::query::QueryDecoder<#query_lifetime, Output = Self> {
+            fn decoder() -> impl #runtime::QueryDecoder<#query_lifetime, Output = Self> {
                 struct #state_name #state_generics #state_where_clause {
                     #( #state_fields, )*
                     #marker: ::core::marker::PhantomData<fn() -> #name #type_generics>,
                 }
 
-                impl #decoder_impl_generics #runtime::query::QueryDecoder<#query_lifetime>
+                impl #decoder_impl_generics #runtime::QueryDecoder<#query_lifetime>
                     for #state_name #state_type_generics
                     #decoder_where
                 {
@@ -750,7 +788,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn claims_field(&self, key: &str) -> bool {
                         match key {
                             #( #claim_arms, )*
-                            _ => false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )*,
+                            _ => false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )*,
                         }
                     }
 
@@ -762,10 +800,11 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn decode_field(
                         &mut self,
                         key: &str,
-                        value: #runtime::query::Decoded<#query_lifetime>,
+                        value: #runtime::RawValue<#query_lifetime>,
                         pair_offset: usize,
-                        limits: #runtime::query::QueryLimits,
-                    ) -> ::core::result::Result<bool, #runtime::query::Error> {
+                        decoded_total: &mut usize,
+                        limits: #runtime::QueryLimits,
+                    ) -> ::core::result::Result<bool, #runtime::Error> {
                         match key {
                             #( #match_arms, )*
                             _ => {
@@ -774,7 +813,10 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                                 #( #flatten_claims )*
                                 match __routerama_claimant {
                                     #( #flatten_dispatch )*
-                                    ::core::option::Option::None => ::core::result::Result::Ok(false),
+                                    ::core::option::Option::None => {
+                                        #runtime::discard_value(value, decoded_total, limits)?;
+                                        ::core::result::Result::Ok(false)
+                                    }
                                     _ => ::core::unreachable!(),
                                 }
                             }
@@ -784,7 +826,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn finish(
                         self,
                         end_offset: usize,
-                    ) -> ::core::result::Result<Self::Output, #runtime::query::Error> {
+                    ) -> ::core::result::Result<Self::Output, #runtime::Error> {
                         ::core::result::Result::Ok(#name { #( #finishes, )* })
                     }
                 }
@@ -927,7 +969,7 @@ fn add_from_query_bounds(generics: &mut Generics, parsed: &QueryInput<'_>, runti
                 generics
                     .make_where_clause()
                     .predicates
-                    .push(syn::parse_quote!(#ty: #runtime::query::DecodeFields<#lifetime>));
+                    .push(syn::parse_quote!(#ty: #runtime::DecodeFields<#lifetime>));
             }
             FieldKind::Skip
             | FieldKind::Scalar(ValueKind::Str | ValueKind::Cow | ValueKind::String)
@@ -1005,9 +1047,13 @@ fn generic_list(parameters: &[TokenStream]) -> TokenStream {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the encoder expansion assembles writing and exact-length fragments from one parsed field model"
+)]
 pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parsed = QueryInput::parse(input, false)?;
-    let runtime = runtime_path();
+    let runtime = runtime_path(RuntimeCapability::Query);
     let name = &input.ident;
     let mut generated_generics = input.generics.clone();
     add_to_query_bounds(&mut generated_generics, &parsed, &runtime);
@@ -1015,6 +1061,11 @@ pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (_, type_generics, _) = input.generics.split_for_impl();
     let mut generated_names = identifier_names(input);
     let writer = unique_generic_ident("__RouteramaQueryWriter", &mut generated_names);
+    let hint = unique_generic_ident("__routerama_encoded_length", &mut generated_names);
+    let has_unknown_scalar = parsed
+        .fields
+        .iter()
+        .any(|field| matches!(field.kind, FieldKind::Scalar(ValueKind::Other(ty)) if primitive_encoder(ty).is_none()));
     let encoders = parsed.fields.iter().map(|field| {
         let ident = field.ident;
         let parameter = &field.name;
@@ -1051,20 +1102,87 @@ pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
                 }
             }
             FieldKind::Flatten => quote! {
-                #runtime::query::EncodeFields::encode_fields(&self.#ident, encoder)?;
+                #runtime::EncodeFields::encode_fields(&self.#ident, encoder)?;
             },
             FieldKind::Skip => TokenStream::new(),
         }
     });
+    let hints = parsed
+        .fields
+        .iter()
+        .map(|field| {
+            let ident = field.ident;
+            let encoded_parameter = encode_parameter(&field.name);
+            let value_length = |kind: ValueKind<'_>, value: TokenStream| match kind {
+                ValueKind::Str | ValueKind::Cow | ValueKind::String => Some(quote! { #runtime::encoded_str_length(#value) }),
+                ValueKind::Other(ty) => primitive_encoded_length(ty, &runtime, &value),
+            };
+            match field.kind {
+                FieldKind::Scalar(kind) => value_length(kind, quote!(&self.#ident))
+                    .map(|value_length| quote! { #hint.pair(#encoded_parameter, #value_length); })
+                    .unwrap_or_default(),
+                FieldKind::Optional(kind, _) => value_length(kind, quote!(value)).map_or_else(
+                    || {
+                        quote! {
+                            if self.#ident.is_some() {
+                                return ::core::option::Option::None;
+                            }
+                        }
+                    },
+                    |value_length| {
+                        quote! {
+                            if let ::core::option::Option::Some(value) = &self.#ident {
+                                #hint.pair(#encoded_parameter, #value_length);
+                            }
+                        }
+                    },
+                ),
+                FieldKind::Repeated(kind, _) => value_length(kind, quote!(value)).map_or_else(
+                    || {
+                        quote! {
+                            if !self.#ident.is_empty() {
+                                return ::core::option::Option::None;
+                            }
+                        }
+                    },
+                    |value_length| {
+                        quote! {
+                            for value in &self.#ident {
+                                #hint.pair(#encoded_parameter, #value_length);
+                            }
+                        }
+                    },
+                ),
+                FieldKind::Flatten => quote! {
+                    let nested_length = #runtime::EncodeFields::encoded_length_hint(&self.#ident)?;
+                    #hint.flatten(nested_length);
+                },
+                FieldKind::Skip => TokenStream::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let hint_body = if has_unknown_scalar {
+        quote! { ::core::option::Option::None }
+    } else {
+        quote! {
+            let mut #hint = #runtime::EncodedLengthHint::new();
+            #( #hints )*
+            ::core::option::Option::Some(#hint.finish())
+        }
+    };
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics #runtime::query::EncodeFields for #name #type_generics #where_clause {
+        impl #impl_generics #runtime::EncodeFields for #name #type_generics #where_clause {
             fn encode_fields<#writer: ::core::fmt::Write>(
                 &self,
-                encoder: &mut #runtime::query::Encoder<'_, #writer>,
-            ) -> ::core::result::Result<(), #runtime::query::Error> {
+                encoder: &mut #runtime::Encoder<'_, #writer>,
+            ) -> ::core::result::Result<(), #runtime::Error> {
                 #( #encoders )*
                 ::core::result::Result::Ok(())
+            }
+
+            fn encoded_length_hint(&self) -> ::core::option::Option<usize> {
+                #hint_body
             }
         }
     })
@@ -1086,7 +1204,7 @@ fn add_to_query_bounds(generics: &mut Generics, parsed: &QueryInput<'_>, runtime
                 generics
                     .make_where_clause()
                     .predicates
-                    .push(syn::parse_quote!(#ty: #runtime::query::EncodeFields));
+                    .push(syn::parse_quote!(#ty: #runtime::EncodeFields));
             }
             FieldKind::Skip
             | FieldKind::Scalar(ValueKind::Str | ValueKind::Cow | ValueKind::String)
@@ -1167,6 +1285,9 @@ mod tests {
         assert!(expanded.contains("pair_u32 (\"count\""));
         assert!(expanded.contains("for value in & self . tags"));
         assert!(expanded.contains("EncodeFields :: encode_fields"));
+        assert!(expanded.contains("fn encoded_length_hint"));
+        assert!(expanded.contains("encoded_str_length"));
+        assert!(expanded.contains("encoded_u32_length"));
         assert!(!expanded.contains("self . ignored"));
     }
 
@@ -1720,17 +1841,25 @@ mod tests {
     #[test]
     fn value_parsing_emits_each_specialized_path() {
         let runtime = quote!(routerama);
-        let other: Type = parse_quote!(u32);
+        let primitive: Type = parse_quote!(u32);
+        let custom: Type = parse_quote!(Custom);
         let outputs = [
-            parse_value(ValueKind::Str, &runtime, "value").to_string(),
-            parse_value(ValueKind::Cow, &runtime, "value").to_string(),
-            parse_value(ValueKind::String, &runtime, "value").to_string(),
-            parse_value(ValueKind::Other(&other), &runtime, "value").to_string(),
+            value_parser(ValueKind::Str, &runtime, "value"),
+            value_parser(ValueKind::Cow, &runtime, "value"),
+            value_parser(ValueKind::String, &runtime, "value"),
+            value_parser(ValueKind::Other(&primitive), &runtime, "value"),
+            value_parser(ValueKind::Other(&custom), &runtime, "value"),
         ];
+        let outputs = outputs.map(|(prepare, finish)| format!("{prepare} {finish}"));
         assert!(outputs[0].contains("parse_borrowed"));
+        // A borrowing field rejects an encoded value before decoding allocates.
+        assert!(!outputs[0].contains("decode_value"));
         assert!(outputs[1].contains("parse_cow"));
         assert!(outputs[2].contains("parse_owned"));
-        assert!(outputs[3].contains("parse_value"));
+        assert!(outputs[3].contains("parse_u32"));
+        assert!(!outputs[3].contains("decode_value"));
+        assert!(outputs[4].contains("decode_value"));
+        assert!(outputs[4].contains("parse_value"));
     }
 
     #[test]

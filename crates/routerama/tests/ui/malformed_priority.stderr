@@ -1,0 +1,5 @@
+error: `priority` must be an integer in the `i32` range
+  --> tests/ui/malformed_priority.rs:12:34
+   |
+12 |     #[route(GET, "/", priority = "high")]
+   |                                  ^^^^^^

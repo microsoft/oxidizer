@@ -1,31 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A tour of `routerama` using in-source `#[resolver]` — the simplest way
-//! to define a resolver: no `build.rs`, no generated file.
-//!
-//! Run it with `cargo run --example routing`.
-//!
-//! `#[resolver]` attaches routing to a normal enum, generating an infallible
-//! resolver constructor for this static route set. Each captured `{variable}`
-//! becomes a typed field:
-//!
-//! - `&str` — the raw, undecoded capture, borrowed zero-copy from the path.
-//! - `String` / `Cow<'_, str>` — percent-decoded (`Cow` borrows when there is
-//!   nothing to decode).
-//! - any `T: FromStr` (`u32`, a custom type, ...) — decoded, then parsed.
-//!
-//! Failed coercion returns a capture-related `ResolveError`; misses return
-//! `ResolveError::NotFound`. Resolvers for several route enums can coexist.
-//!
-//! For routes registered at run time (from config, a database, or a plugin
-//! registry) instead of baked into the enum, see the `dynamic_routing` example;
-//! for mixing both in one resolver, see `hybrid_routing`.
+//! Static typed resolution with borrowed, decoded, and parsed captures.
 
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use routerama::ResolveError;
+use routerama::resolve::ResolveError;
 
 /// Custom capture type parsed through `FromStr`.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,7 +20,7 @@ impl FromStr for Isbn {
     }
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum BookRoute<'p> {
     #[route(GET, "/books")]

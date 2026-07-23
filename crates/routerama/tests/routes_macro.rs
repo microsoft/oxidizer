@@ -3,7 +3,7 @@
 
 //! Behavioral tests for the `#[resolver]` macro.
 
-use routerama::{ResolveError, Resolver, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, Resolver, resolver};
 
 #[resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +106,47 @@ enum HealthRoute {
 
 #[resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LiteralChainRoute {
+    #[route(GET, "/api/v1/catalog/items")]
+    List,
+    #[route(POST, "/api/v1/catalog/items")]
+    Create,
+    #[route(POST, "/api/v1/catalog/items:refresh")]
+    Refresh,
+    #[route(GET, "/api/v1/catalog/status")]
+    Status,
+}
+
+#[test]
+fn fused_literal_chains_preserve_path_method_and_verb_semantics() {
+    let resolver = LiteralChainRoute::resolver();
+
+    assert_eq!(resolver.resolve("GET", "/api/v1/catalog/items"), Ok(LiteralChainRoute::List));
+    assert_eq!(resolver.resolve("POST", "/api/v1/catalog/items"), Ok(LiteralChainRoute::Create));
+    assert_eq!(
+        resolver.resolve("POST", "/api/v1/catalog/items:refresh"),
+        Ok(LiteralChainRoute::Refresh)
+    );
+    assert_eq!(resolver.resolve("GET", "/api/v1/catalog/status"), Ok(LiteralChainRoute::Status));
+    for (method, path) in [
+        ("DELETE", "/api/v1/catalog/items"),
+        ("GET", "/api/v1/catalog/items/"),
+        ("GET", "/api/v1/catalog/missing"),
+        ("POST", "/api/v1/catalog/items:other"),
+    ] {
+        assert!(matches!(resolver.resolve(method, path), Err(ResolveError::NotFound(_))));
+    }
+    for path in [
+        "/api/v1/catalog/items?sort=name",
+        "/api/v1/catalog/items#top",
+        "/api/v1/catalog/items:refresh?force",
+    ] {
+        assert_eq!(resolver.resolve("GET", path), Err(ResolveError::InvalidPath(path)));
+    }
+}
+
+#[resolver]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ErrorNameRoutes {
     #[route(GET, "/not-found")]
     NotFound,
@@ -118,6 +159,7 @@ enum ErrorNameRoutes {
 enum ExplicitRoute {
     #[route(GET, "/explicit")]
     Static,
+    #[route(dynamic)]
     Dynamic,
 }
 
@@ -133,7 +175,7 @@ fn explicit_resolver() -> ExplicitResolver {
 }
 
 fn explicit_resolver_builder() -> ExplicitResolverBuilder {
-    ExplicitRoute::builder().add_dynamic(routerama::HttpMethod::GET, "/dynamic")
+    ExplicitRoute::builder().add_dynamic(HttpMethod::GET, "/dynamic")
 }
 
 #[test]

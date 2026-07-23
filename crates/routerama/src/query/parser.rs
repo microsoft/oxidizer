@@ -7,12 +7,49 @@ use alloc::vec::Vec;
 
 use super::scan::{SIMD_THRESHOLD, contains_either, find_byte};
 use super::{Decoded, Error, ErrorKind, QueryLimits};
+use crate::primitive::{self, DecodeError};
 
 #[derive(Debug)]
 pub(crate) struct Pair<'q> {
     pub(crate) key: Decoded<'q>,
-    pub(crate) value: Decoded<'q>,
+    pub(crate) value: RawValue<'q>,
     pub(crate) offset: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RawValueInner<'q> {
+    Borrowed(&'q str),
+    Encoded { raw: &'q str, offset: usize },
+}
+
+/// A query value that generated code can decode according to its field type.
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct RawValue<'q> {
+    inner: RawValueInner<'q>,
+}
+
+/// A decoded primitive whose invalid-value error is deferred until schema
+/// duplicate, ambiguity, and repetition checks have run.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ParsedPrimitive<T> {
+    value: Result<T, ()>,
+}
+
+impl<T> ParsedPrimitive<T> {
+    /// Returns the primitive or its field-attributed invalid-value error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidValue`] when the decoded bytes were not a
+    /// value of the requested primitive type.
+    #[doc(hidden)]
+    #[inline]
+    pub fn finish(self, parameter: &'static str, pair_offset: usize) -> Result<T, Error> {
+        self.value
+            .map_err(|()| Error::parsing(Some(parameter), pair_offset, ErrorKind::InvalidValue))
+    }
 }
 
 pub(crate) struct Parser<'q, const WIDE: bool> {
@@ -86,7 +123,7 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
             };
             let key = decode::<true>(key, offset, &mut self.decoded, self.limits)?;
             let value_offset = offset + equals.map_or(raw_pair.len(), |index| index + 1);
-            let value = decode::<true>(value, value_offset, &mut self.decoded, self.limits)?;
+            let value = raw_value::<true>(value, value_offset, &mut self.decoded, self.limits)?;
             return Ok(Some(Pair { key, value, offset }));
         }
     }
@@ -128,16 +165,22 @@ impl<'q, const WIDE: bool> Parser<'q, WIDE> {
                     self.decoded = total;
                     return Ok(Some(Pair {
                         key: Cow::Borrowed(key),
-                        value: Cow::Borrowed(value),
+                        value: RawValue {
+                            inner: RawValueInner::Borrowed(value),
+                        },
                         offset,
                     }));
                 }
             }
             let key = decode_known(key, offset, &mut self.decoded, self.limits, scan.key_encoded)?;
             let value_offset = offset + scan.equals.map_or(raw_pair.len(), |index| index + 1);
-            let value = decode_known(value, value_offset, &mut self.decoded, self.limits, scan.value_encoded)?;
+            let value = raw_value_known(value, value_offset, &mut self.decoded, self.limits, scan.value_encoded)?;
             return Ok(Some(Pair { key, value, offset }));
         }
+    }
+
+    pub(crate) fn decoded_total_mut(&mut self) -> &mut usize {
+        &mut self.decoded
     }
 }
 
@@ -211,6 +254,161 @@ fn decode_known<'q>(
     }
 
     decode_encoded(input, offset, decoded_total, limits)
+}
+
+#[inline]
+fn raw_value<'q, const WIDE: bool>(
+    input: &'q str,
+    offset: usize,
+    decoded_total: &mut usize,
+    limits: QueryLimits,
+) -> Result<RawValue<'q>, Error> {
+    raw_value_known(
+        input,
+        offset,
+        decoded_total,
+        limits,
+        contains_either::<WIDE>(input.as_bytes(), b'%', b'+'),
+    )
+}
+
+#[inline]
+fn raw_value_known<'q>(
+    input: &'q str,
+    offset: usize,
+    decoded_total: &mut usize,
+    limits: QueryLimits,
+    encoded: bool,
+) -> Result<RawValue<'q>, Error> {
+    if encoded {
+        Ok(RawValue {
+            inner: RawValueInner::Encoded { raw: input, offset },
+        })
+    } else {
+        add_decoded(decoded_total, input.len(), offset, limits)?;
+        Ok(RawValue {
+            inner: RawValueInner::Borrowed(input),
+        })
+    }
+}
+
+/// Materializes a query value for string, `Cow`, and generic `FromStr` fields.
+///
+/// # Errors
+///
+/// Returns the existing query decoding and decoded-length errors.
+#[doc(hidden)]
+#[inline]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "consuming the token prevents generated code from accounting an encoded value more than once"
+)]
+pub fn decode_value<'q>(value: RawValue<'q>, decoded_total: &mut usize, limits: QueryLimits) -> Result<Decoded<'q>, Error> {
+    match value.inner {
+        RawValueInner::Borrowed(value) => Ok(Cow::Borrowed(value)),
+        RawValueInner::Encoded { raw, offset } => decode_encoded(raw, offset, decoded_total, limits),
+    }
+}
+
+/// Borrows a query value, rejecting one that would have to be decoded.
+///
+/// The check precedes decoding, so a value a borrowing field cannot accept is
+/// rejected without ever materializing its decoded form.
+///
+/// # Errors
+///
+/// Returns [`ErrorKind::BorrowRequired`] when the value is percent- or
+/// plus-encoded, because decoding it would allocate.
+#[doc(hidden)]
+#[inline]
+pub fn parse_borrowed<'q>(value: &RawValue<'q>, parameter: &'static str, pair_offset: usize) -> Result<&'q str, Error> {
+    match value.inner {
+        RawValueInner::Borrowed(value) => Ok(value),
+        RawValueInner::Encoded { .. } => Err(Error::parsing(Some(parameter), pair_offset, ErrorKind::BorrowRequired)),
+    }
+}
+
+/// Validates and accounts for a value that no generated field consumes.
+///
+/// # Errors
+///
+/// Returns the existing query decoding and decoded-length errors.
+#[doc(hidden)]
+#[inline]
+pub fn discard_value(value: RawValue<'_>, decoded_total: &mut usize, limits: QueryLimits) -> Result<(), Error> {
+    decode_value(value, decoded_total, limits).map(drop)
+}
+
+macro_rules! primitive_parsers {
+    ($( $name:ident => $ty:ty ),+ $(,)?) => {
+        $(
+            #[doc = "Decodes one macro-selected primitive query field without allocating."]
+            ///
+            /// # Errors
+            ///
+            /// Returns the existing query decoding and decoded-length errors.
+            #[doc(hidden)]
+            #[inline]
+            pub fn $name(
+                value: RawValue<'_>,
+                decoded_total: &mut usize,
+                limits: QueryLimits,
+            ) -> Result<ParsedPrimitive<$ty>, Error> {
+                parse_primitive::<$ty>(value, decoded_total, limits)
+            }
+        )+
+    };
+}
+
+primitive_parsers!(
+    parse_bool => bool,
+    parse_u8 => u8,
+    parse_u16 => u16,
+    parse_u32 => u32,
+    parse_u64 => u64,
+    parse_u128 => u128,
+    parse_usize => usize,
+    parse_i8 => i8,
+    parse_i16 => i16,
+    parse_i32 => i32,
+    parse_i64 => i64,
+    parse_i128 => i128,
+    parse_isize => isize,
+);
+
+#[inline]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "consuming the token prevents generated code from accounting an encoded value more than once"
+)]
+fn parse_primitive<T: core::str::FromStr + primitive::Primitive>(
+    value: RawValue<'_>,
+    decoded_total: &mut usize,
+    limits: QueryLimits,
+) -> Result<ParsedPrimitive<T>, Error> {
+    match value.inner {
+        RawValueInner::Borrowed(value) => Ok(ParsedPrimitive {
+            value: value.parse().map_err(drop),
+        }),
+        RawValueInner::Encoded { raw, offset } => {
+            let (decoded_len, result) = primitive::decode_encoded::<T, true, true>(raw).into_parts();
+            match result {
+                Err(DecodeError::InvalidEncoding(relative)) => {
+                    Err(Error::parsing(None, advance(offset, relative), ErrorKind::InvalidEncoding))
+                }
+                result => {
+                    add_decoded(decoded_total, decoded_len, offset, limits)?;
+                    match result {
+                        Ok(value) => Ok(ParsedPrimitive { value: value.ok_or(()) }),
+                        Err(DecodeError::InvalidUtf8) => Err(Error::parsing(None, offset, ErrorKind::InvalidUtf8)),
+                        Err(DecodeError::InvalidEncoding(_)) => {
+                            unreachable!("invalid percent encoding returns before decoded-length accounting")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[inline]
@@ -337,6 +535,13 @@ const fn hex(byte: u8) -> Option<u8> {
 mod tests {
     use super::*;
 
+    fn raw_text<'a>(value: &'a RawValue<'_>) -> &'a str {
+        match &value.inner {
+            RawValueInner::Borrowed(value) => value,
+            RawValueInner::Encoded { raw, .. } => raw,
+        }
+    }
+
     #[test]
     fn decoded_length_overflow_is_reported() {
         let mut total = usize::MAX;
@@ -360,7 +565,7 @@ mod tests {
         let mut parser = Parser::<false>::new("%61=b", QueryLimits::UNLIMITED).expect("query is within limits");
         let pair = parser.next_pair_scalar().expect("encoded key is valid").expect("pair is present");
         assert_eq!(pair.key, "a");
-        assert_eq!(pair.value, "b");
+        assert_eq!(raw_text(&pair.value), "b");
     }
 
     #[test]
@@ -438,10 +643,10 @@ mod tests {
         let mut parser = Parser::<true>::new(input, QueryLimits::UNLIMITED).expect("query is within limits");
         let pair = parser.next_pair().expect("pair parses").expect("pair exists");
         assert_eq!(pair.key, "abcdefghijklmnopqrstuvwxyz");
-        assert_eq!(pair.value, "");
+        assert_eq!(raw_text(&pair.value), "");
         let pair = parser.next_pair().expect("pair parses").expect("pair exists");
         assert_eq!(pair.key, "key-only");
-        assert_eq!(pair.value, "");
+        assert_eq!(raw_text(&pair.value), "");
 
         let limits = QueryLimits {
             max_pairs: 0,
@@ -522,7 +727,8 @@ mod tests {
         }
 
         let mut parser = Parser::<false>::new("aa=%", QueryLimits::UNLIMITED).expect("query starts");
-        let error = parser.next_pair().expect_err("value escape is malformed");
+        let pair = parser.next_pair().expect("pair scan succeeds").expect("pair is present");
+        let error = discard_value(pair.value, parser.decoded_total_mut(), QueryLimits::UNLIMITED).expect_err("value escape is malformed");
         assert_eq!(error.pair_offset(), Some(3));
     }
 }

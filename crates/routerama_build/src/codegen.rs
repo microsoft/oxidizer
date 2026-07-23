@@ -11,7 +11,7 @@
 //! wildcard before a `**` catch-all, and a deeper (longer) match before a
 //! shorter one — so overlapping templates resolve deterministically.
 //!
-//! [`routerama::codegen_helpers::scan_segments`]: https://docs.rs/routerama
+//! [`routerama::resolve::__private::scan_segments`]: https://docs.rs/routerama
 
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
@@ -25,8 +25,8 @@ use quote::quote;
 
 use crate::route::Route;
 use crate::trie::{
-    Leaf, Node, VarPlan, affix_edges_in_match_order, build_trie_with_templates, capture_field_names, conflicts, field_name,
-    is_valid_variant,
+    Leaf, Node, VarPlan, affix_edges_in_match_order, build_trie_with_templates, capture_field_names, conflicts, depth_limit_error,
+    field_name, is_valid_variant,
 };
 
 /// Generates a route enum and its resolver implementation.
@@ -47,6 +47,19 @@ pub(crate) fn generate(routes: &[Route], route_type: &str, public: bool, full_ap
     };
 
     let templates: Vec<PathTemplate<'_>> = routes.iter().map(Route::template).collect();
+
+    // Every walk below, and `Node`'s derived drop glue, recurse once per
+    // segment, so an over-deep template must be rejected before the trie is
+    // built rather than overflow the compiler's stack.
+    let depth_errors: Vec<_> = templates
+        .iter()
+        .filter_map(|template| depth_limit_error(template.segments()))
+        .map(|message| quote! { ::core::compile_error!(#message); })
+        .collect();
+    if !depth_errors.is_empty() {
+        return quote! { #(#depth_errors)* };
+    }
+
     let trie = build_trie_with_templates(routes, &templates);
     let root = trie.root;
     let any_verb = trie.any_verb;
@@ -55,12 +68,15 @@ pub(crate) fn generate(routes: &[Route], route_type: &str, public: bool, full_ap
     let body_bind = if any_verb {
         quote! { let (__body, __verb) = #runtime::split_verb(path); }
     } else {
-        quote! { let __body: &str = path; }
+        quote! {
+            let __body: &str = path;
+            let __verb: ::core::option::Option<&str> = ::core::option::Option::None;
+        }
     };
 
     let cap_lit = Literal::usize_unsuffixed(cap);
 
-    let match_tree = emit_node(&root, 0, any_verb, &route_enum);
+    let match_tree = emit_node(&root, 0, any_verb, &route_enum, is_literal_only(&root));
 
     let conflicts = conflicts(&root);
     let conflict_errors = conflicts.iter().map(|message| quote! { ::core::compile_error!(#message); });
@@ -73,10 +89,16 @@ pub(crate) fn generate(routes: &[Route], route_type: &str, public: bool, full_ap
         #(#conflict_errors)*
         #body_bind
         #runtime::with_scanned_path(__body, #cap_lit, |__path| {
-            let __count = __path.count();
-            #match_tree
-            ::core::option::Option::None
+            Self::__resolve_scanned(method, __path, __verb)
         })
+    };
+    let scanned_resolve_body = quote! {
+        let __path = __path
+            .for_resolver(#cap_lit)
+            .expect("generated resolver requires a scan sized for its maximum route depth");
+        let __count = __path.count();
+        #match_tree
+        ::core::option::Option::None
     };
 
     let enum_lt = if route_generic {
@@ -91,7 +113,7 @@ pub(crate) fn generate(routes: &[Route], route_type: &str, public: bool, full_ap
         runtime,
         &visibility,
         route_generic,
-        &checked_resolve_body,
+        (&checked_resolve_body, &scanned_resolve_body),
         full_api,
     );
 
@@ -112,7 +134,7 @@ fn emit_resolver_and_match(
     runtime: &TokenStream,
     visibility: &TokenStream,
     route_generic: bool,
-    resolve_body: &TokenStream,
+    resolve_bodies: (&TokenStream, &TokenStream),
     full_api: bool,
 ) -> TokenStream {
     let route_ty = if route_generic {
@@ -161,9 +183,7 @@ fn emit_resolver_and_match(
             }
         }
     });
-    let empty_capture_arm = variants.is_empty().then(|| {
-        quote! { _ => ::core::option::Option::None, }
-    });
+    let empty_capture_arm = variants.is_empty().then(|| quote! { _ => ::core::option::Option::None, });
     let allow = quote! {
         #[allow(
             clippy::all,
@@ -197,7 +217,20 @@ fn emit_resolver_and_match(
             }
         }
     });
-    let resolve_methods = emit_resolve_methods(visibility, &fn_generics, &route_ty, runtime, resolve_body);
+    let scanned_fn_generics = if route_generic {
+        TokenStream::new()
+    } else {
+        quote! { <'p> }
+    };
+    let resolve_methods = emit_resolve_methods(
+        visibility,
+        &fn_generics,
+        &scanned_fn_generics,
+        &route_ty,
+        runtime,
+        resolve_bodies.0,
+        resolve_bodies.1,
+    );
     quote! {
         #allow
         impl #impl_generics #route_ty {
@@ -211,9 +244,11 @@ fn emit_resolver_and_match(
 fn emit_resolve_methods(
     visibility: &TokenStream,
     fn_generics: &TokenStream,
+    scanned_fn_generics: &TokenStream,
     route_ty: &TokenStream,
     runtime: &TokenStream,
-    resolve_body: &TokenStream,
+    checked_resolve_body: &TokenStream,
+    scanned_resolve_body: &TokenStream,
 ) -> TokenStream {
     quote! {
         /// Resolves an HTTP method + path against this route table.
@@ -240,7 +275,17 @@ fn emit_resolve_methods(
         where
             __P: ::core::convert::AsRef<str> + ?::core::marker::Sized,
         {
-            #resolve_body
+            #checked_resolve_body
+        }
+
+        #[doc(hidden)]
+        #[inline]
+        pub(crate) fn __resolve_scanned #scanned_fn_generics (
+            method: &str,
+            __path: &#runtime::ScannedPath<'p, '_>,
+            __verb: ::core::option::Option<&str>,
+        ) -> ::core::option::Option<#route_ty> {
+            #scanned_resolve_body
         }
     }
 }
@@ -425,7 +470,11 @@ fn variant_ident(name: &str) -> Ident {
 
 /// Emits the matching code for a trie `node` reached after consuming `depth`
 /// segments. On a match the code `return`s; otherwise it falls through.
-fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> TokenStream {
+fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident, fuse_literals: bool) -> TokenStream {
+    if fuse_literals && let Some(fused) = emit_fused_literal_chain(node, depth, any_verb, route_enum) {
+        return fused;
+    }
+
     let depth_lit = Literal::usize_unsuffixed(depth);
 
     let has_literals = !node.literals.is_empty();
@@ -442,7 +491,7 @@ fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> T
         quote! {}
     };
     let literal_arms = node.literals.iter().map(|(lit, child)| {
-        let child = emit_node(child, depth + 1, any_verb, route_enum);
+        let child = emit_node(child, depth + 1, any_verb, route_enum, fuse_literals);
         // Byte matching avoids repeated UTF-8 boundary checks.
         let lit = Literal::byte_string(lit.as_bytes());
         quote! { #lit => { #child } }
@@ -458,7 +507,7 @@ fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> T
         quote! {}
     };
     let affix_code = affix_edges_in_match_order(node).into_iter().map(|((prefix, suffix), child)| {
-        let child = emit_node(child, depth + 1, any_verb, route_enum);
+        let child = emit_node(child, depth + 1, any_verb, route_enum, fuse_literals);
         let total_lit = Literal::usize_unsuffixed(prefix.len() + suffix.len());
         let prefix_check = if prefix.is_empty() {
             quote! {}
@@ -478,7 +527,7 @@ fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> T
             }
         }
     });
-    let single_code = emit_single(node.single.as_deref(), depth, any_verb, route_enum);
+    let single_code = emit_single(node.single.as_deref(), depth, any_verb, route_enum, fuse_literals);
     let rest_dispatch = emit_leaves(&node.rest, any_verb, route_enum);
 
     let has_segment_branch = has_literals || has_affix || node.single.is_some();
@@ -524,12 +573,61 @@ fn emit_node(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> T
     }
 }
 
-fn emit_single(child: Option<&Node>, depth: usize, any_verb: bool, route_enum: &Ident) -> TokenStream {
+fn emit_fused_literal_chain(node: &Node, depth: usize, any_verb: bool, route_enum: &Ident) -> Option<TokenStream> {
+    let (literal, child, consumed) = fused_literal_chain(node)?;
+    let first = Literal::usize_unsuffixed(depth);
+    let last = Literal::usize_unsuffixed(depth + consumed - 1);
+    let required = Literal::usize_unsuffixed(depth + consumed);
+    let literal = Literal::byte_string(literal.as_bytes());
+    let child = emit_node(child, depth + consumed, any_verb, route_enum, true);
+    Some(quote! {
+        if __count >= #required
+            && __path
+                .capture(#first, #last)
+                .expect("guarded by the segment count check")
+                .as_bytes()
+                == #literal
+        {
+            #child
+        }
+    })
+}
+
+fn is_literal_only(node: &Node) -> bool {
+    node.affix.is_empty()
+        && node.single.is_none()
+        && node.rest.is_empty()
+        && node.exact.iter().all(|leaf| leaf.vars.is_empty())
+        && node.literals.values().all(is_literal_only)
+}
+
+fn fused_literal_chain(node: &Node) -> Option<(String, &Node, usize)> {
+    let mut current = node;
+    let mut literal = String::new();
+    let mut consumed = 0;
+    while current.exact.is_empty()
+        && current.rest.is_empty()
+        && current.affix.is_empty()
+        && current.single.is_none()
+        && current.literals.len() == 1
+    {
+        let (segment, child) = current.literals.first_key_value().expect("guarded by the literal count check");
+        if consumed != 0 {
+            literal.push('/');
+        }
+        literal.push_str(segment);
+        consumed += 1;
+        current = child;
+    }
+    (consumed >= 2).then_some((literal, current, consumed))
+}
+
+fn emit_single(child: Option<&Node>, depth: usize, any_verb: bool, route_enum: &Ident, fuse_literals: bool) -> TokenStream {
     let Some(child) = child else {
         return TokenStream::new();
     };
     let depth_lit = Literal::usize_unsuffixed(depth);
-    let child = emit_node(child, depth + 1, any_verb, route_enum);
+    let child = emit_node(child, depth + 1, any_verb, route_enum, fuse_literals);
     quote! {
         if !__path
             .segment(#depth_lit)
@@ -723,11 +821,22 @@ mod tests {
     }
 
     #[test]
+    fn a_template_past_the_segment_limit_is_rejected_before_the_trie_is_built() {
+        let deep = "/a".repeat(crate::trie::MAX_TEMPLATE_SEGMENTS + 1);
+        let code = generated(&[("Deep", "GET", &deep)]);
+        assert!(code.contains("compile_error"), "{code}");
+        assert!(code.contains("at most 256"), "{code}");
+        assert!(!code.contains("enum Route"), "{code}");
+    }
+
+    #[test]
     fn generates_a_resolve_function() {
         let code = generated(&[("GetShelf", "GET", "/v1/shelves/{shelf}")]);
         assert!(code.contains("fn resolve"));
         assert!(code.contains("GetShelf"));
         assert!(code.contains("with_scanned_path"));
+        assert!(code.contains("__resolve_scanned"));
+        assert!(code.contains("for_resolver"));
     }
 
     #[test]
@@ -741,6 +850,24 @@ mod tests {
 
         assert!(code.contains("with_scanned_path(__body,128"));
         assert!(!code.contains("[0usize;128]"));
+    }
+
+    #[test]
+    fn literal_only_routes_fuse_single_child_segment_chains() {
+        let code = flat(&[("Get", "GET", "/api/v1/books/featured")]);
+
+        assert!(code.contains("__path.capture(0,3)"), "{code}");
+        assert!(code.contains("b\"api/v1/books/featured\""), "{code}");
+        assert!(!code.contains("\"api\"=>"), "{code}");
+    }
+
+    #[test]
+    fn capture_route_sets_keep_individual_literal_segments() {
+        let code = flat(&[("Get", "GET", "/api/v1/books/{book}")]);
+
+        assert!(code.contains("\"api\"=>"), "{code}");
+        assert!(code.contains("\"v1\"=>"), "{code}");
+        assert!(!code.contains("b\"api/v1/books\""), "{code}");
     }
 
     #[test]
@@ -823,7 +950,7 @@ mod tests {
         let capturing = prettyplease::unparse(&syn::parse2(generate_code(rules(&[("GetBook", "GET", "/books/{book}")]))).expect("valid"))
             .replace(' ', "");
         assert!(
-            capturing.contains("impl<'p>::routerama::codegen_helpers::RouteMatch<'p>forRoute<'p>{"),
+            capturing.contains("impl<'p>::routerama::resolve::__private::RouteMatch<'p>forRoute<'p>{"),
             "{capturing}"
         );
         assert!(capturing.contains("impl<'p>Route<'p>{"), "resolve impl on the enum: {capturing}");
@@ -832,7 +959,7 @@ mod tests {
         let unit =
             prettyplease::unparse(&syn::parse2(generate_code(rules(&[("Health", "GET", "/health")]))).expect("valid")).replace(' ', "");
         assert!(
-            unit.contains("impl<'p>::routerama::codegen_helpers::RouteMatch<'p>forRoute{"),
+            unit.contains("impl<'p>::routerama::resolve::__private::RouteMatch<'p>forRoute{"),
             "{unit}"
         );
     }

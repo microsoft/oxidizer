@@ -1,0 +1,5 @@
+error: `priority` is HTTP route policy supported only by `#[router]`; `#[resolver]` resolves only methods and paths
+  --> tests/ui/resolver_priority.rs:10:34
+   |
+10 |     #[route(GET, "/", priority = 1)]
+   |                                  ^

@@ -36,12 +36,23 @@ pub struct QueryLimits {
 
 impl QueryLimits {
     /// Limits suitable for HTTP request query strings.
+    ///
+    /// These limits are round-trip safe: any query the codec produces under
+    /// `DEFAULT` parses back under `DEFAULT`. The production limits are
+    /// therefore no larger than the matching parsing limits, so a value that
+    /// cannot be parsed back is refused while it is being produced rather than
+    /// yielding a query string that no parser configured the same way accepts.
+    ///
+    /// Neither [`UNLIMITED`](Self::UNLIMITED) nor hand-built limits carry that
+    /// guarantee. Limits that allow more output than input, or more produced
+    /// pairs than parsed pairs, can produce query strings that the same limits
+    /// reject on the way back in.
     pub const DEFAULT: Self = Self {
         max_query_length: 16 * 1024,
         max_pairs: 256,
         max_decoded_length: 64 * 1024,
         max_repeated_values: 256,
-        max_encoded_length: 64 * 1024,
+        max_encoded_length: 16 * 1024,
     };
 
     /// Disables all codec resource limits.

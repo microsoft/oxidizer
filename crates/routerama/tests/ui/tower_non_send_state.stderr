@@ -1,0 +1,19 @@
+error[E0277]: `Rc<u32>` cannot be sent between threads safely
+  --> tests/ui/tower_non_send_state.rs:18:17
+   |
+18 |     assert_send(service);
+   |     ----------- ^^^^^^^ `Rc<u32>` cannot be sent between threads safely
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = help: within `RouteService<(), Rc<u32>, {closure@$DIR/tests/ui/tower_non_send_state.rs:13:57: 13:106}>`, the trait `Send` is not implemented for `Rc<u32>`
+note: required because it appears within the type `RouteService<(), Rc<u32>, {closure@$DIR/tests/ui/tower_non_send_state.rs:13:57: 13:106}>`
+  --> src/route/tower.rs
+   |
+   | pub struct RouteService<Service, State, Call, Boundary = ExactBody> {
+   |            ^^^^^^^^^^^^
+note: required by a bound in `assert_send`
+  --> tests/ui/tower_non_send_state.rs:21:19
+   |
+21 | fn assert_send<S: Send>(service: S) {
+   |                   ^^^^ required by this bound in `assert_send`

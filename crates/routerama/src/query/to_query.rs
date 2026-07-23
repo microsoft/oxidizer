@@ -63,7 +63,12 @@ pub trait ToQuery: EncodeFields {
     ///
     /// Returns an error when formatting or the output limit fails.
     fn to_query_string_with(&self, limits: QueryLimits) -> Result<String, Error> {
-        let mut output = String::new();
+        let capacity = match self.encoded_length_hint() {
+            Some(0) => return Ok(String::new()),
+            Some(length) => length.min(limits.max_encoded_length),
+            None => 0,
+        };
+        let mut output = String::with_capacity(capacity);
         self.write_query_with(&mut output, limits)?;
         Ok(output)
     }

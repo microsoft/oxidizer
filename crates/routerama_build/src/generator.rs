@@ -57,7 +57,7 @@ impl Generator {
             public,
             full_api: true,
             routes: Vec::new(),
-            runtime: quote! { ::routerama::codegen_helpers },
+            runtime: quote! { ::routerama::resolve::__private },
         }
     }
 

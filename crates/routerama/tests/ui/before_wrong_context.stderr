@@ -1,0 +1,13 @@
+error: a per-handler `#[before(handler, ...)]` interceptor runs after route selection, where the request URI backs the selected route's zero-copy captures. It takes `&mut SelectedContext<'_>`, which reads the method, URI, and version and mutates the headers and extensions. Drop the handler list to get a router-wide `#[before]` taking `&mut BeforeContext<'_>`, which runs before resolution and may rewrite the method and URI
+  --> tests/ui/before_wrong_context.rs:16:27
+   |
+16 |     async fn guard(&self, _ctx: &mut BeforeContext<'_>) -> Before<StatusCode> {
+   |                           ^^^^
+
+warning: unused imports: `BeforeContext`, `Before`, and `StatusCode`
+ --> tests/ui/before_wrong_context.rs:4:24
+  |
+4 | use routerama::route::{Before, BeforeContext, StatusCode, router};
+  |                        ^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

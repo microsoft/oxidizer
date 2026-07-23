@@ -48,6 +48,7 @@ pub struct Encoder<'a, W> {
     output: &'a mut W,
     limits: QueryLimits,
     written: usize,
+    pairs: usize,
     first: bool,
 }
 
@@ -88,6 +89,7 @@ impl<'a, W: fmt::Write> Encoder<'a, W> {
             output,
             limits,
             written: 0,
+            pairs: 0,
             first: true,
         }
     }
@@ -131,6 +133,12 @@ impl<'a, W: fmt::Write> Encoder<'a, W> {
     }
 
     fn start_pair(&mut self, parameter: &'static str, encoded_parameter: &'static str) -> Result<(), Error> {
+        // Every pair the encoder writes is a pair the parser will count, so the
+        // same limit applies here to keep production and parsing symmetric.
+        self.pairs += 1;
+        if self.pairs > self.limits.max_pairs {
+            return Err(Error::production(Some(parameter), ErrorKind::TooManyPairs));
+        }
         if !self.first {
             self.write_raw(Some(parameter), "&")?;
         }
@@ -195,12 +203,14 @@ impl<W: fmt::Write> fmt::Write for EncodingWriter<'_, '_, W> {
     }
 }
 
-const fn is_safe(byte: u8) -> bool {
+pub(super) const fn is_safe(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'*' | b'-' | b'.' | b'_')
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
+
     use super::*;
 
     struct RejectEmptyWrites(alloc::string::String);
@@ -218,7 +228,7 @@ mod tests {
 
     #[test]
     fn written_length_overflow_is_reported() {
-        let mut output = alloc::string::String::new();
+        let mut output = String::new();
         let mut encoder = Encoder::new(&mut output, QueryLimits::UNLIMITED);
         encoder.written = usize::MAX;
         let error = encoder.write_raw(Some("value"), "x").expect_err("length overflow");
@@ -228,7 +238,7 @@ mod tests {
 
     #[test]
     fn exact_output_limit_is_accepted_without_empty_writes() {
-        let mut output = RejectEmptyWrites(alloc::string::String::new());
+        let mut output = RejectEmptyWrites(String::new());
         let limits = QueryLimits {
             max_encoded_length: 9,
             ..QueryLimits::UNLIMITED
@@ -236,5 +246,24 @@ mod tests {
         let mut encoder = Encoder::new(&mut output, limits);
         encoder.write_encoded("value", "/abc/").expect("exact-length output writes");
         assert_eq!(output.0, "%2Fabc%2F");
+    }
+
+    #[test]
+    fn producing_more_pairs_than_the_limit_allows_is_reported() {
+        let mut output = String::new();
+        let limits = QueryLimits {
+            max_pairs: 2,
+            ..QueryLimits::UNLIMITED
+        };
+        let mut encoder = Encoder::new(&mut output, limits);
+        encoder.pair_str("first", "first", "1").expect("the first pair fits the limit");
+        encoder.pair_str("second", "second", "2").expect("the second pair fits the limit");
+        let error = encoder
+            .pair_str("third", "third", "3")
+            .expect_err("the third pair exceeds the limit");
+        assert_eq!(error.parameter(), Some("third"));
+        assert_eq!(error.pair_offset(), None);
+        assert_eq!(error.kind(), ErrorKind::TooManyPairs);
+        assert_eq!(output, "first=1&second=2");
     }
 }

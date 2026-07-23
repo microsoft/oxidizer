@@ -20,6 +20,7 @@ use crate::rt_node::RtNode;
 /// The runtime behind a generated route builder's dynamic routes.
 pub struct DynBuilder<X> {
     entries: Vec<(Route, DynRoute<X>)>,
+    reserved: Vec<Route>,
     errors: Vec<BuildErrorEntry>,
 }
 
@@ -29,12 +30,40 @@ impl<X> DynBuilder<X> {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            reserved: Vec::new(),
             errors: Vec::new(),
         }
     }
 
+    /// Reserves one statically generated route for dynamic collision checks.
+    #[doc(hidden)]
+    pub fn reserve(&mut self, method: &str, path: &str, variant: &'static str) {
+        let template = match PathTemplate::parse(path, Grammar::default().with_segment_affixes()) {
+            Ok(template) => template,
+            Err(error) => {
+                self.errors.push(BuildErrorEntry::InvalidTemplate {
+                    variant,
+                    path: path.to_string(),
+                    source: error,
+                });
+                return;
+            }
+        };
+        self.reserved.push(Route::new(variant, method, template));
+    }
+
     /// Registers `path` for `method` under the dynamic `variant`.
-    pub fn add(&mut self, method: HttpMethod, path: &str, expected: &[&'static str], variant: &'static str, extractor: X) {
+    pub fn add(&mut self, method: impl AsRef<str>, path: &str, expected: &[&'static str], variant: &'static str, extractor: X) {
+        let method = match HttpMethod::custom(method) {
+            Ok(method) => method,
+            Err(error) => {
+                self.errors.push(BuildErrorEntry::InvalidMethod {
+                    variant,
+                    method: error.invalid_http_method_value().unwrap_or_default().into(),
+                });
+                return;
+            }
+        };
         let template = match PathTemplate::parse(path, Grammar::default().with_segment_affixes()) {
             Ok(template) => template,
             Err(error) => {
@@ -47,7 +76,10 @@ impl<X> DynBuilder<X> {
             }
         };
 
-        let found: Vec<String> = capture_field_names(template.segments()).iter().map(|name| name.join(".")).collect();
+        // The generated `add_*` methods pass the variant's field identifiers, which
+        // `route_field_name` derives by replacing `.` with `_`; join the same way so a
+        // dotted template key compares equal to the field the macro emits.
+        let found: Vec<String> = capture_field_names(template.segments()).iter().map(|name| name.join("_")).collect();
         let capture_order: Option<Box<[usize]>> = expected
             .iter()
             .map(|field| found.iter().position(|found| found == field))
@@ -80,6 +112,38 @@ impl<X> DynBuilder<X> {
             .push((Route::new(variant, method, template), DynRoute::new(extractor, capture_order)));
     }
 
+    #[cfg(feature = "mount")]
+    pub(crate) fn add_untyped(&mut self, method: impl AsRef<str>, path: &str, extractor: X) {
+        const VARIANT: &str = "mounted service";
+
+        let method = match HttpMethod::custom(method) {
+            Ok(method) => method,
+            Err(error) => {
+                self.errors.push(BuildErrorEntry::InvalidMethod {
+                    variant: VARIANT,
+                    method: error.invalid_http_method_value().unwrap_or_default().into(),
+                });
+                return;
+            }
+        };
+        let template = match PathTemplate::parse(path, Grammar::default().with_segment_affixes()) {
+            Ok(template) => template,
+            Err(error) => {
+                self.errors.push(BuildErrorEntry::InvalidTemplate {
+                    variant: VARIANT,
+                    path: path.to_string(),
+                    source: error,
+                });
+                return;
+            }
+        };
+        let capture_count = capture_field_names(template.segments()).len();
+        let capture_order = (0..capture_count).collect::<Vec<_>>().into_boxed_slice();
+        let route_name = alloc::format!("Mount{}", self.entries.len());
+        self.entries
+            .push((Route::new(route_name, method, template), DynRoute::new(extractor, capture_order)));
+    }
+
     /// Records a missing dynamic route registration.
     pub fn require(&mut self, seen: bool, add_method: &'static str, variant: &'static str) {
         if !seen {
@@ -93,19 +157,47 @@ impl<X> DynBuilder<X> {
     ///
     /// Returns [`ConfigurationError`] if any dynamic route failed to register.
     pub fn finish(self) -> Result<RawResolver<DynRoute<X>>, ConfigurationError> {
-        let Self { entries, mut errors } = self;
+        self.finish_with(ConfigurationError::resolver)
+    }
+
+    #[cfg(feature = "mount")]
+    pub(crate) fn finish_mounts(self) -> Result<RawResolver<DynRoute<X>>, ConfigurationError> {
+        self.finish_with(ConfigurationError::mounts)
+    }
+
+    fn finish_with(
+        self,
+        configuration_error: fn(Vec<BuildErrorEntry>) -> ConfigurationError,
+    ) -> Result<RawResolver<DynRoute<X>>, ConfigurationError> {
+        let Self {
+            entries,
+            reserved,
+            mut errors,
+        } = self;
         let (routes, payloads): (Vec<Route>, Vec<DynRoute<X>>) = entries.into_iter().unzip();
         let trie = build_trie(&routes);
-        errors.extend(
-            conflicts(&trie.root)
-                .into_iter()
-                .map(|message| BuildErrorEntry::Conflict { message }),
-        );
+        if reserved.is_empty() {
+            errors.extend(
+                conflicts(&trie.root)
+                    .into_iter()
+                    .map(|message| BuildErrorEntry::Conflict { message }),
+            );
+        } else {
+            let mut all_routes = reserved;
+            all_routes.extend(routes.iter().cloned());
+            let all_trie = build_trie(&all_routes);
+            errors.extend(
+                conflicts(&all_trie.root)
+                    .into_iter()
+                    .map(|message| BuildErrorEntry::Conflict { message }),
+            );
+            RtNode::discard_source(all_trie.root);
+        }
         if errors.is_empty() {
             Ok(RawResolver::with_trie(payloads.into_boxed_slice(), trie))
         } else {
             RtNode::discard_source(trie.root);
-            Err(ConfigurationError::resolver(errors))
+            Err(configuration_error(errors))
         }
     }
 }
@@ -147,6 +239,7 @@ mod tests {
     use core::fmt::Write as _;
 
     use super::*;
+    use crate::route_match::RouteMatch as _;
 
     #[test]
     fn failed_build_discards_deep_source_trie_iteratively() {
@@ -166,5 +259,49 @@ mod tests {
             .expect("test thread starts")
             .join()
             .expect("failed build must not overflow its stack");
+    }
+
+    #[test]
+    fn dotted_capture_names_match_the_sanitized_fields_the_macro_emits() {
+        let mut builder = DynBuilder::new();
+        builder.add("GET", "/dyn/{book.id}", &["book_id"], "Dotted", ());
+        builder.add("GET", "/deep/{a.b.c}", &["a_b_c"], "Deep", ());
+        let resolver = builder.finish().expect("dotted captures register like the macro backend");
+
+        let dotted = resolver.resolve("GET", "/dyn/7").expect("the dotted route resolves");
+        assert_eq!(dotted.name(), "Dotted");
+        assert_eq!(dotted.capture("book.id"), Some("7"));
+
+        let deep = resolver.resolve("GET", "/deep/x").expect("the multi-dotted route resolves");
+        assert_eq!(deep.name(), "Deep");
+        assert_eq!(deep.capture("a.b.c"), Some("x"));
+    }
+
+    #[test]
+    fn capture_names_that_are_rust_keywords_stay_unsanitized() {
+        // The macro passes the unraw field name (`type`, not `_f_type`), so the
+        // comparison must not apply the codegen identifier sanitizer.
+        let mut builder = DynBuilder::new();
+        builder.add("GET", "/dyn/{type}", &["type"], "Keyword", ());
+        let resolver = builder.finish().expect("keyword captures register verbatim");
+
+        let matched = resolver.resolve("GET", "/dyn/plugin").expect("the keyword route resolves");
+        assert_eq!(matched.capture("type"), Some("plugin"));
+    }
+
+    #[test]
+    fn reserved_static_shapes_reject_dynamic_collisions_without_entering_dispatch() {
+        let mut builder = DynBuilder::new();
+        builder.reserve("GET", "/fixed/{id}", "Fixed");
+        builder.add("GET", "/fixed/{value}", &["value"], "Dynamic", ());
+        let error = builder.finish().expect_err("the dynamic shape overlaps a reserved static route");
+        assert!(error.to_string().contains("conflicting routes"), "{error}");
+
+        let mut builder = DynBuilder::new();
+        builder.reserve("GET", "/fixed", "Fixed");
+        builder.add("GET", "/dynamic", &[], "Dynamic", ());
+        let resolver = builder.finish().expect("non-overlapping reservations are validation-only");
+        assert!(resolver.resolve("GET", "/fixed").is_none());
+        assert!(resolver.resolve("GET", "/dynamic").is_some());
     }
 }

@@ -1,0 +1,11 @@
+error: a route handler may have at most one `#[body]` parameter because the request body can be consumed only once
+  --> tests/ui/duplicate_body_markers.rs:14:17
+   |
+14 |         #[body] second: Vec<u8>,
+   |                 ^^^^^^
+
+error: the first request-body consumer is here
+  --> tests/ui/duplicate_body_markers.rs:13:17
+   |
+13 |         #[body] first: Vec<u8>,
+   |                 ^^^^^

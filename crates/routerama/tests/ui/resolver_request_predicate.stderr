@@ -1,0 +1,5 @@
+error: `host` is an HTTP request predicate supported only by `#[router]`; `#[resolver]` resolves only methods and paths
+ --> tests/ui/resolver_request_predicate.rs:8:30
+  |
+8 |     #[route(GET, "/", host = "api.example")]
+  |                              ^^^^^^^^^^^^^

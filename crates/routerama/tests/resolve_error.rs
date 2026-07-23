@@ -9,7 +9,7 @@
     reason = "route path templates use `{var}` capture syntax, not string formatting"
 )]
 
-use routerama::{ResolveError, resolver};
+use routerama::resolve::{ResolveError, resolver};
 
 #[test]
 fn field_returns_the_offending_field_for_every_variant() {

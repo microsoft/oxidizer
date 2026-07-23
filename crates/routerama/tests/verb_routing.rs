@@ -8,17 +8,14 @@
     reason = "route path templates use `{var}` capture syntax, not string formatting"
 )]
 
-use routerama::{HttpMethod, ResolveError, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, resolver};
 
 #[resolver]
 enum Mixed<'p> {
     #[route(GET, "/items/{id}")]
-    GetItem {
-        id: &'p str,
-    },
-    Archive {
-        id: String,
-    },
+    GetItem { id: &'p str },
+    #[route(dynamic)]
+    Archive { id: String },
 }
 
 #[test]
@@ -41,12 +38,9 @@ fn dynamic_verb_route_is_reachable_despite_overlapping_static_route() {
 #[resolver]
 enum NoVerbs<'p> {
     #[route(GET, "/refs/{name}")]
-    GetRef {
-        name: &'p str,
-    },
-    Plugin {
-        name: String,
-    },
+    GetRef { name: &'p str },
+    #[route(dynamic)]
+    Plugin { name: String },
 }
 
 #[test]
@@ -68,12 +62,9 @@ fn literal_colon_is_preserved_when_no_route_uses_verbs() {
 #[resolver]
 enum StaticVerb<'p> {
     #[route(GET, "/docs/{id}:publish")]
-    Publish {
-        id: &'p str,
-    },
-    Get {
-        id: String,
-    },
+    Publish { id: &'p str },
+    #[route(dynamic)]
+    Get { id: String },
 }
 
 #[test]

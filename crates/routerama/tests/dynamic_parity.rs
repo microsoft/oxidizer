@@ -4,10 +4,10 @@
 //! Differential tests for static and runtime resolution.
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::__rt::{RawResolver, Route, RouteMatch};
-use routerama::{HttpMethod, ResolveError};
+use routerama::resolve::__private::{RawResolver, Route, RouteMatch};
+use routerama::resolve::{HttpMethod, ResolveError};
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ApiRoute<'p> {
     #[route(GET, "/books")]
@@ -113,7 +113,7 @@ fn dynamic_resolver() -> RawResolver {
     ])
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExoticRoute<'p> {
     #[route(GET, "/x/{type}")]
@@ -271,7 +271,7 @@ fn static_core_falls_back_to_a_dynamic_overlay() {
 }
 
 // Covers lifetime-free generated enums and static promotion of their resolver.
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ping {
     #[route(GET, "/health")]
@@ -363,4 +363,50 @@ fn exotic_resolver() -> ExoticRouteResolver {
 }
 fn ping_resolver() -> PingResolver {
     Ping::resolver()
+}
+
+// A dotted capture registered at run time must behave exactly like the same
+// template compiled through the static macro path.
+#[routerama::resolve::resolver]
+#[derive(Debug, PartialEq, Eq)]
+enum DottedRoute {
+    #[route(GET, "/shelves/{shelf.id}/items/{item.sub.id}")]
+    Compiled { shelf_id: String, item_sub_id: String },
+    #[route(dynamic)]
+    Registered { shelf_id: String, item_sub_id: String },
+}
+
+/// Runtime registration of dotted capture names matches the static backend.
+#[test]
+fn dynamic_registration_accepts_dotted_capture_names() {
+    let resolver = DottedRoute::builder()
+        .add_registered(HttpMethod::GET, "/dyn/{shelf.id}/items/{item.sub.id}")
+        .build()
+        .expect("dotted captures register at run time just as the macro compiles them");
+
+    assert_eq!(
+        resolver.resolve("GET", "/shelves/sci-fi/items/7"),
+        Ok(DottedRoute::Compiled {
+            shelf_id: "sci-fi".to_owned(),
+            item_sub_id: "7".to_owned(),
+        })
+    );
+    assert_eq!(
+        resolver.resolve("GET", "/dyn/sci-fi/items/7"),
+        Ok(DottedRoute::Registered {
+            shelf_id: "sci-fi".to_owned(),
+            item_sub_id: "7".to_owned(),
+        })
+    );
+}
+
+/// A dotted registration failure is reported as a capture mismatch, not silently.
+#[test]
+fn dynamic_registration_rejects_genuinely_mismatched_captures() {
+    let error = DottedRoute::builder()
+        .add_registered(HttpMethod::GET, "/dyn/{shelf.id}/items/{other}")
+        .build()
+        .expect_err("`other` is not one of the variant's fields");
+    let message = error.to_string();
+    assert!(message.contains("do not match its fields"), "{message}");
 }

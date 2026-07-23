@@ -20,8 +20,15 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama_m
 [lib]
 proc-macro = true
 
+[features]
+default = []
+query = ["routerama_build/query"]
+resolve = ["routerama_build/resolve"]
+route = ["routerama_build/route"]
+tower = ["route", "routerama_build/tower"]
+
 [dependencies]
-routerama_build = { workspace = true, default-features = false, features = ["codegen"] }
+routerama_build = { workspace = true, default-features = false }
 
 [dev-dependencies]
 mutants = { workspace = true }

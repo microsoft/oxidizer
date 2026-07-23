@@ -17,7 +17,7 @@
 //! [`proc_macro2::TokenStream`](https://docs.rs/proc-macro2/latest/proc_macro2/struct.TokenStream.html).
 //! This API is intended for build scripts and
 //! procedural-macro implementations; applications normally use
-//! `routerama::resolver` instead.
+//! `routerama::resolve::resolver` instead.
 //!
 //! Disable the default `codegen` feature when only the hidden, framework-neutral
 //! routing trie is required at run time.
@@ -48,14 +48,14 @@
 //! ```
 
 extern crate alloc;
-#[cfg(any(test, feature = "codegen"))]
+#[cfg(any(test, feature = "codegen", feature = "query", feature = "resolve", feature = "route"))]
 extern crate std;
 
 #[cfg(feature = "codegen")]
 mod codegen;
 #[cfg(feature = "codegen")]
 mod generator;
-#[cfg(feature = "codegen")]
+#[cfg(any(feature = "query", feature = "resolve", feature = "route"))]
 #[doc(hidden)]
 pub mod macro_impl;
 mod route;

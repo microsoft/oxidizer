@@ -1,0 +1,5 @@
+error: every static `#[route]` alias on one handler must declare identical `host`, `consumes`, and `produces` predicates
+  --> tests/ui/different_alias_predicates.rs:11:36
+   |
+11 |     #[route(HEAD, "/items", host = "other.example")]
+   |                                    ^^^^^^^^^^^^^^^

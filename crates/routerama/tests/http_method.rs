@@ -3,7 +3,7 @@
 
 //! HTTP method public API tests.
 
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
 #[test]
 fn standard_and_custom_methods_expose_their_tokens() {

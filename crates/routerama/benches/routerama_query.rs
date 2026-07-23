@@ -3,11 +3,39 @@
 
 #![allow(missing_docs, reason = "benchmark code needs no API documentation")]
 
+use std::io::Write as _;
+
+use alloc_tracker::Allocator;
 use criterion::{Criterion, criterion_group, criterion_main};
+
+#[global_allocator]
+static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 include!("common/query_scenarios.rs");
 
 fn query_codecs(c: &mut Criterion) {
+    assert_output_shapes();
+    let mut stderr = std::io::stderr().lock();
+    for diagnostic in output_diagnostics() {
+        writeln!(
+            stderr,
+            "query-output allocations/{name}: measured={allocations} allocations/{bytes} bytes; length={length}; capacity={capacity}",
+            name = diagnostic.shape.name(),
+            allocations = diagnostic.allocations,
+            bytes = diagnostic.bytes,
+            length = diagnostic.length,
+            capacity = diagnostic.capacity
+        )
+        .expect("writing query-output diagnostics to stderr should succeed");
+    }
+    let reserved = reserved_output_diagnostic();
+    writeln!(
+        stderr,
+        "query-output allocations/caller_reserved: measured={} allocations/{} bytes; length={}; capacity={}",
+        reserved.allocations, reserved.bytes, reserved.length, reserved.capacity
+    )
+    .expect("writing reserved query-output diagnostics to stderr should succeed");
+
     let mut parsing = c.benchmark_group("routerama_query/parse_common");
     parsing.bench_function("routerama", |b| b.iter(direct_parse_common));
     parsing.bench_function("serde_urlencoded", |b| b.iter(serde_urlencoded_parse_common));
@@ -54,6 +82,15 @@ fn query_codecs(c: &mut Criterion) {
         b.iter(|| serde_html_form_produce_common(&serde));
     });
     allocating.finish();
+
+    let prepared = OutputShape::ALL.map(prepare_output_shape);
+    let mut shapes = c.benchmark_group("routerama_query/produce_shapes");
+    for (shape, prepared) in OutputShape::ALL.into_iter().zip(prepared.iter()) {
+        shapes.bench_function(shape.name(), |b| {
+            b.iter(|| std::hint::black_box(run_output_shape(prepared)));
+        });
+    }
+    shapes.finish();
 }
 
 criterion_group!(benches, query_codecs);

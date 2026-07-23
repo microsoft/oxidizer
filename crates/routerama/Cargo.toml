@@ -4,7 +4,7 @@
 [package]
 name = "routerama"
 version = "0.1.0"
-description = "Blazingly fast HTTP route resolution and query string processing"
+description = "Blazingly fast HTTP routing, response composition, and query/form processing"
 readme = "README.md"
 keywords = ["http", "router", "routing", "path", "url"]
 categories = ["web-programming", "network-programming"]
@@ -19,27 +19,81 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "routerama_macros::FromQuery",
-    "routerama_macros::ToQuery",
-    "routerama_macros::resolver",
+    # Canonical `response` contracts deliberately expose these ecosystem types.
+    "bytes::*",
+    "bytesbuf::*",
+    "headers::*",
+    "http::*",
+    "http_body::*",
+    # Other feature-gated modules expose their macro and codec types.
+    "routerama_macros::*",
+    "serde_core::*",
+    "serde_json::*",
+    # The `tower` transport adapter implements this ecosystem trait by design.
+    "tower_service::Service",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
-default = ["query"]
-query = ["dep:itoa"]
+default = []
+bytesbuf = ["dep:bytesbuf", "bytesbuf/bytes-compat", "response"]
+bytesbuf-std = ["bytesbuf", "bytesbuf/std", "serde_json?/std"]
+form = ["route", "query"]
+json = ["route", "dep:serde", "dep:serde_json"]
+mount = ["route"]
+query = ["dep:itoa", "dep:routerama_macros", "routerama_macros/query"]
+resolve = [
+    "dep:http_path_template",
+    "dep:routerama_build",
+    "dep:routerama_macros",
+    "dep:smallvec",
+    "routerama_macros/resolve",
+]
+response = ["dep:bytes", "dep:http", "dep:http-body", "dep:pin-project-lite"]
+route = [
+    "dep:headers",
+    "dep:http_path_template",
+    "dep:routerama_build",
+    "dep:routerama_macros",
+    "dep:smallvec",
+    "response",
+    "routerama_macros/route",
+]
+tower = ["dep:tower-service", "route", "routerama_macros/tower"]
 
 [dependencies]
-http_path_template = { workspace = true }
+bytes = { workspace = true, optional = true }
+bytesbuf = { workspace = true, default-features = false, optional = true }
+headers = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http_path_template = { workspace = true, optional = true }
 itoa = { workspace = true, optional = true }
-routerama_build = { workspace = true, default-features = false }
-routerama_macros = { workspace = true }
-smallvec = { workspace = true }
+pin-project-lite = { workspace = true, optional = true }
+routerama_build = { workspace = true, default-features = false, optional = true }
+routerama_macros = { workspace = true, default-features = false, optional = true }
+serde = { workspace = true, features = ["alloc"], optional = true }
+serde_json = { workspace = true, features = ["alloc"], optional = true }
+smallvec = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Full-framework comparison fixtures remain dev-only; their workspace entries
+# disable default features.
+actix-web = { workspace = true }
 alloc_tracker = { workspace = true }
-# `axum` powers the `web_app` example: it is only the HTTP transport, so
-# `routerama` can do all of the routing from a single fallback handler.
-axum = { workspace = true, features = ["tokio", "http1"] }
+# `axum` powers the `web_app` example; its `json` and `form` features are used
+# only by the bounded-body and bounded-form comparison fixtures. It remains a
+# dev-only HTTP transport.
+axum = { workspace = true, features = ["tokio", "http1", "json", "form", "query"] }
 # Do not add actix-router here: its unconditional tracing/log feature changes
 # workspace-wide coverage instrumentation for unrelated telemetry call sites.
 bolero = { workspace = true, features = ["std"] }
@@ -47,15 +101,34 @@ bolero = { workspace = true, features = ["std"] }
 # because bolero-libfuzzer references `bolero_engine::any::run` but does
 # not itself activate that feature on `bolero-engine`.
 criterion = { workspace = true }
+ctor = { workspace = true }
+futures-core = { workspace = true }
+http-body-util = { workspace = true }
+http_extensions = { workspace = true, features = ["test-util"] }
+hyper = { workspace = true, features = ["http1", "server"] }
 matchit = { workspace = true }
 mutants = { workspace = true }
 path-tree = { workspace = true }
 regex = { workspace = true, features = ["std", "perf"] }
+# Rocket's JSON support is used only by the bounded-body comparison fixture.
+rocket = { workspace = true, features = ["json"] }
 route-recognizer = { workspace = true }
 serde = { workspace = true, features = ["derive", "std"] }
 serde_html_form = { workspace = true, features = ["de", "ser", "std"] }
 serde_urlencoded = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+# `tower` supplies `ServiceBuilder` and the layers used by the `tower_service`
+# example and tests. It is a dev-only transport composition helper: the library
+# itself depends only on the `tower-service` trait definition.
+tower = { workspace = true, features = ["limit", "util"] }
+tower-service = { workspace = true }
+# `tracing` and `tracing-subscriber` are used only by the `auth_tracing`
+# example and its test. The library emits no telemetry of its own.
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "registry"] }
+trybuild = { workspace = true }
+warp = { workspace = true, features = ["server"] }
 
 # Callgrind instruction-count benchmarks (Valgrind is Linux-only).
 [target.'cfg(target_os = "linux")'.dev-dependencies]
@@ -67,34 +140,42 @@ workspace = true
 [[bench]]
 name = "criterion_routers"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "gungraun_routers"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_static"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_static_cg"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_dynamic"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_dynamic_cg"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_mixed"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_mixed_cg"
 harness = false
+required-features = ["resolve"]
 
 [[bench]]
 name = "routerama_query"
@@ -106,13 +187,403 @@ name = "routerama_query_cg"
 harness = false
 required-features = ["query"]
 
+[[bench]]
+name = "routerama_bytesbuf"
+harness = false
+required-features = ["bytesbuf-std", "tower"]
+
+[[bench]]
+name = "routerama_bytesbuf_cg"
+harness = false
+required-features = ["bytesbuf-std", "tower"]
+
+[[bench]]
+name = "routerama_primitive_decode"
+harness = false
+required-features = ["query", "resolve"]
+
+[[bench]]
+name = "routerama_primitive_decode_cg"
+harness = false
+required-features = ["query", "resolve"]
+
+[[bench]]
+name = "routerama_http_dispatch"
+harness = false
+required-features = ["query", "route"]
+
+[[bench]]
+name = "routerama_http_dispatch_cg"
+harness = false
+required-features = ["query", "route"]
+
+[[bench]]
+name = "routerama_http_dispatch_scaling"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_http_dispatch_scaling_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_literal_controls"
+harness = false
+required-features = ["resolve"]
+
+[[bench]]
+name = "routerama_literal_controls_cg"
+harness = false
+required-features = ["resolve"]
+
+[[bench]]
+name = "routerama_literal_controls_size_16"
+harness = false
+required-features = ["resolve"]
+
+[[bench]]
+name = "routerama_literal_controls_size_128"
+harness = false
+required-features = ["resolve"]
+
+[[bench]]
+name = "routerama_literal_controls_size_1024"
+harness = false
+required-features = ["resolve"]
+
+[[bench]]
+name = "routerama_body_extraction"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_body_extraction_cg"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_text_body"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_text_body_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_form_extraction"
+harness = false
+required-features = ["form"]
+
+[[bench]]
+name = "routerama_form_extraction_cg"
+harness = false
+required-features = ["form"]
+
+[[bench]]
+name = "routerama_route_policy"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_route_policy_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_predicate_overlap"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_predicate_overlap_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_mount"
+harness = false
+required-features = ["mount"]
+
+[[bench]]
+name = "routerama_mount_cg"
+harness = false
+required-features = ["mount"]
+
+[[bench]]
+name = "routerama_interceptors"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_interceptors_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_header_cache"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_header_cache_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_throughput"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_tower"
+harness = false
+required-features = ["tower"]
+
+[[bench]]
+name = "routerama_tower_cg"
+harness = false
+required-features = ["tower"]
+
+[[bench]]
+name = "routerama_tower_size_exact"
+harness = false
+required-features = ["tower"]
+
+[[bench]]
+name = "routerama_tower_size_generated"
+harness = false
+required-features = ["tower"]
+
+[[bench]]
+name = "routerama_tower_size_send_boxed"
+harness = false
+required-features = ["tower"]
+
+[[bench]]
+name = "routerama_response_body"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_body_cg"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_templates"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_response_templates_cg"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_response_templates_size_existing"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_response_templates_size_exact"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_response_templates_size_segmented"
+harness = false
+required-features = ["json"]
+
+[[bench]]
+name = "routerama_response_heads_size_ordinary"
+harness = false
+required-features = ["response"]
+
+[[bench]]
+name = "routerama_response_heads_size_reserved"
+harness = false
+required-features = ["response"]
+
+[[bench]]
+name = "routerama_response_heads_size_static_plan"
+harness = false
+required-features = ["response"]
+
+[[bench]]
+name = "routerama_response_heads_size_generated"
+harness = false
+required-features = ["response"]
+
+[[bench]]
+name = "routerama_response_heads_route_size_ordinary"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_heads_route_size_generated"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_body_variants_1"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_body_variants_4"
+harness = false
+required-features = ["route"]
+
+[[bench]]
+name = "routerama_response_body_variants_16"
+harness = false
+required-features = ["route"]
+
+[[example]]
+name = "auth_tracing"
+required-features = ["tower"]
+
+[[example]]
+name = "bytesbuf"
+required-features = ["bytesbuf-std", "route"]
+
+[[example]]
+name = "dynamic_routing"
+required-features = ["resolve"]
+
+[[example]]
+name = "form"
+required-features = ["form"]
+
+[[example]]
+name = "hybrid_routing"
+required-features = ["resolve"]
+
+[[example]]
+name = "header_accessors"
+required-features = ["route"]
+
+[[example]]
+name = "interceptors"
+required-features = ["route"]
+
+[[example]]
+name = "json_api"
+required-features = ["json"]
+
+[[example]]
+name = "mounted_services"
+required-features = ["mount"]
+
 [[example]]
 name = "query_strings"
 required-features = ["query"]
 
 [[example]]
+name = "request_metadata"
+required-features = ["route"]
+
+[[example]]
+name = "request_predicates"
+required-features = ["route"]
+
+[[example]]
+name = "required_state"
+required-features = ["route"]
+
+[[example]]
+name = "response_composition"
+required-features = ["response"]
+
+[[example]]
+name = "routing"
+required-features = ["resolve"]
+
+[[example]]
+name = "route_policy"
+required-features = ["route"]
+
+[[example]]
+name = "streaming_responses"
+required-features = ["route"]
+
+[[example]]
+name = "tower_service"
+required-features = ["tower"]
+
+[[example]]
 name = "web_app"
-required-features = ["query"]
+required-features = ["query", "route"]
+
+[[test]]
+name = "bench_router"
+required-features = ["resolve"]
+
+[[test]]
+name = "body_extraction_fixtures"
+required-features = ["json"]
+
+[[test]]
+name = "bolero_routerama_resolver"
+required-features = ["resolve"]
+
+[[test]]
+name = "build_errors"
+required-features = ["resolve"]
+
+[[test]]
+name = "dynamic_parity"
+required-features = ["resolve"]
+
+[[test]]
+name = "feature_gates"
+required-features = ["response"]
+
+[[test]]
+name = "form_extraction_fixtures"
+required-features = ["form"]
+
+[[test]]
+name = "http_method"
+required-features = ["resolve"]
+
+[[test]]
+name = "interceptor_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "literal_control_fixtures"
+required-features = ["resolve"]
+
+[[test]]
+name = "macro_hygiene"
+required-features = ["route", "resolve"]
+
+[[test]]
+name = "mount"
+required-features = ["mount"]
+
+[[test]]
+name = "mount_fixtures"
+required-features = ["mount"]
+
+[[test]]
+name = "mixed_fixtures"
+required-features = ["resolve"]
+
+[[test]]
+name = "http_dispatch_fixtures"
+required-features = ["query", "route"]
+
+[[test]]
+name = "http_dispatch_scaling_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "http_dispatch_scaling_generated"
 
 [[test]]
 name = "query"
@@ -121,3 +592,146 @@ required-features = ["query"]
 [[test]]
 name = "query_allocations"
 required-features = ["query"]
+
+[[test]]
+name = "query_round_trip"
+required-features = ["query"]
+
+[[test]]
+name = "query_output_fixtures"
+required-features = ["query"]
+
+[[test]]
+name = "prepared_path"
+required-features = ["resolve"]
+
+[[test]]
+name = "primitive_decode_fixtures"
+required-features = ["query", "resolve"]
+
+[[test]]
+name = "primitive_path_captures"
+required-features = ["resolve"]
+
+[[test]]
+name = "response"
+required-features = ["response"]
+
+[[test]]
+name = "response_body_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "response_body_variants_generated"
+
+[[test]]
+name = "response_head_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "response_template_fixtures"
+required-features = ["json"]
+
+[[test]]
+name = "predicate_overlap_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "resilience"
+required-features = ["resolve"]
+
+[[test]]
+name = "route_policy_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "resolve_error"
+required-features = ["resolve"]
+
+[[test]]
+name = "resolver_coercion"
+required-features = ["resolve"]
+
+[[test]]
+name = "router"
+required-features = ["route"]
+
+[[test]]
+name = "router_auth_tracing"
+required-features = ["route"]
+
+[[test]]
+name = "router_body"
+required-features = ["route"]
+
+[[test]]
+name = "router_hrtb_extractor"
+required-features = ["route"]
+
+[[test]]
+name = "router_borrowed"
+required-features = ["route"]
+
+[[test]]
+name = "router_private_rejection"
+required-features = ["route"]
+
+[[test]]
+name = "router_compile_fail"
+required-features = ["route"]
+
+[[test]]
+name = "router_form"
+required-features = ["form"]
+
+[[test]]
+name = "router_json"
+required-features = ["json"]
+
+[[test]]
+name = "router_predicates"
+required-features = ["route"]
+
+[[test]]
+name = "router_interceptors"
+required-features = ["route"]
+
+[[test]]
+name = "router_policy"
+required-features = ["route"]
+
+[[test]]
+name = "router_query"
+required-features = ["query", "route"]
+
+[[test]]
+name = "router_required_state"
+required-features = ["route"]
+
+[[test]]
+name = "router_response_body"
+required-features = ["route"]
+
+[[test]]
+name = "routes_macro"
+required-features = ["resolve"]
+
+[[test]]
+name = "tower"
+required-features = ["tower"]
+
+[[test]]
+name = "throughput_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "text_body_fixtures"
+required-features = ["route"]
+
+[[test]]
+name = "tower_fixtures"
+required-features = ["tower"]
+
+[[test]]
+name = "verb_routing"
+required-features = ["resolve"]

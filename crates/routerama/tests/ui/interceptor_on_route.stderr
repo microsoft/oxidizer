@@ -1,0 +1,13 @@
+error: a method cannot be both a route handler and a `#[before]`, `#[after]`, or `#[transform]` interceptor
+  --> tests/ui/interceptor_on_route.rs:12:14
+   |
+12 |     async fn home(&self, _ctx: &mut BeforeContext<'_>) -> Before<StatusCode> {
+   |              ^^^^
+
+warning: unused imports: `BeforeContext`, `Before`, and `StatusCode`
+ --> tests/ui/interceptor_on_route.rs:4:24
+  |
+4 | use routerama::route::{Before, BeforeContext, StatusCode, router};
+  |                        ^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

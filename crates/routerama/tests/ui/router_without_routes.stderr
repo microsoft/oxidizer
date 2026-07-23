@@ -1,0 +1,5 @@
+error: `#[router]` requires at least one `#[route]` handler
+ --> tests/ui/router_without_routes.rs:9:1
+  |
+9 | impl Api {
+  | ^^^^

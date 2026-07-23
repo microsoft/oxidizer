@@ -1,0 +1,5 @@
+error: overlapping routes cannot share priority 1
+  --> tests/ui/overlap_duplicate_priority.rs:17:56
+   |
+17 |     #[route(GET, "/", host = "two.example", priority = 1)]
+   |                                                        ^

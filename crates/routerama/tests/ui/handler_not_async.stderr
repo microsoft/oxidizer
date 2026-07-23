@@ -1,0 +1,13 @@
+error: service handlers must be async
+  --> tests/ui/handler_not_async.rs:11:5
+   |
+11 |     fn health(&self) -> StatusCode {
+   |     ^^
+
+warning: unused import: `StatusCode`
+ --> tests/ui/handler_not_async.rs:4:24
+  |
+4 | use routerama::route::{StatusCode, router};
+  |                        ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

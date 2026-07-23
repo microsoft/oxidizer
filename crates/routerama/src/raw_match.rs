@@ -10,10 +10,7 @@ use crate::route_match::RouteMatch;
 
 /// Captures retained inline in each match.
 ///
-/// Four covers the common route shapes measured by the dynamic capture-count
-/// benchmarks. The paired four/five-capture cases track the allocation
-/// boundary: increasing this value enlarges every match, while decreasing it
-/// makes more requests allocate.
+/// Additional captures spill to the heap.
 pub(crate) const INLINE_CAPTURES: usize = 4;
 
 /// A matched route, its captures, and its attached value.

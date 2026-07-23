@@ -57,3 +57,25 @@ fn production_into_reserved_string_is_allocation_free() {
     assert_eq!(total_bytes_allocated(&session, "query_produce"), 0);
     assert_eq!(output, "q=rust&page=2&exact=true");
 }
+
+#[derive(Debug, routerama::query::FromQuery)]
+struct BorrowedQuery<'q> {
+    q: &'q str,
+}
+
+#[test]
+fn a_borrowed_field_rejects_an_encoded_value_without_decoding_it() {
+    let borrowed = BorrowedQuery::from_query("q=rust").expect("an unencoded value borrows");
+    assert_eq!(borrowed.q, "rust");
+
+    let session = Session::new().no_stdout().no_file();
+    let operation = session.operation("borrow_required");
+    let error = {
+        let _span = operation.measure_thread().iterations(1);
+        BorrowedQuery::from_query("q=rust+lang%2Fnow").expect_err("a borrowed field cannot own decoded data")
+    };
+
+    assert_eq!(error.parameter(), Some("q"));
+    assert_eq!(error.kind(), routerama::query::ErrorKind::BorrowRequired);
+    assert_eq!(total_bytes_allocated(&session, "borrow_required"), 0);
+}

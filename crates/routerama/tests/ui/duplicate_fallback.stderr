@@ -1,0 +1,11 @@
+error: a generated service may declare only one `#[fallback]` method
+  --> tests/ui/duplicate_fallback.rs:22:7
+   |
+22 |     #[fallback]
+   |       ^^^^^^^^
+
+error: the first fallback is declared here
+  --> tests/ui/duplicate_fallback.rs:18:14
+   |
+18 |     async fn first(&self, _failure: RouteFailure<'_>) -> StatusCode {
+   |              ^^^^^

@@ -4,6 +4,7 @@
 //! Query codec integration tests.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::num::ParseIntError;
@@ -61,6 +62,68 @@ struct NumericQuery {
     enabled: bool,
 }
 
+macro_rules! primitive_query {
+    ($( $name:ident => $ty:ty ),+ $(,)?) => {
+        $(
+            #[derive(Debug, routerama::query::FromQuery)]
+            struct $name {
+                value: $ty,
+            }
+
+            impl $name {
+                fn parse(query: &str) -> Result<$ty, Error> {
+                    Self::from_query(query).map(|parsed| parsed.value)
+                }
+
+                fn parse_encoded(value: &str) -> Result<$ty, Error> {
+                    Self::parse(&format!("value={}", percent_encode(value)))
+                }
+            }
+        )+
+    };
+}
+
+primitive_query!(
+    EncodedBool => bool,
+    EncodedU8 => u8,
+    EncodedU16 => u16,
+    EncodedU32 => u32,
+    EncodedU64 => u64,
+    EncodedU128 => u128,
+    EncodedUsize => usize,
+    EncodedI8 => i8,
+    EncodedI16 => i16,
+    EncodedI32 => i32,
+    EncodedI64 => i64,
+    EncodedI128 => i128,
+    EncodedIsize => isize,
+);
+
+#[derive(Debug, PartialEq, Eq, routerama::query::FromQuery)]
+struct PrimitiveContainers {
+    optional: Option<i16>,
+    repeated: Vec<u32>,
+}
+
+fn percent_encode(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mut encoded = String::with_capacity(value.len() * 3);
+    for byte in value.bytes() {
+        encoded.push('%');
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0F)]));
+    }
+    encoded
+}
+
+fn assert_parse_error<T>(result: Result<T, Error>, kind: ErrorKind, parameter: Option<&'static str>, offset: usize) {
+    let error = result.err().expect("the adversarial query must be rejected");
+    assert_eq!(error.kind(), kind);
+    assert_eq!(error.parameter(), parameter);
+    assert_eq!(error.pair_offset(), Some(offset));
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct DisplayValue(&'static str);
 
@@ -78,9 +141,25 @@ impl fmt::Display for FailingDisplay {
     }
 }
 
+struct CountingDisplay<'a> {
+    calls: &'a Cell<usize>,
+}
+
+impl fmt::Display for CountingDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.calls.set(self.calls.get() + 1);
+        f.write_str("counted")
+    }
+}
+
 #[derive(routerama::query::ToQuery)]
 struct DisplayQuery {
     value: DisplayValue,
+}
+
+#[derive(routerama::query::ToQuery)]
+struct CountingDisplayQuery<'a> {
+    value: CountingDisplay<'a>,
 }
 
 #[derive(routerama::query::ToQuery)]
@@ -353,7 +432,7 @@ fn default_limits_are_pinned() {
     assert_eq!(QueryLimits::DEFAULT.max_pairs, 256);
     assert_eq!(QueryLimits::DEFAULT.max_decoded_length, 65_536);
     assert_eq!(QueryLimits::DEFAULT.max_repeated_values, 256);
-    assert_eq!(QueryLimits::DEFAULT.max_encoded_length, 65_536);
+    assert_eq!(QueryLimits::DEFAULT.max_encoded_length, 16_384);
 }
 
 #[test]
@@ -761,11 +840,139 @@ fn parses_and_produces_every_specialized_scalar() {
 }
 
 #[test]
+fn percent_encoded_integers_cover_every_width_and_boundary() {
+    macro_rules! signed_cases {
+        ($query:ident, $ty:ty, $overflow:expr) => {{
+            assert_eq!($query::parse_encoded("0").expect("encoded zero parses"), 0);
+            assert_eq!($query::parse_encoded("-0").expect("encoded signed zero parses"), 0);
+            assert_eq!($query::parse_encoded("+1").expect("an escaped plus remains a sign"), 1);
+            assert_eq!(
+                $query::parse_encoded(&<$ty>::MIN.to_string()).expect("encoded minimum parses"),
+                <$ty>::MIN
+            );
+            assert_eq!(
+                $query::parse_encoded(&<$ty>::MAX.to_string()).expect("encoded maximum parses"),
+                <$ty>::MAX
+            );
+            assert_parse_error($query::parse_encoded($overflow), ErrorKind::InvalidValue, Some("value"), 0);
+            assert_parse_error($query::parse("value=+1"), ErrorKind::InvalidValue, Some("value"), 0);
+            assert_parse_error($query::parse("value=%"), ErrorKind::InvalidEncoding, None, 6);
+            assert_parse_error($query::parse("value=%FF"), ErrorKind::InvalidUtf8, None, 6);
+        }};
+    }
+
+    macro_rules! unsigned_cases {
+        ($query:ident, $ty:ty, $overflow:expr) => {{
+            assert_eq!($query::parse_encoded("0").expect("encoded zero parses"), 0);
+            assert_eq!($query::parse_encoded("+1").expect("an escaped plus remains a sign"), 1);
+            assert_eq!(
+                $query::parse_encoded(&<$ty>::MAX.to_string()).expect("encoded maximum parses"),
+                <$ty>::MAX
+            );
+            assert_parse_error($query::parse_encoded("-1"), ErrorKind::InvalidValue, Some("value"), 0);
+            assert_parse_error($query::parse_encoded($overflow), ErrorKind::InvalidValue, Some("value"), 0);
+            assert_parse_error($query::parse("value=+1"), ErrorKind::InvalidValue, Some("value"), 0);
+            assert_parse_error($query::parse("value=%"), ErrorKind::InvalidEncoding, None, 6);
+            assert_parse_error($query::parse("value=%FF"), ErrorKind::InvalidUtf8, None, 6);
+        }};
+    }
+
+    signed_cases!(EncodedI8, i8, "128");
+    signed_cases!(EncodedI16, i16, "32768");
+    signed_cases!(EncodedI32, i32, "2147483648");
+    signed_cases!(EncodedI64, i64, "9223372036854775808");
+    signed_cases!(EncodedI128, i128, "170141183460469231731687303715884105728");
+    signed_cases!(
+        EncodedIsize,
+        isize,
+        if isize::BITS == 64 { "9223372036854775808" } else { "2147483648" }
+    );
+
+    unsigned_cases!(EncodedU8, u8, "256");
+    unsigned_cases!(EncodedU16, u16, "65536");
+    unsigned_cases!(EncodedU32, u32, "4294967296");
+    unsigned_cases!(EncodedU64, u64, "18446744073709551616");
+    unsigned_cases!(EncodedU128, u128, "340282366920938463463374607431768211456");
+    unsigned_cases!(
+        EncodedUsize,
+        usize,
+        if usize::BITS == 64 { "18446744073709551616" } else { "4294967296" }
+    );
+}
+
+#[test]
+fn percent_encoded_bool_and_schema_errors_preserve_query_semantics() {
+    assert!(EncodedBool::parse_encoded("true").expect("encoded true parses"));
+    assert!(!EncodedBool::parse_encoded("false").expect("encoded false parses"));
+    for invalid in ["TRUE", "yes", "tr+ue"] {
+        assert_parse_error(EncodedBool::parse_encoded(invalid), ErrorKind::InvalidValue, Some("value"), 0);
+    }
+    assert_parse_error(EncodedBool::parse("value=tr+ue"), ErrorKind::InvalidValue, Some("value"), 0);
+    assert_parse_error(EncodedBool::parse("value=%"), ErrorKind::InvalidEncoding, None, 6);
+    assert_parse_error(EncodedBool::parse("value=%FF"), ErrorKind::InvalidUtf8, None, 6);
+    assert_parse_error(EncodedU8::parse("value=%32%35%36%"), ErrorKind::InvalidEncoding, None, 15);
+    assert_parse_error(EncodedU8::parse("value=%32%35%36%FF"), ErrorKind::InvalidUtf8, None, 6);
+
+    assert_parse_error(EncodedU8::parse("value=%31&value=%32"), ErrorKind::Duplicate, Some("value"), 10);
+    assert_parse_error(EncodedU8::parse("value=%31&value=%"), ErrorKind::InvalidEncoding, None, 16);
+
+    let parsed = PrimitiveContainers::from_query("optional=%2D%31&repeated=%31&repeated=%32")
+        .expect("optional and repeated encoded primitives parse");
+    assert_eq!(
+        parsed,
+        PrimitiveContainers {
+            optional: Some(-1),
+            repeated: vec![1, 2],
+        }
+    );
+
+    let repeated_limits = QueryLimits {
+        max_repeated_values: 1,
+        ..QueryLimits::UNLIMITED
+    };
+    let error = PrimitiveContainers::from_query_with("repeated=%31&repeated=%78", repeated_limits)
+        .expect_err("the repetition limit precedes primitive value parsing");
+    assert_eq!(error.kind(), ErrorKind::TooManyValues);
+    assert_eq!(error.parameter(), Some("repeated"));
+    assert_eq!(error.pair_offset(), Some(13));
+
+    let error = PrimitiveContainers::from_query_with("repeated=%31&repeated=%", repeated_limits)
+        .expect_err("malformed encoding still precedes the repetition limit");
+    assert_eq!(error.kind(), ErrorKind::InvalidEncoding);
+    assert_eq!(error.parameter(), None);
+    assert_eq!(error.pair_offset(), Some(22));
+
+    let decoded_limits = QueryLimits {
+        max_decoded_length: 5,
+        ..QueryLimits::UNLIMITED
+    };
+    assert_parse_error(
+        EncodedU8::from_query_with("value=%31", decoded_limits).map(|parsed| parsed.value),
+        ErrorKind::DecodedTooLong,
+        None,
+        6,
+    );
+    assert_parse_error(AmbiguousFlatten::from_query("shared=%"), ErrorKind::InvalidEncoding, None, 7);
+    assert_parse_error(StrictOuter::from_query("unknown=%"), ErrorKind::InvalidEncoding, None, 8);
+    let missing = EncodedU8::from_query("").expect_err("the required primitive remains required");
+    assert_eq!(missing.kind(), ErrorKind::Missing);
+    assert_eq!(missing.parameter(), Some("value"));
+    assert_eq!(missing.pair_offset(), Some(0));
+}
+
+#[test]
 fn custom_display_values_escape_and_propagate_failures() {
     let escaped = DisplayQuery {
         value: DisplayValue("a b/~"),
     };
     assert_eq!(escaped.to_query_string().expect("display value writes"), "value=a+b%2F%7E");
+
+    let calls = Cell::new(0);
+    let counted = CountingDisplayQuery {
+        value: CountingDisplay { calls: &calls },
+    };
+    assert_eq!(counted.to_query_string().expect("display value writes once"), "value=counted");
+    assert_eq!(calls.get(), 1);
 
     let format_error = FailingQuery { value: FailingDisplay }
         .to_query_string()

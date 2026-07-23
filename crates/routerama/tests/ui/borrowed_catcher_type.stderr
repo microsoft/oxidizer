@@ -1,0 +1,5 @@
+error: catcher rejection types cannot depend on a non-static lifetime
+  --> tests/ui/borrowed_catcher_type.rs:18:22
+   |
+18 |     #[catch(Borrowed<'_>)]
+   |                      ^^
