@@ -82,6 +82,44 @@ Describe 'Format-PackageMenu' {
         $out | Should -Match 'Detected package with unreleased modifications: ohno'
     }
 
+    Context 'manual proc-macro SemVer review' {
+        It 'explains the unsupported automated check and offers the standard decision choices' {
+            $finding = NewFinding -Folder 'macros' -CurrentVersion '1.2.3'
+            $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
+            $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro'
+            $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @()
+            $finding | Add-Member -NotePropertyName PlannedChangeType -NotePropertyValue 'patch'
+
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+
+            $out | Should -Match 'Manual SemVer review required for proc-macro-only package: macros'
+            $out | Should -Match 'cargo-semver-checks cannot inspect procedural macro names'
+            $out | Should -Match 'Review the diff and choose the appropriate change type manually'
+            $out | Should -Match '2\. Keep the planned patch release after manual review'
+            $out | Should -Match '3\. Release as breaking change'
+            $out | Should -Match '4\. Release as non-breaking change'
+            $out | Should -Match '5\. Release as patch'
+        }
+
+        It 'explains one-hop propagation for an ordinary dependent of a reviewed breaking package' {
+            $finding = NewFinding -Folder 'facade' -CurrentVersion '1.2.3'
+            $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
+            $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro-dependent'
+            $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @('macros')
+            $finding | Add-Member -NotePropertyName PlannedChangeType -NotePropertyValue 'patch'
+
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+
+            $out | Should -Match 'package affected by a breaking proc-macro review chain: facade'
+            $out | Should -Match 'Direct dependency with a manually reviewed breaking release: macros'
+            $out | Should -Match 'cargo-semver-checks still classifies this library'
+            $out | Should -Match 'breaking result continues review to direct published consumers'
+            $out | Should -Match 'weaker result stops propagation here'
+        }
+    }
+
     Context 'no-changes (-All-mode) finding' {
 
         # When the planner surfaces a package via -All mode there may be no
@@ -1081,6 +1119,119 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
         Should -Invoke -CommandName Get-UnreleasedModifiedDependencies -Times 1 -Exactly -ParameterFilter {
             -not $IncludeAllModifiedAsRoots
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-PlanReview mandatory proc-macro review precedence
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PlanReview mandatory proc-macro review precedence' {
+    It 're-prompts a previously declined consumer when a breaking proc macro later enters the plan' {
+        Mock -CommandName Write-Host -MockWith { } -ModuleName $null
+
+        $baseline = @(
+            [pscustomobject]@{
+                Name = 'seed'; Folder = 'seed'; Version = '1.0.0'
+                Published = $true; Deps = @(); IsProcMacroOnly = $false
+            }
+            [pscustomobject]@{
+                Name = 'z_macros'; Folder = 'z_macros'; Version = '1.0.0'
+                Published = $true; Deps = @(); IsProcMacroOnly = $true
+            }
+            [pscustomobject]@{
+                Name = 'a_consumer'; Folder = 'a_consumer'; Version = '1.0.0'
+                Published = $true; Deps = @('z_macros'); IsProcMacroOnly = $false
+            }
+        )
+        Mock -CommandName Get-WorkspacePackages -MockWith { $baseline }
+
+        Mock -CommandName Resolve-ReleaseSet -MockWith {
+            $entries = New-Object 'System.Collections.Generic.List[object]'
+            $entries.Add([pscustomobject]@{
+                Folder = 'seed'; Name = 'seed'; CurrentVersion = '1.0.0'
+                EffectiveChangeType = 'patch'; EffectiveTargetVersion = '1.0.1'
+                Source = 'user'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; IsProcMacroOnly = $false
+                RequiresManualSemverReview = $false
+                CascadeReasons = New-Object 'System.Collections.Generic.List[object]'
+                RawToken = 'seed@patch'
+            })
+
+            if (@($ParsedTokens.Name) -contains 'z_macros') {
+                $entries.Add([pscustomobject]@{
+                    Folder = 'z_macros'; Name = 'z_macros'; CurrentVersion = '1.0.0'
+                    EffectiveChangeType = 'breaking'; EffectiveTargetVersion = '2.0.0'
+                    Source = 'user'; AutoUpgraded = $false
+                    PinHonoredAgainstCascade = $false; IsProcMacroOnly = $true
+                    RequiresManualSemverReview = $true
+                    CascadeReasons = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken = 'z_macros@breaking'
+                })
+                $consumerReasons = New-Object 'System.Collections.Generic.List[object]'
+                $consumerReasons.Add([pscustomobject]@{ Target = 'z_macros'; Breaking = $false })
+                $entries.Add([pscustomobject]@{
+                    Folder = 'a_consumer'; Name = 'a_consumer'; CurrentVersion = '1.0.0'
+                    EffectiveChangeType = 'patch'; EffectiveTargetVersion = '1.0.1'
+                    Source = 'cascade'; AutoUpgraded = $false
+                    PinHonoredAgainstCascade = $false; IsProcMacroOnly = $false
+                    RequiresManualSemverReview = $false
+                    CascadeReasons = $consumerReasons; RawToken = $null
+                })
+            }
+            $entries
+        }
+
+        # Both findings exist from the beginning. The ordinary consumer is
+        # deliberately first and is declined before the proc macro is accepted.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            [pscustomobject]@{
+                Folder = 'a_consumer'; PackageName = 'a_consumer'
+                CurrentVersion = '1.0.0'; InReleaseSet = $false
+                ChangedFileCount = 1; DependencyChains = @()
+                WorkspaceDependencyChains = @()
+                RequiresManualSemverReview = $false
+            }
+            [pscustomobject]@{
+                Folder = 'z_macros'; PackageName = 'z_macros'
+                CurrentVersion = '1.0.0'; InReleaseSet = $false
+                ChangedFileCount = 1; DependencyChains = @()
+                WorkspaceDependencyChains = @()
+                RequiresManualSemverReview = $true
+                ManualSemverReviewKind = 'proc-macro'
+                ManualSemverReviewSources = @()
+                PlannedChangeType = 'patch'
+            }
+        }
+
+        $script:MandatoryReviewPromptFolders = New-Object 'System.Collections.Generic.List[string]'
+        Mock -CommandName Get-PackageReleaseDecision -MockWith {
+            $script:MandatoryReviewPromptFolders.Add($Finding.Folder)
+            switch ($script:MandatoryReviewPromptFolders.Count) {
+                1 { return @{ Action = 'ignore' } }
+                2 { return @{ Action = 'breaking' } }
+                3 { return @{ Action = 'ignore' } }
+                default { throw "Unexpected review prompt for '$($Finding.Folder)'." }
+            }
+        }
+
+        $initialToken = [pscustomobject]@{
+            Name = 'seed'; RequestedChangeType = 'patch'
+            RequestedTargetVersion = $null; RawToken = 'seed@patch'
+        }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @($initialToken) `
+            -WorkspaceBaseline $baseline
+
+        $script:MandatoryReviewPromptFolders.ToArray() | Should -Be @(
+            'a_consumer',
+            'z_macros',
+            'a_consumer'
+        )
+        $plan['a_consumer'].ManualSemverReviewCompleted | Should -BeTrue
+        $plan['a_consumer'].ManualSemverReviewSources | Should -Be @('z_macros')
     }
 }
 

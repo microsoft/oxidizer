@@ -14,7 +14,8 @@ BeforeAll {
             [string]   $Name = $null,
             [string]   $Version = '0.1.0',
             [string[]] $Deps = @(),
-            [bool]     $Published = $true
+            [bool]     $Published = $true,
+            [bool]     $IsProcMacroOnly = $false
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
         return [pscustomobject]@{
@@ -23,6 +24,7 @@ BeforeAll {
             Version   = $Version
             Published = $Published
             Deps      = $Deps
+            IsProcMacroOnly = $IsProcMacroOnly
         }
     }
 
@@ -93,6 +95,22 @@ Describe 'Get-TransitivePublishedDependentsFromBaseline' {
     }
 }
 
+Describe 'Get-DirectPublishedDependentsFromBaseline' {
+    It 'returns only immediate published consumers' {
+        # a -> b -> c; private also directly consumes a but is not published.
+        $baseline = @(
+            (New-BaselinePackage -Folder 'a')
+            (New-BaselinePackage -Folder 'b' -Deps @('a'))
+            (New-BaselinePackage -Folder 'c' -Deps @('b'))
+            (New-BaselinePackage -Folder 'private' -Deps @('a') -Published $false)
+        )
+
+        $result = Get-DirectPublishedDependentsFromBaseline -Baseline $baseline -TargetCargoName 'a'
+
+        $result | Should -Be @('b')
+    }
+}
+
 Describe 'Resolve-ReleaseSet' {
     Context 'single user-source entry without dependents' {
         It 'returns a single user-source entry with the right effective state (0.x non-breaking -> 0.y.(z+1))' {
@@ -125,6 +143,155 @@ Describe 'Resolve-ReleaseSet' {
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@breaking')
             $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
             $resolved[0].EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'marks a user-selected proc-macro-only package for manual review without invoking the classifier' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'macros' -Version '1.0.0' -IsProcMacroOnly $true)
+            )
+            $classifier = {
+                throw 'The automated classifier must not run for proc-macro-only packages.'
+            }
+            $parsed = Parse-ReleaseTokens -Tokens @('macros@patch')
+
+            $resolved = Resolve-ReleaseSet `
+                -ParsedTokens $parsed `
+                -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier
+
+            $resolved[0].EffectiveChangeType | Should -Be 'patch'
+            $resolved[0].RequiresManualSemverReview | Should -BeTrue
+            $resolved[0].IsProcMacroOnly | Should -BeTrue
+        }
+    }
+
+    Describe 'Get-ManualSemverReviewFindings: breaking review propagation' {
+        BeforeAll {
+            function script:New-ProcMacroReviewBaseline {
+                return @(
+                    (New-BaselinePackage -Folder 'macros' -Name 'macros' -Version '1.0.0' -IsProcMacroOnly $true)
+                    (New-BaselinePackage -Folder 'facade' -Name 'facade' -Version '1.0.0' -Deps @('macros'))
+                    (New-BaselinePackage -Folder 'app' -Name 'app' -Version '1.0.0' -Deps @('facade'))
+                )
+            }
+
+            function script:Resolve-ToHash {
+                param(
+                    [object[]]$Baseline,
+                    [string[]]$Tokens
+                )
+                $parsed = Parse-ReleaseTokens -Tokens $Tokens
+                $entries = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $Baseline
+                $result = @{}
+                foreach ($entry in $entries) { $result[$entry.Folder] = $entry }
+                return $result
+            }
+        }
+
+        It 'does not advance beyond an unreviewed proc macro' {
+            $baseline = New-ProcMacroReviewBaseline
+            $resolved = Resolve-ToHash -Baseline $baseline -Tokens @('macros@breaking')
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+
+            $findings.Folder | Should -Be @('macros')
+        }
+
+        It 'surfaces only the direct consumer after the proc macro is reviewed as breaking' {
+            $baseline = New-ProcMacroReviewBaseline
+            $resolved = Resolve-ToHash -Baseline $baseline -Tokens @('macros@breaking')
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            [void]$reviewed.Add('macros')
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+            $facade = $findings | Where-Object { $_.Folder -eq 'facade' }
+
+            $facade | Should -Not -BeNullOrEmpty
+            $facade.ManualSemverReviewKind | Should -Be 'proc-macro-dependent'
+            $facade.ManualSemverReviewSources | Should -Be @('macros')
+            $findings.Folder | Should -Not -Contain 'app'
+        }
+
+        It 'stops when the reviewed proc macro is non-breaking' {
+            $baseline = New-ProcMacroReviewBaseline
+            $resolved = Resolve-ToHash -Baseline $baseline -Tokens @('macros@patch')
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            [void]$reviewed.Add('macros')
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+
+            $findings.Folder | Should -Be @('macros')
+        }
+
+        It 'advances to the next hop only after the direct consumer is reviewed as breaking' {
+            $baseline = New-ProcMacroReviewBaseline
+            $resolved = Resolve-ToHash -Baseline $baseline -Tokens @('macros@breaking', 'facade@breaking')
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            [void]$reviewed.Add('macros')
+            [void]$reviewed.Add('facade')
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+            $app = $findings | Where-Object { $_.Folder -eq 'app' }
+
+            $app | Should -Not -BeNullOrEmpty
+            $app.ManualSemverReviewSources | Should -Be @('facade')
+        }
+
+        It 'does not advance when the direct consumer is reviewed below breaking' {
+            $baseline = New-ProcMacroReviewBaseline
+            $resolved = Resolve-ToHash -Baseline $baseline -Tokens @('macros@breaking', 'facade@patch')
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            [void]$reviewed.Add('macros')
+            [void]$reviewed.Add('facade')
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+
+            $findings.Folder | Should -Not -Contain 'app'
+        }
+
+        It 'follows the actual forced pin instead of a stronger internal severity tag' {
+            $baseline = New-ProcMacroReviewBaseline
+            $parsed = Parse-ReleaseTokens -Tokens @('macros@breaking', 'facade@1.1.0')
+            $classifier = New-StubClassifier @{ facade = 'breaking' }
+            $entries = Resolve-ReleaseSet `
+                -ParsedTokens $parsed `
+                -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier `
+                -Force
+            $resolved = @{}
+            foreach ($entry in $entries) { $resolved[$entry.Folder] = $entry }
+            $reviewed = [System.Collections.Generic.HashSet[string]]::new()
+            [void]$reviewed.Add('macros')
+            [void]$reviewed.Add('facade')
+
+            # -Force retains the non-breaking 1.1.0 pin while the internal tag stays
+            # breaking so cascade bookkeeping remains conservative.
+            $resolved['facade'].EffectiveChangeType | Should -Be 'breaking'
+            $resolved['facade'].EffectiveTargetVersion | Should -Be '1.1.0'
+
+            $findings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $baseline `
+                -ReviewedManualSemver $reviewed)
+
+            $findings.Folder | Should -Contain 'facade'
+            $findings.Folder | Should -Not -Contain 'app'
         }
     }
 
@@ -272,6 +439,38 @@ Describe 'Resolve-ReleaseSet' {
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveChangeType | Should -Be 'non-breaking'
             $byFolder['c'].EffectiveChangeType | Should -Be 'patch'
+        }
+
+        It 'adds a proc-macro-only cascade dependent at the mechanical patch floor for manual review' {
+            # consumer -> macros -> implementation. Releasing implementation
+            # pulls in both dependents. The proc-macro itself cannot be
+            # cargo-semver-checked, while the ordinary consumer still can.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'implementation' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'macros' -Version '1.0.0' -Deps @('implementation') -IsProcMacroOnly $true)
+                (New-BaselinePackage -Folder 'consumer' -Version '1.0.0' -Deps @('macros'))
+            )
+            $calls = [System.Collections.Generic.List[string]]::new()
+            $classifier = {
+                param([string]$Folder, [string]$CargoName)
+                $calls.Add($Folder)
+                return 'none'
+            }.GetNewClosure()
+            $parsed = Parse-ReleaseTokens -Tokens @('implementation@patch')
+
+            $resolved = Resolve-ReleaseSet `
+                -ParsedTokens $parsed `
+                -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['macros'].Source | Should -Be 'cascade'
+            $byFolder['macros'].EffectiveChangeType | Should -Be 'patch'
+            $byFolder['macros'].RequiresManualSemverReview | Should -BeTrue
+            $calls | Should -Not -Contain 'macros'
+            $calls | Should -Contain 'implementation'
+            $calls | Should -Contain 'consumer'
         }
     }
 

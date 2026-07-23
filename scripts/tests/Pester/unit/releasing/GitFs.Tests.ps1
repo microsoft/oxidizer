@@ -401,6 +401,61 @@ Describe 'Get-WorkspacePackages' {
     }
 }
 
+Describe 'Get-WorkspacePackages: proc-macro target classification' {
+    BeforeAll {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'macros'; Version = '0.2.0'; ProcMacro = $true }
+                @{ Name = 'library'; Version = '1.0.0' }
+            )
+        }
+        $script:ProcMacroWorkspace = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'proc-macro-targets')
+    }
+
+    It 'identifies a proc-macro-only package from cargo metadata' {
+        $packages = Get-WorkspacePackages -repoRoot $script:ProcMacroWorkspace.Path
+        $macros = $packages | Where-Object { $_.Name -eq 'macros' }
+
+        $macros.IsProcMacroOnly | Should -BeTrue
+        $macros.HasLibraryTarget | Should -BeFalse
+    }
+
+    It 'preserves ordinary library classification' {
+        $packages = Get-WorkspacePackages -repoRoot $script:ProcMacroWorkspace.Path
+        $library = $packages | Where-Object { $_.Name -eq 'library' }
+
+        $library.IsProcMacroOnly | Should -BeFalse
+        $library.HasLibraryTarget | Should -BeTrue
+    }
+
+    It 'returns manual without invoking cargo-semver-checks for a proc-macro-only package' {
+        Reset-ReleaseScriptCaches
+        Mock -CommandName Invoke-CrateSemverCheck -MockWith {
+            throw 'Invoke-CrateSemverCheck must not run for proc-macro-only packages.'
+        }
+
+        Get-CrateRequiredChangeType `
+            -Folder 'macros' `
+            -CargoName 'macros' `
+            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'manual'
+
+        Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 0 -Exactly
+    }
+
+    It 'continues invoking cargo-semver-checks for an ordinary library package' {
+        Reset-ReleaseScriptCaches
+        Mock -CommandName Invoke-CrateSemverCheck -MockWith { 'patch' }
+
+        Get-CrateRequiredChangeType `
+            -Folder 'library' `
+            -CargoName 'library' `
+            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'patch'
+
+        Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 1 -Exactly
+    }
+}
+
 Describe 'Get-AllTransitiveDependents' {
     BeforeAll {
         Reset-ReleaseScriptCaches

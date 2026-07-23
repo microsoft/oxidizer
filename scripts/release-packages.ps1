@@ -55,18 +55,33 @@
 
     Cargo's 0.x.y SemVer rules are honored throughout: for `0.x.y` packages a
     Breaking change becomes `0.(x+1).0`, NonBreaking and Patch both map to
-    incrementing `y`. Every release in the plan is classified by running
-    `cargo semver-checks` against each crate's previous version-bump commit in
-    git history (the most recent commit that changed the crate's `[package]
-    version`, with the baseline rustdoc rebuilt from source via `--baseline-rev`,
-    so no registry access is required and it works in OSS and enterprise/offline
-    environments alike): a dependent whose own public API is unaffected by the
-    release cascades as a `patch` (it still re-releases to pick up the new
-    dependency version), while a dependent whose API actually changes (e.g. because
-    it re-exports a changed type) cascades at the severity `cargo semver-checks`
-    reports. Dev-only dependents are skipped — they automatically pick up the
-    new workspace version. cargo-semver-checks is a hard dependency (install
-    the version pinned in constants.env); there is no heuristic fallback.
+    incrementing `y`. Every ordinary library release in the plan is classified
+    by running `cargo semver-checks` against the crate's previous version-bump
+    commit in git history (the most recent commit that changed the crate's
+    `[package] version`, with the baseline rustdoc rebuilt from source via
+    `--baseline-rev`, so no registry access is required and it works in OSS and
+    enterprise/offline environments alike): a dependent whose own public API is
+    unaffected by the release cascades as a `patch` (it still re-releases to pick
+    up the new dependency version), while a dependent whose API actually changes
+    (e.g. because it re-exports a changed type) cascades at the severity
+    `cargo semver-checks` reports. Dev-only dependents are skipped — they
+    automatically pick up the new workspace version.
+
+    Proc-macro-only packages are detected from `cargo metadata` before
+    cargo-semver-checks runs. The tool cannot inspect procedural macro names,
+    accepted inputs, diagnostics, or generated output, so every proc-macro-only
+    package in the release set is shown in the standard diff + release-decision
+    dialog for explicit manual classification. This includes targeted packages
+    and unchanged proc-macro dependents added by cascade. Build/test success is
+    separate validation and does not prove procedural macro API compatibility.
+    A breaking manual result triggers the same mandatory review for direct
+    published consumers. Their provisional level remains the stronger of the
+    patch cascade floor and their own cargo-semver-checks result; the proc-macro
+    severity is not copied. Review advances another edge only when that
+    consumer's final result is breaking, and stops on any weaker result.
+
+    cargo-semver-checks remains a hard dependency for ordinary library packages
+    (install the version pinned in constants.env); there is no heuristic fallback.
 
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a
