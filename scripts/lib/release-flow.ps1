@@ -1299,9 +1299,9 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
     if ($inReleaseSet) {
-        [void]$sb.AppendLine('  2. Keep the currently planned release level')
+        [void]$sb.AppendLine('  2. Keep the release level already in the plan')
     } else {
-        [void]$sb.AppendLine('  2. No material changes - release only if required by cascade logic')
+        [void]$sb.AppendLine('  2. No material changes - release only if another package requires it')
     }
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     if (-not $hideNonBreaking) {
@@ -1803,8 +1803,9 @@ function Invoke-PlanReview {
                     if ($_.RequiresManualSemverReview) {
                         # A prior ordinary "skip" or "keep cascade level"
                         # decision did not evaluate the opaque proc-macro
-                        # contract. Only a completed manual SemVer review may
-                        # suppress this mandatory finding.
+                        # contract. Only a completed manual review may suppress
+                        # this finding. Choosing "No material changes" in the
+                        # manual dialog counts as a completed review.
                         return -not $reviewedManualSemver.Contains($_.Folder)
                     }
                     return -not $declined.Contains($_.Folder) -and
@@ -1828,8 +1829,9 @@ function Invoke-PlanReview {
             $decision  = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
             $isManualSemverReview = [bool]$next.RequiresManualSemverReview
             if ($isManualSemverReview) {
-                # Proc-macro status affects why this decision is required and
-                # how review propagates, not the menu or decision semantics.
+                # Every answer completes the manual review. "No material
+                # changes" means no release now, but a later cascade may still
+                # add the package at the patch floor without asking again.
                 [void]$reviewedManualSemver.Add($next.Folder)
             }
 

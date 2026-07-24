@@ -97,7 +97,7 @@ Describe 'Format-PackageMenu' {
 
             $out | Should -Be (Format-PackageMenu -Finding $ordinary -RemainingCount 0)
             $out | Should -Match 'Detected package with unreleased modifications: macros'
-            $out | Should -Match '2\. Keep the currently planned release level'
+            $out | Should -Match '2\. Keep the release level already in the plan'
             $out | Should -Not -Match 'Manual SemVer|cargo-semver-checks|proc-macro'
         }
 
@@ -250,7 +250,7 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
         $lines.Count | Should -Be 5
         $lines[0] | Should -Match '^\s*1\. View diff$'
-        $lines[1] | Should -Match '^\s*2\. No material changes - release only if required by cascade logic$'
+        $lines[1] | Should -Match '^\s*2\. No material changes - release only if another package requires it$'
         # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
         $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
         $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
@@ -1230,6 +1230,80 @@ Describe 'Invoke-PlanReview mandatory proc-macro review precedence' {
         )
         $plan['a_consumer'].ManualSemverReviewCompleted | Should -BeTrue
         $plan['a_consumer'].ManualSemverReviewSources | Should -Be @('z_macros')
+    }
+
+    It 'keeps an out-of-plan no-material decision when cascade later adds the proc macro' {
+        Mock -CommandName Write-Host -MockWith { } -ModuleName $null
+
+        $baseline = @(
+            [pscustomobject]@{
+                Name = 'seed'; Folder = 'seed'; Version = '1.0.0'
+                Published = $true; Deps = @('macros'); IsProcMacroOnly = $false
+            }
+            [pscustomobject]@{
+                Name = 'macros'; Folder = 'macros'; Version = '1.0.0'
+                Published = $true; Deps = @('implementation'); IsProcMacroOnly = $true
+            }
+            [pscustomobject]@{
+                Name = 'implementation'; Folder = 'implementation'; Version = '1.0.0'
+                Published = $true; Deps = @(); IsProcMacroOnly = $false
+            }
+        )
+        Mock -CommandName Get-WorkspacePackages -MockWith { $baseline }
+
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            [pscustomobject]@{
+                Folder = 'macros'; PackageName = 'macros'
+                CurrentVersion = '1.0.0'
+                InReleaseSet = $ResolvedReleaseSet.ContainsKey('macros')
+                ChangedFileCount = 1; DependencyChains = @()
+                WorkspaceDependencyChains = @()
+                RequiresManualSemverReview = $true
+                ManualSemverReviewKind = 'proc-macro'
+                ManualSemverReviewSources = @()
+            }
+            if (-not $ResolvedReleaseSet.ContainsKey('implementation')) {
+                [pscustomobject]@{
+                    Folder = 'implementation'; PackageName = 'implementation'
+                    CurrentVersion = '1.0.0'; InReleaseSet = $false
+                    ChangedFileCount = 1; DependencyChains = @()
+                    WorkspaceDependencyChains = @()
+                    RequiresManualSemverReview = $false
+                }
+            }
+        }
+
+        $script:NoMaterialPromptStates = New-Object 'System.Collections.Generic.List[object]'
+        Mock -CommandName Get-PackageReleaseDecision -MockWith {
+            $script:NoMaterialPromptStates.Add([pscustomobject]@{
+                Folder = $Finding.Folder
+                InReleaseSet = [bool]$Finding.InReleaseSet
+            })
+            switch ($Finding.Folder) {
+                'macros' { return @{ Action = 'ignore' } }
+                'implementation' { return @{ Action = 'patch' } }
+                default { throw "Unexpected review prompt for '$($Finding.Folder)'." }
+            }
+        }
+
+        $initialToken = [pscustomobject]@{
+            Name = 'seed'; RequestedChangeType = 'patch'
+            RequestedTargetVersion = $null; RawToken = 'seed@patch'
+        }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @($initialToken) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType { param($folder, $cargoName) 'none' }
+
+        $script:NoMaterialPromptStates.Count | Should -Be 2
+        $script:NoMaterialPromptStates[0].Folder | Should -Be 'macros'
+        $script:NoMaterialPromptStates[0].InReleaseSet | Should -BeFalse
+        $script:NoMaterialPromptStates[1].Folder | Should -Be 'implementation'
+        $plan['macros'].Source | Should -Be 'cascade'
+        $plan['macros'].EffectiveChangeType | Should -Be 'patch'
+        $plan['macros'].ManualSemverReviewCompleted | Should -BeTrue
     }
 }
 

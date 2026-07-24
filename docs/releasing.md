@@ -274,10 +274,13 @@ change:
 - Every proc-macro-only package in the release set is shown in the
   standard interactive package dialog, even when it was supplied via
   `-Packages` or was cascade-added without changes in its own folder.
-- The dialog uses the same renderer, choices, and decision handling as
-  every other package. Proc-macro detection only bypasses the unsupported
-  automated check and records that the standard decision was made
-  manually.
+- The tool asks the same questions for every package. For a proc macro, it
+  skips the unsupported automated check and records the answer as a manual
+  review.
+- For a proc macro that is not yet in the plan, choosing **No material
+  changes** completes the review. The package is not released unless
+  another package needs it. If that happens later in the same run, the
+  proc macro gets a patch release without another prompt.
 - Use **View diff**, then either keep the currently planned change type
   or select breaking / non-breaking / patch. For a targeted package, a
   new selection replaces the provisional `-Packages` change type. For a
@@ -288,15 +291,13 @@ change:
   re-released at least as `patch`, and its own public API is still
   analysed by `cargo-semver-checks`. A manually chosen proc-macro
   severity is never copied to dependents.
-- When the reviewed proc-macro release is breaking, its direct published
-  consumers receive an additional mandatory manual-review dialog. Their
-  provisional level remains `max(patch, cargo-semver-checks result)`.
-  A final increment that is non-breaking under that package's SemVer
-  rules stops manual propagation there. A breaking increment advances
-  the same review to that package's direct published consumers. This
-  repeats one dependency edge at a time, while all other transitive
-  dependents stay on the normal cascade path. For `0.0.x` packages,
-  every increment is breaking and therefore advances review.
+- If the proc-macro release is breaking, the tool asks the maintainer to
+  review each published crate that directly depends on it.
+- If one of those crates is also breaking, the tool then reviews that
+  crate's direct dependents. Otherwise, the extra review stops there.
+  Each crate keeps its own result; the proc macro's result is never copied
+  to another crate. For `0.0.x` packages, every release is breaking, so
+  the review continues to the next set of direct dependents.
 
 The CI SemVer report follows the same target detection. It skips the
 unsupported invocation, emits a `warn` row saying manual proc-macro
