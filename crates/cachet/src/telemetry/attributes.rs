@@ -99,6 +99,13 @@ pub const EVENT_REFRESH_MISS: &str = "cache.refresh_miss";
 /// Only emitted when eviction telemetry is enabled.
 pub const EVENT_EVICTION: &str = "cache.eviction";
 
+/// A stored value failed authentication and could not be recovered, so it was
+/// treated as a miss.
+///
+/// Only emitted when the `encrypt` feature is enabled. Signals a corrupt,
+/// truncated, wrong-key, tampered, or relocated value.
+pub const EVENT_UNPROTECT_FAILED: &str = "cache.unprotect_failed";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +137,7 @@ mod tests {
             EVENT_REFRESH_HIT,
             EVENT_REFRESH_MISS,
             EVENT_EVICTION,
+            EVENT_UNPROTECT_FAILED,
         ];
 
         for (i, a) in events.iter().enumerate() {

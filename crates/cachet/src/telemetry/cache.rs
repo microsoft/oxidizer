@@ -372,6 +372,31 @@ impl CacheTelemetry {
         );
     }
 
+    /// Records that a stored value failed authentication and could not be
+    /// recovered, so it was treated as a cache miss.
+    ///
+    /// Fires from a `ProtectedTier` on the `get` path, so the thread-local
+    /// request ID is set and correlates the failure with the operation that
+    /// observed it. Signals a corrupt, truncated, wrong-key, tampered, or
+    /// relocated value. The protected tier always sits on the post-transform
+    /// (fallback) side of the hierarchy, so the event is tagged
+    /// `fallback = true` to match the tier's other events.
+    #[cfg(feature = "encrypt")]
+    pub(crate) fn record_unprotect_failure(&self, cache_name: CacheName) {
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            tracing::warn!(cache.name = cache_name, cache.event = attributes::EVENT_UNPROTECT_FAILED);
+        }
+
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_UNPROTECT_FAILED,
+            Duration::ZERO,
+            true,
+        );
+    }
+
     pub(crate) fn complete_operation(
         &self,
         request_id: RequestId,

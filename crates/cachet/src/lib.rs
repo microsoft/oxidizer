@@ -155,6 +155,7 @@
 //! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
 //! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
+//! | `encrypt` | ❌ | Enables `.protect_with(protector)` on serialized builders and the `ValueProtector` trait for authenticated value protection with a caller-supplied implementation. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -224,6 +225,117 @@
 //! # };
 //! ```
 //!
+//! ## Encryption Boundary
+//!
+//! With the `encrypt` feature, chain `.protect_with(protector)` after `.serialize()` to
+//! protect values with a caller-supplied `ValueProtector` before they reach the
+//! fallback tier. The cachet crate ships only the protection *mechanism* — it has **no
+//! cryptographic dependency of its own**, so you plug in a protector backed by whichever
+//! approved cryptographic library your project mandates. The protector receives each
+//! value's storage key as its context and must bind it, which cryptographically binds
+//! every value to its key. (The protect/unprotect contract mirrors OS data-protection
+//! APIs such as the Windows DPAPI `CryptProtectData` function.)
+//!
+//! Only values are protected: keys are left serialized-but-unprotected so they remain
+//! deterministic and can be looked up — so do not place secrets or PII in cache keys.
+//! A stored value that fails to unprotect (corrupt, truncated, wrong key, tampered, or
+//! relocated to a different key) is treated as a cache miss and emits a
+//! `cache.unprotect_failed` telemetry event.
+//!
+//! ```ignore
+//! use cachet::Cache;
+//! use tick::Clock;
+//! # async {
+//!
+//! let clock = Clock::new_tokio();
+//! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+//!
+//! let cache = Cache::builder::<String, String>(clock)
+//!     .memory()
+//!     .serialize()
+//!     .protect_with(my_protector) // any `ValueProtector` implementation
+//!     .fallback(remote)
+//!     .build();
+//!
+//! cache.insert("key".to_string(), "value".to_string()).await?;
+//! # Ok::<(), cachet::Error>(())
+//! # };
+//! ```
+//!
+//! ### Example: a `SymCrypt`-backed AES-256-GCM protector
+//!
+//! [SymCrypt](https://github.com/microsoft/SymCrypt) is a FIPS-certifiable,
+//! SDL-approved cryptographic library. The following `ValueProtector` implementation
+//! wraps it using the [`symcrypt`](https://crates.io/crates/symcrypt) crate; it stores
+//! each value as `nonce || ciphertext || tag` with a fresh random 96-bit nonce and
+//! binds the storage key as associated data. It is shown here as a reference rather
+//! than shipped as a compiled feature, because `SymCrypt` requires the native library
+//! to be present at build and run time. Add `symcrypt` and `getrandom` to your own
+//! crate to use it.
+//!
+//! ```ignore
+//! use bytesbuf::BytesView;
+//! use cachet::{DecodeOutcome, Error, ValueProtector};
+//! use symcrypt::cipher::BlockCipherType;
+//! use symcrypt::gcm::GcmExpandedKey;
+//!
+//! const NONCE_SIZE: usize = 12;
+//! const TAG_SIZE: usize = 16;
+//!
+//! pub struct Aes256GcmProtector {
+//!     key: GcmExpandedKey,
+//! }
+//!
+//! impl Aes256GcmProtector {
+//!     pub fn new(key: &[u8; 32]) -> Self {
+//!         let key = GcmExpandedKey::new(key, BlockCipherType::AesBlock)
+//!             .expect("AES-256-GCM key expansion cannot fail for a valid 32-byte key");
+//!         Self { key }
+//!     }
+//! }
+//!
+//! impl ValueProtector for Aes256GcmProtector {
+//!     fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+//!         let mut nonce = [0u8; NONCE_SIZE];
+//!         getrandom::fill(&mut nonce).map_err(|e| Error::from_message(format!("nonce: {e}")))?;
+//!
+//!         // Assemble `nonce || plaintext || tag`, copying the plaintext in once, then
+//!         // encrypt the ciphertext region in place and write the tag into the tail.
+//!         let plaintext_len = plaintext.len();
+//!         let mut result = vec![0u8; NONCE_SIZE + plaintext_len + TAG_SIZE];
+//!         result[..NONCE_SIZE].copy_from_slice(&nonce);
+//!         let mut offset = NONCE_SIZE;
+//!         for (slice, _) in plaintext.slices() {
+//!             result[offset..offset + slice.len()].copy_from_slice(slice);
+//!             offset += slice.len();
+//!         }
+//!         let (head, tag) = result.split_at_mut(NONCE_SIZE + plaintext_len);
+//!         self.key.encrypt_in_place(&nonce, context, &mut head[NONCE_SIZE..], tag);
+//!         Ok(result.into())
+//!     }
+//!
+//!     fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+//!         let bytes = protected.to_vec();
+//!         if bytes.len() < NONCE_SIZE + TAG_SIZE {
+//!             return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+//!         }
+//!         let (nonce, rest) = bytes.split_at(NONCE_SIZE);
+//!         let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
+//!         let nonce: &[u8; NONCE_SIZE] = nonce.try_into().expect("exactly 12 bytes");
+//!
+//!         let mut buffer = body.to_vec();
+//!         match self.key.decrypt_in_place(nonce, context, &mut buffer, tag) {
+//!             // Any authentication failure is a soft failure: the entry reads as a miss.
+//!             Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
+//!             Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! Because each protect uses a fresh random 96-bit nonce, rotate the key periodically
+//! under extreme write volumes to stay well within the birthday bound.
+//!
 //! # Telemetry
 //!
 //! Cachet provides two complementary telemetry channels:
@@ -285,6 +397,9 @@ pub mod telemetry;
 mod transform;
 mod wrapper;
 
+#[cfg(feature = "encrypt")]
+#[doc(inline)]
+pub use builder::ProtectedTransformBuilder;
 #[doc(inline)]
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
@@ -308,6 +423,12 @@ pub use policy::InsertPolicy;
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
 pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
+#[cfg(all(feature = "encrypt", any(feature = "test-util", test)))]
+#[doc(inline)]
+pub use transform::MockValueProtector;
+#[cfg(feature = "encrypt")]
+#[doc(inline)]
+pub use transform::ValueProtector;
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
 

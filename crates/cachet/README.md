@@ -165,6 +165,7 @@ most commonly used types from all of them.
 |`logs`|❌|Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`][__link18] constants.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
 |`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
+|`encrypt`|❌|Enables `.protect_with(protector)` on serialized builders and the `ValueProtector` trait for authenticated value protection with a caller-supplied implementation.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -226,6 +227,114 @@ let cache = Cache::builder::<String, String>(clock)
 cache.insert("key".to_string(), "value".to_string()).await?;
 ```
 
+### Encryption Boundary
+
+With the `encrypt` feature, chain `.protect_with(protector)` after `.serialize()` to
+protect values with a caller-supplied `ValueProtector` before they reach the
+fallback tier. The cachet crate ships only the protection *mechanism* — it has **no
+cryptographic dependency of its own**, so you plug in a protector backed by whichever
+approved cryptographic library your project mandates. The protector receives each
+value’s storage key as its context and must bind it, which cryptographically binds
+every value to its key. (The protect/unprotect contract mirrors OS data-protection
+APIs such as the Windows DPAPI `CryptProtectData` function.)
+
+Only values are protected: keys are left serialized-but-unprotected so they remain
+deterministic and can be looked up — so do not place secrets or PII in cache keys.
+A stored value that fails to unprotect (corrupt, truncated, wrong key, tampered, or
+relocated to a different key) is treated as a cache miss and emits a
+`cache.unprotect_failed` telemetry event.
+
+```rust
+use cachet::Cache;
+use tick::Clock;
+
+let clock = Clock::new_tokio();
+let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+
+let cache = Cache::builder::<String, String>(clock)
+    .memory()
+    .serialize()
+    .protect_with(my_protector) // any `ValueProtector` implementation
+    .fallback(remote)
+    .build();
+
+cache.insert("key".to_string(), "value".to_string()).await?;
+```
+
+#### Example: a `SymCrypt`-backed AES-256-GCM protector
+
+[SymCrypt][__link20] is a FIPS-certifiable,
+SDL-approved cryptographic library. The following `ValueProtector` implementation
+wraps it using the [`symcrypt`][__link21] crate; it stores
+each value as `nonce || ciphertext || tag` with a fresh random 96-bit nonce and
+binds the storage key as associated data. It is shown here as a reference rather
+than shipped as a compiled feature, because `SymCrypt` requires the native library
+to be present at build and run time. Add `symcrypt` and `getrandom` to your own
+crate to use it.
+
+```rust
+use bytesbuf::BytesView;
+use cachet::{DecodeOutcome, Error, ValueProtector};
+use symcrypt::cipher::BlockCipherType;
+use symcrypt::gcm::GcmExpandedKey;
+
+const NONCE_SIZE: usize = 12;
+const TAG_SIZE: usize = 16;
+
+pub struct Aes256GcmProtector {
+    key: GcmExpandedKey,
+}
+
+impl Aes256GcmProtector {
+    pub fn new(key: &[u8; 32]) -> Self {
+        let key = GcmExpandedKey::new(key, BlockCipherType::AesBlock)
+            .expect("AES-256-GCM key expansion cannot fail for a valid 32-byte key");
+        Self { key }
+    }
+}
+
+impl ValueProtector for Aes256GcmProtector {
+    fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+        let mut nonce = [0u8; NONCE_SIZE];
+        getrandom::fill(&mut nonce).map_err(|e| Error::from_message(format!("nonce: {e}")))?;
+
+        // Assemble `nonce || plaintext || tag`, copying the plaintext in once, then
+        // encrypt the ciphertext region in place and write the tag into the tail.
+        let plaintext_len = plaintext.len();
+        let mut result = vec![0u8; NONCE_SIZE + plaintext_len + TAG_SIZE];
+        result[..NONCE_SIZE].copy_from_slice(&nonce);
+        let mut offset = NONCE_SIZE;
+        for (slice, _) in plaintext.slices() {
+            result[offset..offset + slice.len()].copy_from_slice(slice);
+            offset += slice.len();
+        }
+        let (head, tag) = result.split_at_mut(NONCE_SIZE + plaintext_len);
+        self.key.encrypt_in_place(&nonce, context, &mut head[NONCE_SIZE..], tag);
+        Ok(result.into())
+    }
+
+    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+        let bytes = protected.to_vec();
+        if bytes.len() < NONCE_SIZE + TAG_SIZE {
+            return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+        }
+        let (nonce, rest) = bytes.split_at(NONCE_SIZE);
+        let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
+        let nonce: &[u8; NONCE_SIZE] = nonce.try_into().expect("exactly 12 bytes");
+
+        let mut buffer = body.to_vec();
+        match self.key.decrypt_in_place(nonce, context, &mut buffer, tag) {
+            // Any authentication failure is a soft failure: the entry reads as a miss.
+            Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
+            Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+        }
+    }
+}
+```
+
+Because each protect uses a fresh random 96-bit nonce, rotate the key periodically
+under extreme write volumes to stay well within the birthday bound.
+
 ## Telemetry
 
 Cachet provides two complementary telemetry channels:
@@ -233,13 +342,13 @@ Cachet provides two complementary telemetry channels:
 ### Tracing events
 
 Enable with the `logs` feature and `.enable_logs()` on the cache builder.
-Each tier outcome and operation completion emits a structured [`tracing`][__link20] event.
+Each tier outcome and operation completion emits a structured [`tracing`][__link22] event.
 
 **Tier events** carry `cache.name`, `cache.event`, and `cache.duration_ns`.
 **Operation-complete events** carry `cache.name`, `cache.operation`,
 `cache.duration_ns`, and `cache.coalesced`.
 
-Use [`telemetry::attributes`][__link21] constants to filter and match events in a
+Use [`telemetry::attributes`][__link23] constants to filter and match events in a
 custom `tracing_subscriber::Layer`:
 
 ```rust
@@ -265,10 +374,10 @@ See the `telemetry_subscriber` example for a complete demonstration.
 
 ### Event handler callback API
 
-Register a [`CacheEventHandler`][__link22] via
+Register a [`CacheEventHandler`][__link24] via
 `.event_handler(handler)` on the cache builder to receive typed
-[`CacheTierEvent`][__link23] and
-[`CacheOperationEvent`][__link24] callbacks.
+[`CacheTierEvent`][__link25] and
+[`CacheOperationEvent`][__link26] callbacks.
 Events carry a `request_id` for correlating tier outcomes with their parent
 operation. Works independently of the `logs` feature.
 
@@ -280,7 +389,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbuPGLEPMCj2MbgA5ER0E3BJMbfCIg-AE0UIgbL0L1ZOiGk45hZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.9.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier
@@ -294,11 +403,13 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link18]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::attributes
  [__link19]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
  [__link2]: https://docs.rs/cachet/0.9.0/cachet/?search=CacheBuilder::stampede_protection
- [__link20]: https://crates.io/crates/tracing/0.1.44
- [__link21]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::attributes
- [__link22]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheEventHandler
- [__link23]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheTierEvent
- [__link24]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheOperationEvent
+ [__link20]: https://github.com/microsoft/SymCrypt
+ [__link21]: https://crates.io/crates/symcrypt
+ [__link22]: https://crates.io/crates/tracing/0.1.44
+ [__link23]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::attributes
+ [__link24]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheEventHandler
+ [__link25]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheTierEvent
+ [__link26]: https://docs.rs/cachet/0.9.0/cachet/?search=telemetry::handler::CacheOperationEvent
  [__link3]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=DynamicCache
  [__link5]: https://docs.rs/cachet/0.9.0/cachet/?search=InsertPolicy
