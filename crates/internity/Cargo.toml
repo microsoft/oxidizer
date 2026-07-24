@@ -1,0 +1,89 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "internity"
+version = "0.1.0"
+description = "Blazingly fast string interning with compact handles, compact storage, and concurrent fill support"
+readme = "README.md"
+keywords = ["intern", "interner", "string", "symbol", "concurrent"]
+categories = ["data-structures", "concurrency", "no-std"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/internity"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "rustc_hash::FxBuildHasher",
+    "serde_core::de::Deserialize",
+    "serde_core::ser::Serialize",
+]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["std"]
+std = ["dep:parking_lot"]
+serde = ["dep:serde"]
+# Marker feature selecting the Loom model-checking test target. The model itself
+# is compiled under `--cfg loom` by the workspace's `just loom` recipe.
+loom = []
+
+[dependencies]
+hashbrown = { workspace = true, features = ["default-hasher", "inline-more"] }
+parking_lot = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["alloc"], optional = true }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+foldhash = { workspace = true }
+lasso = { workspace = true, features = ["multi-threaded"] }
+mutants = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+string-interner = { workspace = true, features = ["backends", "inline-more", "std"] }
+string_cache = { workspace = true }
+symbol_table = { workspace = true, features = ["global"] }
+ustr = { workspace = true }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[[bench]]
+name = "compare"
+harness = false
+
+[[bench]]
+name = "counts"
+harness = false
+
+[[bench]]
+name = "mem"
+harness = false
+
+[[test]]
+name = "loom_internity"
+path = "tests/loom_internity.rs"
+required-features = ["loom"]
+
+[[test]]
+name = "basic"
+required-features = ["std"]
+
+[[test]]
+name = "bolero_internity"
+required-features = ["std"]
+
+[lints]
+workspace = true

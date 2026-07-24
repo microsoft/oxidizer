@@ -122,8 +122,10 @@ hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
+internity = { path = "crates/internity", default-features = false, version = "0.1.0" }
 itoa = { version = "1.0.17", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
+lasso = { version = "0.7.3", default-features = false }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 libc = { version = "0.2.178", default-features = false }
 loom = { version = "0.7.2", default-features = false }
@@ -196,6 +198,9 @@ slotmap = { version = "1.1.1", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
+string-interner = { version = "0.20.0", default-features = false }
+string_cache = { version = "0.10.0", default-features = false }
+symbol_table = { version = "0.5.0", default-features = false }
 syn = { version = "2.0.111", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.4" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.6" }
@@ -223,6 +228,7 @@ trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 unicode-ident = { version = "1.0.22", default-features = false }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
+ustr = { version = "1.1.0", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }

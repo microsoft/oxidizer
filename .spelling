@@ -48,6 +48,7 @@ C-SERDE
 C-SMART-PTR
 CAS
 CLI
+CSR
 CONTRIBUTING.md
 CPUs
 CSE
@@ -76,6 +77,7 @@ FFI
 FFI-compatible
 Fundle
 Fundle's
+Fx
 HRESULT
 Hardcoded
 How-tos
@@ -226,6 +228,7 @@ backtraces
 bincode
 bitflag
 bitwise
+blazingly
 bool
 boolean
 branch_name
@@ -282,9 +285,12 @@ deallocating
 deallocation
 deallocator
 dec
+decorrelate
 decrement
 decrementer
 decrementers
+dedup
+deduplicated
 deduplicating
 deduplication
 deps
@@ -370,6 +376,8 @@ insta
 instantiation
 integrations
 interleavings
+interner
+interners
 interop
 interoperability
 interoperable
@@ -511,6 +519,7 @@ serde
 serde's
 serializable
 setsockopt
+sharded
 sharable
 shareable
 skimmable
@@ -587,6 +596,7 @@ unresolvable
 unrounded
 unsized
 untrusted
+upgradable
 unyielded
 v4
 v6

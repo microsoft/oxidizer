@@ -56,7 +56,7 @@ anvil-bolero: anvil-bolero-validate-prereqs
     }
     # `cargo bolero list` emits one JSON object per target on stdout;
     # we want the set of (package, test) pairs over the affected set.
-    $targetsJson = & cargo bolero list @bareArgs 2>$null
+    $targetsJson = & cargo '+{{ rust_nightly }}' bolero list @bareArgs 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'anvil-bolero: bolero list failed; assuming no targets'
         exit 0
@@ -68,8 +68,10 @@ anvil-bolero: anvil-bolero-validate-prereqs
     }
     $failed = $false
     foreach ($t in $targets) {
-        Write-Host "anvil-bolero: $($t.package_name)::$($t.test_name)"
-        & cargo '+{{ rust_nightly }}' bolero test --release --engine libfuzzer -T 60s --package $t.package_name $t.test_name
+        $packageName = if ($t.package) { $t.package } else { $t.package_name }
+        $testName = if ($t.test) { $t.test } elseif ($t.test_name) { $t.test_name } else { $t.target }
+        Write-Host "anvil-bolero: ${packageName}::${testName}"
+        & cargo '+{{ rust_nightly }}' bolero test --engine libfuzzer -T 60s --package $packageName $testName
         if ($LASTEXITCODE -ne 0) { $failed = $true }
     }
     if ($failed) { exit 1 }
