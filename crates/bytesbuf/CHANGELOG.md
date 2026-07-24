@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0] - 2026-07-24
+
+- ⚠️ Breaking
+
+  - replace generic num_traits numeric API with concrete-typed methods ([#591](https://github.com/microsoft/oxidizer/pull/591))
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+  - support type erasure of pooled handles to unsized types ([#585](https://github.com/microsoft/oxidizer/pull/585))
+
+- 🐛 Bug Fixes
+
+  - scale Linux sysinfo memory by mem_unit ([#594](https://github.com/microsoft/oxidizer/pull/594))
+  - make BytesView hash independent of span segmentation ([#590](https://github.com/microsoft/oxidizer/pull/590))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.6.0] - 2026-07-07
 
 - ⚠️ Breaking

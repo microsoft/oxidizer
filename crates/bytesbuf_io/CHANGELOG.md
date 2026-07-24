@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.3.9` of `ohno`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+  - support type erasure of pooled handles to unsized types ([#585](https://github.com/microsoft/oxidizer/pull/585))
+
+- 🐛 Bug Fixes
+
+  - make ReadAsFuturesStream Send ([#592](https://github.com/microsoft/oxidizer/pull/592))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.6.0] - 2026-07-07
 
 - ⚠️ Breaking

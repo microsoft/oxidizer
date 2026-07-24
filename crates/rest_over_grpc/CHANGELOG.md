@@ -1,11 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.1.1] - 2026-07-24
 
 ### Added
 
@@ -27,3 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (feature `layered`).
 - Runnable examples covering Tower, Axum, direct transcoding, streaming,
   OpenAPI generation, custom handlers, and gRPC-stack bridges.
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `layered`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+

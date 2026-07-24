@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.5.1` of `cachet_memory`
+  - Now requires `0.2.9` of `cachet_service`
+  - Now requires `0.2.7` of `cachet_tier`
+  - Now requires `0.3.6` of `layered`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
 ## [0.9.0] - 2026-07-15
 
 - 🔧 Maintenance
