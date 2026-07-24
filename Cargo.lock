@@ -1345,7 +1345,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch"
-version = "0.14.1"
+version = "0.14.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.5.1"
+version = "0.5.0"
 dependencies = [
  "anyspawn",
  "bytes",

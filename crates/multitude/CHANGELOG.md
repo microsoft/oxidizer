@@ -2,19 +2,13 @@
 
 ## [0.7.0] - 2026-07-24
 
-- ✨ Features
-
-  - release bytesbuf v0.7.0 and 23 additional packages
-  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
-
-## [0.6.3] - 2026-07-24
-
 - 🔧 Maintenance
 
   - Now requires `0.7.0` of `bytesbuf`
 
 - ✨ Features
 
+  - release bytesbuf v0.7.0 and 23 additional packages
   - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
 
 ## [0.6.1] - 2026-07-07
