@@ -29,6 +29,7 @@ Please see each crate's change log below:
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
 - [`plurality`](./crates/plurality/CHANGELOG.md)
 - [`recoverable`](./crates/recoverable/CHANGELOG.md)
+- [`rest_over_grpc`](./crates/rest_over_grpc/CHANGELOG.md)
 - [`routerama`](./crates/routerama/CHANGELOG.md)
 - [`routerama_build`](./crates/routerama_build/CHANGELOG.md)
 - [`routerama_macros`](./crates/routerama_macros/CHANGELOG.md)

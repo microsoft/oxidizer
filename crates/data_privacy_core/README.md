@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.png" alt="Data Privacy Core Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Data Privacy Core Logo" width="96">
 
 # Data Privacy Core
 
@@ -8,8 +8,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/data_privacy_core)](https://crates.io/crates/data_privacy_core)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
@@ -37,10 +37,10 @@ and always use `data_privacy`.**
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_core">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4y
  [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass
  [__link1]: https://docs.rs/data_privacy
  [__link2]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass
