@@ -4,7 +4,7 @@
 [package]
 name = "fetch"
 description = "HTTP client with resilience, observability, and Tokio runtime support."
-version = "0.13.0"
+version = "0.14.0"
 readme = "README.md"
 keywords = ["http", "client", "async", "resilience", "observability"]
 categories = ["network-programming"]

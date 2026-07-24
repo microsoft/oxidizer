@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.0] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.3.6` of `layered`
+  - Now requires `0.3.9` of `ohno`
+  - Now requires `0.3.5` of `templated_uri`
+
+- ✨ Features
+
+  - release bytesbuf v0.7.0 and 23 additional packages
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- ⚡ Performance
+
+  - reuse the rendered path across build and routing ([#559](https://github.com/microsoft/oxidizer/pull/559))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
+- 🔄 Continuous Integration
+
+  - add cargo-machete for workspace-wide unused-dependency detection ([#578](https://github.com/microsoft/oxidizer/pull/578))
+
 ## [0.7.0] - 2026-07-07
 
 - ⚠️ Breaking

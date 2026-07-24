@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.0` of `http_extensions`
+  - Now requires `0.6.1` of `seatbelt`
+  - Now requires `0.3.5` of `templated_uri`
+
+- ✨ Features
+
+  - release bytesbuf v0.7.0 and 23 additional packages
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.5.0] - 2026-07-07
 
 - ⚠️ Breaking

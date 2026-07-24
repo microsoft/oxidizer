@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0] - 2026-07-24
+
+- ⚠️ Breaking
+
+  - `fetch_hyper` 0.4.6 unintentionally broke compatibility while staying on the 0.4.x line by adopting incompatible major versions of `http_extensions`, `anyspawn`, and `tick`. Consumers combining it with `fetch` 0.11.2 (with `tokio` and `native-tls`) can encounter duplicate-version type and trait errors; 0.5.0 makes that break explicit as a major-line bump.
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.2.6` of `fetch_tls`
+  - Now requires `0.8.0` of `http_extensions`
+  - Now requires `0.3.6` of `layered`
+  - Now requires `0.3.9` of `ohno`
+  - Now requires `0.6.1` of `seatbelt`
+  - Now requires `0.3.5` of `templated_uri`
+
+- ✨ Features
+
+  - release bytesbuf v0.7.0 and 23 additional packages
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.4.6] - 2026-07-07
 
 - 🔧 Maintenance

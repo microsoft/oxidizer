@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.14.0` of `fetch`
+  - Now requires `0.3.6` of `layered`
+
+- ✨ Features
+
+  - release bytesbuf v0.7.0 and 23 additional packages
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 📚 Documentation
+
+  - fix changelog missing release dates and garbled ellipsis ([#576](https://github.com/microsoft/oxidizer/pull/576))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.3.0] - 2026-07-07
 
 - ⚠️ Breaking
