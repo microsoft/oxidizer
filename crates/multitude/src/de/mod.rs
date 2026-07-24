@@ -159,6 +159,12 @@
 //! On an error it remains valid, but may contain the successfully decoded
 //! prefix rather than its previous value.
 //!
+//! [`Arena::deserialize_json_each`] streams a top-level JSON array through a
+//! callback without constructing a root collection. Values arrive in input
+//! order and are passed by ownership, so the callback can retain selected
+//! arena-owned fields. A parse or limit error may occur after a prefix has
+//! already been delivered.
+//!
 //! [`DeserializationLimits`] bounds nesting, sequence and map lengths, strings,
 //! and byte strings. Use [`Arena::deserialize_with_limits`],
 //! [`Arena::deserialize_alloc_with_limits`],
@@ -167,7 +173,10 @@
 //! hints before visitors reserve storage.
 //!
 //! Serde requires seeds to return the format's error type, so allocation and
-//! limit failures are reported through [`serde::de::Error::custom`]. Failed
+//! limit failures from format-independent APIs are reported through
+//! [`serde::de::Error::custom`]. Resource-limited JSON helpers instead return
+//! [`JsonError`], whose [`JsonError::limit_exceeded`] method distinguishes
+//! resource rejection from malformed or incompatible JSON. Failed
 //! deserialization may consume arena capacity. General rollback would be
 //! unsound because a custom implementation can let escape-capable smart
 //! pointers outlive the failed operation.
@@ -177,10 +186,11 @@
 //! The base `serde` feature is format-independent and supports `no_std` with
 //! `alloc`. The `serde_json` feature implies `serde` and adds
 //! [`Arena::deserialize_json`], [`Arena::deserialize_json_alloc`], and their
-//! resource-limited variants for strings and byte inputs. Those helpers require
-//! one complete JSON value and reject trailing non-whitespace input. JSON may
-//! use temporary parser scratch space while decoding escaped strings even
-//! though the final arena-aware value is stored in the arena.
+//! resource-limited variants, plus [`Arena::deserialize_json_each`] and
+//! [`Arena::deserialize_json_each_with_limits`] for top-level arrays. Those
+//! helpers require one complete JSON value and reject trailing non-whitespace
+//! input. JSON may use temporary parser scratch space while decoding escaped
+//! strings even though the final arena-aware value is stored in the arena.
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -197,6 +207,9 @@ mod deserialize_in_seed;
 mod deserialize_seed;
 #[cfg(feature = "serde_json")]
 mod json;
+#[cfg(feature = "serde_json")]
+mod json_error;
+mod limit_exceeded;
 mod limits;
 mod reuse;
 mod slice_visitor;
@@ -221,6 +234,9 @@ pub use deserialize_in::DeserializeIn;
 pub use deserialize_in_seed::DeserializeInSeed;
 #[doc(hidden)]
 pub use deserialize_seed::DeserializeSeed;
+#[cfg(feature = "serde_json")]
+pub use json_error::JsonError;
+pub use limit_exceeded::{DeserializationResource, LimitExceeded};
 pub use limits::DeserializationLimits;
 use limits::deserialize_seed_with_limits;
 use slice_visitor::SliceVisitor;
@@ -381,6 +397,9 @@ deserialize_via_serde!(
     f64
 );
 
+#[cfg(feature = "serde_json")]
+deserialize_via_serde!(&'de serde_json::value::RawValue);
+
 impl<'de, T, A> DeserializeIn<'de, A> for Option<T>
 where
     T: DeserializeIn<'de, A>,
@@ -437,7 +456,7 @@ impl<'de, A: Allocator + Clone> DeserializeIn<'de, A> for Box<str, A> {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_str(StrVisitor::new(arena, |arena: &Arena<A>, value: &str| {
-            arena.try_alloc_str_box(value)
+            arena.try_alloc_str_box_ref(value)
         }))
     }
 }
