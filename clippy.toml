@@ -26,6 +26,7 @@ semicolon-outside-block-ignore-multiline = true
 # failure. Without these, every test triggers the lint.
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
+doc-valid-idents = ["OpenAPI", ".."]
 
 # Aspirational: when clippy.wildcard_imports is re-enabled (currently
 # allowed in cargo-lints-body.toml due to upstream bug rust-clippy#15036),

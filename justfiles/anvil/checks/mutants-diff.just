@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier. cargo-mutants does its own diff-scoping via --in-diff;
 # the affected-tier guard is the wiring-layer's coarse filter (if no
@@ -12,6 +15,8 @@
 # would fail. The merged pr-slow group runs on all four OS legs; mutants
 # is the only sub-recipe that can't follow, so it bails out early on the
 # affected leg. Coverage on the other three legs is unchanged.
+
+# Run mutation testing for changes relative to the base branch.
 [script("pwsh")]
 anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -42,8 +47,10 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
 
 # --- pr-mutants members ---
 
+# Install prerequisites for the `anvil-mutants-diff` recipe.
 [group("anvil-setup")]
 anvil-mutants-diff-setup installer="install": (anvil-tool-cargo-mutants-install installer)
 
+# Validate prerequisites for the `anvil-mutants-diff` recipe.
 [group("anvil-setup")]
 anvil-mutants-diff-validate-prereqs: anvil-tool-cargo-mutants-validate-prereqs

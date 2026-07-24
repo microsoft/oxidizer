@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier (lints public API of changed crates and rev-deps).
 #
@@ -15,6 +18,8 @@
 # build a name->manifest map from cargo metadata, filter to lib crates,
 # intersect with ANVIL_INCLUDE_AFFECTED, and call the tool once per
 # crate. Hard-fails on errors (no tolerance, unlike semver-check).
+
+# Check public APIs for unapproved external types.
 [script("pwsh")]
 anvil-external-types: anvil-external-types-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -66,8 +71,10 @@ anvil-external-types: anvil-external-types-validate-prereqs
     }
     if ($failed) { exit 1 }
 
+# Install prerequisites for the `anvil-external-types` recipe.
 [group("anvil-setup")]
 anvil-external-types-setup installer="install": anvil-toolchain-nightly-external-types-install (anvil-tool-cargo-check-external-types-install installer)
 
+# Validate prerequisites for the `anvil-external-types` recipe.
 [group("anvil-setup")]
 anvil-external-types-validate-prereqs: anvil-toolchain-nightly-external-types-validate-prereqs anvil-tool-cargo-check-external-types-validate-prereqs

@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier. Runs on the pinned nightly toolchain: cargo-llvm-cov
 # only sets the `cfg(coverage_nightly)` that gates the workspace's
@@ -10,6 +13,8 @@
 # untestable code (process-shelling error paths, script-only crates,
 # etc.) wrongly counts against coverage. This matches the repo's own
 # `coverage-measure` recipe, which also runs on nightly.
+
+# Measure test coverage and enforce the coverage gate.
 [script("pwsh")]
 anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -148,8 +153,10 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
 
 # --- pr-test members (shared with scheduled-test) ---
 
+# Install prerequisites for the `anvil-llvm-cov` recipe.
 [group("anvil-setup")]
 anvil-llvm-cov-setup installer="install": anvil-component-nightly-llvm-tools-install (anvil-tool-cargo-llvm-cov-install installer) (anvil-tool-cargo-nextest-install installer) (anvil-tool-cargo-coverage-gate-install installer)
 
+# Validate prerequisites for the `anvil-llvm-cov` recipe.
 [group("anvil-setup")]
 anvil-llvm-cov-validate-prereqs: anvil-component-nightly-llvm-tools-validate-prereqs anvil-tool-cargo-llvm-cov-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs anvil-tool-cargo-coverage-gate-validate-prereqs

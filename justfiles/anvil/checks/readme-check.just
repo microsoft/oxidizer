@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Modified tier.
 #
@@ -25,6 +28,8 @@
 # rather than --manifest-path-driven), and per-crate template-path
 # resolution. The ANVIL_INCLUDE_MODIFIED value would still need to
 # be intersected with the lib-crate set rather than splatted into cargo.
+
+# Check that crate README files are up to date.
 [script("pwsh")]
 anvil-readme-check: anvil-readme-check-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -104,8 +109,10 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
     }
     if ($hadFailure) { exit 1 }
 
+# Install prerequisites for the `anvil-readme-check` recipe.
 [group("anvil-setup")]
 anvil-readme-check-setup installer="install": (anvil-tool-cargo-doc2readme-install installer)
 
+# Validate prerequisites for the `anvil-readme-check` recipe.
 [group("anvil-setup")]
 anvil-readme-check-validate-prereqs: anvil-tool-cargo-doc2readme-validate-prereqs
