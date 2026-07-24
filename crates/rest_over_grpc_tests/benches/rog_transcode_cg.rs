@@ -45,7 +45,6 @@ mod linux {
         Transcoder::new(InMemoryLibrary)
     }
 
-    // Path-variable binding, no request body.
     #[library_benchmark]
     #[bench::get_path_var(transcoder())]
     fn transcode_get_path_var(transcoder: Transcoder<InMemoryLibrary>) -> TranscodeResponse {
@@ -57,7 +56,6 @@ mod linux {
         ))
     }
 
-    // Request-body field decode (`body: "shelf"`).
     #[library_benchmark]
     #[bench::post_body(transcoder())]
     fn transcode_post_body(transcoder: Transcoder<InMemoryLibrary>) -> TranscodeResponse {
@@ -69,7 +67,6 @@ mod linux {
         ))
     }
 
-    // Query-parameter binding.
     #[library_benchmark]
     #[bench::get_query(transcoder())]
     fn transcode_get_query(transcoder: Transcoder<InMemoryLibrary>) -> TranscodeResponse {
@@ -81,8 +78,7 @@ mod linux {
         ))
     }
 
-    // Server-streaming RPC, driven to completion by collecting every encoded frame
-    // (so the count reflects the full streaming encode, not just stream setup).
+    // Consume every frame so the benchmark measures the complete stream.
     #[library_benchmark]
     #[bench::streaming(transcoder())]
     fn transcode_streaming(transcoder: Transcoder<InMemoryLibrary>) -> Vec<u8> {
@@ -105,7 +101,6 @@ mod linux {
         })
     }
 
-    // A routing miss (resolve returns `None`, mapped to a 404).
     #[library_benchmark]
     #[bench::miss(transcoder())]
     fn transcode_miss(transcoder: Transcoder<InMemoryLibrary>) -> TranscodeResponse {

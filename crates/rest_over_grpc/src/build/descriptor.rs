@@ -37,7 +37,7 @@ use super::descriptor_options::DescriptorOptions;
 use super::http_rule::HttpRule;
 use super::request_body::RequestBody;
 use super::response_body::ResponseBody;
-use super::service_definition::{ServiceDefinition, to_snake_case};
+use super::service_definition::{ServiceDefinition, prost_snake_identifier, prost_type_identifier};
 
 /// Decodes every annotated service in `descriptor_set` into a
 /// [`ServiceDefinition`], its `module` set to the service's proto package (or
@@ -53,8 +53,8 @@ use super::service_definition::{ServiceDefinition, to_snake_case};
 /// Returns a [`DescriptorError`] if the descriptor bytes cannot be decoded, a
 /// method's annotation is malformed, an annotated method is client-streaming or
 /// bidirectional (which cannot be transcoded), a path template fails to parse,
-/// or a `body` / `response_body` names a field the request / response message
-/// does not have.
+/// a path variable does not target a supported request field, or a `body` /
+/// `response_body` names a field the request / response message does not have.
 pub(crate) fn definitions_from_descriptor(
     descriptor_set: &[u8],
     options: &DescriptorOptions,
@@ -83,6 +83,7 @@ pub(crate) fn definitions_from_descriptor(
             let Some(mut rule) = read_http_rule(method.name(), &method.options(), http_ext.as_ref(), &input, &output)? else {
                 continue;
             };
+            validate_path_fields(method.name(), &rule, &input)?;
 
             // Server-streaming is transcoded to a streamed JSON body; client-
             // streaming and bidirectional RPCs have no REST mapping.
@@ -231,10 +232,11 @@ fn read_rule(
     let mut request_body = read_body(message);
     let mut response_body = read_response_body(message);
     canonicalize_body_field(rpc, &mut request_body, input)?;
-    canonicalize_response_body_field(rpc, &mut response_body, output)?;
+    let response_body_default = canonicalize_response_body_field(rpc, &mut response_body, output)?;
     Ok(HttpRule::new(rpc, method, template)
         .request_body(request_body)
-        .response_body(response_body))
+        .response_body(response_body)
+        .with_response_body_default(response_body_default))
 }
 
 fn read_binding(
@@ -243,15 +245,27 @@ fn read_binding(
     input: &MessageDescriptor,
     output: &MessageDescriptor,
 ) -> Result<Binding, DescriptorError> {
+    if message
+        .get_field_by_name("additional_bindings")
+        .as_deref()
+        .and_then(Value::as_list)
+        .is_some_and(|list| !list.is_empty())
+    {
+        return Err(DescriptorError::malformed(
+            rpc,
+            "additional_bindings may not be nested inside another additional binding",
+        ));
+    }
     let (method, pattern) = read_pattern(rpc, message)?;
     let template = parse_template(rpc, &pattern)?;
     let mut request_body = read_body(message);
     let mut response_body = read_response_body(message);
     canonicalize_body_field(rpc, &mut request_body, input)?;
-    canonicalize_response_body_field(rpc, &mut response_body, output)?;
+    let response_body_default = canonicalize_response_body_field(rpc, &mut response_body, output)?;
     Ok(Binding::new(method, template)
         .request_body(request_body)
-        .response_body(response_body))
+        .response_body(response_body)
+        .with_response_body_default(response_body_default))
 }
 
 /// Verifies that a `body: "field"` names an actual field of the request
@@ -265,13 +279,51 @@ fn canonicalize_body_field(rpc: &str, body: &mut RequestBody, message: &MessageD
 }
 
 /// Verifies that a `response_body: "field"` names an actual field of the
-/// response `message`. An empty/absent `response_body` (the whole message)
-/// needs no field.
-fn canonicalize_response_body_field(rpc: &str, body: &mut ResponseBody, message: &MessageDescriptor) -> Result<(), DescriptorError> {
-    if let ResponseBody::Field(field) = body {
-        require_field(rpc, field, message, "response_body")?.json_name().clone_into(field);
+/// response `message`, rewrites it to its canonical JSON name, and returns the
+/// proto3-JSON literal to emit when that field holds its default value. An
+/// empty/absent `response_body` (the whole message) needs no field and returns
+/// `None`.
+fn canonicalize_response_body_field(
+    rpc: &str,
+    body: &mut ResponseBody,
+    message: &MessageDescriptor,
+) -> Result<Option<String>, DescriptorError> {
+    let ResponseBody::Field(field) = body else {
+        return Ok(None);
+    };
+    let descriptor = require_field(rpc, field, message, "response_body")?;
+    descriptor.json_name().clone_into(field);
+    Ok(Some(response_body_default_json(&descriptor)))
+}
+
+/// The proto3-JSON literal a `response_body` field serializes to when it holds
+/// its default value.
+///
+/// pbjson omits default-valued fields when serializing, so a selected field at
+/// its default would otherwise appear absent from the response. Emitting this
+/// literal instead matches the value a proto3-JSON gateway returns.
+fn response_body_default_json(field: &FieldDescriptor) -> String {
+    if field.is_list() {
+        return "[]".to_owned();
     }
-    Ok(())
+    if field.is_map() {
+        return "{}".to_owned();
+    }
+    // Message fields and `optional`/proto2 scalars carry explicit presence: an
+    // unset value is represented as JSON `null`.
+    if field.supports_presence() {
+        return "null".to_owned();
+    }
+    match field.kind() {
+        Kind::Bool => "false".to_owned(),
+        Kind::String | Kind::Bytes => "\"\"".to_owned(),
+        // 64-bit integers are proto3-JSON strings; every other numeric is a bare number.
+        Kind::Int64 | Kind::Uint64 | Kind::Sint64 | Kind::Fixed64 | Kind::Sfixed64 => "\"0\"".to_owned(),
+        Kind::Double | Kind::Float | Kind::Int32 | Kind::Uint32 | Kind::Sint32 | Kind::Fixed32 | Kind::Sfixed32 => "0".to_owned(),
+        Kind::Enum(descriptor) => format!("\"{}\"", descriptor.default_value().name()),
+        // A message without presence cannot occur (message fields always carry it).
+        Kind::Message(_) => "null".to_owned(),
+    }
 }
 
 /// Returns an [`DescriptorError`] unless `message` has a field named `field`
@@ -282,6 +334,55 @@ fn require_field(rpc: &str, field: &str, message: &MessageDescriptor, kind: &str
         .get_field_by_name(field)
         .or_else(|| message.get_field_by_json_name(field))
         .ok_or_else(|| DescriptorError::unknown_field(rpc, kind, field, message.full_name()))
+}
+
+fn validate_path_fields(rpc: &str, rule: &HttpRule, request: &MessageDescriptor) -> Result<(), DescriptorError> {
+    for path in rule.path_variable_field_paths() {
+        validate_path_field(rpc, &path, request)?;
+    }
+    Ok(())
+}
+
+fn validate_path_field(rpc: &str, path: &[String], request: &MessageDescriptor) -> Result<(), DescriptorError> {
+    let field_path = path.join(".");
+    let mut message = request.clone();
+    for (index, segment) in path.iter().enumerate() {
+        let field = message
+            .get_field_by_name(segment)
+            .ok_or_else(|| DescriptorError::unknown_field(rpc, "path variable", &field_path, message.full_name()))?;
+        let leaf = index + 1 == path.len();
+
+        if field.is_list() || field.is_map() {
+            return Err(DescriptorError::malformed(
+                rpc,
+                &format!("path variable `{field_path}` targets repeated or map field `{segment}`"),
+            ));
+        }
+        if field.containing_oneof().is_some_and(|oneof| !oneof.is_synthetic()) {
+            return Err(DescriptorError::malformed(
+                rpc,
+                &format!("path variable `{field_path}` targets oneof field `{segment}`"),
+            ));
+        }
+
+        match (leaf, field.kind()) {
+            (false, Kind::Message(nested)) => message = nested,
+            (false, _) => {
+                return Err(DescriptorError::malformed(
+                    rpc,
+                    &format!("path variable `{field_path}` descends through non-message field `{segment}`"),
+                ));
+            }
+            (true, Kind::Message(_)) => {
+                return Err(DescriptorError::malformed(
+                    rpc,
+                    &format!("path variable `{field_path}` must end at a primitive or enum field"),
+                ));
+            }
+            (true, _) => {}
+        }
+    }
+    Ok(())
 }
 
 fn parse_template<'a>(rpc: &str, pattern: &'a str) -> Result<PathTemplate<'a>, DescriptorError> {
@@ -412,10 +513,10 @@ fn relative_type_path(full_name: &str, package: &str, extern_paths: &[(String, S
     let rest = &type_segs[shared..];
     for (idx, seg) in rest.iter().enumerate() {
         if idx + 1 < rest.len() {
-            out.push_str(&to_snake_case(seg));
+            out.push_str(&prost_snake_identifier(seg));
             out.push_str("::");
         } else {
-            out.push_str(seg);
+            out.push_str(&prost_type_identifier(seg));
         }
     }
     out
@@ -449,9 +550,9 @@ fn resolve_extern(full_name: &str, extern_paths: &[(String, String)]) -> Option<
     for (idx, seg) in rest.iter().enumerate() {
         out.push_str("::");
         if idx + 1 < rest.len() {
-            out.push_str(&to_snake_case(seg));
+            out.push_str(&prost_snake_identifier(seg));
         } else {
-            out.push_str(seg);
+            out.push_str(&prost_type_identifier(seg));
         }
     }
     Some(out)
@@ -708,6 +809,37 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
+    fn nested_additional_bindings_are_rejected() {
+        let descriptor = compile_descriptor(
+            "nested_additional_bindings",
+            r#"
+                syntax = "proto3";
+                package nestedbind;
+                import "google/api/annotations.proto";
+                message Req { string name = 1; }
+                message Resp { string item = 1; }
+                service S {
+                  rpc Get(Req) returns (Resp) {
+                    option (google.api.http) = {
+                      get: "/v1/x/{name}"
+                      additional_bindings {
+                        get: "/v1/y/{name}"
+                        additional_bindings {
+                          get: "/v1/z/{name}"
+                        }
+                      }
+                    };
+                  }
+                }
+            "#,
+            true,
+        );
+        let err = definitions_from_descriptor(&descriptor, &DescriptorOptions::new()).expect_err("nested additional_bindings are rejected");
+        assert!(err.to_string().contains("additional_bindings may not be nested"), "{err}");
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
     fn snake_case_body_field_is_accepted() {
         let descriptor = compile_descriptor(
             "snake_case_body",
@@ -730,7 +862,7 @@ mod tests {
         assert_eq!(definitions.len(), 1);
         let code = generated(&descriptor, &DescriptorOptions::new()).replace(' ', "");
         assert!(code.contains("RequestBodyKind::Field(\"pageSize\")"), "{code}");
-        assert!(code.contains("ResponseBodyKind::Field(\"nextPageToken\")"), "{code}");
+        assert!(code.contains("ResponseBodyKind::Field{name:\"nextPageToken\","), "{code}");
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
@@ -822,8 +954,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn proto_leading_comments_become_method_docs() {
-        // A method's proto leading comment is applied verbatim (all lines) to the
-        // generated trait method; a comment-less method gets no doc comment.
         let descriptor = compile_descriptor(
             "method_docs",
             r#"
@@ -848,19 +978,14 @@ mod tests {
         let definitions = definitions_from_descriptor(&descriptor, &DescriptorOptions::new()).expect("valid annotations");
         let rendered = definitions[0].trait_code().to_string();
 
-        // The documented RPC carries its proto comment (both lines).
         assert!(rendered.contains("Fetches a single item by name."), "{rendered}");
         assert!(rendered.contains("A second line of documentation."), "{rendered}");
-        // The comment-less RPC carries no doc comment: only the documented RPC's
-        // two `#[doc]` lines are emitted (the service itself is uncommented).
         assert_eq!(rendered.matches("[doc").count(), 2, "{rendered}");
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn proto_service_leading_comment_documents_the_trait() {
-        // A service's leading comment is applied to the generated trait; a
-        // comment-less service yields a trait with no doc comment.
         let descriptor = compile_descriptor(
             "service_docs",
             r#"
@@ -883,13 +1008,10 @@ mod tests {
         let library = definitions.iter().find(|d| d.trait_name() == "Library").expect("Library");
         let undocumented = definitions.iter().find(|d| d.trait_name() == "Undocumented").expect("Undocumented");
 
-        // The service's leading comment documents the trait; its comment-less RPC
-        // adds no further doc, so exactly one `#[doc]` is emitted.
         let library_code = library.trait_code().to_string();
         assert!(library_code.contains("Manages the shelves in the library."), "{library_code}");
         assert_eq!(library_code.matches("[doc").count(), 1, "{library_code}");
 
-        // A comment-less service yields a trait (and method) with no doc comment.
         let undocumented_code = undocumented.trait_code().to_string();
         assert!(!undocumented_code.contains("[doc"), "{undocumented_code}");
     }
@@ -1161,8 +1283,6 @@ mod tests {
         let options_desc = pool
             .get_message_by_name("google.protobuf.MethodOptions")
             .expect("method options descriptor is present");
-        // A stand-in message for the input/output arguments: these cases fail on
-        // the pattern before body/response_body validation is reached.
         let msg = options_desc.clone();
 
         let bad_get_ext = pool
@@ -1285,9 +1405,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn from_fds_classifies_an_enum_path_variable() {
-        // An `enum` field bound as a path variable is classified so the generated
-        // poke accepts the value by name (via `parse_path_enum_value`), not just
-        // as a scalar.
         let descriptor = compile_descriptor(
             "enumpath",
             r#"
@@ -1317,10 +1434,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn from_fds_classifies_a_nested_enum_path_variable() {
-        // A dotted path variable whose leaf is an `enum` reached *through* a nested
-        // message (`{filters.genre}`) must still be classified as an enum, so the
-        // walk has to descend into the intermediate message field before reaching
-        // the enum leaf.
         let descriptor = compile_descriptor(
             "nestedenum",
             r#"
@@ -1341,9 +1454,6 @@ mod tests {
         );
 
         let code = generated(&descriptor, &opts());
-        // Classified as an enum (parsed by name/number), not a bare scalar, which
-        // is only possible if the walk descended through the `filters` message to
-        // reach the `genre` enum leaf.
         assert!(code.contains("parse_path_enum_value"), "{code}");
         assert!(
             code.contains("Genre :: from_str_name") || code.contains("Genre::from_str_name"),
@@ -1353,9 +1463,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
-    fn enum_classification_skips_a_path_variable_that_descends_through_a_scalar() {
-        // A dotted path variable whose first segment is a scalar (not a message)
-        // cannot be an enum field, so classification bails without error.
+    fn path_variable_cannot_descend_through_a_scalar() {
         let descriptor = compile_descriptor(
             "scalarpath",
             r#"
@@ -1373,15 +1481,176 @@ mod tests {
             true,
         );
 
-        let definitions = definitions_from_descriptor(&descriptor, &opts()).expect("decodes despite the scalar-intermediate path");
+        let error = definitions_from_descriptor(&descriptor, &opts()).expect_err("scalar-intermediate path is rejected");
+        assert!(error.is_malformed());
+        assert!(error.to_string().contains("descends through non-message field `a`"));
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn path_variable_must_name_an_existing_field() {
+        let descriptor = compile_descriptor(
+            "missingpath",
+            r#"
+                syntax = "proto3";
+                package missingpath;
+                import "google/api/annotations.proto";
+                message Req { string present = 1; }
+                message Resp {}
+                service Svc {
+                    rpc Get(Req) returns (Resp) {
+                        option (google.api.http) = { get: "/v1/{missing}" };
+                    }
+                }
+            "#,
+            true,
+        );
+
+        let error = definitions_from_descriptor(&descriptor, &opts()).expect_err("missing capture field is rejected");
+        assert!(error.is_unknown_field());
+        assert!(error.to_string().contains("path variable"));
+        assert!(error.to_string().contains("missing"));
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn path_variable_rejects_unsupported_leaf_shapes() {
+        for (name, field, capture, expected) in [
+            ("repeated", "repeated string values = 1;", "values", "repeated or map"),
+            ("message", "Nested nested = 1;", "nested", "primitive or enum"),
+            ("oneof", "oneof choice { string value = 1; }", "value", "oneof"),
+        ] {
+            let source = format!(
+                r#"
+                    syntax = "proto3";
+                    package {name};
+                    import "google/api/annotations.proto";
+                    message Nested {{ string value = 1; }}
+                    message Req {{ {field} }}
+                    message Resp {{}}
+                    service Svc {{
+                        rpc Get(Req) returns (Resp) {{
+                            option (google.api.http) = {{ get: "/v1/{{{capture}}}" }};
+                        }}
+                    }}
+                "#
+            );
+            let descriptor = compile_descriptor(name, &source, true);
+            let error = definitions_from_descriptor(&descriptor, &opts()).expect_err("unsupported capture shape is rejected");
+            assert!(error.is_malformed());
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn optional_primitive_path_variable_is_accepted() {
+        let descriptor = compile_descriptor(
+            "optionalpath",
+            r#"
+                syntax = "proto3";
+                package optionalpath;
+                import "google/api/annotations.proto";
+                message Req { optional string value = 1; }
+                message Resp {}
+                service Svc {
+                    rpc Get(Req) returns (Resp) {
+                        option (google.api.http) = { get: "/v1/{value}" };
+                    }
+                }
+            "#,
+            true,
+        );
+
+        let definitions = definitions_from_descriptor(&descriptor, &opts()).expect("synthetic optional oneof is accepted");
         assert_eq!(definitions.len(), 1);
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
+    fn prost_keyword_field_identifiers_match_generated_messages() {
+        let descriptor = compile_descriptor(
+            "keywordfields",
+            r#"
+                syntax = "proto3";
+                package keywordfields;
+                import "google/api/annotations.proto";
+                message Req {
+                    string self = 1;
+                    string extern = 2;
+                    string gen = 3;
+                }
+                message Resp {}
+                service Svc {
+                    rpc Get(Req) returns (Resp) {
+                        option (google.api.http) = {
+                            get: "/v1/{self}"
+                            additional_bindings { get: "/v1/extern/{extern}" }
+                            additional_bindings { get: "/v1/gen/{gen}" }
+                        };
+                    }
+                }
+            "#,
+            true,
+        );
+
+        let code = generated(&descriptor, &opts());
+        assert!(code.contains("request . self_") || code.contains("request.self_"), "{code}");
+        assert!(code.contains("request . extern_") || code.contains("request.extern_"), "{code}");
+        assert!(code.contains("request . r#gen") || code.contains("request.r#gen"), "{code}");
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn response_body_default_json_covers_every_field_kind() {
+        let descriptor = compile_descriptor(
+            "defaultjson",
+            r#"
+                syntax = "proto3";
+                package defaultjson;
+                enum Color { RED = 0; GREEN = 1; }
+                message Inner { string leaf = 1; }
+                message All {
+                    repeated string list_f = 1;
+                    map<string, string> map_f = 2;
+                    optional string opt_f = 3;
+                    Inner msg_f = 4;
+                    bool bool_f = 5;
+                    string str_f = 6;
+                    bytes bytes_f = 7;
+                    int64 i64_f = 8;
+                    uint64 u64_f = 9;
+                    int32 i32_f = 10;
+                    double dbl_f = 11;
+                    Color enum_f = 12;
+                }
+            "#,
+            false,
+        );
+        let pool = prost_reflect::DescriptorPool::decode(descriptor.as_slice()).expect("descriptor pool decodes");
+        let message = pool.get_message_by_name("defaultjson.All").expect("All message exists");
+        let default_of = |name: &str| {
+            let field = message.get_field_by_name(name).expect("field exists");
+            response_body_default_json(&field)
+        };
+
+        assert_eq!(default_of("list_f"), "[]");
+        assert_eq!(default_of("map_f"), "{}");
+        assert_eq!(default_of("opt_f"), "null");
+        assert_eq!(default_of("msg_f"), "null");
+        assert_eq!(default_of("bool_f"), "false");
+        assert_eq!(default_of("str_f"), "\"\"");
+        assert_eq!(default_of("bytes_f"), "\"\"");
+        assert_eq!(default_of("i64_f"), "\"0\"");
+        assert_eq!(default_of("u64_f"), "\"0\"");
+        assert_eq!(default_of("i32_f"), "0");
+        assert_eq!(default_of("dbl_f"), "0");
+        assert_eq!(default_of("enum_f"), "\"RED\"");
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
     fn enum_field_rust_type_is_none_for_an_empty_field_path() {
-        // Defensive fall-through: an empty field path never occurs for a real
-        // path variable (each has at least one segment), so the walk yields `None`.
         let descriptor = compile_descriptor(
             "emptypath",
             r#"
@@ -1394,6 +1663,38 @@ mod tests {
         let pool = prost_reflect::DescriptorPool::decode(descriptor.as_slice()).expect("descriptor pool decodes");
         let message = pool.get_message_by_name("emptypath.Req").expect("Req message exists");
         assert_eq!(enum_field_rust_type(&message, &[], "emptypath", &[]), None);
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn enum_field_rust_type_is_none_for_non_enum_leaf_and_scalar_intermediate() {
+        // These paths are guarded upstream by path-field validation, so the
+        // defensive `None` arms are exercised directly here.
+        let descriptor = compile_descriptor(
+            "enumpath",
+            r#"
+                syntax = "proto3";
+                package enumpath;
+                message Inner { string leaf = 1; }
+                message Req { string scalar = 1; Inner inner = 2; }
+            "#,
+            false,
+        );
+        let pool = prost_reflect::DescriptorPool::decode(descriptor.as_slice()).expect("descriptor pool decodes");
+        let message = pool.get_message_by_name("enumpath.Req").expect("Req message exists");
+
+        // Leaf field is a scalar, not an enum.
+        assert_eq!(enum_field_rust_type(&message, &["scalar".to_owned()], "enumpath", &[]), None);
+        // A non-leaf segment names a scalar, so the walk cannot descend.
+        assert_eq!(
+            enum_field_rust_type(&message, &["scalar".to_owned(), "leaf".to_owned()], "enumpath", &[]),
+            None
+        );
+        // The leaf resolves through a message intermediate but is itself a scalar.
+        assert_eq!(
+            enum_field_rust_type(&message, &["inner".to_owned(), "leaf".to_owned()], "enumpath", &[]),
+            None
+        );
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
@@ -1424,8 +1725,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn compile_fds_propagates_a_descriptor_decode_error() {
-        // Invalid descriptor bytes fail to decode, so `compile_fds` surfaces the
-        // error (the `?` error path) rather than writing anything.
         let out = scratch_dir("compilefds-bad");
         compile_fds(b"\xff\xff not a FileDescriptorSet", &out).expect_err("invalid descriptor bytes error");
     }
@@ -1433,14 +1732,11 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn leading_comment_ignores_a_blank_comment() {
-        // A present-but-blank leading comment yields no doc (the blank branch),
-        // while a real comment is retained.
         let descriptor = compile_descriptor(
             "blankdoc",
             "syntax = \"proto3\";\npackage blankdoc;\nimport \"google/api/annotations.proto\";\nmessage R { string name = 1; }\n//\u{20}\nservice Blank {\n  rpc Get(R) returns (R) { option (google.api.http) = { get: \"/v1/{name}\" }; }\n}\n",
             true,
         );
-        // The service's blank comment must not become a doc string on the trait.
         let code = generated(&descriptor, &opts());
         assert!(code.contains("trait Blank"), "{code}");
     }
@@ -1449,8 +1745,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn write_merges_openapi_specs_for_services_sharing_a_module() {
-        // Two services in one proto package share a `{module}.openapi.json`, so
-        // their per-service specs are merged (paths and schemas unioned).
         let descriptor = compile_descriptor(
             "multi",
             r#"
@@ -1483,7 +1777,6 @@ mod tests {
         generator.write(&out).expect("writes merged output");
 
         let spec = fs::read_to_string(out.join("multi.openapi.json")).expect("merged openapi document exists");
-        // Paths from both services are unioned into the one module document.
         assert!(spec.contains("/v1/alpha/{a}"), "alpha path merged: {spec}");
         assert!(spec.contains("/v1/beta/{b}"), "beta path merged: {spec}");
     }
@@ -1520,32 +1813,26 @@ mod tests {
             (".google.protobuf.Empty".to_owned(), "::prost_types::Empty".to_owned()),
             (".google.protobuf".to_owned(), "::prost_types".to_owned()),
         ];
-        // Exact match wins.
         assert_eq!(
             relative_type_path("google.protobuf.Empty", "library", &externs),
             "::prost_types::Empty"
         );
-        // Longer prefix (package) applies to a sibling type.
         assert_eq!(
             relative_type_path("google.protobuf.Timestamp", "library", &externs),
             "::prost_types::Timestamp"
         );
-        // No matching extern falls back to relative resolution.
         assert_eq!(relative_type_path("library.Shelf", "library", &externs), "Shelf");
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn extern_resolution_prefers_the_longest_matching_prefix() {
-        // Two prefixes of the same type; the longer (more specific) one must win,
-        // regardless of declaration order.
         let externs = vec![
             (".google".to_owned(), "::short".to_owned()),
             (".google.protobuf".to_owned(), "::long".to_owned()),
         ];
         assert_eq!(relative_type_path("google.protobuf.Empty", "library", &externs), "::long::Empty");
 
-        // With equal-length (duplicate) prefixes, the first declared wins.
         let dup = vec![
             (".a.b".to_owned(), "::first".to_owned()),
             (".a.b".to_owned(), "::second".to_owned()),
@@ -1556,8 +1843,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn extern_prefix_snake_cases_intermediate_module_segments() {
-        // A prefix match leaving multiple trailing segments snake-cases the
-        // intermediate module segments and keeps the final type name verbatim.
         let externs = vec![(".root".to_owned(), "::root".to_owned())];
         assert_eq!(relative_type_path("root.MyMod.Thing", "library", &externs), "::root::my_mod::Thing");
     }
@@ -1565,8 +1850,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn every_http_method_is_emitted_with_its_verb() {
-        // `valid_descriptor` annotates one RPC per method (plus a custom `HEAD`);
-        // each must route under its own verb, not collapse to the `_` fallback.
         let code = generated(&valid_descriptor(), &opts());
         for method in ["GET", "PUT", "POST", "DELETE", "PATCH", "HEAD"] {
             assert!(
@@ -1600,8 +1883,6 @@ mod tests {
         assert!(code.contains("rest_over_grpc :: handling :: ResponseStream"));
         assert!(code.contains("StreamingResponse :: encode"));
         assert!(code.contains("StreamEncoding :: from_accept"));
-        // The service has a server-streaming RPC, so `try_transcode`
-        // emits a streaming arm producing a `TranscodeResponse`.
         assert!(code.contains("fn try_transcode"));
         assert!(!code.contains("try_transcode_streaming"));
         assert!(code.contains("rest_over_grpc :: transcoding :: TranscodeResponse"));
@@ -1610,8 +1891,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn send_bounds_emit_send_and_supertrait() {
-        // `Send` bounds are always emitted so the output works on multi-threaded
-        // executors.
         let code = render(&valid_descriptor(), &opts(), Generator::new());
         assert!(code.contains("Send + :: core :: marker :: Sync") || code.contains("Send + ::core::marker::Sync"));
         assert!(code.matches("marker :: Send").count() >= 2);
@@ -1620,11 +1899,9 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn tonic_generator_option_emits_the_bridge() {
-        // On by default: the bridge `impl` is emitted for the decoded service.
         let bridged = render(&valid_descriptor(), &opts(), Generator::new());
         assert!(bridged.replace(' ', "").contains("library_server::Library"));
 
-        // Opting out drops the bridge `impl`.
         let plain = render(&valid_descriptor(), &opts(), Generator::builder().emit_tonic_bridge(false).build());
         assert!(!plain.replace(' ', "").contains("library_server::Library"));
     }

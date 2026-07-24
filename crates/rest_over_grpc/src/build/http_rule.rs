@@ -45,6 +45,7 @@ pub struct HttpRule {
     pattern: String,
     body: RequestBody,
     response_body: ResponseBody,
+    response_body_default: Option<String>,
     additional_bindings: Vec<Binding>,
     enum_path_fields: Vec<(Vec<String>, String)>,
 }
@@ -82,6 +83,7 @@ impl HttpRule {
             pattern: template.to_string(),
             body: RequestBody::None,
             response_body: ResponseBody::Whole,
+            response_body_default: None,
             additional_bindings: Vec::new(),
             enum_path_fields: Vec::new(),
         }
@@ -99,6 +101,28 @@ impl HttpRule {
     pub fn response_body(mut self, response_body: ResponseBody) -> Self {
         self.response_body = response_body;
         self
+    }
+
+    /// Records the proto3-JSON literal to emit when the primary binding's
+    /// selected `response_body` field holds its default value (computed from the
+    /// response descriptor).
+    #[must_use]
+    pub(crate) fn with_response_body_default(mut self, default: Option<String>) -> Self {
+        self.response_body_default = default;
+        self
+    }
+
+    /// The proto3-JSON default literals for the `response_body` field of each
+    /// lowered route, in [`lower`](Self::lower) order (primary binding first,
+    /// then each additional binding). `None` for a route that returns the whole
+    /// message or whose default is unknown (e.g. a manually built rule).
+    pub(crate) fn response_body_defaults(&self) -> Vec<Option<String>> {
+        let mut defaults = Vec::with_capacity(1 + self.additional_bindings.len());
+        defaults.push(self.response_body_default.clone());
+        for binding in &self.additional_bindings {
+            defaults.push(binding.response_body_default().map(str::to_owned));
+        }
+        defaults
     }
 
     /// Adds an additional HTTP binding for the same gRPC RPC. Call repeatedly to
@@ -250,8 +274,6 @@ mod tests {
     #[cfg(feature = "build")]
     #[test]
     fn path_variable_field_paths_collects_variable_and_affix_captures() {
-        // A plain `{shelf}` variable and an affix segment (`img-{id}.png`, from the
-        // extended grammar) both contribute their captured field paths.
         let template = PathTemplate::parse("/v1/shelves/{shelf}/img-{id}.png", Grammar::default().with_segment_affixes())
             .expect("valid extended template");
         let rule = HttpRule::new("GetImage", HttpMethod::GET, template);
@@ -279,5 +301,16 @@ mod tests {
         assert!(matches!(routes[0].body(), RequestBody::Field(field) if field == "shelf"));
         assert!(matches!(routes[0].response_body(), ResponseBody::Field(field) if field == "shelf"));
         assert_eq!(routes[0].template().verb(), None);
+    }
+
+    #[test]
+    fn response_body_defaults_reports_primary_then_additional_binding_defaults() {
+        let rule = HttpRule::new("GetShelf", HttpMethod::GET, template("/v1/shelves/{shelf}"))
+            .with_response_body_default(Some("\"\"".to_owned()))
+            .add_binding(
+                Binding::new(HttpMethod::GET, template("/v1/shelves/{shelf}/info")).with_response_body_default(Some("0".to_owned())),
+            );
+
+        assert_eq!(rule.response_body_defaults(), vec![Some("\"\"".to_owned()), Some("0".to_owned())]);
     }
 }

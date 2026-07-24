@@ -140,7 +140,8 @@ impl DescriptorError {
         matches!(self.kind, DescriptorErrorKind::Template { .. })
     }
 
-    /// Whether a `body` / `response_body` named a field the message does not have.
+    /// Whether a body, response body, or path variable named a field the message
+    /// does not have.
     #[must_use]
     pub fn is_unknown_field(&self) -> bool {
         matches!(self.kind, DescriptorErrorKind::UnknownField { .. })

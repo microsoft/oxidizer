@@ -171,6 +171,7 @@ impl ServiceDefinition {
     ) -> &mut Self {
         let name = rule.name().to_owned();
         let enum_fields = rule.enum_path_fields().to_vec();
+        let response_body_defaults = rule.response_body_defaults();
         self.methods.push(ServiceMethod::new(
             name,
             request_type,
@@ -179,6 +180,7 @@ impl ServiceDefinition {
             false,
             doc,
             enum_fields,
+            response_body_defaults,
         ));
         self
     }
@@ -196,6 +198,7 @@ impl ServiceDefinition {
     ) -> &mut Self {
         let name = rule.name().to_owned();
         let enum_fields = rule.enum_path_fields().to_vec();
+        let response_body_defaults = rule.response_body_defaults();
         self.methods.push(ServiceMethod::new(
             name,
             request_type,
@@ -204,6 +207,7 @@ impl ServiceDefinition {
             true,
             doc,
             enum_fields,
+            response_body_defaults,
         ));
         self
     }
@@ -244,7 +248,7 @@ impl ServiceDefinition {
     pub(crate) fn tonic_bridge(&self) -> TokenStream {
         let our_trait = ident(&self.trait_name);
         let snake = to_snake_case(&self.trait_name);
-        let tonic_trait = type_path(&format!("{snake}_server::{}", self.trait_name));
+        let tonic_trait = type_path(&format!("{snake}_server::{}", prost_type_identifier(&self.trait_name)));
 
         let arms = self.methods.iter().map(|m| {
             let fn_ident = ident(&to_snake_case(m.rpc()));
@@ -252,11 +256,7 @@ impl ServiceDefinition {
             let resp_ty = type_path(m.response_type());
 
             if m.server_streaming() {
-                // Both the `tonic` method and the generated trait method are
-                // two-phase (`async fn -> Result<Stream, Status>`): await
-                // initiation, map the `tonic::Status` (initiation and per-item) to
-                // `rest_over_grpc::handling::Status`, box the `Send + 'static` response
-                // stream, and seed the request metadata from `cx`'s headers.
+                // Map both initiation and per-item tonic errors.
                 return quote! {
                     async fn #fn_ident(
                         &self,
@@ -276,10 +276,11 @@ impl ServiceDefinition {
                         let mut __request = ::tonic::Request::new(request);
                         *__request.metadata_mut() =
                             ::tonic::metadata::MetadataMap::from_headers(cx.take_request_headers());
-                        let __stream = <Self as #tonic_trait>::#fn_ident(self, __request)
+                        let (__metadata, __stream, _) = <Self as #tonic_trait>::#fn_ident(self, __request)
                             .await
                             .map_err(__convert_status)?
-                            .into_inner();
+                            .into_parts();
+                        cx.merge_response_headers(__metadata.into_headers());
                         ::core::result::Result::Ok(::std::boxed::Box::pin(
                             ::rest_over_grpc::codegen_helpers::map_stream_status(__stream, __convert_status),
                         ))
@@ -348,8 +349,6 @@ impl ServiceDefinition {
             let fn_ident = ident(&to_snake_case(m.rpc()));
             let req_ty = type_path(m.request_type());
             let resp_ty = type_path(m.response_type());
-            // Emit the RPC's proto documentation when present (one `#[doc]` per
-            // line, preserving its structure); otherwise emit no doc comment.
             let doc_attrs = m.doc().map(|doc| {
                 let lines = doc.split('\n').map(|line| quote! { #[doc = #line] });
                 quote! { #(#lines)* }
@@ -376,8 +375,6 @@ impl ServiceDefinition {
             }
         });
 
-        // The service's `doc` documents the trait verbatim (one `#[doc]` per
-        // line); when absent, no doc comment is emitted.
         let doc_attrs = self.doc.as_ref().map(|doc| {
             let lines = doc.split('\n').map(|line| quote! { #[doc = #line] });
             quote! { #(#lines)* }
@@ -418,10 +415,7 @@ pub(crate) fn generate_transcoder(services: &[ServiceDefinition]) -> TokenStream
         })
         .collect();
 
-    // Merged router over every service's routes, each tagged uniquely so the
-    // transcode arms can key on the resolved `(service, rpc)`. Every method emits
-    // one arm producing a `TranscodeResponse` (a unary RPC's buffered response or
-    // a server-streaming RPC's live frame stream), so a single `transcode` serves
+    // Route tags identify the service and RPC selected by the merged router.
     let mut merged_routes: Vec<Route> = Vec::new();
     let mut arms: Vec<TokenStream> = Vec::new();
     for (i, svc) in services.iter().enumerate() {
@@ -456,8 +450,6 @@ pub(crate) fn generate_transcoder(services: &[ServiceDefinition]) -> TokenStream
     let transcode_impl = transcoder_transcode_impl(&try_transcode_method, &generic_params, &where_clause);
 
     quote! {
-        // The merged router is emitted once at module scope here, rather than
-        // inlined into the `try_transcode` method body.
         #resolve
 
         /// Routes incoming REST requests across all generated services to the
@@ -620,6 +612,7 @@ struct RouteVariant {
     reserved_expansions: Vec<bool>,
     body: RequestBody,
     response_body: ResponseBody,
+    response_body_default: Option<String>,
 }
 
 /// The ordered capture signature of a path template and whether each capture is
@@ -664,6 +657,7 @@ fn assign_method_variants(base: &str, method: &ServiceMethod, module: &str) -> (
             reserved_expansions,
             body: route.body().clone(),
             response_body: route.response_body().clone(),
+            response_body_default: method.response_body_defaults().get(index).cloned().flatten(),
         });
         routes.push(rename_route(route, &name));
     }
@@ -722,70 +716,10 @@ fn variant_pattern(variant: &RouteVariant) -> TokenStream {
     }
 }
 
-/// The message field-access identifier for one dotted-path segment (e.g. `type`
-/// → `r#type`), matching how `prost` names fields that collide with a Rust
-/// keyword.
+/// The message field-access identifier for one dotted-path segment, matching
+/// `prost`'s snake-casing and reserved-word handling.
 fn field_segment_ident(segment: &str) -> Ident {
-    if is_raw_keyword(segment) {
-        Ident::new_raw(segment, Span::call_site())
-    } else {
-        Ident::new(segment, Span::call_site())
-    }
-}
-
-/// Whether `word` is a Rust keyword that `prost` emits as a raw identifier
-/// (`r#word`) when it is a proto field name. The handful of keywords that cannot
-/// be raw identifiers (`self`, `Self`, `super`, `crate`, `extern`) are excluded;
-/// they are not valid field names in generated message structs anyway.
-fn is_raw_keyword(word: &str) -> bool {
-    matches!(
-        word,
-        "as" | "break"
-            | "const"
-            | "continue"
-            | "else"
-            | "enum"
-            | "false"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "pub"
-            | "ref"
-            | "return"
-            | "static"
-            | "struct"
-            | "trait"
-            | "true"
-            | "type"
-            | "unsafe"
-            | "use"
-            | "where"
-            | "while"
-            | "async"
-            | "await"
-            | "dyn"
-            | "abstract"
-            | "become"
-            | "box"
-            | "do"
-            | "final"
-            | "macro"
-            | "override"
-            | "priv"
-            | "typeof"
-            | "unsized"
-            | "virtual"
-            | "yield"
-            | "try"
-    )
+    ident(&prost_snake_identifier(segment))
 }
 
 /// The statements that poke a route variant's captured path variables directly
@@ -813,8 +747,7 @@ fn variant_pokes(variant: &RouteVariant) -> TokenStream {
         .enumerate()
         .map(|(capture_index, ((path, enum_type), reserved))| {
             let capture = capture_binding_ident(capture_index);
-            // Build the lvalue: `request` then each segment, materializing every
-            // non-leaf (message) segment so the leaf assignment has somewhere to go.
+            // Materialize intermediate message fields before assigning the leaf.
             let mut lvalue = quote! { request };
             for (index, segment) in path.iter().enumerate() {
                 let seg = field_segment_ident(segment);
@@ -897,7 +830,7 @@ fn qualified_type_path(path: &str, module: &str) -> TokenStream {
 
     let mut absolute = String::new();
     for segment in segments {
-        absolute.push_str(segment);
+        absolute.push_str(&prost_snake_identifier(segment));
         absolute.push_str("::");
     }
     absolute.push_str(remainder);
@@ -957,7 +890,7 @@ fn transcode_arm(variants: &[RouteVariant], receiver: &TokenStream, req_ty: &Tok
         let arms = variants.iter().map(|variant| {
             let pattern = variant_pattern(variant);
             let body_kind = body_kind_tokens(&variant.body);
-            let response_kind = response_kind_tokens(&variant.response_body);
+            let response_kind = response_kind_tokens(&variant.response_body, variant.response_body_default.as_deref());
             let decoded = decode_and_poke(variant, req_ty, &body_kind);
             quote! {
                 #pattern => {
@@ -997,7 +930,7 @@ fn transcode_arm(variants: &[RouteVariant], receiver: &TokenStream, req_ty: &Tok
         let pattern = variant_pattern(variant);
         let body_kind = body_kind_tokens(&variant.body);
         let decoded = decode_and_poke(variant, req_ty, &body_kind);
-        let resp_kind = response_kind_tokens(&variant.response_body);
+        let resp_kind = response_kind_tokens(&variant.response_body, variant.response_body_default.as_deref());
         quote! {
             #pattern => {
                 let result: ::core::result::Result<::std::vec::Vec<u8>, ::rest_over_grpc::handling::Status> = async {
@@ -1030,11 +963,16 @@ fn body_kind_tokens(body: &RequestBody) -> TokenStream {
     }
 }
 
-fn response_kind_tokens(response_body: &ResponseBody) -> TokenStream {
+fn response_kind_tokens(response_body: &ResponseBody, default: Option<&str>) -> TokenStream {
     match response_body {
         ResponseBody::Whole => quote! { ::rest_over_grpc::codegen_helpers::ResponseBodyKind::Whole },
         ResponseBody::Field(field) => {
-            quote! { ::rest_over_grpc::codegen_helpers::ResponseBodyKind::Field(#field) }
+            // pbjson omits default-valued fields, so the transcoder emits this
+            // proto3-JSON default literal when the selected field is at its
+            // default. `null` is a safe fallback when the default is unknown
+            // (e.g. a manually built rule with no response descriptor).
+            let default = default.unwrap_or("null");
+            quote! { ::rest_over_grpc::codegen_helpers::ResponseBodyKind::Field { name: #field, default: #default } }
         }
     }
 }
@@ -1047,11 +985,33 @@ fn response_kind_tokens(response_body: &ResponseBody) -> TokenStream {
 /// trait and its `tonic` bridge in lockstep. Non-keyword names (`PascalCase`
 /// trait names, `T0` generics, `__invoke_*` helpers) are unaffected.
 fn ident(name: &str) -> Ident {
-    if is_raw_keyword(name) {
-        Ident::new_raw(name, Span::call_site())
+    let sanitized = prost_identifier(name);
+    if let Some(raw) = sanitized.strip_prefix("r#") {
+        Ident::new_raw(raw, Span::call_site())
     } else {
-        Ident::new(name, Span::call_site())
+        Ident::new(&sanitized, Span::call_site())
     }
+}
+
+/// Sanitizes a Rust identifier exactly as `prost-build` 0.14 does.
+pub(crate) fn prost_identifier(name: &str) -> String {
+    match name {
+        "as" | "break" | "const" | "continue" | "else" | "enum" | "false" | "fn" | "for" | "if" | "impl" | "in" | "let" | "loop"
+        | "match" | "mod" | "move" | "mut" | "pub" | "ref" | "return" | "static" | "struct" | "trait" | "true" | "type" | "unsafe"
+        | "use" | "where" | "while" | "dyn" | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override" | "priv" | "typeof"
+        | "unsized" | "virtual" | "yield" | "async" | "await" | "try" | "gen" => format!("r#{name}"),
+        "_" | "super" | "self" | "Self" | "extern" | "crate" => format!("{name}_"),
+        value if value.starts_with(char::is_numeric) => format!("_{value}"),
+        _ => name.to_owned(),
+    }
+}
+
+pub(crate) fn prost_snake_identifier(name: &str) -> String {
+    prost_identifier(&to_snake_case(name))
+}
+
+pub(crate) fn prost_type_identifier(name: &str) -> String {
+    prost_identifier(&heck::AsUpperCamelCase(name).to_string())
 }
 
 /// Parses a fully-qualified Rust type path string into tokens, falling back to a
@@ -1101,35 +1061,54 @@ mod tests {
         assert_eq!(to_snake_case("GetShelf"), "get_shelf");
         assert_eq!(to_snake_case("ListBooksByAuthor"), "list_books_by_author");
         assert_eq!(to_snake_case("already_snake"), "already_snake");
-        // Acronyms match prost/tonic (heck) casing, not a naive per-capital split.
         assert_eq!(to_snake_case("GetHTTPConfig"), "get_http_config");
         assert_eq!(to_snake_case("MyHTTPService"), "my_http_service");
+    }
+
+    #[test]
+    fn identifier_sanitization_matches_prost() {
+        for (source, expected) in [
+            ("gen", "r#gen"),
+            ("self", "self_"),
+            ("Self", "Self_"),
+            ("super", "super_"),
+            ("extern", "extern_"),
+            ("crate", "crate_"),
+            ("0field", "_0field"),
+            ("ordinary", "ordinary"),
+        ] {
+            assert_eq!(prost_identifier(source), expected);
+        }
+        assert_eq!(field_segment_ident("Self").to_string(), "self_");
+        assert_eq!(field_segment_ident("extern").to_string(), "extern_");
+        assert_eq!(field_segment_ident("gen").to_string(), "r#gen");
+
+        let mut generator = ServiceDefinition::new("KeywordFields", None);
+        generator.add_method(
+            rule("Get", HttpMethod::GET, "/v1/{gen}"),
+            "crate::pb::KeywordFieldsRequest",
+            "crate::pb::KeywordFieldsRequest",
+            None,
+        );
+        let file: syn::File = syn::parse2(generator.generate(CodegenOptions::default())).expect("gen capture produces valid Rust");
+        assert!(prettyplease::unparse(&file).contains("request.r#gen"));
     }
 
     #[test]
     fn qualified_type_path_resolves_relative_and_rooted_paths() {
         let q = |path: &str, module: &str| qualified_type_path(path, module).to_string();
 
-        // Same-package and nested types are prefixed with the package module.
         assert_eq!(q("GetShelfRequest", "library"), "library :: GetShelfRequest");
         assert_eq!(q("outer::Inner", "library"), "library :: outer :: Inner");
-        // Multi-segment package.
         assert_eq!(q("Foo", "a.b"), "a :: b :: Foo");
-        // An empty module leaves the (unrooted) path unqualified.
         assert_eq!(q("Foo", ""), "Foo");
-        // `super::` steps up toward the common root: a parent-package type in `a.b`.
         assert_eq!(q("super::Foo", "a.b"), "a :: Foo");
-        // A sibling-package type: two `super::`s then the type's own package path.
         assert_eq!(q("super::super::x::y::Foo", "a.b"), "x :: y :: Foo");
-        // Rooted paths (extern overrides, crate-relative manual paths) pass through.
         assert_eq!(q("::prost_types::Empty", "library"), ":: prost_types :: Empty");
         assert_eq!(q("crate::pb::Shelf", "library_service"), "crate :: pb :: Shelf");
-        // Every rooted prefix passes through unchanged — one per branch of the
-        // disjunction so no single `||`/`==`/`starts_with` can be dropped silently.
         assert_eq!(q("crate", "library"), "crate");
         assert_eq!(q("self", "library"), "self");
         assert_eq!(q("self::Inner", "library"), "self :: Inner");
-        // A `$crate::…` path is rooted, so it is never prefixed with the module.
         assert!(
             !q("$crate::Macro", "library").contains("library"),
             "$crate path must pass through unprefixed"
@@ -1138,22 +1117,16 @@ mod tests {
 
     #[test]
     fn route_name_is_a_unique_identifier() {
-        // The name suffixes the RPC with the service index, keeping it a valid,
-        // collision-free Rust identifier (it names a route enum variant).
         assert_eq!(route_name(0, "GetShelf"), "GetShelf_0");
         assert_eq!(route_name(3, "ListBooks"), "ListBooks_3");
     }
 
     #[test]
     fn a_service_less_transcoder_omits_generics_and_where_clause() {
-        // With no services the transcoder has no generic type parameters and no
-        // `where` clause (the empty-`generics`/`bounds` branches).
         let tokens = generate_transcoder(&[]);
         let file: syn::File = syn::parse2(tokens).expect("service-less transcoder is valid Rust");
         let pretty = prettyplease::unparse(&file);
         assert!(pretty.contains("struct Transcoder"), "{pretty}");
-        // Scope the checks to the transcoder itself: the module-level `resolve`
-        // helper (emitted earlier) carries its own generic `AsRef<str>` bounds.
         let transcoder = &pretty[pretty.find("struct Transcoder").expect("transcoder struct present")..];
         assert!(!transcoder.contains("T0"), "no generic parameters: {transcoder}");
         assert!(!transcoder.contains("where"), "no where clause: {transcoder}");
@@ -1161,12 +1134,10 @@ mod tests {
 
     #[test]
     fn transcoder_field_name_suffixes_only_on_collision() {
-        // Distinct trait names keep their plain snake_case field name.
         let distinct = vec![ServiceDefinition::new("Library", None), ServiceDefinition::new("Catalog", None)];
         assert_eq!(transcoder_field_name(&distinct, 0), "library");
         assert_eq!(transcoder_field_name(&distinct, 1), "catalog");
 
-        // Two services with the same trait name are disambiguated by index.
         let colliding = vec![ServiceDefinition::new("Library", None), ServiceDefinition::new("Library", None)];
         assert_eq!(transcoder_field_name(&colliding, 0), "library_0");
         assert_eq!(transcoder_field_name(&colliding, 1), "library_1");
@@ -1174,9 +1145,6 @@ mod tests {
 
     #[test]
     fn additional_bindings_with_different_captures_split_into_separate_arms() {
-        // One RPC bound to two paths that capture different variables cannot share
-        // a single field-carrying route enum variant, so each becomes its own
-        // variant and its own destructuring transcode arm.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("GetShelf", HttpMethod::GET, "/v1/shelves/{shelf}")
@@ -1188,21 +1156,14 @@ mod tests {
 
         let file: syn::File = syn::parse2(generator.generate(CodegenOptions::default())).expect("generated service must be valid Rust");
         let flat = prettyplease::unparse(&file).replace(' ', "");
-        // Two distinct-capture bindings yield two struct variants.
         assert!(flat.contains("GetShelf_0{shelf:&'pstr}"), "{flat}");
         assert!(flat.contains("GetShelf_0_b1{shelf:&'pstr,book:&'pstr}"), "{flat}");
-        // Each variant gets its own destructuring arm binding its fields to
-        // reserved `__cap{n}` locals.
         assert!(flat.contains("Route::GetShelf_0{shelf:__cap0}=>"), "{flat}");
         assert!(flat.contains("Route::GetShelf_0_b1{shelf:__cap0,book:__cap1}=>"), "{flat}");
     }
 
     #[test]
     fn nested_path_variable_pokes_through_get_or_insert() {
-        // A dotted path variable `{shelf.id}` pokes into a nested message field:
-        // the non-leaf segment is materialized with `get_or_insert_with` and the
-        // leaf is parsed via `parse_path_field`, with the value read from the
-        // matched variant's `shelf_id` field.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("GetBook", HttpMethod::GET, "/v1/shelves/{shelf.id}/book"),
@@ -1213,12 +1174,8 @@ mod tests {
 
         let file: syn::File = syn::parse2(generator.generate(CodegenOptions::default())).expect("generated service must be valid Rust");
         let pretty = prettyplease::unparse(&file);
-        // Collapse all whitespace so the (line-wrapped) poke chain matches.
         let flat: String = pretty.split_whitespace().collect();
-        // The variant reads the `shelf_id` field into a reserved `__cap0` binding.
         assert!(flat.contains("Route::GetBook_0{shelf_id:__cap0}=>"), "{pretty}");
-        // The poke walks `request.shelf.get_or_insert_with(..).id` and parses the
-        // captured value into it.
         assert!(
             flat.contains("request.shelf.get_or_insert_with(::core::default::Default::default).id=::rest_over_grpc::codegen_helpers::parse_path_field(__cap0"),
             "{pretty}"
@@ -1226,12 +1183,41 @@ mod tests {
     }
 
     #[test]
+    fn keyword_named_service_produces_valid_sanitized_rust() {
+        for name in ["Self", "Loop", "Match", "Type", "Async", "Gen", "Extern", "Move"] {
+            let mut generator = ServiceDefinition::new(name, None);
+            generator.add_method(
+                rule("Get", HttpMethod::GET, "/v1/get"),
+                "crate::pb::GetRequest",
+                "crate::pb::Resp",
+                None,
+            );
+            let options = CodegenOptions { emit_tonic: true };
+            let _: syn::File = syn::parse2(generator.generate(options))
+                .unwrap_or_else(|error| panic!("service `{name}` must produce valid Rust: {error}"));
+        }
+
+        let mut generator = ServiceDefinition::new("Self", None);
+        generator.add_method(
+            rule("Get", HttpMethod::GET, "/v1/get"),
+            "crate::pb::GetRequest",
+            "crate::pb::Resp",
+            None,
+        );
+        let file: syn::File = syn::parse2(generator.generate(CodegenOptions { emit_tonic: true })).expect("valid Rust");
+        let pretty = prettyplease::unparse(&file);
+        assert!(
+            pretty.contains("trait Self_"),
+            "the reserved `Self` trait must be raw-sanitized: {pretty}"
+        );
+        assert!(
+            pretty.contains("self_server::Self_"),
+            "the tonic bridge must reference the sanitized trait: {pretty}"
+        );
+    }
+
+    #[test]
     fn keyword_named_rpc_emits_a_raw_identifier_method() {
-        // A proto RPC whose `snake_case` name is a Rust keyword (e.g. `Match` →
-        // `match`) must be emitted as a raw identifier (`fn r#match`); a bare
-        // a bare `fn match` would not compile. `syn::parse2` here would fail on the
-        // unescaped form, so this both round-trips the generated code and pins
-        // the raw form in the pretty output.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("Match", HttpMethod::GET, "/v1/match"),
@@ -1249,10 +1235,6 @@ mod tests {
 
     #[test]
     fn enum_path_variable_pokes_via_parse_path_enum_value() {
-        // A path variable declared as an enum field is poked via
-        // `parse_path_enum_value` with the field's concrete enum type (so it
-        // accepts the value by name or number), with the `i32` `.into()`-ed to
-        // fit the field; a non-declared capture stays on `parse_path_field`.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("ListByState", HttpMethod::GET, "/v1/books/state/{state}").path_field_enum("state", "crate::pb::BookState"),
@@ -1287,10 +1269,6 @@ mod tests {
 
     #[test]
     fn path_variable_named_like_a_transcoder_local_does_not_collide() {
-        // A path variable whose proto field name equals a transcoder local
-        // (`request`, `body`, `cx`, `query_pairs`) must be destructured into a
-        // reserved `__cap{n}` binding, so it cannot shadow that local and break
-        // the generated `decode_request`/poke code.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("Get", HttpMethod::GET, "/v1/{request}"),
@@ -1301,8 +1279,6 @@ mod tests {
 
         let file: syn::File = syn::parse2(generator.generate(CodegenOptions::default())).expect("generated service must be valid Rust");
         let flat: String = prettyplease::unparse(&file).split_whitespace().collect();
-        // The `request` field is read into `__cap0` (not a bare `request` binding
-        // that would shadow the decoded message local).
         assert!(flat.contains("{request:__cap0}=>"), "{flat}");
         assert!(
             flat.contains("request.request=::rest_over_grpc::codegen_helpers::parse_path_field(__cap0"),
@@ -1312,8 +1288,6 @@ mod tests {
 
     #[test]
     fn keyword_path_segment_pokes_through_a_raw_identifier() {
-        // A dotted path variable whose segment is a Rust keyword (`type`) is poked
-        // through a raw identifier (`r#type`) so the generated code compiles.
         let mut generator = ServiceDefinition::new("Library", None);
         generator.add_method(
             rule("GetTyped", HttpMethod::GET, "/v1/{msg.type}"),
@@ -1332,9 +1306,6 @@ mod tests {
 
     #[test]
     fn affix_path_segment_is_captured_and_poked() {
-        // An affix segment (`img-{id}.png`, from the extended template grammar)
-        // captures its field like a plain variable; the transcoder destructures
-        // and pokes it. Exercises the affix arm of `capture_signature`.
         let template =
             PathTemplate::parse("/v1/images/img-{id}.png", Grammar::default().with_segment_affixes()).expect("valid extended template");
         let mut generator = ServiceDefinition::new("Library", None);
@@ -1380,8 +1351,6 @@ mod tests {
 
     #[test]
     fn service_doc_documents_the_trait() {
-        // A `Some(doc)` documents the trait verbatim (one `#[doc]` per line);
-        // `None` emits no doc comment.
         let documented = ServiceDefinition::new("Library", Some(" A library service.\n Second line.".to_owned()))
             .trait_code()
             .to_string();
@@ -1395,9 +1364,6 @@ mod tests {
 
     #[test]
     fn generates_streaming_transcode_for_server_streaming_methods() {
-        // A server-streaming method makes the generated `Transcoder`'s
-        // `try_transcode` emit a streaming arm; a unary sibling exercises
-        // the unary arm of the same method too.
         let mut generator = ServiceDefinition::new("Library", None);
         generator
             .add_server_streaming_method(
@@ -1417,12 +1383,8 @@ mod tests {
             syn::parse2(generator.generate(CodegenOptions::default())).expect("generated streaming service must be valid Rust");
         let pretty = prettyplease::unparse(&file);
         assert!(pretty.contains("fn stream_shelves"));
-        // The transcoder exposes a single `try_transcode` returning a
-        // `TranscodeResponse`; there is no separate streaming method.
         assert!(pretty.contains("fn try_transcode"));
         assert!(!pretty.contains("fn try_transcode_streaming"));
-        // The streaming arm frames the handler's stream — a token unique to the
-        // streaming arm (the unary arm produces a buffered `HttpResponse`).
         assert!(pretty.replace(' ', "").contains("StreamingResponse::encode_response"));
     }
 
@@ -1447,7 +1409,10 @@ mod tests {
         let additional_arm = &flat[additional_start..];
 
         assert!(primary_arm.contains("RequestBodyKind::Whole"), "{primary_arm}");
-        assert!(primary_arm.contains("ResponseBodyKind::Field(\"item\","), "{primary_arm}");
+        assert!(
+            primary_arm.contains("ResponseBodyKind::Field{name:\"item\",default:\"null\","),
+            "{primary_arm}"
+        );
         assert!(additional_arm.contains("RequestBodyKind::Field(\"item\","), "{additional_arm}");
         assert!(additional_arm.contains("ResponseBodyKind::Whole"), "{additional_arm}");
     }
@@ -1489,17 +1454,13 @@ mod tests {
         let _: syn::File = syn::parse2(bridge.clone()).expect("streaming bridge must be valid Rust");
         let flat = bridge.to_string().replace(' ', "");
 
-        // The bridged method is two-phase: an `async fn` returning
-        // `Result<ResponseStream<_>, Status>`.
         assert!(flat.contains(
             "asyncfnstream_shelves(&self,request:crate::pb::ListShelvesRequest,cx:&mut::rest_over_grpc::handling::Context,)->::core::result::Result<::rest_over_grpc::handling::ResponseStream<crate::pb::Shelf>,::rest_over_grpc::handling::Status,>"
         ));
-        // It awaits the tonic call, boxes the response stream, and maps per-item
-        // errors via the runtime helper.
         assert!(flat.contains("::rest_over_grpc::codegen_helpers::map_stream_status("));
-        assert!(flat.contains(".into_inner()"));
+        assert!(flat.contains(".into_parts()"));
+        assert!(flat.contains("cx.merge_response_headers(__metadata.into_headers())"));
         assert!(flat.contains("__convert_status"));
-        // The request headers seed the tonic request metadata (moved, not cloned).
         assert!(flat.contains("::tonic::metadata::MetadataMap::from_headers(cx.take_request_headers())"));
     }
 
@@ -1520,7 +1481,6 @@ mod tests {
         assert!(pretty.contains("impl<T> Library for T"));
         assert!(pretty.contains("T: library_server::Library"));
         assert!(pretty.contains("tonic::Request::new(request)"));
-        // The request headers seed the tonic request metadata.
         assert!(pretty.contains("MetadataMap::from_headers"));
         assert!(pretty.contains("request_headers()"));
         assert!(pretty.contains("response.into_parts()"));
@@ -1539,7 +1499,6 @@ mod tests {
             None,
         );
 
-        // With `emit_tonic` unset, `generate` emits no bridge `impl`.
         assert!(
             !definition
                 .generate(CodegenOptions::default())
@@ -1548,7 +1507,6 @@ mod tests {
                 .contains("library_server::Library")
         );
 
-        // With `emit_tonic` set, the bridge `impl` is included alongside the trait.
         assert!(
             definition
                 .generate(CodegenOptions { emit_tonic: true })
@@ -1568,8 +1526,6 @@ mod tests {
             None,
         );
 
-        // The service trait always gains a `Send + Sync` supertrait and per-future
-        // `+ Send` bounds so the output works on multi-threaded executors.
         let code = definition.generate(CodegenOptions::default()).to_string();
         assert!(code.contains("Send + :: core :: marker :: Sync") || code.contains("Send + ::core::marker::Sync"));
         assert!(code.matches("marker :: Send").count() >= 2);
@@ -1602,7 +1558,7 @@ mod tests {
         let flat = tokens.to_string().replace(' ', "");
         assert!(flat.contains("RequestBodyKind::Whole"));
         assert!(flat.contains("RequestBodyKind::Field(\"book\")"));
-        assert!(flat.contains("ResponseBodyKind::Field(\"book\")"));
+        assert!(flat.contains("ResponseBodyKind::Field{name:\"book\",default:\"null\"}"));
     }
 
     #[test]

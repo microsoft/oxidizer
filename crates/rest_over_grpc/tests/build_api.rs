@@ -34,12 +34,10 @@ fn generator_renders_and_inspects_services() {
 
     let (transcoder, generated) = generator.generate();
     assert_eq!(generated.len(), 2);
-    // The transcoder is always produced and routes across the added services.
     assert!(transcoder.to_string().contains("struct Transcoder"));
     let library = generated.iter().find(|g| g.trait_name() == "Library").expect("Library generated");
     assert_eq!(library.module_name(), "library");
     assert!(library.service_trait().to_string().contains("get_shelf"));
-    // The tonic bridge is on by default; the trait itself carries no bridge impl.
     assert!(library.tonic_bridge().is_some());
     assert!(library.service_trait().to_string().contains("pub trait Library"));
 }
@@ -71,7 +69,6 @@ fn generator_concatenates_services_sharing_a_module() {
         .join(format!("rog_build_it_shared_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("scratch dir");
 
-    // Two services grouped into the same module are concatenated into one file.
     let mut books = ServiceDefinition::new("Books", None);
     books.set_module_name("catalog").add_method(
         rule("GetBook", HttpMethod::GET, "/v1/books/{book}"),
@@ -192,7 +189,6 @@ mod descriptor {
     #[test]
     fn compile_fds_reports_a_write_error() {
         let descriptor = descriptor_set(PROTO);
-        // A path whose parent does not exist cannot be written to.
         let bad = std::path::PathBuf::from("/rest_over_grpc_codegen_nonexistent_dir/nested");
         let error = compile_fds(&descriptor, &bad).expect_err("write fails");
         assert!(error.to_string().contains("failed to write"));
@@ -218,7 +214,6 @@ mod descriptor {
             .write(&out)
             .expect("writes");
 
-        // Both the code and the spec are written, the spec named after the module.
         assert!(out.join("api.rest.rs").exists(), "code still written");
         let spec = std::fs::read_to_string(out.join("api.openapi.json")).expect("spec file exists");
         assert!(spec.contains("\"openapi\": \"3.1.0\""), "{spec}");
@@ -253,8 +248,6 @@ mod descriptor {
             .write(&out)
             .expect("writes");
 
-        // With no proto package the module defaults to the snake-cased trait name,
-        // so the spec sits beside `s.rest.rs` as `s.openapi.json`.
         assert!(out.join("s.openapi.json").exists(), "default-package spec written");
     }
 
@@ -263,8 +256,6 @@ mod descriptor {
     fn write_merges_openapi_documents_for_services_sharing_a_package() {
         use rest_over_grpc::build::OpenApiInfo;
 
-        // Two services in one package merge into one `{package}.openapi.json`
-        // rather than clobbering each other.
         const TWO_SERVICES: &str = r#"
             syntax = "proto3";
             package shared;
@@ -300,7 +291,6 @@ mod descriptor {
 
         let descriptor = descriptor_set(PROTO);
 
-        // With OpenAPI requested, `openapi_spec()` carries the per-service document.
         let mut with_spec = Generator::builder()
             .emit_openapi_spec(Some(OpenApiInfo::new("Things API", "v1")))
             .build();
@@ -313,12 +303,10 @@ mod descriptor {
         assert!(spec.contains("/v1/things/{id}"));
         assert!(spec.contains("Things API"));
 
-        // Without OpenAPI requested, a decoded service still has no spec.
         let mut no_spec = Generator::new();
         no_spec.add_all(ServiceDefinition::from_fds(&descriptor, &DescriptorOptions::new().package(".api")).expect("decode"));
         assert!(no_spec.generate().1[0].openapi_spec().is_none());
 
-        // A hand-built service has no descriptor, so no OpenAPI state even when requested.
         let mut manual = Generator::builder()
             .emit_openapi_spec(Some(OpenApiInfo::new("Manual", "v1")))
             .build();

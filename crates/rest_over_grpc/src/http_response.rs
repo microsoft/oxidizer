@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::{Value, to_vec};
 
 use crate::code::Code;
-use crate::context::append_headers;
+use crate::context::{append_headers, strip_uncontrolled_response_headers};
 use crate::handling::Status;
 
 /// The JSON body shape for a [`Status`] response, mirroring `google.rpc.Status`:
@@ -269,6 +269,7 @@ impl HttpResponse {
     /// accumulated on its [`Context`](crate::handling::Context).
     pub fn merge_headers(&mut self, headers: HeaderMap) {
         append_headers(&mut self.headers, headers);
+        strip_uncontrolled_response_headers(&mut self.headers);
     }
 
     /// The response body bytes.
@@ -375,6 +376,21 @@ mod tests {
         _ = response
             .headers_mut()
             .insert(http::header::ETAG, http::HeaderValue::from_static("\"v1\""));
+        assert_eq!(response.headers()[http::header::ETAG], "\"v1\"");
+    }
+
+    #[test]
+    fn merge_headers_strips_framing_headers_from_handler_headers() {
+        let mut response = HttpResponse::ok_json(b"{}".to_vec());
+        let mut handler = HeaderMap::new();
+        handler.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("999"));
+        handler.insert(http::header::TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        handler.insert(http::header::ETAG, http::HeaderValue::from_static("\"v1\""));
+
+        response.merge_headers(handler);
+
+        assert!(response.headers().get(http::header::CONTENT_LENGTH).is_none());
+        assert!(response.headers().get(http::header::TRANSFER_ENCODING).is_none());
         assert_eq!(response.headers()[http::header::ETAG], "\"v1\"");
     }
 }

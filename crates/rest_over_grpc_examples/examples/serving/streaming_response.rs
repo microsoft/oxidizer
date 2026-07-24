@@ -33,16 +33,11 @@ async fn run(library: &'static Transcoder<LibraryService>, method: Method, targe
         .body(Full::new(bytes::Bytes::new()))
         .expect("request builds");
 
-    // `serve_http` feeds the request straight to the generated transcode — no
-    // wiring closure needed; server-streaming RPCs come back as a live
-    // `StreamingResponse`, unary RPCs as a buffered body.
     let response = serve_http(request, library).await;
 
     println!("\n{method} {target}  (Accept: {accept})");
     println!("  -> {} {}", response.status(), content_type(&response));
 
-    // Drain the body frame by frame — for a server-streaming route each data
-    // frame is one encoding frame flushed as the handler produced it.
     let mut body = response.into_body();
     while let Some(frame) = body.frame().await {
         match frame {
@@ -69,18 +64,13 @@ fn content_type(response: &http::Response<rest_over_grpc::serving::RestBody>) ->
 }
 
 fn main() {
-    // `'static` so the streaming body (which outlives the transcode call) can hold
-    // the service; a real server shares it via `Arc` or a long-lived value.
     let library: &'static Transcoder<LibraryService> = Box::leak(Box::new(Transcoder::new(LibraryService)));
 
     futures::executor::block_on(async {
-        // Server-streaming route: streamed NDJSON, one frame per shelf.
         run(library, Method::GET, "/v1/shelves:stream", "application/x-ndjson").await;
 
-        // Same route as a JSON array (the default encoding).
         run(library, Method::GET, "/v1/shelves:stream", "application/json").await;
 
-        // A unary route is simply buffered.
         run(library, Method::GET, "/v1/shelves/history", "application/json").await;
     });
 }

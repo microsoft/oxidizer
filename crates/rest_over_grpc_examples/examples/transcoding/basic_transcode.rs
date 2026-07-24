@@ -23,16 +23,9 @@ use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
 fn main() {
     let library = Transcoder::new(LibraryService);
 
-    let requests = [
-        ("GET", "/v1/shelves/history"), // unary route (GetShelf)
-        ("GET", "/v1/shelves:stream"),  // server-streaming route (frame stream)
-        ("GET", "/v1/nope"),            // no route → 404
-    ];
+    let requests = [("GET", "/v1/shelves/history"), ("GET", "/v1/shelves:stream"), ("GET", "/v1/nope")];
 
     for (method, target) in requests {
-        // `transcode` resolves the route, transcodes the request into the gRPC
-        // message, invokes the bridged handler, and encodes the reply as JSON —
-        // buffered for a unary RPC, or as a frame stream for a streaming RPC.
         let response = futures::executor::block_on(library.transcode(method, target, http::HeaderMap::new(), b""));
         match response {
             TranscodeResponse::Unary(http) => {

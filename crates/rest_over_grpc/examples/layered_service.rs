@@ -47,8 +47,6 @@ impl Transcode for HealthApi {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    // `layered::Service` needs no `Clone` and takes `&self`, so the service is
-    // not `mut`.
     let service = RestService::new(HealthApi);
 
     for target in ["/v1/health", "/v1/missing"] {
@@ -58,7 +56,6 @@ async fn main() {
             .body(Full::new(Bytes::new()))
             .expect("request builds");
 
-        // `layered::Service::execute` returns the response directly (no `Result`).
         let response = service.execute(request).await;
 
         let status = response.status();

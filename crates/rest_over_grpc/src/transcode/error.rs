@@ -4,7 +4,7 @@
 //! The [`TranscodeError`] request/response transcoding error type.
 
 use core::fmt;
-use std::backtrace::Backtrace;
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::error::Error;
 
 use crate::handling::{Code, Status};
@@ -14,7 +14,7 @@ use crate::handling::{Code, Status};
 /// The underlying `serde`/`serde_json` failure (when there is one) is preserved
 /// and reachable through [`std::error::Error::source`]. A [`Backtrace`] is
 /// captured at construction and shown in the `Debug` output when
-/// `RUST_BACKTRACE` is enabled.
+/// `RUST_BACKTRACE` is enabled; disabled backtraces do not allocate.
 ///
 /// # Examples
 ///
@@ -42,7 +42,23 @@ pub struct TranscodeError {
     detail: String,
     source: Option<Box<dyn Error + Send + Sync + 'static>>,
     #[expect(dead_code, reason = "captured for Debug output and RUST_BACKTRACE diagnostics")]
-    backtrace: Box<Backtrace>,
+    backtrace: MaybeBacktrace,
+}
+
+#[derive(Debug)]
+enum MaybeBacktrace {
+    Captured(#[expect(dead_code, reason = "captured for Debug output and RUST_BACKTRACE diagnostics")] Box<Backtrace>),
+    Disabled,
+}
+
+impl MaybeBacktrace {
+    fn capture() -> Self {
+        let backtrace = Backtrace::capture();
+        match backtrace.status() {
+            BacktraceStatus::Captured => Self::Captured(Box::new(backtrace)),
+            BacktraceStatus::Disabled | BacktraceStatus::Unsupported | _ => Self::Disabled,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +79,7 @@ impl TranscodeError {
             kind,
             detail: source.to_string(),
             source: Some(Box::new(source)),
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -96,7 +112,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Serialize,
             detail,
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -105,7 +121,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Structure,
             detail: detail.to_owned(),
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -114,7 +130,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Serialize,
             detail: detail.to_owned(),
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -123,7 +139,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Deserialize,
             detail: format!("{component} contains malformed percent encoding or invalid UTF-8"),
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -133,7 +149,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Deserialize,
             detail: format!("path variable value {value:?} did not parse: {error}"),
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -143,7 +159,7 @@ impl TranscodeError {
             kind: TranscodeErrorKind::Deserialize,
             detail: format!("path variable value {value:?} is not a valid enum value"),
             source: None,
-            backtrace: Box::new(Backtrace::capture()),
+            backtrace: MaybeBacktrace::capture(),
         }
     }
 
@@ -239,5 +255,21 @@ mod tests {
 
         let shape = serde_json::from_slice::<u32>(br#""text""#).expect_err("wrong JSON shape");
         assert_eq!(TranscodeError::body_or_deserialize(shape).kind, TranscodeErrorKind::Deserialize);
+    }
+
+    #[test]
+    fn backtrace_capture_honors_runtime_support() {
+        // Nextest isolates each test in its own process, so enabling backtraces
+        // here does not leak into other tests. On platforms where capture is
+        // supported this exercises the `Captured` arm; elsewhere it falls back
+        // to `Disabled`.
+        //
+        // SAFETY: set before the first backtrace capture in this process, with
+        // no other threads running.
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "1");
+        }
+        let captured = matches!(MaybeBacktrace::capture(), MaybeBacktrace::Captured(_));
+        assert_eq!(captured, std::backtrace::Backtrace::capture().status() == BacktraceStatus::Captured);
     }
 }

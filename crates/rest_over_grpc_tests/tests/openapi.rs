@@ -50,7 +50,6 @@ fn path_parameter_and_query_parameter_are_described() {
 #[test]
 fn create_shelf_binds_the_shelf_body_field() {
     let doc = spec();
-    // CreateShelf uses `body: "shelf"`, so the body is the `shelf` field's type.
     let schema = &doc["paths"]["/v1/shelves"]["post"]["requestBody"]["content"]["application/json"]["schema"];
     assert_eq!(schema["$ref"], "#/components/schemas/library.Shelf");
 }
@@ -70,6 +69,5 @@ fn message_schemas_are_components() {
     assert_eq!(shelf["type"], "object");
     assert_eq!(shelf["properties"]["name"]["type"], "string");
     assert_eq!(shelf["properties"]["theme"]["type"], "string");
-    // The shared error schema is always present.
-    assert_eq!(doc["components"]["schemas"]["Status"]["type"], "object");
+    assert_eq!(doc["components"]["schemas"]["google.rpc.Status"]["type"], "object");
 }

@@ -9,13 +9,14 @@
 
 use core::fmt;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::vec::IntoIter;
 
 use serde::de::value::{StrDeserializer, StringDeserializer};
 use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::value::RawValue;
 use serde_json::{Deserializer as JsonDeserializer, Error as JsonError, Number, Value, from_slice, from_str};
+use smallvec::{SmallVec, smallvec};
 
 use super::request_body_kind::RequestBodyKind;
 use super::{TranscodeError, percent};
@@ -57,18 +58,27 @@ fn all_flat(query: &[(&str, &str)]) -> bool {
     query.iter().all(|(key, _)| !key.contains('.'))
 }
 
-fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
-    let mut overlay: Vec<(&str, Vec<Cow<'_, str>>)> = Vec::with_capacity(query.len());
-    let mut overlay_index: HashMap<&str, usize> = HashMap::with_capacity(query.len());
-    for (key, value) in query {
-        let decoded = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
-        if let Some(&index) = overlay_index.get(key) {
-            overlay[index].1.push(decoded);
-        } else {
-            overlay_index.insert(*key, overlay.len());
-            overlay.push((key, vec![decoded]));
-        }
+/// Normalizes a proto3-JSON field key for identity comparison.
+///
+/// proto3 JSON accepts a field under both its `snake_case` proto name and its
+/// `lowerCamelCase` JSON name, which denote the same field. Folding case and
+/// dropping `_` maps both spellings to one key, so the overlay can treat them as
+/// the same field when deduplicating body entries and applying query overrides.
+fn normalized_key(key: &str) -> Cow<'_, str> {
+    if key.bytes().all(|byte| byte != b'_' && !byte.is_ascii_uppercase()) {
+        Cow::Borrowed(key)
+    } else {
+        Cow::Owned(key.chars().filter(|&ch| ch != '_').map(|ch| ch.to_ascii_lowercase()).collect())
     }
+}
+
+type QueryValues<'de> = SmallVec<[Cow<'de, str>; 2]>;
+type FlatOverlay<'de> = SmallVec<[(&'de str, QueryValues<'de>); 8]>;
+type FlatOverlayIndex<'de> = HashMap<&'de str, usize>;
+type GroupedFlatQuery<'de> = (FlatOverlay<'de>, Option<FlatOverlayIndex<'de>>);
+
+fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
+    let (overlay, _overlay_index) = group_flat_query(query)?;
 
     let mut body_entries = match body {
         Some(bytes) if !bytes.is_empty() => match from_slice::<BodyTop<'_>>(bytes) {
@@ -78,7 +88,16 @@ fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)])
         _ => Vec::new(),
     };
 
-    body_entries.retain(|(key, _)| !overlay_index.contains_key(key.as_str()));
+    let query_norms: SmallVec<[Cow<'_, str>; 8]> = overlay.iter().map(|(key, _)| normalized_key(key)).collect();
+    let query_norm_set: Option<HashSet<&str>> =
+        (query_norms.len() > query_norms.inline_size()).then(|| query_norms.iter().map(Cow::as_ref).collect());
+    body_entries.retain(|(key, _)| {
+        let normalized = normalized_key(key);
+        match &query_norm_set {
+            Some(set) => !set.contains(normalized.as_ref()),
+            None => !query_norms.contains(&normalized),
+        }
+    });
 
     let map = OverlayMap {
         body: body_entries.into_iter(),
@@ -88,9 +107,37 @@ fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)])
     T::deserialize(OverlayDeserializer { map }).map_err(TranscodeError::deserialize)
 }
 
+fn group_flat_query<'de>(query: &[(&'de str, &'de str)]) -> Result<GroupedFlatQuery<'de>, TranscodeError> {
+    let mut overlay = FlatOverlay::new();
+    let mut overlay_index: Option<FlatOverlayIndex<'de>> = None;
+    for (key, value) in query {
+        let decoded = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
+        let existing = match &overlay_index {
+            Some(index) => index.get(key).copied(),
+            None => overlay.iter().position(|(existing, _)| existing == key),
+        };
+        if let Some(index) = existing {
+            overlay[index].1.push(decoded);
+        } else {
+            if overlay_index.is_none() && overlay.len() == overlay.inline_size() {
+                let mut index = HashMap::with_capacity(query.len());
+                index.extend(overlay.iter().enumerate().map(|(position, (existing, _))| (*existing, position)));
+                overlay_index = Some(index);
+            }
+            if let Some(index) = &mut overlay_index {
+                index.insert(*key, overlay.len());
+            }
+            overlay.push((key, smallvec![decoded]));
+        }
+    }
+    Ok((overlay, overlay_index))
+}
+
 fn classify_body_error(bytes: &[u8]) -> TranscodeError {
     match from_slice::<Value>(bytes) {
         Err(source) => TranscodeError::body(source),
+        // A valid JSON object that `BodyTop` rejects can only fail its duplicate-field check.
+        Ok(Value::Object(_)) => TranscodeError::structure("request body contains a duplicate field"),
         Ok(_) => TranscodeError::structure("request body must be a JSON object"),
     }
 }
@@ -114,15 +161,13 @@ impl<'de> serde::Deserialize<'de> for BodyTop<'de> {
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut entries: Vec<(String, &'de RawValue)> = Vec::new();
-                let mut entry_index: HashMap<String, usize> = HashMap::new();
+                let mut seen: HashMap<String, ()> = HashMap::new();
                 while let Some(key) = map.next_key::<String>()? {
                     let value: &'de RawValue = map.next_value()?;
-                    if let Some(&index) = entry_index.get(&key) {
-                        entries[index].1 = value;
-                    } else {
-                        entry_index.insert(key.clone(), entries.len());
-                        entries.push((key, value));
+                    if seen.insert(normalized_key(&key).into_owned(), ()).is_some() {
+                        return Err(serde::de::Error::custom("request body contains a duplicate field"));
                     }
+                    entries.push((key, value));
                 }
                 Ok(BodyTop { entries })
             }
@@ -134,13 +179,13 @@ impl<'de> serde::Deserialize<'de> for BodyTop<'de> {
 
 enum Pending<'de> {
     Raw(&'de RawValue),
-    Query(Vec<Cow<'de, str>>),
+    Query(QueryValues<'de>),
 }
 
 struct OverlayMap<'de, B, O>
 where
     B: Iterator<Item = (String, &'de RawValue)>,
-    O: Iterator<Item = (&'de str, Vec<Cow<'de, str>>)>,
+    O: Iterator<Item = (&'de str, QueryValues<'de>)>,
 {
     body: B,
     overlay: O,
@@ -150,7 +195,7 @@ where
 impl<'de, B, O> MapAccess<'de> for OverlayMap<'de, B, O>
 where
     B: Iterator<Item = (String, &'de RawValue)>,
-    O: Iterator<Item = (&'de str, Vec<Cow<'de, str>>)>,
+    O: Iterator<Item = (&'de str, QueryValues<'de>)>,
 {
     type Error = JsonError;
 
@@ -182,7 +227,7 @@ where
 struct OverlayDeserializer<'de, B, O>
 where
     B: Iterator<Item = (String, &'de RawValue)>,
-    O: Iterator<Item = (&'de str, Vec<Cow<'de, str>>)>,
+    O: Iterator<Item = (&'de str, QueryValues<'de>)>,
 {
     map: OverlayMap<'de, B, O>,
 }
@@ -190,7 +235,7 @@ where
 impl<'de, B, O> Deserializer<'de> for OverlayDeserializer<'de, B, O>
 where
     B: Iterator<Item = (String, &'de RawValue)>,
-    O: Iterator<Item = (&'de str, Vec<Cow<'de, str>>)>,
+    O: Iterator<Item = (&'de str, QueryValues<'de>)>,
 {
     type Error = JsonError;
 
@@ -206,7 +251,7 @@ where
 }
 
 struct QueryValue<'de> {
-    values: Vec<Cow<'de, str>>,
+    values: QueryValues<'de>,
 }
 
 impl QueryValue<'_> {
@@ -363,7 +408,7 @@ where
 }
 
 struct QuerySequence<'de> {
-    values: IntoIter<Cow<'de, str>>,
+    values: smallvec::IntoIter<[Cow<'de, str>; 2]>,
 }
 
 impl<'de> SeqAccess<'de> for QuerySequence<'de> {
@@ -372,14 +417,14 @@ impl<'de> SeqAccess<'de> for QuerySequence<'de> {
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error> {
         self.values
             .next()
-            .map(|value| seed.deserialize(QueryValue { values: vec![value] }))
+            .map(|value| seed.deserialize(QueryValue { values: smallvec![value] }))
             .transpose()
     }
 }
 
 enum QueryNode {
     Map(Vec<(String, Self)>),
-    Leaf(Vec<String>),
+    Leaf(SmallVec<[String; 2]>),
 }
 
 fn decode_tree<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
@@ -420,7 +465,7 @@ fn insert_query_node<'a>(
             if has_more {
                 QueryNode::Map(Vec::new())
             } else {
-                QueryNode::Leaf(Vec::new())
+                QueryNode::Leaf(SmallVec::new())
             },
         ));
         &mut map.last_mut().expect("entry was pushed immediately above").1
@@ -450,10 +495,11 @@ impl<'de> Deserializer<'de> for TreeDeserializer<'de> {
     fn deserialize_any<V: Visitor<'de>>(mut self, visitor: V) -> Result<V::Value, Self::Error> {
         let mut query = Vec::with_capacity(self.query.len());
         for (key, node) in self.query {
+            let normalized = normalized_key(&key);
             let body = self
                 .body
                 .iter()
-                .position(|(body_key, _)| *body_key == key)
+                .position(|(body_key, _)| normalized_key(body_key) == normalized)
                 .map(|index| self.body.remove(index).1);
             query.push((key, node, body));
         }
@@ -541,6 +587,94 @@ mod tests {
     }
 
     #[test]
+    fn normalized_key_borrows_plain_keys_and_folds_snake_and_camel() {
+        assert!(matches!(normalized_key("theme"), Cow::Borrowed("theme")));
+        assert!(matches!(normalized_key("shelf_name"), Cow::Owned(owned) if owned == "shelfname"));
+        assert!(matches!(normalized_key("shelfName"), Cow::Owned(owned) if owned == "shelfname"));
+    }
+
+    #[test]
+    fn normalized_key_folds_ascii_case_without_garbling_multibyte_chars() {
+        assert!(matches!(normalized_key("Café_Bar"), Cow::Owned(owned) if owned == "cafébar"));
+    }
+
+    #[test]
+    fn large_query_deduplicates_body_entries_through_a_set() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Nine {
+            a: String,
+            b: String,
+            c: String,
+            d: String,
+            e: String,
+            f: String,
+            g: String,
+            h: String,
+            i: String,
+        }
+
+        let query = [
+            ("a", "qa"),
+            ("b", "qb"),
+            ("c", "qc"),
+            ("d", "qd"),
+            ("e", "qe"),
+            ("f", "qf"),
+            ("g", "qg"),
+            ("h", "qh"),
+            ("i", "qi"),
+        ];
+        let decoded: Nine = decode_flat(Some(br#"{"a":"body"}"#), &query).expect("decodes");
+        assert_eq!(decoded.a, "qa");
+        assert_eq!(decoded.i, "qi");
+    }
+
+    #[test]
+    fn small_flat_queries_keep_grouping_storage_inline() {
+        let query = [
+            ("a", "1"),
+            ("b", "2"),
+            ("c", "3"),
+            ("d", "4"),
+            ("e", "5"),
+            ("f", "6"),
+            ("g", "7"),
+            ("a", "8"),
+        ];
+        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        assert!(!overlay.spilled());
+        assert!(index.is_none());
+        assert!(overlay.iter().all(|(_, values)| !values.spilled()));
+        assert_eq!(overlay[0].1.as_slice(), ["1", "8"]);
+    }
+
+    #[test]
+    fn large_flat_queries_use_a_hash_index() {
+        let query = [
+            ("a", "1"),
+            ("b", "2"),
+            ("c", "3"),
+            ("d", "4"),
+            ("e", "5"),
+            ("f", "6"),
+            ("g", "7"),
+            ("h", "8"),
+            ("i", "9"),
+        ];
+        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        assert!(overlay.spilled());
+        assert_eq!(index.expect("large query is indexed").len(), query.len());
+    }
+
+    #[test]
+    fn repeated_flat_query_does_not_build_a_hash_index() {
+        let query = [("tag", "a"); 16];
+        let (overlay, index) = group_flat_query(&query).expect("query groups");
+        assert_eq!(overlay.len(), 1);
+        assert!(index.is_none());
+    }
+
+    #[test]
     fn repeated_query_keys_are_presented_as_a_sequence() {
         let decoded: Option<Result<Shelf, _>> = try_decode_overlay(
             &RequestBodyKind::None,
@@ -591,32 +725,49 @@ mod tests {
     }
 
     #[test]
-    fn a_repeated_body_key_keeps_the_last_occurrence() {
-        // The top-level body scan de-duplicates repeated keys, last-write-wins.
+    fn a_repeated_body_key_is_rejected() {
         let body = br#"{"theme":"first","shelf":"7","theme":"second"}"#;
-        let decoded: Shelf = try_decode_overlay(&RequestBodyKind::Whole, &[], body)
+        let error = try_decode_overlay::<Shelf>(&RequestBodyKind::Whole, &[], body)
             .expect("flat whole-body input takes the overlay path")
-            .expect("decodes");
-        assert_eq!(
-            decoded,
-            Shelf {
-                shelf: "7".to_owned(),
-                theme: "second".to_owned()
-            }
-        );
+            .expect_err("duplicate body fields are rejected");
+        assert!(error.to_string().contains("duplicate field"));
     }
 
     #[test]
-    fn query_shadows_repeated_body_keys() {
+    fn query_does_not_rescue_a_repeated_body_key() {
         let body = br#"{"theme":"first","shelf":"body","theme":"second"}"#;
-        let decoded: Shelf = decode_flat(Some(body), &[("shelf", "query")]).expect("decodes");
-        assert_eq!(
-            decoded,
-            Shelf {
-                shelf: "query".to_owned(),
-                theme: "second".to_owned()
-            }
-        );
+        let error = decode_flat::<Shelf>(Some(body), &[("shelf", "query")]).expect_err("duplicate body fields are rejected");
+        assert!(error.to_string().contains("duplicate field"));
+    }
+
+    #[test]
+    fn query_overrides_a_body_field_spelled_in_the_other_case() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Options {
+            #[serde(alias = "includeArchived")]
+            include_archived: bool,
+        }
+
+        let body = br#"{"includeArchived":false}"#;
+        let decoded: Options = decode_flat(Some(body), &[("include_archived", "true")]).expect("query overrides camelCase body field");
+        assert_eq!(decoded, Options { include_archived: true });
+
+        let body = br#"{"include_archived":false}"#;
+        let decoded: Options = decode_flat(Some(body), &[("includeArchived", "true")]).expect("query overrides snake_case body field");
+        assert_eq!(decoded, Options { include_archived: true });
+    }
+
+    #[test]
+    fn a_body_field_repeated_under_mixed_case_is_rejected() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Options {
+            #[serde(alias = "includeArchived")]
+            include_archived: bool,
+        }
+
+        let body = br#"{"include_archived":false,"includeArchived":true}"#;
+        let error = decode_flat::<Options>(Some(body), &[]).expect_err("mixed-case duplicate body fields are rejected");
+        assert!(error.to_string().contains("duplicate field"));
     }
 
     #[derive(Debug, PartialEq)]

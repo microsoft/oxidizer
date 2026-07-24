@@ -234,9 +234,6 @@ impl pb::Library for MyShelfService {
     }
 
     async fn list_shelves_by_genre(&self, request: ListShelvesByGenreRequest, _cx: &mut Context) -> Result<ListShelvesResponse, Status> {
-        // No `volo` counterpart: this handler filters the sample shelves by the
-        // decoded enum value directly (the `{genre}` path variable arrives as its
-        // `i32`, from either the value name or its number).
         let theme = match request.genre() {
             Genre::History => "history",
             Genre::Science => "science",
@@ -247,11 +244,6 @@ impl pb::Library for MyShelfService {
     }
 
     async fn stream_shelves(&self, request: ListShelvesRequest, _cx: &mut Context) -> Result<ResponseStream<Shelf>, Status> {
-        // Both a `volo` streaming method and the generated trait method have the
-        // same two-phase shape: `async fn -> Result<Stream, Status>`. Await
-        // initiation, map the initiation error, then box and error-map the
-        // response stream (`volo`'s stream is `Send + 'static`), so it streams to
-        // the wire after transcode returns.
         let stream = <Self as volo_gen::LibraryServer>::stream_shelves(self, volo_gen::Request::new(request))
             .await
             .map(volo_gen::Response::into_inner)
@@ -264,9 +256,9 @@ impl pb::Library for MyShelfService {
 async fn main() {
     let service = rest_over_grpc_examples::custom::Transcoder::new(MyShelfService);
     let requests = [
-        ("GET", "/v1/shelves/history"), // unary
-        ("GET", "/v1/shelves"),         // unary list
-        ("GET", "/v1/shelves:stream"),  // server-streaming
+        ("GET", "/v1/shelves/history"),
+        ("GET", "/v1/shelves"),
+        ("GET", "/v1/shelves:stream"),
     ];
 
     for (method, target) in requests {

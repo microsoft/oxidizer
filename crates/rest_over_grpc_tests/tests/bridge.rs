@@ -38,8 +38,6 @@ fn streaming(response: TranscodeResponse) -> (String, Vec<u8>) {
 
 #[test]
 fn tonic_bridge_transcodes_unary() {
-    // `GreeterService` only implements the tonic trait; the generated bridge makes
-    // it a REST service, so `transcode` transcodes the `GET /v1/greet/{name}` route.
     let response = unary(block_on(Transcoder::new(GreeterService).transcode(
         "GET",
         "/v1/greet/World",
@@ -53,9 +51,6 @@ fn tonic_bridge_transcodes_unary() {
 
 #[test]
 fn tonic_bridge_maps_handler_status_to_not_found() {
-    // A handler-returned `tonic::Status::not_found` (for the `missing` sentinel)
-    // is bridged to a REST 404 carrying the handler's message — distinct from an
-    // unmatched route's generic 404.
     let response = unary(block_on(Transcoder::new(GreeterService).transcode(
         "GET",
         "/v1/greet/missing",
@@ -69,7 +64,6 @@ fn tonic_bridge_maps_handler_status_to_not_found() {
 
 #[test]
 fn tonic_bridge_maps_status_to_not_found() {
-    // An unmatched route falls through to a 404 via the generated `transcode`.
     let response = unary(block_on(Transcoder::new(GreeterService).transcode(
         "GET",
         "/v1/nope",
@@ -81,8 +75,6 @@ fn tonic_bridge_maps_status_to_not_found() {
 
 #[test]
 fn tonic_bridge_transcodes_server_streaming_as_json_array() {
-    // The server-streaming RPC is bridged too; the streaming `transcode` yields
-    // frames that concatenate into a JSON array (the default encoding).
     let (content_type, body) = streaming(block_on(Transcoder::new(GreeterService).transcode(
         "GET",
         "/v1/greet/World:stream",
@@ -97,7 +89,6 @@ fn tonic_bridge_transcodes_server_streaming_as_json_array() {
 
 #[test]
 fn tonic_bridge_negotiates_ndjson_for_streaming() {
-    // An `Accept: application/x-ndjson` request gets newline-delimited JSON.
     let mut headers = http::HeaderMap::new();
     let _ = headers.insert(http::header::ACCEPT, http::HeaderValue::from_static("application/x-ndjson"));
     let (content_type, body) = streaming(block_on(Transcoder::new(GreeterService).transcode(
@@ -109,4 +100,49 @@ fn tonic_bridge_negotiates_ndjson_for_streaming() {
     assert_eq!(content_type, "application/x-ndjson");
     let text = String::from_utf8(body).expect("utf8 body");
     assert_eq!(text, "{\"message\":\"Hello, World!\"}\n{\"message\":\"Bye, World!\"}\n");
+}
+
+#[test]
+fn tonic_bridge_forwards_streaming_response_metadata() {
+    use std::pin::Pin;
+
+    use futures::stream::{self, Stream};
+    use rest_over_grpc_tests::tonic_bridge::greeter::{HelloReply, HelloRequest, greeter_server};
+
+    #[derive(Clone, Copy)]
+    struct MetadataGreeter;
+
+    #[tonic::async_trait]
+    impl greeter_server::Greeter for MetadataGreeter {
+        async fn say_hello(&self, _request: tonic::Request<HelloRequest>) -> Result<tonic::Response<HelloReply>, tonic::Status> {
+            Err(tonic::Status::unimplemented("unary is not exercised by this test"))
+        }
+
+        type StreamGreetingsStream = Pin<Box<dyn Stream<Item = Result<HelloReply, tonic::Status>> + Send + 'static>>;
+
+        async fn stream_greetings(
+            &self,
+            _request: tonic::Request<HelloRequest>,
+        ) -> Result<tonic::Response<Self::StreamGreetingsStream>, tonic::Status> {
+            let items = stream::iter(vec![Ok(HelloReply { message: "hi".to_owned() })]);
+            let mut response = tonic::Response::new(Box::pin(items) as Self::StreamGreetingsStream);
+            let _ = response
+                .metadata_mut()
+                .insert("x-greeting-source", tonic::metadata::MetadataValue::from_static("stream"));
+            Ok(response)
+        }
+    }
+
+    let response = block_on(Transcoder::new(MetadataGreeter).transcode("GET", "/v1/greet/World:stream", http::HeaderMap::new(), b""));
+    let stream = match response {
+        TranscodeResponse::Streaming(stream) => stream,
+        TranscodeResponse::Unary(_) => panic!("expected a streaming response"),
+    };
+    assert_eq!(
+        stream
+            .headers()
+            .get("x-greeting-source")
+            .expect("initial response metadata is forwarded"),
+        "stream"
+    );
 }
