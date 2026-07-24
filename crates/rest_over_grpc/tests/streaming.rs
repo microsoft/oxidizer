@@ -95,7 +95,6 @@ fn from_accept_negotiates_the_encoding() {
     assert_eq!(StreamEncoding::from_accept("application/json"), StreamEncoding::JsonArray);
     assert_eq!(StreamEncoding::from_accept("*/*"), StreamEncoding::JsonArray);
     assert_eq!(StreamEncoding::from_accept(""), StreamEncoding::JsonArray);
-    // Quality values take precedence over header order.
     assert_eq!(
         StreamEncoding::from_accept("application/json, text/event-stream;q=0.9"),
         StreamEncoding::JsonArray
@@ -113,10 +112,6 @@ async fn serialization_failure_is_reported_as_internal() {
     let err = results.into_iter().find_map(Result::err).expect("serialize fails");
     assert_eq!(err.code(), Code::Internal);
 }
-
-// Mirrors the server-streaming bridge contract: a two-phase
-// `async fn -> Result<ResponseStream, Status>` that maps the initiation `Status`
-// and error-maps the response stream via `map_stream_status`.
 
 struct FakeStatus(String);
 
@@ -141,7 +136,6 @@ impl FakeService {
         &self,
         start: u32,
     ) -> Result<FakeResponse<impl Stream<Item = Result<u32, FakeStatus>> + Send + 'static>, FakeStatus> {
-        // Mirror `tonic`'s genuinely-async initiation.
         core::future::ready(()).await;
         if self.ok {
             Ok(FakeResponse(stream::iter(vec![Ok(start), Err(FakeStatus("mid".to_owned()))])))
@@ -188,8 +182,6 @@ fn bridge_future_is_send() {
     assert_send(&bridge_call(&service, 1));
 }
 
-// Real-streaming value types (`StreamingResponse` / `TranscodeResponse`).
-
 #[tokio::test]
 async fn streaming_response_encodes_ndjson_frames_lazily() {
     let items = stream::iter(vec![Ok::<_, Status>(Msg { n: 1 }), Ok(Msg { n: 2 })]);
@@ -205,7 +197,7 @@ async fn streaming_response_applies_response_body_mapping() {
     let response = StreamingResponse::encode_response(
         items,
         StreamEncoding::JsonArray,
-        rest_over_grpc::codegen_helpers::ResponseBodyKind::Field("n"),
+        rest_over_grpc::codegen_helpers::ResponseBodyKind::Field { name: "n", default: "0" },
     );
     let frames: Vec<Vec<u8>> = response.into_frames().map(|frame| frame.expect("frame")).collect().await;
     assert_eq!(frames.concat(), b"[7]");

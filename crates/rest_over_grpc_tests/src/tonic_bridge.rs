@@ -31,9 +31,7 @@ pub mod greeter {
     include!(concat!(env!("OUT_DIR"), "/tonic_bridge/greeter.rest.rs"));
 }
 
-// The generated top-level `Transcoder` refers to the service by its proto
-// package path (`greeter::Greeter`), so it is `include!`d at the enclosing scope
-// where `greeter` is a sibling module.
+// Generated paths expect the proto package as a sibling module.
 #[allow(
     clippy::all,
     clippy::pedantic,
@@ -67,8 +65,6 @@ pub struct GreeterService;
 impl greeter_server::Greeter for GreeterService {
     async fn say_hello(&self, request: tonic::Request<HelloRequest>) -> Result<tonic::Response<HelloReply>, tonic::Status> {
         let name = request.into_inner().name;
-        // A failable handler so examples can contrast a handler-returned status
-        // with a routing miss.
         if name == "missing" {
             return Err(tonic::Status::not_found("no greeting for that name"));
         }

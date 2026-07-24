@@ -127,7 +127,13 @@ fn try_decode_fast<T: DeserializeOwned>(
 /// let value: serde_json::Value = serde_json::from_slice(&body)?;
 /// assert_eq!(value["name"], "shelves/7/books/rust");
 ///
-/// let title = encode_response(&book, ResponseBodyKind::Field("title"))?;
+/// let title = encode_response(
+///     &book,
+///     ResponseBodyKind::Field {
+///         name: "title",
+///         default: "\"\"",
+///     },
+/// )?;
 /// assert_eq!(title, br#""The Rust Book""#);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -140,10 +146,13 @@ pub fn encode_response<T: Serialize>(message: &T, kind: ResponseBodyKind) -> Res
 pub(crate) fn encode_response_into<T: Serialize>(message: &T, kind: ResponseBodyKind, body: &mut Vec<u8>) -> Result<(), TranscodeError> {
     match kind {
         ResponseBodyKind::Whole => to_writer(body, message).map_err(TranscodeError::serialize),
-        ResponseBodyKind::Field(field) => match message.serialize(FieldSerializer::new(field, body)) {
+        ResponseBodyKind::Field { name, default } => match message.serialize(FieldSerializer::new(name, body)) {
             Ok(()) => Ok(()),
-            Err(FieldSerError::Absent) => Err(TranscodeError::response_structure("response_body field is absent from the message")),
-            Err(FieldSerError::Unsupported) => encode_field_via_value_into(message, field, body),
+            Err(FieldSerError::Absent) => {
+                body.extend_from_slice(default.as_bytes());
+                Ok(())
+            }
+            Err(FieldSerError::Unsupported) => encode_field_via_value_into(message, name, body),
             Err(FieldSerError::Json(source)) => Err(TranscodeError::serialize(source)),
             Err(FieldSerError::Custom(detail)) => Err(TranscodeError::serialize_message(detail)),
         },
@@ -253,7 +262,14 @@ mod tests {
             name: "shelves/1".to_owned(),
             size: 3,
         };
-        let bytes = encode_response(&resp, ResponseBodyKind::Field("name")).expect("encodes");
+        let bytes = encode_response(
+            &resp,
+            ResponseBodyKind::Field {
+                name: "name",
+                default: "null",
+            },
+        )
+        .expect("encodes");
         assert_eq!(bytes, br#""shelves/1""#);
     }
 
@@ -265,7 +281,15 @@ mod tests {
         };
         let mut body = b"prefix:".to_vec();
 
-        encode_response_into(&resp, ResponseBodyKind::Field("name"), &mut body).expect("encodes");
+        encode_response_into(
+            &resp,
+            ResponseBodyKind::Field {
+                name: "name",
+                default: "null",
+            },
+            &mut body,
+        )
+        .expect("encodes");
 
         assert_eq!(body, br#"prefix:"shelves/1""#);
     }
@@ -276,7 +300,14 @@ mod tests {
             name: "n".to_owned(),
             size: 42,
         };
-        let bytes = encode_response(&resp, ResponseBodyKind::Field("size")).expect("encodes");
+        let bytes = encode_response(
+            &resp,
+            ResponseBodyKind::Field {
+                name: "size",
+                default: "null",
+            },
+        )
+        .expect("encodes");
         assert_eq!(bytes, b"42");
     }
 
@@ -296,7 +327,14 @@ mod tests {
             inner: Inner { a: "x".to_owned(), b: 1 },
             other: 9,
         };
-        let bytes = encode_response(&outer, ResponseBodyKind::Field("inner")).expect("encodes");
+        let bytes = encode_response(
+            &outer,
+            ResponseBodyKind::Field {
+                name: "inner",
+                default: "null",
+            },
+        )
+        .expect("encodes");
         let value: Value = serde_json::from_slice(&bytes).expect("valid json");
         assert_eq!(value, serde_json::json!({"a": "x", "b": 1}));
     }
@@ -307,7 +345,14 @@ mod tests {
             name: "wrapped".to_owned(),
             size: 1,
         });
-        let bytes = encode_response(&resp, ResponseBodyKind::Field("name")).expect("encodes");
+        let bytes = encode_response(
+            &resp,
+            ResponseBodyKind::Field {
+                name: "name",
+                default: "null",
+            },
+        )
+        .expect("encodes");
         assert_eq!(bytes, br#""wrapped""#);
     }
 
@@ -322,7 +367,14 @@ mod tests {
             good: "ok".to_owned(),
             bad: Unserializable,
         };
-        let bytes = encode_response(&mixed, ResponseBodyKind::Field("good")).expect("encodes selected field");
+        let bytes = encode_response(
+            &mixed,
+            ResponseBodyKind::Field {
+                name: "good",
+                default: "null",
+            },
+        )
+        .expect("encodes selected field");
         assert_eq!(bytes, br#""ok""#);
     }
 
@@ -332,21 +384,42 @@ mod tests {
         struct Wrap {
             bad: Unserializable,
         }
-        let err = encode_response(&Wrap { bad: Unserializable }, ResponseBodyKind::Field("bad")).expect_err("field fails");
+        let err = encode_response(
+            &Wrap { bad: Unserializable },
+            ResponseBodyKind::Field {
+                name: "bad",
+                default: "null",
+            },
+        )
+        .expect_err("field fails");
         assert_eq!(err.code(), Code::Internal);
         assert!(err.to_string().contains("serialize"));
     }
 
     #[test]
     fn field_selection_maps_top_level_custom_error_to_internal() {
-        let err = encode_response(&Unserializable, ResponseBodyKind::Field("any")).expect_err("top-level serialize fails");
+        let err = encode_response(
+            &Unserializable,
+            ResponseBodyKind::Field {
+                name: "any",
+                default: "null",
+            },
+        )
+        .expect_err("top-level serialize fails");
         assert_eq!(err.code(), Code::Internal);
         assert!(err.to_string().contains("serialize"));
     }
 
     #[test]
     fn field_selection_on_non_object_is_absent() {
-        let err = encode_response(&"scalar", ResponseBodyKind::Field("name")).expect_err("no fields");
+        let err = encode_response(
+            &"scalar",
+            ResponseBodyKind::Field {
+                name: "name",
+                default: "null",
+            },
+        )
+        .expect_err("no fields");
         assert_eq!(err.code(), Code::Internal);
         assert!(err.to_string().starts_with("failed to encode the response:"));
     }
@@ -356,7 +429,14 @@ mod tests {
         let mut map = BTreeMap::new();
         let _ = map.insert("name".to_owned(), "from_map".to_owned());
         let _ = map.insert("theme".to_owned(), "history".to_owned());
-        let bytes = encode_response(&map, ResponseBodyKind::Field("name")).expect("encodes via fallback");
+        let bytes = encode_response(
+            &map,
+            ResponseBodyKind::Field {
+                name: "name",
+                default: "null",
+            },
+        )
+        .expect("encodes via fallback");
         assert_eq!(bytes, br#""from_map""#);
     }
 
@@ -364,8 +444,48 @@ mod tests {
     fn field_selection_map_fallback_reports_absent() {
         let mut map = BTreeMap::new();
         let _ = map.insert("name".to_owned(), "x".to_owned());
-        let err = encode_response(&map, ResponseBodyKind::Field("missing")).expect_err("absent");
+        let err = encode_response(
+            &map,
+            ResponseBodyKind::Field {
+                name: "missing",
+                default: "null",
+            },
+        )
+        .expect_err("absent");
         assert_eq!(err.code(), Code::Internal);
+    }
+
+    #[test]
+    fn defaulted_struct_field_emits_the_supplied_default() {
+        #[expect(
+            clippy::trivially_copy_pass_by_ref,
+            reason = "serde `skip_serializing_if` requires a `fn(&T) -> bool` signature"
+        )]
+        fn is_zero(value: &u32) -> bool {
+            *value == 0
+        }
+        #[derive(Serialize)]
+        struct Msg {
+            #[serde(skip_serializing_if = "is_zero")]
+            code: u32,
+            name: String,
+        }
+        let msg = Msg {
+            code: 0,
+            name: "x".to_owned(),
+        };
+        // `code` is omitted by serialization (mirroring pbjson's proto3
+        // default-omission), so selecting it yields the supplied proto3 default
+        // rather than a 500.
+        let bytes = encode_response(
+            &msg,
+            ResponseBodyKind::Field {
+                name: "code",
+                default: "0",
+            },
+        )
+        .expect("emits default");
+        assert_eq!(bytes, b"0");
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -701,17 +821,23 @@ mod tests {
     }
 
     #[test]
-    fn encode_response_body_field_absent() {
-        let err = encode_response(
+    fn encode_response_body_field_at_default_emits_default() {
+        // A selected field absent from the serialization (here `Resp` never emits
+        // a `missing` field) yields the supplied proto3-JSON default rather than
+        // a 500. Validated codegen only reaches this path when a real field holds
+        // its default value.
+        let bytes = encode_response(
             &Resp {
                 name: "n".to_owned(),
                 size: 1,
             },
-            ResponseBodyKind::Field("missing"),
+            ResponseBodyKind::Field {
+                name: "missing",
+                default: "null",
+            },
         )
-        .expect_err("absent");
-        assert_eq!(err.code(), Code::Internal);
-        assert!(err.into_status().message().starts_with("failed to encode the response:"));
+        .expect("emits default");
+        assert_eq!(bytes, b"null");
     }
 
     #[test]

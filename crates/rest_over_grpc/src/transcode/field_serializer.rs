@@ -120,95 +120,95 @@ impl<'a> Serializer for FieldSerializer<'a> {
     }
 
     fn serialize_bool(self, _value: bool) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_i8(self, _value: i8) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_i16(self, _value: i16) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_i32(self, _value: i32) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_i64(self, _value: i64) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_i128(self, _value: i128) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_u8(self, _value: u8) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_u16(self, _value: u16) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_u32(self, _value: u32) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_u64(self, _value: u64) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_u128(self, _value: u128) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_f32(self, _value: f32) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_f64(self, _value: f64) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_char(self, _value: char) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_str(self, _value: &str) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_bytes(self, _value: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_unit_variant(self, _name: &'static str, _index: u32, _variant: &'static str) -> Result<Self::Ok, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 
     fn serialize_tuple_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Err(FieldSerError::Absent)
+        Err(FieldSerError::Unsupported)
     }
 }
 
@@ -252,36 +252,36 @@ mod tests {
     }
 
     #[test]
-    fn scalar_and_sequence_shapes_report_absent() {
-        assert_variant!(FieldSerError::Absent, serialize_bool(true));
-        assert_variant!(FieldSerError::Absent, serialize_i8(0));
-        assert_variant!(FieldSerError::Absent, serialize_i16(0));
-        assert_variant!(FieldSerError::Absent, serialize_i32(0));
-        assert_variant!(FieldSerError::Absent, serialize_i64(0));
-        assert_variant!(FieldSerError::Absent, serialize_i128(0));
-        assert_variant!(FieldSerError::Absent, serialize_u8(0));
-        assert_variant!(FieldSerError::Absent, serialize_u16(0));
-        assert_variant!(FieldSerError::Absent, serialize_u32(0));
-        assert_variant!(FieldSerError::Absent, serialize_u64(0));
-        assert_variant!(FieldSerError::Absent, serialize_u128(0));
-        assert_variant!(FieldSerError::Absent, serialize_f32(0.0));
-        assert_variant!(FieldSerError::Absent, serialize_f64(0.0));
-        assert_variant!(FieldSerError::Absent, serialize_char('a'));
-        assert_variant!(FieldSerError::Absent, serialize_str("s"));
-        assert_variant!(FieldSerError::Absent, serialize_bytes(b"b"));
-        assert_variant!(FieldSerError::Absent, serialize_none());
-        assert_variant!(FieldSerError::Absent, serialize_unit());
-        assert_variant!(FieldSerError::Absent, serialize_unit_struct("U"));
-        assert_variant!(FieldSerError::Absent, serialize_unit_variant("E", 0, "V"));
-        assert_variant!(FieldSerError::Absent, serialize_seq(None));
-        assert_variant!(FieldSerError::Absent, serialize_tuple(2));
-        assert_variant!(FieldSerError::Absent, serialize_tuple_struct("T", 2));
+    fn scalar_and_sequence_shapes_report_unsupported() {
+        assert_variant!(FieldSerError::Unsupported, serialize_bool(true));
+        assert_variant!(FieldSerError::Unsupported, serialize_i8(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_i16(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_i32(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_i64(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_i128(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_u8(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_u16(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_u32(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_u64(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_u128(0));
+        assert_variant!(FieldSerError::Unsupported, serialize_f32(0.0));
+        assert_variant!(FieldSerError::Unsupported, serialize_f64(0.0));
+        assert_variant!(FieldSerError::Unsupported, serialize_char('a'));
+        assert_variant!(FieldSerError::Unsupported, serialize_str("s"));
+        assert_variant!(FieldSerError::Unsupported, serialize_bytes(b"b"));
+        assert_variant!(FieldSerError::Unsupported, serialize_none());
+        assert_variant!(FieldSerError::Unsupported, serialize_unit());
+        assert_variant!(FieldSerError::Unsupported, serialize_unit_struct("U"));
+        assert_variant!(FieldSerError::Unsupported, serialize_unit_variant("E", 0, "V"));
+        assert_variant!(FieldSerError::Unsupported, serialize_seq(None));
+        assert_variant!(FieldSerError::Unsupported, serialize_tuple(2));
+        assert_variant!(FieldSerError::Unsupported, serialize_tuple_struct("T", 2));
     }
 
     #[test]
     fn option_and_newtype_forward_to_the_inner_value() {
-        assert_variant!(FieldSerError::Absent, serialize_some(&0_i32));
-        assert_variant!(FieldSerError::Absent, serialize_newtype_struct("N", &0_i32));
+        assert_variant!(FieldSerError::Unsupported, serialize_some(&0_i32));
+        assert_variant!(FieldSerError::Unsupported, serialize_newtype_struct("N", &0_i32));
     }
 
     #[test]

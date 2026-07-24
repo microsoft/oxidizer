@@ -172,7 +172,7 @@ quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 regex = { version = "1.12.2", default-features = false }
-rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.1.0" }
+rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.2.0" }
 route-recognizer = { version = "0.3.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.1.0" }
 routerama_build = { path = "crates/routerama_build", default-features = false, version = "0.1.0" }
