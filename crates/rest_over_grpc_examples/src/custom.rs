@@ -38,10 +38,7 @@ pub mod pb {
     include!(concat!(env!("OUT_DIR"), "/custom/library.rest.rs"));
 }
 
-// The generated top-level `Transcoder` refers to each service by its
-// module-qualified path (`{proto package}::Trait` / `::RequestType`). This proto
-// package is `library`, so we alias the `pb` module accordingly and `include!`
-// the transcoder at the enclosing scope where `library` is a sibling module.
+// Generated paths expect the proto package as a sibling module.
 use pb as library;
 
 #[allow(
@@ -83,8 +80,6 @@ impl pb::Library for InMemoryLibrary {
             })));
         }
 
-        // Propagate a caller-supplied trace id back to the response, and set a
-        // cache validator — both request- and response-side metadata.
         if let Some(trace) = cx.request_headers().get("x-trace-id").cloned() {
             _ = cx.response_headers_mut().insert(HeaderName::from_static("x-trace-id"), trace);
         }
@@ -99,7 +94,6 @@ impl pb::Library for InMemoryLibrary {
     async fn create_shelf(&self, request: CreateShelfRequest, cx: &mut Context) -> Result<Shelf, Status> {
         let mut created = request.shelf.ok_or_else(|| Status::invalid_argument("shelf is required"))?;
         "shelves/created".clone_into(&mut created.name);
-        // Point the client at the freshly created resource.
         _ = cx.insert_response_header(HeaderName::from_static("location"), HeaderValue::from_static("/v1/shelves/created"));
         Ok(created)
     }
@@ -123,8 +117,6 @@ impl pb::Library for InMemoryLibrary {
     }
 
     async fn list_shelves_by_genre(&self, request: ListShelvesByGenreRequest, _cx: &mut Context) -> Result<ListShelvesResponse, Status> {
-        // The enum path variable arrives as its `i32` value, decoded from either
-        // the value name (`SCIENCE`) or its number (`2`).
         let theme = match request.genre() {
             Genre::History => "history",
             Genre::Science => "science",

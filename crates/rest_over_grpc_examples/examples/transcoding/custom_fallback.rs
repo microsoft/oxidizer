@@ -24,14 +24,10 @@ use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
 async fn handle(library: &Transcoder<LibraryService>, method: &str, target: &str, headers: HeaderMap, body: &[u8]) -> TranscodeResponse {
     let path = target.split('?').next().unwrap_or(target);
 
-    // A non-generated route, handled before the transcoder.
     if method == "GET" && path == "/healthz" {
         return HttpResponse::ok_json(br#"{"status":"ok"}"#.to_vec()).into();
     }
 
-    // Delegate to the generated routes. `None` means none matched — a genuine
-    // routing miss, as opposed to a handler returning `Status::not_found`, which
-    // comes back as `Some(404)` and is served as-is.
     library
         .try_transcode(method, target, headers, body)
         .await
@@ -51,14 +47,13 @@ fn main() {
     let library = Transcoder::new(LibraryService);
 
     let requests = [
-        ("GET", "/v1/shelves/history"), // a generated route
-        ("GET", "/healthz"),            // the hand-written route
-        ("GET", "/v1/shelves/missing"), // matched route, handler returns not-found
-        ("GET", "/nope"),               // no route → custom fallback
+        ("GET", "/v1/shelves/history"),
+        ("GET", "/healthz"),
+        ("GET", "/v1/shelves/missing"),
+        ("GET", "/nope"),
     ];
 
     for (method, target) in requests {
-        // Every route in this example is unary, so the response is always buffered.
         let TranscodeResponse::Unary(response) = futures::executor::block_on(handle(&library, method, target, HeaderMap::new(), b""))
         else {
             unreachable!("this example only exercises unary routes");

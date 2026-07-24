@@ -40,14 +40,11 @@ mod linux {
     use gungraun::{library_benchmark, library_benchmark_group};
     use rest_over_grpc_tests::bench_router::Route;
 
-    // The shared route table (`ROUTES`).
     include!("../bench_routes.rs");
 
     type MethodAwareRouter = matchit::Router<Vec<(&'static str, &'static str)>>;
 
-    // Builds a method-aware `matchit` router from `ROUTES` (path-keyed trie, each
-    // node carrying its `(method, rpc)` pairs, as `axum` layers method routing on
-    // `matchit`). Runs in setup, so its allocation is not measured.
+    // Setup is excluded from the measured region.
     fn build_matchit() -> MethodAwareRouter {
         let mut by_path: Vec<(String, Vec<(&'static str, &'static str)>)> = Vec::new();
         for (rpc, method, pattern) in ROUTES {
@@ -67,9 +64,7 @@ mod linux {
         router
     }
 
-    // Converts a `google.api.http` template into `matchit` 0.8 syntax: `{var}` stays
-    // `{var}` (dots sanitized to `_`), a trailing `{var=**}` becomes a `{*var}`
-    // catch-all.
+    // Convert trailing `{var=**}` captures to matchit's `{*var}` syntax.
     fn to_matchit_path(pattern: &str) -> String {
         let mut out = String::with_capacity(pattern.len());
         for segment in pattern.split('/') {
@@ -103,13 +98,11 @@ mod linux {
         })
     }
 
-    // Generated router: a shallow two-segment hit.
     #[library_benchmark]
     fn generated_shallow() {
         black_box(Route::resolve(black_box("GET"), black_box("/v1/users/octocat")));
     }
 
-    // Generated router: a deep six-segment hit.
     #[library_benchmark]
     fn generated_deep() {
         black_box(Route::resolve(
@@ -118,7 +111,6 @@ mod linux {
         ));
     }
 
-    // Generated router: a `**` catch-all hit.
     #[library_benchmark]
     fn generated_catch_all() {
         black_box(Route::resolve(
@@ -127,14 +119,12 @@ mod linux {
         ));
     }
 
-    // Generated router: a miss (no route matches).
     #[library_benchmark]
     fn generated_miss() {
         black_box(Route::resolve(black_box("GET"), black_box("/v1/unknown")));
     }
 
-    // `matchit` sibling: shallow hit. Returns the router so its trie drop is not
-    // counted in the measured region.
+    // Returning the router excludes its drop from the measured region.
     #[library_benchmark]
     #[bench::shallow(build_matchit())]
     fn matchit_shallow(router: MethodAwareRouter) -> MethodAwareRouter {
@@ -142,8 +132,6 @@ mod linux {
         router
     }
 
-    // `matchit` sibling: deep hit. Returns the router so its trie drop is not
-    // counted in the measured region.
     #[library_benchmark]
     #[bench::deep(build_matchit())]
     fn matchit_deep(router: MethodAwareRouter) -> MethodAwareRouter {
@@ -155,8 +143,6 @@ mod linux {
         router
     }
 
-    // `matchit` sibling: a `**` catch-all hit. Returns the router so its trie
-    // drop is not counted in the measured region.
     #[library_benchmark]
     #[bench::catch_all(build_matchit())]
     fn matchit_catch_all(router: MethodAwareRouter) -> MethodAwareRouter {
@@ -168,8 +154,6 @@ mod linux {
         router
     }
 
-    // `matchit` sibling: a miss (no route matches). Returns the router so its
-    // trie drop is not counted in the measured region.
     #[library_benchmark]
     #[bench::miss(build_matchit())]
     fn matchit_miss(router: MethodAwareRouter) -> MethodAwareRouter {

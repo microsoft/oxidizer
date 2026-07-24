@@ -26,9 +26,6 @@ use tower_service::Service as _;
 const MAX_BODY_BYTES: usize = 1 << 20;
 
 fn main() {
-    // `RestService::new` wraps the generated `Transcoder` (any `Transcode`) as a
-    // `tower` service directly. Cap buffered requests before exposing it to
-    // untrusted clients.
     let mut service = RestService::new(Transcoder::new(LibraryService)).with_max_body_bytes(MAX_BODY_BYTES);
 
     for target in ["/v1/shelves/history", "/v1/shelves:stream", "/v1/nope"] {
@@ -38,7 +35,6 @@ fn main() {
             .body(Full::new(Bytes::new()))
             .expect("request builds");
 
-        // `call` is what a `hyper`/`axum`/`tower` server invokes per request.
         let response = futures::executor::block_on(service.call(request)).expect("the transcoder is infallible");
 
         let status = response.status().as_u16();

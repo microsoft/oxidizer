@@ -160,7 +160,6 @@ fn from_status_renders_details_and_omits_them_when_empty() {
 fn into_http_appends_custom_headers_and_keeps_content_type_authoritative() {
     let response = HttpResponse::ok_json(b"{}".to_vec())
         .with_header(http::header::LOCATION, http::HeaderValue::from_static("/v1/shelves/7"))
-        // A stray custom content-type must not survive alongside the negotiated one.
         .with_header(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/plain"));
 
     let http = response.into_http();
