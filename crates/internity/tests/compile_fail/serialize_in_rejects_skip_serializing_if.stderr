@@ -1,0 +1,11 @@
+error: internity::SerializeIn does not support serde `skip_serializing_if`: a runtime skip predicate would diverge from the type's ordinary Serde wire schema. Remove the attribute, or use `#[serde(skip_serializing)]` to always omit the field.
+  --> tests/compile_fail/serialize_in_rejects_skip_serializing_if.rs:14:5
+   |
+14 |     value: Option<Sym>,
+   |     ^^^^^
+
+error: internity::SerializeIn does not support serde `skip_serializing_if`: a runtime skip predicate would diverge from the type's ordinary Serde wire schema. Remove the attribute, or use `#[serde(skip_serializing)]` to always omit the field.
+  --> tests/compile_fail/serialize_in_rejects_skip_serializing_if.rs:18:64
+   |
+18 | struct Tuple(#[serde(skip_serializing_if = "Option::is_none")] Option<Sym>);
+   |                                                                ^^^^^^^^^^^

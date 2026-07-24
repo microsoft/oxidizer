@@ -1,0 +1,47 @@
+error[E0277]: the trait bound `Sym: serde::Serialize` is not satisfied
+  --> tests/compile_fail/sym_is_not_serde.rs:13:24
+   |
+13 |     assert_serialize::<Sym>();
+   |                        ^^^ the trait `Serialize` is not implemented for `Sym`
+   |
+   = note: for local types consider adding `#[derive(serde::Serialize)]` to your `Sym` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Serialize`:
+             &'a T
+             &'a mut T
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+             (T0, T1, T2, T3, T4)
+           and $N others
+note: required by a bound in `assert_serialize`
+  --> tests/compile_fail/sym_is_not_serde.rs:9:24
+   |
+ 9 | fn assert_serialize<T: serde::Serialize>() {}
+   |                        ^^^^^^^^^^^^^^^^ required by this bound in `assert_serialize`
+
+error[E0277]: the trait bound `Sym: serde::Deserialize<'de>` is not satisfied
+  --> tests/compile_fail/sym_is_not_serde.rs:14:26
+   |
+14 |     assert_deserialize::<Sym>();
+   |                          ^^^ the trait `Deserialize<'_>` is not implemented for `Sym`
+   |
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `Sym` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `Deserialize<'de>`:
+             &'a Path
+             &'a [u8]
+             &'a str
+             ()
+             (T,)
+             (T0, T1)
+             (T0, T1, T2)
+             (T0, T1, T2, T3)
+           and $N others
+note: required by a bound in `assert_deserialize`
+  --> tests/compile_fail/sym_is_not_serde.rs:10:31
+   |
+10 | fn assert_deserialize<'de, T: serde::Deserialize<'de>>() {}
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `assert_deserialize`
