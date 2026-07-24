@@ -2,6 +2,10 @@
 
 ## [0.5.0] - 2026-07-24
 
+- ⚠️ Breaking
+
+  - `fetch_hyper` 0.4.6 unintentionally broke compatibility while staying on the 0.4.x line by adopting incompatible major versions of `http_extensions`, `anyspawn`, and `tick`. Consumers combining it with `fetch` 0.11.2 (with `tokio` and `native-tls`) can encounter duplicate-version type and trait errors; 0.5.0 makes that break explicit as a major-line bump.
+
 - 🔧 Maintenance
 
   - Now requires `0.7.0` of `bytesbuf`
