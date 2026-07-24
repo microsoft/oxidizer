@@ -21,15 +21,21 @@
 
 mod common;
 
+use core::alloc::Layout;
+use core::ptr::NonNull;
+use std::cell::Cell;
+use std::error::Error;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread;
 
-use allocator_api2::alloc::Global;
+use allocator_api2::alloc::{AllocError as BackingAllocError, Allocator, Global};
 use common::DropCounter;
-use plurality::{AllocError, Pool};
+use plurality::{AllocError, Arc, Box as PoolBox, Pool, Rc};
 
 /// A full, single-slot bounded pool plus the handle keeping it full.
-fn full_pool() -> (Pool<u32>, plurality::Box<u32>) {
+fn full_pool() -> (Pool<u32>, PoolBox<u32>) {
     let pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
     let held = pool.alloc_box(0);
     (pool, held)
@@ -89,7 +95,7 @@ fn closure_and_uninit_constructors() {
     assert_eq!(*unsafe { ub.assume_init() }, 5);
 
     let mut ua = pool.alloc_uninit_arc();
-    plurality::Arc::get_mut(&mut ua).unwrap().write(6);
+    Arc::get_mut(&mut ua).unwrap().write(6);
     // SAFETY: written just above.
     assert_eq!(*unsafe { ua.assume_init() }, 6);
 
@@ -99,7 +105,7 @@ fn closure_and_uninit_constructors() {
     assert_eq!(*unsafe { ul.assume_init() }, 7);
 
     let mut ur = pool.alloc_uninit_rc();
-    plurality::Rc::get_mut(&mut ur).unwrap().write(8);
+    Rc::get_mut(&mut ur).unwrap().write(8);
     // SAFETY: written just above.
     assert_eq!(*unsafe { ur.assume_init() }, 8);
 }
@@ -136,7 +142,6 @@ fn slot_reuse_keeps_capacity() {
     let b = pool.alloc_box(2);
     let _c = pool.alloc_box(3);
     assert_eq!(*b, 2);
-    // First slot was reused; we never needed more than one chunk.
     assert_eq!(pool.chunks_allocated(), 1);
 }
 
@@ -160,7 +165,6 @@ fn bounded_pool_reports_full_and_recovers() {
     assert_eq!(pool.max_capacity(), Some(2));
     let a = pool.alloc_box(1);
     let b = pool.alloc_box(2);
-    // Pool is full now.
     assert!(pool.try_alloc_box(3).is_err());
     drop(a);
     // A slot freed; allocation should succeed again.
@@ -195,7 +199,7 @@ fn rejected_value_is_dropped_when_full() {
 fn try_alloc_with_does_not_call_closure_when_full() {
     let pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
     let _a = pool.alloc_box(1);
-    let called = std::cell::Cell::new(false);
+    let called = Cell::new(false);
     let res = pool.try_alloc_box_with(|| {
         called.set(true);
         99
@@ -206,11 +210,7 @@ fn try_alloc_with_does_not_call_closure_when_full() {
 
 #[test]
 fn closure_panic_returns_slot_to_pool() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    // A panicking `_with` closure must not leak the reserved slot: on a
-    // capacity-1 bounded pool, the slot has to return to the free list so a
-    // subsequent allocation still succeeds (a leak would exhaust the pool).
+    // Unwinding must return the only slot to this bounded pool.
     fn check(alloc_panics: impl Fn(&Pool<u32>)) {
         let pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
 
@@ -241,11 +241,7 @@ struct PanicOnce(StdArc<AtomicBool>);
 
 impl Drop for PanicOnce {
     fn drop(&mut self) {
-        // This value panics the first time it is dropped and returns normally
-        // on every later drop, exercising an unwind through the pool's reclaim
-        // path. `swap` returns the previous flag: it is `false` on the first
-        // drop (so the assert fails and unwinds) and `true` afterwards (so the
-        // assert passes).
+        // Only the first drop panics, allowing slot reclamation to be checked.
         let dropped_before = self.0.swap(true, Ordering::SeqCst);
         assert!(dropped_before, "PanicOnce panics on its first drop");
     }
@@ -257,7 +253,7 @@ fn panicking_destructor_returns_refcounted_slots() {
         let panicked = StdArc::new(AtomicBool::new(false));
         let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
         assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            catch_unwind(AssertUnwindSafe(|| {
                 drop(pool.alloc_box(PanicOnce(panicked.clone())));
             }))
             .is_err()
@@ -270,7 +266,7 @@ fn panicking_destructor_returns_refcounted_slots() {
         let panicked = StdArc::new(AtomicBool::new(false));
         let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
         assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            catch_unwind(AssertUnwindSafe(|| {
                 drop(pool.alloc_arc(PanicOnce(panicked.clone())));
             }))
             .is_err()
@@ -283,7 +279,7 @@ fn panicking_destructor_returns_refcounted_slots() {
         let panicked = StdArc::new(AtomicBool::new(false));
         let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
         assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            catch_unwind(AssertUnwindSafe(|| {
                 drop(pool.alloc_rc(PanicOnce(panicked.clone())));
             }))
             .is_err()
@@ -336,7 +332,7 @@ fn alloc_error_formatting() {
 
     // `AllocError` always implements `core::error::Error` (even in `no_std`),
     // so it can be used as a trait object regardless of the `std` feature.
-    let as_err: &dyn std::error::Error = &err;
+    let as_err: &dyn Error = &err;
     assert_eq!(as_err.to_string(), "the pool reached its maximum capacity");
     assert!(as_err.source().is_none());
 }
@@ -356,12 +352,16 @@ macro_rules! full_panics {
 
 full_panics!(panic_alloc_box, alloc_box, 1);
 full_panics!(panic_alloc_arc, alloc_arc, 1);
+full_panics!(panic_alloc_arc_pin, alloc_arc_pin, 1);
 full_panics!(panic_alloc, alloc, 1);
 full_panics!(panic_alloc_rc, alloc_rc, 1);
+full_panics!(panic_alloc_rc_pin, alloc_rc_pin, 1);
 full_panics!(panic_alloc_box_with, alloc_box_with, || 1);
 full_panics!(panic_alloc_arc_with, alloc_arc_with, || 1);
+full_panics!(panic_alloc_arc_pin_with, alloc_arc_pin_with, || 1);
 full_panics!(panic_alloc_with, alloc_with, || 1);
 full_panics!(panic_alloc_rc_with, alloc_rc_with, || 1);
+full_panics!(panic_alloc_rc_pin_with, alloc_rc_pin_with, || 1);
 full_panics!(panic_alloc_uninit_box, alloc_uninit_box);
 full_panics!(panic_alloc_uninit_arc, alloc_uninit_arc);
 full_panics!(panic_alloc_uninit, alloc_uninit);
@@ -394,11 +394,11 @@ struct FailingAllocator;
 
 // SAFETY: `allocate` always returns `Err`, so no memory is ever handed out and
 // `deallocate` is never called with a pointer from this allocator.
-unsafe impl allocator_api2::alloc::Allocator for FailingAllocator {
-    fn allocate(&self, _layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError> {
-        Err(allocator_api2::alloc::AllocError)
+unsafe impl Allocator for FailingAllocator {
+    fn allocate(&self, _layout: Layout) -> Result<NonNull<[u8]>, BackingAllocError> {
+        Err(BackingAllocError)
     }
-    unsafe fn deallocate(&self, _ptr: core::ptr::NonNull<u8>, _layout: core::alloc::Layout) {}
+    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 }
 
 #[test]
@@ -414,26 +414,26 @@ fn allocator_failure_surfaces_as_allocator_failure() {
 
 // An allocator that tracks the number of live bytes, to prove memory is freed.
 #[derive(Clone)]
-struct CountingAllocator(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+struct CountingAllocator(StdArc<AtomicUsize>);
 
 // SAFETY: forwards to `Global` and only adjusts a counter by the same `layout`.
-unsafe impl allocator_api2::alloc::Allocator for CountingAllocator {
-    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+unsafe impl Allocator for CountingAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BackingAllocError> {
         let p = Global.allocate(layout)?;
-        self.0.fetch_add(layout.size(), std::sync::atomic::Ordering::SeqCst);
+        self.0.fetch_add(layout.size(), Ordering::SeqCst);
         Ok(p)
     }
-    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         // SAFETY: same contract as `Global::deallocate`.
         unsafe { Global.deallocate(ptr, layout) };
-        self.0.fetch_sub(layout.size(), std::sync::atomic::Ordering::SeqCst);
+        self.0.fetch_sub(layout.size(), Ordering::SeqCst);
     }
 }
 
 #[test]
 fn pool_drop_frees_chunks() {
     use std::sync::atomic::Ordering::SeqCst;
-    let live = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let live = StdArc::new(AtomicUsize::new(0));
     {
         let pool = Pool::<u64>::builder()
             .chunk_size(8)
@@ -481,7 +481,7 @@ fn handles_outlive_the_pool() {
 fn send_pool_to_another_thread() {
     let pool = Pool::<u32>::builder().chunk_size(8).build();
     let b = pool.alloc_box(123);
-    let join = std::thread::spawn(move || {
+    let join = thread::spawn(move || {
         let b2 = pool.alloc_box(456);
         *b2 + pool.len() as u32
     });
@@ -511,7 +511,7 @@ fn concurrent_frees() {
         let mut iter = handles.into_iter();
         (0..8).map(|_| (0..N / 8).filter_map(|_| iter.next()).collect()).collect()
     };
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         for chunk in chunks {
             s.spawn(move || {
                 for h in chunk {

@@ -21,44 +21,21 @@
     reason = "gungraun bench inputs are passed by value by the framework"
 )]
 
-//! Cross-crate comparison of steady-state allocate + free, run via [gungraun]
-//! (Callgrind instruction counts — deterministic and noise-free, ideal for
-//! ranking per-operation cost across libraries).
-//!
-//! Each benchmark performs `COUNT` iterations of "materialize one object, then
-//! free it" against a pool that has been **pre-warmed** so the timed region
-//! never grows or allocates from the system: the free list / storage already
-//! holds `CAP` recycled slots. This isolates each pool's hot reuse path.
-//!
-//! Fair-comparison notes:
-//!   * Pools that hand back a slot without a value (`object-pool`, `opool`,
-//!     `deadpool`) get an explicit `*guard = Obj::new(i)` write, matching the
-//!     ~32-byte move that `plurality`/`slab`/`slotmap` pay when inserting.
-//!   * `plurality` is shown twice: `plurality_box` (owned, `Send`,
-//!     pool-refcounted handle) and `plurality_alloc` (lifetime-bound handle
-//!     that skips the refcount). `plurality_alloc` is the fair analog to the
-//!     borrow-bound guards of `object-pool`/`opool`/`deadpool`; `slab`,
-//!     `slotmap`, and `sharded-slab` instead return integer keys.
-//!   * `infinity_pool` is likewise shown twice: `infinity_pinned`
-//!     (`PinnedPool`, reference-counted handle, analog of `plurality_box`) and
-//!     `infinity_raw` (`RawPinnedPool`, no refcount with manual lifetimes,
-//!     analog of `plurality_alloc`).
-//!
-//! Run with: `cargo bench --bench pool_comparison`
-//!
-//! [gungraun]: https://github.com/gungraun/gungraun
+//! Callgrind comparison of pre-warmed allocate-and-free paths. Guard-based
+//! pools receive the same payload write performed by insertion-based pools;
+//! owning and borrow-bound variants are measured separately.
 
 use std::hint::black_box;
 
 use gungraun::prelude::*;
+use plurality::Pool;
 
 /// Iterations of allocate+free per benchmark body.
 const COUNT: u64 = 10_000;
 /// Number of slots each pool is pre-warmed with.
 const CAP: usize = 1024;
 
-/// A small, `Drop`-free ~32-byte payload, so we measure the pool's own
-/// alloc/free cost rather than user destructors.
+/// A `Drop`-free payload that isolates pool allocation costs.
 #[derive(Clone)]
 #[allow(dead_code, reason = "fields set a realistic object size for the benchmark")]
 struct Obj {
@@ -80,8 +57,8 @@ impl Obj {
 // plurality
 // ---------------------------------------------------------------------------
 
-fn setup_plurality(n: usize) -> plurality::Pool<Obj> {
-    let pool = plurality::Pool::<Obj>::builder().chunk_size(CAP as u32).build();
+fn setup_plurality(n: usize) -> Pool<Obj> {
+    let pool = Pool::<Obj>::builder().chunk_size(CAP as u32).build();
     let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
     drop(warm);
     pool
@@ -89,7 +66,7 @@ fn setup_plurality(n: usize) -> plurality::Pool<Obj> {
 
 #[library_benchmark]
 #[bench::churn(args = (CAP,), setup = setup_plurality)]
-fn plurality_box(pool: plurality::Pool<Obj>) -> plurality::Pool<Obj> {
+fn plurality_box(pool: Pool<Obj>) -> Pool<Obj> {
     for i in 0..COUNT {
         let h = pool.alloc_box(black_box(Obj::new(i)));
         drop(black_box(h));
@@ -99,7 +76,7 @@ fn plurality_box(pool: plurality::Pool<Obj>) -> plurality::Pool<Obj> {
 
 #[library_benchmark]
 #[bench::churn(args = (CAP,), setup = setup_plurality)]
-fn plurality_alloc(pool: plurality::Pool<Obj>) -> plurality::Pool<Obj> {
+fn plurality_alloc(pool: Pool<Obj>) -> Pool<Obj> {
     for i in 0..COUNT {
         let h = pool.alloc(black_box(Obj::new(i)));
         drop(black_box(h));

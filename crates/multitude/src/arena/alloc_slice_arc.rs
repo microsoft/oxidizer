@@ -561,7 +561,8 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync + 'static,
     {
-        Arc::into_pin(self.alloc_slice_fill_with_arc::<T, F>(len, f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_slice_fill_with_arc::<T, F>(len, f)) }
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_arc_pin`].
@@ -586,7 +587,10 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync + 'static,
     {
-        self.try_alloc_slice_fill_with_arc::<T, F>(len, f).map(Arc::into_pin)
+        self.try_alloc_slice_fill_with_arc::<T, F>(len, f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
     /// Allocate a pinned [`Rc`] slice of `len` elements initialized by `f(i)`.
@@ -605,7 +609,8 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: 'static,
     {
-        Rc::into_pin(self.alloc_slice_fill_with_rc::<T, F>(len, f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_slice_fill_with_rc::<T, F>(len, f)) }
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_rc_pin`].
@@ -629,7 +634,10 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: 'static,
     {
-        self.try_alloc_slice_fill_with_rc::<T, F>(len, f).map(Rc::into_pin)
+        self.try_alloc_slice_fill_with_rc::<T, F>(len, f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 }
 

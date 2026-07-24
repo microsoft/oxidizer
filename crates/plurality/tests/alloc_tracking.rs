@@ -1,23 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! System-allocation behaviour tests: prove that once a [`Pool`] has grown to
-//! cover its working set, a steady state of allocate-then-free reuses the
-//! pool's slots and touches the system allocator **zero** times.
-//!
-//! These use the `alloc_tracker` crate, whose `Allocator` global-allocator
-//! wrapper counts every byte the process hands to the system allocator. Each
-//! operation's thread-local span measures only the work inside it, so the
-//! pool's chunk allocations are observed in isolation. The handles a pool hands
-//! out (`Box`/`Arc`/`Rc`) are carved from the pool's own chunks, not the
-//! system, so allocating them only touches the system when the pool grows a new
-//! chunk. The vectors that hold the handles are pre-reserved outside the spans
-//! so their growth is never counted.
-//!
-//! A pool grows chunks on demand and keeps them until it is dropped — freeing a
-//! handle only returns its slot to the free list. So the invariant we assert is
-//! the steady state: once the working set's chunks all exist, repeating the same
-//! allocate/free workload reuses those chunks and never reallocates.
+//! Verifies with `alloc_tracker` that a warmed pool reuses slots without system
+//! allocations. Holding vectors are reserved outside measured spans.
 
 // Excluded under Miri: these measure real system-allocator traffic, which Miri
 // (with its own allocator model) does not represent.
@@ -26,17 +11,20 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 #![allow(clippy::collection_is_never_read, reason = "tests retain handles only to keep slots occupied")]
 
+use std::alloc::System;
+
 use alloc_tracker::{Allocator, Session};
-use plurality::Pool;
+use plurality::{Arc as PoolArc, Box as PoolBox, Pool, Rc as PoolRc};
 
 /// Single-operation bodies for the pooled fat-pointer comparison. Kept as a
 /// self-contained copy (rather than an include shared with the benches) so this
 /// test pulls in no cross-target files.
 mod dyn_box_ops {
+    use std::boxed::Box as StdBox;
     use std::hint::black_box;
 
     use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-    use plurality::{Pool, coerce};
+    use plurality::{Box as PoolBox, Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
     pub(crate) const CAP: usize = 1024;
@@ -82,7 +70,7 @@ mod dyn_box_ops {
         assert!(pool.capacity() >= n as u64);
         assert!(pool.is_empty());
         let handle = pool.alloc_box(Obj::new(n as u64));
-        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
         assert_eq!(handle.tag(), 0xFF);
         drop(handle);
         pool
@@ -141,12 +129,10 @@ mod dyn_box_ops {
     }
 
     pub(crate) fn setup_std_box(n: usize) {
-        let warm: Vec<std::boxed::Box<dyn Marker>> = (0..n)
-            .map(|i| std::boxed::Box::new(Obj::new(i as u64)) as std::boxed::Box<dyn Marker>)
-            .collect();
+        let warm: Vec<StdBox<dyn Marker>> = (0..n).map(|i| StdBox::new(Obj::new(i as u64)) as StdBox<dyn Marker>).collect();
         black_box(&warm);
         drop(warm);
-        let handle: std::boxed::Box<dyn Marker> = std::boxed::Box::new(Obj::new(n as u64));
+        let handle: StdBox<dyn Marker> = StdBox::new(Obj::new(n as u64));
         assert_eq!(black_box::<&dyn Marker>(&*handle).tag(), 0xFF);
         drop(black_box(handle));
     }
@@ -154,7 +140,7 @@ mod dyn_box_ops {
     #[inline]
     pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
         let handle = pool.alloc_box(black_box(Obj::new(i)));
-        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
         invoke_dyn(&*handle);
         drop(black_box(handle));
     }
@@ -189,20 +175,19 @@ mod dyn_box_ops {
 
     #[inline]
     pub(crate) fn std_box(i: u64) {
-        let handle: std::boxed::Box<dyn Marker> = std::boxed::Box::new(black_box(Obj::new(i)));
+        let handle: StdBox<dyn Marker> = StdBox::new(black_box(Obj::new(i)));
         invoke_dyn(&*handle);
         drop(black_box(handle));
     }
 }
 
 #[global_allocator]
-static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
+static ALLOCATOR: Allocator<System> = Allocator::system();
 
 /// Number of live values per fill — large enough to span several chunks at the
 /// default chunk size.
 const WORKLOAD: usize = 2_000;
-/// Warm-up cycles, generous enough to grow every chunk the working set needs and
-/// reach steady state before we measure.
+/// Warm-up cycles needed to reach a steady state before measurement.
 const WARMUP_CYCLES: usize = 4;
 /// Steady-state cycles to measure.
 const STEADY_CYCLES: usize = 16;
@@ -272,7 +257,7 @@ fn first_fill_allocates_then_steady_state_is_zero() {
 
     // Pre-reserve the holding vector outside any measured span so its growth
     // never pollutes the pool measurements.
-    let mut hold: std::vec::Vec<plurality::Box<u64>> = std::vec::Vec::with_capacity(WORKLOAD);
+    let mut hold: Vec<PoolBox<u64>> = Vec::with_capacity(WORKLOAD);
 
     // The very first fill must obtain chunks from the system.
     let first = session.operation("first_fill");
@@ -309,7 +294,7 @@ fn first_fill_allocates_then_steady_state_is_zero() {
 fn steady_state_box_fill_and_drop_does_not_allocate() {
     let pool = Pool::<u64>::new();
     let session = quiet_session();
-    let mut hold: std::vec::Vec<plurality::Box<u64>> = std::vec::Vec::with_capacity(WORKLOAD);
+    let mut hold: Vec<PoolBox<u64>> = Vec::with_capacity(WORKLOAD);
 
     for _ in 0..WARMUP_CYCLES {
         for i in 0..WORKLOAD {
@@ -341,7 +326,7 @@ fn steady_state_box_fill_and_drop_does_not_allocate() {
 fn steady_state_arc_fill_and_drop_does_not_allocate() {
     let pool = Pool::<u64>::new();
     let session = quiet_session();
-    let mut hold: std::vec::Vec<plurality::Arc<u64>> = std::vec::Vec::with_capacity(WORKLOAD);
+    let mut hold: Vec<PoolArc<u64>> = Vec::with_capacity(WORKLOAD);
 
     for _ in 0..WARMUP_CYCLES {
         for i in 0..WORKLOAD {
@@ -373,7 +358,7 @@ fn steady_state_arc_fill_and_drop_does_not_allocate() {
 fn steady_state_rc_fill_and_drop_does_not_allocate() {
     let pool = Pool::<u64>::new();
     let session = quiet_session();
-    let mut hold: std::vec::Vec<plurality::Rc<u64>> = std::vec::Vec::with_capacity(WORKLOAD);
+    let mut hold: Vec<PoolRc<u64>> = Vec::with_capacity(WORKLOAD);
 
     for _ in 0..WARMUP_CYCLES {
         for i in 0..WORKLOAD {
@@ -409,7 +394,7 @@ fn steady_state_rolling_churn_does_not_allocate() {
 
     // Keep a fixed-size working set live; `None` slots are replaced in place so
     // each replacement reuses the slot freed one statement earlier.
-    let mut hold: std::vec::Vec<Option<plurality::Box<u64>>> = std::vec::Vec::with_capacity(WORKLOAD);
+    let mut hold: Vec<Option<PoolBox<u64>>> = Vec::with_capacity(WORKLOAD);
     for i in 0..WORKLOAD {
         hold.push(Some(pool.alloc_box(i as u64)));
     }

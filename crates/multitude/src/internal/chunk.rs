@@ -330,6 +330,28 @@ impl<A: Allocator + Clone> Chunk<A> {
         debug_assert!(prev >= n, "refund_refs underflow: prev={prev} n={n}");
     }
 
+    /// Atomically returns `n` unused pre-credited refs and releases one
+    /// additional strong ref. Returns `true` if the combined release reached
+    /// zero.
+    ///
+    /// # Safety
+    ///
+    /// Caller must own exactly `n` previously-credited refs plus one strong
+    /// reference on this chunk. After this call those references no longer
+    /// exist.
+    #[inline]
+    pub(crate) unsafe fn refund_refs_and_release_one(&self, n: usize) -> bool {
+        let released = n + 1;
+        let prev = self.ref_count.fetch_sub(released, Ordering::Release);
+        debug_assert!(prev >= released, "combined ref release underflow: prev={prev} released={released}");
+        if prev == released {
+            fence(Ordering::Acquire);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     #[inline]
     // Returning an incorrect capacity can make allocation retries infinite.

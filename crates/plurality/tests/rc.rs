@@ -22,9 +22,10 @@ mod common;
 
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use common::DropCounter;
-use plurality::Pool;
+use plurality::{Pool, Rc};
 
 #[test]
 fn rc_share_clone_and_drop() {
@@ -46,12 +47,12 @@ fn rc_share_clone_and_drop() {
 fn rc_get_mut_when_unique() {
     let pool = Pool::<u32>::builder().chunk_size(2).build();
     let mut r = pool.alloc_rc(1);
-    *plurality::Rc::get_mut(&mut r).unwrap() = 42;
+    *Rc::get_mut(&mut r).unwrap() = 42;
     assert_eq!(*r, 42);
     let r2 = r.clone();
-    assert!(plurality::Rc::get_mut(&mut r).is_none()); // shared now
+    assert!(Rc::get_mut(&mut r).is_none());
     drop(r2);
-    assert!(plurality::Rc::get_mut(&mut r).is_some()); // unique again
+    assert!(Rc::get_mut(&mut r).is_some());
 }
 
 #[test]
@@ -83,7 +84,7 @@ fn rc_freed_slot_reused_as_cross_thread_arc() {
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 
     let a = pool.alloc_arc(DropCounter(counter.clone())); // reuses the same slot
-    std::thread::spawn(move || drop(a)).join().unwrap();
+    thread::spawn(move || drop(a)).join().unwrap();
     assert_eq!(counter.load(Ordering::SeqCst), 2);
     assert_eq!(pool.len(), 0);
 }

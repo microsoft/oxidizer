@@ -290,7 +290,8 @@ fn json_convenience_methods_cover_root_inference_inputs_and_limits() {
     }
 
     trailing(arena.deserialize_json::<Box<u64>, _>("1 2"));
-    trailing(arena.deserialize_json_with_limits::<Box<u64>, _>(b"1 2", unlimited()));
+    let error = arena.deserialize_json_with_limits::<Box<u64>, _>(b"1 2", unlimited()).unwrap_err();
+    assert!(error.as_json_error().to_string().contains("trailing characters"));
 }
 
 #[test]

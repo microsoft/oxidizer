@@ -1,19 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Length-prefixed chunk allocator for thin string smart pointers
-//! ([`Arc<str>`](crate::Arc), [`Box<str>`](crate::Box),
-//! `Arc<Utf16Str>`, `Box<Utf16Str>`) and the generic thin
-//! DST `Arc<[T]>` / `Box<[T]>` family.
+//! Length-prefixed allocation for thin smart pointers.
 //!
-//! Layout: `[usize len (unaligned)][len * T payload]`. The payload is
-//! T-aligned because the reservation itself is T-aligned and
-//! `PREFIX_BYTES` is a multiple of any supported T's align. The leading
-//! `usize` is read unaligned, so consecutive prefixed allocations pack
-//! without per-allocation alignment padding for the length field.
-//!
-//! Restriction: `align_of::<T>() <= align_of::<usize>()` (statically
-//! asserted). All current callers use `u8`, `u16`, or `usize`.
+//! Layout: `[unaligned usize length][T payload]`, with
+//! `align_of::<T>() <= align_of::<usize>()`.
 
 use core::mem;
 use core::ptr::{self, NonNull};
@@ -24,7 +15,7 @@ use super::Arena;
 use super::alloc_value::acquire_chunk_ref;
 use crate::AllocError;
 use crate::internal::chunk_ref::ChunkRef;
-use crate::internal::thin_dst;
+use crate::internal::thin_dst::{self, Strong};
 use crate::internal::uninit::copy_bytes_nonoverlapping;
 
 /// Byte size of the inline element-count prefix written immediately
@@ -52,6 +43,38 @@ pub(in crate::arena) fn worst_case_thin_slice_payload<T>(len: usize) -> usize {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
+    /// Byte-specialized length-prefixed allocation for `Box<str>`.
+    ///
+    /// The reservation is always nonzero (`PREFIX_BYTES + max(len, 1)`), so
+    /// this can bypass generic alignment and ZST probes.
+    #[inline(always)]
+    pub(in crate::arena) fn impl_alloc_prefixed_shared_bytes(&self, src: &[u8]) -> Result<NonNull<u8>, AllocError> {
+        let payload_bytes = src.len().max(1);
+        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
+        loop {
+            if let Some((uninit, chunk_ptr)) = self.current().try_alloc_bytes_with_chunk(total) {
+                let chunk_ref: ChunkRef<A> = self.acquire_current_chunk_ref(chunk_ptr);
+                let (base, _) = uninit.into_raw_buffer();
+                let payload = write_prefixed_payload::<u8>(base, src);
+                let _ = chunk_ref.forget();
+                return Ok(payload);
+            }
+            if self.is_oversized(total) {
+                return self.alloc_oversized_shared_with(total, |mutator, chunk_ptr| {
+                    let ticket = mutator
+                        .try_alloc_bytes(total)
+                        .expect("dedicated oversized chunk sized to fit prefixed byte payload");
+                    let chunk_ref: ChunkRef<A> = acquire_chunk_ref::<A>(chunk_ptr);
+                    let (base, _) = ticket.into_raw_buffer();
+                    let payload = write_prefixed_payload::<u8>(base, src);
+                    let _ = chunk_ref.forget();
+                    payload
+                });
+            }
+            self.refill(total)?;
+        }
+    }
+
     /// Reserves `PREFIX_BYTES + max(src.len() * size_of::<T>(),
     /// align_of::<T>())` bytes in the current chunk, writes the
     /// length prefix (unaligned) and the payload, bumps the chunk's
@@ -60,6 +83,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// `T` must have `align_of::<T>() <= align_of::<usize>()`; see
     /// module docs.
+    #[cfg(feature = "utf16")]
     #[inline(always)]
     pub(in crate::arena) fn impl_alloc_prefixed_shared<T: Copy>(&self, src: &[T]) -> Result<NonNull<T>, AllocError> {
         const {
@@ -107,21 +131,12 @@ impl<A: Allocator + Clone> Arena<A> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Strong-prefixed [`Arc`](crate::Arc) variant of
-    /// [`Self::impl_alloc_prefixed_shared`]: reserves a per-`Arc`
-    /// [`AtomicU32`](core::sync::atomic::AtomicU32) strong count and a
-    /// `usize` length metadata word immediately before the payload,
-    /// initializes the strong count to `1`, writes the length and the
-    /// payload, takes one chunk refcount for the new `Arc` family, and
-    /// returns a thin `NonNull<T>` to the first payload element.
+    /// Allocates a strong-counted, length-prefixed payload.
     ///
     /// `T` must have `align_of::<T>() <= align_of::<usize>()`; see
     /// module docs.
     #[inline(always)]
-    pub(in crate::arena) fn impl_alloc_prefixed_shared_arc<S: crate::internal::thin_dst::Strong, T: Copy>(
-        &self,
-        src: &[T],
-    ) -> Result<NonNull<T>, AllocError> {
+    pub(in crate::arena) fn impl_alloc_prefixed_shared_arc<S: Strong, T: Copy>(&self, src: &[T]) -> Result<NonNull<T>, AllocError> {
         const {
             assert!(
                 mem::align_of::<T>() <= mem::align_of::<usize>(),
@@ -131,10 +146,6 @@ impl<A: Allocator + Clone> Arena<A> {
         let len = src.len();
         // `src` is a live `&[T]`, so `size_of_val(src)` is a valid usize.
         let payload_bytes = mem::size_of_val(src);
-        // Straight-line fast path: a single in-chunk reservation attempt. The
-        // worst-case refill hint (used only by the cold refill / oversized
-        // arms) is computed in the cold helper, not here, so the hot success
-        // path skips its saturating arithmetic.
         // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`.
         if let Some((uninit, chunk_ptr)) = unsafe { self.try_reserve_arc_slice_with_size::<S, T>(len, payload_bytes) } {
             let chunk_ref: ChunkRef<A> = self.acquire_current_chunk_ref(chunk_ptr);
@@ -145,13 +156,10 @@ impl<A: Allocator + Clone> Arena<A> {
         self.alloc_prefixed_shared_arc_refill::<S, T>(src, len, payload_bytes)
     }
 
-    /// Cold continuation of [`Self::impl_alloc_prefixed_shared_arc`]: compute
-    /// the worst-case refill hint, then refill the current chunk (or fall back
-    /// to a dedicated oversized chunk) and retry until the reservation succeeds
-    /// or the backing allocator fails.
+    /// Refill path for [`Self::impl_alloc_prefixed_shared_arc`].
     #[cold]
     #[inline(never)]
-    fn alloc_prefixed_shared_arc_refill<S: crate::internal::thin_dst::Strong, T: Copy>(
+    fn alloc_prefixed_shared_arc_refill<S: Strong, T: Copy>(
         &self,
         src: &[T],
         len: usize,
@@ -207,9 +215,9 @@ pub(crate) fn worst_case_strong_slice_payload<S: thin_dst::Strong, T>(len: usize
 /// `src` immediately after, returning a thin pointer to the first
 /// payload element.
 ///
-/// Shared between the in-arena fast path and the dedicated-oversized
-/// path in [`Arena::impl_alloc_prefixed_shared`]; isolating the
-/// unsafe write to one place keeps the call sites trivial.
+/// Shared between the in-arena fast paths and their dedicated-oversized
+/// paths; isolating the unsafe write to one place keeps the call sites
+/// trivial.
 #[inline(always)]
 fn write_prefixed_payload<T: Copy>(base: NonNull<u8>, src: &[T]) -> NonNull<T> {
     let len = src.len();

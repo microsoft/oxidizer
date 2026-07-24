@@ -2,14 +2,6 @@
 // Licensed under the MIT License.
 
 //! Compile-time variance assertions and ZST regression tests.
-//!
-//! - **Covariance** (bumpalo #170): verifies that `Box`, `Rc`, and `Arc`
-//!   are covariant in `T`, so `Container<&'long str>` can be used where
-//!   `Container<&'short str>` is expected.
-//!
-//! - **ZST sentinel safety** (bumpalo #289): verifies that zero-sized
-//!   allocations work correctly (the shared sentinel is never mutated
-//!   because the fit-check always fails for it).
 
 #![allow(clippy::needless_lifetimes, reason = "explicit lifetimes clarify variance tests")]
 #![allow(clippy::missing_const_for_fn, reason = "variance assertions are never called; const is irrelevant")]
@@ -18,6 +10,8 @@
     reason = "variance assertions require two lifetimes even though 'b appears only once"
 )]
 #![allow(dead_code, reason = "variance assertion functions are never called at runtime")]
+
+use std::thread;
 
 use multitude::{Arc, Arena, Box};
 
@@ -55,7 +49,7 @@ fn zst_alloc_arc_succeeds() {
     let arena = Arena::new();
     let a = arena.alloc_arc(());
     let b = a.clone();
-    let h = std::thread::spawn(move || *b);
+    let h = thread::spawn(move || *b);
     assert_eq!(*a, ());
     assert_eq!((), h.join().unwrap());
 }

@@ -24,12 +24,11 @@ ohno = { path = "../../ohno", features = ["app-err"] }
 //!   `scripts/perf_report.rs --samples 50 --measurement-time 3`     — custom criterion settings
 //!   `scripts/perf_report.rs --cpu 4`                               — pin benchmark processes to CPU 4
 //!
-//! Both bench suites must be aligned 1:1: each criterion `<group>/<variant>`
-//! corresponds to a gungraun `<group>_<variant>`. The variant order in
-//! `GROUPS` mirrors the order benches are defined in `benches/criterion_*.rs`
-//! and `benches/gungraun_*.rs`; if a bench is added or removed, update
-//! `GROUPS`, `TEARDOWN_GROUPS`, or `SERDE_GROUPS` to match.
+//! Criterion variants with a Callgrind counterpart are aligned through the
+//! group tables below. If a bench is added or removed, update the matching
+//! group table.
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -271,6 +270,67 @@ const TEARDOWN_GROUPS: &[Group] = &[
     ),
 ];
 
+const RECORD_BATCH_GROUPS: &[Group] = &[
+    (
+        "multitude_record_batch/decode",
+        &[
+            ("standard_vec", Some("decode_standard_vec")),
+            ("arena_box_slice", Some("decode_arena_box_slice")),
+            ("arena_vec_baseline", Some("decode_arena_vec_baseline")),
+        ],
+    ),
+    (
+        "multitude_record_batch/strings",
+        &[
+            ("standard_vec_unescaped", Some("strings_standard_vec_unescaped")),
+            ("standard_vec_escaped", Some("strings_standard_vec_escaped")),
+            ("arena_vec_unescaped", Some("strings_arena_vec_unescaped")),
+            ("arena_vec_escaped", Some("strings_arena_vec_escaped")),
+        ],
+    ),
+    (
+        "multitude_record_batch/reuse",
+        &[
+            ("repeated_no_reset", Some("reuse_repeated_no_reset")),
+            ("reset_recreate", Some("reuse_reset_recreate")),
+        ],
+    ),
+    (
+        "multitude_record_batch/sparse_retention",
+        &[
+            ("standard_one_in_eight", Some("sparse_retention_standard_one_in_eight")),
+            ("arena_one_in_eight", Some("sparse_retention_arena_one_in_eight")),
+        ],
+    ),
+    (
+        "multitude_record_batch/lazy_raw_strings",
+        &[
+            ("eager_sparse_escaped", Some("lazy_raw_strings_eager_sparse_escaped")),
+            ("lazy_sparse_escaped", Some("lazy_raw_strings_lazy_sparse_escaped")),
+        ],
+    ),
+    (
+        "multitude_record_batch/errors",
+        &[
+            ("malformed_standard", Some("errors_malformed_standard")),
+            ("malformed_arena", Some("errors_malformed_arena")),
+            ("resource_limited_arena", Some("errors_resource_limited_arena")),
+        ],
+    ),
+    (
+        "multitude_record_batch/refresh_workload",
+        &[
+            ("standard_selective", Some("refresh_workload_standard_selective")),
+            ("arena_vec_reset_selective", Some("refresh_workload_arena_vec_reset_selective")),
+            ("arena_each_reset_selective", Some("refresh_workload_arena_each_reset_selective")),
+            (
+                "arena_raw_each_reset_index_selective",
+                Some("refresh_workload_arena_raw_each_reset_index_selective"),
+            ),
+        ],
+    ),
+];
+
 /// `(workload, criterion_group, arena_variant, standard_variant)`.
 const SERDE_COMPARISONS: &[(&str, &str, &str, &str)] = &[
     ("Typed record", "multitude_serde/typed", "arena_owned", "serde_json_owned"),
@@ -389,8 +449,8 @@ fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Vec<(String, f64)> 
         }
     }
 
-    let expected_keys: std::collections::HashSet<String> = expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
-    let got_keys: std::collections::HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
+    let expected_keys: HashSet<String> = expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
+    let got_keys: HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
     for missing in expected_keys.difference(&got_keys) {
         eprintln!("warning: criterion log missing expected bench {missing}");
     }
@@ -557,6 +617,7 @@ fn build_report(
     g_drop: &[GungEntry],
     g_teardown: &[GungEntry],
     g_serde: &[GungEntry],
+    g_record_batch: &[GungEntry],
     serde_repetitions: u32,
     cpu: Option<u32>,
 ) -> String {
@@ -587,6 +648,11 @@ fn build_report(
          `multitude_teardown_cg` — matched measurements of freeing standard \
          allocations and resetting local-reference arenas.\n\n",
     );
+    out.push_str(
+        "- `cargo bench --bench multitude_record_batch` and \
+         `multitude_record_batch_cg` — wide-record decoding, reuse, sparse \
+         retention, error handling, and reset-per-refresh workloads.\n\n",
+    );
     out.push_str("**Workload:** N = 1000 operations per measurement; slice element count = 8.  \n");
     out.push_str(
         "Owned slice rows (`Box<[u64]>`, `Arc<[u64]>`, and `Rc<[u64]>` variants) \
@@ -596,6 +662,11 @@ fn build_report(
     out.push_str(
         "Serde single-record rows measure one deserialization of the documented \
          JSON fixture; batch rows process 32 independent documents.\n",
+    );
+    out.push_str(
+        "Record-batch rows normally process 16 wide records. The refresh workload \
+         processes 1,000 escaped-string records, retains one in eight, and keeps \
+         the previous retained generation alive until its replacement is ready.\n",
     );
     out.push_str(
         "Criterion median is reported (default 30 samples, 1 s warm-up, \
@@ -841,6 +912,49 @@ fn build_report(
             fmt_int_delta(instructions, batch_standard_instructions),
         );
     }
+    out.push('\n');
+
+    out.push_str("## Record-Batch Deserialization\n\n");
+    out.push_str(
+        "These synthetic wide-record workloads compare standard decoding with \
+         arena-backed collection, reuse, and selective-retention paths. The \
+         reset-per-refresh workload recreates arena vectors after reset or \
+         streams each item directly to the retention callback. Criterion and \
+         Callgrind invoke the same shared hot-path functions and equivalent \
+         prewarmed state.\n\n",
+    );
+    for (group, variants) in RECORD_BATCH_GROUPS {
+        let title = group
+            .strip_prefix("multitude_record_batch/")
+            .expect("record-batch report groups use the benchmark prefix");
+        let _ = writeln!(out, "### `{title}`\n");
+        out.push_str(
+            "| Variant | Time (criterion) | Instructions | \
+             Branch misses | Mem accesses |\n",
+        );
+        out.push_str("|---|---:|---:|---:|---:|\n");
+        for (variant, gung_name) in *variants {
+            let time = lookup_time(crit, &format!("{group}/{variant}"));
+            let instructions = gung_name.and_then(|name| gung_metric(g_record_batch, name, "Instructions"));
+            let branch_misses = gung_name.and_then(|name| gung_metric(g_record_batch, name, "Bcm"));
+            let memory_accesses = gung_name.and_then(|name| {
+                let l1 = gung_metric(g_record_batch, name, "L1 Hits")?;
+                let ll = gung_metric(g_record_batch, name, "LL Hits")?;
+                let ram = gung_metric(g_record_batch, name, "RAM Hits")?;
+                Some(l1 + ll + ram)
+            });
+            let _ = writeln!(
+                out,
+                "| `{variant}` | {} | {} | {} | {} |",
+                fmt_ns(time),
+                fmt_int(instructions),
+                fmt_int(branch_misses),
+                fmt_int(memory_accesses),
+            );
+        }
+        out.push('\n');
+    }
+    out.pop();
     out
 }
 
@@ -864,17 +978,8 @@ fn have_valgrind() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Run `cargo bench --bench <name> -- <args>` from `cwd`, capturing combined
-/// stdout+stderr (criterion writes summaries to stdout; we mirror the
-/// previous shell script's behaviour of redirecting both streams into one log).
-fn run_bench(
-    cwd: &Path,
-    bench: &str,
-    features: &[&str],
-    extra: &[&str],
-    label: &str,
-    cpu: Option<u32>,
-) -> Result<String, AppError> {
+/// Run a benchmark and capture stdout and stderr in one log.
+fn run_bench(cwd: &Path, bench: &str, features: &[&str], extra: &[&str], label: &str, cpu: Option<u32>) -> Result<String, AppError> {
     println!("==> Running {label}");
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = if let Some(cpu) = cpu {
@@ -924,14 +1029,7 @@ fn run_groups(
         let mut args = Vec::with_capacity(common_args.len() + 1);
         args.push(filter.as_str());
         args.extend_from_slice(common_args);
-        combined.push_str(&run_bench(
-            cwd,
-            bench,
-            features,
-            &args,
-            &format!("{bench} ({group})"),
-            cpu,
-        )?);
+        combined.push_str(&run_bench(cwd, bench, features, &args, &format!("{bench} ({group})"), cpu)?);
     }
     Ok(combined)
 }
@@ -1060,18 +1158,19 @@ fn run(args: &Args) -> Result<(), AppError> {
         args.serde_repetitions,
         args.cpu,
     )?;
-    let (gung_alloc_log, gung_drop_log, gung_teardown_log, gung_serde_log) = if run_gungraun {
+    let crit_record_batch_log = run_groups(
+        &crate_dir,
+        "multitude_record_batch",
+        &["serde_json"],
+        RECORD_BATCH_GROUPS,
+        &crit_args,
+        args.cpu,
+    )?;
+    let (gung_alloc_log, gung_drop_log, gung_teardown_log, gung_serde_log, gung_record_batch_log) = if run_gungraun {
         (
             run_bench(&crate_dir, "gungraun_alloc", &[], &[], "gungraun_alloc", args.cpu)?,
             run_bench(&crate_dir, "gungraun_drop", &[], &[], "gungraun_drop", args.cpu)?,
-            run_bench(
-                &crate_dir,
-                "multitude_teardown_cg",
-                &[],
-                &[],
-                "multitude_teardown_cg",
-                args.cpu,
-            )?,
+            run_bench(&crate_dir, "multitude_teardown_cg", &[], &[], "multitude_teardown_cg", args.cpu)?,
             run_bench(
                 &crate_dir,
                 "multitude_serde_cg",
@@ -1080,9 +1179,17 @@ fn run(args: &Args) -> Result<(), AppError> {
                 "multitude_serde_cg",
                 args.cpu,
             )?,
+            run_bench(
+                &crate_dir,
+                "multitude_record_batch_cg",
+                &["serde_json"],
+                &[],
+                "multitude_record_batch_cg",
+                args.cpu,
+            )?,
         )
     } else {
-        (String::new(), String::new(), String::new(), String::new())
+        (String::new(), String::new(), String::new(), String::new(), String::new())
     };
 
     println!("==> Building docs/PERF.md");
@@ -1112,16 +1219,22 @@ fn run(args: &Args) -> Result<(), AppError> {
         .iter()
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
+    let record_batch_keys: Vec<(&str, &str)> = RECORD_BATCH_GROUPS
+        .iter()
+        .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
+        .collect();
 
     let mut crit = parse_criterion(&crit_alloc_log, &alloc_keys);
     crit.extend(parse_criterion(&crit_drop_log, &drop_keys));
     crit.extend(parse_criterion(&crit_ava_log, &ava_keys));
     crit.extend(parse_criterion(&crit_teardown_log, &teardown_keys));
     crit.extend(parse_criterion(&crit_serde_log, &serde_keys));
+    crit.extend(parse_criterion(&crit_record_batch_log, &record_batch_keys));
     let g_alloc = parse_gungraun(&gung_alloc_log, "gungraun_alloc");
     let g_drop = parse_gungraun(&gung_drop_log, "gungraun_drop");
     let g_teardown = parse_gungraun(&gung_teardown_log, "multitude_teardown_cg");
     let g_serde = parse_gungraun(&gung_serde_log, "multitude_serde_cg");
+    let g_record_batch = parse_gungraun(&gung_record_batch_log, "multitude_record_batch_cg");
 
     let report = build_report(
         &crit,
@@ -1129,6 +1242,7 @@ fn run(args: &Args) -> Result<(), AppError> {
         &g_drop,
         &g_teardown,
         &g_serde,
+        &g_record_batch,
         args.serde_repetitions,
         args.cpu,
     );
@@ -1137,13 +1251,15 @@ fn run(args: &Args) -> Result<(), AppError> {
 
     println!(
         "Wrote {} ({} criterion, {} gungraun_alloc, {} gungraun_drop, \
-         {} multitude_teardown_cg, {} multitude_serde_cg benches)",
+         {} multitude_teardown_cg, {} multitude_serde_cg, \
+         {} multitude_record_batch_cg benches)",
         out_path.display(),
         crit.len(),
         g_alloc.len(),
         g_drop.len(),
         g_teardown.len(),
         g_serde.len(),
+        g_record_batch.len(),
     );
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())

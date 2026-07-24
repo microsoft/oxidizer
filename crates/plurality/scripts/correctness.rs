@@ -10,18 +10,7 @@ edition = "2024"
 argh = "0.1"
 ---
 
-//! Run the full plurality correctness suite locally.
-//!
-//! This reproduces the correctness checks that CI performs:
-//!
-//! * **Miri** — four borrow-model / provenance configurations
-//!   (stacked borrows, tree borrows, strict provenance, many-seeds race
-//!   coverage) using `cargo miri nextest run`.
-//! * **Loom** — model-checked concurrency tests (`tests/loom_pool.rs`).
-//! * **Bolero** — property-based tests (`tests/bolero_pool.rs`).
-//! * **cargo-careful** — extra UB checks via `cargo careful nextest run`.
-//! * **Doctests** — `cargo test --doc` (neither Miri nor nextest run doctests,
-//!   so they are otherwise unexercised by this suite).
+//! Runs the Miri, Loom, Bolero, cargo-careful, and doctest correctness checks.
 //!
 //! Prerequisites:
 //!   * `rustup component add miri --toolchain <nightly>`
@@ -36,6 +25,7 @@ argh = "0.1"
 //!   `scripts/correctness.rs --doc`        — only doctests
 
 use std::env;
+use std::fs;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
@@ -158,8 +148,6 @@ fn main() -> ExitCode {
     }
 }
 
-// --- Check runners --------------------------------------------------------
-
 fn run_miri(root: &Path, tc: &Toolchains, config: &MiriConfig, failures: &mut Vec<String>) {
     let label = format!("Miri ({})", config.label);
 
@@ -178,10 +166,7 @@ fn run_miri(root: &Path, tc: &Toolchains, config: &MiriConfig, failures: &mut Ve
 }
 
 fn run_loom(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
-    // Loom tests are gated behind `#![cfg(loom)]` and must be compiled with
-    // `--cfg loom` in RUSTFLAGS.  `--release` makes the exploration substantially
-    // faster.  `--test-threads=1` avoids loom's internal model checker racing
-    // with itself across tests.
+    // A single release-mode harness keeps loom model exploration isolated.
     let mut rustflags = env::var("RUSTFLAGS").unwrap_or_default();
     if !rustflags.is_empty() {
         rustflags.push(' ');
@@ -208,9 +193,6 @@ fn run_loom(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
 }
 
 fn run_bolero(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
-    // Run bolero property tests as plain `cargo test` invocations.  This
-    // exercises every `bolero::check!()` target using the built-in random
-    // generator.  For coverage-guided fuzzing with libfuzzer, use `just bolero`.
     let mut cmd = cargo(root, &tc.nightly);
     cmd.args(["test", "-p", PACKAGE, "--test", "bolero_pool", "--all-features", "--locked"]);
 
@@ -225,15 +207,12 @@ fn run_careful(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
 }
 
 fn run_doc(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
-    // Neither Miri nor cargo-nextest execute doctests, so run them explicitly
-    // via plain `cargo test --doc` on the latest stable toolchain.
+    // Miri and nextest do not execute doctests.
     let mut cmd = cargo(root, &tc.latest);
     cmd.args(["test", "--doc", "-p", PACKAGE, "--all-features", "--locked"]);
 
     run_step("Doctests", cmd, failures);
 }
-
-// --- Helpers --------------------------------------------------------------
 
 fn cargo(workspace_root: &Path, toolchain: &str) -> Command {
     let mut cmd = Command::new("cargo");
@@ -286,7 +265,7 @@ fn format_cmd(cmd: &Command) -> String {
 /// Parse `constants.env` at the workspace root for toolchain versions.
 fn load_toolchains(workspace_root: &Path) -> Toolchains {
     let env_path = workspace_root.join("constants.env");
-    let content = std::fs::read_to_string(&env_path).unwrap_or_else(|e| panic!("failed to read {}: {e}", env_path.display()));
+    let content = fs::read_to_string(&env_path).unwrap_or_else(|e| panic!("failed to read {}: {e}", env_path.display()));
 
     let mut nightly = None;
     let mut latest = None;

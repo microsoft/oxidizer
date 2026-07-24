@@ -10,6 +10,8 @@
     reason = "test assertions use direct indexing on known-length buffers"
 )]
 
+use std::thread;
+
 use bytes::Bytes;
 use multitude::Arena;
 
@@ -119,7 +121,7 @@ fn bytes_send_across_threads() {
     let arena = Arena::new();
     let arc = arena.alloc_slice_copy_arc(b"threaded" as &[u8]);
     let b: Bytes = arc.into();
-    let h = std::thread::spawn(move || b.len());
+    let h = thread::spawn(move || b.len());
     assert_eq!(h.join().unwrap(), 8);
 }
 
@@ -128,7 +130,7 @@ fn bytes_from_arc_str_send_across_threads() {
     let arena = Arena::new();
     let s = arena.alloc_str_arc("threaded");
     let b: Bytes = s.into();
-    let h = std::thread::spawn(move || b.len());
+    let h = thread::spawn(move || b.len());
     assert_eq!(h.join().unwrap(), 8);
 }
 

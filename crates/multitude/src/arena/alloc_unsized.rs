@@ -558,7 +558,8 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync + 'static,
     {
         // SAFETY: forwarded.
-        Arc::into_pin(unsafe { self.alloc_dst_arc::<T>(layout, metadata, init) })
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_dst_arc::<T>(layout, metadata, init)) }
     }
 
     /// Fallible variant of [`Self::alloc_dst_arc_pin`].
@@ -604,7 +605,10 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync + 'static,
     {
         // SAFETY: forwarded.
-        unsafe { self.try_alloc_dst_arc::<T>(layout, metadata, init) }.map(Arc::into_pin)
+        unsafe { self.try_alloc_dst_arc::<T>(layout, metadata, init) }.map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
     /// `Pin` variant of [`Self::alloc_dst_rc`] (non-atomic).
@@ -649,7 +653,8 @@ impl<A: Allocator + Clone> Arena<A> {
         A: 'static,
     {
         // SAFETY: forwarded.
-        Rc::into_pin(unsafe { self.alloc_dst_rc::<T>(layout, metadata, init) })
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_dst_rc::<T>(layout, metadata, init)) }
     }
 
     /// Fallible variant of [`Self::alloc_dst_rc_pin`].
@@ -695,7 +700,10 @@ impl<A: Allocator + Clone> Arena<A> {
         A: 'static,
     {
         // SAFETY: forwarded.
-        unsafe { self.try_alloc_dst_rc::<T>(layout, metadata, init) }.map(Rc::into_pin)
+        unsafe { self.try_alloc_dst_rc::<T>(layout, metadata, init) }.map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 
     /// `Pin` variant of [`Self::alloc_dst_box`]. Trait objects are

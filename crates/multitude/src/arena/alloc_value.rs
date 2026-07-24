@@ -112,8 +112,8 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Allocate the result of `f` in a chunk and return an [`Arc`].
     ///
-    /// The returned [`Arc`] is safe for cross-thread sharing. The closure
-    /// constructs the value in place — no stack copy of `T`.
+    /// The returned [`Arc`] is safe for cross-thread sharing. Storage is
+    /// reserved before `f` runs, then its result is moved into that storage.
     ///
     /// # Panics
     ///
@@ -212,7 +212,8 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Allocate the result of `f` in a chunk and return an [`Rc`].
     ///
-    /// See [`Self::alloc_rc`]; the closure constructs the value in place.
+    /// See [`Self::alloc_rc`]. Storage is reserved before `f` runs, then its
+    /// result is moved into that storage.
     ///
     /// # Panics
     ///
@@ -361,8 +362,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_box_with::<T, F>(f)
     }
 
-    /// Allocate `value` and return a pinned [`Box<T, A>`](crate::Box).
-    /// Mirror of `std::boxed::Box::pin`.
+    /// Allocate `value` in a pinned [`Box<T, A>`](crate::Box).
     ///
     /// # Panics
     ///
@@ -412,9 +412,9 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Allocate the result of `f` in a pinned [`Box<T, A>`](crate::Box).
     ///
-    /// The closure may construct `!Unpin`
-    /// types (e.g. self-referential futures) directly into the arena
-    /// without first creating them on the stack.
+    /// The closure returns an ordinary value, which is moved into its final
+    /// allocation before the owner is pinned. This is not a pin-initialization
+    /// protocol and cannot construct self-references to the final address.
     ///
     /// # Panics
     ///
@@ -483,7 +483,8 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync + 'static,
     {
-        Arc::into_pin(self.alloc_arc(value))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_arc(value)) }
     }
 
     /// Fallible variant of [`Self::alloc_arc_pin`].
@@ -508,14 +509,16 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync + 'static,
     {
-        self.try_alloc_arc(value).map(Arc::into_pin)
+        self.try_alloc_arc(value).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
     /// Allocate the result of `f` in a pinned [`Arc<T, A>`](crate::Arc).
     ///
-    /// The dominant use case is
-    /// `Arena::alloc_arc_pin_with(|| async move { ... })` for type-
-    /// erased futures shared across threads.
+    /// The closure result is moved into its final allocation before pinning;
+    /// this is not a pin-initialization protocol.
     ///
     /// # Panics
     ///
@@ -535,7 +538,8 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync + 'static,
     {
-        Arc::into_pin(self.alloc_arc_with(f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_arc_with(f)) }
     }
 
     /// Fallible variant of [`Self::alloc_arc_pin_with`].
@@ -559,7 +563,10 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync + 'static,
     {
-        self.try_alloc_arc_with(f).map(Arc::into_pin)
+        self.try_alloc_arc_with(f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
     /// Allocate `value` and return a pinned [`Rc<T, A>`](crate::Rc).
@@ -583,7 +590,8 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        Rc::into_pin(self.alloc_rc(value))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_rc(value)) }
     }
 
     /// Fallible variant of [`Self::alloc_rc_pin`].
@@ -608,10 +616,16 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        self.try_alloc_rc(value).map(Rc::into_pin)
+        self.try_alloc_rc(value).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 
     /// Allocate the result of `f` in a pinned [`Rc<T, A>`](crate::Rc).
+    ///
+    /// The closure result is moved into its final allocation before pinning;
+    /// this is not a pin-initialization protocol.
     ///
     /// # Panics
     ///
@@ -631,7 +645,8 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        Rc::into_pin(self.alloc_rc_with(f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_rc_with(f)) }
     }
 
     /// Fallible variant of [`Self::alloc_rc_pin_with`].
@@ -655,7 +670,10 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        self.try_alloc_rc_with(f).map(Rc::into_pin)
+        self.try_alloc_rc_with(f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 
     /// Bump-allocate `value` in an arena-lifetime [`Alloc`] handle.
@@ -722,10 +740,11 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_value_with::<T, _>(move || value)
     }
 
-    /// Bump-allocate the result of `f`, constructing it in place in the arena.
+    /// Bump-allocate the result of `f`.
     ///
-    /// Avoids a stack copy of `T`. Returns an [`Alloc`] handle whose lifetime
-    /// is tied to `&self`. See [`Self::alloc`] for full semantics.
+    /// Storage is reserved before `f` runs, then its result is moved into that
+    /// storage. The returned [`Alloc`] handle's lifetime is tied to `&self`.
+    /// See [`Self::alloc`] for full semantics.
     ///
     /// # Panics
     ///
@@ -739,8 +758,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// ```
     /// let arena = multitude::Arena::new();
-    /// let value = arena.alloc_with(|| String::from("built in place"));
-    /// assert_eq!(&*value, "built in place");
+    /// let value = arena.alloc_with(|| String::from("built by closure"));
+    /// assert_eq!(&*value, "built by closure");
     /// ```
     #[inline]
     pub fn alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Alloc<'_, T> {

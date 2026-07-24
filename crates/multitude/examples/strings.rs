@@ -6,7 +6,9 @@
 #![allow(clippy::unwrap_used, reason = "example code")]
 #![allow(clippy::missing_panics_doc, reason = "example code")]
 #![allow(clippy::std_instead_of_core, reason = "example uses std::thread/HashMap")]
-#![allow(clippy::items_after_statements, reason = "example uses inline imports")]
+
+use std::collections::HashMap;
+use std::thread;
 
 use multitude::{Arc, Arena, Box};
 fn main() {
@@ -29,10 +31,9 @@ fn main() {
 
     let shared: Arc<str> = arena.alloc_str_arc("shared across threads");
     let cloned = shared.clone();
-    let h = std::thread::spawn(move || cloned.len());
+    let h = thread::spawn(move || cloned.len());
     println!("ArenaArcStr: {} (len from thread: {})", &*shared, h.join().unwrap());
 
-    use std::collections::HashMap;
     let mut counts: HashMap<Arc<str>, i32> = HashMap::new();
     let _ = counts.insert(arena.alloc_str_arc("alpha"), 1);
     let _ = counts.insert(arena.alloc_str_arc("beta"), 2);

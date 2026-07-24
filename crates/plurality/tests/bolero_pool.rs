@@ -15,24 +15,10 @@
     reason = "test and benchmark code"
 )]
 
-//! Property/fuzz tests via [bolero]. A byte stream from the fuzzer is
-//! interpreted as a random sequence of pool operations (allocate `Box`,
-//! allocate `Arc`, clone an `Arc`, drop a handle). After replaying it we assert
-//! the pool's core invariants hold for *every* generated input:
-//!
-//!   * every allocated value is dropped exactly once, and
-//!   * once all handles are released the pool reports zero live allocations.
-//!
-//! Runs a randomized batch under `cargo test`; for coverage-guided fuzzing use
-//! `cargo bolero test pool_invariants` (libFuzzer/AFL/Kani).
-//!
-//! [bolero]: https://docs.rs/bolero
+//! Property tests for mixed allocation, clone, and drop sequences. Every value
+//! must be dropped once, and releasing all handles must empty the pool.
 
-// The whole file is gated out of Miri: `bolero::check!` needs filesystem
-// isolation that Miri does not provide, and pulling `bolero`/`bolero-engine`
-// through Miri's MIR translation is costly even when the tests are skipped. The
-// unsafe lifecycle/drop paths exercised here are independently covered under
-// Miri by `box.rs`, `arc.rs`, `rc.rs`, `alloc.rs`, `pool.rs`, and `smart_ptr.rs`.
+// Bolero needs filesystem isolation unavailable under Miri.
 #![cfg(not(miri))]
 
 use std::sync::Arc as StdArc;
@@ -74,7 +60,6 @@ fn run(input: &[u8]) {
                 allocations += 1;
             }
             2 => {
-                // Clone a randomly chosen existing Arc (no new value allocated).
                 if !handles.is_empty() {
                     let idx = bytes.next().unwrap_or(0) as usize % handles.len();
                     if let Handle::Shared(a) = &handles[idx] {
@@ -83,7 +68,6 @@ fn run(input: &[u8]) {
                 }
             }
             _ => {
-                // Drop a randomly chosen handle.
                 if !handles.is_empty() {
                     let idx = bytes.next().unwrap_or(0) as usize % handles.len();
                     drop(handles.swap_remove(idx));
@@ -92,17 +76,14 @@ fn run(input: &[u8]) {
         }
     }
 
-    // Drop everything still held.
     drop(handles);
 
-    // Every allocated value was dropped exactly once...
     assert_eq!(
         counter.load(Ordering::Relaxed),
         allocations,
         "expected {allocations} drops, saw {}",
         counter.load(Ordering::Relaxed)
     );
-    // ...and the pool is empty again.
     assert_eq!(pool.len(), 0, "pool should have no live allocations");
 }
 

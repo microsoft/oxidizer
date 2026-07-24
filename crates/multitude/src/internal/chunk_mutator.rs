@@ -17,6 +17,8 @@ use super::chunk::Chunk;
 use super::in_chunk::InChunk;
 use super::uninit::Uninit;
 
+type ByteAllocation<'a, A> = (Uninit<'a, [u8]>, NonNull<Chunk<A>>);
+
 /// Owns one strong reference to a chunk and tracks the bump cursor.
 ///
 /// Hot-path layout stores only `chunk`, `bump`, and `end`; cold paths
@@ -220,6 +222,16 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         let new_bump = unsafe { cur.byte_add(len) };
         self.bump.set(new_bump);
         Some(Uninit::new(InChunk::from_raw(cur).into_slice::<u8>(len)))
+    }
+
+    /// [`Self::try_alloc_bytes`] paired with the owning chunk pointer.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
+    pub(crate) fn try_alloc_bytes_with_chunk(&self, len: usize) -> Option<ByteAllocation<'_, A>> {
+        let uninit = self.try_alloc_bytes(len)?;
+        // SAFETY: a successful byte reservation proves the mutator owns a
+        // chunk.
+        Some((uninit, unsafe { self.chunk_ptr_unchecked() }))
     }
 
     /// Reserves storage for `len` consecutive `T`s and returns an
@@ -535,6 +547,28 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         mem::forget(self);
         chunk
     }
+
+    /// Releases this mutator's strong reference together with unused
+    /// pre-credited references in one atomic operation.
+    #[inline]
+    pub(crate) fn release_with_refund(self, refund: usize) {
+        let Some(chunk) = self.chunk else {
+            return;
+        };
+        #[cfg(feature = "stats")]
+        {
+            // SAFETY: the mutator still owns its +1 and the chunk is live.
+            unsafe { Chunk::<A>::record_retire(chunk, self.wasted_tail_for_stats()) };
+        }
+        mem::forget(self);
+        // SAFETY: this mutator owns the +1, and the arena transfers ownership
+        // of exactly `refund` unused pre-credited references to this call.
+        unsafe {
+            if chunk.as_ref().refund_refs_and_release_one(refund) {
+                Chunk::<A>::teardown_and_release(chunk);
+            }
+        }
+    }
 }
 
 impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
@@ -652,6 +686,20 @@ mod tests {
         let result = m.try_alloc_bytes(free);
         assert!(result.is_some(), "try_alloc_bytes(free_bytes) must succeed at the exact boundary");
         assert!(m.try_alloc_bytes(1).is_none());
+    }
+
+    #[test]
+    fn try_alloc_bytes_with_chunk_returns_ticket_and_owner() {
+        let arena = crate::Arena::new();
+        let _ = arena.alloc(0_u8);
+        let m = arena.current();
+        let expected_chunk = m.chunk_ptr().expect("allocation initialized the current chunk");
+
+        let (ticket, chunk) = m.try_alloc_bytes_with_chunk(4).expect("current chunk has capacity");
+        let (_, len) = ticket.into_raw_buffer();
+
+        assert_eq!(len, 4);
+        assert_eq!(chunk, expected_chunk);
     }
 
     // An in-place growth may end exactly at the payload boundary.

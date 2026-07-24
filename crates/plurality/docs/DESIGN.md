@@ -61,9 +61,51 @@ The design rationale behind the split:
   interchangeable.
 
 Unique handles expose mutable access to the value; shared handles are read-only,
-deferring mutation to interior mutability inside the value. All four dereference
-to the value and support pinning, comparison, hashing, and formatting so they
-substitute cleanly for the standard smart pointers.
+except when uniqueness-checked mutable access proves that only one shared owner
+remains. All four dereference to the value and support comparison, hashing, and
+formatting so they substitute cleanly for the standard smart pointers. Pinning
+depends on the ownership form rather than being uniform across all four.
+
+### Rust pinning model
+
+Pool slots are address-stable, but address stability by itself is not enough to
+make every handle a sound pinned owner. The owner must also keep the slot
+occupied for the full duration of the pinning guarantee, even if that owner is
+forgotten.
+
+The **bound owner is therefore not pinnable**. It relies on its borrow of the
+pool rather than independently retaining pool storage. Forgetting it ends that
+borrow without returning the slot, after which dropping the pool could reclaim
+the backing memory. A pinning guarantee cannot depend on the forgotten handle's
+destructor running.
+
+The detachable owners provide pinning according to their ownership discipline:
+
+- A unique detached owner may be converted into a pin. It independently keeps
+  the pool alive, so forgetting it leaks the slot and its pool claim rather than
+  permitting reuse.
+- Atomic and local shared owners may be pinned only while freshly constructed,
+  before an ordinary alias can escape. Converting an existing shared owner
+  would be unsafe because another ordinary alias might later become unique and
+  gain mutable access to a `!Unpin` value.
+- A pinned shared owner may be unsized while remaining pinned. Unsizing changes
+  pointer metadata, not the allocation or the value's address, and never
+  exposes an ordinary owner.
+
+Uniqueness-checked mutable access on ordinary shared owners is compatible with
+this model precisely because pinned shared construction prevents ordinary
+owners from coexisting with the pinned family.
+
+Shared uninitialized owners do not support a pin-then-initialize transition.
+The uninitialized wrapper is movable, which would make it possible for an
+ordinary alias to escape before the initialized value acquired its pinning
+guarantee. A pinned shared value is instead constructed complete and pinned
+before it becomes observable.
+
+Closure-based constructors are not emplacement protocols. A closure produces
+an ordinary value, which is then moved into its final slot; pinning is
+established only after that move. The closure therefore cannot form
+self-references to the eventual slot.
 
 ### Thin handles and type erasure
 
@@ -252,8 +294,8 @@ teardown thread observes a complete, frozen set of chunks to reclaim.
 Each handle flavour offers the same shape of allocation entry points:
 
 - a **by-value** form for convenience,
-- a **construct-in-place** form whose closure body is the construction site,
-  avoiding an intermediate stack copy, and
+- a **closure-based** form that defers value construction until a slot is
+  available, and
 - an **uninitialized-then-initialize** form, the guaranteed zero-copy path,
   mirroring the standard library's `new_uninit` idioms.
 
@@ -300,6 +342,10 @@ invariants:
    the latter, so teardown finds no live values.
 6. **A value is destroyed exactly once**, on its own handle's final drop, never
    during pool teardown.
+7. **Pinning follows retained ownership.** Bound owners are not pinnable;
+   unique detached owners retain their slots independently, and shared pinning
+   is established only during fresh construction before an ordinary alias can
+   escape.
 
 ## Verification strategy
 

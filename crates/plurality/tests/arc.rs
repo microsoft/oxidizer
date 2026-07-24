@@ -24,7 +24,7 @@ use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::DropCounter;
-use plurality::Pool;
+use plurality::{Arc, Pool};
 
 #[test]
 fn arc_share_and_clone() {
@@ -58,7 +58,7 @@ fn arc_drops_value_on_last_handle() {
 fn uninit_arc_placement() {
     let pool = Pool::<String>::builder().chunk_size(2).build();
     let mut a = pool.alloc_uninit_arc();
-    plurality::Arc::get_mut(&mut a).unwrap().write(String::from("hello"));
+    Arc::get_mut(&mut a).unwrap().write(String::from("hello"));
     // SAFETY: the value was written just above.
     let a = unsafe { a.assume_init() };
     let a2 = a.clone();

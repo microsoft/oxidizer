@@ -18,14 +18,9 @@ enum ErrorKind {
 /// The error returned by the fallible `try_alloc_*` methods of
 /// [`Pool`](crate::Pool).
 ///
-/// Allocation fails for one of two reasons, which can be told apart with
+/// Distinguish the two causes with
 /// [`is_capacity_exhausted`](Self::is_capacity_exhausted) and
-/// [`is_allocator_failure`](Self::is_allocator_failure):
-///
-/// * the pool reached its capacity limit — every slot is occupied and it cannot
-///   grow, because it hit the configured `max_chunks` cap (or, for an unbounded
-///   pool, the addressable slot-index ceiling); or
-/// * the backing allocator failed to provide memory for a new chunk.
+/// [`is_allocator_failure`](Self::is_allocator_failure).
 ///
 /// In both cases the rejected value is dropped and any `_with` closure is left
 /// uncalled.
@@ -51,10 +46,7 @@ impl AllocError {
         kind: ErrorKind::AllocatorFailed,
     };
 
-    /// Returns `true` if allocation failed because the pool reached its capacity
-    /// limit: every slot is occupied and it cannot grow, having hit the
-    /// configured `max_chunks` cap (or, for an unbounded pool, the addressable
-    /// slot-index ceiling).
+    /// Returns `true` if every slot was occupied and the pool could not grow.
     #[must_use]
     pub fn is_capacity_exhausted(self) -> bool {
         matches!(self.kind, ErrorKind::CapacityExhausted)

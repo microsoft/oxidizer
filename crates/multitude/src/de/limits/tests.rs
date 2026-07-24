@@ -16,6 +16,7 @@ fn make_state(limits: DeserializationLimits) -> LimitState {
     LimitState {
         limits,
         depth: Cell::new(0),
+        limit_exceeded: Cell::new(None),
     }
 }
 
@@ -474,7 +475,7 @@ fn depth_enter_leave_success_limit_and_nested_errors() {
     unrestricted.enter::<Error>().unwrap();
     assert_eq!(unrestricted.depth.get(), usize::MAX);
     unrestricted.leave();
-    assert_eq!(unrestricted.depth.get(), usize::MAX - 1);
+    assert_eq!(unrestricted.depth.get(), usize::MAX);
 }
 
 #[test]
@@ -593,6 +594,16 @@ fn sequence_callbacks_hints_end_overflow_and_depth_error() {
     };
     assert!(overflow.next_element::<u8>().unwrap_err().to_string().contains("sequence length"));
 
+    let unlimited = make_state(DeserializationLimits::unlimited());
+    let inner = SeqDeserializer::<_, Error>::new(vec![1_u8].into_iter());
+    let mut uncounted = LimitedSeqAccess {
+        inner,
+        state: &unlimited,
+        count: usize::MAX,
+    };
+    assert_eq!(uncounted.next_element::<u8>().unwrap(), Some(1));
+    assert_eq!(uncounted.count, usize::MAX);
+
     let inner = SeqDeserializer::<_, Error>::new(Vec::<u8>::new().into_iter());
     let mut empty = LimitedSeqAccess {
         inner,
@@ -673,6 +684,17 @@ fn map_callbacks_hints_end_overflow_values_and_depth_error() {
         count: usize::MAX,
     };
     assert!(overflow.next_key::<String>().unwrap_err().to_string().contains("map length"));
+
+    let unlimited = make_state(DeserializationLimits::unlimited());
+    let inner = MapDeserializer::<_, Error>::new(vec![("a", 1_u8)].into_iter());
+    let mut uncounted = LimitedMapAccess {
+        inner,
+        state: &unlimited,
+        count: usize::MAX,
+    };
+    assert_eq!(uncounted.next_key::<String>().unwrap().as_deref(), Some("a"));
+    assert_eq!(uncounted.next_value::<u8>().unwrap(), 1);
+    assert_eq!(uncounted.count, usize::MAX);
 
     let inner = MapDeserializer::<_, Error>::new(Vec::<(&str, u8)>::new().into_iter());
     let mut empty = LimitedMapAccess {

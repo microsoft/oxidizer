@@ -6,7 +6,7 @@
 
 #![allow(clippy::missing_panics_doc, reason = "example code")]
 
-use multitude::de::{DeserializationLimits, Value};
+use multitude::de::{DeserializationLimits, DeserializationResource, JsonError, Value};
 use multitude::{Arena, Box};
 use serde::Deserialize as _;
 
@@ -16,7 +16,7 @@ struct Coordinates {
     y: i64,
 }
 
-fn main() -> serde_json::Result<()> {
+fn main() -> Result<(), JsonError> {
     let arena = Arena::new();
 
     let value: Box<Value> = arena.deserialize_json(r#"{"x":3,"y":4,"label":"point","label":"duplicate"}"#)?;
@@ -34,9 +34,11 @@ fn main() -> serde_json::Result<()> {
         .with_max_string_len(32)
         .with_max_bytes_len(32);
     let sequence_limits = limits.with_max_sequence_len(2);
-    let result: serde_json::Result<Box<Value>> = arena.deserialize_json_with_limits(r#"["one","two","three"]"#, sequence_limits);
+    let result: Result<Box<Value>, JsonError> = arena.deserialize_json_with_limits(r#"["one","two","three"]"#, sequence_limits);
     let error = result.expect_err("the sequence exceeds the configured limit");
-    assert!(error.to_string().contains("sequence length limit"));
+    let exceeded = error.limit_exceeded().expect("the sequence limit was exceeded");
+    assert_eq!(exceeded.resource(), DeserializationResource::SequenceLength);
+    assert_eq!(exceeded.limit(), 2);
 
     Ok(())
 }

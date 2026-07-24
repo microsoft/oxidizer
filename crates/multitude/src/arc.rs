@@ -21,9 +21,7 @@ use crate::internal::thin_dst;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
 
-/// Strong-count saturation threshold. Cloning past this aborts the
-/// process, mirroring `std::sync::Arc`'s `MAX_REFCOUNT` guard (using
-/// the `u32` strong counter's half-range instead of `isize::MAX`).
+/// Strong-count saturation threshold.
 const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 
 /// A thread-safe reference-counted smart pointer to a `T` stored in an [`Arena`](crate::Arena).
@@ -45,7 +43,46 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 ///
 /// # Pinning
 ///
-/// `Arc` implements [`Unpin`] unconditionally (like `std::sync::Arc`).
+/// Use [`Arena::alloc_arc_pin`](crate::Arena::alloc_arc_pin) to pin a `!Unpin`
+/// value during construction. [`Pin::new`] can wrap an existing owner only when
+/// `T: Unpin`. Multitude provides no safe conversion for an existing owner of a
+/// `!Unpin` value because an ordinary alias may later become unique through
+/// [`Arc::get_mut`].
+///
+/// ```compile_fail
+/// use core::marker::PhantomPinned;
+/// use core::pin::Pin;
+/// use multitude::{Arc, Arena};
+///
+/// let arena = Arena::new();
+/// let value = arena.alloc_arc(PhantomPinned);
+/// let _: Pin<Arc<PhantomPinned>> = value.into();
+/// ```
+///
+/// ```compile_fail
+/// use core::marker::PhantomPinned;
+/// use core::pin::Pin;
+/// use multitude::Arena;
+///
+/// let arena = Arena::new();
+/// let _ = Pin::new(arena.alloc_arc(PhantomPinned));
+/// ```
+///
+/// Multitude intentionally provides no `assume_init_pin` conversion for
+/// `Pin<Arc<MaybeUninit<T>>>`. Initialize first; an address-sensitive value
+/// still cannot then be pinned through an existing shared owner:
+///
+/// ```compile_fail
+/// use core::marker::PhantomPinned;
+/// use core::pin::Pin;
+/// use multitude::{Arc, Arena};
+///
+/// let arena = Arena::new();
+/// let value = arena.alloc_zeroed_arc::<PhantomPinned>();
+/// // SAFETY: PhantomPinned is an inhabited zero-sized type.
+/// let value: Arc<PhantomPinned> = unsafe { value.assume_init() };
+/// let _: Pin<Arc<PhantomPinned>> = Pin::new(value);
+/// ```
 ///
 /// # Example
 ///
@@ -123,6 +160,41 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
         self.ptr
     }
 
+    /// Pins a freshly-created owner before any ordinary alias can escape.
+    ///
+    /// # Safety
+    ///
+    /// No unpinned alias to this allocation may exist or be created.
+    #[inline]
+    pub(crate) unsafe fn pin_fresh(this: Self) -> Pin<Self> {
+        // SAFETY: guaranteed by the caller.
+        unsafe { Pin::new_unchecked(this) }
+    }
+
+    /// Returns mutable access when this is the only strong owner.
+    ///
+    /// ```
+    /// use multitude::{Arc, Arena};
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_arc(1_u32);
+    /// *Arc::get_mut(&mut value).expect("the owner is unique") = 2;
+    /// assert_eq!(*value, 2);
+    /// ```
+    #[inline]
+    pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+        let value_align = mem::align_of_val::<T>(&**this);
+        // SAFETY: `this` keeps the strong-count prefix alive.
+        let strong = unsafe { thin_dst::strong_ref::<T>(this.ptr, value_align) };
+        if strong.load(Ordering::Acquire) != 1 {
+            return None;
+        }
+        let mut value = this.as_fat_ptr();
+        // SAFETY: a strong count of one means no other owner can expose the
+        // pointee, and no weak-owner API exists.
+        Some(unsafe { value.as_mut() })
+    }
+
     /// True iff both handles point at the same address.
     ///
     /// ```
@@ -181,40 +253,6 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
         // chunk layout is identical and no rewrite is needed.
         unsafe { Arc::from_raw(thin) }
     }
-
-    /// Pinned mirror of [`Self::assume_init`]. The pin is preserved
-    /// across the cast because the value's address does not change.
-    ///
-    /// # Safety
-    ///
-    /// Same contract as [`Self::assume_init`].
-    ///
-    /// ```
-    /// use core::pin::Pin;
-    ///
-    /// use multitude::{Arc, Arena};
-    ///
-    /// let arena = Arena::new();
-    /// let value = Pin::new(arena.alloc_zeroed_arc::<u32>());
-    /// // SAFETY: zero is a valid `u32` representation.
-    /// let value = unsafe { Arc::assume_init_pin(value) };
-    /// assert_eq!(*value, 0);
-    /// ```
-    #[must_use]
-    #[inline]
-    pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Arc<T, A>>
-    where
-        A: 'static,
-    {
-        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
-        // re-pin the result, and the value's address is unchanged across the
-        // cast (nothing moves). The caller's `assume_init` contract (the
-        // `MaybeUninit<T>` holds a valid `T`) is forwarded unchanged.
-        unsafe {
-            let inner: Self = Pin::into_inner_unchecked(this);
-            Arc::into_pin(inner.assume_init())
-        }
-    }
 }
 
 impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
@@ -256,39 +294,6 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
         // the metadata already in the prefix matches the new fat
         // pointer.
         unsafe { Arc::from_raw(thin) }
-    }
-
-    /// Pinned mirror of [`Self::assume_init`] for slices.
-    ///
-    /// # Safety
-    ///
-    /// Same contract as [`Self::assume_init`].
-    ///
-    /// ```
-    /// use core::pin::Pin;
-    ///
-    /// use multitude::{Arc, Arena};
-    ///
-    /// let arena = Arena::new();
-    /// let values = Pin::new(arena.alloc_zeroed_slice_arc::<u16>(2));
-    /// // SAFETY: zero is a valid `u16` representation.
-    /// let values = unsafe { Arc::assume_init_pin_slice(values) };
-    /// assert_eq!(&*values, &[0, 0]);
-    /// ```
-    #[must_use]
-    #[inline]
-    pub unsafe fn assume_init_pin_slice(this: Pin<Self>) -> Pin<Arc<[T], A>>
-    where
-        A: 'static,
-    {
-        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
-        // re-pin the result, and the elements' addresses are unchanged across
-        // the cast (nothing moves). The caller's slice `assume_init` contract
-        // (every element is a valid `T`) is forwarded unchanged.
-        unsafe {
-            let inner: Self = Pin::into_inner_unchecked(this);
-            Arc::into_pin(inner.assume_init())
-        }
     }
 }
 
@@ -377,18 +382,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+
     use super::*;
     use crate::Arena;
 
-    // The maximum strong count is the lower half of the `u32` range.
     #[test]
     fn max_strong_refcount_is_u32_half_range() {
         assert_eq!(MAX_STRONG_REFCOUNT, u32::MAX >> 1);
         assert_eq!(MAX_STRONG_REFCOUNT, 0x7FFF_FFFF);
     }
 
-    // `fetch_add` returns the previous count, so cloning at the maximum
-    // permitted previous count succeeds.
     #[test]
     fn clone_at_max_refcount_threshold_does_not_abort() {
         let arena = Arena::new();
@@ -404,13 +408,10 @@ mod tests {
         )]
         let clone = arc.clone();
         assert_eq!(*clone, 0xABCD);
-        // Restore the true live-handle count (`arc` + `clone`) so the two
-        // drops tear the value and chunk down correctly instead of
-        // leaking the strong count above 1 forever.
+        // Restore the two live handles before teardown.
         strong.store(2, Ordering::Relaxed);
     }
 
-    // A clone observing a previous count above the maximum must abort.
     #[test]
     #[should_panic(expected = "refcount overflow")]
     fn clone_above_max_refcount_threshold_aborts() {
@@ -420,12 +421,10 @@ mod tests {
         // so the strong slot is aligned and within chunk provenance.
         let strong = unsafe { thin_dst::strong_ref::<u32>(arc.thin_ptr(), mem::align_of::<u32>()) };
         strong.store(MAX_STRONG_REFCOUNT + 1, Ordering::Relaxed);
-        // Restore the sole live handle after the overflow check increments
-        // the count, then resume the expected panic.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = catch_unwind(AssertUnwindSafe(|| {
             let _c = arc.clone();
         }));
         strong.store(1, Ordering::Relaxed);
-        std::panic::resume_unwind(result.expect_err("clone past the threshold must panic"));
+        resume_unwind(result.expect_err("clone past the threshold must panic"));
     }
 }

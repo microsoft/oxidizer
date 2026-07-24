@@ -11,6 +11,7 @@ mod common;
 
 use core::cmp::Ordering;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::thread;
 
 use multitude::{Arc, Arena};
 
@@ -19,7 +20,7 @@ fn cross_thread_arena_arc() {
     let arena = Arena::new();
     let shared: Arc<u64> = arena.alloc_arc(99);
     let s2 = shared.clone();
-    let h = std::thread::spawn(move || *s2);
+    let h = thread::spawn(move || *s2);
     assert_eq!(*shared, 99);
     assert_eq!(99, h.join().unwrap());
 
@@ -59,7 +60,7 @@ fn alloc_arc_with_constructs_in_place() {
     let arena = Arena::new();
     let r = arena.alloc_arc_with(|| 271_u32);
     let r2 = r.clone();
-    let h = std::thread::spawn(move || *r2);
+    let h = thread::spawn(move || *r2);
     assert_eq!(*r, 271);
     assert_eq!(h.join().unwrap(), 271);
 
@@ -68,11 +69,27 @@ fn alloc_arc_with_constructs_in_place() {
 }
 
 #[test]
+fn get_mut_requires_unique_ownership() {
+    let arena = Arena::new();
+    let mut value = arena.alloc_arc(10_u32);
+    *Arc::get_mut(&mut value).unwrap() = 11;
+
+    let alias = value.clone();
+    assert!(Arc::get_mut(&mut value).is_none());
+    drop(alias);
+    assert_eq!(*Arc::get_mut(&mut value).unwrap(), 11);
+
+    let mut slice = arena.alloc_slice_copy_arc([1_u8, 2, 3]);
+    Arc::get_mut(&mut slice).unwrap()[1] = 9;
+    assert_eq!(&*slice, &[1, 9, 3]);
+}
+
+#[test]
 fn alloc_slice_copy_arc_works() {
     let arena = Arena::new();
     let r = arena.alloc_slice_copy_arc([7_u32, 8, 9]);
     let r2 = r.clone();
-    let h = std::thread::spawn(move || r2[1]);
+    let h = thread::spawn(move || r2[1]);
     assert_eq!(&*r, &[7, 8, 9]);
     assert_eq!(h.join().unwrap(), 8);
 
@@ -150,7 +167,7 @@ fn cross_thread_drop_no_use_after_free() {
     let handles: std::vec::Vec<_> = (0..100_u32)
         .map(|i| {
             let h = arena.alloc_arc(i);
-            std::thread::spawn(move || *h)
+            thread::spawn(move || *h)
         })
         .collect();
     let mut sum = 0_u64;
@@ -173,7 +190,7 @@ fn arena_drop_races_last_shared_handle_drop() {
         let handle: Arc<u64> = arena.alloc_arc(0xDEAD_BEEF);
         let barrier = std::sync::Arc::new(Barrier::new(2));
         let b2 = std::sync::Arc::clone(&barrier);
-        let other = std::thread::spawn(move || {
+        let other = thread::spawn(move || {
             let _ = b2.wait();
             drop(handle);
         });
@@ -250,7 +267,7 @@ fn arena_arc_slice_send_to_thread() {
     let arena = Arena::new();
     let r: Arc<[u32]> = arena.alloc_slice_copy_arc([5_u32, 6, 7]);
     let r2 = r.clone();
-    let h = std::thread::spawn(move || r2.iter().sum::<u32>());
+    let h = thread::spawn(move || r2.iter().sum::<u32>());
     assert_eq!(h.join().unwrap(), 18);
     assert_eq!(&*r, &[5, 6, 7]);
 }

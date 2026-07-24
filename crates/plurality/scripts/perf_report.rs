@@ -7,23 +7,8 @@
 edition = "2021"
 ---
 
-//! Run the benchmark suites and regenerate `docs/PERF.md`.
-//!
-//! The allocation suite comes as two aligned halves that exercise the *same*
-//! per-operation bodies (`benches/gungraun/ops.rs` and its `benches/criterion/`
-//! twin):
-//!   * `gungraun`  — Callgrind, runs each op **once** (instruction-precise,
-//!     deterministic).
-//!   * `criterion` — wall-clock, loops each op `N` times. The reported
-//!     median is for `N` ops, so this script divides by `N` for per-op time.
-//!
-//! Each bench binary carries both the allocation groups and the owning
-//! fat-pointer comparison group, so one `cargo bench` invocation per harness
-//! covers everything.
-//!
-//! Two further benches stand on their own:
-//!   * `pool_comparison` — gungraun cross-crate alloc+free comparison.
-//!   * `graph_churn`     — wall-clock 1M-node macro-benchmark vs mimalloc.
+//! Runs the benchmark suites and regenerates `docs/PERF.md`. Gungraun supplies
+//! instruction counts; criterion and graph churn supply wall-clock results.
 //!
 //! The gungraun suites need `valgrind` on PATH; pass `--no-gungraun` to skip
 //! them. Pass `--no-wallclock` to skip the criterion + graph-churn suites, and
@@ -37,9 +22,10 @@ edition = "2021"
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::str::from_utf8;
 
 /// Operations per criterion iteration (must match `N` in `benches/criterion/main.rs`).
 const N: f64 = 1000.0;
@@ -236,7 +222,7 @@ fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<Str
     let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&out.stderr));
     if !out.status.success() {
-        let _ = std::io::stderr().write_all(combined.as_bytes());
+        let _ = io::stderr().write_all(combined.as_bytes());
         return Err(format!("cargo bench --bench {bench} failed ({})", out.status));
     }
     Ok(combined)
@@ -416,7 +402,7 @@ fn fmt_int(n: Option<u64>) -> String {
         if !(i == 0 && first == 0) {
             out.push(',');
         }
-        out.push_str(std::str::from_utf8(chunk).expect("ASCII digits"));
+        out.push_str(from_utf8(chunk).expect("ASCII digits"));
     }
     out
 }

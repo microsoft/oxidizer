@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.6.2"
+version = "0.7.0"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -68,7 +68,7 @@ hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"],
 multitude_macros = { workspace = true, optional = true }
 ptr_meta = { workspace = true }
 serde = { workspace = true, features = ["alloc"], optional = true }
-serde_json = { workspace = true, features = ["alloc"], optional = true }
+serde_json = { workspace = true, features = ["alloc", "raw_value"], optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
 zerocopy = { workspace = true, optional = true }
 
@@ -89,7 +89,7 @@ criterion = { workspace = true }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
@@ -111,6 +111,16 @@ required-features = ["serde_json"]
 
 [[bench]]
 name = "multitude_serde_cg"
+harness = false
+required-features = ["serde_json"]
+
+[[bench]]
+name = "multitude_record_batch"
+harness = false
+required-features = ["serde_json"]
+
+[[bench]]
+name = "multitude_record_batch_cg"
 harness = false
 required-features = ["serde_json"]
 
