@@ -530,7 +530,10 @@ function Reset-ReleaseScriptCaches {
 # Memoised, mockable classifier: returns the minimum change type a crate's
 # current working-tree public API requires versus its previous version-bump
 # commit ('breaking' / 'non-breaking' / 'patch' / 'none' when there is no prior
-# bump to compare against), by running cargo-semver-checks once per crate.
+# bump to compare against). Ordinary library crates are classified by running
+# cargo-semver-checks once per crate. Proc-macro-only crates have no supported
+# cargo-semver-checks API surface, so they return the explicit 'manual' result
+# before the tool is invoked; the interactive planner owns that decision.
 # Resolve-ReleaseSet is invoked many times during the interactive review loop, so
 # results are cached per cargo name for the run. Test suites Mock this function to
 # supply deterministic verdicts without invoking the real tool (see the scenario
@@ -548,6 +551,15 @@ function Get-CrateRequiredChangeType {
         return $script:CrateSemverVerdictCache[$CargoName]
     }
 
+    $workspacePackage = Get-WorkspacePackages -repoRoot $RepoRoot |
+        Where-Object { $_.Folder -eq $Folder -or $_.Name -eq $CargoName } |
+        Select-Object -First 1
+    if ($null -ne $workspacePackage -and $workspacePackage.IsProcMacroOnly) {
+        Write-Host "cargo semver-checks: '$CargoName' is proc-macro-only; manual SemVer review is required." -ForegroundColor Yellow
+        $script:CrateSemverVerdictCache[$CargoName] = 'manual'
+        return 'manual'
+    }
+
     Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its previous version-bump commit..." -ForegroundColor Cyan
     $result = Invoke-CrateSemverCheck -PackageName $CargoName -PackageFolder $Folder -RepoRoot $RepoRoot
     $script:CrateSemverVerdictCache[$CargoName] = $result
@@ -559,6 +571,8 @@ function Get-CrateRequiredChangeType {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
+#   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
     param([string]$repoRoot)
 
@@ -579,12 +593,17 @@ function Get-WorkspacePackages {
             }
         }
 
+        $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
+        $hasLibraryTarget = $targetKinds -contains 'lib'
+
         $packages += [pscustomobject]@{
             Name                 = $package.name
             Folder               = Split-Path $manifestDir -Leaf
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
+            HasLibraryTarget     = $hasLibraryTarget
+            IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
     }
 
@@ -715,6 +734,28 @@ function Get-AllTransitiveDependents {
     }
 
     return $dependents
+}
+
+# Returns the published workspace packages that directly depend on a cargo
+# package in an already-captured metadata snapshot. This deliberately follows
+# exactly one dependency edge; callers can advance a review frontier only after
+# classifying that edge's consumer.
+function Get-DirectPublishedDependentsFromBaseline {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Baseline,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName
+    )
+
+    return @(
+        $Baseline |
+            Where-Object {
+                $_.Published -and
+                $_.Name.Replace('-', '_') -ne $TargetCargoName -and
+                $_.Deps -contains $TargetCargoName
+            } |
+            Sort-Object -Property Folder |
+            ForEach-Object { $_.Folder }
+    )
 }
 
 # --- FILE-CHANGE ANALYSIS ---
@@ -1222,12 +1263,13 @@ function Get-UnreleasedModifiedDependencies {
                     $isInReleaseSet = $null -ne $depEntry
                     if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
-                            Folder           = $depFolder
-                            PackageName      = $depPackage.Name
-                            CurrentVersion   = $depPackage.Version
-                            InReleaseSet     = $isInReleaseSet
-                            ChangedFileCount = $modifiedMap[$depFolder]
-                            DependencyChains = @(, $depChain)
+                            Folder                     = $depFolder
+                            PackageName                = $depPackage.Name
+                            CurrentVersion             = $depPackage.Version
+                            InReleaseSet               = $isInReleaseSet
+                            ChangedFileCount           = $modifiedMap[$depFolder]
+                            DependencyChains           = @(, $depChain)
+                            RequiresManualSemverReview = [bool]$depPackage.IsProcMacroOnly
                         }
                     }
                     else {
@@ -1272,12 +1314,13 @@ function Get-UnreleasedModifiedDependencies {
         if (-not (& $shouldSurface $folder)) { continue }
         $pkg = $byFolder[$folder]
         $findings[$folder] = [pscustomobject]@{
-            Folder           = $folder
-            PackageName      = $pkg.Name
-            CurrentVersion   = $pkg.Version
-            InReleaseSet     = $ResolvedReleaseSet.ContainsKey($folder)
-            ChangedFileCount = $modifiedMap[$folder]
-            DependencyChains = @()
+            Folder                     = $folder
+            PackageName                = $pkg.Name
+            CurrentVersion             = $pkg.Version
+            InReleaseSet               = $ResolvedReleaseSet.ContainsKey($folder)
+            ChangedFileCount           = $modifiedMap[$folder]
+            DependencyChains           = @()
+            RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
         }
     }
 

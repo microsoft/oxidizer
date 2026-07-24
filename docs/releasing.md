@@ -203,9 +203,9 @@ Examples:
 
 After parsing the tokens, the planner walks the workspace dependency
 graph forward from every user-source release and adds each transitive
-published dependent as a cascade-source release. The change type for
-every release in the plan — both the directly-requested (user-source)
-crates and the cascade-pulled dependents — is derived by running
+published dependent as a cascade-source release. For ordinary library
+packages, the required change type — both for directly-requested
+(user-source) packages and cascade-pulled dependents — is derived by running
 [`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
 against each crate's **previous version-bump commit in git history** —
 the most recent commit that changed the crate's `[package] version`,
@@ -255,6 +255,84 @@ Cascade dependents are floored at `patch` (they must re-release to pick
 up the new dependency version even when their own public API is
 unchanged), then raised to whatever their own `cargo semver-checks`
 result requires.
+
+#### Proc-macro-only packages require manual SemVer review
+
+`cargo semver-checks` deliberately supports ordinary library targets,
+not proc-macro-only targets. For a package whose `cargo metadata`
+targets contain `proc-macro` but no ordinary `lib` target, the tool exits
+with "no crates with library targets selected". This is expected: its
+rustdoc-based analysis cannot validate the procedural macro contract,
+including exported macro names, accepted input syntax, diagnostics, or
+generated output.
+
+The release tooling detects this target shape from the workspace
+metadata **before invoking `cargo semver-checks`**. It does not reinterpret
+the unsupported-tool error as success and does not guess a breaking
+change:
+
+- Every proc-macro-only package in the release set is shown in the
+  standard interactive package dialog, even when it was supplied via
+  `-Packages` or was cascade-added without changes in its own folder.
+- The tool asks the same questions for every package. For a proc macro, it
+  skips the unsupported automated check and records the answer as a manual
+  review.
+- For a proc macro that is not yet in the plan, choosing **No material
+  changes** completes the review. The package is not released unless
+  another package needs it. If that happens later in the same run, the
+  proc macro gets a patch release without another prompt.
+- Use **View diff**, then either keep the currently planned change type
+  or select breaking / non-breaking / patch. For a targeted package, a
+  new selection replaces the provisional `-Packages` change type. For a
+  cascade-added package, it replaces the mechanical `patch` floor.
+- The final release plan labels the package as manually classified and
+  states that `cargo-semver-checks` was not run for it.
+- Ordinary library dependents keep their normal behavior: each is
+  re-released at least as `patch`, and its own public API is still
+  analysed by `cargo-semver-checks`. A manually chosen proc-macro
+  severity is never copied to dependents.
+- If the proc-macro release is breaking, the tool asks the maintainer to
+  review each published crate that directly depends on it.
+- If one of those crates is also breaking, the tool then reviews that
+  crate's direct dependents. Otherwise, the extra review stops there.
+  Each crate keeps its own result; the proc macro's result is never copied
+  to another crate. For `0.0.x` packages, every release is breaking, so
+  the review continues to the next set of direct dependents.
+
+The CI SemVer report follows the same target detection. It skips the
+unsupported invocation, emits a `warn` row saying manual proc-macro
+review is required, and does **not** claim that the version increment was
+automatically verified. For a breaking proc-macro increment, CI marks
+the direct published consumer for manual review while retaining that
+consumer's ordinary `cargo-semver-checks` result. It continues only
+through consumers whose own version increment is breaking. If a required
+direct consumer is absent from the publishing set, the report calls out
+the incomplete review chain. If CI cannot determine a reviewed package's
+baseline, it conservatively continues the warning to the next edge rather
+than treating the unknown result as non-breaking.
+
+Build and test validation are separate from SemVer validation. The
+release driver runs `cargo check --workspace` after applying the plan,
+and normal CI exercises the workspace tests. Those checks can catch
+compilation failures and tested behavioral regressions, but passing them
+does not prove compatibility for exported macro names, all accepted
+inputs, diagnostics, or generated code. Review those aspects explicitly.
+
+For example, to validate the main consumer and release
+`templated_uri_macros`, run:
+
+```powershell
+cargo test -p templated_uri
+./scripts/release-packages.ps1 -Packages 'templated_uri_macros@patch'
+```
+
+The `patch` token is the provisional plan entry, not an automated
+compatibility verdict. In the standard package dialog, view the diff
+and choose the actual change type before allowing the release to proceed.
+If that choice is breaking, the planner next requires review of
+`templated_uri`, its direct published consumer; keep or elevate
+`templated_uri` based on whether its public contract exposes the macro
+change.
 
 **Baseline semantics.** The baseline is the crate's previous
 version-bump commit — the most recent commit (before the change under
@@ -387,6 +465,12 @@ The user-review queue therefore contains two categories of finding:
      publishable packages with no on-disk changes; the "View diff" option
      is relabelled `View diff (no changes in this package)` so the empty
      state is obvious before you open the editor.
+   - For every proc-macro-only package in the release set, show the same
+     menu as a mandatory manual SemVer review. This includes targeted
+     packages and unchanged proc-macro dependents added by cascade.
+     A breaking result then surfaces direct published consumers one edge
+     at a time; propagation stops at the first consumer reviewed below
+     breaking.
    - After review, apply all version-number increments, changelog
      updates, README regeneration, `Cargo.toml` rewrites, and workspace
      `[workspace.dependencies]` updates in one shot.
