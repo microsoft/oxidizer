@@ -34,10 +34,11 @@ mod linux {
     use crate::shared::{
         ArenaRefreshState, RecordBatchState, ReusableVectorState, StandardRefreshState, arena_box_slice_hot_path,
         arena_each_refresh_iteration, arena_each_refresh_state, arena_raw_each_refresh_iteration, arena_raw_each_refresh_state,
-        arena_vec_baseline_hot_path, arena_vec_refresh_iteration, arena_vec_refresh_state, escaped_state, malformed_arena_hot_path,
-        malformed_standard_hot_path, malformed_state, repeated_no_reset_iteration, reset_recreate_hot_path, reset_recreate_state,
-        resource_limited_hot_path, reusable_vector_state, sparse_arena_hot_path, sparse_lazy_standard_hot_path, sparse_standard_hot_path,
-        standard_refresh_iteration, standard_refresh_state, standard_vec_hot_path, unescaped_state,
+        arena_raw_index_refresh_iteration, arena_raw_index_refresh_state, arena_vec_baseline_hot_path, arena_vec_refresh_iteration,
+        arena_vec_refresh_state, escaped_state, malformed_arena_hot_path, malformed_standard_hot_path, malformed_state,
+        repeated_no_reset_iteration, reset_recreate_hot_path, reset_recreate_state, resource_limited_hot_path, reusable_vector_state,
+        sparse_arena_hot_path, sparse_lazy_standard_hot_path, sparse_standard_hot_path, standard_refresh_iteration, standard_refresh_state,
+        standard_vec_hot_path, unescaped_state,
     };
 
     #[library_benchmark]
@@ -138,26 +139,32 @@ mod linux {
 
     #[library_benchmark]
     #[bench::run(&mut standard_refresh_state())]
-    fn refresh_workload_standard_selective(state: &mut StandardRefreshState) {
+    fn refresh_workload_standard_global_select(state: &mut StandardRefreshState) {
         standard_refresh_iteration(state);
     }
 
     #[library_benchmark]
     #[bench::run(&mut arena_vec_refresh_state())]
-    fn refresh_workload_arena_vec_reset_selective(state: &mut ArenaRefreshState) {
+    fn refresh_workload_arena_vec_reset_global_select(state: &mut ArenaRefreshState) {
         arena_vec_refresh_iteration(state);
     }
 
     #[library_benchmark]
     #[bench::run(&mut arena_each_refresh_state())]
-    fn refresh_workload_arena_each_reset_selective(state: &mut ArenaRefreshState) {
+    fn refresh_workload_arena_each_reset_global_select(state: &mut ArenaRefreshState) {
         arena_each_refresh_iteration(state);
     }
 
     #[library_benchmark]
     #[bench::run(&mut arena_raw_each_refresh_state())]
-    fn refresh_workload_arena_raw_each_reset_index_selective(state: &mut ArenaRefreshState) {
+    fn refresh_workload_arena_raw_each_reset_global_select(state: &mut ArenaRefreshState) {
         arena_raw_each_refresh_iteration(state);
+    }
+
+    #[library_benchmark]
+    #[bench::run(&mut arena_raw_index_refresh_state())]
+    fn refresh_workload_arena_raw_index_reset_global_select(state: &mut ArenaRefreshState) {
+        arena_raw_index_refresh_iteration(state);
     }
 
     library_benchmark_group!(
@@ -191,10 +198,11 @@ mod linux {
     library_benchmark_group!(
         name = refresh_workload;
         benchmarks =
-            refresh_workload_standard_selective,
-            refresh_workload_arena_vec_reset_selective,
-            refresh_workload_arena_each_reset_selective,
-            refresh_workload_arena_raw_each_reset_index_selective
+            refresh_workload_standard_global_select,
+            refresh_workload_arena_vec_reset_global_select,
+            refresh_workload_arena_each_reset_global_select,
+            refresh_workload_arena_raw_each_reset_global_select,
+            refresh_workload_arena_raw_index_reset_global_select
     );
 }
 

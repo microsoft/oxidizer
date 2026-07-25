@@ -3,11 +3,13 @@
 
 /// Runtime statistics for an [`Arena`](crate::Arena).
 ///
-/// Lifetime counters accumulate over the life of the arena. Live gauges use
-/// atomic accounting events around successful backing allocations, chunk
-/// reclamation, and cache publication. Escaped thread-safe owners can return
-/// chunks concurrently, so fields in one snapshot may reflect adjacent events
-/// rather than one globally synchronized state.
+/// Lifetime counters accumulate over the life of the arena. Counters with a
+/// `_since_reset` suffix start at zero after each successful
+/// [`Arena::reset`](crate::Arena::reset). Live gauges use atomic accounting
+/// events around successful backing allocations, chunk reclamation, and cache
+/// publication. Escaped thread-safe owners can return chunks concurrently, so
+/// fields in one snapshot may reflect adjacent events rather than one globally
+/// synchronized state.
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -62,4 +64,27 @@ pub struct ArenaStats {
     /// A relocation copies a collection to a larger buffer when in-place
     /// growth is unavailable.
     pub relocations: u64,
+
+    /// Normal chunks allocated from the backing allocator since the last
+    /// successful [`Arena::reset`](crate::Arena::reset).
+    pub normal_chunks_allocated_since_reset: u64,
+
+    /// Oversized one-shot chunks allocated since the last successful
+    /// [`Arena::reset`](crate::Arena::reset).
+    pub oversized_chunks_allocated_since_reset: u64,
+
+    /// Total bytes successfully obtained from the backing allocator since the
+    /// last successful [`Arena::reset`](crate::Arena::reset).
+    ///
+    /// This is a cumulative generation counter, not a live gauge. It includes
+    /// bytes that were subsequently released.
+    pub backing_bytes_allocated_since_reset: u64,
+
+    /// Normal chunks acquired from the reusable cache since the last
+    /// successful [`Arena::reset`](crate::Arena::reset).
+    pub normal_chunks_reused_since_reset: u64,
+
+    /// Growing-collection buffer relocations since the last successful
+    /// [`Arena::reset`](crate::Arena::reset).
+    pub relocations_since_reset: u64,
 }

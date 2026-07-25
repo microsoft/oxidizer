@@ -3,12 +3,14 @@
 
 //! Public API tests for arena-aware deserialization.
 
-#![cfg(feature = "serde")]
+#![cfg(feature = "serde_json")]
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use multitude::de::{DeserializationLimits, DeserializationResource, DeserializeIn, DeserializeInSeed, Entry, Number, Value};
+use multitude::de::{
+    DeserializationLimits, DeserializationResource, DeserializeIn, DeserializeInSeed, Entry, JsonEachError, JsonError, Number, Value,
+};
 use multitude::{Arc, Arena, Box, Cow, Rc};
 use serde::Deserialize as _;
 use serde::de::value::{
@@ -906,6 +908,135 @@ fn deserialize_json_each_preserves_borrowed_and_owned_cow_storage() {
     assert!(values[1].is_owned());
     assert_eq!(&*values[0], "borrowed");
     assert_eq!(&*values[1], "owned value");
+}
+
+#[test]
+fn try_deserialize_json_each_successfully_visits_every_element_in_order() {
+    let arena = Arena::new();
+    let mut values = std::vec::Vec::new();
+
+    let result = arena.try_deserialize_json_each("[1,2,3]", |value: u64| {
+        values.push(value);
+        Ok::<_, &'static str>(())
+    });
+
+    assert!(matches!(result, Ok(())));
+    assert_eq!(values, [1, 2, 3]);
+
+    values.clear();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(3);
+    let result = arena.try_deserialize_json_each_with_limits("[4,5,6]", limits, |value: u64| {
+        values.push(value);
+        Ok::<_, &'static str>(())
+    });
+
+    assert!(matches!(result, Ok(())));
+    assert_eq!(values, [4, 5, 6]);
+}
+
+#[test]
+fn try_deserialize_json_each_stops_and_preserves_callback_error() {
+    let arena = Arena::new();
+    let mut values = std::vec::Vec::new();
+
+    let error = arena
+        .try_deserialize_json_each("[1,2,not valid JSON", |value: u64| {
+            values.push(value);
+            if value == 2 { Err("rejected value") } else { Ok(()) }
+        })
+        .unwrap_err();
+
+    assert_eq!(values, [1, 2]);
+    assert_eq!(error.callback_error(), Some(&"rejected value"));
+    assert!(error.json_error().is_none());
+    assert_eq!(error.into_callback_error(), Some("rejected value"));
+}
+
+#[test]
+fn try_deserialize_json_each_reports_json_errors_after_successful_callbacks() {
+    let arena = Arena::new();
+    let mut values = std::vec::Vec::new();
+
+    let error = arena
+        .try_deserialize_json_each("[1,2] trailing", |value: u64| {
+            values.push(value);
+            Ok::<_, &'static str>(())
+        })
+        .unwrap_err();
+
+    assert_eq!(values, [1, 2]);
+    let json = error.json_error().unwrap();
+    assert!(json.as_json_error().to_string().contains("trailing characters"));
+    assert!(error.callback_error().is_none());
+}
+
+#[test]
+fn try_deserialize_json_each_with_limits_distinguishes_limits_and_callback_errors() {
+    let arena = Arena::new();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(1);
+
+    let limit_error = arena
+        .try_deserialize_json_each_with_limits("[1,2]", limits, |_: u64| Ok::<_, &'static str>(()))
+        .unwrap_err();
+    let exceeded = limit_error.json_error().unwrap().limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::SequenceLength);
+    assert_eq!(exceeded.limit(), 1);
+
+    let callback_error = arena
+        .try_deserialize_json_each_with_limits("[1,not valid JSON", DeserializationLimits::unlimited(), |_: u64| Err("stop"))
+        .unwrap_err();
+    assert_eq!(callback_error.callback_error(), Some(&"stop"));
+
+    let wrong_root = arena
+        .try_deserialize_json_each_with_limits("1", DeserializationLimits::unlimited(), |_: u64| Ok::<_, &'static str>(()))
+        .unwrap_err();
+    assert!(
+        wrong_root
+            .json_error()
+            .unwrap()
+            .as_json_error()
+            .to_string()
+            .contains("expected a sequence")
+    );
+
+    let trailing = arena
+        .try_deserialize_json_each_with_limits("[1] trailing", DeserializationLimits::unlimited(), |_: u64| {
+            Ok::<_, &'static str>(())
+        })
+        .unwrap_err();
+    assert!(
+        trailing
+            .json_error()
+            .unwrap()
+            .as_json_error()
+            .to_string()
+            .contains("trailing characters")
+    );
+}
+
+#[test]
+fn json_each_error_preserves_display_sources_and_conversions() {
+    #[derive(Debug, Eq, PartialEq)]
+    struct CallbackFailure;
+
+    impl std::fmt::Display for CallbackFailure {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("callback detail")
+        }
+    }
+
+    impl std::error::Error for CallbackFailure {}
+
+    let arena = Arena::new();
+    let callback = arena.try_deserialize_json_each("[1]", |_: u64| Err(CallbackFailure)).unwrap_err();
+    assert_eq!(callback.to_string(), "JSON element callback failed");
+    assert_eq!(std::error::Error::source(&callback).unwrap().to_string(), "callback detail");
+
+    let source = serde_json::from_str::<u64>("not JSON").unwrap_err();
+    let json: JsonEachError<CallbackFailure> = JsonError::from(source).into();
+    assert_eq!(json.to_string(), "JSON deserialization failed");
+    assert!(std::error::Error::source(&json).is_some());
+    assert_eq!(json.into_callback_error(), None);
 }
 
 #[test]
