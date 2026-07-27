@@ -12,11 +12,13 @@ of the design.
 
 - [The problem being solved](#the-problem-being-solved)
 - [The four allocation styles](#the-four-allocation-styles)
+- [Rust pinning model](#rust-pinning-model)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Chunk lifecycle](#chunk-lifecycle)
 - [Reference counting without hot-path atomics](#reference-counting-without-hot-path-atomics)
 - [Thin smart pointers: the alignment/masking trick](#thin-smart-pointers-the-alignmentmasking-trick)
 - [Growable collections and zero-copy freeze](#growable-collections-and-zero-copy-freeze)
+- [Arena-aware deserialization](#arena-aware-deserialization)
 - [Concurrency model](#concurrency-model)
 - [Configuration and tuning](#configuration-and-tuning)
 - [Failure modes and edge cases](#failure-modes-and-edge-cases)
@@ -76,6 +78,51 @@ This split is why there is **no deferred-drop list**: because every
 handle finalizes its own value when it drops, a chunk never has to
 remember which slots still need a destructor at reset. Reset becomes a
 pure cursor rewind.
+
+## Rust pinning model
+
+The crate's Rust `Pin` support follows the ownership of the allocation,
+not merely the fact that arena storage happens to remain at a stable
+address. A sound pinned owner must prevent the allocation from being
+reused for as long as the pinning guarantee can matter, including when
+the owner is deliberately forgotten.
+
+That requirement produces three distinct policies:
+
+- **Arena-bound `Alloc` is not pinnable.** Forgetting an `Alloc` ends its
+  borrow without retaining the chunk independently. A later reset could
+  then reuse the storage, so address stability during the ordinary handle
+  lifetime is not enough to uphold `Pin`'s stronger contract.
+- **A unique `Box` can be converted into a pin.** It independently retains
+  its chunk, and forgetting it leaks that ownership rather than making the
+  allocation reusable. This mirrors the standard unique-box model.
+- **Shared `Arc` and `Rc` values can be pinned only at construction.** A
+  fresh pinned constructor establishes the guarantee before any ordinary
+  owner can escape. An existing shared owner cannot be converted later:
+  an ordinary alias could survive the conversion, eventually become
+  unique, and obtain mutable access to move a `!Unpin` value.
+
+The ordinary shared owners provide uniqueness-checked mutable access when
+their strong count is one. This remains compatible with pinning because a
+pinned shared allocation never exposes an ordinary owner. Cloning through
+the pinned abstraction preserves that separation and does not expose a
+route back to unpinned ownership.
+
+Shared uninitialized owners deliberately have no operation that combines
+pinning with later initialization. `MaybeUninit<T>` is itself movable, so
+such a surface could allow an ordinary shared owner to escape before the
+initialized `T` became pinned. Callers instead construct the complete
+value through a fresh pinned constructor.
+
+Closure-based constructors do not provide emplacement. The closure
+produces an ordinary value, which is then moved into its final allocation
+before the owner is pinned. It therefore cannot create references to the
+eventual allocation while the closure is running.
+
+This use of Rust `Pin` is separate from the document's term **pinned
+chunk**. A pinned chunk is one retained by the arena until reset because
+it served arena-bound references; it says nothing about whether values in
+that chunk are wrapped in `core::pin::Pin`.
 
 ## Architecture at a glance
 
@@ -326,6 +373,117 @@ capacity to the arena when it can.
 
 A one-bit `freeze_prefix` flag on each buffer records which path applies.
 
+## Arena-aware deserialization
+
+Deserialization extends the ownership model into Serde rather than replacing
+Serde with a format-specific object mapper. The central abstraction is an
+allocator-aware counterpart to ordinary `Deserialize`: every recursive step
+receives the arena, so fields can choose arena-backed storage while preserving
+Serde's streaming, borrowing, and data-model semantics.
+
+```text
+ encoded input
+      │
+      ▼
+ format deserializer ──► optional resource-limit boundary
+      │
+      ▼
+ arena-aware seed carrying &Arena
+      │
+      ├──► scalars and ordinary values
+      ├──► arena-owned strings, slices, and smart pointers
+      ├──► borrowed input where the format can expose it safely
+      └──► explicitly delegated ordinary-Serde fields
+```
+
+This is deliberately **opt-in and structural**. A type derives or implements
+arena-aware deserialization, and that decision is propagated through its
+fields. There is no blanket fallback from every ordinary `Deserialize` type:
+such a fallback would overlap arena-aware implementations and, more
+importantly, could silently allocate through the global allocator. A field may
+explicitly delegate to ordinary Serde when that allocation behavior is
+intended.
+
+### Storage and lifetime follow the target type
+
+The target type determines where decoded data lives:
+
+- Arena `Box`, `Arc`, and `Rc` fields own their decoded strings, slices, or
+  values in arena chunks and have the same escape behavior as values allocated
+  directly through the arena.
+- An `Alloc` root is tied to the arena borrow. An escape-capable smart-pointer
+  root independently retains its chunk, so a fully arena-owned graph can
+  outlive the arena handle.
+- Arena `Cow` borrows input only when the source deserializer can provide data
+  valid for the input lifetime. Otherwise it stores a decoded copy in the
+  arena. For JSON, an unescaped string can be borrowed, while an escaped string
+  must be decoded and owned.
+- Ordinary collections may contain arena-aware elements while retaining their
+  own ordinary buffers or nodes. Frozen arena slices are the usual choice when
+  the sequence storage itself must belong to the arena.
+
+This separation makes mixed graphs explicit: arena ownership is not inferred
+from the mere presence of an arena at the root.
+
+### Derived, custom, and dynamic data
+
+The derive supports the structural forms that can be decoded directly through
+Serde's visitor model, including structs and externally tagged enums, while
+honoring the corresponding naming, defaulting, unknown-field, and custom-field
+rules. Representations that require hidden buffering or replay, such as
+untagged or internally tagged enums and flattened fields, are rejected rather
+than weakening the caller's input-borrowing contract.
+
+Custom implementations use the same arena-carrying seed model, allowing
+arena-aware values to participate inside larger Serde visitors without
+introducing a separate data format.
+
+For intentional buffering, the dynamic `Value` model captures arbitrary Serde
+data in arena storage and can replay it through an ordinary Serde deserializer.
+Its maps preserve insertion order, duplicate keys, and non-string keys. Replay
+is limited by what the source format exposes: opaque enum-access protocols do
+not always reveal enough structure for a format-independent capture.
+
+### Limits and failure semantics
+
+Optional deserialization limits bound nesting depth, sequence and map lengths,
+string length, and byte-string length. They form a wrapper around the
+format-independent seed path, so the same policy applies to generic
+deserializers and JSON helpers. Reported size hints are clamped before
+reserving storage; they are optimization hints, never trusted declarations of
+the eventual input size.
+
+Serde requires format-independent allocation and limit failures to use the
+source deserializer's error type. Resource-limited JSON helpers add a typed
+boundary around that channel: `JsonError::limit_exceeded` reports the resource
+and configured limit, while malformed and incompatible input preserves the
+underlying `serde_json::Error`. A failed operation is **not transactional**:
+already consumed arena capacity remains consumed. General rollback would be
+unsound because custom deserialization can create escape-capable owners before
+a later field fails.
+
+Reusable arena `String` and `Vec` builders offer a narrower replacement model.
+They clear their logical contents while retaining capacity, then decode into
+that existing buffer. On failure the builder remains valid but may contain the
+successfully decoded prefix. Reuse applies across several refreshes within one
+arena generation; reset invalidates the borrowed builder, after which a new one
+can benefit from the arena's warm chunk cache.
+
+Top-level JSON arrays can instead be consumed as a stream of independently
+owned values. Each value is delivered in wire order and dropped after its
+callback unless the callback moves selected arena-owned fields elsewhere. This
+avoids allocating a root sequence buffer, but does not make decoding lazy:
+every delivered value is fully deserialized first. Syntax, shape, allocation,
+or limit failures may occur after an earlier prefix has already produced
+observable callback effects.
+
+JSON support is a convenience layer over the same architecture. It accepts
+string or byte input, requires exactly one complete JSON value, rejects trailing
+non-whitespace data, and offers the same resource limits, vector-reuse, and
+streaming semantics. Trailing-input rejection occurs after a streamed array has
+been delivered. Decoding escaped JSON strings may require temporary parser
+scratch space even when the final value is arena-owned.
+
 ## Concurrency model
 
 `Arena<A>` is **`Send` when `A: Send + Sync`, but always `!Sync`**. The
@@ -377,9 +535,14 @@ Two adaptive behaviors run without configuration:
   class and destroys stragglers below it, bounding cache footprint as the
   working set's typical chunk size grows.
 
-With the `stats` feature, `Arena::stats` returns a zero-cost snapshot of
-lifetime counters (chunks allocated, relocations) and live gauges (bytes
-held, wasted tail bytes) for observability.
+With the `stats` feature, `Arena::stats` returns a low-cost snapshot. Lifetime
+counters report backing allocations, cache reuse, resets, and buffer
+relocations. Live gauges report bytes held, cached chunks and bytes, and wasted
+tail bytes; the byte high-water mark survives reset and reclamation. Cached
+bytes are a subset of total held bytes: active, retired, and independently
+retained chunks remain outside the cache. Because escaped atomic owners can
+return chunks from other threads, fields in one snapshot may describe adjacent
+instants rather than one globally synchronized state.
 
 ## Failure modes and edge cases
 
@@ -438,6 +601,10 @@ unsound, so they are maintained centrally rather than at each call site:
 - **Pin-if-referenced** — any chunk that handed out a refcount-free
   `Alloc` stays alive until `&mut self` reset, so an `Alloc`'s borrow can
   never dangle.
+- **Rust pinning follows retained ownership** — `Alloc` is not pinnable;
+  unique `Box` pinning retains its chunk independently; and shared pinning
+  is established only during fresh construction, before an ordinary alias
+  can escape.
 - **Refcount before value drop** — a family's chunk refcount is adopted
   before the value's destructor runs, so a panicking destructor still
   releases the chunk.

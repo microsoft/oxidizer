@@ -127,6 +127,25 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
         self.ptr
     }
 
+    /// Convert this uniquely-owned value into a pinned box.
+    ///
+    /// This mirrors [`std::boxed::Box::into_pin`]. The pointee does not move,
+    /// and forgetting the returned pin leaks the allocation rather than making
+    /// its storage available for reuse.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = multitude::Box::into_pin(arena.alloc_box(3_u8));
+    /// assert_eq!(*value, 3);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn into_pin(this: Self) -> Pin<Self> {
+        // SAFETY: `Box` uniquely owns a pointee whose chunk remains retained
+        // until the box is dropped or leaked.
+        unsafe { Pin::new_unchecked(this) }
+    }
+
     /// Returns a raw mutable pointer to the value (fat if `T: ?Sized` is a DST).
     #[expect(
         clippy::needless_pass_by_ref_mut,
@@ -140,6 +159,13 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
 }
 
 impl_thin_smart_ptr_common!(Box);
+
+impl<T: ?Sized + Pointee, A: Allocator + Clone> From<Box<T, A>> for Pin<Box<T, A>> {
+    #[inline]
+    fn from(value: Box<T, A>) -> Self {
+        Box::into_pin(value)
+    }
+}
 
 // No `leak`: dropping the refcount risks UAF; keeping it leaks the chunk.
 
