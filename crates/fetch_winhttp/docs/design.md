@@ -265,10 +265,14 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
   per-request from the request's `BodyTimeout`. It surfaces as `HttpError::timeout`.
 - **Seatbelt request timeout**: enforced above the transport; the transport is not
   involved.
-- **Resolve and send timeouts**: `fetch` has no concept for these, so they are exposed as
-  transport-specific `WinHttpOptions` knobs - the appropriate home for fine-grained
-  network-phase timers, as discussed in the fetch API stabilization feedback
-  (../../fetch/docs/stabilization.md).
+- **Send timeout**: not a distinct concept. Sending the request and waiting for the
+  response headers (without touching the body) is exactly the span `ResponseTimeout`
+  already governs, after which `BodyTimeout` takes over; there is no separate send
+  deadline to honor.
+- **Resolve timeout**: `fetch` has no concept for a standalone DNS-resolution deadline
+  (it is otherwise subsumed by `connect_timeout`), so it is exposed as a transport-specific
+  `WinHttpOptions` knob for callers that need to bound resolution finely, as discussed in
+  the fetch API stabilization feedback (../../fetch/docs/stabilization.md).
 
 Cancellation is the transport's backstop for every timeout it does not enforce natively:
 when `fetch` (or any layer above) drops the request future on a timeout, the transport
