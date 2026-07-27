@@ -380,7 +380,9 @@ impl CacheTelemetry {
     /// observed it. Signals a corrupt, truncated, wrong-key, tampered, or
     /// relocated value. The protected tier always sits on the post-transform
     /// (fallback) side of the hierarchy, so the event is tagged
-    /// `fallback = true` to match the tier's other events.
+    /// `fallback = true` to match the tier's other events. Like other validation
+    /// outcomes (e.g. `insert_rejected`), it is not a timed operation and so omits
+    /// `cache.duration_ns`.
     #[cfg(feature = "encrypt")]
     pub(crate) fn record_unprotect_failure(&self, cache_name: CacheName) {
         #[cfg(any(feature = "logs", test))]

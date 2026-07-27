@@ -8,8 +8,9 @@
 //!
 //! **Tier events** (hit, miss, expired, etc.) carry `FIELD_NAME`, `FIELD_EVENT`,
 //! and `FIELD_DURATION_NS`. Some events intentionally omit `FIELD_DURATION_NS`
-//! to indicate "not timed": `EVENT_INSERT_REJECTED`, `EVENT_EVICTION`, and
-//! background `EVENT_EXPIRED` events emitted from eviction listeners.
+//! to indicate "not timed": `EVENT_INSERT_REJECTED`, `EVENT_EVICTION`,
+//! `EVENT_UNPROTECT_FAILED`, and background `EVENT_EXPIRED` events emitted from
+//! eviction listeners.
 //!
 //! **Operation-complete events** carry `FIELD_NAME`, `FIELD_OPERATION`,
 //! `FIELD_DURATION_NS`, and `FIELD_COALESCED`.
