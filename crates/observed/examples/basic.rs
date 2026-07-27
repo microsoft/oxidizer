@@ -57,7 +57,7 @@ impl observed::processing::EventProcessor for SimpleLogProcessor {
             record.set_severity_number(opentelemetry::logs::Severity::from(severity));
             record.set_severity_text(severity.as_str());
         }
-        record.set_timestamp(std::time::SystemTime::now());
+        record.set_timestamp(event.timestamp());
         if let Some(body) = event.body() {
             record.set_body(AnyValue::String(body.into_owned().into()));
         }
