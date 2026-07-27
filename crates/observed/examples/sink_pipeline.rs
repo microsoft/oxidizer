@@ -8,7 +8,7 @@
 //! receives pre-redacted events.
 //!
 //! Field routing (which fields go to logs vs metric dimensions) is declared
-//! inside `#[derive(Event)]` attributes. Fields are log attributes by default;
+//! inside `#[event(...)]` attributes. Fields are log attributes by default;
 //! metric dimensions are opt-in via `#[dimension(metric = "...")]`, and
 //! `#[dimension(log = exclude)]`
 //! opts a field out of logs.
@@ -28,7 +28,7 @@ use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
 const DC: DataClass = DataClass::new("example", "public");
 
 // ---------------------------------------------------------------------------
-// Event types with declarative routing via #[derive(Event)] attributes
+// Event types with declarative routing via #[event(...)] attributes
 // ---------------------------------------------------------------------------
 
 /// An HTTP request event with **declarative** log and metric routing.

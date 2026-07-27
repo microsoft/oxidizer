@@ -54,7 +54,7 @@ impl EventDescription {
 
     /// Returns the [`TypeId`] of the event struct, if available.
     ///
-    /// Present for all compile-time events (`#[derive(Event)]`).
+    /// Present for all compile-time events (`#[event(...)]`).
     /// `None` for dynamic events (e.g. from the tracing bridge).
     #[must_use]
     pub const fn type_id(&self) -> Option<TypeId> {

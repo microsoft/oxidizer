@@ -6,7 +6,7 @@
 //! Demonstrates event identification in processors using two approaches:
 //!
 //! 1. **`TypeId` matching** - type-safe, works with generics, but only for
-//!    compile-time events (`#[derive(Event)]`). `TypeId` is `None` for dynamic
+//!    compile-time events (`#[event(...)]`). `TypeId` is `None` for dynamic
 //!    events (e.g. from the tracing bridge).
 //!
 //! 2. **Name matching** - uses the canonical `#[event(name = "...")]` string.

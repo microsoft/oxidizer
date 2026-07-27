@@ -4,8 +4,8 @@
 //! Shared field-level attribute parsing for `#[dimension(...)]`, `#[unredacted]`,
 //! and `#[data_class(...)]`.
 //!
-//! Both `#[derive(Event)]` and `#[derive(Enrichment)]` accept these attributes on fields.
-//! This module provides the types and parsing logic so neither derive macro duplicates it.
+//! Both `#[event(...)]` and `#[derive(Enrichment)]` accept these attributes on fields.
+//! This module provides the types and parsing logic so neither macro duplicates it.
 
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;

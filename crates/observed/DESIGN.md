@@ -144,7 +144,7 @@ Rust services and libraries need structured telemetry that is:
 ### Privacy
 
 1. **Redaction-by-construction.** The core privacy guarantee: attribute values cannot reach an exporter without an explicit classification decision.
-   Every field in `#[derive(Event)]` and `#[derive(Enrichment)]` follows one of three paths:
+   Every field in `#[event(...)]` and `#[derive(Enrichment)]` follows one of three paths:
    - **Default** - the type must implement `RedactedDisplay` (e.g. via `#[classified(...)]`). If it doesn't, compilation fails.
    - **`data_class = <expr>`** - wraps the value in `Sensitive::new(value, expr)` before redaction, for types that don't carry their own classification.
    - **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`. Used for primitives and other inherently non-sensitive values.
@@ -170,7 +170,7 @@ A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the 
 A new instance of a sink can be created from an existing one. It will inherit the setup of the previous sink and add new pipelines/instructions on top.
 
 Sinks are activated in the current scope via RAII guards. `emit!()` always accepts a sink as the first argument and fans out to all active sinks,
-each processing the event independently through its pipelines. Processing instructions are generated at compile time by `#[derive(Event)]`,
+each processing the event independently through its pipelines. Processing instructions are generated at compile time by `#[event(...)]`,
 cached per event type on first emission, and can be overridden at runtime. See [Sinks and Keys](#sinks-and-keys) for the full technical details.
 
 ### Signal Routing: How Events Become Logs, Metrics, and Traces
@@ -331,9 +331,9 @@ flowchart TD
 | **ETW** | Event Tracing for Windows - a high-performance kernel-level tracing facility. |
 | **Sink** | A named telemetry pipeline identified by an `SinkId`. Holds one or more `SinkPipeline` instances and configuration (severity filter, enrichment isolation). |
 | **SinkId** | A `&'static`-lifetime identifier for a sink. Uses pointer identity for O(1) equality checks. |
-| **Attribute** | A key-value pair on an emitted event. Attributes come from two sources: event-defined (struct fields via `#[derive(Event)]`) and enrichment. Both are subject to the same redaction rules and end up as key-value pairs on the exported record. |
+| **Attribute** | A key-value pair on an emitted event. Attributes come from two sources: event-defined (struct fields via `#[event(...)]`) and enrichment. Both are subject to the same redaction rules and end up as key-value pairs on the exported record. |
 | **Enrichment** | The process of attaching attributes to all events within a scope |
-| **Event** | A Rust struct implementing the `Event` trait (via `#[derive(Event)]`). Represents a single telemetry occurrence with typed attributes, severity, and routing instructions. |
+| **Event** | A Rust struct implementing the `Event` trait (via `#[event(...)]`). Represents a single telemetry occurrence with typed attributes, severity, and routing instructions. |
 | **ProcessingInstructions** | Compile-time-generated rules that determine how an event is routed to logs, metrics, and traces. Contains `LogProcessingInstructions`, `MetricProcessingInstructions`, and trace instructions. |
 | **RedactionEngine** | The `data_privacy` crate's engine for applying data-classification-aware redaction to field values. |
 | **DataClass** | Describes the taxonomy of a type. Part of `data_privacy` crate. |

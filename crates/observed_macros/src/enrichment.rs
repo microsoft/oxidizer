@@ -7,13 +7,13 @@
 //! a `Vec<EnrichmentEntry>`, plus an `IntoIterator` implementation so the
 //! struct can be passed directly to `.enrich()`.
 //!
-//! Unlike `#[derive(Event)]`, enrichment fields cannot *be* a metric value;
+//! Unlike `#[event(...)]`, enrichment fields cannot *be* a metric value;
 //! they can only opt in as metric **dimensions** via `#[dimension(metric)]` or
 //! `#[dimension(metric = "...")]`.
 //!
 //! ## Attribute syntax
 //!
-//! Enrichment uses the **same field-level attributes** as `#[derive(Event)]`:
+//! Enrichment uses the **same field-level attributes** as `#[event(...)]`:
 //!
 //! | Attribute | Example | Description |
 //! |-----------|---------|-------------|
@@ -28,7 +28,7 @@
 //!
 //! ## Optional fields
 //!
-//! A field of type `Option<T>` behaves exactly as it does in `#[derive(Event)]`:
+//! A field of type `Option<T>` behaves exactly as it does in `#[event(...)]`:
 //! when it is `None`, `#[if_none(...)]` decides whether the entry is
 //! dropped or filled with a placeholder string (default `"n/a"`).
 
@@ -151,7 +151,7 @@ fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
 
 /// Generates a statement that pushes this field's `EnrichmentEntry` onto `entries`.
 ///
-/// `Option<T>` fields behave like in `#[derive(Event)]`: on `None`,
+/// `Option<T>` fields behave like in `#[event(...)]`: on `None`,
 /// `#[no_value_behavior(...)]` decides whether the entry is dropped or filled with
 /// a placeholder string (default `"N/A"`).
 fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
