@@ -19,6 +19,7 @@ use core::mem::MaybeUninit;
 use core::ptr::NonNull;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use allocator_api2::alloc::{Allocator, Global};
 use multitude::{Arc, Arena};
@@ -134,10 +135,10 @@ fn arc_concurrent_assume_init_no_race() {
     }
     let b = a.clone();
 
-    let h1 = std::thread::spawn(move || {
+    let h1 = thread::spawn(move || {
         let _x = unsafe { a.assume_init() };
     });
-    let h2 = std::thread::spawn(move || {
+    let h2 = thread::spawn(move || {
         let _y = unsafe { b.assume_init() };
     });
     h1.join().unwrap();

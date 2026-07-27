@@ -8,7 +8,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use multitude::de::{DeserializationLimits, DeserializeIn, DeserializeInSeed, Entry, Number, Value};
+use multitude::de::{DeserializationLimits, DeserializationResource, DeserializeIn, DeserializeInSeed, Entry, Number, Value};
 use multitude::{Arc, Arena, Box, Cow, Rc};
 use serde::Deserialize as _;
 use serde::de::value::{
@@ -781,6 +781,176 @@ fn deserialize_reusing_leaves_a_valid_partial_value_on_error() {
 }
 
 #[test]
+fn deserialize_json_reusing_checks_complete_input_and_retains_capacity() {
+    let arena = Arena::new();
+    let mut values = arena.alloc_vec_with_capacity::<u64>(8);
+    values.extend([10, 20, 30]);
+    let pointer = values.as_ptr();
+
+    values.deserialize_json_reusing("[1,2,3,4]").unwrap();
+    assert_eq!(values.as_slice(), &[1, 2, 3, 4]);
+    assert_eq!(values.as_ptr(), pointer);
+
+    let error = values.deserialize_json_reusing("[5,6] trailing").unwrap_err();
+    assert!(error.to_string().contains("trailing characters"));
+    assert_eq!(values.as_slice(), &[5, 6]);
+    assert_eq!(values.as_ptr(), pointer);
+}
+
+#[test]
+fn deserialize_json_each_streams_in_order_and_allows_selective_retention() {
+    #[derive(DeserializeIn)]
+    struct Item {
+        id: u64,
+        label: Box<str>,
+    }
+
+    let retained = {
+        let arena = Arena::new();
+        let mut seen = std::vec::Vec::new();
+        let mut retained = std::vec::Vec::new();
+
+        arena
+            .deserialize_json_each(
+                r#"[{"id":1,"label":"discard"},{"id":2,"label":"retain"},{"id":3,"label":"discard"}]"#,
+                |item: Item| {
+                    seen.push(item.id);
+                    if item.id.is_multiple_of(2) {
+                        retained.push(item.label);
+                    }
+                },
+            )
+            .unwrap();
+
+        assert_eq!(seen, [1, 2, 3]);
+        retained
+    };
+
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].as_str(), "retain");
+}
+
+#[cfg(feature = "serde_json")]
+#[test]
+fn deserialize_json_each_streams_borrowed_raw_values_without_materializing_them() {
+    let arena = Arena::new();
+    let input = r#"[{"id":1,"payload":"discard\u0020me"},{"id":2,"payload":"retain"}]"#;
+    let mut values = std::vec::Vec::new();
+
+    arena
+        .deserialize_json_each(input, |value: &serde_json::value::RawValue| values.push(value.get()))
+        .unwrap();
+
+    assert_eq!(
+        values,
+        [r#"{"id":1,"payload":"discard\u0020me"}"#, r#"{"id":2,"payload":"retain"}"#]
+    );
+    let input_range = input.as_bytes().as_ptr_range();
+    assert!(values.iter().all(|value| input_range.contains(&value.as_ptr())));
+}
+
+#[test]
+fn deserialize_json_each_reports_errors_after_the_processed_prefix() {
+    let arena = Arena::new();
+    let mut values = std::vec::Vec::new();
+
+    let error = arena
+        .deserialize_json_each("[1,2,\"invalid\"]", |value: u64| values.push(value))
+        .unwrap_err();
+    assert!(error.to_string().contains("invalid type"));
+    assert_eq!(values, [1, 2]);
+
+    let error = arena
+        .deserialize_json_each("[3,4] trailing", |value: u64| values.push(value))
+        .unwrap_err();
+    assert!(error.to_string().contains("trailing characters"));
+    assert_eq!(values, [1, 2, 3, 4]);
+
+    let error = arena.deserialize_json_each("5", |_: u64| {}).unwrap_err();
+    assert!(error.to_string().contains("expected a sequence"));
+}
+
+#[test]
+fn deserialize_json_each_with_limits_bounds_the_top_level_sequence() {
+    let arena = Arena::new();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(2);
+    let mut values = std::vec::Vec::new();
+
+    let error = arena
+        .deserialize_json_each_with_limits("[1,2,3]", limits, |value: u64| values.push(value))
+        .unwrap_err();
+    let exceeded = error.limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::SequenceLength);
+    assert_eq!(exceeded.limit(), 2);
+    assert_eq!(values, [1, 2]);
+
+    let error = arena
+        .deserialize_json_each_with_limits("[3] trailing", DeserializationLimits::unlimited(), |value: u64| values.push(value))
+        .unwrap_err();
+    assert!(!error.is_limit_exceeded());
+    assert!(error.as_json_error().to_string().contains("trailing characters"));
+    assert_eq!(values, [1, 2, 3]);
+}
+
+#[test]
+fn deserialize_json_each_preserves_borrowed_and_owned_cow_storage() {
+    let arena = Arena::new();
+    let input = r#"["borrowed","owned\u0020value"]"#;
+    let mut values = std::vec::Vec::new();
+
+    arena
+        .deserialize_json_each(input, |value: Cow<'_, str>| values.push(value))
+        .unwrap();
+
+    assert!(values[0].is_borrowed());
+    assert!(values[1].is_owned());
+    assert_eq!(&*values[0], "borrowed");
+    assert_eq!(&*values[1], "owned value");
+}
+
+#[test]
+fn deserialize_json_reusing_with_limits_rejects_oversized_sequence() {
+    let arena = Arena::new();
+    let mut values = arena.alloc_vec::<u64>();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(2);
+
+    let error = values.deserialize_json_reusing_with_limits("[1,2,3]", limits).unwrap_err();
+    let exceeded = error.limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::SequenceLength);
+    assert_eq!(exceeded.limit(), 2);
+    assert_eq!(values.as_slice(), &[1, 2]);
+}
+
+#[test]
+fn deserialize_json_reusing_with_limits_checks_complete_input() {
+    let arena = Arena::new();
+    let mut values = arena.alloc_vec_with_capacity::<u64>(4);
+    let pointer = values.as_ptr();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(3);
+
+    values.deserialize_json_reusing_with_limits("[1,2,3]", limits).unwrap();
+    assert_eq!(values.as_slice(), &[1, 2, 3]);
+    assert_eq!(values.as_ptr(), pointer);
+
+    let error = values.deserialize_json_reusing_with_limits("[4,5] trailing", limits).unwrap_err();
+    assert!(error.as_json_error().to_string().contains("trailing characters"));
+    assert_eq!(values.as_slice(), &[4, 5]);
+    assert_eq!(values.as_ptr(), pointer);
+}
+
+#[test]
+fn deserialize_reusing_with_limits_preserves_the_accepted_prefix() {
+    let arena = Arena::new();
+    let mut values = arena.alloc_vec::<u64>();
+    let limits = DeserializationLimits::unlimited().with_max_sequence_len(2);
+    let input = SeqDeserializer::<_, ValueError>::new([1_u64, 2, 3].into_iter());
+
+    let error = values.deserialize_reusing_with_limits(input, limits).unwrap_err();
+    assert!(error.to_string().contains("sequence length limit"));
+    assert_eq!(values.as_slice(), &[1, 2]);
+}
+
+#[test]
 fn recursive_standard_containers_use_arena_aware_elements() {
     let arena = Arena::new();
     let mut deserializer = serde_json::Deserializer::from_str(r#"["arena",[1,2,3]]"#);
@@ -809,10 +979,81 @@ fn deserialization_limits_reject_oversized_values() {
     let limits = DeserializationLimits::unlimited().with_max_sequence_len(2).with_max_string_len(4);
 
     let error = arena.deserialize_json_with_limits::<Box<[u64]>, _>("[1,2,3]", limits).unwrap_err();
-    assert!(error.to_string().contains("sequence length limit"));
+    let exceeded = error.limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::SequenceLength);
+    assert_eq!(exceeded.limit(), 2);
 
     let error = arena.deserialize_json_with_limits::<Box<str>, _>(r#""12345""#, limits).unwrap_err();
+    let exceeded = error.limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::StringLength);
+    assert_eq!(exceeded.limit(), 4);
+}
+
+#[test]
+fn limited_json_errors_classify_resources_and_preserve_json_errors() {
+    use std::error::Error as _;
+
+    let arena = Arena::new();
+
+    let depth = DeserializationLimits::unlimited().with_max_depth(0);
+    let error = arena.deserialize_json_with_limits::<Box<[u64]>, _>("[1]", depth).unwrap_err();
+    assert!(error.is_limit_exceeded());
+    assert_eq!(error.limit_exceeded().unwrap().resource(), DeserializationResource::Depth);
+    assert!(error.to_string().contains("nesting depth limit"));
+
+    let map = DeserializationLimits::unlimited().with_max_map_len(0);
+    let error = arena.deserialize_json_with_limits::<Value, _>(r#"{"key":1}"#, map).unwrap_err();
+    assert_eq!(error.limit_exceeded().unwrap().resource(), DeserializationResource::MapLength);
+    assert!(error.to_string().contains("map length limit"));
+
+    let string = DeserializationLimits::unlimited().with_max_string_len(0);
+    let error = arena.deserialize_json_with_limits::<Box<str>, _>(r#""value""#, string).unwrap_err();
+    assert_eq!(error.limit_exceeded().unwrap().resource(), DeserializationResource::StringLength);
     assert!(error.to_string().contains("string length limit"));
+
+    let bytes = DeserializationLimits::unlimited().with_max_bytes_len(0);
+    let error = arena
+        .deserialize_json_with_limits::<Cow<'_, [u8]>, _>(r#""value""#, bytes)
+        .unwrap_err();
+    assert_eq!(
+        error.limit_exceeded().unwrap().resource(),
+        DeserializationResource::ByteStringLength
+    );
+    assert!(error.to_string().contains("byte string length limit"));
+
+    let error = arena
+        .deserialize_json_with_limits::<Box<u64>, _>("invalid", DeserializationLimits::unlimited())
+        .unwrap_err();
+    assert!(!error.is_limit_exceeded());
+    assert!(error.as_json_error().is_syntax());
+    let _ = error.backtrace();
+    assert!(error.source().is_some());
+    assert_eq!(error.to_string(), "JSON deserialization failed");
+    assert!(error.source().unwrap().to_string().contains("expected value"));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)] // std backtrace capture calls readlink, unsupported under Miri isolation
+fn limited_json_error_captures_an_enabled_backtrace() {
+    const CHILD: &str = "MULTITUDE_BACKTRACE_TEST_CHILD";
+
+    if std::env::var_os(CHILD).is_some() {
+        let arena = Arena::new();
+        let error = arena
+            .deserialize_json_with_limits::<Box<u64>, _>("invalid", DeserializationLimits::unlimited())
+            .unwrap_err();
+        assert_eq!(error.backtrace().status(), std::backtrace::BacktraceStatus::Captured);
+        return;
+    }
+
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("limited_json_error_captures_an_enabled_backtrace")
+        .env(CHILD, "1")
+        .env("RUST_BACKTRACE", "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 #[cfg(feature = "serde_json")]
@@ -874,7 +1115,9 @@ fn json_convenience_apis_reject_trailing_input() {
 
     let limits = DeserializationLimits::unlimited().with_max_string_len(4);
     let result = arena.deserialize_json_alloc_with_limits::<Box<str>, _>(br#""oversized""#, limits);
-    assert!(result.unwrap_err().to_string().contains("string length limit"));
+    let exceeded = result.unwrap_err().limit_exceeded().unwrap();
+    assert_eq!(exceeded.resource(), DeserializationResource::StringLength);
+    assert_eq!(exceeded.limit(), 4);
 }
 
 #[test]

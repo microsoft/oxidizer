@@ -23,9 +23,8 @@ struct Request {
     name: Box<str>,
     tags: Box<[Box<str>]>,
     metadata: Metadata,
-    // Opt out when a field should retain its ordinary Serde representation.
     #[multitude(via_serde)]
-    trace_id: std::string::String,
+    trace_id: String,
 }
 
 fn main() -> serde_json::Result<()> {

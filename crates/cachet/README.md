@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.png" alt="Cachet Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Cachet Logo" width="96">
 
 # Cachet
 
@@ -8,8 +8,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/cachet)](https://crates.io/crates/cachet)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
@@ -277,10 +277,10 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.9.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

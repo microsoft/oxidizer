@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Modified tier. cargo-fmt is a rustup component. We invoke it via the
 # pinned nightly (see versions.just) because rustfmt.toml uses
@@ -9,6 +12,8 @@
 # format_code_in_doc_comments). Floating nightly would mean
 # format-drift breaking cloud workflows on rustup updates — the same trap we
 # explicitly avoid for udeps/miri/careful/external-types.
+
+# Check Rust source formatting.
 [script("pwsh")]
 anvil-fmt: anvil-fmt-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -31,8 +36,10 @@ anvil-fmt: anvil-fmt-validate-prereqs
 
 # --- pr-fast members ---
 
+# Install prerequisites for the `anvil-fmt` recipe.
 [group("anvil-setup")]
 anvil-fmt-setup installer="install": anvil-component-nightly-rustfmt-install
 
+# Validate prerequisites for the `anvil-fmt` recipe.
 [group("anvil-setup")]
 anvil-fmt-validate-prereqs: anvil-component-nightly-rustfmt-validate-prereqs

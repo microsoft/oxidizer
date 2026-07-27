@@ -1,8 +1,12 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
+
+# Run Miri tests with strict provenance checks.
 [script("pwsh")]
 anvil-miri-strict-provenance: anvil-miri-strict-provenance-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -13,8 +17,10 @@ anvil-miri-strict-provenance: anvil-miri-strict-provenance-validate-prereqs
     & cargo '+{{ rust_nightly }}' miri test --all-features --tests @pkg
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Install prerequisites for the `anvil-miri-strict-provenance` recipe.
 [group("anvil-setup")]
 anvil-miri-strict-provenance-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
+# Validate prerequisites for the `anvil-miri-strict-provenance` recipe.
 [group("anvil-setup")]
 anvil-miri-strict-provenance-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs

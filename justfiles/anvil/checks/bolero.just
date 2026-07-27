@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier. Smoke-only fuzz pass via [bolero](https://crates.io/crates/bolero):
 # each fuzz target gets a 60-second libfuzzer run, just enough to
@@ -24,6 +27,8 @@
 # campaigns wire a separate scheduled job; anvil deliberately does
 # not ship a long-form fuzz tier (the failure surface is too
 # repo-specific to standardize).
+
+# Run Bolero tests for affected workspace packages.
 [script("pwsh")]
 anvil-bolero: anvil-bolero-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -71,8 +76,11 @@ anvil-bolero: anvil-bolero-validate-prereqs
 
 # bolero needs cargo-bolero plus the pinned nightly toolchain
 # (libfuzzer engine requires nightly rustc features).
+
+# Install prerequisites for the `anvil-bolero` recipe.
 [group("anvil-setup")]
 anvil-bolero-setup installer="install": anvil-toolchain-nightly-install (anvil-tool-cargo-bolero-install installer)
 
+# Validate prerequisites for the `anvil-bolero` recipe.
 [group("anvil-setup")]
 anvil-bolero-validate-prereqs: anvil-toolchain-nightly-validate-prereqs anvil-tool-cargo-bolero-validate-prereqs
