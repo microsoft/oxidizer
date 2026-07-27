@@ -136,8 +136,8 @@ impl<'a> EventView<'a> {
         }
     }
 
-    /// Builds a view for a synthetic / replayed event.
-    /// timestamp.
+    /// Builds a view for a synthetic / replayed event, using the caller-supplied
+    /// `timestamp` instead of one captured from a sink clock.
     pub fn new_synthetic(event: &'a dyn DynEvent, timestamp: SystemTime) -> Self {
         Self {
             event,
