@@ -17,12 +17,14 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::{env, process, thread};
 
+mod futures_test;
 mod io;
 mod macros;
 mod metrics;
 pub mod tracing_logs;
 mod yielding;
 
+pub use futures_test::*;
 pub use io::*;
 pub use metrics::*;
 pub use yielding::*;

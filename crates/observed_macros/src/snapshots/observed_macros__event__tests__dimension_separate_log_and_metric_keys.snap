@@ -1,0 +1,45 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for CountEvent {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "http.request.count",
+            ::core::option::Option::Some(::core::any::TypeId::of::<CountEvent>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "http.request.count",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "http.request.count",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(LogFieldEntry::new("http.status_code")),
+                    ::core::option::Option::Some(MetricFieldEntry::dimension("status")),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.status.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

@@ -1,0 +1,28 @@
+---
+source: crates/observed_macros/src/enrichment.rs
+expression: output
+---
+const _: () = {
+    impl<'a, T> ::observed::enrichment::Enrichment for MixedCtx<'a, T> {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(2usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "label",
+                        self.label,
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "value",
+                        self.value,
+                    ),
+                );
+            entries
+        }
+    }
+};

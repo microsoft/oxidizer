@@ -1,0 +1,40 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl<'a> ::observed::Event for BorrowedEvent<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "borrowed.event",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<BorrowedEvent<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "borrowed.event",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "message",
+                    ::core::option::Option::Some(LogFieldEntry::new("message")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.message.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

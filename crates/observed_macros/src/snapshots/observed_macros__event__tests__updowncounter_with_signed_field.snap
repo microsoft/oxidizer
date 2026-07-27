@@ -1,0 +1,42 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for QueueDelta {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "queue.delta",
+            ::core::option::Option::Some(::core::any::TypeId::of::<QueueDelta>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "delta",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "delta",
+                            ::observed::metadata::MetricDescription::new(
+                                "queue.size.delta",
+                                ::observed::metadata::InstrumentKind::UpDownCounter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.delta.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
