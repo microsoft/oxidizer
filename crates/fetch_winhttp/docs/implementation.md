@@ -405,6 +405,14 @@ S2) with mask `ALL_COMPLETIONS | SECURE_FAILURE | HANDLES`, and every request ha
 inherits it. The only per-request handoff is installing the context pointer via
 `WinHttpSetOption(WINHTTP_OPTION_CONTEXT_VALUE, ptr)`.
 
+**Ordering:** the driver issues this `SetOption` *before* the first async call
+(`WinHttpSendRequest`). This guards the window where an async call fails
+synchronously: because the context is already installed, closing the handle still
+delivers a `HANDLE_CLOSING` that carries the pointer, so the callback reclaims the
+`Box` on the normal path instead of the driver needing a second, racy free path. Were
+the context installed *after* the send, a synchronous send failure could close the
+handle with a null context and strand the `Box`.
+
 Before that `SetOption` succeeds, a failed `WinHttpOpenRequest` or `SetOption` lets
 the driver drop the `Box` directly back into the pool. This is safe because WinHTTP
 initializes a handle's context to null, and the trampoline ignores any callback
@@ -695,7 +703,7 @@ after the table.
 | Protocol negotiation (design.md §3) | protocol-flag bitmask + `HTTP_PROTOCOL_REQUIRED` per `supported_http_versions` (empty -> `fetch` default; h2/h3-only -> required); response `Version` from the queried negotiated protocol | unmappable version (`HTTP/1.0`, `HTTP/0.9`) rejected as `invalid_request` |
 | TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`; `SECURE_FAILURE` -> `tls`-labeled, non-retryable | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
-| Connection management (design.md §2) | connect handle opened per request and closed with it; max-conns mapping; keep-alive left enabled; `DISABLE_GLOBAL_POOLING` on the session | `connection_lifetime` Fixed/PerConnection: accepted, no recycling, emits the `warn` "not honored" event |
+| Connection management (design.md §2) | connect handle opened per request and closed with it; max-conns mapping; `ConnectionKeepAlive` mapped to `HTTP2/3_KEEPALIVE` interval (§10.3); `DISABLE_GLOBAL_POOLING` on the session | `connection_lifetime` Fixed/PerConnection: accepted, no recycling, emits the `warn` "not honored" event; keep-alive `timeout`/active-only nuances emit the same warn |
 | Timeouts (design.md §6) | `WinHttpSetTimeouts` + connect/response options get values derived from `fetch` options; mock-clock connect deadline (design.md §6.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired |
 
 - **Inline / reentrant completion.** Configure `MockBindings` so an async call
@@ -765,6 +773,12 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   because that would depend on real wall-clock timing and be flaky.
 - Real cancellation: drop an in-flight download future and assert clean teardown
   (no panic, no leak), the integration counterpart to the unit cancellation tests.
+- Leak-freedom soak: a process-wide counter increments on every `RequestContext`
+  allocation and decrements on every reclaim (the same counter the mock path asserts,
+  compiled into the real path behind a test-only feature). A soak test runs a large
+  batch mixing normal completion, timeout cancellation, and mid-flight future drops,
+  then asserts the live-context count returns to its baseline. This catches a missed
+  `HANDLE_CLOSING` free on the real OS path, which Miri cannot see (§7 preamble).
 
 The full `fetch` pipeline (retry/breaker/telemetry) is validated by building an
 `HttpClient` via `HttpClient::builder_winhttp(...)` and asserting a real request round-trips,
@@ -899,6 +913,16 @@ expressible. The v1 transport keeps exactly one session for its whole lifetime
 and does not recycle it. Connection-lifetime handling under that constraint is
 covered in design.md §2.2.
 
+**Deferred (v2): stale-connection retry.** WinHTTP offers
+`WINHTTP_OPTION_FAILED_CONNECTION_RETRIES` scoped to
+`WINHTTP_CONNECTION_RETRY_CONDITION_STALE_CONNECTION`, which makes WinHTTP
+transparently reconnect and retry a request that lands on a pooled connection the
+server already closed (safe even for non-idempotent requests, since a stale
+connection means the request never reached the server). v1 does not use it - the
+`fetch` pipeline's own retry covers the failure, if coarsely. It is recorded here as
+a candidate to revisit alongside session lifecycle and recycling in the v2 "what do
+we do about sessions" discussion.
+
 ## 10. WinHTTP request option mapping
 
 How the contract in design.md §3-§6 is expressed to WinHTTP. None of this is part of the
@@ -981,6 +1005,17 @@ The behaviors in design.md §5 are configured through these options.
   stores `Set-Cookie` nor auto-attaches `Cookie`) and
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_AUTHENTICATION` (WinHTTP
   does not intercept 401/407 or attach credentials).
+- **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2) maps to
+  `WINHTTP_OPTION_HTTP2_KEEPALIVE` / `WINHTTP_OPTION_HTTP3_KEEPALIVE`, which make
+  WinHTTP send an HTTP/2 or HTTP/3 PING once a connection has been idle for the
+  configured interval (WinHTTP requires `>= 5000 ms`), keeping pooled connections warm
+  past the server's idle-close. `Disabled` leaves the options unset. `interval` sets
+  the option value; the fit is imperfect and the residue follows the §11 warn policy:
+  WinHTTP PINGs idle pooled connections and has no separate "active-only" mode (so
+  `ActiveConnections` and `ActiveAndIdleConnections` behave alike), it exposes a single
+  interval and manages the probe-response timeout itself (so the `timeout` field is not
+  separately honorable), and HTTP/1.1 has no application-level PING (so keep-alive there
+  is plain TCP connection reuse, always on unless `WINHTTP_DISABLE_KEEP_ALIVE`, §9.3).
 
 ### 10.4 Timeout mapping and the native-timer backstop
 
@@ -1036,7 +1071,30 @@ These gaps are a symptom of `fetch`-level over-abstraction; the proper fix is
 transport-level configuration (see the fetch API stabilization feedback,
 ../../fetch/docs/stabilization.md). Until then, the warning is the safety net.
 
-## 12. Dependencies
+## 12. Telemetry
+
+The transport reports through the `observed::Sink` supplied in its dependencies
+(design.md §1.2). Two kinds of signal are emitted, and the distinction is
+deliberate:
+
+- **Metrics** (counters) stay low-cardinality: request count, error count, and the
+  "option not honored" counter (§11). No per-request or per-connection attribute is
+  attached to a metric.
+- **Log events** may carry richer, higher-cardinality context that is useful for
+  diagnosing a single failure but would be spam as a metric dimension.
+
+**Cold-connect error attribution (log only).** WinHTTP fires
+`CONNECTING_TO_SERVER` when a request establishes a *new* physical connection
+rather than reusing a pooled one. When a request then fails (connect timeout,
+`REQUEST_ERROR`, `SECURE_FAILURE`), the transport annotates the failure's log event
+with a marker that the failure occurred on a freshly-established connection, plus the
+measured connect duration. This lets an operator distinguish "the server/pool is
+unhealthy" from "cold-connection establishment is slow or failing" - the two have
+different remediations. This attribution is attached only to the log event; it is
+**not** promoted to a metric label, to keep connection-establishment noise out of the
+metric cardinality.
+
+## 13. Dependencies
 
 Planned crate dependencies (all `default-features = false`, per workspace policy):
 
