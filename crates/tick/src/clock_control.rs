@@ -266,14 +266,50 @@ impl ClockControl {
         self
     }
 
-    /// Configures whether the `ClockControl` should automatically advance to fire upcoming timers.
+    /// Configures whether the clock automatically advances to fire pending timers.
     ///
-    /// When enabled, the clock will automatically advance to the next scheduled timer whenever
-    /// the current time is accessed, firing timers in sequence.
+    /// When enabled, the clock fast-forwards on its own to fire timers, so timer-based futures
+    /// such as [`Delay`](crate::Delay) complete without any manual clock advancement and without
+    /// waiting for real time to elapse. This is the simplest way to keep time-dependent tests both
+    /// deterministic and fast: awaiting a delay resolves right away in wall-clock terms.
+    ///
+    /// The clock advances both when a timer is scheduled and when the current time is read, jumping
+    /// forward to a timer's deadline before firing it. Simulated time is still consumed, so
+    /// elapsed-time measurements (for example via a [`Stopwatch`](crate::Stopwatch)) reflect each
+    /// delay's configured duration. A delay with no finite deadline
+    /// ([`Duration::MAX`](std::time::Duration::MAX)) never completes.
+    ///
+    /// # Timers do not run concurrently
+    ///
+    /// Timers are fired eagerly, one at a time, as they are scheduled; this option does not
+    /// simulate multiple timers running side by side. Do not rely on concurrent delays completing
+    /// in duration order — a shorter delay scheduled after a longer one may still complete after
+    /// it. When the relative ordering of concurrent timers matters, drive the clock explicitly with
+    /// [`Self::advance`] instead.
     ///
     /// > **Note**: When [`Self::auto_advance_limit`] is set, the maximum total auto-advance
     /// > duration is respected. Once the limit is reached, no further timers will be fired
     /// > automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::ClockControl;
+    ///
+    /// # async fn auto_advance_timers_example() {
+    /// let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+    ///
+    /// let stopwatch = clock.stopwatch();
+    ///
+    /// // Resolves right away in real time — no manual `advance` call is needed.
+    /// clock.delay(Duration::from_secs(30)).await;
+    ///
+    /// // Simulated time still elapses by the delay's duration.
+    /// assert_eq!(stopwatch.elapsed(), Duration::from_secs(30));
+    /// # }
+    /// ```
     #[must_use]
     pub fn auto_advance_timers(self, enabled: bool) -> Self {
         self.with_state(|v| v.auto_advance_timers = enabled);
