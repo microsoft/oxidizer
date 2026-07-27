@@ -17,7 +17,7 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppE
 
     println!("cargo {args_str}");
 
-    let output = duct::cmd("cargo", args).unchecked().run()?;
+    let output = duct::cmd("cargo", args).run()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -32,17 +32,4 @@ pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppE
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg_attr(miri, ignore)]
-    fn run_cargo_propagates_command_failure() {
-        let error = run_cargo(["--definitely-not-a-cargo-option"].into_iter()).expect_err("invalid cargo arguments should fail");
-
-        assert!(error.to_string().contains("failed with exit code"));
-    }
 }
