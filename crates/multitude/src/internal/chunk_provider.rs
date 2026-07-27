@@ -75,6 +75,16 @@ pub(crate) struct ChunkAllocStats {
     oversized: u64,
 }
 
+/// Snapshot of chunk activity since the owning arena's last reset.
+#[cfg(feature = "stats")]
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkGenerationStats {
+    normal_allocated: u64,
+    oversized_allocated: u64,
+    backing_bytes_allocated: u64,
+    normal_reused: u64,
+}
+
 #[cfg(feature = "stats")]
 impl ChunkAllocStats {
     /// Lifetime count of normal-class chunks allocated.
@@ -87,6 +97,29 @@ impl ChunkAllocStats {
     #[inline]
     pub(crate) fn oversized(&self) -> u64 {
         self.oversized
+    }
+}
+
+#[cfg(feature = "stats")]
+impl ChunkGenerationStats {
+    #[inline]
+    pub(crate) fn normal_allocated(&self) -> u64 {
+        self.normal_allocated
+    }
+
+    #[inline]
+    pub(crate) fn oversized_allocated(&self) -> u64 {
+        self.oversized_allocated
+    }
+
+    #[inline]
+    pub(crate) fn backing_bytes_allocated(&self) -> u64 {
+        self.backing_bytes_allocated
+    }
+
+    #[inline]
+    pub(crate) fn normal_reused(&self) -> u64 {
+        self.normal_reused
     }
 }
 
@@ -114,9 +147,18 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// allocator (cache hits are not counted).
     #[cfg(feature = "stats")]
     normal_chunks_allocated: AtomicU64,
+    /// Normal chunks allocated since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    normal_chunks_allocated_since_reset: AtomicU64,
     /// Lifetime count of oversized one-shot chunks allocated.
     #[cfg(feature = "stats")]
     oversized_chunks_allocated: AtomicU64,
+    /// Oversized chunks allocated since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    oversized_chunks_allocated_since_reset: AtomicU64,
+    /// Bytes successfully obtained from the backing allocator since reset.
+    #[cfg(feature = "stats")]
+    backing_bytes_allocated_since_reset: AtomicU64,
     /// High-water value of `allocated_bytes`.
     #[cfg(feature = "stats")]
     peak_bytes_allocated: AtomicUsize,
@@ -129,6 +171,9 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// Lifetime count of normal chunks acquired from the cache.
     #[cfg(feature = "stats")]
     normal_chunks_reused: AtomicU64,
+    /// Normal chunks acquired from the cache since reset.
+    #[cfg(feature = "stats")]
+    normal_chunks_reused_since_reset: AtomicU64,
     /// Unused tail bytes in retired chunks not yet cached or freed. Retire
     /// increments; cache/destroy decrements.
     #[cfg(feature = "stats")]
@@ -164,7 +209,13 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             #[cfg(feature = "stats")]
             normal_chunks_allocated: AtomicU64::new(0),
             #[cfg(feature = "stats")]
+            normal_chunks_allocated_since_reset: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
             oversized_chunks_allocated: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            oversized_chunks_allocated_since_reset: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            backing_bytes_allocated_since_reset: AtomicU64::new(0),
             #[cfg(feature = "stats")]
             peak_bytes_allocated: AtomicUsize::new(0),
             #[cfg(feature = "stats")]
@@ -173,6 +224,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             cached_bytes: AtomicU64::new(0),
             #[cfg(feature = "stats")]
             normal_chunks_reused: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            normal_chunks_reused_since_reset: AtomicU64::new(0),
             #[cfg(feature = "stats")]
             wasted_tail_bytes: AtomicU64::new(0),
         })
@@ -185,6 +238,26 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             normal: self.normal_chunks_allocated.load(Ordering::Relaxed),
             oversized: self.oversized_chunks_allocated.load(Ordering::Relaxed),
         }
+    }
+
+    /// Snapshot of allocation activity since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    pub(crate) fn generation_stats(&self) -> ChunkGenerationStats {
+        ChunkGenerationStats {
+            normal_allocated: self.normal_chunks_allocated_since_reset.load(Ordering::Relaxed),
+            oversized_allocated: self.oversized_chunks_allocated_since_reset.load(Ordering::Relaxed),
+            backing_bytes_allocated: self.backing_bytes_allocated_since_reset.load(Ordering::Relaxed),
+            normal_reused: self.normal_chunks_reused_since_reset.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Starts a fresh generation after a completed arena reset.
+    #[cfg(feature = "stats")]
+    pub(crate) fn reset_generation_stats(&self) {
+        self.normal_chunks_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.oversized_chunks_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.backing_bytes_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.normal_chunks_reused_since_reset.store(0, Ordering::Relaxed);
     }
 
     /// Total bytes currently outstanding from the underlying allocator: the
@@ -343,6 +416,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 #[cfg(feature = "stats")]
                 {
                     self.normal_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                    self.normal_chunks_allocated_since_reset.fetch_add(1, Ordering::Relaxed);
                     self.record_allocation(total);
                 }
                 Ok(chunk)
@@ -439,6 +513,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 #[cfg(feature = "stats")]
                 {
                     self.oversized_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                    self.oversized_chunks_allocated_since_reset.fetch_add(1, Ordering::Relaxed);
                     self.record_allocation(total);
                 }
                 Ok(chunk)
@@ -481,7 +556,10 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             self.record_cache_remove(total);
             if total >= floor_min_total {
                 #[cfg(feature = "stats")]
-                self.normal_chunks_reused.fetch_add(1, Ordering::Relaxed);
+                {
+                    self.normal_chunks_reused.fetch_add(1, Ordering::Relaxed);
+                    self.normal_chunks_reused_since_reset.fetch_add(1, Ordering::Relaxed);
+                }
                 return Some(chunk_nn);
             }
             // Below-floor straggler from a concurrent push that raced the
@@ -535,6 +613,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     #[cfg(feature = "stats")]
     fn record_allocation(&self, total: usize) {
         let previous = self.allocated_bytes.fetch_add(total, Ordering::AcqRel);
+        self.backing_bytes_allocated_since_reset.fetch_add(total as u64, Ordering::Relaxed);
         self.peak_bytes_allocated.fetch_max(previous + total, Ordering::Relaxed);
     }
 

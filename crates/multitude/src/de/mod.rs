@@ -163,7 +163,9 @@
 //! callback without constructing a root collection. Values arrive in input
 //! order and are passed by ownership, so the callback can retain selected
 //! arena-owned fields. A parse or limit error may occur after a prefix has
-//! already been delivered.
+//! already been delivered. [`Arena::try_deserialize_json_each`] additionally
+//! accepts a fallible callback and stops parsing immediately when it fails;
+//! the unconsumed suffix is not validated.
 //!
 //! [`DeserializationLimits`] bounds nesting, sequence and map lengths, strings,
 //! and byte strings. Use [`Arena::deserialize_with_limits`],
@@ -208,6 +210,8 @@ mod deserialize_seed;
 #[cfg(feature = "serde_json")]
 mod json;
 #[cfg(feature = "serde_json")]
+mod json_each_error;
+#[cfg(feature = "serde_json")]
 mod json_error;
 mod limit_exceeded;
 mod limits;
@@ -234,6 +238,8 @@ pub use deserialize_in::DeserializeIn;
 pub use deserialize_in_seed::DeserializeInSeed;
 #[doc(hidden)]
 pub use deserialize_seed::DeserializeSeed;
+#[cfg(feature = "serde_json")]
+pub use json_each_error::JsonEachError;
 #[cfg(feature = "serde_json")]
 pub use json_error::JsonError;
 pub use limit_exceeded::{DeserializationResource, LimitExceeded};
