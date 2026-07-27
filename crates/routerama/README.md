@@ -177,7 +177,7 @@ requires `std`.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6-fiLAwLMD3G4641CpERAgJGwDcE54cDpLlGy3rTYRh7r4FYWSBgmlyb3V0ZXJhbWFlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbr5-IsDAswPcbjrjUKkRECAkbANwTnhwOkuUbLetNhGHuvgVhZIGCaXJvdXRlcmFtYWUwLjEuMA
  [__link0]: macro@resolver
  [__link1]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver
  [__link2]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver::resolve

@@ -166,7 +166,7 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5fMTMzy4UGnG1kTnRsEXYRXG8-JQrhebgRtG5v01AZ0Vm6uYWSBgmlwbHVyYWxpdHllMC4xLjE
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbl8xMzPLhQacbWROdGwRdhFcbz4lCuF5uBG0bm_TUBnRWbq5hZIGCaXBsdXJhbGl0eWUwLjEuMQ
  [__link0]: https://docs.rs/plurality/0.1.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.1.1/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.1.1/plurality/?search=Rc
