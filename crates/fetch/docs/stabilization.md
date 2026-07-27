@@ -37,11 +37,14 @@ verbose hello-world is worth the consistency.
 ## 2. Transport-specific TLS configuration
 
 TLS configuration is over-abstracted. `fetch`'s generic `TlsOptions`
-carries rustls/native-tls material that only the Hyper transport understands;
-Schannel-based WinHTTP cannot consume it and needs its own knobs (see fetch_winhttp design.md §1.2 and §4).
-Per the split above, TLS should be configured per transport, on the transport being
-plugged in; the `HttpClient::build(transport().tls(cfg))` shape would express this
-cleanly.
+carries rustls/native-tls material that only `fetch_hyper` - the Hyper-based `fetch`
+transport, which configures its TLS through exactly that material - can consume;
+Schannel-based `fetch_winhttp` cannot use it and needs its own knobs (see fetch_winhttp design.md §1.2 and §4).
+The TLS model is a property of each transport, not of `fetch`: `fetch_hyper` and
+`fetch_winhttp` have fundamentally different, non-interchangeable TLS configuration, so
+it cannot be handled at the `fetch` layer at all. Per the split above, TLS should be
+configured per transport, on the transport being plugged in; the
+`HttpClient::build(transport().tls(cfg))` shape would express this cleanly.
 
 ## 3. Transport-specific connection management
 
