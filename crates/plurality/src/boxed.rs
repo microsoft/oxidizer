@@ -7,7 +7,7 @@
 )]
 
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
+use core::mem::{MaybeUninit, forget};
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
@@ -84,7 +84,7 @@ impl<T, A: Allocator> Box<T, A> {
     pub fn unsize<U: ?Sized>(this: Self, coercion: Coercion<T, U, impl FnOnce(*const T) -> *const U>) -> Box<U, A> {
         let value = coerce::unsize(this.slot, coercion);
         // The returned box inherits ownership of the same slot.
-        core::mem::forget(this);
+        forget(this);
         Box::from_value(value)
     }
 }
@@ -96,6 +96,15 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
             slot: value,
             _marker: PhantomData,
         }
+    }
+
+    /// Converts this unique owner into a pinned owner.
+    #[must_use]
+    #[inline]
+    pub fn into_pin(this: Self) -> Pin<Self> {
+        // SAFETY: the uniquely owned value remains in its occupied pool slot
+        // until it is dropped. Forgetting the owner leaks rather than reuses it.
+        unsafe { Pin::new_unchecked(this) }
     }
 
     /// Consumes the handle and returns the raw value pointer **without** freeing
@@ -112,7 +121,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     pub fn into_raw(this: Self) -> NonNull<T> {
         let ptr = this.slot;
         // Suppress the drop so the slot stays occupied; the caller now owns it.
-        core::mem::forget(this);
+        forget(this);
         ptr
     }
 
@@ -146,6 +155,13 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     }
 }
 
+impl<T: ?Sized, A: Allocator> From<Box<T, A>> for Pin<Box<T, A>> {
+    #[inline]
+    fn from(handle: Box<T, A>) -> Self {
+        Box::into_pin(handle)
+    }
+}
+
 impl<T, A: Allocator> Box<MaybeUninit<T>, A> {
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Removing initialization makes assume_init() UB, so the mutant is invalid.
@@ -164,7 +180,7 @@ impl<T, A: Allocator> Box<MaybeUninit<T>, A> {
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let value = self.slot.cast::<T>();
         // Don't run the uninit box's destructor; transfer the slot as-is.
-        core::mem::forget(self);
+        forget(self);
         Box::from_value(value)
     }
 

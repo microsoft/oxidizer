@@ -1,17 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Shared inherent methods and forwarding trait impls for the four thin
-//! handle types ([`Box`](crate::Box), [`Alloc`](crate::Alloc),
-//! [`Arc`](crate::Arc), [`Rc`](crate::Rc)).
+//! Shared accessors and forwarding trait implementations for pool handles.
 //!
-//! All four use a single pointer for sized values and forward `Deref`-able
-//! operations to the contained value, so the macros below emit the read-only
-//! surface once. `Alloc` points to `SlotCell<T>` while `Box`/`Arc`/`Rc` point
-//! directly to `T` and may therefore carry DST metadata. Per-file blocks keep
-//! what legitimately differs (`Send`/`Sync`, `Drop`, `Clone` for `Arc`/`Rc`,
-//! and mutable access for `Box`/`Alloc`). The optional `$lt` lifetime lets the
-//! same macro serve `Alloc<'pool, T, A>`.
+//! Separate macros cover sized `Alloc` storage and the possibly-unsized direct
+//! value pointers used by `Box`, `Arc`, and `Rc`.
 
 /// Emits the shared inherent methods and read-only forwarding trait impls for a
 /// thin handle whose value is reached through `Deref`.
@@ -29,30 +22,6 @@ macro_rules! impl_handle_common {
                 core::ptr::from_ref::<T>(&**this)
             }
 
-            /// Converts the handle into a [`Pin`](core::pin::Pin) of itself.
-            ///
-            /// Sound for any `T` (including `!Unpin`): the value's address is
-            /// fixed at allocation and the handle keeps the slot alive at that
-            /// same address until the value is dropped — exactly `Pin`'s
-            /// contract.
-            #[must_use]
-            #[inline]
-            pub fn into_pin(this: Self) -> core::pin::Pin<Self> {
-                // SAFETY: the value's address is fixed for the handle's lifetime
-                // (the pool never moves an occupied slot), satisfying `Pin` even
-                // for `!Unpin` `T`. `Pin::new` is unusable here: it requires the
-                // pointee `T: Unpin`, but this must accept `!Unpin` values.
-                unsafe { core::pin::Pin::new_unchecked(this) }
-            }
-        }
-
-        impl<$($lt,)? T, A: allocator_api2::alloc::Allocator> From<$Ty<$($lt,)? T, A>>
-            for core::pin::Pin<$Ty<$($lt,)? T, A>>
-        {
-            #[inline]
-            fn from(handle: $Ty<$($lt,)? T, A>) -> Self {
-                $Ty::into_pin(handle)
-            }
         }
 
         // The handle's own address is irrelevant to the pinned value (which
@@ -194,27 +163,6 @@ macro_rules! impl_handle_common_unsized {
             #[inline]
             pub fn as_ptr(this: &Self) -> *const T {
                 core::ptr::from_ref::<T>(&**this)
-            }
-
-            /// Converts the handle into a [`Pin`](core::pin::Pin) of itself.
-            ///
-            /// Sound for any `T` (including `!Unpin`): the value's address is
-            /// fixed at allocation and the handle keeps the slot alive at that
-            /// same address until the value is dropped.
-            #[must_use]
-            #[inline]
-            pub fn into_pin(this: Self) -> core::pin::Pin<Self> {
-                // SAFETY: the value's address is fixed for the handle's lifetime
-                // (the pool never moves an occupied slot), satisfying `Pin` even
-                // for `!Unpin` `T`.
-                unsafe { core::pin::Pin::new_unchecked(this) }
-            }
-        }
-
-        impl<T: ?Sized, A: allocator_api2::alloc::Allocator> From<$Ty<T, A>> for core::pin::Pin<$Ty<T, A>> {
-            #[inline]
-            fn from(handle: $Ty<T, A>) -> Self {
-                $Ty::into_pin(handle)
             }
         }
 

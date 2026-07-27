@@ -22,12 +22,7 @@
     reason = "gungraun bench inputs are passed by value by the framework"
 )]
 
-//! Callgrind (instruction-count) benchmarks, run via [gungraun]. Each benchmark
-//! runs the hot operation **once** — Callgrind counts instructions exactly, so
-//! no loop is needed. Every body here is also looped by the criterion suite; the
-//! `perf_report.rs` script aligns the two by `<group>/<name>`.
-//!
-//! [gungraun]: https://github.com/gungraun/gungraun
+//! Callgrind allocation benchmarks aligned with criterion by group and name.
 
 use std::hint::black_box;
 
