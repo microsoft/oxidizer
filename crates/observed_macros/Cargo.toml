@@ -23,9 +23,6 @@ all-features = true
 [lib]
 proc-macro = true
 
-[lints]
-workspace = true
-
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
@@ -35,3 +32,6 @@ syn = { workspace = true, features = ["full", "parsing", "derive", "extra-traits
 insta = { workspace = true }
 mutants = { workspace = true }
 prettyplease = { workspace = true }
+
+[lints]
+workspace = true

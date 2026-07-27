@@ -14,9 +14,6 @@ license.workspace = true
 homepage.workspace = true
 include.workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 data_privacy = { workspace = true }
 observed = { workspace = true, features = ["test-util"] }
@@ -27,3 +24,6 @@ opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 testing_aids = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
+[lints]
+workspace = true

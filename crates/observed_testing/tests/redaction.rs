@@ -63,20 +63,11 @@ fn engine_passthrough() -> RedactionEngine {
 fn engine_per_class() -> RedactionEngine {
     RedactionEngine::builder()
         // PII: replace with stars
-        .add_class_redactor(
-            TestTaxonomy::Pii,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')),
-        )
+        .add_class_redactor(TestTaxonomy::Pii, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
         // Secret: erase completely
-        .add_class_redactor(
-            TestTaxonomy::Secret,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Erase),
-        )
+        .add_class_redactor(TestTaxonomy::Secret, SimpleRedactor::with_mode(SimpleRedactorMode::Erase))
         // Public: passthrough
-        .add_class_redactor(
-            TestTaxonomy::PublicData,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        )
+        .add_class_redactor(TestTaxonomy::PublicData, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
         // Fallback for anything else
         .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Erase))
         .build()
@@ -336,10 +327,7 @@ fn insert_mode_replaces_with_custom_string() {
 fn passthrough_for_specific_class_erase_rest() {
     let engine = RedactionEngine::builder()
         // PII: passthrough (explicitly not redacted)
-        .add_class_redactor(
-            TestTaxonomy::Pii,
-            SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough),
-        )
+        .add_class_redactor(TestTaxonomy::Pii, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
         // Everything else erased
         .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Erase))
         .build();

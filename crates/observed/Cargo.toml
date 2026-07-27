@@ -32,9 +32,6 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
-[lints]
-workspace = true
-
 [features]
 test-util = []
 
@@ -59,6 +56,9 @@ opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
+[lints]
+workspace = true
 
 [[bench]]
 name = "observed_benchmarks"

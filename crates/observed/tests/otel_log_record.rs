@@ -411,13 +411,7 @@ fn isolated_sink_excludes_globals_keeps_targeted() {
     let sink = Sink::new_isolated(LIB, vec![Arc::new(otel_processor(&provider))], tick::SimpleClock::new_frozen());
 
     (|| {
-        emit!(
-            sink,
-            HttpRequest {
-                status: 200,
-                retries: 0
-            }
-        );
+        emit!(sink, HttpRequest { status: 200, retries: 0 });
     })
     // Untargeted (global) enrichment: dropped by an isolated sink.
     .enrich(&sink, TenantEnrich { tenant: 1 })
