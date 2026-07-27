@@ -159,8 +159,8 @@ reallocates and moves values on growth:
   `AllocError`).
 - One `no_std` crate / allocator story shared with `Pool`.
 
-Build it only if the stable-address niche is a goal; for plain high-frequency
-iterate-all-each-tick (ECS) workloads, point users at `slotmap`/`DenseSlotMap`.
+Build it only if the stable-address niche is a goal; for plain high-frequency,
+iterate-all-each-tick workloads, point users at `slotmap`/`DenseSlotMap`.
 
 ## 2. Batch allocation — `alloc_*_many` / `alloc_*_with_many` (push API)
 

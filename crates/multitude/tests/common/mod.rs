@@ -67,6 +67,77 @@ unsafe impl Allocator for FailingAllocator {
     }
 }
 
+/// Allocator that fails its first allocation and forwards every later request.
+#[derive(Clone)]
+pub(crate) struct FailOnceAllocator {
+    fail_next: std::rc::Rc<Cell<bool>>,
+}
+
+impl FailOnceAllocator {
+    pub(crate) fn new() -> Self {
+        Self {
+            fail_next: std::rc::Rc::new(Cell::new(true)),
+        }
+    }
+}
+
+// SAFETY: forwards to Global after the first deterministic failure.
+unsafe impl Allocator for FailOnceAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if self.fail_next.replace(false) {
+            Err(AllocError)
+        } else {
+            Global.allocate(layout)
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded — caller's contract.
+        unsafe { Global.deallocate(ptr, layout) };
+    }
+}
+
+/// Allocator that tracks live allocations and panics after completing its
+/// first deallocation.
+#[derive(Clone)]
+pub(crate) struct PanicOnceDeallocator {
+    panic_next: std::sync::Arc<core::sync::atomic::AtomicBool>,
+    live_allocations: std::sync::Arc<core::sync::atomic::AtomicIsize>,
+}
+
+impl PanicOnceDeallocator {
+    pub(crate) fn new() -> Self {
+        Self {
+            panic_next: std::sync::Arc::new(core::sync::atomic::AtomicBool::new(true)),
+            live_allocations: std::sync::Arc::new(core::sync::atomic::AtomicIsize::new(0)),
+        }
+    }
+
+    pub(crate) fn live_allocations(&self) -> isize {
+        self.live_allocations.load(core::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+// SAFETY: forwards every allocation and deallocation to Global exactly once;
+// the deliberate panic occurs only after Global has completed the deallocation.
+unsafe impl Allocator for PanicOnceDeallocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let ptr = Global.allocate(layout)?;
+        self.live_allocations.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        Ok(ptr)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded — caller's contract.
+        unsafe { Global.deallocate(ptr, layout) };
+        self.live_allocations.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        assert!(
+            !self.panic_next.swap(false, core::sync::atomic::Ordering::Relaxed),
+            "planned deallocation panic"
+        );
+    }
+}
+
 /// Allocator that tracks live allocations (count and bytes) so tests
 /// can detect leaks across an `Arena`'s lifetime. Tracks `allocate`
 /// vs. `deallocate` and `grow`/`shrink` deltas.

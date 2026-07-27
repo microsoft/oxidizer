@@ -20,6 +20,7 @@
 
 mod common;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -70,11 +71,7 @@ struct PanicOnce(StdArc<AtomicBool>);
 
 impl Drop for PanicOnce {
     fn drop(&mut self) {
-        // This value panics the first time it is dropped and returns normally
-        // on every later drop, exercising an unwind through the pool's reclaim
-        // path. `swap` returns the previous flag: it is `false` on the first
-        // drop (so the assert fails and unwinds) and `true` afterwards (so the
-        // assert passes).
+        // Only the first drop panics, allowing slot reclamation to be checked.
         let dropped_before = self.0.swap(true, Ordering::SeqCst);
         assert!(dropped_before, "PanicOnce panics on its first drop");
     }
@@ -85,7 +82,7 @@ fn panicking_destructor_returns_local_slot() {
     let panicked = StdArc::new(AtomicBool::new(false));
     let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
     assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        catch_unwind(AssertUnwindSafe(|| {
             drop(pool.alloc(PanicOnce(panicked.clone())));
         }))
         .is_err()

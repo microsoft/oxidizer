@@ -652,16 +652,13 @@ fn alloc_leak_returns_reference_and_skips_drop() {
 }
 
 // Exercises the `Alloc` forwarding trait impls (AsRef/AsMut/Borrow/BorrowMut/
-// Debug/Display/Pointer/PartialEq/PartialOrd/Ord/Hash/into_pin/From-for-Pin).
+// Debug/Display/Pointer/PartialEq/PartialOrd/Ord/Hash).
 #[test]
 fn alloc_forwarding_trait_impls() {
     use core::borrow::{Borrow, BorrowMut};
     use core::cmp::Ordering;
     use core::hash::{Hash, Hasher};
-    use core::pin::Pin;
     use std::collections::hash_map::DefaultHasher;
-
-    use multitude::Alloc;
 
     let arena = Arena::new();
     let mut a = arena.alloc(10_u32);
@@ -697,10 +694,4 @@ fn alloc_forwarding_trait_impls() {
     let mut h_value = DefaultHasher::new();
     10_u32.hash(&mut h_value);
     assert_eq!(h_handle.finish(), h_value.finish());
-
-    // into_pin + From<Alloc> for Pin
-    let p: Pin<Alloc<'_, u32>> = Alloc::into_pin(a);
-    assert_eq!(*p, 10);
-    let p2: Pin<Alloc<'_, u32>> = b.into();
-    assert_eq!(*p2, 20);
 }

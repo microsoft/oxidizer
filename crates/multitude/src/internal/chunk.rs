@@ -330,6 +330,36 @@ impl<A: Allocator + Clone> Chunk<A> {
         debug_assert!(prev >= n, "refund_refs underflow: prev={prev} n={n}");
     }
 
+    /// Atomically returns `n` unused pre-credited refs and releases one
+    /// additional strong ref. Returns `true` if the combined release reached
+    /// zero.
+    ///
+    /// # Safety
+    ///
+    /// Caller must own exactly `n` previously-credited refs plus one strong
+    /// reference on this chunk. After this call those references no longer
+    /// exist.
+    #[inline]
+    pub(crate) unsafe fn refund_refs_and_release_one(&self, n: usize) -> bool {
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        #[inline(never)]
+        #[cold]
+        fn overflow() -> ! {
+            refcount_overflow_abort()
+        }
+        let Some(released) = n.checked_add(1) else {
+            overflow();
+        };
+        let prev = self.ref_count.fetch_sub(released, Ordering::Release);
+        debug_assert!(prev >= released, "combined ref release underflow: prev={prev} released={released}");
+        if prev == released {
+            fence(Ordering::Acquire);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     #[inline]
     // Returning an incorrect capacity can make allocation retries infinite.
@@ -590,6 +620,23 @@ mod tests {
             chunk.as_ref().set_ref_count_for_test(0);
             Chunk::destroy(chunk);
             std::panic::resume_unwind(result.expect_err("pre_credit_refs must panic"));
+        }
+    }
+
+    // The test configuration turns combined-release overflow into a panic.
+    #[test]
+    #[should_panic(expected = "refcount overflow")]
+    fn refund_refs_and_release_one_overflow_triggers_abort_guard() {
+        // SAFETY: the overflow guard runs before touching the refcount; the
+        // test restores the count before destroying its exclusively-owned chunk.
+        unsafe {
+            let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = chunk.as_ref().refund_refs_and_release_one(usize::MAX);
+            }));
+            chunk.as_ref().set_ref_count_for_test(0);
+            Chunk::destroy(chunk);
+            std::panic::resume_unwind(result.expect_err("combined release must panic"));
         }
     }
 }
