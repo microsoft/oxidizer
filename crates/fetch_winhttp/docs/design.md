@@ -34,30 +34,43 @@ except the constructors arrive through an extension trait this crate implements 
 
 ```rust,ignore
 use fetch::HttpClient;
-use fetch_winhttp::HttpClientWinHttpExt; // brings the constructors into scope
+use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpOptions, WinHttpTlsConfig};
 
 // Defaults:
 let client = HttpClient::new_winhttp();
 
-// Configured:
-let client = HttpClient::builder_winhttp(WinHttpDeps {
-    tls: WinHttpTlsConfig { /* Schannel knobs, §4 */ ..Default::default() },
-    options: WinHttpOptions { /* protocol/timeout tuning, §3, §5, §6 */ ..Default::default() },
-    sink: observed::Sink::noop(), // telemetry sink; detailed in v1.1
-})
-.build();                    // a `fetch::HttpClientBuilder`, so the pipeline can be tuned first
+// Configured. Every WinHTTP config type is built through a builder, never a struct
+// literal, so all of them are `#[non_exhaustive]` and can gain knobs in later versions
+// without a breaking change:
+let deps = WinHttpDeps::builder()
+    .tls(WinHttpTlsConfig::builder()
+        .accept_invalid_certs(true)                 // Schannel knobs, §4
+        .build())
+    .options(WinHttpOptions::builder()
+        .connect_timeout(Duration::from_secs(10))   // protocol/timeout tuning, §3, §5, §6
+        .build())
+    .sink(observed::Sink::noop())                   // telemetry sink; detailed in v1.1
+    .build();
+
+let client = HttpClient::builder_winhttp(deps)
+    .build();                    // a `fetch::HttpClientBuilder`, so the pipeline can be tuned first
 ```
 
 The result is an ordinary `fetch` `HttpClient`; no other caller code changes.
 `WinHttpDeps` carries only WinHTTP-specific configuration - the clock, memory pool, and
-telemetry meter are supplied by `fetch` itself and are not configured here:
+telemetry meter are supplied by `fetch` itself and are not configured here. It and its
+component config types are `#[non_exhaustive]` and constructed through builders so new
+fields can be added compatibly:
 
 ```rust,ignore
+/// WinHTTP-specific dependencies. Construct with [`WinHttpDeps::builder`].
 #[derive(thread_aware::ThreadAware)]
-pub struct WinHttpDeps {
-    pub tls: WinHttpTlsConfig,     // WinHTTP-specific TLS knobs (§4)
-    pub options: WinHttpOptions,   // WinHTTP-specific tuning (§3, §5, §6)
-    pub sink: observed::Sink,      // telemetry sink for events/metrics (v1.1)
+#[non_exhaustive]
+pub struct WinHttpDeps { /* tls, options, sink - private; set via the builder */ }
+
+impl WinHttpDeps {
+    /// Starts building a `WinHttpDeps`. `tls`/`options`/`sink` default when unset.
+    pub fn builder() -> WinHttpDepsBuilder;
 }
 
 /// Adds WinHTTP-transport constructors to `fetch::HttpClient`.
@@ -68,6 +81,9 @@ pub trait HttpClientWinHttpExt {
     fn new_winhttp() -> HttpClient;
 }
 ```
+
+`WinHttpTlsConfig` (§4) and `WinHttpOptions` (§3, §5, §6) follow the same
+builder + `#[non_exhaustive]` pattern.
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
 
@@ -234,9 +250,19 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
 - **Connect timeout** (`TransportOptions.connect_timeout`, default 30 s): honored by this
   transport as a *total* deadline on connection establishment (§6.2). `fetch` models this
   option but leaves each transport to enforce it.
-- **Response timeout and body idle timeout** (`http_extensions::ResponseTimeout` /
-  `BodyTimeout`): enforced by `fetch` above the transport and honored here the same way
-  `fetch_hyper` does; both surface as `HttpError::timeout`.
+- **Response timeout** (`http_extensions::ResponseTimeout`, read per-request from the
+  request extensions): a *total* deadline over connection setup, sending the request, and
+  receiving the response headers. `fetch` enforces this above the transport (the same way
+  `fetch_hyper` relies on it), and it surfaces as `HttpError::timeout`. WinHTTP has no
+  native timer with matching semantics - its receive-response timer covers only the
+  post-send wait for the first response byte, excluding connect and send - so the transport
+  does not remap `ResponseTimeout` onto a native timer; it only sets the native
+  receive-response timer as a looser liveness backstop (implementation.md §10.4).
+- **Body idle timeout** (`http_extensions::BodyTimeout`, read per-request from the request
+  extensions): the maximum idle gap between response body chunks, reset on progress. This
+  *does* match WinHTTP's `WINHTTP_OPTION_RECEIVE_TIMEOUT` (a per-receive-operation idle
+  timer, reset each read), so the transport honors it natively by programming that timer
+  per-request from the request's `BodyTimeout`. It surfaces as `HttpError::timeout`.
 - **Seatbelt request timeout**: enforced above the transport; the transport is not
   involved.
 - **Resolve and send timeouts**: `fetch` has no concept for these, so they are exposed as
@@ -244,8 +270,10 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
   network-phase timers, as discussed in the fetch API stabilization feedback
   (../../fetch/docs/stabilization.md).
 
-The transport also sets the OS's own receive timers to the `fetch`-configured values so
-they act as a liveness backstop (implementation.md §10.4).
+Cancellation is the transport's backstop for every timeout it does not enforce natively:
+when `fetch` (or any layer above) drops the request future on a timeout, the transport
+honors it by closing the WinHTTP handle and tearing the request down (the drop-safety
+contract in §7 and implementation.md §4).
 
 ### 6.2 The outer connect timeout
 

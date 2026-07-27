@@ -621,10 +621,12 @@ let body = builder.stream(stream); // HttpBodyBuilder::stream, Send-clean
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
-there is no unbounded buffering. A
-body-timeout from request extensions is honored via the same `HttpBodyOptions`
-path `fetch_hyper` uses (`HttpBodyBuilder::stream(.., options)` wraps the body in
-an idle timeout).
+there is no unbounded buffering. The request's body idle timeout
+(`http_extensions::BodyTimeout`) is enforced natively rather than by a Rust-side idle
+wrapper: its reset-on-progress semantics match `WINHTTP_OPTION_RECEIVE_TIMEOUT`, so the
+driver programs that native per-read timer from the request's `BodyTimeout` (§10.4),
+keeping the body path free of a self-scheduled timer (the connect deadline stays the sole
+exception, §4.6).
 
 The `READ_COMPLETE` buffer WinHTTP fills is a slice reserved inside a pooled
 `BytesBuf`; it stays pinned until the callback fires (§4), then the filled prefix
@@ -704,7 +706,7 @@ after the table.
 | TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`; `SECURE_FAILURE` -> `tls`-labeled, non-retryable | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
 | Connection management (design.md §2) | connect handle opened per request and closed with it; max-conns mapping; `ConnectionKeepAlive` mapped to `HTTP2/3_KEEPALIVE` interval (§10.3); `DISABLE_GLOBAL_POOLING` on the session | `connection_lifetime` Fixed/PerConnection: accepted, no recycling, emits the `warn` "not honored" event; keep-alive `timeout`/active-only nuances emit the same warn |
-| Timeouts (design.md §6) | `WinHttpSetTimeouts` + connect/response options get values derived from `fetch` options; mock-clock connect deadline (design.md §6.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired |
+| Timeouts (design.md §6) | `WinHttpSetTimeouts` gets connect/send from `WinHttpOptions`; per-request `BodyTimeout` -> `WINHTTP_OPTION_RECEIVE_TIMEOUT` and `ResponseTimeout` -> backstop `RECEIVE_RESPONSE_TIMEOUT`, both read from request extensions; mock-clock connect deadline (design.md §6.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired; a per-request `BodyTimeout` overrides the session default on the native receive timer |
 
 - **Inline / reentrant completion.** Configure `MockBindings` so an async call
   (e.g. `read_data`) fires its completion *synchronously, inline, on the submitting
@@ -1024,16 +1026,19 @@ The timeout contract in design.md §6 maps to WinHTTP timers as follows.
 | `fetch` concept | Type / default | Where enforced | WinHTTP equivalent |
 |-----------------|----------------|----------------|--------------------|
 | Connect timeout | `TransportOptions.connect_timeout` (30 s) | This transport (`fetch` core does not wrap connect; `fetch_hyper` enforces it in its own connector) | `WINHTTP_OPTION_CONNECT_TIMEOUT`, applied to the send-time TCP/TLS handshake |
-| Response timeout | `http_extensions::ResponseTimeout` | Above transport, in `fetch::HttpClient::execute` (wraps the whole pipeline, maps to `HttpError::timeout`) | `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` (native backstop, below) |
-| Body idle timeout | `http_extensions::BodyTimeout` | We apply it, like `fetch_hyper`, via `HttpBodyOptions::timeout` on the response body (§6.2) | `WINHTTP_OPTION_RECEIVE_TIMEOUT` per read (native backstop, below) |
+| Response timeout | `http_extensions::ResponseTimeout`, read per-request | Above transport, in `fetch::HttpClient::execute` (wraps the whole pipeline, maps to `HttpError::timeout`) | No matching native timer: `RECEIVE_RESPONSE_TIMEOUT` covers only the post-send wait for headers, not the connect+send+headers *total* `ResponseTimeout` promises. Set as a looser backstop only (below); not a faithful remap. |
+| Body idle timeout | `http_extensions::BodyTimeout`, read per-request | This transport, natively | `WINHTTP_OPTION_RECEIVE_TIMEOUT` set per-request from the request's `BodyTimeout`: a per-receive-operation idle timer reset each read, which matches `BodyTimeout`'s reset-on-progress idle semantics. |
 | Seatbelt request timeout | `seatbelt::TimeoutLayer` (30 s) | Above transport | n/a |
 | Resolve/send timeouts | (no distinct `fetch` concept; transport-specific by design, see the fetch API stabilization feedback, ../../fetch/docs/stabilization.md) | this transport | `WinHttpSetTimeouts` resolve/send fields, set from `WinHttpOptions` |
 
-`WinHttpSetTimeouts(resolve, connect, send, receive)` sets the four base timers;
-`WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` is set separately and is forced by
-WinHTTP to be at least the receive timeout. Each of these is a native WinHTTP timer,
-scheduled by WinHTTP inside its own async machinery (§2.1); the transport's own
-connect deadline (design.md §6.2) is the sole exception.
+`ResponseTimeout` and `BodyTimeout` are read from each request's extensions
+(`http_extensions::RequestExt`), not from session-global config, so per-request overrides
+are honored. `WinHttpSetTimeouts(resolve, connect, send, receive)` sets the four base
+timers; the per-request `WINHTTP_OPTION_RECEIVE_TIMEOUT` (body idle) and the backstop
+`WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` are set on the request handle, the latter forced
+by WinHTTP to be at least the receive timeout. Each is a native WinHTTP timer, scheduled by
+WinHTTP inside its own async machinery (§2.1); the transport's own connect deadline
+(design.md §6.2) is the sole exception.
 
 WinHTTP always applies its own receive timers - they have non-zero defaults that
 cannot be disabled - so the transport sets them to the `fetch`-configured value
