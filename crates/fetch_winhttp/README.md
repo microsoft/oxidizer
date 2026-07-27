@@ -23,9 +23,12 @@ API, running in fully asynchronous mode.
 ## Status
 
 This crate is a placeholder. Only the design exists so far; there is no
-implementation yet. See [`docs/DESIGN.md`][__link3]
-for the proposed architecture, threading/cancellation/error models, and the
-test plan.
+implementation yet. See
+[`docs/design.md`][__link3]
+for the architecture, behavior, and design tenets, and
+[`docs/implementation.md`][__link4]
+for the implementation strategy (threading, cancellation and FFI ownership,
+pooling, body streaming) and the test plan.
 
 
 <hr/>
@@ -36,4 +39,5 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/DESIGN.md
+ [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/implementation.md

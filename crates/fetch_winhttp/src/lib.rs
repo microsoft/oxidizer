@@ -13,9 +13,12 @@
 //! # Status
 //!
 //! This crate is a placeholder. Only the design exists so far; there is no
-//! implementation yet. See [`docs/DESIGN.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/DESIGN.md)
-//! for the proposed architecture, threading/cancellation/error models, and the
-//! test plan.
+//! implementation yet. See
+//! [`docs/design.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md)
+//! for the architecture, behavior, and design tenets, and
+//! [`docs/implementation.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/implementation.md)
+//! for the implementation strategy (threading, cancellation and FFI ownership,
+//! pooling, body streaming) and the test plan.
 //!
 //! [`fetch`]: https://docs.rs/fetch
 //! [`HttpClient`]: https://docs.rs/fetch
