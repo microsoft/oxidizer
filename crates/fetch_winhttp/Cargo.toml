@@ -1,0 +1,40 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_winhttp"
+description = "WinHTTP-based HTTP transport for fetch (Windows only)."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "winhttp", "fetch", "http", "windows"]
+categories = ["network-programming"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp"
+
+[package.metadata.docs.rs]
+all-features = true
+# WinHTTP is a Windows-only API surface; build docs against a Windows target.
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]
+
+# NOTE: This crate is a skeleton. The transport is not implemented yet; only the
+# crate scaffolding and design documentation exist so far. See `docs/design/`
+# for the API shape, the fetch integration model, the async bridge strategy, and
+# the configuration-mapping / contention analysis this crate will be built
+# against. Dependencies are intentionally omitted until implementation begins so
+# the skeleton stays free of unused-dependency lint noise.
+
+[dependencies]
+
+[dev-dependencies]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
