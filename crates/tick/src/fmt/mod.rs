@@ -9,6 +9,10 @@
 //! - [`Iso8601`]: Parsing and formatting of system time in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format.
 //!   For example, `2024-08-06T21:30:00Z`.
 //!
+//! - [`EcmaScript`]: Fixed-width parsing and formatting of system time in the
+//!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format), the profile produced by
+//!   JavaScript's `Date.prototype.toISOString`. For example, `2024-08-06T21:30:00.123Z`.
+//!
 //! - [`Rfc2822`]: Parsing and formatting of system time in [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3) format.
 //!   For example, `Tue, 6 Aug 2024 14:30:00 -0000`.
 //!
@@ -30,11 +34,15 @@
 //! ## Using format types
 //!
 //! ```
-//! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
+//! use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 //!
 //! // ISO 8601
 //! let time: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! assert_eq!(time.to_string(), "2024-08-06T21:30:00Z");
+//!
+//! // ECMAScript (fixed-width, milliseconds)
+//! let time: EcmaScript = "2024-08-06T21:30:00Z".parse()?;
+//! assert_eq!(time.to_string(), "2024-08-06T21:30:00.000Z");
 //!
 //! // RFC 2822
 //! let time: Rfc2822 = "Tue, 06 Aug 2024 14:30:00 GMT".parse()?;
@@ -59,10 +67,12 @@
 //! // Output: Time: 1970-01-01T01:00:00Z
 //! ```
 
+mod ecma_script;
 mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
+pub use ecma_script::EcmaScript;
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
@@ -84,13 +94,14 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();
 
         assert_eq!(
             json,
-            r#"{"iso":"1970-01-01T02:48:43.456Z","rfc":"Thu, 01 Jan 1970 02:48:43 GMT","unix":10123}"#
+            r#"{"iso":"1970-01-01T02:48:43.456Z","rfc":"Thu, 01 Jan 1970 02:48:43 GMT","unix":10123,"ecma":"1970-01-01T02:48:43.456Z"}"#
         );
     }
 
@@ -102,12 +113,13 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
-        let formatted = format!("iso: {}, unix: {}, rfc: {}", dates.iso, dates.unix, dates.rfc);
+        let formatted = format!("iso: {}, unix: {}, rfc: {}, ecma: {}", dates.iso, dates.unix, dates.rfc, dates.ecma);
         assert_eq!(
             formatted,
-            "iso: 1970-01-01T02:48:43.456Z, unix: 10123, rfc: Thu, 01 Jan 1970 02:48:43 GMT"
+            "iso: 1970-01-01T02:48:43.456Z, unix: 10123, rfc: Thu, 01 Jan 1970 02:48:43 GMT, ecma: 1970-01-01T02:48:43.456Z"
         );
     }
 
@@ -119,6 +131,7 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();
@@ -131,6 +144,7 @@ mod tests {
         iso: Iso8601,
         rfc: Rfc2822,
         unix: UnixSeconds,
+        ecma: EcmaScript,
     }
 
     #[test]
@@ -139,18 +153,26 @@ mod tests {
         let iso_epoch: SystemTime = Iso8601::UNIX_EPOCH.into();
         let rfc_epoch: SystemTime = Rfc2822::UNIX_EPOCH.into();
         let unix_epoch: SystemTime = UnixSeconds::UNIX_EPOCH.into();
+        let ecma_epoch: SystemTime = EcmaScript::UNIX_EPOCH.into();
 
         assert_eq!(iso_epoch, SystemTime::UNIX_EPOCH, "Iso8601::UNIX_EPOCH should be Unix epoch");
         assert_eq!(rfc_epoch, SystemTime::UNIX_EPOCH, "Rfc2822::UNIX_EPOCH should be Unix epoch");
         assert_eq!(unix_epoch, SystemTime::UNIX_EPOCH, "UnixSeconds::UNIX_EPOCH should be Unix epoch");
+        assert_eq!(ecma_epoch, SystemTime::UNIX_EPOCH, "EcmaScript::UNIX_EPOCH should be Unix epoch");
 
         // Cross-format conversions at UNIX_EPOCH should preserve the value
         assert_eq!(Iso8601::from(Rfc2822::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
         assert_eq!(Iso8601::from(UnixSeconds::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
+        assert_eq!(Iso8601::from(EcmaScript::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
         assert_eq!(Rfc2822::from(Iso8601::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
         assert_eq!(Rfc2822::from(UnixSeconds::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
+        assert_eq!(Rfc2822::from(EcmaScript::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
         assert_eq!(UnixSeconds::from(Iso8601::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
         assert_eq!(UnixSeconds::from(Rfc2822::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
+        assert_eq!(UnixSeconds::from(EcmaScript::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
+        assert_eq!(EcmaScript::from(Iso8601::UNIX_EPOCH), EcmaScript::UNIX_EPOCH);
+        assert_eq!(EcmaScript::from(Rfc2822::UNIX_EPOCH), EcmaScript::UNIX_EPOCH);
+        assert_eq!(EcmaScript::from(UnixSeconds::UNIX_EPOCH), EcmaScript::UNIX_EPOCH);
     }
 
     #[test]
@@ -159,16 +181,24 @@ mod tests {
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();
+        let ecma_max: SystemTime = EcmaScript::MAX.into();
 
         assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
         assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
+        assert_eq!(iso_max, ecma_max, "Iso8601::MAX and EcmaScript::MAX should be equal");
 
         // Cross-format conversions at MAX should preserve the value
         assert_eq!(Iso8601::from(Rfc2822::MAX), Iso8601::MAX);
         assert_eq!(Iso8601::from(UnixSeconds::MAX), Iso8601::MAX);
+        assert_eq!(Iso8601::from(EcmaScript::MAX), Iso8601::MAX);
         assert_eq!(Rfc2822::from(Iso8601::MAX), Rfc2822::MAX);
         assert_eq!(Rfc2822::from(UnixSeconds::MAX), Rfc2822::MAX);
+        assert_eq!(Rfc2822::from(EcmaScript::MAX), Rfc2822::MAX);
         assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
         assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
+        assert_eq!(UnixSeconds::from(EcmaScript::MAX), UnixSeconds::MAX);
+        assert_eq!(EcmaScript::from(Iso8601::MAX), EcmaScript::MAX);
+        assert_eq!(EcmaScript::from(Rfc2822::MAX), EcmaScript::MAX);
+        assert_eq!(EcmaScript::from(UnixSeconds::MAX), EcmaScript::MAX);
     }
 }

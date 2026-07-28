@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use jiff::{SignedDuration, Timestamp};
 
 use crate::Error;
-use crate::fmt::{Rfc2822, UnixSeconds};
+use crate::fmt::{EcmaScript, Rfc2822, UnixSeconds};
 
 /// Parser and formatter for system time in ISO 8601 format.
 ///
@@ -147,6 +147,12 @@ impl From<Rfc2822> for Iso8601 {
 impl From<UnixSeconds> for Iso8601 {
     fn from(value: UnixSeconds) -> Self {
         Self(Timestamp::UNIX_EPOCH + value.0)
+    }
+}
+
+impl From<EcmaScript> for Iso8601 {
+    fn from(value: EcmaScript) -> Self {
+        Self(value.0)
     }
 }
 

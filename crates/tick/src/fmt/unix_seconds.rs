@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use crate::Error;
-use crate::fmt::{Iso8601, Rfc2822};
+use crate::fmt::{EcmaScript, Iso8601, Rfc2822};
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
@@ -160,6 +160,12 @@ impl From<Rfc2822> for UnixSeconds {
 
 impl From<Iso8601> for UnixSeconds {
     fn from(value: Iso8601) -> Self {
+        Self(value.to_unix_epoch_duration())
+    }
+}
+
+impl From<EcmaScript> for UnixSeconds {
+    fn from(value: EcmaScript) -> Self {
         Self(value.to_unix_epoch_duration())
     }
 }

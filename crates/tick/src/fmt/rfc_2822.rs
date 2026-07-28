@@ -9,7 +9,7 @@ use jiff::Timestamp;
 use jiff::fmt::rfc2822;
 
 use crate::Error;
-use crate::fmt::{Iso8601, UnixSeconds};
+use crate::fmt::{EcmaScript, Iso8601, UnixSeconds};
 
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
@@ -148,6 +148,12 @@ impl From<Iso8601> for Rfc2822 {
 impl From<UnixSeconds> for Rfc2822 {
     fn from(value: UnixSeconds) -> Self {
         Self(Timestamp::UNIX_EPOCH + value.0)
+    }
+}
+
+impl From<EcmaScript> for Rfc2822 {
+    fn from(value: EcmaScript) -> Self {
+        Self(value.0)
     }
 }
 
