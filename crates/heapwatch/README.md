@@ -16,11 +16,11 @@
 A global allocator wrapper that continuously accounts heap usage.
 
 Heapwatch wraps another allocator and, installed as a binary’s
-`#[global_allocator]`, reports how many bytes that binary’s Rust heap holds,
-how high it has been, and how much has moved through it. It answers *how
-much*, never *who* — no backtraces, no per-allocation metadata, no
-pointer-to-size shadow map — which is what keeps the per-allocation cost to
-a few non-atomic adds, low enough to leave enabled in production.
+`#[global_allocator]`, reports how many bytes that binary’s Rust heap holds
+and how much has moved through it. It answers *how much*, never *who* — no
+backtraces, no per-allocation metadata, no pointer-to-size shadow map —
+which is what keeps the per-allocation cost to a few non-atomic adds, low
+enough to leave enabled in production.
 
 ## Status
 
@@ -32,7 +32,7 @@ the code so the design can be reviewed on its own terms.
 ## The mechanism
 
 Each thread accumulates its own totals with plain, non-atomic arithmetic and
-publishes them into a fixed set of process-wide atomics in batches — once
+publishes them into the allocator instance’s atomic totals in batches — once
 *bytes allocated plus bytes freed* since its last publication crosses a
 compile-time threshold, when the thread exits, or on request. That removes
 the atomic read-modify-write per allocation that an exact accounting wrapper
@@ -42,8 +42,8 @@ The trade is a small, bounded, stated inaccuracy: a reading omits whatever
 each live thread has not yet published, at most the threshold times the
 number of live threads. That bound depends on neither the allocation rate
 nor how long the process has been running. Reading is O(1) in the thread
-count — a handful of relaxed loads against fixed statics, with no registry
-to walk.
+count — a handful of relaxed loads through a handle obtained from the
+allocator, with no registry to walk.
 
 ## Measurement boundary
 

@@ -4,7 +4,23 @@ Designs and ideas that are **not** part of the shipped architecture, which is
 documented in [`DESIGN.md`](./DESIGN.md). Items here range from small
 follow-ups to features that would change the crate's character.
 
-## 1. A reported error bar
+## 1. Peak live bytes
+
+The counters report the heap as it is now, not the highest it has been, so a
+spike shorter than the emission interval leaves no trace. Tracking a peak
+per thread — the running maximum of local live, folded into a process-wide
+`fetch_max` at each commit — would catch those spikes at the cost of one
+compare per allocation and one atomic per commit.
+
+Deliberately not done for now: a consumer that already samples live bytes can
+maintain its own maximum, and every other view of one — arbitrary windows, fleet
+aggregation, correlation — is better derived downstream anyway. Doing it in the
+crate also drags in a reset operation and a subtler contract, because a
+candidate combines a local maximum measured at one instant with a total read at
+a later one, so a monotone maximum acquires a small *persistent* upward bias
+where the other counters carry only a transient one.
+
+## 2. A reported error bar
 
 The accuracy bound is `threshold × live threads`, and `stats()` reports neither
 factor — so a caller cannot turn the documented bound into a number. Tracking a
@@ -17,19 +33,19 @@ ignore, and an operator who needs the figure already knows their deployment's
 thread-count ceiling. Worth revisiting if the crate grows a consumer that has to
 decide programmatically whether a reading is trustworthy.
 
-## 2. Telemetry integration
+## 3. Telemetry integration
 
 Today the crate reports numbers and nothing more; emitting them is the caller's
 job. A thin optional layer that registers the gauges with a metrics backend
 would remove the boilerplate every adopter otherwise writes — periodic emission
-of live bytes, peak, and the net allocation count, with the allocator name as a
-dimension, followed by a peak reset.
+of live bytes and the net allocation count, with the allocator name as a
+dimension.
 
 The reason to keep it optional and separate is dependency weight: the core crate
 should stay a `GlobalAlloc` wrapper with no metrics dependency, so that a binary
 that already has its own emission path pays nothing.
 
-## 3. Usable-size accounting
+## 4. Usable-size accounting
 
 Byte figures are recorded as *requested*, because `GlobalAlloc` has no hook to
 ask the inner allocator what it actually reserved. Allocators generally do know
@@ -43,9 +59,9 @@ size-class lookup on the hot path would trade a documented, stable
 under-estimate for real overhead. Worth exploring only for allocators whose
 rounding can be computed arithmetically from the layout.
 
-## 4. Scoped or per-category accounting
+## 5. Scoped or per-category accounting
 
-The counters are process-global, which answers "how big is the heap" but not
+The counters cover the whole process, which answers "how big is the heap" but not
 "which subsystem grew". A scoped variant — a guard that attributes allocations
 on the current thread to a named category for the duration of a request or task
 — would give per-category totals without call-site attribution.
@@ -57,7 +73,7 @@ hard part). Freed-elsewhere allocations would be attributed to whoever frees
 them unless a shadow map recorded ownership, which is the cost the whole design
 avoids.
 
-## 5. Sampling-based call-site attribution
+## 6. Sampling-based call-site attribution
 
 A sampled backtrace on one allocation in every N would recover a coarse version
 of what a heap profiler provides, at a cost proportional to the sampling rate
@@ -69,7 +85,7 @@ never allocates: capturing and symbolizing a backtrace does. A viable version
 would have to buffer raw frame pointers into fixed-size storage and resolve them
 off the allocation path.
 
-## 6. Allocation-size histogram
+## 7. Allocation-size histogram
 
 A small fixed set of size-class buckets, incremented on the same thread-local
 block and flushed with everything else, would show whether a heap grew because
