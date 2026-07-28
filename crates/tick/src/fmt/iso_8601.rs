@@ -3,12 +3,12 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use jiff::{SignedDuration, Timestamp};
 
 use crate::Error;
-use crate::fmt::{Rfc2822, UnixSeconds};
+use crate::fmt::{Rfc2822, UnixSeconds, to_system_time};
 
 /// Parser and formatter for system time in ISO 8601 format.
 ///
@@ -50,6 +50,13 @@ use crate::fmt::{Rfc2822, UnixSeconds};
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// # Representable range
+///
+/// This type spans [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) through [`Iso8601::MAX`]
+/// (`9999-12-30T22:00:00.999999999Z`), which is the widest range in the [`fmt`][crate::fmt]
+/// module. Converting an `Iso8601` into a narrower format saturates to that format's nearest
+/// boundary rather than producing an unrelated instant.
 ///
 /// # Examples
 ///
@@ -94,14 +101,16 @@ impl Iso8601 {
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
+    /// The smallest value that can be represented by `Iso8601`.
+    ///
+    /// This represents a Unix system time of `2 January -9999 01:59:59 UTC`, expressed as an
+    /// expanded ISO 8601 year.
+    pub const MIN: Self = Self(Timestamp::MIN);
+
     /// The Unix epoch represented as `Iso8601`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
-
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
-    }
 }
 
 impl FromStr for Iso8601 {
@@ -125,7 +134,7 @@ impl Display for Iso8601 {
 
 impl From<Iso8601> for SystemTime {
     fn from(value: Iso8601) -> Self {
-        value.0.into()
+        to_system_time(value.0.as_duration())
     }
 }
 
@@ -188,6 +197,7 @@ fn with_rounded_nanos(timestamp: Timestamp) -> Timestamp {
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
+    use std::time::Duration;
 
     use super::*;
 

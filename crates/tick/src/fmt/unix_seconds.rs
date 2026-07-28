@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use crate::Error;
-use crate::fmt::{Iso8601, Rfc2822};
+use crate::fmt::{Iso8601, Rfc2822, to_unix_epoch_duration};
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
@@ -29,6 +29,22 @@ use crate::fmt::{Iso8601, Rfc2822};
 /// # Leap seconds
 ///
 /// This value represents the number of non-leap seconds since the Unix epoch.
+///
+/// # Representable range
+///
+/// The offset from the Unix epoch is unsigned, so this type spans [`UnixSeconds::MIN`] (`0`,
+/// the Unix epoch itself) through [`UnixSeconds::MAX`] (`253402207200`). Converting an instant
+/// that occurs before the Unix epoch saturates to [`UnixSeconds::MIN`].
+///
+/// ```
+/// use tick::fmt::{Iso8601, UnixSeconds};
+///
+/// let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
+///
+/// assert_eq!(UnixSeconds::from(before_epoch), UnixSeconds::MIN);
+///
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 ///
 /// # Examples
 ///
@@ -63,6 +79,12 @@ impl UnixSeconds {
     /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
+
+    /// The smallest value that be can represented by `UnixSeconds`.
+    ///
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`. Because the offset
+    /// from the epoch is unsigned, this is the same instant as [`UnixSeconds::UNIX_EPOCH`].
+    pub const MIN: Self = Self(Duration::ZERO);
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///
@@ -154,13 +176,13 @@ impl TryFrom<SystemTime> for UnixSeconds {
 
 impl From<Rfc2822> for UnixSeconds {
     fn from(value: Rfc2822) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self(to_unix_epoch_duration(value.0))
     }
 }
 
 impl From<Iso8601> for UnixSeconds {
     fn from(value: Iso8601) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self(to_unix_epoch_duration(value.0))
     }
 }
 

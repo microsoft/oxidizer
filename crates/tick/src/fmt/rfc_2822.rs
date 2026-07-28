@@ -3,13 +3,13 @@
 
 use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use jiff::Timestamp;
 use jiff::fmt::rfc2822;
 
 use crate::Error;
-use crate::fmt::{Iso8601, UnixSeconds};
+use crate::fmt::{Iso8601, UnixSeconds, to_system_time};
 
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
@@ -45,6 +45,25 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 ///
 /// let rfc = "Mon, 31 Dec 1990 23:59:60 GMT".parse::<Rfc2822>()?;
 /// assert_eq!(rfc.to_string(), "Mon, 31 Dec 1990 23:59:59 GMT");
+///
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Representable range
+///
+/// RFC 2822 encodes the year as four digits, so this type spans [`Rfc2822::MIN`]
+/// (`Sat, 01 Jan 0000 00:00:00 GMT`) through [`Rfc2822::MAX`] (`Thu, 30 Dec 9999 22:00:00 GMT`).
+/// Converting an earlier instant into `Rfc2822` saturates to [`Rfc2822::MIN`], so the type can
+/// never hold an instant it is unable to format.
+///
+/// ```
+/// use tick::fmt::{Iso8601, Rfc2822};
+///
+/// let before_year_zero: Iso8601 = "-000001-06-15T00:00:00Z".parse()?;
+/// let rfc = Rfc2822::from(before_year_zero);
+///
+/// assert_eq!(rfc, Rfc2822::MIN);
+/// assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
 ///
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -92,13 +111,26 @@ impl Rfc2822 {
     /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
+    /// The smallest value that can be represented by `Rfc2822`.
+    ///
+    /// This represents a Unix system time of `1 January 0000 00:00:00 UTC`. RFC 2822 encodes
+    /// the year as four digits, so it cannot express any earlier instant.
+    pub const MIN: Self = Self(Timestamp::constant(-62_167_219_200, 0));
+
     /// The Unix epoch represented as `Rfc2822`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
-    pub(super) fn to_unix_epoch_duration(self) -> Duration {
-        self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
+    /// Creates an `Rfc2822` that is guaranteed to be within the representable range,
+    /// saturating to [`Rfc2822::MIN`] for earlier instants.
+    ///
+    /// Every `Rfc2822` is built through this constructor so that the type can never hold an
+    /// instant its [`Display`] implementation is unable to encode.
+    fn new_saturating(timestamp: Timestamp) -> Self {
+        // Only the lower bound needs clamping: `Rfc2822::MAX` is `Timestamp::MAX`, so no
+        // `Timestamp` can exceed it. `max_is_jiff_timestamp_max` guards that assumption.
+        Self(timestamp.max(Self::MIN.0))
     }
 }
 
@@ -108,7 +140,7 @@ impl FromStr for Rfc2822 {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let timestamp = RFC2822_PARSER.parse_timestamp(s).map_err(Error::jiff)?;
 
-        Ok(Self(timestamp))
+        Ok(Self::new_saturating(timestamp))
     }
 }
 
@@ -126,7 +158,7 @@ impl Display for Rfc2822 {
 
 impl From<Rfc2822> for SystemTime {
     fn from(value: Rfc2822) -> Self {
-        value.0.into()
+        to_system_time(value.0.as_duration())
     }
 }
 
@@ -135,19 +167,19 @@ impl TryFrom<SystemTime> for Rfc2822 {
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
-        Ok(Self(timestamp))
+        Ok(Self::new_saturating(timestamp))
     }
 }
 
 impl From<Iso8601> for Rfc2822 {
     fn from(value: Iso8601) -> Self {
-        Self(value.0)
+        Self::new_saturating(value.0)
     }
 }
 
 impl From<UnixSeconds> for Rfc2822 {
     fn from(value: UnixSeconds) -> Self {
-        Self(Timestamp::UNIX_EPOCH + value.0)
+        Self::new_saturating(Timestamp::UNIX_EPOCH + value.0)
     }
 }
 
@@ -177,6 +209,7 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
 #[cfg(test)]
 mod tests {
     use std::hash::Hash;
+    use std::time::Duration;
 
     use super::*;
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);

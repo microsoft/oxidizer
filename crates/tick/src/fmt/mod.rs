@@ -25,6 +25,38 @@
 //! which retrieves current system time and does the automatic conversion to the output format. This conversion never fails because clock
 //! always returns a valid and normalized `SystemTime`.
 //!
+//! # Representable ranges and saturation
+//!
+//! Each format covers a different span of time:
+//!
+//! | Format | Minimum | Maximum |
+//! | --- | --- | --- |
+//! | [`Iso8601`] | [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) | [`Iso8601::MAX`] (`9999-12-30T22:00:00.999999999Z`) |
+//! | [`Rfc2822`] | [`Rfc2822::MIN`] (`Sat, 01 Jan 0000 00:00:00 GMT`) | [`Rfc2822::MAX`] (`Thu, 30 Dec 9999 22:00:00 GMT`) |
+//! | [`UnixSeconds`] | [`UnixSeconds::MIN`] (`0`, the Unix epoch) | [`UnixSeconds::MAX`] (`253402207200`) |
+//!
+//! Converting an instant into a format that cannot represent it **saturates to the nearest
+//! boundary of the target range** rather than panicking, wrapping, or mirroring the value.
+//! This keeps every conversion between the formats infallible while never inventing an
+//! instant on the other side of a boundary.
+//!
+//! ```
+//! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
+//!
+//! // `UnixSeconds` counts forward from the Unix epoch, so earlier instants saturate to it.
+//! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
+//! assert_eq!(UnixSeconds::from(before_epoch), UnixSeconds::MIN);
+//!
+//! // RFC 2822 encodes the year as four digits, so earlier instants saturate to year 0.
+//! let before_year_zero: Iso8601 = "-000001-06-15T00:00:00Z".parse()?;
+//! assert_eq!(Rfc2822::from(before_year_zero), Rfc2822::MIN);
+//!
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Converting any format back into a [`SystemTime`][std::time::SystemTime] saturates the same
+//! way, to the furthest instant the platform can represent.
+//!
 //! # Examples
 //!
 //! ## Using format types
@@ -63,14 +95,67 @@ mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
+use std::time::{Duration, SystemTime};
+
+use jiff::{SignedDuration, Timestamp};
+
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
 
+/// Returns how long after the Unix epoch `timestamp` occurs.
+///
+/// Instants before the Unix epoch saturate to [`Duration::ZERO`], since the unsigned
+/// [`Duration`] used by [`UnixSeconds`] cannot represent them.
+fn to_unix_epoch_duration(timestamp: Timestamp) -> Duration {
+    timestamp.as_duration().max(SignedDuration::ZERO).unsigned_abs()
+}
+
+/// Converts an offset from the Unix epoch into a [`SystemTime`].
+///
+/// Offsets that the platform cannot represent saturate to the furthest [`SystemTime`] in
+/// that direction, so the conversion never panics.
+fn to_system_time(offset: SignedDuration) -> SystemTime {
+    let negative = offset.is_negative();
+
+    checked_offset(negative, offset.unsigned_abs()).unwrap_or_else(|| saturating_bound(negative))
+}
+
+/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, returning `None` when the result is
+/// outside the range the platform can represent.
+fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
+    if negative {
+        SystemTime::UNIX_EPOCH.checked_sub(magnitude)
+    } else {
+        SystemTime::UNIX_EPOCH.checked_add(magnitude)
+    }
+}
+
+/// Returns the [`SystemTime`] furthest from the Unix epoch that the platform can represent.
+fn saturating_bound(negative: bool) -> SystemTime {
+    // The representable range of `SystemTime` is platform defined and `std` does not expose it,
+    // so the boundary is located with a binary search over whole seconds. This is a cold path:
+    // it is only reached when an offset within the `jiff::Timestamp` range (year -9999..=9999)
+    // exceeds what the platform can represent, which no currently supported platform does.
+    let mut lower = 0;
+    let mut upper = u64::MAX;
+
+    while lower < upper {
+        let candidate = lower + (upper - lower) / 2 + 1;
+
+        if checked_offset(negative, Duration::from_secs(candidate)).is_some() {
+            lower = candidate;
+        } else {
+            upper = candidate - 1;
+        }
+    }
+
+    checked_offset(negative, Duration::from_secs(lower))
+        .expect("the loop above only ever advances `lower` to an offset it verified as representable")
+}
+
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime};
-
     use serde::{Deserialize, Serialize};
 
     use super::*;
