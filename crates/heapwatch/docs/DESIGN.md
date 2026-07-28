@@ -267,6 +267,13 @@ that total to a new maximum has a positive pending `live`, and the local peak is
 the running maximum of local live, so the candidate it offers is at least the
 new total. With the bound, that gives the undershoot side.
 
+The invariant describes completed commits, not commits in flight. Raising the
+committed total and folding in the peak candidate are two separate atomics, so a
+reader that lands between them sees a live total the peak has not caught up with
+yet. That window closes as soon as the `fetch_max` retires — unlike the
+overshoot below, it self-corrects — but `peak ≥ current` is consequently not
+something a caller may assert across a reading.
+
 Overshoot differs in kind. A candidate combines a local peak measured at one
 instant with a committed total read at a later one, so other threads carrying
 negative pending values inflate it. Because the recorded peak is a monotone
@@ -401,8 +408,9 @@ atomics, which excludes targets without `target_has_atomic = "64"`.
    destructor loses is bounded by the threshold.
 4. **A thread's residue is below the threshold between operations**, so the
    reporting error is bounded and does not grow with uptime.
-5. **The recorded peak is never below the highest value the committed live total
-   ever reached**, and never more than the bound above the true peak.
+5. **Once a commit has completed, the recorded peak is never below the highest
+   value the committed live total ever reached**, and never more than the bound
+   above the true peak.
 6. **Reading is O(1) in the thread count.** No registry, no walk, no iteration.
 7. **The wrapper is transparent.** Pointers, layouts, and the `realloc` and
    `alloc_zeroed` specializations pass through unchanged.

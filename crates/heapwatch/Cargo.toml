@@ -17,6 +17,18 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/heapwatch"
 
+# The crate is scaffolding: it carries the design documents but no code, so
+# there is nothing to instrument and no test to run. Without this opt-out the
+# impact-scoped coverage run fails with nextest's "no tests to run" (exit 4).
+# REMOVE THIS SECTION when the implementation lands, so the workspace-default
+# 100% line-coverage gate applies again.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
