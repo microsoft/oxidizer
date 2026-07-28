@@ -88,8 +88,6 @@ async fn list_shelves_binds_query_parameter() {
 
 #[tokio::test]
 async fn list_shelves_by_genre_binds_enum_path_variable_by_name() {
-    // The `{genre}` path variable targets an `enum` field: given by name, it is
-    // decoded to the matching enum value (proto3 JSON parity).
     let resp = unary(
         Transcoder::new(InMemoryLibrary)
             .transcode("GET", "/v1/shelves/genre/SCIENCE", HeaderMap::new(), b"")
@@ -104,7 +102,6 @@ async fn list_shelves_by_genre_binds_enum_path_variable_by_name() {
 
 #[tokio::test]
 async fn list_shelves_by_genre_binds_enum_path_variable_by_number() {
-    // The same enum path variable also accepts the value's number.
     let resp = unary(
         Transcoder::new(InMemoryLibrary)
             .transcode("GET", "/v1/shelves/genre/1", HeaderMap::new(), b"")
@@ -119,7 +116,6 @@ async fn list_shelves_by_genre_binds_enum_path_variable_by_number() {
 
 #[tokio::test]
 async fn list_shelves_by_genre_rejects_an_unknown_enum_value() {
-    // A value that is neither a known name nor a number is an invalid argument.
     let resp = unary(
         Transcoder::new(InMemoryLibrary)
             .transcode("GET", "/v1/shelves/genre/BOGUS", HeaderMap::new(), b"")
@@ -159,7 +155,6 @@ async fn stream_shelves_filters_via_query() {
 
 #[tokio::test]
 async fn stream_shelves_negotiates_encoding_via_accept() {
-    // NDJSON: one compact JSON object per line.
     let (ndjson_type, ndjson_bytes) = streaming(
         Transcoder::new(InMemoryLibrary)
             .transcode("GET", "/v1/shelves:stream", accept("application/x-ndjson"), b"")
@@ -170,7 +165,6 @@ async fn stream_shelves_negotiates_encoding_via_accept() {
     let line_count = ndjson_bytes.split(|&b| b == b'\n').filter(|l| !l.is_empty()).count();
     assert_eq!(line_count, 2);
 
-    // SSE: one `data:` frame per message.
     let (sse_type, sse_bytes) = streaming(
         Transcoder::new(InMemoryLibrary)
             .transcode("GET", "/v1/shelves:stream", accept("text/event-stream"), b"")
@@ -243,6 +237,42 @@ async fn additional_binding_uses_its_own_body_and_response_body() {
 }
 
 #[tokio::test]
+async fn response_body_field_at_its_default_serializes_the_default() {
+    // `force:false` makes the handler return `result_code = 0`. pbjson omits
+    // default-valued fields, so selecting `result_code` as the response body used
+    // to fail with a 500; it must now serialize the proto3 default `0`.
+    let response = unary(
+        Transcoder::new(InMemoryLibrary)
+            .transcode(
+                "POST",
+                "/v1/shelves/secondary:replace",
+                HeaderMap::new(),
+                br#"{"shelf":{"theme":"science"},"force":false}"#,
+            )
+            .await,
+    );
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(body(&response), serde_json::json!(0));
+}
+
+#[tokio::test]
+async fn a_duplicate_body_key_is_rejected_on_the_query_overlay_path() {
+    // A present query forces the body through the overlay decoder rather than the
+    // direct fast path; a duplicate field in the body must still be rejected.
+    let response = unary(
+        Transcoder::new(InMemoryLibrary)
+            .transcode(
+                "POST",
+                "/v1/shelves/secondary:replace?force=true",
+                HeaderMap::new(),
+                br#"{"shelf":{"theme":"science"},"force":true,"force":false}"#,
+            )
+            .await,
+    );
+    assert_eq!(response.status().as_u16(), 400);
+}
+
+#[tokio::test]
 async fn streaming_response_body_selects_each_item_field() {
     let (content_type, bytes) = streaming(
         Transcoder::new(InMemoryLibrary)
@@ -305,14 +335,12 @@ async fn unknown_route_yields_404() {
 
 #[tokio::test]
 async fn try_transcode_distinguishes_unmatched_routes() {
-    // An unmatched route yields `None`, so a caller can supply its own fallback.
     assert!(
         Transcoder::new(InMemoryLibrary)
             .try_transcode("GET", "/v1/widgets/1", HeaderMap::new(), b"")
             .await
             .is_none()
     );
-    // A matched route yields `Some`, even when the handler itself fails.
     let matched = Transcoder::new(InMemoryLibrary)
         .try_transcode("GET", "/v1/shelves/history", HeaderMap::new(), b"")
         .await;
@@ -364,11 +392,8 @@ async fn handler_sets_response_headers_and_echoes_request_metadata() {
             .await,
     );
     assert_eq!(resp.status().as_u16(), 200);
-    // A cache validator set by the handler and the echoed request metadata both
-    // surface as response headers.
     assert_eq!(resp.headers()["etag"], "\"shelf-v1\"");
     assert_eq!(resp.headers()["x-trace-id"], "trace-42");
-    // The JSON content type stays authoritative alongside the custom headers.
     assert_eq!(resp.content_type(), "application/json");
 }
 

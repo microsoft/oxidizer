@@ -88,7 +88,6 @@ mod tests {
 
     #[test]
     fn extern_path_preserves_prior_state() {
-        // The builder must return the updated `Self`, not a fresh default.
         let options = DescriptorOptions::new().package(".library").extern_path("a", "b");
         assert_eq!(options.packages(), &[".library".to_owned()]);
         assert_eq!(options.extern_paths(), &[("a".to_owned(), "b".to_owned())]);

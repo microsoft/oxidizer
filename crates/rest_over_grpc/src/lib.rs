@@ -290,6 +290,8 @@ pub mod transcoding {
     #[doc(inline)]
     pub use crate::http_response::HttpResponse;
     #[doc(inline)]
+    pub use crate::stream::StreamEncoding;
+    #[doc(inline)]
     pub use crate::transcode_api::Transcode;
     #[doc(inline)]
     pub use crate::transcode_response::{FrameStream, StreamingResponse, TranscodeResponse};
