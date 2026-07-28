@@ -261,14 +261,15 @@ flush, that local peak is added to the committed total observed *at that moment*
 and offered as a candidate maximum, which a single `fetch_max` folds in. Frees
 can never raise a local peak, so they skip peak tracking entirely.
 
-The result satisfies one clean invariant: **the recorded peak is never below the
-highest value the committed live total ever reached.** Any commit that raises
-that total to a new maximum has a positive pending `live`, and the local peak is
-the running maximum of local live, so the candidate it offers is at least the
-new total. With the bound, that gives the undershoot side.
+The result satisfies one clean invariant: **once a commit has completed, the
+recorded peak is never below the highest value the committed live total ever
+reached.** Any commit that raises that total to a new maximum has a positive
+pending `live`, and the local peak is the running maximum of local live, so the
+candidate it offers is at least the new total. With the bound, that gives the
+undershoot side.
 
-The invariant describes completed commits, not commits in flight. Raising the
-committed total and folding in the peak candidate are two separate atomics, so a
+The qualification matters because publishing a commit takes two separate
+atomics: raising the committed total, then folding in the peak candidate. A
 reader that lands between them sees a live total the peak has not caught up with
 yet. That window closes as soon as the `fetch_max` retires — unlike the
 overshoot below, it self-corrects — but `peak ≥ current` is consequently not
