@@ -232,3 +232,56 @@ async fn encrypt_chained_post_transform_fallbacks() {
         .expect("first post tier should have received an insert");
     assert_ne!(stored, serialized("v"), "value must be encrypted in the chained fallback");
 }
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn unprotect_failure_emits_structured_event_correlated_with_get() {
+    use cachet::RecordingEventHandler;
+    use cachet::telemetry::attributes::EVENT_UNPROTECT_FAILED;
+
+    // Assert the public structured event schema and request-id correlation, not just
+    // the tracing text. Handlers are taken by value, so register a clone and keep the
+    // original to read back the captured events.
+    let handler = RecordingEventHandler::new();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .event_handler(handler.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    // Plant a malformed blob under the serialized key directly in the untrusted post
+    // tier, so a read falls past L1, finds it, and fails to unprotect.
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+        .await
+        .expect("planting the blob should succeed");
+
+    assert!(
+        cache.get("k").await.expect("get should succeed").is_none(),
+        "an unprotectable value must read as a miss"
+    );
+
+    // The structured tier callback must carry the unprotect-failure outcome, be tagged
+    // as a fallback-side event, and carry a real (nonzero) request id.
+    let unprotect = handler
+        .tier_events()
+        .into_iter()
+        .find(|event| event.outcome == EVENT_UNPROTECT_FAILED)
+        .expect("a cache.unprotect_failed tier event must be emitted");
+    assert!(unprotect.fallback, "unprotect_failed must be tagged fallback = true");
+    assert_ne!(unprotect.request_id, 0, "unprotect_failed must carry a real request id");
+
+    // That request id must match the completed `cache.get` operation event.
+    let get_op = handler
+        .operation_events()
+        .into_iter()
+        .find(|event| event.operation == "cache.get")
+        .expect("a completed cache.get operation event must be emitted");
+    assert_eq!(
+        get_op.request_id, unprotect.request_id,
+        "unprotect_failed must correlate with the get that observed it"
+    );
+}

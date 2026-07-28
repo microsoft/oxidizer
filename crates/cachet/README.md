@@ -369,6 +369,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 |Level|Events|
 |-----|------|
 |ERROR|`cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error`|
+|WARN|`cache.unprotect_failed` (with the `encrypt` feature)|
 |INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction`|
 |DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared`|
 
@@ -389,7 +390,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbuPGLEPMCj2MbgA5ER0E3BJMbfCIg-AE0UIgbL0L1ZOiGk45hZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbftDsvfJXijIbUVbjrz6DbKwb0unPSpK0CfEbOnrfy0X4GXVhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.9.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

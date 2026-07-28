@@ -370,6 +370,7 @@
 //! | Level | Events |
 //! |-------|--------|
 //! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
+//! | WARN  | `cache.unprotect_failed` (with the `encrypt` feature) |
 //! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 //!
@@ -423,6 +424,9 @@ pub use policy::InsertPolicy;
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
 pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
+#[cfg(any(feature = "test-util", test))]
+#[doc(inline)]
+pub use telemetry::handler::{RecordedOperationEvent, RecordedTierEvent, RecordingEventHandler};
 #[cfg(all(feature = "encrypt", any(feature = "test-util", test)))]
 #[doc(inline)]
 pub use transform::MockValueProtector;
