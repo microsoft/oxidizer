@@ -260,7 +260,7 @@ A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the 
 
 #### SinkPipeline
 
-An `SinkPipeline` is a single emission target. It bundles OTel providers (`SdkLoggerProvider`, `SdkMeterProvider`),
+A `SinkPipeline` is a single emission target. It bundles OTel providers (`SdkLoggerProvider`, `SdkMeterProvider`),
 a `RedactionEngine`, and its own set of processing instructions. Each pipeline maintains its own processing instructions independently;
 the same event type can be routed differently by different pipelines within the same sink.
 
