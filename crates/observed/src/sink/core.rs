@@ -70,7 +70,7 @@ impl std::fmt::Debug for Sink {
 impl Sink {
     /// Constructs a sink with the given [`SinkId`], processor list, and clock.
     ///
-    /// `id` accepts an [`SinkId`] or a `&'static str`; it is the identity
+    /// `id` accepts a [`SinkId`] or a `&'static str`; it is the identity
     /// token targeted by `enrich_for(ID, …)`.
     ///
     /// `clock` stamps the timestamp on every event this sink dispatches. It

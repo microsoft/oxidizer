@@ -329,7 +329,7 @@ flowchart TD
 | Term | Definition |
 | --- | --- |
 | **ETW** | Event Tracing for Windows - a high-performance kernel-level tracing facility. |
-| **Sink** | A named telemetry pipeline identified by an `SinkId`. Holds one or more `SinkPipeline` instances and configuration (severity filter, enrichment isolation). |
+| **Sink** | A named telemetry pipeline identified by a `SinkId`. Holds one or more `SinkPipeline` instances and configuration (severity filter, enrichment isolation). |
 | **SinkId** | A `&'static`-lifetime identifier for a sink. Uses pointer identity for O(1) equality checks. |
 | **Attribute** | A key-value pair on an emitted event. Attributes come from two sources: event-defined (struct fields via `#[event(...)]`) and enrichment. Both are subject to the same redaction rules and end up as key-value pairs on the exported record. |
 | **Enrichment** | The process of attaching attributes to all events within a scope |

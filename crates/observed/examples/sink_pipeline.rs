@@ -3,7 +3,7 @@
 
 //! Demonstrates the Sink processor model with per-field routing.
 //!
-//! Events flow through an [`Sink`] that dispatches to one or more
+//! Events flow through a [`Sink`] that dispatches to one or more
 //! [`EventProcessor`]s. Each processor has its own redaction engine and
 //! receives pre-redacted events.
 //!
