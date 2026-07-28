@@ -54,6 +54,19 @@ Deeper customization of the default transport could still be exposed, e.g.
 viewed as a stopgap pending runtime/security stabilization, after which built-in
 `builder_oxidizer`/`new_oxidizer` constructors would arrive.
 
+**Reviewer input (collected for stabilization, not a decision).** A further perspective
+questions whether the transport list needs to be open-ended at all. `fetch` could bundle
+`fetch_winhttp` directly: the open extensibility exists today mainly because an internal
+`fetch` variant lives out-of-tree, and once that variant moves into this repository the
+requirement for downstream transports may go away. The transport/pipeline split still holds
+regardless. A related crate-layering idea (mirroring how .NET ships WinHTTP as an optional
+`System.Net.Http.WinHttpHandler` package rather than inside the core client) keeps `fetch`
+an *enabler with reasonable defaults* rather than a monolithic all-in-one crate: split out
+a `fetch_core` crate that excludes the transport layer, and have `fetch` re-export it plus a
+set of supported transports. Libraries would depend only on `fetch_core`; applications would
+depend on `fetch`. This keeps the heavy transport plumbing (WinHTTP's especially) out of the
+dependency graph of code that does not need it.
+
 ## 2. Transport-specific TLS configuration
 
 TLS configuration is over-abstracted. `fetch`'s generic `TlsOptions`
@@ -154,3 +167,36 @@ same sink, and `fetch` already owns the client's telemetry meter. `fetch` should
 sink to the transport the same way it hands over the clock and memory pool (through the
 custom-transport context), so no transport has to surface a sink of its own. Until then,
 `fetch_winhttp` carries it in `WinHttpDeps`.
+
+## 7. Application-vs-library configuration responsibility
+
+Beyond *where* a knob lives (transport vs pipeline, per the split above), stabilization
+must settle *who* sets it when `fetch` is consumed indirectly. This is the ownership
+dimension of the same layering question and it intersects item 3's connection-management
+split.
+
+**Reviewer input (collected for stabilization, not a decision).** Two usage shapes pull in
+different directions:
+
+- An application calling an API directly controls everything and needs the full knob set
+  (transport choice, TLS, cert validation, connection lifetime, resilience policy). This is
+  the simple case - the application makes every decision.
+- A library calling endpoints on the application's behalf (e.g. the ECS use case) splits
+  that responsibility: some configuration is the library's to own, some the application's.
+
+Three models were considered for the indirect case: (a) the application configures nothing
+and the library owns the whole client - maximally free for the library, but the application
+cannot work around misconfiguration and inherits whatever transport/TLS dependencies the
+library picks (e.g. a forced rustls in the tree); (b) the application configures and owns
+the whole `HttpClient` and hands the library a finished client - but then the library loses
+control over things it should arguably own, such as its retry policy; (c) a mix where the
+application supplies the transport, the library configures the pipeline concerns it cares
+about, and the application may still override selected properties. The mix (c) is seen as
+the most ergonomic, with a workable fallback being (b) plus a library-exposed
+"configure this `HttpClientBuilder`" function (considered a UX wart).
+
+The obstacle to (c) is that the configuration libraries care about does not fall cleanly on
+the pipeline side of the transport/pipeline split: connection lifetime, for instance,
+matters deeply to ECS yet is a transport concern. Early analysis suggests the knobs
+libraries most commonly want can be honored by both the Hyper and WinHTTP transports, but
+only if the transport abstraction is richer than a plain layered/Tower service.
