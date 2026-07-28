@@ -1,0 +1,23 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "heapwatch"
+version = "0.1.0"
+description = "A low-overhead global allocator wrapper that continuously accounts heap usage"
+readme = "README.md"
+keywords = ["allocator", "heap", "memory", "metrics", "diagnostics"]
+categories = ["memory-management", "development-tools::profiling"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/heapwatch"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

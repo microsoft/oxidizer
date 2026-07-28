@@ -78,6 +78,7 @@ Fundle
 Fundle's
 HRESULT
 Hardcoded
+Heapwatch
 How-tos
 Hyper
 IOCP
@@ -345,6 +346,7 @@ growable
 hashbrown
 hasher
 hashers
+heapwatch
 hedges
 honour
 hostname
