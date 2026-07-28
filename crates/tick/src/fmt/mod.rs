@@ -54,8 +54,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! Converting any format back into a [`SystemTime`][std::time::SystemTime] saturates the same
-//! way, to the furthest instant the platform can reach from the Unix epoch.
+//! Converting any format back into a [`SystemTime`] saturates the same way, to the furthest
+//! instant the platform can reach from the Unix epoch.
 //!
 //! # Examples
 //!
@@ -116,9 +116,13 @@ fn to_unix_epoch_duration(timestamp: Timestamp) -> Duration {
 /// Offsets the platform cannot apply saturate to the furthest [`SystemTime`] reachable from
 /// the Unix epoch in that direction, so the conversion never panics.
 fn to_system_time(offset: SignedDuration) -> SystemTime {
-    let negative = offset.is_negative();
+    saturating_offset(offset.is_negative(), offset.unsigned_abs())
+}
 
-    checked_offset(negative, offset.unsigned_abs()).unwrap_or_else(|| saturating_bound(negative))
+/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, saturating to the furthest instant the
+/// platform can reach when the offset is too large to apply.
+fn saturating_offset(negative: bool, magnitude: Duration) -> SystemTime {
+    checked_offset(negative, magnitude).unwrap_or_else(|| saturating_bound(negative))
 }
 
 /// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, returning `None` when the platform
@@ -135,10 +139,10 @@ fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
 /// given direction.
 fn saturating_bound(negative: bool) -> SystemTime {
     // How large an offset `SystemTime` accepts is platform defined and `std` does not expose
-    // it, so the boundary is located with a binary search over whole seconds. This is a cold
-    // path: it is only reached when an offset within the `jiff::Timestamp` range
-    // (year -9999..=9999) exceeds what the platform accepts, which no currently supported
-    // platform does.
+    // it, so the boundary is located with a binary search over whole seconds. Whether this is
+    // reachable from a `jiff::Timestamp` (year -9999..=9999) depends on the platform: no
+    // currently supported platform rejects an offset that small, so in practice this runs
+    // only as a defence against a narrower `SystemTime` on some future target.
     let mut lower = 0;
     let mut upper = u64::MAX;
 
@@ -284,31 +288,30 @@ mod tests {
     }
 
     #[test]
-    fn to_system_time_saturates_positive_overflow() {
-        let saturated = to_system_time(SignedDuration::MAX);
+    fn saturating_offset_saturates_beyond_the_platform_bound() {
+        for negative in [false, true] {
+            // No platform can apply an offset of `Duration::MAX` to the Unix epoch, so this
+            // always exercises the saturating fallback.
+            let saturated = saturating_offset(negative, Duration::MAX);
 
-        // Saturation never lands inside the range of instants a format can hold, so a
-        // saturated value can never be mistaken for a real one.
-        assert!(saturated > SystemTime::from(Iso8601::MAX));
+            let magnitude = if negative {
+                SystemTime::UNIX_EPOCH.duration_since(saturated).unwrap()
+            } else {
+                saturated.duration_since(SystemTime::UNIX_EPOCH).unwrap()
+            };
 
-        // The boundary is maximal: the epoch cannot be offset by even one more second.
-        let magnitude = saturated.duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        assert!(SystemTime::UNIX_EPOCH.checked_add(magnitude + Duration::from_secs(1)).is_none());
+            // Saturation lands exactly on the boundary: that offset applies, one more second
+            // does not.
+            assert_eq!(checked_offset(negative, magnitude), Some(saturated));
+            assert_eq!(checked_offset(negative, magnitude + Duration::from_secs(1)), None);
 
-        // Saturation is deterministic regardless of how far out of range the input is.
-        assert_eq!(saturated, to_system_time(SignedDuration::MAX - SignedDuration::from_secs(1)));
-    }
+            // The boundary lies outside the range of any instant a format can hold, so a
+            // saturated value can never be mistaken for a real one.
+            assert!(magnitude > Timestamp::MIN.as_duration().unsigned_abs());
 
-    #[test]
-    fn to_system_time_saturates_negative_overflow() {
-        let saturated = to_system_time(SignedDuration::MIN);
-
-        assert!(saturated < SystemTime::from(Iso8601::MIN));
-
-        let magnitude = SystemTime::UNIX_EPOCH.duration_since(saturated).unwrap();
-        assert!(SystemTime::UNIX_EPOCH.checked_sub(magnitude + Duration::from_secs(1)).is_none());
-
-        assert_eq!(saturated, to_system_time(SignedDuration::MIN + SignedDuration::from_secs(1)));
+            // Saturation is deterministic regardless of how far out of range the input is.
+            assert_eq!(saturated, saturating_offset(negative, Duration::MAX - Duration::from_secs(1)));
+        }
     }
 
     #[test]
