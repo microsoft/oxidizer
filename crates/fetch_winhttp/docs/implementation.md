@@ -6,11 +6,12 @@ Status: design, pre-implementation. This document describes the implementation s
 
 This is the whole design in one picture; the numbered chapters below elaborate each part.
 
-- **One shared OS session per built client**, opened at build time, `Arc`-shared by
-  all per-core instances, and immutable after setup (§3.2).
+- **One OS session per core, scoped to the built client.** Each per-core transport
+  instance opens its own session when `fetch` materializes it, so two independently
+  built clients (or clones) never share a session or its connection pool (§3.2).
 - **One transport instance per core.** `fetch` clones and relocates the transport
   per core (`Isolation::Isolated`, §3.2); each instance owns its object and event
-  pools (§5) and holds a clone of the one shared session `Arc`.
+  pools (§5) and its own session `Arc`.
 - **One `RequestDriver` future per request** (§4.4). It owns a `RequestGuard`
   bundling the request handle, its connect handle, and a session-`Arc` clone, and
   rents a pooled `RequestContext` - the small slot WinHTTP calls back into (§4.1).
@@ -96,7 +97,7 @@ crates/fetch_winhttp/
     lib.rs               // #![cfg(windows)] gate + re-exports + crate docs
     builder.rs           // WinHttpDeps, WinHttpOptions, builder()/new()
     transport.rs         // WinHttpTransport: per-core Service<HttpRequest> (§3.2)
-    session.rs           // shared session handle (one per transport)
+    session.rs           // per-core session handle (§3.2)
     request.rs           // RequestDriver: one request/response lifecycle
     context.rs           // RequestContext (per-operation FFI context; pooled)
     callback.rs          // extern "system" trampoline -> dispatch_completion
@@ -219,7 +220,7 @@ submitted it, so completion work stays on the same processor as the async work t
 issued it rather than hopping to an arbitrary thread-pool worker. Only genuinely
 deferred completions incur the hop.
 
-### 3.2 Per-core transport instances and the one shared session
+### 3.2 Per-core transport instances and per-core sessions
 
 `fetch_winhttp` registers with `Isolation::Isolated`. Under `Isolated`, `fetch`
 stores the *config plus a factory* and, the first time each core touches it, clones
@@ -231,29 +232,48 @@ the `!Sync` `plurality` object pool (§5) can be core-local; the handler must st
 `Sync`, so that one pool sits behind a coarse `Mutex` (§5). `WinHttpDeps` derives
 `ThreadAware` so `fetch` can clone and relocate the config per core.
 
-The one piece of state that is **not** rebuilt per core is the OS session. A session
-owns session-scoped state - most importantly the connection (keep-alive) pool - so a
-single session gives one shared connection pool across all cores, and the
-process-global callback thread pool (§3.1) means extra sessions would add duplicated
-state without adding throughput. The session is opened once at build time, wrapped in
-`Arc<WinHttpSession>`, captured by the factory closure, and `Arc`-cloned into every
-per-core instance (design.md §1.1). It is immutable after setup, so a plain `Arc` suffices; the
-per-core object pool is the only mutable shared state (`Mutex`-guarded), while the
-event pool and read-buffer `GlobalPool` are already thread-safe. All are uncontended
-under thread-per-core use.
+The OS session - which owns session-scoped state, most importantly the connection
+(keep-alive) pool - is opened by the factory when `fetch` materializes a per-core
+transport instance, from the finalized `CustomContext`, not eagerly in `builder_winhttp`.
+This is deliberate: `HttpClientBuilder` is `Clone`, so a session opened up front and
+captured in the (clone-shared) factory closure would be shared by every client built from
+that builder or any clone of it, letting two independently built clients reuse each
+other's pooled connections - violating the pool-isolation boundary of design.md §2.
+Opening it inside the factory (exactly as the Tokio transport builds its hyper client in
+its own factory) scopes the session to the built client: two independently built clients -
+including two builds of a cloned builder - never share a session or its pool.
+
+Under `Isolation::Isolated` the factory runs once per core, so each core opens its own
+session and a client holds one connection pool per core rather than a single cross-core
+pool. That is an acceptable, even preferable, trade: core-local pools stay warm and
+uncontended (see Future exploration below). A single session shared across a client's
+cores *and* isolated between independently built clients is not expressible with today's
+custom-transport API - it exposes only builder-scoped state (shared across clones) or
+per-core/per-slot state (not shared across cores), with no per-built-client scope - so it
+is noted as `fetch` API feedback (../../fetch/docs/stabilization.md, connection-management
+item). Each per-core session is immutable after its setup, so a plain `Arc` (cloned into
+that core's in-flight requests) suffices; the per-core object pool is the only mutable
+shared state (`Mutex`-guarded, §5), while the event pool and read-buffer `GlobalPool` are
+already thread-safe. All are uncontended under thread-per-core use.
 
 **Contrast with `fetch_hyper`.** `fetch_hyper` uses `Isolation::Shared`: one hyper
-client, already fully thread-safe, shared across cores, so its pool is process-wide
-by construction. `fetch_winhttp` reaches the same end state (one connection pool per
-client) from the other direction - per-core instances sharing only the session that
-owns the pool.
+client, already fully thread-safe, shared across cores, so its pool is process-wide by
+construction. `fetch_winhttp` instead keeps a session (and therefore a connection pool)
+per core, trading a single cross-core pool for warmer, core-local pools that need no
+cross-core coordination.
 
-**Future exploration.** Two choices here are conservative defaults, open to revision
-after performance analysis: (a) a *single* session per transport - a future
-multi-session design could recycle connections at session granularity, supplying the
-connection-lifetime control WinHTTP otherwise denies us (design.md §2.2); and (b) *cross-core*
-connection reuse via one shared session - it is not obvious this beats per-core
-sessions with warmer, core-local pools, so v2 may revisit it.
+**Future exploration.** The per-core session baseline is open to revision after
+performance analysis: a future design could consolidate to one session shared across a
+client's cores - recovering cross-core connection reuse and enabling session-granularity
+connection recycling (the connection-lifetime control WinHTTP otherwise denies us,
+design.md §2.2) - but doing so cleanly needs a `fetch` per-built-client shared-state hook
+(or accepting `Isolation::Shared` at the cost of core-local object pools). It is not
+obvious either beats per-core sessions with warmer, core-local pools, so v2 may revisit
+it. Relatedly, whether per-core instancing is the right default at all could become a
+knob: a low-traffic client has no need for per-core instances and might prefer a single
+shared instance. This is left unconfigurable in v1 - a knob earns its place only with
+demonstrated value, and per-core is a sound default - but is a candidate future
+opportunity if profiling shows it matters.
 
 Connection management (connect handles, reuse, lifetime) gets its own chapter (design.md §2).
 
@@ -303,16 +323,17 @@ needs differ:
   the submit), never shared by reference from two threads at once. The driver keeps
   at most one operation outstanding per handle and holds the only reference, so
   `Send` alone is what we need and all we can honestly assert.
-- **The session handle is `Send + Sync`.** It is the one object shared by reference
-  across cores (an `Arc<WinHttpSession>` captured by the factory closure, design.md §1.1
-  and §3.2 below).
-  The closure must be `Send + Sync`, so the captured session must be too. This is
+- **The session handle is `Send + Sync`.** A session `Arc` is cloned into every
+  in-flight request on its core and is touched by WinHTTP's process-global callback
+  threads (§3.1), so it is shared by reference across threads.
+  The handler that holds it must be `Send + Sync` (a `fetch` requirement), so the session
+  must be too. This is
   sound because WinHTTP explicitly permits concurrent operations on one session
-  handle, and after build-time setup the session is read-only from our side (§3.2);
+  handle, and after its build-time setup the session is read-only from our side (§3.2);
   the `unsafe impl Sync for WinHttpSession` carries exactly that justification.
 
 The future therefore holds only `Send` state (an `events_once` receiver plus
-request/connect handle wrappers and a shared session `Arc`), satisfying `fetch`'s
+request/connect handle wrappers and a session `Arc`), satisfying `fetch`'s
 `Out: Send` requirement.
 
 ## 4. Cancellation model and FFI ownership
@@ -442,7 +463,7 @@ The "state machine" that issues the calls above is `RequestDriver` in
 `request.rs`: the concrete async body that `WinHttpTransport::execute` returns and
 polls. It walks the steps of §2, awaiting each step's `events_once` receiver, and
 owns the `RequestGuard` - the request handle, its connect handle, a clone of the
-shared `Arc<WinHttpSession>`, and the raw `RequestContext` pointer - whose drop
+core's session `Arc<WinHttpSession>`, and the raw `RequestContext` pointer - whose drop
 performs the synchronous teardown described in §4.3. When the design refers to "the
 driver" it means this type. The handles live here, not in the context (§4.1); the
 context is only the completion mailbox.
@@ -659,7 +680,7 @@ an `http::HeaderMap`. Method and URI come from the `http::Request` parts.
 return, because the body is read lazily *after* the driver returns the
 `HttpResponse`. So at the point the response is built the `RequestGuard` **moves
 into** the `WinHttpBodyReader`, carrying the request handle, its per-request connect
-handle, the shared session `Arc<WinHttpSession>`, and the `RequestContext` pointer
+handle, the core's session `Arc<WinHttpSession>`, and the `RequestContext` pointer
 with it. Holding the session `Arc` in every live request (driver or body reader)
 keeps the session handle alive for exactly as long as any request needs it.
 
@@ -703,10 +724,10 @@ after the table.
 | Threading (§3) | completions fired from a foreign OS thread reach the awaiting future; `static_assertions` for `execute`'s future `Send`, handles `Send`+`!Sync`, handler `Send + Sync`, and per-core-owned pools | all setup calls run inline on the caller's thread |
 | Error handling (design.md §7) | table-driven Win32/`WINHTTP_*` code -> `ErrorLabel` + `RecoveryInfo`; `GetLastError` mapping on a failing synchronous call | a 4xx/5xx response is `Ok`, not `Err` |
 | Protocol negotiation (design.md §3) | protocol-flag bitmask + `HTTP_PROTOCOL_REQUIRED` per `supported_http_versions` (empty -> `fetch` default; h2/h3-only -> required); response `Version` from the queried negotiated protocol | unmappable version (`HTTP/1.0`, `HTTP/0.9`) rejected as `invalid_request` |
-| TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`; `SECURE_FAILURE` -> `tls`-labeled, non-retryable | mTLS out of scope (design.md §4.1) - nothing to assert |
+| TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`, each flag setting only its own `SECURITY_FLAGS` bit (the two are independent, not coupled); `SECURE_FAILURE` -> `tls`-labeled, non-retryable | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
 | Connection management (design.md §2) | connect handle opened per request and closed with it; max-conns mapping; `ConnectionKeepAlive` mapped to `HTTP2/3_KEEPALIVE` interval (§10.3); `DISABLE_GLOBAL_POOLING` on the session | `connection_lifetime` Fixed/PerConnection: accepted, no recycling, emits the `warn` "not honored" event; keep-alive `timeout`/active-only nuances emit the same warn |
-| Timeouts (design.md §6) | `WinHttpSetTimeouts` gets connect/resolve from `WinHttpOptions`; per-request `BodyTimeout` -> `WINHTTP_OPTION_RECEIVE_TIMEOUT` and `ResponseTimeout` -> backstop `RECEIVE_RESPONSE_TIMEOUT`, both read from request extensions; mock-clock connect deadline (design.md §6.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired; a per-request `BodyTimeout` overrides the session default on the native receive timer |
+| Timeouts (design.md §6) | `WinHttpSetTimeouts` gets resolve from `WinHttpOptions` and connect from `TransportOptions.connect_timeout` (the single connect-timeout source, §10.4); per-request `BodyTimeout` -> `WINHTTP_OPTION_RECEIVE_TIMEOUT` and `ResponseTimeout` -> backstop `RECEIVE_RESPONSE_TIMEOUT`, both read from request extensions; mock-clock connect deadline (design.md §6.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired; a per-request `BodyTimeout` overrides the session default on the native receive timer |
 
 - **Inline / reentrant completion.** Configure `MockBindings` so an async call
   (e.g. `read_data`) fires its completion *synchronously, inline, on the submitting
@@ -755,9 +776,19 @@ elsewhere in `fetch`). These validate the real OS path end to end:
 - Streaming upload (unknown length -> chunked) and streaming download; assert
   incremental delivery, not just final bytes.
 - Real gzip/deflate responses are transparently decoded.
-- `https` against a localhost TLS server with a self-signed cert: fails by
-  default, succeeds with `accept_invalid_certs`; a valid-cert case proves normal
-  trust works. (Client-certificate/mTLS is out of scope for v1, design.md §4.1.)
+- `https` against a localhost TLS server, exercising `accept_invalid_certs` and
+  `accept_invalid_hostnames` as *independent* relaxations. A valid-cert case proves
+  normal trust works. Against a server with an untrusted (self-signed) cert *and* a
+  hostname mismatch, assert all four flag combinations: neither flag -> fails;
+  `accept_invalid_certs` alone -> still fails on the hostname mismatch;
+  `accept_invalid_hostnames` alone -> still fails on the untrusted cert; both -> succeeds.
+  This proves the two Schannel ignore flags are not accidentally coupled and each leaves
+  the other validation active. (Client-certificate/mTLS is out of scope for v1, design.md §4.1.)
+- Pool isolation across clients: two `HttpClient`s built independently - including two
+  builds of a *cloned* `builder_winhttp` builder - issue requests to the same authority;
+  assert via server-side connection counting that they establish *separate* connections
+  and never reuse each other's, proving the per-built-client session/pool boundary
+  (design.md §2, §3.2).
 - HTTP/1.1 vs HTTP/2 negotiation against a server that supports both (wiremock and
   hyper-based localhost servers cover h1 and h2); assert the reported response
   `Version`.
@@ -836,12 +867,18 @@ where
 read-buffer pool), a `PoolIndex`, the generic `TransportOptions`/`TlsOptions`, a
 `Meter`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-core
 placement comes from `Isolation::Isolated`, §3.2) and ignores `CustomContext::tls` (it
-takes its own `WinHttpTlsConfig` instead; see design.md §1.2).
+takes its own `WinHttpTlsConfig` instead; see design.md §1.2). Ignoring `PoolIndex`
+collapses `fetch`'s `multiple_pools` onto WinHTTP's own per-authority pooling; whether
+connection-pool ownership belongs on `fetch` at all or entirely on the transport is
+unresolved and may retire the `PoolIndex` surface in its current shape (../../fetch/docs/stabilization.md,
+connection-management item).
 
-`builder_winhttp` opens the one shared OS session up front, then calls
-`create_builder`. The session is deliberately **not** a `WinHttpDeps` field; the
-per-core capture-and-`Arc`-clone that keeps it shared while `WinHttpDeps` stays plain,
-relocatable configuration is described in §3.2. The clock and read-buffer pool come
+`builder_winhttp` does **not** open the session; it just calls `create_builder` with the
+factory. Each per-core transport instance opens its own session inside the factory when
+`fetch` materializes it (§3.2), so the session is scoped to the built client and never
+captured in the clone-shared builder closure. The session is deliberately not a
+`WinHttpDeps` field either - `WinHttpDeps` stays plain, relocatable configuration. The
+clock and read-buffer pool come
 from `CustomContext`, so they are not duplicated in `Extras`. The `observed::Sink`
 rides in `WinHttpDeps` and relocates per core with the rest of the config; the
 transport emits its telemetry through it (detailed in v1.1). There is no
@@ -870,7 +907,7 @@ owned and pooled by the session's WebIO layer, keyed by authority. Consequences:
 Because a connect handle is cheap, non-blocking, and carries no connection state,
 `fetch_winhttp` opens one per request via `WinHttpConnect` and closes it when the
 request ends. There is **no** connect-handle cache. Caching would add shared
-mutable state (a per-authority map, which under a shared session would need
+mutable state (a per-authority map, which would need
 synchronization) to save a call that does no I/O, and it would buy no connection
 reuse: reuse is keyed by authority in the session's pool and is independent of
 which connect handle a request used. Dropping the cache keeps the transport's

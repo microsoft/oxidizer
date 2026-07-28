@@ -47,7 +47,7 @@ let deps = WinHttpDeps::builder()
         .accept_invalid_certs(true)                 // Schannel knobs, §4
         .build())
     .options(WinHttpOptions::builder()
-        .connect_timeout(Duration::from_secs(10))   // protocol/timeout tuning, §3, §5, §6
+        .resolve_timeout(Duration::from_secs(10))   // transport-specific tuning, §3, §5, §6
         .build())
     .sink(observed::Sink::noop())                   // telemetry sink; detailed in v1.1
     .build();
@@ -154,7 +154,7 @@ connection age faithfully:
 | Whole-session recycling | Open a fresh session, steer new requests to it, drain and close the old one | Bounds age only pool-wide, not per connection, and needs a drain latch, age timer, and atomic session swap for an approximate result |
 
 Because none is faithful, **v1 does not implement `connection_lifetime` for
-`Fixed`/`PerConnection`; it keeps one session for the transport's lifetime.**
+`Fixed`/`PerConnection`; it never recycles sessions during the transport's lifetime.**
 (`WINHTTP_OPTION_EXPIRE_CONNECTION` remains a candidate for a different feature:
 error-driven poisoning of a connection after a protocol failure.)
 
@@ -249,7 +249,9 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
 
 - **Connect timeout** (`TransportOptions.connect_timeout`, default 30 s): honored by this
   transport as a *total* deadline on connection establishment (§6.2). `fetch` models this
-  option but leaves each transport to enforce it.
+  option but leaves each transport to enforce it. This is the sole source of the connect
+  deadline: `WinHttpOptions` deliberately exposes no separate connect-timeout knob, so the
+  two can never diverge.
 - **Response timeout** (`http_extensions::ResponseTimeout`, read per-request from the
   request extensions): a *total* deadline over connection setup, sending the request, and
   receiving the response headers. `fetch` enforces this above the transport (the same way
@@ -292,7 +294,7 @@ native per-attempt timer (how it does so is implementation.md §4.6).
 The deadline spans connection establishment: name resolution, TCP/TLS connect,
 proxy discovery, and sending the request line and headers. The request body is
 streamed afterward, so it lies outside this deadline and is governed by the
-send/body timers instead.
+body idle timer (§6.1) instead.
 
 One consequence: the deadline can fire after the headers reached the server, so a
 bodyless non-idempotent request may already be in processing when it trips.

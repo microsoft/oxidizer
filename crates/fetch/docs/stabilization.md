@@ -15,6 +15,11 @@ reuse) is a transport concern and belongs on the transport, while end-to-end pip
 concerns (overall response deadline, retry, telemetry) stay in `fetch`. Several of
 the items below are instances of that split being in the wrong place today.
 
+Some items below also carry **reviewer input** captured during the `fetch_winhttp`
+review (labeled as such). These notes aggregate ideas and options for the stabilization
+phase to analyze later; they are not agreed decisions, and the actual direction will be
+settled separately, outside this PR.
+
 The items below should be resolved (or consciously accepted) before stabilization:
 
 ## 1. First-class transport plug-in
@@ -34,6 +39,21 @@ API where the caller always explicitly constructs and plugs in a transport - e.g
 avoid a Hyper-colored default, and treat every transport uniformly. The slightly more
 verbose hello-world is worth the consistency.
 
+**Reviewer input (collected for stabilization, not a decision).** A counter-view holds
+that `fetch` is deliberately *batteries-included* and so should *play favorites*: pick a
+recommended default transport per supported runtime and keep its hello-world maximally
+terse, so the 90% of users who just want the default runtime pay no extra ceremony, while
+custom transports remain possible without degrading the default ergonomics. One shape
+suggested for this: `HttpClient::builder()` returns `HttpClientBuilder<NeedsTransport>`
+(exposing only transport-agnostic pipeline configuration) and a transport must be plugged
+in to reach a buildable state, while `HttpClient::builder_tokio(...)` returns
+`HttpClientBuilder<DefaultTransport>` (the recommended transport pre-plugged); the generic
+is defaulted (`HttpClientBuilder<T = DefaultTransport>`) and kept off `HttpClient` itself.
+Deeper customization of the default transport could still be exposed, e.g.
+`HttpClient::builder(...).hyper(hyper_transport)`. The current transport bundling is also
+viewed as a stopgap pending runtime/security stabilization, after which built-in
+`builder_oxidizer`/`new_oxidizer` constructors would arrive.
+
 ## 2. Transport-specific TLS configuration
 
 TLS configuration is over-abstracted. `fetch`'s generic `TlsOptions`
@@ -45,6 +65,24 @@ The TLS model is a property of each transport, not of `fetch`: `fetch_hyper` and
 it cannot be handled at the `fetch` layer at all. Per the split above, TLS should be
 configured per transport, on the transport being plugged in; the
 `HttpClient::build(transport().tls(cfg))` shape would express this cleanly.
+
+**Reviewer input (collected for stabilization, not a decision).** An alternative to
+moving TLS entirely onto each transport is to keep a `fetch`-level TLS type as a set of
+transport-agnostic *descriptors* that each TLS technology interprets in its own way; the
+open problem there is representing capabilities that some backends expose and others do
+not (for example certificate-validation callbacks exist for rustls but not native-tls or
+Schannel). A related construction idea is to require TLS explicitly at construction rather
+than threading it through the builder, e.g. `HttpClient::builder_tokio(deps, tls)`.
+
+The silent-ignore hazard is what makes this pressing: because `CustomContext::tls` is
+always populated, a caller who sets security-affecting `TlsOptions` (a private CA root, a
+client identity, cert pinning) and plugs in a transport that cannot consume them - like
+`fetch_winhttp` - gets a default system-trust connection with no signal, even though the
+same code is honored by `fetch_hyper`. Rather than have each transport special-case,
+warn, or reject on every such field (playing whack-a-mole with a mis-shaped API), the fix
+belongs in the TLS-configuration redesign above: TLS material should be configured on the
+transport that can honor it, so an unhonorable combination is unrepresentable rather than
+silently dropped.
 
 ## 3. Transport-specific connection management
 
@@ -62,6 +100,16 @@ its own floors, so `ConnectionKeepAlive` and `connection_idle_timeout` map only
 approximately or not at all. Per the split above, this configuration belongs on the
 transport.
 
+**Reviewer input (collected for stabilization, not a decision).** The pool model itself
+is unresolved: `fetch` today exposes `multiple_pools`/`PoolIndex` and invokes a custom
+transport's factory once per pool slot, presuming `fetch` owns pool partitioning - but a
+transport like WinHTTP owns its own pool and cannot faithfully honor an externally imposed
+`PoolIndex` (see fetch_winhttp implementation.md §8), so nominally separate pools collapse
+onto one OS pool. Since connection management generally cannot be generalized across
+transports, pool ownership most likely belongs on the transport layer, which may retire
+the `PoolIndex` surface in its current shape. Where pool management lives should be settled
+as part of the v2 "what do we do about sessions/pools" discussion.
+
 ## 4. Scope-based timeout configuration
 
 Timeouts are over-abstracted, not under-modeled. `fetch` models a connect
@@ -74,6 +122,14 @@ exposes them as `WinHttpOptions` knobs (see fetch_winhttp design.md §6.1). The 
 today is that `fetch` reaches down to model a connect timeout while leaving the rest to
 transports - it should leave all network-phase timers to the transport and keep only
 pipeline-level deadlines.
+
+**Reviewer input (collected for stabilization, not a decision).** A refinement of the
+split: even if fine-grained network-phase timers move to transports, *connect timeout* is
+the one timeout end consumers care about most, so it is worth keeping as a common,
+transport-agnostic knob that each transport interprets in its own terms. The transport's
+last-resort mechanism for any deadline it cannot express natively is drop safety - when
+`fetch` cancels the request future, the transport must honor it and tear down promptly
+(see fetch_winhttp design.md §6, §7).
 
 ## 5. Transport construction ergonomics
 
