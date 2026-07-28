@@ -18,7 +18,7 @@ mod transform;
 
 pub use cache::CacheBuilder;
 #[cfg(feature = "encrypt")]
-pub use encrypt::ProtectedTransformBuilder;
+pub use encrypt::{ProtectedTransformBuilder, ProtectingTierBuilder};
 pub use fallback::FallbackBuilder;
 pub use sealed::CacheTierBuilder;
 pub use transform::TransformBuilder;

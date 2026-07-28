@@ -235,6 +235,40 @@ async fn encrypt_chained_post_transform_fallbacks() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
+async fn tampered_first_post_tier_falls_through_to_valid_second() {
+    // Both post tiers receive a copy on insert. If the first tier's copy is tampered
+    // but the second's is intact, a read must fall through to the second and return the
+    // value — a tampered tier must not shadow a good copy in a later tier.
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let l3 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
+        .build();
+
+    cache.insert("k".to_string(), "v".to_string()).await.expect("insert should succeed");
+
+    // Corrupt the first post tier's stored ciphertext, and evict L1 so the read must
+    // consult the encrypted post chain.
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+        .await
+        .expect("tampering should succeed");
+    l1.invalidate(&"k".to_string()).await.expect("invalidate should succeed");
+
+    let fetched = cache.get("k").await.expect("get should succeed");
+    assert_eq!(
+        fetched.map(|entry| entry.value().clone()),
+        Some("v".to_string()),
+        "a tampered first post tier must not shadow the valid copy in the next tier"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 async fn unprotect_failure_emits_structured_event_correlated_with_get() {
     use cachet::RecordingEventHandler;
     use cachet::telemetry::attributes::EVENT_UNPROTECT_FAILED;

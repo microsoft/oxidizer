@@ -4,6 +4,7 @@
 //! The [`ProtectedTier`] cache tier that applies a [`ValueProtector`] at the boundary.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use bytesbuf::BytesView;
 
@@ -37,15 +38,20 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
 /// (`Ok(None)`) rather than an error. Each such failure emits a `cache.unprotect_failed`
 /// telemetry event so that tampering with the backing store is observable rather than
 /// silent.
+///
+/// One `ProtectedTier` decorates each post-transform storage tier (sharing a single
+/// protector via [`Arc`]), so every backing store is independently authenticated: a
+/// tampered tier reads as a miss and the fallback chain continues to the next tier
+/// rather than being shadowed by the bad copy.
 pub(crate) struct ProtectedTier<S> {
     inner: S,
-    protector: Box<dyn ValueProtector>,
+    protector: Arc<dyn ValueProtector>,
     telemetry: CacheTelemetry,
     name: CacheName,
 }
 
 impl<S> ProtectedTier<S> {
-    pub(crate) fn new(inner: S, protector: Box<dyn ValueProtector>, telemetry: CacheTelemetry, name: CacheName) -> Self {
+    pub(crate) fn new(inner: S, protector: Arc<dyn ValueProtector>, telemetry: CacheTelemetry, name: CacheName) -> Self {
         Self {
             inner,
             protector,
@@ -137,11 +143,11 @@ mod tests {
     }
 
     fn tier<S>(inner: S) -> ProtectedTier<S> {
-        ProtectedTier::new(inner, Box::new(MockValueProtector::new()), CacheTelemetry::new(), "encrypted-test")
+        ProtectedTier::new(inner, Arc::new(MockValueProtector::new()), CacheTelemetry::new(), "encrypted-test")
     }
 
     fn failing_tier<S>(inner: S) -> ProtectedTier<S> {
-        ProtectedTier::new(inner, Box::new(FailingProtector), CacheTelemetry::new(), "failing-test")
+        ProtectedTier::new(inner, Arc::new(FailingProtector), CacheTelemetry::new(), "failing-test")
     }
 
     #[cfg_attr(miri, ignore)]
@@ -255,7 +261,7 @@ mod tests {
         let inner = MockCache::<BytesView, BytesView>::new();
         let tier = ProtectedTier::new(
             inner.clone(),
-            Box::new(MockValueProtector::new()),
+            Arc::new(MockValueProtector::new()),
             CacheTelemetry::with_logging(),
             "encrypted-test",
         );

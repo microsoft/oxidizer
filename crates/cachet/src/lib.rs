@@ -398,11 +398,11 @@ pub mod telemetry;
 mod transform;
 mod wrapper;
 
-#[cfg(feature = "encrypt")]
-#[doc(inline)]
-pub use builder::ProtectedTransformBuilder;
 #[doc(inline)]
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
+#[cfg(feature = "encrypt")]
+#[doc(inline)]
+pub use builder::{ProtectedTransformBuilder, ProtectingTierBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(any(feature = "memory", test))]

@@ -13,6 +13,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use bytesbuf::BytesView;
 use cachet_tier::DynamicCache;
@@ -24,7 +25,7 @@ use super::sealed::{CacheTierBuilder, Sealed};
 use super::transform::TransformBuilder;
 use crate::telemetry::CacheTelemetry;
 use crate::transform::{ProtectedTier, TransformAdapter, ValueProtector};
-use crate::{Codec, Encoder};
+use crate::{Cache, Codec, Encoder};
 
 /// The builder produced by [`TransformBuilder::protect_with`].
 ///
@@ -38,7 +39,7 @@ pub struct ProtectedTransformBuilder<K, V, Pre, Post = ()> {
     post: Post,
     key_encoder: Box<dyn Encoder<K, BytesView>>,
     value_codec: Box<dyn Codec<V, BytesView>>,
-    protector: Box<dyn ValueProtector>,
+    protector: Arc<dyn ValueProtector>,
     clock: Clock,
     telemetry: CacheTelemetry,
     stampede_protection: bool,
@@ -111,7 +112,7 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
             post: self.post,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
-            protector: Box::new(protector),
+            protector: Arc::new(protector),
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -123,13 +124,17 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
 
 impl<K, V, Pre> ProtectedTransformBuilder<K, V, Pre, ()> {
     /// Sets the first post-transform storage tier (speaks encrypted `BytesView`).
-    pub fn fallback<FB>(self, fallback: FB) -> ProtectedTransformBuilder<K, V, Pre, FB>
+    ///
+    /// The tier is decorated with a `ProtectedTier` so its stored values are
+    /// authenticated independently of any later tier.
+    pub fn fallback<FB>(self, fallback: FB) -> ProtectedTransformBuilder<K, V, Pre, ProtectingTierBuilder<FB>>
     where
         FB: CacheTierBuilder<BytesView, BytesView>,
     {
+        let post = ProtectingTierBuilder::new(fallback, Arc::clone(&self.protector), self.clock.clone(), self.telemetry.clone());
         ProtectedTransformBuilder {
             pre: self.pre,
-            post: fallback,
+            post,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
             protector: self.protector,
@@ -145,7 +150,14 @@ where
     Post: CacheTierBuilder<BytesView, BytesView>,
 {
     /// Adds another post-transform fallback tier (speaks encrypted `BytesView`).
-    pub fn fallback<FB>(self, fallback: FB) -> ProtectedTransformBuilder<K, V, Pre, FallbackBuilder<BytesView, BytesView, Post, FB>>
+    ///
+    /// Like the first tier, it is decorated with its own `ProtectedTier` (sharing the
+    /// protector), so a tampered earlier tier reads as a miss and the chain falls
+    /// through to this one rather than being shadowed.
+    pub fn fallback<FB>(
+        self,
+        fallback: FB,
+    ) -> ProtectedTransformBuilder<K, V, Pre, FallbackBuilder<BytesView, BytesView, Post, ProtectingTierBuilder<FB>>>
     where
         FB: CacheTierBuilder<BytesView, BytesView>,
     {
@@ -153,10 +165,11 @@ where
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
+        let wrapped = ProtectingTierBuilder::new(fallback, Arc::clone(&self.protector), clock.clone(), telemetry.clone());
         let post_chain = FallbackBuilder {
             name: None,
             primary_builder: self.post,
-            fallback_builder: fallback,
+            fallback_builder: wrapped,
             clock: clock.clone(),
             refresh: None,
             telemetry: telemetry.clone(),
@@ -230,19 +243,110 @@ where
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
         let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone(), fallback);
 
-        // Build the post-transform tier chain and wrap it so values are protected
-        // (and key-bound) before reaching it.
+        // The post-transform chain is composed of `ProtectingTierBuilder`s, so building
+        // it applies a `ProtectedTier` to each storage tier — each backing store is
+        // authenticated independently, so a tampered tier reads as a miss and the chain
+        // falls through instead of shadowing a good copy in a later tier.
         let post_tier = self.post.build_tier(clock.clone(), telemetry.clone(), true);
-        let protected = ProtectedTier::new(
-            post_tier,
-            self.protector,
-            telemetry.clone(),
-            type_name::<ProtectedTier<Post::TierOutput>>(None),
-        );
-        let adapted = TransformAdapter::from_boxed(protected, self.key_encoder, self.value_codec);
+        let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
 
         let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);
 
         DynamicCache::new(fallback)
+    }
+}
+
+/// A post-transform tier builder that decorates its built tier with a `ProtectedTier`.
+///
+/// [`ProtectedTransformBuilder::fallback`] wraps each post storage tier in one of these
+/// (sharing a single [`ValueProtector`] via [`Arc`]) so that value protection is applied
+/// *per tier*, before the fallback chain is composed. This keeps every backing store
+/// independently authenticated.
+pub struct ProtectingTierBuilder<Inner> {
+    inner: Inner,
+    protector: Arc<dyn ValueProtector>,
+    clock: Clock,
+    telemetry: CacheTelemetry,
+}
+
+impl<Inner> ProtectingTierBuilder<Inner> {
+    fn new(inner: Inner, protector: Arc<dyn ValueProtector>, clock: Clock, telemetry: CacheTelemetry) -> Self {
+        Self {
+            inner,
+            protector,
+            clock,
+            telemetry,
+        }
+    }
+}
+
+impl<Inner: Debug> Debug for ProtectingTierBuilder<Inner> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProtectingTierBuilder")
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<Inner> Sealed for ProtectingTierBuilder<Inner> where Inner: CacheTierBuilder<BytesView, BytesView> {}
+
+impl<Inner> CacheTierBuilder<BytesView, BytesView> for ProtectingTierBuilder<Inner> where Inner: CacheTierBuilder<BytesView, BytesView> {}
+
+impl<Inner> Buildable<BytesView, BytesView> for ProtectingTierBuilder<Inner>
+where
+    Inner: Buildable<BytesView, BytesView>,
+{
+    type TierOutput = ProtectedTier<Inner::TierOutput>;
+
+    fn build(self) -> Cache<BytesView, BytesView> {
+        let clock = self.clock.clone();
+        let telemetry = self.telemetry.clone();
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry.clone(), false));
+
+        Cache::new(type_name::<Self::TierOutput>(None), tier, clock, telemetry, false)
+    }
+
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
+        let inner = self.inner.build_tier(clock, telemetry.clone(), fallback);
+        ProtectedTier::new(
+            inner,
+            self.protector,
+            telemetry,
+            type_name::<ProtectedTier<Inner::TierOutput>>(None),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use cachet_tier::MockCache;
+
+    use super::*;
+    use crate::{Cache, CacheEntry, CacheTier, MockValueProtector};
+
+    // `ProtectingTierBuilder::new` is private and normally only reached via
+    // `ProtectedTransformBuilder::fallback`, so exercise its standalone `build` and
+    // `Debug` here: it must produce a working single-tier protected cache.
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn protecting_tier_builder_builds_a_standalone_protected_cache() {
+        let clock = Clock::new_frozen();
+        let inner = Cache::builder::<BytesView, BytesView>(clock.clone()).storage(MockCache::<BytesView, BytesView>::new());
+        let builder = ProtectingTierBuilder::new(inner, Arc::new(MockValueProtector::new()), clock, CacheTelemetry::new());
+
+        assert!(format!("{builder:?}").contains("ProtectingTierBuilder"));
+
+        let cache = builder.build();
+        let key = BytesView::from(b"k".to_vec());
+        cache
+            .insert(key.clone(), CacheEntry::new(BytesView::from(b"v".to_vec())))
+            .await
+            .expect("insert should succeed");
+        let got = cache.get(&key).await.expect("get should succeed").expect("value should be present");
+        assert_eq!(
+            got.value().to_vec(),
+            b"v",
+            "value must round-trip through the standalone protected tier"
+        );
     }
 }
