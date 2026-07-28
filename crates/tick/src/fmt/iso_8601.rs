@@ -54,7 +54,7 @@ use crate::fmt::{Rfc2822, UnixSeconds, to_system_time};
 /// # Representable range
 ///
 /// This type spans [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) through [`Iso8601::MAX`]
-/// (`9999-12-30T22:00:00.999999999Z`), which is the widest range in the [`fmt`][crate::fmt]
+/// (`9999-12-30T22:00:00.9999999Z`), which is the widest range in the [`fmt`][crate::fmt]
 /// module. Converting an `Iso8601` into a narrower format saturates to that format's nearest
 /// boundary rather than producing an unrelated instant.
 ///

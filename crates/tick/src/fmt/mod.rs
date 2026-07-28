@@ -31,7 +31,7 @@
 //!
 //! | Format | Minimum | Maximum |
 //! | --- | --- | --- |
-//! | [`Iso8601`] | [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) | [`Iso8601::MAX`] (`9999-12-30T22:00:00.999999999Z`) |
+//! | [`Iso8601`] | [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) | [`Iso8601::MAX`] (`9999-12-30T22:00:00.9999999Z`) |
 //! | [`Rfc2822`] | [`Rfc2822::MIN`] (`Sat, 01 Jan 0000 00:00:00 GMT`) | [`Rfc2822::MAX`] (`Thu, 30 Dec 9999 22:00:00 GMT`) |
 //! | [`UnixSeconds`] | [`UnixSeconds::MIN`] (`0`, the Unix epoch) | [`UnixSeconds::MAX`] (`253402207200`) |
 //!
@@ -339,6 +339,21 @@ mod tests {
         assert_eq!(Iso8601::from(rfc), iso, "the two inputs must denote the same instant");
         assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
         assert_eq!(UnixSeconds::from(rfc), UnixSeconds::from(iso));
+    }
+
+    #[test]
+    fn boundary_values_render_as_documented() {
+        // Guards the representable-range table in this module's documentation. `Iso8601`
+        // rounds nanoseconds down to 100 ns steps on display, so its `MAX` renders with
+        // seven fractional digits rather than the nine `Timestamp::MAX` carries.
+        assert_eq!(Iso8601::MIN.to_string(), "-009999-01-02T01:59:59Z");
+        assert_eq!(Iso8601::MAX.to_string(), "9999-12-30T22:00:00.9999999Z");
+
+        assert_eq!(Rfc2822::MIN.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        assert_eq!(Rfc2822::MAX.to_string(), "Thu, 30 Dec 9999 22:00:00 GMT");
+
+        assert_eq!(UnixSeconds::MIN.to_string(), "0");
+        assert_eq!(UnixSeconds::MAX.to_string(), "253402207200");
     }
 
     #[test]
