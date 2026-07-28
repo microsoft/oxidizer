@@ -91,13 +91,13 @@
 //! // Output: Time: 1970-01-01T01:00:00Z
 //! ```
 
-mod iso_8601;
-mod rfc_2822;
-mod unix_seconds;
-
 use std::time::{Duration, SystemTime};
 
 use jiff::{SignedDuration, Timestamp};
+
+mod iso_8601;
+mod rfc_2822;
+mod unix_seconds;
 
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
