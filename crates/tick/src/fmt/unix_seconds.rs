@@ -219,21 +219,27 @@ mod tests {
     static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn min_is_unix_epoch() {
-        // `UnixSeconds` is an unsigned offset from the epoch, so its minimum is the epoch.
+        assert_eq!(UnixSeconds::MIN, UnixSeconds::UNIX_EPOCH);
+        assert_eq!(UnixSeconds::MIN.to_secs(), 0);
+        assert_eq!(SystemTime::from(UnixSeconds::MIN), SystemTime::UNIX_EPOCH);
+        assert!(UnixSeconds::MIN < UnixSeconds::MAX);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn from_pre_epoch_iso_8601_saturates() {
-        // AB#7661495: pre-epoch `Iso8601` values must clamp to `UnixSeconds::MIN`.
+        let iso: Iso8601 = "1969-12-31T23:59:59Z".parse().unwrap();
+        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
+
+        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn from_pre_epoch_rfc_2822_saturates() {
-        // AB#7661495: pre-epoch `Rfc2822` values must clamp to `UnixSeconds::MIN`.
+        let rfc: Rfc2822 = "Wed, 31 Dec 1969 23:59:59 GMT".parse().unwrap();
+        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::MIN);
+
+        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
     }
 
     #[test]

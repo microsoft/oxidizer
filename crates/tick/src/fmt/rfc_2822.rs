@@ -215,53 +215,91 @@ mod tests {
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn display_does_not_panic_for_negative_year() {
-        // AB#7661499: an `Rfc2822` derived from a negative-year `Iso8601` must render
-        // `Rfc2822::MIN` instead of panicking inside `ToString`.
+        // AB#7661499: `to_string` used to panic because `Display` returned an error.
+        let iso: Iso8601 = "-000001-06-15T00:00:00Z".parse().unwrap();
+        let rfc: Rfc2822 = iso.into();
+
+        assert_eq!(rfc, Rfc2822::MIN);
+        assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        assert_eq!(format!("{rfc}"), "Sat, 01 Jan 0000 00:00:00 GMT");
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn display_does_not_panic_for_iso_8601_min() {
-        // The same guarantee for the extreme case, `Iso8601::MIN`.
+        let rfc: Rfc2822 = Iso8601::MIN.into();
+
+        assert_eq!(rfc, Rfc2822::MIN);
+        assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
+    #[cfg(feature = "serde")]
     fn serialize_does_not_panic_for_negative_year() {
-        // serde serialization uses `collect_str`, which panics on a failing `Display`.
+        // Serialization goes through `collect_str`, which panics on a failing `Display`.
+        let rfc: Rfc2822 = Iso8601::MIN.into();
+
+        let serialized = serde_json::to_string(&rfc).unwrap();
+        assert_eq!(serialized, r#""Sat, 01 Jan 0000 00:00:00 GMT""#);
+
+        let deserialized: Rfc2822 = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, rfc);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn min_is_earliest_encodable_instant() {
-        // `Rfc2822::MIN` must print, and the second before it must clamp back up to `MIN`.
+        assert_eq!(Rfc2822::MIN.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        assert!(Rfc2822::MIN < Rfc2822::UNIX_EPOCH);
+
+        // One second earlier is not encodable, so it clamps back up to `MIN`.
+        let one_second_earlier = Iso8601::from(Rfc2822::MIN);
+        let one_second_earlier: SystemTime = one_second_earlier.into();
+        let one_second_earlier = one_second_earlier - Duration::from_secs(1);
+
+        assert_eq!(Rfc2822::try_from(one_second_earlier).unwrap(), Rfc2822::MIN);
+
+        // The instant itself is preserved, not rounded away.
+        assert_eq!(Rfc2822::try_from(SystemTime::from(Rfc2822::MIN)).unwrap(), Rfc2822::MIN);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn max_is_jiff_timestamp_max() {
-        // The saturating constructor only clamps the lower bound, which is sound only
-        // while `Rfc2822::MAX` is `Timestamp::MAX`.
+        // `new_saturating` only clamps the lower bound, which is sound only while no
+        // `Timestamp` can exceed `Rfc2822::MAX`.
+        assert_eq!(Rfc2822::MAX.0, Timestamp::MAX);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn from_system_time_saturates_below_min() {
-        // A `SystemTime` before year 0 must clamp to `Rfc2822::MIN`.
+        let before_min = SystemTime::from(Iso8601::MIN);
+        assert!(before_min < SystemTime::from(Rfc2822::MIN));
+
+        assert_eq!(Rfc2822::try_from(before_min).unwrap(), Rfc2822::MIN);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_unix_seconds_saturates_before_epoch() {
         // AB#7661495 for the RFC 2822 source format.
+        let rfc: Rfc2822 = "Wed, 31 Dec 1969 23:59:59 GMT".parse().unwrap();
+        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::MIN);
+
+        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
+
+        // Post-epoch values are unaffected.
+        let rfc: Rfc2822 = "Thu, 01 Jan 1970 00:00:01 GMT".parse().unwrap();
+        assert_eq!(UnixSeconds::from(rfc).to_secs(), 1);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_system_time_before_filetime_epoch() {
         // AB#7663342 for the RFC 2822 source format.
+        let rfc: Rfc2822 = "Wed, 01 Jan 1000 00:00:00 GMT".parse().unwrap();
+        let system_time = SystemTime::from(rfc);
+
+        assert!(system_time < SystemTime::UNIX_EPOCH);
+        assert_eq!(Rfc2822::try_from(system_time).unwrap(), rfc);
+
+        assert_eq!(Rfc2822::try_from(SystemTime::from(Rfc2822::MIN)).unwrap(), Rfc2822::MIN);
     }
 
     #[test]

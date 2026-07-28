@@ -292,24 +292,48 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_unix_seconds_saturates_before_epoch() {
-        // AB#7661495: `1969-12-31T23:59:59Z` must convert to `UnixSeconds::UNIX_EPOCH`,
-        // not to one second after the epoch.
+        // AB#7661495: this used to mirror to `UnixSeconds(1)`, one second *after* the epoch.
+        let iso: Iso8601 = "1969-12-31T23:59:59Z".parse().unwrap();
+
+        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
+        assert_eq!(UnixSeconds::from(iso).to_string(), "0");
+
+        let iso: Iso8601 = "1900-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
+
+        // The epoch itself and later instants are unaffected.
+        assert_eq!(UnixSeconds::from(Iso8601::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
+
+        let iso: Iso8601 = "1970-01-01T00:00:01Z".parse().unwrap();
+        assert_eq!(UnixSeconds::from(iso).to_secs(), 1);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn min_is_timestamp_min() {
-        // `Iso8601::MIN` must be the earliest instant the format can represent and must
-        // round-trip through `SystemTime`.
+        assert_eq!(Iso8601::MIN.0, Timestamp::MIN);
+        assert!(Iso8601::MIN < Iso8601::UNIX_EPOCH);
+        assert_eq!(Iso8601::MIN.to_string(), "-009999-01-02T01:59:59Z");
+
+        // The minimum survives a round-trip through `SystemTime`.
+        assert_eq!(Iso8601::try_from(SystemTime::from(Iso8601::MIN)).unwrap(), Iso8601::MIN);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_system_time_before_filetime_epoch() {
-        // AB#7663342: pre-1601 instants, including `Iso8601::MIN`, must convert to
-        // `SystemTime` without panicking.
+        // AB#7663342: instants before the Windows FILETIME epoch (1601-01-01) must convert
+        // without panicking.
+        for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "-000500-01-01T00:00:00Z"] {
+            let iso: Iso8601 = input.parse().unwrap();
+            let system_time = SystemTime::from(iso);
+
+            assert!(system_time < SystemTime::UNIX_EPOCH);
+            assert_eq!(Iso8601::try_from(system_time).unwrap(), iso, "{input} must round-trip");
+        }
+
+        // The most extreme value the type can hold.
+        let system_time = SystemTime::from(Iso8601::MIN);
+        assert_eq!(Iso8601::try_from(system_time).unwrap(), Iso8601::MIN);
     }
 
     #[test]

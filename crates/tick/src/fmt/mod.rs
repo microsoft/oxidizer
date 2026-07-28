@@ -55,7 +55,7 @@
 //! ```
 //!
 //! Converting any format back into a [`SystemTime`][std::time::SystemTime] saturates the same
-//! way, to the furthest instant the platform can represent.
+//! way, to the furthest instant the platform can reach from the Unix epoch.
 //!
 //! # Examples
 //!
@@ -113,16 +113,16 @@ fn to_unix_epoch_duration(timestamp: Timestamp) -> Duration {
 
 /// Converts an offset from the Unix epoch into a [`SystemTime`].
 ///
-/// Offsets that the platform cannot represent saturate to the furthest [`SystemTime`] in
-/// that direction, so the conversion never panics.
+/// Offsets the platform cannot apply saturate to the furthest [`SystemTime`] reachable from
+/// the Unix epoch in that direction, so the conversion never panics.
 fn to_system_time(offset: SignedDuration) -> SystemTime {
     let negative = offset.is_negative();
 
     checked_offset(negative, offset.unsigned_abs()).unwrap_or_else(|| saturating_bound(negative))
 }
 
-/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, returning `None` when the result is
-/// outside the range the platform can represent.
+/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, returning `None` when the platform
+/// cannot apply an offset that large.
 fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
     if negative {
         SystemTime::UNIX_EPOCH.checked_sub(magnitude)
@@ -131,12 +131,14 @@ fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
     }
 }
 
-/// Returns the [`SystemTime`] furthest from the Unix epoch that the platform can represent.
+/// Returns the [`SystemTime`] furthest from the Unix epoch the platform can reach in the
+/// given direction.
 fn saturating_bound(negative: bool) -> SystemTime {
-    // The representable range of `SystemTime` is platform defined and `std` does not expose it,
-    // so the boundary is located with a binary search over whole seconds. This is a cold path:
-    // it is only reached when an offset within the `jiff::Timestamp` range (year -9999..=9999)
-    // exceeds what the platform can represent, which no currently supported platform does.
+    // How large an offset `SystemTime` accepts is platform defined and `std` does not expose
+    // it, so the boundary is located with a binary search over whole seconds. This is a cold
+    // path: it is only reached when an offset within the `jiff::Timestamp` range
+    // (year -9999..=9999) exceeds what the platform accepts, which no currently supported
+    // platform does.
     let mut lower = 0;
     let mut upper = u64::MAX;
 
@@ -239,48 +241,101 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_unix_epoch_duration_saturates_before_epoch() {
-        // A pre-epoch timestamp must yield `Duration::ZERO`, not a mirrored positive offset.
+        let before_epoch = Timestamp::UNIX_EPOCH - SignedDuration::from_secs(1);
+
+        // Without saturation this mirrors to one second *after* the epoch.
+        assert_eq!(to_unix_epoch_duration(before_epoch), Duration::ZERO);
+        assert_eq!(to_unix_epoch_duration(Timestamp::MIN), Duration::ZERO);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_unix_epoch_duration_keeps_after_epoch() {
-        // Post-epoch offsets must be returned unchanged, including `Timestamp::MAX`.
+        assert_eq!(to_unix_epoch_duration(Timestamp::UNIX_EPOCH), Duration::ZERO);
+
+        let after_epoch = Timestamp::UNIX_EPOCH + SignedDuration::from_secs(1);
+        assert_eq!(to_unix_epoch_duration(after_epoch), Duration::from_secs(1));
+
+        assert_eq!(to_unix_epoch_duration(Timestamp::MAX), UnixSeconds::MAX.0);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_system_time_matches_epoch_offsets_in_range() {
-        // In-range offsets must map to `UNIX_EPOCH +/- offset` exactly.
+        assert_eq!(to_system_time(SignedDuration::ZERO), SystemTime::UNIX_EPOCH);
+
+        assert_eq!(
+            to_system_time(SignedDuration::from_secs(90)),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(90)
+        );
+        assert_eq!(
+            to_system_time(SignedDuration::from_secs(-90)),
+            SystemTime::UNIX_EPOCH - Duration::from_secs(90)
+        );
+
+        // The extremes of the jiff range are representable on every supported platform.
+        assert_eq!(
+            to_system_time(Timestamp::MAX.as_duration()),
+            SystemTime::UNIX_EPOCH + Timestamp::MAX.as_duration().unsigned_abs()
+        );
+        assert_eq!(
+            to_system_time(Timestamp::MIN.as_duration()),
+            SystemTime::UNIX_EPOCH - Timestamp::MIN.as_duration().unsigned_abs()
+        );
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_system_time_saturates_positive_overflow() {
-        // `SignedDuration::MAX` must saturate to a representable `SystemTime` whose
-        // successor second is not representable.
+        let saturated = to_system_time(SignedDuration::MAX);
+
+        // Saturation never lands inside the range of instants a format can hold, so a
+        // saturated value can never be mistaken for a real one.
+        assert!(saturated > SystemTime::from(Iso8601::MAX));
+
+        // The boundary is maximal: the epoch cannot be offset by even one more second.
+        let magnitude = saturated.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        assert!(SystemTime::UNIX_EPOCH.checked_add(magnitude + Duration::from_secs(1)).is_none());
+
+        // Saturation is deterministic regardless of how far out of range the input is.
+        assert_eq!(saturated, to_system_time(SignedDuration::MAX - SignedDuration::from_secs(1)));
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn to_system_time_saturates_negative_overflow() {
-        // `SignedDuration::MIN` must saturate to a representable `SystemTime` whose
-        // predecessor second is not representable.
+        let saturated = to_system_time(SignedDuration::MIN);
+
+        assert!(saturated < SystemTime::from(Iso8601::MIN));
+
+        let magnitude = SystemTime::UNIX_EPOCH.duration_since(saturated).unwrap();
+        assert!(SystemTime::UNIX_EPOCH.checked_sub(magnitude + Duration::from_secs(1)).is_none());
+
+        assert_eq!(saturated, to_system_time(SignedDuration::MIN + SignedDuration::from_secs(1)));
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn min_values_are_aligned() {
-        // Cross-format `MIN` conversions must agree with each format's representable range.
+        // `UnixSeconds` cannot go below the epoch, and `Rfc2822` cannot go below year 0.
+        assert_eq!(UnixSeconds::MIN, UnixSeconds::UNIX_EPOCH);
+        assert!(Iso8601::MIN < Iso8601::from(Rfc2822::MIN));
+        assert!(Iso8601::from(Rfc2822::MIN) < Iso8601::from(UnixSeconds::MIN));
+
+        // Converting each format's minimum into a narrower format saturates to that minimum.
+        assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
+        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
+        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
+
+        // Widening conversions are lossless.
+        assert_eq!(Iso8601::from(UnixSeconds::MIN), Iso8601::UNIX_EPOCH);
+        assert_eq!(Rfc2822::from(UnixSeconds::MIN), Rfc2822::UNIX_EPOCH);
     }
 
     #[test]
-    #[ignore = "stub: implementation pending"]
     fn pre_epoch_to_unix_seconds_is_consistent_across_formats() {
-        // `Iso8601` and `Rfc2822` must produce the same `UnixSeconds` for the same
-        // pre-epoch instant.
+        let iso: Iso8601 = "1900-01-01T00:00:00Z".parse().unwrap();
+        let rfc: Rfc2822 = "Mon, 01 Jan 1900 00:00:00 GMT".parse().unwrap();
+
+        assert_eq!(Iso8601::from(rfc), iso, "the two inputs must denote the same instant");
+        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
+        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::from(iso));
     }
 
     #[test]
