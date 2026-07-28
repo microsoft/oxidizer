@@ -34,8 +34,8 @@ the code so the design can be reviewed on its own terms.
 Each thread accumulates its own totals with plain, non-atomic arithmetic and
 publishes them into the allocator instance’s atomic totals in batches — once
 *bytes allocated plus bytes freed* since its last publication crosses a
-compile-time threshold, when the thread exits, or on request. That removes
-the atomic read-modify-write per allocation that an exact accounting wrapper
+compile-time threshold, and again when the thread exits. That removes the
+atomic read-modify-write per allocation that an exact accounting wrapper
 pays, which is the cost that scales badly with core count.
 
 The trade is a small, bounded, stated inaccuracy: a reading omits whatever

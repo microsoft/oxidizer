@@ -93,8 +93,8 @@ One idea: **accumulate per thread without synchronization, publish in batches**.
         │  live · bytes · op counts         │
         └───────────────┬───────────────────┘
                         │  churn ≥ threshold ─┐
-                        │  thread exit ───────┼─► one batched commit
-                        │  explicit flush ────┘
+                        │                     ├─► one batched commit
+                        │  thread exit ───────┘
                         ▼
         ┌───────────────────────────────────┐
         │  atomic totals owned by the       │
@@ -235,20 +235,25 @@ The rest of the surface:
   before/after comparison across an allocator change a dashboard filter rather
   than a reconstruction from deployment timestamps.
 - **`watch()`** — a `Copy + Send + Sync` handle valid for the life of the
-  process. `stats()` and `flush_thread()` are callable on the instance and on
-  the handle alike.
+  process. `stats()` is callable on the instance and on the handle alike.
 - **`stats()`** — a plain `Copy` snapshot: current bytes, cumulative bytes
   allocated and freed, allocation, free, and reallocation counts, plus the
   derived net allocation count. It is `#[non_exhaustive]`, so adding a counter
   later stays additive.
-- **`flush_thread()`** — fold the caller's pending values in before reading.
+
+**There is deliberately no flush operation.** Committing is entirely internal —
+the churn threshold and thread exit — so a caller has one verb, *read*, and
+nothing to sequence before it. Exposing a flush would offer callers a way to
+tighten a bound that is already documented and small, in exchange for an API
+whose correct use is subtle: it only affects the calling thread, so tightening
+a process-wide reading would mean calling it on every thread, which is not
+something a diagnostic endpoint can do.
 
 **Concurrency contract.** Every entry point is callable from any thread at any
-time; none blocks, none allocates, and none can fail. `flush_thread()` touches
-only the calling thread's block, and is the one operation no other thread can
-perform on its behalf. Concurrent readers and writers otherwise race in the
-ordinary way; since the counters are a gauge rather than a protocol, that is not
-a correctness problem, only the imprecision the accuracy section bounds.
+time; none blocks, none allocates, and none can fail. Concurrent readers and
+writers race in the ordinary way; since the counters are a gauge rather than a
+protocol, that is not a correctness problem, only the imprecision the accuracy
+section bounds.
 
 Heapwatch requires `std`, a deliberate exception to the workspace's `no_std`
 preference: the mechanism needs a thread-local with a thread-exit destructor,
@@ -278,10 +283,10 @@ gigabytes.
 
 Two caveats. The bound does not *converge*: a thread that parks below the
 threshold hides its residue for as long as it sleeps, so a large idle pool can
-hold the full bound indefinitely — which is why a worker about to block should
-flush first. And it is stated in live threads, a quantity `stats()` does not
-report, so a caller wanting a numeric error bar must supply the thread-count
-ceiling from its own deployment knowledge.
+hold the full bound indefinitely, and with no flush operation there is nothing a
+reader can do about it. And it is stated in live threads, a quantity `stats()`
+does not report, so a caller wanting a numeric error bar must supply the
+thread-count ceiling from its own deployment knowledge.
 
 Lowering the threshold tightens the bound and raises the per-allocation share of
 the atomic cost; raising it does the reverse. Zero flushes every operation:
