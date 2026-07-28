@@ -139,10 +139,9 @@ fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
 /// given direction.
 fn saturating_bound(negative: bool) -> SystemTime {
     // How large an offset `SystemTime` accepts is platform defined and `std` does not expose
-    // it, so the boundary is located with a binary search over whole seconds. Whether this is
-    // reachable from a `jiff::Timestamp` (year -9999..=9999) depends on the platform: no
-    // currently supported platform rejects an offset that small, so in practice this runs
-    // only as a defence against a narrower `SystemTime` on some future target.
+    // it, so the boundary is located with a binary search over whole seconds. This path is
+    // live: where `SystemTime` is FILETIME-based its epoch is `1601-01-01T00:00:00Z`, so
+    // every earlier instant a `jiff::Timestamp` can hold (down to year -9999) lands here.
     let mut lower = 0;
     let mut upper = u64::MAX;
 
@@ -276,15 +275,25 @@ mod tests {
             SystemTime::UNIX_EPOCH - Duration::from_secs(90)
         );
 
-        // The extremes of the jiff range are representable on every supported platform.
-        assert_eq!(
-            to_system_time(Timestamp::MAX.as_duration()),
-            SystemTime::UNIX_EPOCH + Timestamp::MAX.as_duration().unsigned_abs()
-        );
-        assert_eq!(
-            to_system_time(Timestamp::MIN.as_duration()),
-            SystemTime::UNIX_EPOCH - Timestamp::MIN.as_duration().unsigned_abs()
-        );
+        // How far a platform's `SystemTime` reaches is not universal -- a FILETIME-based
+        // `SystemTime` cannot go below 1601 -- so the extremes of the jiff range are checked
+        // against the platform's own arithmetic rather than an assumed range.
+        for timestamp in [Timestamp::MIN, Timestamp::MAX] {
+            let offset = timestamp.as_duration();
+            let negative = offset.is_negative();
+            let converted = to_system_time(offset);
+
+            let expected = if negative {
+                SystemTime::UNIX_EPOCH.checked_sub(offset.unsigned_abs())
+            } else {
+                SystemTime::UNIX_EPOCH.checked_add(offset.unsigned_abs())
+            };
+
+            match expected {
+                Some(expected) => assert_eq!(converted, expected, "{timestamp} must convert exactly"),
+                None => assert_eq!(converted, saturating_bound(negative), "{timestamp} must saturate"),
+            }
+        }
     }
 
     #[test]
@@ -304,10 +313,6 @@ mod tests {
             // does not.
             assert_eq!(checked_offset(negative, magnitude), Some(saturated));
             assert_eq!(checked_offset(negative, magnitude + Duration::from_secs(1)), None);
-
-            // The boundary lies outside the range of any instant a format can hold, so a
-            // saturated value can never be mistaken for a real one.
-            assert!(magnitude > Timestamp::MIN.as_duration().unsigned_abs());
 
             // Saturation is deterministic regardless of how far out of range the input is.
             assert_eq!(saturated, saturating_offset(negative, Duration::MAX - Duration::from_secs(1)));

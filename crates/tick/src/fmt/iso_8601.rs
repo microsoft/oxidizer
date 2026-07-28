@@ -314,26 +314,27 @@ mod tests {
         assert_eq!(Iso8601::MIN.0, Timestamp::MIN);
         assert!(Iso8601::MIN < Iso8601::UNIX_EPOCH);
         assert_eq!(Iso8601::MIN.to_string(), "-009999-01-02T01:59:59Z");
-
-        // The minimum survives a round-trip through `SystemTime`.
-        assert_eq!(Iso8601::try_from(SystemTime::from(Iso8601::MIN)).unwrap(), Iso8601::MIN);
     }
 
     #[test]
     fn to_system_time_before_filetime_epoch() {
         // AB#7663342: instants before the Windows FILETIME epoch (1601-01-01) must convert
-        // without panicking.
+        // without panicking, including on platforms whose `SystemTime` starts at that epoch
+        // and therefore cannot represent them.
         for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "-000500-01-01T00:00:00Z"] {
             let iso: Iso8601 = input.parse().unwrap();
             let system_time = SystemTime::from(iso);
 
-            assert!(system_time < SystemTime::UNIX_EPOCH);
-            assert_eq!(Iso8601::try_from(system_time).unwrap(), iso, "{input} must round-trip");
-        }
+            assert!(system_time < SystemTime::UNIX_EPOCH, "{input} must stay before the epoch");
 
-        // The most extreme value the type can hold.
-        let system_time = SystemTime::from(Iso8601::MIN);
-        assert_eq!(Iso8601::try_from(system_time).unwrap(), Iso8601::MIN);
+            match SystemTime::UNIX_EPOCH.checked_sub(iso.0.as_duration().unsigned_abs()) {
+                // The platform reaches that far back, so nothing is lost.
+                Some(expected) => assert_eq!(system_time, expected, "{input} must convert exactly"),
+                // Otherwise the conversion saturated to the platform's own lower bound
+                // instead of panicking, which every earlier instant shares.
+                None => assert_eq!(system_time, SystemTime::from(Iso8601::MIN), "{input} must saturate"),
+            }
+        }
     }
 
     #[test]

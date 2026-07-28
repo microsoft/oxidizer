@@ -211,6 +211,8 @@ mod tests {
     use std::hash::Hash;
     use std::time::Duration;
 
+    use jiff::SignedDuration;
+
     use super::*;
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
@@ -251,15 +253,16 @@ mod tests {
         assert_eq!(Rfc2822::MIN.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
         assert!(Rfc2822::MIN < Rfc2822::UNIX_EPOCH);
 
-        // One second earlier is not encodable, so it clamps back up to `MIN`.
-        let one_second_earlier = Iso8601::from(Rfc2822::MIN);
-        let one_second_earlier: SystemTime = one_second_earlier.into();
-        let one_second_earlier = one_second_earlier - Duration::from_secs(1);
+        // Anything earlier is not encodable, so it clamps back up to `MIN`. The clamp is
+        // exercised through `Iso8601` rather than `SystemTime` because a platform whose
+        // `SystemTime` starts at the FILETIME epoch cannot express an instant this early.
+        for earlier in [SignedDuration::from_secs(1), SignedDuration::from_nanos(1)] {
+            let earlier = Iso8601(Rfc2822::MIN.0 - earlier);
+            assert_eq!(Rfc2822::from(earlier), Rfc2822::MIN);
+        }
 
-        assert_eq!(Rfc2822::try_from(one_second_earlier).unwrap(), Rfc2822::MIN);
-
-        // The instant itself is preserved, not rounded away.
-        assert_eq!(Rfc2822::try_from(SystemTime::from(Rfc2822::MIN)).unwrap(), Rfc2822::MIN);
+        // The instant itself is preserved, not clamped away.
+        assert_eq!(Rfc2822::from(Iso8601(Rfc2822::MIN.0)), Rfc2822::MIN);
     }
 
     #[test]
@@ -270,11 +273,25 @@ mod tests {
     }
 
     #[test]
-    fn from_system_time_saturates_below_min() {
-        let before_min = SystemTime::from(Iso8601::MIN);
-        assert!(before_min < SystemTime::from(Rfc2822::MIN));
+    fn from_system_time_never_yields_an_unencodable_value() {
+        // Whatever range the platform's `SystemTime` covers, `TryFrom` must land inside the
+        // encodable range so `Display` cannot fail.
+        for system_time in [
+            SystemTime::from(Iso8601::MIN),
+            SystemTime::from(Rfc2822::MIN),
+            SystemTime::UNIX_EPOCH,
+        ] {
+            let rfc = Rfc2822::try_from(system_time).unwrap();
 
-        assert_eq!(Rfc2822::try_from(before_min).unwrap(), Rfc2822::MIN);
+            assert!(rfc >= Rfc2822::MIN);
+            assert!(!rfc.to_string().is_empty());
+        }
+
+        // Where the platform can express an instant before year 0, the clamp is observable.
+        let below_min = Rfc2822::MIN.0.as_duration().unsigned_abs() + Duration::from_secs(1);
+        if let Some(below_min) = SystemTime::UNIX_EPOCH.checked_sub(below_min) {
+            assert_eq!(Rfc2822::try_from(below_min).unwrap(), Rfc2822::MIN);
+        }
     }
 
     #[test]
@@ -297,9 +314,13 @@ mod tests {
         let system_time = SystemTime::from(rfc);
 
         assert!(system_time < SystemTime::UNIX_EPOCH);
-        assert_eq!(Rfc2822::try_from(system_time).unwrap(), rfc);
 
-        assert_eq!(Rfc2822::try_from(SystemTime::from(Rfc2822::MIN)).unwrap(), Rfc2822::MIN);
+        match SystemTime::UNIX_EPOCH.checked_sub(rfc.0.as_duration().unsigned_abs()) {
+            // The platform reaches that far back, so nothing is lost.
+            Some(expected) => assert_eq!(system_time, expected),
+            // Otherwise the conversion saturated instead of panicking.
+            None => assert_eq!(system_time, SystemTime::from(Rfc2822::MIN)),
+        }
     }
 
     #[test]
