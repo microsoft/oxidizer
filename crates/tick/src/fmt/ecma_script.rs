@@ -13,10 +13,12 @@ use crate::fmt::{Iso8601, Rfc2822, UnixSeconds};
 
 /// Fixed-width parser and formatter for the ECMAScript Date Time String Format.
 ///
-/// For every wall-clock instant the output has the fixed 24-character shape
+/// For any non-negative year the output has the fixed 24-character shape
 /// `YYYY-MM-DDTHH:MM:SS.sssZ`: a four-digit year, two-digit calendar and clock
 /// fields, exactly three fractional digits (milliseconds, truncated rather than
 /// rounded), and the UTC designator `Z`. For example: `2024-08-06T21:30:00.123Z`.
+/// Years before 1 CE - reachable only by saturation - are the sole exception and
+/// render wider, in the expanded-year form described in the Range section below.
 ///
 /// Unlike the variable-precision output of [`Iso8601`] - which trims trailing
 /// fractional zeros and so varies in width - this fixed width keeps tabular

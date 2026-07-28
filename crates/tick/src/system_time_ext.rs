@@ -25,11 +25,13 @@ pub trait SystemTimeExt: sealed::Sealed {
 
     /// Returns a value that formats the [`SystemTime`] in the ECMAScript Date Time String Format.
     ///
-    /// The output has the fixed 24-character shape `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to
-    /// millisecond precision. See [`EcmaScript`][crate::fmt::EcmaScript] for details.
+    /// For any non-negative year the output has the fixed 24-character shape
+    /// `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to millisecond precision. See
+    /// [`EcmaScript`][crate::fmt::EcmaScript] for details.
     ///
     /// Times outside the valid range (before year -9999 or after year 9999) are saturated
-    /// to the nearest boundary.
+    /// to the nearest boundary. Saturating below the minimum yields a negative year, which
+    /// renders in the wider ECMAScript expanded-year form rather than the fixed 24-character shape.
     ///
     /// # Examples
     ///
@@ -39,7 +41,10 @@ pub trait SystemTimeExt: sealed::Sealed {
     /// use tick::SystemTimeExt;
     ///
     /// let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
-    /// assert_eq!(time.display_ecmascript().to_string(), "1970-01-01T01:00:00.000Z");
+    /// assert_eq!(
+    ///     time.display_ecmascript().to_string(),
+    ///     "1970-01-01T01:00:00.000Z"
+    /// );
     /// ```
     #[cfg(any(feature = "fmt", test))]
     fn display_ecmascript(&self) -> impl std::fmt::Display;
