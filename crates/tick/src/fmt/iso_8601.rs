@@ -282,6 +282,27 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_unix_seconds_saturates_before_epoch() {
+        // AB#7661495: `1969-12-31T23:59:59Z` must convert to `UnixSeconds::UNIX_EPOCH`,
+        // not to one second after the epoch.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn min_is_timestamp_min() {
+        // `Iso8601::MIN` must be the earliest instant the format can represent and must
+        // round-trip through `SystemTime`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_system_time_before_filetime_epoch() {
+        // AB#7663342: pre-1601 instants, including `Iso8601::MIN`, must convert to
+        // `SystemTime` without panicking.
+    }
+
+    #[test]
     fn far_in_the_past() {
         let iso: Iso8601 = "1601-01-01T00:00:00Z".parse().unwrap();
         assert_eq!(iso.to_string(), "1601-01-01T00:00:00Z");

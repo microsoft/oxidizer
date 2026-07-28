@@ -197,6 +197,24 @@ mod tests {
     static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
     #[test]
+    #[ignore = "stub: implementation pending"]
+    fn min_is_unix_epoch() {
+        // `UnixSeconds` is an unsigned offset from the epoch, so its minimum is the epoch.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn from_pre_epoch_iso_8601_saturates() {
+        // AB#7661495: pre-epoch `Iso8601` values must clamp to `UnixSeconds::MIN`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn from_pre_epoch_rfc_2822_saturates() {
+        // AB#7661495: pre-epoch `Rfc2822` values must clamp to `UnixSeconds::MIN`.
+    }
+
+    #[test]
     fn max_duration_is_jiff_duration() {
         let jiff_max = Timestamp::MAX.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs();
 

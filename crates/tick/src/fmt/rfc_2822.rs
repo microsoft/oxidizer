@@ -182,6 +182,56 @@ mod tests {
     static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
     #[test]
+    #[ignore = "stub: implementation pending"]
+    fn display_does_not_panic_for_negative_year() {
+        // AB#7661499: an `Rfc2822` derived from a negative-year `Iso8601` must render
+        // `Rfc2822::MIN` instead of panicking inside `ToString`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn display_does_not_panic_for_iso_8601_min() {
+        // The same guarantee for the extreme case, `Iso8601::MIN`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn serialize_does_not_panic_for_negative_year() {
+        // serde serialization uses `collect_str`, which panics on a failing `Display`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn min_is_earliest_encodable_instant() {
+        // `Rfc2822::MIN` must print, and the second before it must clamp back up to `MIN`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn max_is_jiff_timestamp_max() {
+        // The saturating constructor only clamps the lower bound, which is sound only
+        // while `Rfc2822::MAX` is `Timestamp::MAX`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn from_system_time_saturates_below_min() {
+        // A `SystemTime` before year 0 must clamp to `Rfc2822::MIN`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_unix_seconds_saturates_before_epoch() {
+        // AB#7661495 for the RFC 2822 source format.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_system_time_before_filetime_epoch() {
+        // AB#7663342 for the RFC 2822 source format.
+    }
+
+    #[test]
     fn parse_err() {
         "date".parse::<Rfc2822>().unwrap_err();
     }

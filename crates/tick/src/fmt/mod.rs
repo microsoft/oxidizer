@@ -154,6 +154,51 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_unix_epoch_duration_saturates_before_epoch() {
+        // A pre-epoch timestamp must yield `Duration::ZERO`, not a mirrored positive offset.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_unix_epoch_duration_keeps_after_epoch() {
+        // Post-epoch offsets must be returned unchanged, including `Timestamp::MAX`.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_system_time_matches_epoch_offsets_in_range() {
+        // In-range offsets must map to `UNIX_EPOCH +/- offset` exactly.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_system_time_saturates_positive_overflow() {
+        // `SignedDuration::MAX` must saturate to a representable `SystemTime` whose
+        // successor second is not representable.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn to_system_time_saturates_negative_overflow() {
+        // `SignedDuration::MIN` must saturate to a representable `SystemTime` whose
+        // predecessor second is not representable.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn min_values_are_aligned() {
+        // Cross-format `MIN` conversions must agree with each format's representable range.
+    }
+
+    #[test]
+    #[ignore = "stub: implementation pending"]
+    fn pre_epoch_to_unix_seconds_is_consistent_across_formats() {
+        // `Iso8601` and `Rfc2822` must produce the same `UnixSeconds` for the same
+        // pre-epoch instant.
+    }
+
+    #[test]
     fn max_values_are_aligned() {
         // All MAX values should represent 31 December 9999 23:59:59 UTC
         let iso_max: SystemTime = Iso8601::MAX.into();
