@@ -89,7 +89,7 @@ crate::thread_aware_move!(Rfc2822);
 impl Rfc2822 {
     /// The largest value that can be represented by `Rfc2822`.
     ///
-    /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time at `9999-12-30T22:00:00.999999999Z`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `Rfc2822`.

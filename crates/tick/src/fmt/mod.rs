@@ -11,7 +11,7 @@
 //!
 //! - [`EcmaScript`]: Fixed-width parsing and formatting of system time in the
 //!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format), the profile produced by
-//!   JavaScript's `Date.prototype.toISOString`. For example, `2024-08-06T21:30:00.123Z`.
+//!   the ECMAScript `Date.prototype.toISOString` method. For example, `2024-08-06T21:30:00.123Z`.
 //!
 //! - [`Rfc2822`]: Parsing and formatting of system time in [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3) format.
 //!   For example, `Tue, 6 Aug 2024 14:30:00 -0000`.
@@ -65,14 +65,17 @@
 //! let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
 //! println!("Time: {}", time.display_iso_8601());
 //! // Output: Time: 1970-01-01T01:00:00Z
+//!
+//! println!("Time: {}", time.display_ecmascript());
+//! // Output: Time: 1970-01-01T01:00:00.000Z
 //! ```
 
-mod ecma_script;
+mod ecmascript;
 mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
-pub use ecma_script::EcmaScript;
+pub use ecmascript::EcmaScript;
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
@@ -177,7 +180,7 @@ mod tests {
 
     #[test]
     fn max_values_are_aligned() {
-        // All MAX values should represent 31 December 9999 23:59:59 UTC
+        // All MAX values should represent 9999-12-30T22:00:00.999999999Z
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();

@@ -60,7 +60,7 @@ crate::thread_aware_move!(UnixSeconds);
 impl UnixSeconds {
     /// The largest value that be can represented by `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 

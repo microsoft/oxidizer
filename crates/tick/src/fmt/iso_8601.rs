@@ -91,7 +91,7 @@ crate::thread_aware_move!(Iso8601);
 impl Iso8601 {
     /// The largest value that can be represented by `Iso8601`.
     ///
-    /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `Iso8601`.

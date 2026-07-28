@@ -132,6 +132,16 @@ mod tests {
         assert_eq!(time.display_ecmascript().to_string(), "9999-12-30T22:00:00.999Z");
     }
 
+    // On Windows a `SystemTime` cannot represent an instant before the FILETIME
+    // epoch (1601-01-01), so an instant below `Timestamp::MIN` (year -9999) is
+    // unconstructable there and this saturation path is only reachable elsewhere.
+    #[cfg(not(windows))]
+    #[test]
+    fn display_ecmascript_saturates_below_min() {
+        let time = SystemTime::UNIX_EPOCH - Duration::from_secs(400_000_000_000);
+        assert_eq!(time.display_ecmascript().to_string(), "-009999-01-02T01:59:59.000Z");
+    }
+
     #[test]
     fn to_timestamp_fallback_ok() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(12345);

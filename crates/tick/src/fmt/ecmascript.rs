@@ -11,22 +11,26 @@ use jiff::fmt::temporal;
 use crate::Error;
 use crate::fmt::{Iso8601, Rfc2822, UnixSeconds};
 
-/// Fixed-width parser and formatter for the ECMAScript Date Time String Format.
+/// Parser and formatter for the ECMAScript Date Time String Format.
 ///
-/// For any non-negative year the output has the fixed 24-character shape
+/// For years 0000 through 9999 the output has the fixed 24-character shape
 /// `YYYY-MM-DDTHH:MM:SS.sssZ`: a four-digit year, two-digit calendar and clock
 /// fields, exactly three fractional digits (milliseconds, truncated rather than
 /// rounded), and the UTC designator `Z`. For example: `2024-08-06T21:30:00.123Z`.
-/// Years before 1 CE - reachable only by saturation - are the sole exception and
-/// render wider, in the expanded-year form described in the Range section below.
 ///
-/// Unlike the variable-precision output of [`Iso8601`] - which trims trailing
-/// fractional zeros and so varies in width - this fixed width keeps tabular
-/// columns aligned and guarantees that lexicographic ordering matches
-/// chronological ordering.
+/// Years outside `0000..=9999` render in the ECMAScript expanded-year form - a
+/// sign and six year digits, e.g. `-009999-01-02T01:59:59.000Z` - exactly as the
+/// ECMAScript `Date.prototype.toISOString` method does. Such years are reachable
+/// through any constructor (for example [`FromStr`]), not only by saturation, so
+/// the 24-character width is a property of the `0000..=9999` range, not an
+/// invariant of the type.
 ///
-/// The format is defined by the [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format)
-/// and is the profile produced by JavaScript's `Date.prototype.toISOString`.
+/// Within `0000..=9999` this fixed width - unlike the variable-precision output of
+/// [`Iso8601`], which trims trailing fractional zeros - keeps tabular columns
+/// aligned.
+///
+/// The format is defined by the [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format),
+/// the profile produced by the ECMAScript `Date.prototype.toISOString` method.
 ///
 /// # UTC and time zones
 ///
@@ -53,10 +57,8 @@ use crate::fmt::{Iso8601, Rfc2822, UnixSeconds};
 /// `-9999..=9999`. Construct one fallibly with [`TryFrom`], or infallibly (with
 /// out-of-range instants saturated to the nearest boundary) via
 /// [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript].
-/// The 24-character width above assumes a non-negative year; years before 1 CE -
-/// reachable only by saturating an instant before the minimum - render using the
-/// ECMAScript expanded-year form (a leading `-` and six year digits) and are
-/// correspondingly wider.
+/// Only the `0000..=9999` sub-range renders at the fixed 24-character width; years
+/// outside it use the wider ECMAScript expanded-year form.
 ///
 /// # Examples
 ///
@@ -79,15 +81,15 @@ crate::thread_aware_move!(EcmaScript);
 
 /// Prints the fixed-width ECMAScript representation.
 ///
-/// `precision(Some(3))` pins the fractional component to exactly three digits
-/// and truncates (does not round) any finer precision. Years outside `1..=9999`
-/// use the ECMAScript expanded-year form, keeping the output round-trippable.
+/// `precision(Some(3))` pins the fractional component to exactly three digits and
+/// truncates (does not round) any finer precision. Years outside `0000..=9999` use
+/// the ECMAScript expanded-year form.
 static ECMASCRIPT_PRINTER: temporal::DateTimePrinter = temporal::DateTimePrinter::new().precision(Some(3));
 
 impl EcmaScript {
     /// The largest value that can be represented by `EcmaScript`.
     ///
-    /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `EcmaScript`.
@@ -239,6 +241,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_with_offset_normalizes_to_utc() {
+        // Parsing accepts a numeric UTC offset; formatting normalizes to `Z`.
+        let stamp: EcmaScript = "2024-08-06T14:30:00-07:00".parse().unwrap();
+
+        assert_eq!(stamp.to_string(), "2024-08-06T21:30:00.000Z");
+    }
+
+    #[test]
     fn parse_min() {
         let stamp: EcmaScript = "1970-01-01T00:00:00Z".parse().unwrap();
 
@@ -273,15 +283,17 @@ mod tests {
 
     #[test]
     fn negative_year_renders_in_expanded_form() {
-        // Years before 1 CE are reachable only by saturating an instant before
-        // the minimum. They render in the ECMAScript expanded-year form (a
-        // leading `-` and six year digits), which - unlike a bare `-9999`
-        // prefix - round-trips back to the same value.
+        // Years outside `0000..=9999` render in the ECMAScript expanded-year form
+        // (a sign and six year digits), matching `Date.prototype.toISOString`.
         let ecma = EcmaScript::from_timestamp(Timestamp::MIN);
         let rendered = ecma.to_string();
 
         assert_eq!(rendered, "-009999-01-02T01:59:59.000Z");
         assert_eq!(rendered.parse::<EcmaScript>().unwrap(), ecma);
+
+        // Expanded-year timestamps are also reachable by parsing directly.
+        let parsed = "-000500-01-01T00:00:00Z".parse::<EcmaScript>().unwrap();
+        assert_eq!(parsed.to_string(), "-000500-01-01T00:00:00.000Z");
     }
 
     #[test]
