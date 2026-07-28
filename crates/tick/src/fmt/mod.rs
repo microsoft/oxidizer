@@ -139,24 +139,26 @@ fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
 /// given direction.
 fn saturating_bound(negative: bool) -> SystemTime {
     // How large an offset `SystemTime` accepts is platform defined and `std` does not expose
-    // it, so the boundary is located with a binary search over whole seconds. This path is
-    // live: where `SystemTime` is FILETIME-based its epoch is `1601-01-01T00:00:00Z`, so
-    // every earlier instant a `jiff::Timestamp` can hold (down to year -9999) lands here.
-    let mut lower = 0;
-    let mut upper = u64::MAX;
+    // it, so the boundary is discovered here. This path is live: where `SystemTime` is
+    // FILETIME-based its epoch is `1601-01-01T00:00:00Z`, so every earlier instant a
+    // `jiff::Timestamp` can hold (down to year -9999) lands here.
+    //
+    // Representability shrinks monotonically as the offset grows, so the largest acceptable
+    // offset is assembled one bit at a time from the most significant down: keep a bit
+    // whenever the offset it produces still applies. A fixed trip count of `u64::BITS` makes
+    // the walk incapable of looping, which a `lower`/`upper` binary search is not.
+    let mut magnitude = 0_u64;
 
-    while lower < upper {
-        let candidate = lower + (upper - lower) / 2 + 1;
+    for bit in (0..u64::BITS).rev() {
+        let candidate = magnitude | (1 << bit);
 
         if checked_offset(negative, Duration::from_secs(candidate)).is_some() {
-            lower = candidate;
-        } else {
-            upper = candidate - 1;
+            magnitude = candidate;
         }
     }
 
-    checked_offset(negative, Duration::from_secs(lower))
-        .expect("the loop above only ever advances `lower` to an offset it verified as representable")
+    checked_offset(negative, Duration::from_secs(magnitude))
+        .expect("the loop above only ever keeps a bit whose resulting offset it verified as applicable")
 }
 
 #[cfg(test)]
