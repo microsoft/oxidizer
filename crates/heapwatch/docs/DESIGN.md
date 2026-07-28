@@ -69,6 +69,16 @@ classes. This is inherent to the trait, not a shortcut, and it says nothing
 about how the total compares to RSS: heap pages requested but never touched, or
 swapped out, are not resident at all.
 
+**Demand, not footprint.** Because the wrapper counts what callers asked for,
+its numbers are invariant across inner allocators: swapping the system allocator
+for mimalloc leaves every counter identical, since the call pattern did not
+change. That invariance is deliberate — it is what makes heapwatch the control
+variable when something else changes — but it also means heapwatch alone cannot
+say whether an allocator swap reduced the memory a process actually holds.
+Retention, arena caching, and fragmentation are supply-side quantities, visible
+only to the allocator or the OS. Pairing the two is sketched under *Allocator
+footprint reporting* in [`TODO.md`](./TODO.md).
+
 ## The mechanism
 
 One idea: **accumulate per thread without synchronization, publish in batches**.

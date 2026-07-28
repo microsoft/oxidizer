@@ -93,3 +93,28 @@ of more allocations or larger ones — a question the current counters can only
 answer by division. The cost is one extra branch and increment on the record
 path, plus a wider commit; whether that is worth it depends on how often the
 distinction actually drives a decision.
+
+## 8. Allocator footprint reporting
+
+Counters record what callers *requested*, so they are invariant across inner
+allocators by construction: swapping the system allocator for mimalloc leaves
+every number identical, because the call pattern did not change. What does
+change is the memory the allocator holds from the OS — size-class rounding,
+free-list retention, arena caching, fragmentation, and metadata — and none of
+that is reachable through `GlobalAlloc`.
+
+Most production allocators do report it: mimalloc's `mi_process_info` yields
+current and peak committed bytes, and jemalloc's `mallctl` exposes
+`stats.active`, `stats.resident`, `stats.mapped`, and `stats.retained`. An
+optional trait that an inner allocator could implement — one method returning
+committed bytes, called on demand rather than per allocation — would let
+heapwatch report demand and footprint side by side. The ratio between them is
+the figure that actually moves when the allocator changes, and it is also the
+per-component attribution the OS cannot give: an allocator instance linked into
+one library measures that library's heap, not the whole process.
+
+The reasons to keep it optional and off the recording path: the figures come
+from the allocator's own bookkeeping, whose cost and freshness vary (jemalloc
+needs an epoch advance to refresh, mimalloc merges thread-local stats), and no
+equivalent counter exists for the system allocator — so the trait has to be
+implementable only where it means something.
