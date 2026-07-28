@@ -150,7 +150,9 @@ fn saturating_bound(negative: bool) -> SystemTime {
     let mut magnitude = 0_u64;
 
     for bit in (0..u64::BITS).rev() {
-        let candidate = magnitude | (1 << bit);
+        // Addition rather than a bitwise set: this bit is always clear in `magnitude`, since
+        // the walk visits each bit once and never revisits a higher one.
+        let candidate = magnitude + (1 << bit);
 
         if checked_offset(negative, Duration::from_secs(candidate)).is_some() {
             magnitude = candidate;
@@ -161,6 +163,7 @@ fn saturating_bound(negative: bool) -> SystemTime {
         .expect("the loop above only ever keeps a bit whose resulting offset it verified as applicable")
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
