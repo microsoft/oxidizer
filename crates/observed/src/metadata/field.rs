@@ -160,4 +160,11 @@ mod field_tests {
         assert_eq!(entry.instrument_name(), None);
         assert_eq!(entry.kind(), None);
     }
+
+    #[test]
+    fn log_field_entry_display_renders_the_key() {
+        // `Display` is how the log key reaches diagnostics, so it must render
+        // the bare key without any wrapper formatting.
+        assert_eq!(LogFieldEntry::new("http.request.id").to_string(), "http.request.id");
+    }
 }

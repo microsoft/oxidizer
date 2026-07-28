@@ -2207,4 +2207,114 @@ mod coverage_tests {
         });
         assert!(matches!(strip_type_wrappers(&grouped), syn::Type::Path(_)));
     }
+
+    #[test]
+    fn event_args_requires_a_string_name() {
+        let err = syn::parse_str::<EventArgs>("123")
+            .err()
+            .expect("a non-string event name must be rejected");
+        assert!(err.to_string().contains("requires a string event name"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn event_args_accepts_trailing_comma() {
+        let args = syn::parse_str::<EventArgs>(r#""e","#).expect("a trailing comma is allowed");
+        assert_eq!(args.name, "e");
+        assert!(!args.disabled);
+    }
+
+    #[test]
+    fn event_args_rejects_unknown_flag() {
+        let err = syn::parse_str::<EventArgs>(r#""e", bogus"#)
+            .err()
+            .expect("an unknown flag must be rejected");
+        assert!(
+            err.to_string().contains("unknown `#[event(...)]` flag `bogus`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn log_message_followed_by_named_option_generates() {
+        // The comma between the positional message and `name = "..."` drives the
+        // separator branch of the log attribute body parser.
+        expect_ok(r#"#[event("e")] #[info("m", name = "log.name")] struct E { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn duplicate_log_name_option_is_rejected() {
+        let err = expect_err(r#"#[event("e")] #[info("m", name = "a", name = "b")] struct E { #[unredacted] v: i64 }"#);
+        assert!(err.contains("duplicate `name` setting"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn unknown_metric_option_is_rejected() {
+        let err = expect_err(r#"#[event("e")] #[counter(bogus = "x")] struct E { #[unredacted] v: i64 }"#);
+        assert!(err.contains("unknown metric option `bogus`"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn non_ident_struct_attribute_is_ignored() {
+        // A multi-segment attribute path has no single ident, so it can be neither
+        // a log-severity nor a metric-kind helper and is skipped.
+        expect_ok(r#"#[event("e")] #[info] #[some::other] struct E { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn log_attribute_written_as_name_value_is_rejected() {
+        let err = expect_err(r#"#[event("e")] #[info = "m"] struct E { #[unredacted] v: i64 }"#);
+        assert!(err.contains("not `= value`"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn metric_attribute_written_as_name_value_is_rejected() {
+        let err = expect_err(r#"#[event("e")] #[counter = "c"] struct E { #[unredacted] v: i64 }"#);
+        assert!(err.contains("not `= value`"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn event_attr_reemits_struct_without_helper_attributes() {
+        // The attribute entry point re-emits the struct alongside the generated
+        // impl, with every consumed helper attribute stripped.
+        let attr: TokenStream = r#""http.request""#.parse().expect("failed to tokenize attribute");
+        let item: TokenStream = r#"#[info("hi")] struct E { #[unredacted] v: i64 }"#
+            .parse()
+            .expect("failed to tokenize item");
+
+        let expanded = event_attr(attr, item).expect("attribute expansion should succeed");
+
+        let file: syn::File = syn::parse2(expanded).expect("generated code should parse");
+        let syn::Item::Struct(reemitted) = &file.items[0] else {
+            panic!("the first generated item should be the re-emitted struct");
+        };
+        assert!(reemitted.attrs.is_empty(), "struct-level helpers should be stripped");
+        assert!(
+            reemitted.fields.iter().all(|field| field.attrs.is_empty()),
+            "field-level helpers should be stripped"
+        );
+    }
+
+    #[test]
+    fn event_attr_propagates_codegen_errors() {
+        // The entry point must surface codegen failures rather than re-emitting
+        // a struct with no `Event` impl.
+        let attr: TokenStream = r#""e""#.parse().expect("failed to tokenize attribute");
+        let item: TokenStream = "struct E(i64);".parse().expect("failed to tokenize item");
+
+        let err = event_attr(attr, item).expect_err("a tuple struct must be rejected");
+
+        assert!(err.to_string().contains("named fields"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn strip_helper_attrs_clears_tuple_struct_field_attributes() {
+        // Tuple structs are rejected by codegen, but the re-emit helper stays
+        // total over `Fields` so it never silently leaves helpers behind.
+        let item: ItemStruct = syn::parse_str(r"#[info] struct E(#[unredacted] i64);").expect("failed to parse tuple struct");
+
+        let stripped = strip_helper_attrs(item);
+
+        assert!(stripped.attrs.is_empty());
+        assert!(stripped.fields.iter().all(|field| field.attrs.is_empty()));
+    }
 }

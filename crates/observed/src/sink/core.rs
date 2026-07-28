@@ -489,4 +489,48 @@ mod tests {
         noop.dispatch_to_processors(&DummyDyn, &description);
         noop.flush().expect("noop flush should succeed");
     }
+
+    /// A processor whose `flush` always fails, used to pin the error-propagation
+    /// contract of [`Sink::flush`] and of the blanket `EventProcessor for Arc<T>`.
+    struct FailingFlushProcessor;
+
+    impl EventProcessor for FailingFlushProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            false
+        }
+
+        fn process(&self, _event: &EventView<'_>) {}
+
+        fn flush(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Err("flush boom".into())
+        }
+    }
+
+    fn failing_sink(id: &'static str) -> Sink {
+        Sink::new(
+            id,
+            vec![Arc::new(FailingFlushProcessor) as Arc<dyn EventProcessor>],
+            SimpleClock::new_frozen(),
+        )
+    }
+
+    #[test]
+    fn single_sink_flush_propagates_processor_error() {
+        let err = failing_sink("failing").flush().expect_err("flush must surface the processor error");
+        assert_eq!(err.to_string(), "flush boom");
+    }
+
+    #[test]
+    fn composite_sink_flush_propagates_first_child_error() {
+        let composite = Sink::composite([failing_sink("failing"), Sink::noop()]);
+        let err = composite.flush().expect_err("composite flush must surface the child error");
+        assert_eq!(err.to_string(), "flush boom");
+    }
+
+    #[test]
+    fn arc_event_processor_flush_delegates_to_inner() {
+        let processor: Arc<dyn EventProcessor> = Arc::new(FailingFlushProcessor);
+        let err = EventProcessor::flush(&processor).expect_err("Arc must delegate flush to the inner processor");
+        assert_eq!(err.to_string(), "flush boom");
+    }
 }

@@ -111,14 +111,9 @@ impl<F: Future> Future for Transferred<F> {
 }
 
 // M-TYPES-SEND: verify `Transfer` and `Transferred<F: Send>` are `Send`.
-const _: () = {
-    const fn assert_send<T: Send>() {}
-    const fn assert_transferred_send<F: Send>() {
-        assert_send::<Transferred<F>>();
-    }
-    assert_send::<Transfer>();
-    assert_transferred_send::<()>();
-};
+// Asserted from a `#[test]` in the coverage-off `tests` module below rather
+// than a top-level `const _` block: a const block's `const fn` bodies emit
+// coverage regions that can never be executed, which fails the coverage gate.
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
@@ -129,9 +124,23 @@ mod tests {
     use tick::SimpleClock;
 
     use crate::Enrichment;
+    use crate::context::{Transfer, Transferred};
     use crate::enrichment::EnrichFnExt;
     use crate::processing::EventProcessor;
     use crate::sink::{Sink, SinkId};
+
+    #[test]
+    fn transfer_and_transferred_are_send() {
+        const fn assert_send<T: Send>() {}
+        const fn assert_transferred_send<F: Send>() {
+            assert_send::<Transferred<F>>();
+        }
+
+        // `Transfer` is handed across threads and `Transferred` wraps a future
+        // polled on another runtime thread, so both must stay `Send`.
+        assert_send::<Transfer>();
+        assert_transferred_send::<()>();
+    }
 
     const TEST_DC: DataClass = DataClass::new("test", "public");
     const EMPTY_PROCESSORS: Vec<Arc<dyn EventProcessor>> = Vec::new();

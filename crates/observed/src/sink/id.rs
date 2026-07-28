@@ -91,4 +91,11 @@ mod tests {
         assert_eq!(from_str, APP);
         assert_eq!(from_str.label(), "app");
     }
+
+    #[test]
+    fn display_renders_the_label() {
+        // `Display` is what surfaces the id in error messages, so it must
+        // render the bare label without any wrapper formatting.
+        assert_eq!(SinkId::new("app").to_string(), "app");
+    }
 }

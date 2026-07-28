@@ -2838,7 +2838,6 @@ dependencies = [
  "data_privacy",
  "observed",
  "opentelemetry",
- "opentelemetry_sdk",
  "testing_aids",
  "tick",
  "tokio",

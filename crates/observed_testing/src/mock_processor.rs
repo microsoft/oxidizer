@@ -668,10 +668,10 @@ mod coverage_tests {
         // `ExpectedEnrichmentEntry == EnrichmentEntry` (reverse direction).
         let entry = EnrichmentEntry::unclassified("k", 1i64);
         let expected_entry = ExpectedEnrichmentEntry::new("k", 1i64);
-        assert!(expected_entry == entry);
+        assert_eq!(expected_entry, entry);
 
         // `ExpectedEventDescription == EventDescription` (reverse direction).
         let expected_desc = ExpectedEventDescription::new("test.probe", Severity::Info).log();
-        assert!(expected_desc == ProbeEvent::DESCRIPTION);
+        assert_eq!(expected_desc, ProbeEvent::DESCRIPTION);
     }
 }
