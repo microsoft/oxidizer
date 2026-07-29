@@ -201,20 +201,21 @@ impl<T, A: Allocator + Clone> Drop for Drain<'_, '_, T, A> {
         let drop_len = iter.len();
         let mut vec = self.vec;
         let _guard = TailGuard(self);
-        if drop_len > 0 {
-            // SAFETY: re-derive a write-provenance pointer to the remaining
-            // drained elements from the vector itself (`drop_ptr` only supplies
-            // the offset within the same buffer), and drop each exactly once.
-            unsafe {
-                let v = vec.as_mut();
-                let remaining = if mem::size_of::<T>() == 0 {
-                    v.as_mut_ptr()
-                } else {
-                    let offset = drop_ptr.offset_from_unsigned(v.as_ptr());
-                    v.as_mut_ptr().add(offset)
-                };
-                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(remaining, drop_len));
-            }
+        if drop_len == 0 {
+            return;
+        }
+        // SAFETY: re-derive a write-provenance pointer to the remaining
+        // drained elements from the vector itself (`drop_ptr` only supplies
+        // the offset within the same buffer), and drop each exactly once.
+        unsafe {
+            let v = vec.as_mut();
+            let remaining = if mem::size_of::<T>() == 0 {
+                v.as_mut_ptr()
+            } else {
+                let offset = drop_ptr.offset_from_unsigned(v.as_ptr());
+                v.as_mut_ptr().add(offset)
+            };
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(remaining, drop_len));
         }
     }
 }
