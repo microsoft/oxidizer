@@ -62,6 +62,10 @@ impl UnixSeconds {
     ///
     /// This represents a Unix system time of `9999-12-30T22:00:00Z`, the
     /// whole-second floor of the maximum jiff timestamp.
+    #[expect(
+        clippy::duration_suboptimal_units,
+        reason = "UnixSeconds represents whole seconds since the Unix epoch, so seconds is the natural unit, matching to_secs() and Display"
+    )]
     pub const MAX: Self = Self(Duration::from_secs(253_402_207_200));
 
     /// The Unix epoch represented as `UnixSeconds`.
