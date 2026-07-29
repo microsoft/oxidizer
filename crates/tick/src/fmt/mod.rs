@@ -22,8 +22,10 @@
 //! always infallible.
 //!
 //! To retrieve the current system time in the respective format, use the [`Clock::system_time_as`][crate::Clock::system_time_as] function
-//! which retrieves current system time and does the automatic conversion to the output format. This conversion never fails because clock
-//! always returns a valid and normalized `SystemTime`.
+//! which retrieves current system time and does the automatic conversion to the output format. That function panics when the target
+//! format cannot represent the clock's current instant, which a controlled clock can produce: [`UnixSeconds`] rejects anything before
+//! the Unix epoch, and [`Iso8601`] and [`Rfc2822`] reject instants outside the platform's `SystemTime` range. Use
+//! [`Clock::system_time`][crate::Clock::system_time] with the target type's [`TryFrom`] implementation where that has to be handled.
 //!
 //! # Representable range
 //!
@@ -106,12 +108,11 @@ pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
 
-/// Converts `timestamp` into a [`SystemTime`], or returns `None` when the platform cannot
-/// represent that instant.
+/// Converts `timestamp` to `SystemTime` if the platform can represent it.
 ///
-/// The representable range of [`SystemTime`] is platform defined -- where it is FILETIME
-/// based, its epoch is `1601-01-01T00:00:00Z` and nothing earlier can be expressed -- so the
-/// platform is asked directly rather than assumed.
+/// Returns `None` otherwise. The representable range of [`SystemTime`] is platform defined:
+/// where it is FILETIME based, its epoch is `1601-01-01T00:00:00Z` and nothing earlier can be
+/// expressed, so the platform is asked directly rather than assumed.
 fn checked_system_time(timestamp: Timestamp) -> Option<SystemTime> {
     let offset = timestamp.as_duration();
     let magnitude = offset.unsigned_abs();

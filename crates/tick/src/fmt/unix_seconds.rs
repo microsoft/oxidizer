@@ -215,8 +215,8 @@ mod tests {
 
     #[test]
     fn from_pre_epoch_system_time_is_rejected() {
-        // AB#7661495: the offset is unsigned, so a pre-epoch instant has no honest
-        // representation. It used to be mirrored to the same distance after the epoch.
+        // The offset is unsigned, so a pre-epoch instant has no representation and is
+        // rejected. AB#7661495.
         let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
 
         UnixSeconds::try_from(before_epoch).unwrap_err();

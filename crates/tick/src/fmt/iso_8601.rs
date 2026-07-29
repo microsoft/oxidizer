@@ -17,7 +17,11 @@ use crate::fmt::ensure_system_time_representable;
 /// consistency across different systems and regions.
 ///
 /// This type also supports parsing [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339)
-/// timestamps, and the output is always compatible with both RFC 3339 and ISO 8601.
+/// timestamps. Output is always ISO 8601, and is also valid RFC 3339 for every year from
+/// `0000` through `9999`. RFC 3339 fixes the year at four digits, so an earlier instant,
+/// which only a platform whose [`SystemTime`] reaches that far back can hold in the first
+/// place, is written with an ISO 8601 expanded year such as `-000500-01-01T00:00:00Z` and is
+/// not RFC 3339.
 ///
 /// Examples:
 ///
@@ -281,9 +285,8 @@ mod tests {
 
     #[test]
     fn parse_rejects_instants_system_time_cannot_represent() {
-        // AB#7663342: converting a pre-1601 instant used to panic where `SystemTime` is
-        // FILETIME based. Such instants are now rejected at the point of parsing, so a value
-        // that exists can always be converted.
+        // On FILETIME-based platforms, parsing rejects pre-1601 instants, so every value that
+        // exists can be converted back. AB#7663342.
         for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "-000500-01-01T00:00:00Z"] {
             let timestamp: jiff::Timestamp = input.parse().unwrap();
             let parsed = input.parse::<Iso8601>();

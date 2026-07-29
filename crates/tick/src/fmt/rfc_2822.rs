@@ -214,9 +214,9 @@ mod tests {
 
     #[test]
     fn display_cannot_fail_for_any_reachable_value() {
-        // AB#7661499: `to_string` used to panic because `Display` returned an error for a
-        // year RFC 2822 cannot encode. Such a value is now unreachable -- parsing yields a
-        // four-digit year, and `TryFrom<SystemTime>` rejects anything before year 0.
+        // Public construction rejects every instant the formatter cannot encode: parsing
+        // yields a four-digit year, and `TryFrom<SystemTime>` rejects anything before year 0.
+        // AB#7661499.
         for input in ["Thu, 01 Jan 1970 00:00:00 GMT", "Tue, 06 Aug 2024 21:30:00 GMT"] {
             let rfc: Rfc2822 = input.parse().unwrap();
 
