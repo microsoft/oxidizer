@@ -141,7 +141,7 @@ fn ensure_system_time_representable(timestamp: Timestamp) -> Result<Timestamp, E
 ///
 /// Named separately so it stays reachable from tests. Whether [`checked_system_time`] can
 /// fail at all is a property of the platform, so where `SystemTime` spans the whole jiff
-/// range no input produces this error and the message would otherwise go unexercised.
+/// range no input produces this error and the message would otherwise never be exercised.
 fn system_time_out_of_range() -> Error {
     Error::out_of_range("the instant is outside the range that `SystemTime` can represent on this platform")
 }
