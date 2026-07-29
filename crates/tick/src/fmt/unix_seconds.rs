@@ -58,7 +58,7 @@ pub struct UnixSeconds(pub(super) Duration);
 crate::thread_aware_move!(UnixSeconds);
 
 impl UnixSeconds {
-    /// The largest value that be can represented by `UnixSeconds`.
+    /// The largest value that can be represented by `UnixSeconds`.
     ///
     /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.

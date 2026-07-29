@@ -19,11 +19,15 @@ use crate::fmt::{Iso8601, Rfc2822, UnixSeconds};
 /// rounded), and the UTC designator `Z`. For example: `2024-08-06T21:30:00.123Z`.
 ///
 /// Years outside `0000..=9999` render in the ECMAScript expanded-year form - a
-/// sign and six year digits, e.g. `-009999-01-02T01:59:59.000Z` - exactly as the
-/// ECMAScript `Date.prototype.toISOString` method does. Such years are reachable
-/// through any constructor (for example [`FromStr`]), not only by saturation, so
-/// the 24-character width is a property of the `0000..=9999` range, not an
-/// invariant of the type.
+/// sign and six year digits, e.g. `-009999-01-02T01:59:59.000Z` - matching the
+/// shape the ECMAScript `Date.prototype.toISOString` method produces. Such years
+/// are reachable through any constructor (for example [`FromStr`]), not only by
+/// saturation, so the 24-character width is a property of the `0000..=9999` range,
+/// not an invariant of the type.
+///
+/// The representable year range is `-9999..=9999`, narrower than the
+/// `-271821..=275760` range ECMAScript itself supports; years ECMAScript can
+/// express beyond it (such as `+010000`) are rejected rather than represented.
 ///
 /// Within `0000..=9999` this fixed width - unlike the variable-precision output of
 /// [`Iso8601`], which trims trailing fractional zeros - keeps tabular columns
@@ -35,30 +39,34 @@ use crate::fmt::{Iso8601, Rfc2822, UnixSeconds};
 /// # UTC and time zones
 ///
 /// The ECMAScript Date Time String Format is always represented in the UTC time
-/// zone with the `Z` designator.
+/// zone, using the UTC designator `Z`.
 ///
 /// # Parsing
 ///
 /// Parsing accepts any [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339)
-/// or ISO 8601 timestamp, of which the ECMAScript profile is a subset. Regardless
-/// of the input precision, formatting always emits the fixed-width profile above.
+/// or ISO 8601 timestamp; the ECMAScript profile is a subset of both. Regardless
+/// of the input precision, formatting always emits the ECMAScript profile
+/// described above.
 ///
 /// # Serialization and deserialization
 ///
 /// `EcmaScript` implements the `Serialize` and `Deserialize` traits from the
 /// `serde_core` crate. The system time is serialized as a string using the
-/// fixed-width ECMAScript Date Time String Format.
+/// ECMAScript Date Time String Format.
 ///
 /// The serialization support is available when the `serde` feature is enabled.
 ///
 /// # Range
 ///
 /// The wrapped instant is a [`jiff::Timestamp`], whose year is in the range
-/// `-9999..=9999`. Construct one fallibly with [`TryFrom`], or infallibly (with
-/// out-of-range instants saturated to the nearest boundary) via
-/// [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript].
-/// Only the `0000..=9999` sub-range renders at the fixed 24-character width; years
-/// outside it use the wider ECMAScript expanded-year form.
+/// `-9999..=9999`. Construct an `EcmaScript` fallibly with [`TryFrom`] or
+/// [`FromStr`]; both reject instants outside that range. To format an arbitrary
+/// [`SystemTime`] without the possibility of failure - saturating out-of-range
+/// instants to the nearest boundary - use
+/// [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript],
+/// which returns a formatter rather than an `EcmaScript` value. Only the
+/// `0000..=9999` sub-range renders at the fixed 24-character width; years outside
+/// it use the wider ECMAScript expanded-year form.
 ///
 /// # Examples
 ///
@@ -89,8 +97,8 @@ static ECMASCRIPT_PRINTER: temporal::DateTimePrinter = temporal::DateTimePrinter
 impl EcmaScript {
     /// The largest value that can be represented by `EcmaScript`.
     ///
-    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
-    pub const MAX: Self = Self(Timestamp::MAX);
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999Z`.
+    pub const MAX: Self = Self(Timestamp::constant(253_402_207_200, 999_000_000));
 
     /// The Unix epoch represented as `EcmaScript`.
     ///
@@ -101,12 +109,26 @@ impl EcmaScript {
         self.0.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs()
     }
 
-    /// Wraps a [`Timestamp`] already known to be within the representable range.
+    /// Truncates `timestamp` to the millisecond resolution of the ECMAScript Date
+    /// Time String Format, yielding a canonical value whose equality, ordering,
+    /// hashing, `Display`, and serde representations all agree.
+    fn canonicalize(timestamp: Timestamp) -> Self {
+        // Floor to the millisecond at or before the instant. Flooring (rather than
+        // truncating toward zero) matches the civil-time truncation the printer
+        // applies, so a pre-epoch instant keeps the same rendered fraction.
+        let floored_nanos = timestamp.as_nanosecond().div_euclid(1_000_000) * 1_000_000;
+        Self(
+            Timestamp::from_nanosecond(floored_nanos)
+                .expect("flooring a valid timestamp to a millisecond boundary stays within the representable range"),
+        )
+    }
+
+    /// Wraps a [`Timestamp`], truncating it to millisecond precision.
     ///
     /// Used by [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript]
     /// to build a value from an already-saturated timestamp.
-    pub(crate) const fn from_timestamp(timestamp: Timestamp) -> Self {
-        Self(timestamp)
+    pub(crate) fn from_timestamp(timestamp: Timestamp) -> Self {
+        Self::canonicalize(timestamp)
     }
 }
 
@@ -115,7 +137,7 @@ impl FromStr for EcmaScript {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let timestamp = s.parse::<jiff::Timestamp>().map_err(Error::jiff)?;
-        Ok(Self(timestamp))
+        Ok(Self::canonicalize(timestamp))
     }
 }
 
@@ -142,25 +164,25 @@ impl TryFrom<SystemTime> for EcmaScript {
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
-        Ok(Self(timestamp))
+        Ok(Self::canonicalize(timestamp))
     }
 }
 
 impl From<Iso8601> for EcmaScript {
     fn from(value: Iso8601) -> Self {
-        Self(value.0)
+        Self::canonicalize(value.0)
     }
 }
 
 impl From<Rfc2822> for EcmaScript {
     fn from(value: Rfc2822) -> Self {
-        Self(value.0)
+        Self::canonicalize(value.0)
     }
 }
 
 impl From<UnixSeconds> for EcmaScript {
     fn from(value: UnixSeconds) -> Self {
-        Self(Timestamp::UNIX_EPOCH + value.0)
+        Self::canonicalize(Timestamp::UNIX_EPOCH + value.0)
     }
 }
 
@@ -216,6 +238,27 @@ mod tests {
         let formatted = EcmaScript::try_from(at).unwrap();
 
         assert_eq!(formatted.to_string(), "1970-01-01T00:00:08.999Z");
+    }
+
+    #[test]
+    fn sub_millisecond_precision_is_canonical() {
+        // Two instants differing only below millisecond resolution collapse to the
+        // same canonical value, so equality and Display agree.
+        let a = EcmaScript::try_from(SystemTime::UNIX_EPOCH + Duration::new(8, 123_400_000)).unwrap();
+        let b = EcmaScript::try_from(SystemTime::UNIX_EPOCH + Duration::new(8, 123_900_000)).unwrap();
+
+        assert_eq!(a, b);
+        assert_eq!(a.to_string(), "1970-01-01T00:00:08.123Z");
+    }
+
+    #[test]
+    fn pre_epoch_sub_millisecond_floors_to_civil_millisecond() {
+        // Flooring is by civil time (toward negative infinity), matching the
+        // printer, not toward zero, so a pre-epoch instant keeps its fraction.
+        let ecma: EcmaScript = "1969-12-31T23:59:59.999999999Z".parse().unwrap();
+
+        assert_eq!(ecma.to_string(), "1969-12-31T23:59:59.999Z");
+        assert_eq!(ecma, "1969-12-31T23:59:59.999Z".parse().unwrap());
     }
 
     #[test]
@@ -349,5 +392,17 @@ mod tests {
 
         let deserialized: EcmaScript = serde_json::from_str(&serialized).unwrap();
         assert_eq!(ecma, deserialized);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn serde_round_trip_is_identity_for_sub_millisecond() {
+        // Canonicalizing on construction makes serialize -> deserialize an identity,
+        // even for an instant carrying sub-millisecond precision on the way in.
+        let original = EcmaScript::try_from(SystemTime::UNIX_EPOCH + Duration::new(8, 123_456_789)).unwrap();
+        let serialized = serde_json::to_string(&original).unwrap();
+        let deserialized: EcmaScript = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(original, deserialized);
     }
 }

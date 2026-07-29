@@ -9,7 +9,7 @@
 //! - [`Iso8601`]: Parsing and formatting of system time in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format.
 //!   For example, `2024-08-06T21:30:00Z`.
 //!
-//! - [`EcmaScript`]: Fixed-width parsing and formatting of system time in the
+//! - [`EcmaScript`]: Parsing and formatting of system time in the
 //!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format), the profile produced by
 //!   the ECMAScript `Date.prototype.toISOString` method. For example, `2024-08-06T21:30:00.123Z`.
 //!
@@ -180,26 +180,27 @@ mod tests {
 
     #[test]
     fn max_values_are_aligned() {
-        // All MAX values should represent 9999-12-30T22:00:00.999999999Z
+        // Iso8601, Rfc2822, and UnixSeconds share the full-precision boundary
+        // 9999-12-30T22:00:00.999999999Z.
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();
-        let ecma_max: SystemTime = EcmaScript::MAX.into();
 
         assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
         assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
-        assert_eq!(iso_max, ecma_max, "Iso8601::MAX and EcmaScript::MAX should be equal");
 
-        // Cross-format conversions at MAX should preserve the value
+        // Conversions among the full-precision formats preserve the boundary.
         assert_eq!(Iso8601::from(Rfc2822::MAX), Iso8601::MAX);
         assert_eq!(Iso8601::from(UnixSeconds::MAX), Iso8601::MAX);
-        assert_eq!(Iso8601::from(EcmaScript::MAX), Iso8601::MAX);
         assert_eq!(Rfc2822::from(Iso8601::MAX), Rfc2822::MAX);
         assert_eq!(Rfc2822::from(UnixSeconds::MAX), Rfc2822::MAX);
-        assert_eq!(Rfc2822::from(EcmaScript::MAX), Rfc2822::MAX);
         assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
         assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
-        assert_eq!(UnixSeconds::from(EcmaScript::MAX), UnixSeconds::MAX);
+
+        // EcmaScript is a millisecond-resolution format, so its MAX is the same
+        // boundary floored to the millisecond: 9999-12-30T22:00:00.999Z. Converting
+        // any higher-precision MAX into EcmaScript truncates it to EcmaScript::MAX.
+        assert_eq!(EcmaScript::MAX.to_string(), "9999-12-30T22:00:00.999Z");
         assert_eq!(EcmaScript::from(Iso8601::MAX), EcmaScript::MAX);
         assert_eq!(EcmaScript::from(Rfc2822::MAX), EcmaScript::MAX);
         assert_eq!(EcmaScript::from(UnixSeconds::MAX), EcmaScript::MAX);

@@ -25,7 +25,7 @@ pub trait SystemTimeExt: sealed::Sealed {
 
     /// Returns a value that formats the [`SystemTime`] in the ECMAScript Date Time String Format.
     ///
-    /// For any non-negative year the output has the fixed 24-character shape
+    /// For years `0000` through `9999` the output has the fixed 24-character shape
     /// `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to millisecond precision. See
     /// [`EcmaScript`][crate::fmt::EcmaScript] for details.
     ///
