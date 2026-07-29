@@ -68,7 +68,7 @@ use crate::Error;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UnixSeconds(pub(super) Duration);
+pub struct UnixSeconds(Duration);
 
 crate::thread_aware_move!(UnixSeconds);
 

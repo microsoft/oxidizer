@@ -95,7 +95,7 @@ use crate::fmt::ensure_system_time_representable;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Iso8601(pub(super) Timestamp);
+pub struct Iso8601(Timestamp);
 
 crate::thread_aware_move!(Iso8601);
 
@@ -305,12 +305,31 @@ mod tests {
 
     #[test]
     fn to_system_time_never_panics_for_parsed_values() {
-        // Every instant that parses is representable, so the round-trip is exact.
+        // Every instant that parses is representable. These inputs are whole seconds, so
+        // they survive the round trip whatever resolution the platform's `SystemTime` has.
         for input in ["1601-01-01T00:00:00Z", "1970-01-01T00:00:00Z", "2024-08-06T21:30:00Z"] {
             let iso: Iso8601 = input.parse().unwrap();
 
             assert_eq!(Iso8601::try_from(SystemTime::from(iso)).unwrap(), iso, "{input}");
         }
+    }
+
+    #[test]
+    fn the_round_trip_truncates_to_the_platform_resolution() {
+        // `SystemTime` resolution is platform defined: where it counts in 100-nanosecond
+        // intervals, a finer instant is truncated on the way out, so the value that comes
+        // back is the truncated one rather than the parsed one. `Display` already rounds to
+        // the same resolution, so this is invisible in the formatted output.
+        let iso: Iso8601 = "1970-01-01T00:00:00.000000001Z".parse().unwrap();
+        let system_time = SystemTime::from(iso);
+        let round_tripped = Iso8601::try_from(system_time).unwrap();
+
+        assert_eq!(round_tripped.to_string(), "1970-01-01T00:00:00Z");
+
+        // Whatever the resolution, the returned value is a fixed point: converting it again
+        // yields the same `SystemTime`, so nothing drifts on repeated conversions.
+        assert_eq!(SystemTime::from(round_tripped), system_time);
+        assert_eq!(Iso8601::try_from(SystemTime::from(round_tripped)).unwrap(), round_tripped);
     }
 
     #[test]

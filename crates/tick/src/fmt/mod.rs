@@ -39,7 +39,8 @@
 //!
 //! use tick::fmt::{Iso8601, UnixSeconds};
 //!
-//! // Whatever parses can always be converted back, on every platform.
+//! // Whatever parses can always be converted back, on every platform. An instant finer than
+//! // the platform's `SystemTime` resolution comes back truncated to it.
 //! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! let system_time = SystemTime::from(iso);
 //! assert_eq!(Iso8601::try_from(system_time)?, iso);
