@@ -10,7 +10,7 @@ use jiff::Timestamp;
 use jiff::fmt::rfc2822;
 
 use crate::Error;
-use crate::fmt::{ensure_system_time_representable, to_system_time};
+use crate::fmt::ensure_system_time_representable;
 
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
@@ -79,9 +79,14 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 /// ```
 /// use tick::fmt::Rfc2822;
 ///
-/// // Not an RFC 2822 four-digit year, so it cannot be parsed in the first place.
+/// // RFC 2822 syntax cannot write a year outside `0000` through `9999` at all, so an
+/// // earlier instant cannot be spelled for parsing. This string is ISO 8601, and the parser
+/// // rejects it as malformed rather than as out of range.
 /// "-0001-06-15T00:00:00Z".parse::<Rfc2822>().unwrap_err();
 /// ```
+///
+/// The year bound therefore only has to be enforced on the [`TryFrom<SystemTime>`] path,
+/// where a platform whose [`SystemTime`] reaches before year 0 can supply such an instant.
 ///
 /// # Examples
 ///
@@ -144,8 +149,11 @@ impl Rfc2822 {
     /// Returns an error if the instant is outside either range.
     fn new_checked(timestamp: Timestamp) -> Result<Self, Error> {
         // Only the lower bound needs checking: `Rfc2822::MAX` is `Timestamp::MAX`, so no
-        // `Timestamp` can exceed it. `max_is_the_largest_supported_instant` guards that
-        // assumption.
+        // `Timestamp` can exceed it. Asserted here as well as in
+        // `max_is_the_largest_supported_instant`, so a jiff upgrade that breaks the
+        // assumption fails wherever it is relied on rather than only in that one test.
+        debug_assert!(timestamp <= Self::MAX.0, "`Rfc2822::MAX` must stay the largest `Timestamp`");
+
         if timestamp < *MIN_TIMESTAMP {
             return Err(Error::out_of_range(
                 "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year",
@@ -180,7 +188,10 @@ impl Display for Rfc2822 {
 
 impl From<Rfc2822> for SystemTime {
     fn from(value: Rfc2822) -> Self {
-        to_system_time(value.0)
+        // jiff's conversion panics for an instant this platform's `SystemTime` cannot hold,
+        // which no `Rfc2822` can be: every constructor routes through `new_checked`, and the
+        // constants are within range everywhere.
+        value.0.into()
     }
 }
 

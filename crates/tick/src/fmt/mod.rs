@@ -32,7 +32,7 @@
 //! Every value of these types is validated when it is created, whether by parsing or by
 //! converting from a [`SystemTime`]. A value that the platform's [`SystemTime`] cannot
 //! represent, or that the format itself cannot encode, is **rejected** rather than clamped
-//! or wrapped to something else.
+//! or wrapped to a different value.
 //!
 //! ```
 //! use std::time::SystemTime;
@@ -53,6 +53,12 @@
 //!
 //! How far back [`Iso8601`] and [`Rfc2822`] reach is platform dependent: where [`SystemTime`]
 //! is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier instants are rejected.
+//!
+//! [`SystemTime`] also bounds the *resolution*, not just the range. A FILETIME based platform
+//! counts in 100-nanosecond intervals, so a finer instant is truncated to that grid on the way
+//! through. Any conversion routed through [`SystemTime`], including format to format, inherits
+//! that ceiling. [`Iso8601`] already formats at the same resolution, so its output is
+//! unaffected, and [`Rfc2822`] and [`UnixSeconds`] encode whole seconds.
 //!
 //! Because the range is enforced up front, converting any of these types back into a
 //! [`SystemTime`] is infallible and cannot panic.
@@ -168,17 +174,6 @@ fn ensure_system_time_representable(timestamp: Timestamp) -> Result<Timestamp, E
 /// range no input produces this error and the message would otherwise never be exercised.
 fn system_time_out_of_range() -> Error {
     Error::out_of_range("the instant is outside the range that `SystemTime` can represent on this platform")
-}
-
-/// Converts `timestamp` into a [`SystemTime`].
-///
-/// # Panics
-///
-/// Panics if the platform cannot represent the instant. Callers hold a value of one of this
-/// module's format types, and every way to create one runs the instant through
-/// [`ensure_system_time_representable`] first, so this cannot happen.
-fn to_system_time(timestamp: Timestamp) -> SystemTime {
-    checked_system_time(timestamp).expect("every constructor of these format types rejects instants `SystemTime` cannot represent")
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -327,14 +322,6 @@ mod tests {
     }
 
     #[test]
-    fn to_system_time_converts_in_range() {
-        assert_eq!(to_system_time(Timestamp::UNIX_EPOCH), SystemTime::UNIX_EPOCH);
-
-        let after_epoch = Timestamp::UNIX_EPOCH + SignedDuration::from_secs(90);
-        assert_eq!(to_system_time(after_epoch), SystemTime::UNIX_EPOCH + Duration::from_secs(90));
-    }
-
-    #[test]
     fn parsing_agrees_with_system_time_range() {
         // Whatever the platform supports, parsing and conversion must agree: a value that
         // parses can always be converted back, and one that cannot be represented is rejected.
@@ -360,8 +347,9 @@ mod tests {
 
     #[test]
     fn max_values_are_aligned() {
-        // All MAX values represent the same instant, 9999-12-30T22:00:00.999999999Z, which is
-        // the largest jiff timestamp.
+        // All MAX values denote the same instant, 9999-12-30T22:00:00.999999999Z, the largest
+        // jiff timestamp. `Iso8601` formats at 100-nanosecond resolution, which is why the
+        // expected string below carries seven nines rather than nine.
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();

@@ -102,7 +102,9 @@ crate::thread_aware_move!(Iso8601);
 impl Iso8601 {
     /// The largest value that can be represented by `Iso8601`.
     ///
-    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`, which
+    /// [`Display`] writes as `9999-12-30T22:00:00.9999999Z` after rounding to 100-nanosecond
+    /// resolution.
     // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
     // instant everywhere.
     pub const MAX: Self = Self(Timestamp::MAX);
