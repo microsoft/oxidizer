@@ -458,13 +458,13 @@ existing `_arc` slice methods).
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb18PHyI15hcAbWxi-Nw5OCX0b9DsyGb2X0-cbdlYt3acI8VJhZIaCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjYuMIJpbXVsdGl0dWRlZTAuNy4xgmVzZXJkZWcxLjAuMjI4gmh6ZXJvY29weWYwLjguNTI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb18PHyI15hcAbWxi-Nw5OCX0b9DsyGb2X0-cbdlYt3acI8VJhZIaCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjcuMIJpbXVsdGl0dWRlZTAuNy4xgmVzZXJkZWcxLjAuMjI4gmh6ZXJvY29weWYwLjguNTI
  [__link0]: https://docs.rs/multitude/0.7.1/multitude/?search=Alloc
  [__link1]: https://docs.rs/multitude/0.7.1/multitude/?search=Arc
  [__link10]: https://docs.rs/multitude/0.7.1/multitude/?search=vec::Vec
- [__link100]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=mem::Memory
+ [__link100]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=mem::Memory
  [__link101]: https://docs.rs/multitude/0.7.1/multitude/?search=Arena
- [__link102]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesBuf
+ [__link102]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=BytesBuf
  [__link103]: https://docs.rs/multitude/0.7.1/multitude/?search=Arena
  [__link104]: https://crates.io/crates/hashbrown
  [__link105]: https://docs.rs/multitude/0.7.1/multitude/?search=Arena::alloc_hash_map
