@@ -879,10 +879,15 @@ where
 read-buffer pool), a `PoolIndex`, the generic `TransportOptions`/`TlsOptions`, a
 `Meter`, and the caller's `Extras`. `fetch_winhttp` ignores `PoolIndex` (per-core
 placement comes from `Isolation::Isolated`, §3.2) and ignores `CustomContext::tls` (it
-takes its own `WinHttpTlsConfig` instead; see design.md §1.2). Ignoring `PoolIndex`
-collapses `fetch`'s `multiple_pools` onto WinHTTP's own per-authority pooling; whether
-connection-pool ownership belongs on `fetch` at all or entirely on the transport is
-unresolved and may retire the `PoolIndex` surface in its current shape (../../fetch/docs/stabilization.md,
+takes its own `WinHttpTlsConfig` instead; see design.md §1.2). Ignoring the `PoolIndex`
+*value* does not collapse `fetch`'s `multiple_pools`: `fetch` invokes the factory once per
+pool slot (`0..pool_count` in `client_builder.rs`), so each slot opens its own WinHTTP
+session (§3.2), and because pooling is per-session (`DISABLE_GLOBAL_POOLING`, §9.3) those
+sessions already hold distinct pools. Distinct `PoolIndex` slots therefore land in distinct
+sessions/pools structurally, without the transport keying anything on the index. The real
+v1 resource profile is one session/pool per (core × pool slot). Whether connection-pool
+ownership belongs on `fetch` at all or entirely on the transport is unresolved and may
+retire the `PoolIndex` surface in its current shape (../../fetch/docs/stabilization.md,
 connection-management item).
 
 `builder_winhttp` does **not** open the session; it just calls `create_builder` with the
@@ -1196,8 +1201,10 @@ the `fetch` API or profiling data makes them actionable:
   per-core instances and might prefer a single shared instance (§3.2). Left unconfigurable
   in v1 - a knob earns its place only with demonstrated value - but a candidate if
   profiling shows it matters.
-- **Session-keyed connection pools (`PoolIndex`).** v1 leans on WinHTTP's own per-authority
-  pooling and ignores `fetch`'s `PoolIndex`, collapsing nominally separate pools onto one
-  OS pool (§8). If pool ownership stays a transport concern after the v2 sessions/pools
-  discussion, revisit keying sessions by `PoolIndex` (../../fetch/docs/stabilization.md,
+- **Session-keyed connection pools (`PoolIndex`).** v1 does not key anything on `fetch`'s
+  `PoolIndex` value. It does not need to: `fetch` invokes the factory once per pool slot, so
+  each slot already opens its own session/pool (§8), giving a resource profile of one
+  session/pool per (core × pool slot) rather than a single collapsed OS pool. If pool
+  ownership stays a transport concern after the v2 sessions/pools discussion, revisit
+  whether to interpret `PoolIndex` explicitly (../../fetch/docs/stabilization.md,
   connection-management item).

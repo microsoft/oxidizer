@@ -115,13 +115,16 @@ transport.
 
 **Reviewer input (collected for stabilization, not a decision).** The pool model itself
 is unresolved: `fetch` today exposes `multiple_pools`/`PoolIndex` and invokes a custom
-transport's factory once per pool slot, presuming `fetch` owns pool partitioning - but a
-transport like WinHTTP owns its own pool and cannot faithfully honor an externally imposed
-`PoolIndex` (see fetch_winhttp implementation.md §8), so nominally separate pools collapse
-onto one OS pool. Since connection management generally cannot be generalized across
-transports, pool ownership most likely belongs on the transport layer, which may retire
-the `PoolIndex` surface in its current shape. Where pool management lives should be settled
-as part of the v2 "what do we do about sessions/pools" discussion.
+transport's factory once per pool slot, presuming `fetch` owns pool partitioning. A
+transport like WinHTTP owns its own connection pool and does not key anything on the
+externally supplied `PoolIndex` value (see fetch_winhttp implementation.md §8); because
+`fetch` calls the factory once per slot, each slot opens its own WinHTTP session and pool,
+so nominally separate pools do stay separate - the resource profile is one session/pool per
+(core × pool slot), not a single collapsed pool. The open question is ownership: since
+connection management generally cannot be generalized across transports, pool partitioning
+most likely belongs on the transport layer, which may retire the `PoolIndex` surface in its
+current shape. Where pool management lives should be settled as part of the v2 "what do we
+do about sessions/pools" discussion.
 
 ## 4. Scope-based timeout configuration
 
