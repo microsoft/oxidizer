@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::{Value, to_vec};
 
 use crate::code::Code;
-use crate::context::append_headers;
+use crate::context::{append_headers, strip_uncontrolled_response_headers};
 use crate::handling::Status;
 
 /// The JSON body shape for a [`Status`] response, mirroring `google.rpc.Status`:
@@ -269,6 +269,7 @@ impl HttpResponse {
     /// accumulated on its [`Context`](crate::handling::Context).
     pub fn merge_headers(&mut self, headers: HeaderMap) {
         append_headers(&mut self.headers, headers);
+        strip_uncontrolled_response_headers(&mut self.headers);
     }
 
     /// The response body bytes.
@@ -308,7 +309,11 @@ impl HttpResponse {
     /// neutral standard shared by hyper, axum, tower, and others. The
     /// `Content-Type` is authoritative: it is applied after the custom headers,
     /// so a stray `content-type` among them never overrides the negotiated
-    /// value.
+    /// value. Framing and hop-by-hop headers (e.g. `Content-Length`,
+    /// `Transfer-Encoding`, `Connection` and the headers it names) are stripped
+    /// here, so headers set through [`with_header`](Self::with_header) or
+    /// [`headers_mut`](Self::headers_mut) cannot corrupt the response framing
+    /// regardless of how they were set.
     ///
     /// # Examples
     ///
@@ -330,6 +335,7 @@ impl HttpResponse {
             mut headers,
             body,
         } = self;
+        strip_uncontrolled_response_headers(&mut headers);
         let mut response = Response::new(body);
         *response.status_mut() = status;
         let dst = response.headers_mut();
@@ -376,5 +382,47 @@ mod tests {
             .headers_mut()
             .insert(http::header::ETAG, http::HeaderValue::from_static("\"v1\""));
         assert_eq!(response.headers()[http::header::ETAG], "\"v1\"");
+    }
+
+    #[test]
+    fn merge_headers_strips_framing_headers_from_handler_headers() {
+        let mut response = HttpResponse::ok_json(b"{}".to_vec());
+        let mut handler = HeaderMap::new();
+        handler.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("999"));
+        handler.insert(http::header::TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        handler.insert(http::header::ETAG, http::HeaderValue::from_static("\"v1\""));
+
+        response.merge_headers(handler);
+
+        assert!(response.headers().get(http::header::CONTENT_LENGTH).is_none());
+        assert!(response.headers().get(http::header::TRANSFER_ENCODING).is_none());
+        assert_eq!(response.headers()[http::header::ETAG], "\"v1\"");
+    }
+
+    #[test]
+    fn into_http_strips_framing_headers_set_directly_on_the_response() {
+        let mut response =
+            HttpResponse::ok_json(b"{}".to_vec()).with_header(http::header::TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        response
+            .headers_mut()
+            .insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("999"));
+        response
+            .headers_mut()
+            .insert(http::header::CONNECTION, http::HeaderValue::from_static("x-secret"));
+        response
+            .headers_mut()
+            .insert(http::HeaderName::from_static("x-secret"), http::HeaderValue::from_static("leak"));
+        response
+            .headers_mut()
+            .insert(http::header::ETAG, http::HeaderValue::from_static("\"v1\""));
+
+        let http = response.into_http();
+
+        assert!(http.headers().get(http::header::TRANSFER_ENCODING).is_none());
+        assert!(http.headers().get(http::header::CONTENT_LENGTH).is_none());
+        assert!(http.headers().get(http::header::CONNECTION).is_none());
+        assert!(http.headers().get("x-secret").is_none());
+        assert_eq!(http.headers()[http::header::ETAG], "\"v1\"");
+        assert_eq!(http.headers()[http::header::CONTENT_TYPE], "application/json");
     }
 }

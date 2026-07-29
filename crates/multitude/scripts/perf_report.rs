@@ -320,12 +320,22 @@ const RECORD_BATCH_GROUPS: &[Group] = &[
     (
         "multitude_record_batch/refresh_workload",
         &[
-            ("standard_selective", Some("refresh_workload_standard_selective")),
-            ("arena_vec_reset_selective", Some("refresh_workload_arena_vec_reset_selective")),
-            ("arena_each_reset_selective", Some("refresh_workload_arena_each_reset_selective")),
+            ("standard_global_select", Some("refresh_workload_standard_global_select")),
             (
-                "arena_raw_each_reset_index_selective",
-                Some("refresh_workload_arena_raw_each_reset_index_selective"),
+                "arena_vec_reset_global_select",
+                Some("refresh_workload_arena_vec_reset_global_select"),
+            ),
+            (
+                "arena_each_reset_global_select",
+                Some("refresh_workload_arena_each_reset_global_select"),
+            ),
+            (
+                "arena_raw_each_reset_global_select",
+                Some("refresh_workload_arena_raw_each_reset_global_select"),
+            ),
+            (
+                "arena_raw_index_reset_global_select",
+                Some("refresh_workload_arena_raw_index_reset_global_select"),
             ),
         ],
     ),
@@ -665,8 +675,9 @@ fn build_report(
     );
     out.push_str(
         "Record-batch rows normally process 16 wide records. The refresh workload \
-         processes 1,000 escaped-string records, retains one in eight, and keeps \
-         the previous retained generation alive until its replacement is ready.\n",
+         processes 1,000 escaped-string records, parses rich filter headers, makes \
+         one global top-candidate selection, materializes 32 owned records, and \
+         keeps the previous retained generation alive until its replacement is ready.\n",
     );
     out.push_str(
         "Criterion median is reported (default 30 samples, 1 s warm-up, \
@@ -918,10 +929,11 @@ fn build_report(
     out.push_str(
         "These synthetic wide-record workloads compare standard decoding with \
          arena-backed collection, reuse, and selective-retention paths. The \
-         reset-per-refresh workload recreates arena vectors after reset or \
-         streams each item directly to the retention callback. Criterion and \
-         Callgrind invoke the same shared hot-path functions and equivalent \
-         prewarmed state.\n\n",
+         reset-per-refresh workload performs a global selection over rich headers \
+         before retaining owned output. Its raw variants compare callback indexing \
+         with directly collecting `Vec<&RawValue>`; both must scan every element and \
+         parse selected records again. Criterion and Callgrind invoke the same \
+         shared hot-path functions and equivalent prewarmed state.\n\n",
     );
     for (group, variants) in RECORD_BATCH_GROUPS {
         let title = group

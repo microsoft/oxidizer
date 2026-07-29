@@ -72,7 +72,6 @@ async fn health() -> HttpResponse {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    // (label, method, target, accept, body)
     let requests: [DemoRequest; 7] = [
         ("hand-written Axum response", "GET", "/healthz", None, b""),
         ("path variable", "GET", "/v1/shelves/history", None, b""),
@@ -96,8 +95,6 @@ async fn main() {
         }
         let request = builder.body(Body::from(body.to_vec())).expect("request builds");
 
-        // `oneshot` drives the real router (routing, the fallback service, its
-        // response body) exactly as a live server would, per request.
         let response = app().oneshot(request).await.expect("transcode is infallible");
 
         let status = response.status();

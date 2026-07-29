@@ -36,11 +36,9 @@ impl Transcode for HealthApi {
         _headers: http::HeaderMap,
         _body: &[u8],
     ) -> impl core::future::Future<Output = Option<TranscodeResponse>> + Send {
-        // `target` is the path plus optional `?query`; these requests carry none.
         let response = if method == "GET" && target == "/v1/health" {
             HttpResponse::ok_json(br#"{"status":"ok"}"#.to_vec())
         } else {
-            // A gRPC `Status` renders as a JSON HTTP error response.
             HttpResponse::from_status(&Status::not_found("no such route"))
         };
         async move { Some(response.into()) }

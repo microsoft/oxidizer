@@ -21,9 +21,6 @@ use rest_over_grpc::build::{Generator, HttpRule, RequestBody, ServiceDefinition}
 use routerama::HttpMethod;
 
 fn main() {
-    // Each RPC's HTTP binding. `GetShelf` captures the `{shelf}` path variable;
-    // `CreateShelf` maps the request body onto the request message's `shelf`
-    // field.
     let get_shelf = HttpRule::new(
         "GetShelf",
         HttpMethod::GET,
@@ -36,8 +33,6 @@ fn main() {
     )
     .request_body(RequestBody::Field("shelf".to_owned()));
 
-    // Register each RPC's binding with its request/response Rust type paths
-    // (where the `prost`-generated messages live).
     let mut library = ServiceDefinition::new("Library", None);
     library
         .add_method(get_shelf, "crate::pb::GetShelfRequest", "crate::pb::Shelf", None)
@@ -45,8 +40,6 @@ fn main() {
 
     let (transcoder, generated) = Generator::new().add(library).generate();
 
-    // Render the generated Rust for display; a build script would instead
-    // write the code to files under `OUT_DIR` with `Generator::write`.
     for service in generated {
         let mut code = service.service_trait().clone();
         if let Some(bridge) = service.tonic_bridge() {
@@ -56,7 +49,6 @@ fn main() {
         println!("{}", prettyplease::unparse(&file));
     }
 
-    // The top-level transcoder that routes across all services.
     let file = syn::parse2(transcoder).expect("generated transcoder is valid Rust");
     println!("{}", prettyplease::unparse(&file));
 }

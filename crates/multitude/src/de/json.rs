@@ -8,7 +8,7 @@ use core::fmt;
 use allocator_api2::alloc::Allocator;
 use serde::de::{DeserializeSeed, Error as _, SeqAccess, Visitor};
 
-use super::{DeserializationLimits, DeserializeIn, DeserializeInSeed, JsonError};
+use super::{DeserializationLimits, DeserializeIn, DeserializeInSeed, JsonEachError, JsonError};
 use crate::vec::Vec;
 use crate::{Alloc, Arena};
 
@@ -16,6 +16,67 @@ struct DeserializeEachSeed<'arena, 'callback, T, A: Allocator + Clone, F> {
     arena: &'arena Arena<A>,
     callback: &'callback mut F,
     marker: core::marker::PhantomData<fn() -> T>,
+}
+
+struct TryDeserializeEachSeed<'arena, 'callback, 'error, T, A: Allocator + Clone, F, E> {
+    arena: &'arena Arena<A>,
+    callback: &'callback mut F,
+    callback_error: &'error mut Option<E>,
+    marker: core::marker::PhantomData<fn() -> T>,
+}
+
+impl<'de, T, A, F, E> DeserializeSeed<'de> for TryDeserializeEachSeed<'_, '_, '_, T, A, F, E>
+where
+    T: DeserializeIn<'de, A>,
+    A: Allocator + Clone,
+    F: FnMut(T) -> Result<(), E>,
+{
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct TryEachVisitor<'arena, 'callback, 'error, T, A: Allocator + Clone, F, E> {
+            arena: &'arena Arena<A>,
+            callback: &'callback mut F,
+            callback_error: &'error mut Option<E>,
+            marker: core::marker::PhantomData<fn() -> T>,
+        }
+
+        impl<'de, T, A, F, E> Visitor<'de> for TryEachVisitor<'_, '_, '_, T, A, F, E>
+        where
+            T: DeserializeIn<'de, A>,
+            A: Allocator + Clone,
+            F: FnMut(T) -> Result<(), E>,
+        {
+            type Value = ();
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a sequence")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+            where
+                S: SeqAccess<'de>,
+            {
+                while let Some(item) = seq.next_element_seed(DeserializeInSeed::<T, A>::new(self.arena))? {
+                    if let Err(error) = (self.callback)(item) {
+                        *self.callback_error = Some(error);
+                        return Err(S::Error::custom("JSON element callback failed"));
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        deserializer.deserialize_seq(TryEachVisitor {
+            arena: self.arena,
+            callback: self.callback,
+            callback_error: self.callback_error,
+            marker: core::marker::PhantomData,
+        })
+    }
 }
 
 impl<'de, T, A, F> DeserializeSeed<'de> for DeserializeEachSeed<'_, '_, T, A, F>
@@ -287,6 +348,83 @@ impl<A: Allocator + Clone> Arena<A> {
         );
         result.map_err(|source| JsonError::new(source, limit_exceeded))?;
         deserializer.end().map_err(JsonError::from)
+    }
+
+    /// Deserialize each element of a complete top-level JSON array with a
+    /// fallible callback.
+    ///
+    /// A callback error stops parsing immediately and is preserved in
+    /// [`JsonEachError::Callback`]. Because parsing stops at that element, the
+    /// remaining input is not validated. If every callback succeeds, the
+    /// complete array and trailing input are validated normally.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JsonEachError::Json`] for malformed JSON, a shape mismatch,
+    /// trailing input, or allocation failure. Returns
+    /// [`JsonEachError::Callback`] when `callback` fails.
+    pub fn try_deserialize_json_each<'de, T, I, F, E>(&self, input: &'de I, mut callback: F) -> Result<(), JsonEachError<E>>
+    where
+        T: DeserializeIn<'de, A>,
+        I: AsRef<[u8]> + ?Sized,
+        F: FnMut(T) -> Result<(), E>,
+    {
+        let mut deserializer = serde_json::Deserializer::from_slice(input.as_ref());
+        let mut callback_error = None;
+        let result = TryDeserializeEachSeed {
+            arena: self,
+            callback: &mut callback,
+            callback_error: &mut callback_error,
+            marker: core::marker::PhantomData,
+        }
+        .deserialize(&mut deserializer);
+        if let Some(error) = callback_error {
+            return Err(JsonEachError::Callback(error));
+        }
+        result.map_err(|source| JsonEachError::Json(JsonError::from(source)))?;
+        deserializer.end().map_err(|source| JsonEachError::Json(JsonError::from(source)))
+    }
+
+    /// Deserialize each element of a complete top-level JSON array with a
+    /// fallible callback while enforcing resource limits.
+    ///
+    /// This has the same immediate callback-failure and suffix-validation
+    /// behavior as [`Self::try_deserialize_json_each`]. The top-level array
+    /// counts toward [`DeserializationLimits::max_sequence_len`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JsonEachError::Json`] for malformed JSON, a shape mismatch,
+    /// trailing input, allocation failure, or a limit violation. Returns
+    /// [`JsonEachError::Callback`] when `callback` fails.
+    pub fn try_deserialize_json_each_with_limits<'de, T, I, F, E>(
+        &self,
+        input: &'de I,
+        limits: DeserializationLimits,
+        mut callback: F,
+    ) -> Result<(), JsonEachError<E>>
+    where
+        T: DeserializeIn<'de, A>,
+        I: AsRef<[u8]> + ?Sized,
+        F: FnMut(T) -> Result<(), E>,
+    {
+        let mut deserializer = serde_json::Deserializer::from_slice(input.as_ref());
+        let mut callback_error = None;
+        let (result, limit_exceeded) = super::limits::deserialize_seed_with_limits_detailed(
+            &mut deserializer,
+            TryDeserializeEachSeed {
+                arena: self,
+                callback: &mut callback,
+                callback_error: &mut callback_error,
+                marker: core::marker::PhantomData,
+            },
+            limits,
+        );
+        if let Some(error) = callback_error {
+            return Err(JsonEachError::Callback(error));
+        }
+        result.map_err(|source| JsonEachError::Json(JsonError::new(source, limit_exceeded)))?;
+        deserializer.end().map_err(|source| JsonEachError::Json(JsonError::from(source)))
     }
 }
 

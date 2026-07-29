@@ -133,8 +133,6 @@ mod tests {
 
     #[test]
     fn transcode_forwards_a_matched_streaming_response() {
-        // A `Some(Streaming)` from `try_transcode` flows through the default
-        // `transcode` unchanged, so the reply stays a streaming response.
         let response = futures::executor::block_on(StreamingRoute.transcode("GET", "/x", http::HeaderMap::new(), b""));
         assert_eq!(classify(response), ("streaming", http::StatusCode::OK));
     }

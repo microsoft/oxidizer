@@ -39,11 +39,8 @@ async fn serve_http_end_to_end() {
 
 #[tokio::test]
 async fn tower_service_with_query_and_body() {
-    // `Arc<Transcoder>` implements `Transcode`, so a single shared instance is
-    // cloned cheaply into the service on each request.
     let mut service = RestService::new(Arc::new(Transcoder::new(InMemoryLibrary)));
 
-    // GET with a query parameter.
     let list = Request::builder()
         .method(Method::GET)
         .uri("/v1/shelves?filter=science")
@@ -54,7 +51,6 @@ async fn tower_service_with_query_and_body() {
     let json = body_json(response).await;
     assert_eq!(json["shelves"].as_array().expect("array").len(), 1);
 
-    // POST with a JSON body mapped to the `shelf` field.
     let create = Request::builder()
         .method(Method::POST)
         .uri("/v1/shelves")

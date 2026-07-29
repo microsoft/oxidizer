@@ -62,12 +62,39 @@ fn reset_deallocation_panic_preserves_shared_reference_accounting() {
     }
     let retained = arena.alloc_arc(0xABCD_u32);
     assert_eq!(allocator.live_allocations(), 2);
+    #[cfg(feature = "stats")]
+    let generation_before_failed_reset = arena.stats();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| arena.reset()));
     assert!(result.is_err(), "the first retired-chunk deallocation must panic");
     assert_eq!(allocator.live_allocations(), 1, "only the retained Arc's chunk remains");
+    #[cfg(feature = "stats")]
+    {
+        let after = arena.stats();
+        assert_eq!(
+            after.normal_chunks_allocated_since_reset,
+            generation_before_failed_reset.normal_chunks_allocated_since_reset
+        );
+        assert_eq!(
+            after.oversized_chunks_allocated_since_reset,
+            generation_before_failed_reset.oversized_chunks_allocated_since_reset
+        );
+        assert_eq!(
+            after.backing_bytes_allocated_since_reset,
+            generation_before_failed_reset.backing_bytes_allocated_since_reset
+        );
+    }
 
     arena.reset();
+    #[cfg(feature = "stats")]
+    {
+        let after = arena.stats();
+        assert_eq!(after.normal_chunks_allocated_since_reset, 0);
+        assert_eq!(after.oversized_chunks_allocated_since_reset, 0);
+        assert_eq!(after.backing_bytes_allocated_since_reset, 0);
+        assert_eq!(after.normal_chunks_reused_since_reset, 0);
+        assert_eq!(after.relocations_since_reset, 0);
+    }
     {
         // Advance the normal cache floor. If reset incorrectly reclaimed the
         // Arc's chunk into the cache, this evicts and deallocates it; otherwise
@@ -173,6 +200,11 @@ fn arena_stats_report_cache_reuse_and_resets() {
     assert_eq!(initial.peak_bytes_allocated, 64 * 1024);
     assert_eq!(initial.normal_chunks_reused, 0);
     assert_eq!(initial.resets, 0);
+    assert_eq!(initial.normal_chunks_allocated_since_reset, 1);
+    assert_eq!(initial.oversized_chunks_allocated_since_reset, 0);
+    assert_eq!(initial.backing_bytes_allocated_since_reset, 64 * 1024);
+    assert_eq!(initial.normal_chunks_reused_since_reset, 0);
+    assert_eq!(initial.relocations_since_reset, 0);
 
     let value = arena.alloc(1_u64);
     drop(value);
@@ -180,16 +212,68 @@ fn arena_stats_report_cache_reuse_and_resets() {
     assert_eq!(active.cached_chunks, 0);
     assert_eq!(active.cached_bytes, 0);
     assert_eq!(active.normal_chunks_reused, 1);
+    assert_eq!(active.normal_chunks_reused_since_reset, 1);
 
     arena.reset();
     let reset = arena.stats();
     assert_eq!(reset.cached_chunks, 1);
     assert_eq!(reset.cached_bytes, 64 * 1024);
     assert_eq!(reset.resets, 1);
+    assert_eq!(reset.normal_chunks_allocated_since_reset, 0);
+    assert_eq!(reset.oversized_chunks_allocated_since_reset, 0);
+    assert_eq!(reset.backing_bytes_allocated_since_reset, 0);
+    assert_eq!(reset.normal_chunks_reused_since_reset, 0);
+    assert_eq!(reset.relocations_since_reset, 0);
 
     let value = arena.alloc(2_u64);
     drop(value);
-    assert_eq!(arena.stats().normal_chunks_reused, 2);
+    let reused = arena.stats();
+    assert_eq!(reused.normal_chunks_reused, 2);
+    assert_eq!(reused.normal_chunks_reused_since_reset, 1);
+}
+
+#[cfg(feature = "stats")]
+#[test]
+fn arena_stats_report_oversized_bytes_and_relocations_since_reset() {
+    let mut arena = Arena::new();
+    let source = vec![0_u8; OVERSIZED_BYTES];
+    let oversized = arena.alloc_slice_copy_box(&source);
+    let mut values = arena.alloc_vec_with_capacity::<u64>(1);
+    let blocker = arena.alloc(0_u64);
+    drop(blocker);
+    values.extend(0..1_000);
+    let active = arena.stats();
+    assert_eq!(active.oversized_chunks_allocated_since_reset, 1);
+    assert!(active.backing_bytes_allocated_since_reset >= OVERSIZED_BYTES as u64);
+    assert!(active.relocations_since_reset > 0);
+    assert_eq!(active.relocations_since_reset, active.relocations);
+
+    drop(values);
+    drop(oversized);
+    arena.reset();
+    let reset = arena.stats();
+    assert_eq!(reset.oversized_chunks_allocated_since_reset, 0);
+    assert_eq!(reset.backing_bytes_allocated_since_reset, 0);
+    assert_eq!(reset.relocations_since_reset, 0);
+    assert_eq!(reset.relocations, active.relocations);
+
+    let oversized = arena.alloc_slice_copy_box(&source);
+    let mut values = arena.alloc_vec_with_capacity::<u64>(1);
+    let blocker = arena.alloc(0_u64);
+    drop(blocker);
+    values.extend(0..1_000);
+    let next_generation = arena.stats();
+    assert_eq!(next_generation.oversized_chunks_allocated_since_reset, 1);
+    assert_eq!(next_generation.oversized_chunks_allocated, active.oversized_chunks_allocated + 1);
+    assert!(next_generation.backing_bytes_allocated_since_reset >= OVERSIZED_BYTES as u64);
+    assert!(next_generation.relocations_since_reset > 0);
+    assert_eq!(
+        next_generation.relocations,
+        active.relocations + next_generation.relocations_since_reset
+    );
+
+    drop(values);
+    drop(oversized);
 }
 
 #[cfg(feature = "stats")]
