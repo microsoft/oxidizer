@@ -51,10 +51,10 @@ Everything below is machinery in service of those three properties.
 The defining architectural choice is that a single arena, and even a
 single chunk, simultaneously supports four ways of owning a value. They
 all bump-allocate from the same storage, all deref to the value, and all
-run `T::drop` **eagerly** when the owning handle drops. They differ only
-in ownership, escape capability, and what per-handle bookkeeping they pay:
+run `T::drop` **eagerly** when ownership ends. They differ only in
+ownership, escape capability, and what bookkeeping they pay:
 
-| Handle | Ownership | Can outlive arena | Per-handle refcount | Cross-thread |
+| Handle | Ownership | Can outlive arena | Shared strong count | Cross-thread |
 |---|---|---|---|---|
 | `Alloc<'a, T>` | unique, `&mut` | no (bound to `&arena`) | none | move only |
 | `Box<T>` | unique, `&mut` | yes | none | move only |
@@ -62,7 +62,7 @@ in ownership, escape capability, and what per-handle bookkeeping they pay:
 | `Arc<T>` | shared (`Clone`) | yes | atomic `u32` | yes (`T: Send+Sync`) |
 
 The key distinction that drives the whole chunk-lifecycle design is
-**whether a handle carries its own refcount**:
+**whether an owner family retains its chunk independently**:
 
 - `Arc`/`Rc`/`Box` each take exactly **one** refcount on their hosting
   chunk at allocation. Because the chunk is kept alive by that count, the
@@ -272,7 +272,7 @@ There are then **two** independent counts in play:
   keep the chunk alive. The entire `Arc`/`Rc`/`Box` family for one value
   takes exactly **one** chunk refcount at allocation and releases it when
   the last member drops.
-- **The per-handle strong count** tracks clones of a single shared value.
+- **The shared strong count** tracks clones of a single shared value.
   `Arc::clone`/`Rc::clone` bump *only* this count (a relaxed atomic
   increment for `Arc`, a plain non-atomic increment for `Rc`); they never
   touch the chunk count.
@@ -290,9 +290,12 @@ forming a self-pinning cycle.
 
 ## Thin smart pointers: the alignment/masking trick
 
-Every escape-capable smart pointer — `Arc<T>`, `Rc<T>`, `Box<T>` for
-*any* `T` including DSTs — is a **single 8-byte raw pointer** on 64-bit,
-even for `str` and `[T]`. This rests on one geometric invariant:
+Every escape-capable smart pointer stores an 8-byte payload pointer on
+64-bit. Handles for sized values, `str`, slices, and other
+`usize`-metadata DSTs contain only that word. Trait-object handles add a
+second word for the vtable, allowing differently coerced views of the
+same shared allocation to coexist. This hybrid representation rests on
+one geometric invariant:
 
 > **Every chunk allocation is 64 KiB-aligned** (`CHUNK_ALIGN = 65 536`).
 
@@ -301,21 +304,43 @@ simply **masking off the low 16 bits** — no type tag, no back-pointer
 stored per value. `Box::drop`, `Arc::drop`, and `Rc::drop` all recover
 `*const Chunk` the same way.
 
-DST metadata (slice length, vtable) and, for `Arc`/`Rc`, the strong count,
-live in a small **prefix** in the chunk immediately before the value
-payload, read/written unaligned:
+DST metadata is stored according to its kind:
 
 ```text
-Arc/Rc value:  [strong count][pad][T::Metadata (unaligned)][ T payload ]
-                                                            ▲ the 8-byte pointer
-Box value:                        [T::Metadata (unaligned)][ T payload ]
-Sized T:       metadata is (), so there is no prefix overhead
+metadata `()`      allocation: [T payload]          handle: [payload pointer]
+metadata `usize`  allocation: [length][T payload]  handle: [payload pointer]
+trait object      allocation: [T payload]          handle: [payload pointer][vtable]
 ```
+
+The representation uses a defaulted, sealed metadata type parameter on each
+smart pointer. That parameter is a real part of the public type signature even
+though callers normally never name it. For sized and `usize`-metadata pointees
+it is `()`, so the compiler gives it no storage and the handle stays one word.
+For `DynMetadata`-backed pointees it is the vtable word. Hiding metadata in an
+internal enum or raw-word field would make that field occupy space in every
+smart-pointer monomorph, enlarging the common handles to at least two words.
+The defaulted parameter is the deliberate API tradeoff that lets only
+vtable-carrying handles pay the extra word and avoids a metadata tag branch.
+
+Trait-object coercion is explicit because downstream implementations of
+`core::ops::CoerceUnsized` and `core::marker::Unsize` require unstable Rust
+features. `coerce!` instead generates a local function whose raw-pointer
+conversion uses the compiler's built-in unsizing coercion, then packages that
+function as a proof token for the stable API. `Coercion::new` remains an unsafe
+low-level escape hatch for advanced callers; applying its token always checks
+that the function preserved the data-pointer address before accepting the
+resulting metadata.
+
+`Arc` and `Rc` additionally place their family's shared strong count at
+the start of the allocation reservation, before any padding and
+allocation-resident metadata. `Box` has no strong count. Length and strong
+count fields are recovered from the payload pointer and are read or
+written with the alignment discipline appropriate to each field.
 
 Consequences of the masking scheme, each a real edge case:
 
-- **Maximum smart-pointer alignment is 32 KiB** (`CHUNK_ALIGN / 2`). A
-  request above that can never be guaranteed to lie inside the first 64 KiB
+- **The smart-pointer alignment ceiling is 32 KiB** (`CHUNK_ALIGN / 2`). A
+  request at or above that value cannot be guaranteed to lie inside the first 64 KiB
   tile, so it is rejected — `try_alloc_*` returns `AllocError`, `alloc_*`
   panics.
 - **Oversized chunks** are still 64 KiB-aligned and place their single
@@ -331,19 +356,20 @@ The alignment is enforced at allocation time via the `Layout`, not via
 alignment small so `size_of_val` matches the real allocation even for the
 smallest size classes.
 
-`Rc` reuses *all* of this — thin pointer, header masking, metadata prefix,
-the family's single chunk refcount, eager last-drop teardown — with two
-differences: its strong count is a plain non-atomic `u32` (sound because
-`Rc` is `!Send`/`!Sync`), and because that count needs no natural
-alignment it drops the 4-byte reservation floor, packing sub-4-aligned
-payloads (`str`, `[u8]`) a few bytes tighter. Because `Rc` imposes no
-`Send`/`Sync` bound on `T`, it can own thread-affine values (e.g.
-`Rc<RefCell<T>>`) that `Arc` cannot.
+`Rc` reuses all of this — compact handles for sized and slice-like
+pointees, header masking, allocation-resident lengths, the family's
+single chunk refcount, and eager last-drop teardown — with two
+differences. Its strong count is a plain non-atomic `u32` (sound because
+`Rc` is `!Send`/`!Sync`), and the reservation need not be 4-byte aligned.
+For sub-4-aligned payloads (`str`, `[u8]`), this can avoid up to three
+bytes of inter-allocation alignment gap; the strong-count field itself is
+still four bytes. Because `Rc` imposes no `Send`/`Sync` bound on `T`, it
+can own thread-affine values (e.g. `Rc<RefCell<T>>`) that `Arc` cannot.
 
 ## Growable collections and zero-copy freeze
 
 `Vec<T>`, `String`, and `Utf16String` are **transient builders**:
-small (~32-byte) mutable handles over an arena buffer, meant to be built
+small (40-byte on 64-bit targets) mutable handles over an arena buffer, meant to be built
 up briefly and then *frozen* into an immutable smart pointer.
 
 While live, a growable buffer pins its chunk through the same
@@ -353,10 +379,10 @@ path is a plain bump with no atomics. When it can't grow in place it
 the abandoned buffer is dead space reclaimed at reset.
 
 The headline feature is **zero-copy freeze**. Every freezable buffer
-reserves the full `Arc<[T]>` freeze prefix (`[strong][len]`) in front of
-its payload at allocation time — which is exactly the `Arc<[T]>` layout
-(and a superset of `Box<[T]>`'s). Freezing into `Arc<[T]>`/`Box<[T]>`
-then:
+reserves the full shared-slice freeze prefix (`[strong][len]`) in front
+of its payload at allocation time. The bit pattern is suitable for
+`Arc<[T]>` and `Rc<[T]>`; `Box<[T]>` uses the length and ignores the
+strong field. Freezing into any of those owners then:
 
 1. recovers the hosting chunk by the 64 KiB mask;
 2. adopts the family's chunk refcount (from the pre-credited surplus if
@@ -368,18 +394,23 @@ then:
 No allocation, no element copy. The freeze also returns unused tail
 capacity to the arena when it can.
 
-**When zero-copy doesn't apply**, freeze falls back to an O(*n*) copy:
+**When zero-copy doesn't apply**, freeze falls back to an O(*n*) element move:
 
-- `Box<str>`/`Arc<str>` from a `String` always copy — the byte layout must
-  be compacted to keep the result a single `Send`-safe pointer.
-- ZSTs and over-aligned `T` (≥ 32 KiB) can't host the prefix, so their
-  buffers never reserve it and freeze by copying.
+- ZST buffers do not carry a real allocation prefix and freeze by moving
+  their elements into an owning allocation.
 - A zero-copy `split_off` tail whose base points mid-chunk has no prefix
-  and copies.
-- `Vec::leak` → `&mut [T]` is O(1) and allocation-free for `T: !Drop`
-  (reinterpret in place), but the result does **not** outlive the arena.
+  and moves its elements.
+- Any other buffer without a freeze prefix uses the same move fallback.
+- An over-aligned smart-pointer destination (`T` alignment ≥ 32 KiB) is
+  unsupported: a fallible freeze reports `AllocError`, and an infallible
+  freeze panics.
+- `Vec::leak` → `&mut [T]` is O(1) and allocation-free when `T` does not
+  need drop (reinterpret in place), but the result does **not** outlive
+  the arena.
 
 A one-bit `freeze_prefix` flag on each buffer records which path applies.
+`String` and `Utf16String` wrap the same buffer machinery, so their normal
+`Box`/`Rc`/`Arc` freezes are also in-place.
 
 ## Arena-aware deserialization
 
@@ -563,7 +594,7 @@ three mutually exclusive kinds so callers can react appropriately:
 | Kind | Meaning | Retryable? |
 |---|---|---|
 | allocator failure | backing allocator returned null, or `byte_budget` exhausted | maybe (free memory / raise budget) |
-| alignment too large | requested alignment > 32 KiB smart-pointer cap | never — request is inherently unsatisfiable |
+| alignment too large | requested alignment ≥ 32 KiB smart-pointer cap | never — request is inherently unsatisfiable |
 | capacity overflow | layout arithmetic wrapped `usize` or exceeded `isize::MAX` | never |
 
 Every allocation comes in two flavors: `try_alloc_*` returns
@@ -604,7 +635,7 @@ unsound, so they are maintained centrally rather than at each call site:
 
 - **64 KiB chunk alignment** — the sole basis for header recovery by
   masking. Every chunk allocation, normal or oversized, honors it.
-- **Smart-pointer alignment ≤ 32 KiB** — guarantees every value pointer
+- **Smart-pointer alignment < 32 KiB** — guarantees every value pointer
   lies strictly inside its chunk's first tile, so the mask never walks to
   a neighbor. Enforced at allocation.
 - **Non-zero cursor advance** — no reservation returns the one-past-end

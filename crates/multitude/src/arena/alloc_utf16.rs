@@ -3,10 +3,11 @@
 
 //! UTF-16 string allocation helpers on [`Arena`].
 //!
-//! Public docs live on [`Arena`] itself. Both `Arc<Utf16Str>` and
-//! `Box<Utf16Str>` share the same length-prefixed chunk layout
-//! (`[usize u16-count][u16 elements]`, prefix unaligned) and are
-//! thin 8-byte smart pointers.
+//! Public docs live on [`Arena`] itself. `Box<Utf16Str>`, `Rc<Utf16Str>`, and
+//! `Arc<Utf16Str>` use a length-prefixed payload
+//! (`[usize u16-count][u16 elements]`, prefix unaligned) and have thin 8-byte
+//! handles on 64-bit targets. `Rc` and `Arc` additionally place a shared
+//! strong count before the length.
 
 use core::mem;
 use core::ptr::{self, NonNull};
@@ -429,7 +430,7 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Strong-prefixed `Arc<Utf16Str>`
     /// variant of [`Self::impl_alloc_utf16_prefixed_from_str`]: reserves
-    /// a per-`Arc` strong count and slice-length prefix, transcodes `s`
+    /// a shared strong count and slice-length prefix, transcodes `s`
     /// into the `u16` payload, and returns a thin pointer to the first
     /// payload element.
     /// Transcode `s` from UTF-8 to UTF-16 into a strong-prefixed chunk

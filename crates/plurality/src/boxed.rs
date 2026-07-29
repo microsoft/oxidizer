@@ -45,6 +45,11 @@ unsafe impl<T: ?Sized + Send, A: Allocator + Send + Sync> Send for Box<T, A> {}
 // SAFETY: `&Box` only exposes `&T`, so sharing needs `T: Sync`.
 unsafe impl<T: ?Sized + Sync, A: Allocator + Send + Sync> Sync for Box<T, A> {}
 
+// The pointee is uniquely owned, while the allocator may be shared with the
+// pool and other detached handles.
+impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Box<T, A> {}
+impl<T: ?Sized + core::panic::UnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::UnwindSafe for Box<T, A> {}
+
 impl<T, A: Allocator> Box<T, A> {
     #[inline]
     pub(crate) fn from_slot(slot: NonNull<SlotCell<T>>) -> Self {

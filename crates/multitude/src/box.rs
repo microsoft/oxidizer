@@ -10,11 +10,11 @@ use core::pin::Pin;
 use core::ptr::{self, NonNull};
 
 use allocator_api2::alloc::{Allocator, Global};
-use ptr_meta::Pointee;
 
 use crate::internal::chunk_ref::ChunkRef;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
+use crate::{Coercion, HandleMetadata, SmartPointerPointee};
 
 /// An owned, mutable smart pointer to an arena-backed `T`.
 ///
@@ -33,13 +33,14 @@ use crate::vec::Vec;
 /// # `Send` and `Sync`
 ///
 /// `Box<T, A>` is [`Send`] when `T: Send` and `A: Send + Sync`, and
-/// [`Sync`] when `T: Sync` and `A: Sync` — the same bounds as `Arc<T, A>`
-/// (rather than `std::boxed::Box<T, A>`'s `A: Send`), because the backing
-/// storage is shared with the arena's chunk machinery.
+/// [`Sync`] when `T: Sync` and `A: Sync`. The `A: Send + Sync` requirement on
+/// `Send` is stronger than `std::boxed::Box<T, A>`'s `A: Send`: Multitude's
+/// backing storage is shared with the arena's chunk machinery and may be torn
+/// down on another thread.
 ///
 /// # Pinning
 ///
-/// `Box` implements [`Unpin`] unconditionally (like `std::Box`).
+/// `Box` implements [`Unpin`] unconditionally, regardless of `T` or `A`.
 /// Pinning a `Box` is sound: the value stays at a fixed address for as long as
 /// the `Box` (or a pinned, leaked `Box`) exists, satisfying
 /// [`Pin`](core::pin::Pin)'s drop guarantee.
@@ -54,15 +55,18 @@ use crate::vec::Vec;
 /// b.push(4);
 /// assert_eq!(*b, vec![1, 2, 3, 4]);
 /// ```
-pub struct Box<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
-    /// **Thin** pointer to the first byte of the contained value, which
-    /// lives in a 64K-aligned [`Chunk`]'s payload. The chunk
-    /// header is recovered by masking, and `T`'s pointer metadata (if
-    /// any) is stored in the `size_of::<T::Metadata>()` bytes
-    /// immediately preceding the payload (read with
-    /// [`core::ptr::read_unaligned`]). This makes `Box<T>` 8 bytes
-    /// uniformly, even for DST `T`.
+pub struct Box<
+    T: ?Sized + SmartPointerPointee,
+    A: Allocator + Clone = Global,
+    M: HandleMetadata<T> = <T as SmartPointerPointee>::StoredMetadata,
+> {
+    /// Pointer to the first byte of the contained value. The chunk header is
+    /// recovered by masking. Slice and string lengths live immediately before
+    /// the payload; trait-object vtable pointers live in `metadata`.
     ptr: NonNull<u8>,
+    /// Per-handle metadata. This is zero-sized for sized values, slices, and
+    /// strings; trait-object handles carry their vtable here.
+    metadata: M,
     /// Marker for variance and dropck. The raw-pointer wrapping keeps
     /// auto-derivation conservative; the desired `Send`/`Sync` are
     /// re-introduced via the explicit `unsafe impl`s below so the
@@ -86,17 +90,31 @@ pub struct Box<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
 // `A: Send + Sync`), exactly as `Arc<T, A>` requires. Hence the `Send`
 // bound is `A: Send + Sync`, not `std`'s `A: Send`. The `Pointee` bound
 // is implicit (already on the `Box` struct).
-unsafe impl<T: ?Sized + Pointee + Send, A: Allocator + Clone + Send + Sync> Send for Box<T, A> {}
-// SAFETY: a `Box<T, A>` owns its pointee and the chunk `+1`, so sending it
-// across threads can move the pointee and trigger chunk teardown (which may run
-// `A::deallocate`) on the receiving thread; that requires `T: Send` and
-// `A: Send + Sync`. Sharing `&Box<T, A>` across threads exposes only `&T`
-// (`Deref` is `&self -> &T`); `DerefMut` requires `&mut self` and is serialized
-// by the borrow checker. So `Sync` follows `T: Sync`, with `A: Sync`
-// mirrored from `std::boxed::Box<T, A>`.
-unsafe impl<T: ?Sized + Pointee + Sync, A: Allocator + Clone + Sync> Sync for Box<T, A> {}
+unsafe impl<T: ?Sized + SmartPointerPointee + Send, A: Allocator + Clone + Send + Sync, M: HandleMetadata<T>> Send for Box<T, A, M> {}
+// SAFETY: sharing `&Box<T, A>` across threads exposes only `&T` (`Deref` is
+// `&self -> &T`); `DerefMut` requires `&mut self` and is serialized by the
+// borrow checker. The shared chunk machinery may access the allocator, so
+// `A: Sync` is also required.
+unsafe impl<T: ?Sized + SmartPointerPointee + Sync, A: Allocator + Clone + Sync, M: HandleMetadata<T>> Sync for Box<T, A, M> {}
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
+// The pointee is uniquely owned, while the allocator may be shared with the
+// arena and other escaped handles.
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::RefUnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::RefUnwindSafe,
+> core::panic::RefUnwindSafe for Box<T, A, M>
+{
+}
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::UnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::UnwindSafe,
+> core::panic::UnwindSafe for Box<T, A, M>
+{
+}
+
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Box<T, A> {
     /// Builds a `Box` from a thin payload pointer.
     ///
     /// See [`crate::Arc::from_raw`] for the metadata-recovery contract.
@@ -104,9 +122,9 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
     /// # Safety
     ///
     /// - `thin` must reference the payload of a fully-initialized `T`
-    ///   whose storage was bump-allocated from a [`Chunk<A>`].
-    ///   For DST `T` the chunk prefix must carry the matching
-    ///   `T::Metadata`.
+    ///   whose storage was bump-allocated from a [`Chunk<A>`], with any
+    ///   allocation-resident metadata initialized. Handle-resident metadata
+    ///   must instead be supplied through [`Self::from_raw_with_metadata`].
     /// - The caller must have just acquired a +1 refcount on that
     ///   chunk in the new `Box`'s name. The returned `Box` takes
     ///   ownership of that +1 and releases it in [`Drop`].
@@ -117,6 +135,22 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
     pub(crate) unsafe fn from_raw(thin: NonNull<u8>) -> Self {
         Self {
             ptr: thin,
+            metadata: T::metadata_from_allocation(thin),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Builds a `Box` with explicitly supplied pointer metadata.
+    ///
+    /// # Safety
+    ///
+    /// `thin` and `metadata` must describe the same initialized `T`, and the
+    /// allocation must carry the chunk reference required by [`Self::from_raw`].
+    #[inline]
+    pub(crate) unsafe fn from_raw_with_metadata(thin: NonNull<u8>, metadata: T::Metadata) -> Self {
+        Self {
+            ptr: thin,
+            metadata: T::store_metadata(metadata),
             _phantom: PhantomData,
         }
     }
@@ -160,7 +194,31 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
 
 impl_thin_smart_ptr_common!(Box);
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> From<Box<T, A>> for Pin<Box<T, A>> {
+impl<T, A: Allocator + Clone> Box<T, A> {
+    /// Converts this owner into a trait-object owner in place.
+    ///
+    /// The value is neither moved nor reallocated. See [`coerce!`](crate::coerce!)
+    /// for the supported trait-object targets.
+    ///
+    /// Custom trait objects must implement [`ptr_meta::Pointee`], normally via
+    /// `#[multitude::dst::pointee]` with the `dst` feature enabled.
+    #[must_use]
+    pub fn unsize<U, F>(this: Self, coercion: Coercion<T, U, F>) -> Box<U, A>
+    where
+        U: ?Sized + SmartPointerPointee + ptr_meta::Pointee<Metadata = ptr_meta::DynMetadata<U>>,
+        F: FnOnce(*const T) -> *const U,
+    {
+        let metadata = crate::coerce::unsize_metadata(this.ptr, coercion);
+        let payload = this.ptr;
+        mem::forget(this);
+        // SAFETY: the compiler-checked coercion produced `metadata` for the
+        // initialized `T` at `payload`; ownership of the chunk reference moved
+        // from `this` to the returned handle.
+        unsafe { Box::from_raw_with_metadata(payload, metadata) }
+    }
+}
+
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> From<Box<T, A>> for Pin<Box<T, A>> {
     #[inline]
     fn from(value: Box<T, A>) -> Self {
         Box::into_pin(value)
@@ -169,7 +227,7 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> From<Box<T, A>> for Pin<Box<T, A
 
 // No `leak`: dropping the refcount risks UAF; keeping it leaks the chunk.
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Box<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone, M: HandleMetadata<T>> Drop for Box<T, A, M> {
     #[inline]
     fn drop(&mut self) {
         // Adopt the chunk's +1 before running `T::drop`, so a panic in
@@ -328,7 +386,7 @@ impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> DerefMut for Box<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> DerefMut for Box<T, A> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         // SAFETY: `as_fat_ptr` reconstructs the fat pointer to the live pointee
@@ -338,21 +396,21 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> DerefMut for Box<T, A> {
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> AsMut<T> for Box<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> AsMut<T> for Box<T, A> {
     #[inline]
     fn as_mut(&mut self) -> &mut T {
         self
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> BorrowMut<T> for Box<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> BorrowMut<T> for Box<T, A> {
     #[inline]
     fn borrow_mut(&mut self) -> &mut T {
         self
     }
 }
 
-impl<I: Iterator + ?Sized + Pointee, A: Allocator + Clone> Iterator for Box<I, A> {
+impl<I: Iterator + ?Sized + SmartPointerPointee, A: Allocator + Clone> Iterator for Box<I, A> {
     type Item = I::Item;
 
     #[inline]
@@ -371,7 +429,7 @@ impl<I: Iterator + ?Sized + Pointee, A: Allocator + Clone> Iterator for Box<I, A
     }
 }
 
-impl<I: DoubleEndedIterator + ?Sized + Pointee, A: Allocator + Clone> DoubleEndedIterator for Box<I, A> {
+impl<I: DoubleEndedIterator + ?Sized + SmartPointerPointee, A: Allocator + Clone> DoubleEndedIterator for Box<I, A> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         (**self).next_back()
@@ -383,14 +441,14 @@ impl<I: DoubleEndedIterator + ?Sized + Pointee, A: Allocator + Clone> DoubleEnde
     }
 }
 
-impl<I: ExactSizeIterator + ?Sized + Pointee, A: Allocator + Clone> ExactSizeIterator for Box<I, A> {
+impl<I: ExactSizeIterator + ?Sized + SmartPointerPointee, A: Allocator + Clone> ExactSizeIterator for Box<I, A> {
     #[inline]
     fn len(&self) -> usize {
         (**self).len()
     }
 }
 
-impl<I: FusedIterator + ?Sized + Pointee, A: Allocator + Clone> FusedIterator for Box<I, A> {}
+impl<I: FusedIterator + ?Sized + SmartPointerPointee, A: Allocator + Clone> FusedIterator for Box<I, A> {}
 
 impl<'a, T, A: Allocator + Clone> From<Vec<'a, T, A>> for Box<[T], A> {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable

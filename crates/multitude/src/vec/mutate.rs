@@ -198,8 +198,8 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
 
     /// Shrink the capacity of the vector as much as possible.
     ///
-    /// O(1) when the buffer is still at the chunk's bump cursor: returns the
-    /// unused tail without moving data. Otherwise this is a no-op.
+    /// O(1) when the buffer is still at the chunk's bump cursor: reclaims the
+    /// unused capacity tail without moving data. Otherwise this is a no-op.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // thin delegation; logic covered via `reclaim_capacity_tail`
     /// ```
@@ -531,9 +531,9 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// Unlike [`Self::reserve`], this does not over-allocate via
     /// amortized doubling: the resulting capacity is exactly
-    /// `len + additional` (modulo whatever the backing chunk's in-place
-    /// growth already provides). Prefer [`Self::reserve`] when more
-    /// elements are expected to be inserted afterwards.
+    /// `len + additional`, unless the vector already has more capacity, in
+    /// which case that capacity is left unchanged. Prefer [`Self::reserve`]
+    /// when more elements are expected to be inserted afterwards.
     ///
     /// # Panics
     ///

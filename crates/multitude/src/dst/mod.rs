@@ -11,10 +11,9 @@
 //! pinned variants for each ownership model.
 //!
 //! Callers provide an exact [`core::alloc::Layout`], matching pointer metadata,
-//! and an initializer that writes a valid value. This supports slices and trait
-//! objects without storing a wide pointer in each smart-pointer handle.
-//! Metadata is stored with the arena allocation and reconstructed when the
-//! value is dereferenced or dropped.
+//! and an initializer that writes a valid value. Slice lengths are stored with
+//! the arena allocation; trait-object vtable pointers are stored in each handle. The
+//! full pointer is reconstructed when the value is dereferenced or dropped.
 //!
 //! # Safety and failure behavior
 //!

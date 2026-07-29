@@ -14,6 +14,8 @@ mod loom_arc {
     use std::sync::atomic::{AtomicUsize as StdAtomicUsize, Ordering as StdOrdering};
 
     use loom::thread;
+    #[cfg(feature = "dst")]
+    use multitude::coerce;
     use multitude::{Arc, Arena};
 
     #[expect(unused_imports, reason = "common helpers are configuration-dependent")]
@@ -29,6 +31,13 @@ mod loom_arc {
     }
 
     struct DropCounted;
+
+    #[cfg(feature = "dst")]
+    #[multitude::dst::pointee]
+    trait ErasedDropCounted: Send + Sync {}
+
+    #[cfg(feature = "dst")]
+    impl ErasedDropCounted for DropCounted {}
 
     impl Drop for DropCounted {
         fn drop(&mut self) {
@@ -70,6 +79,32 @@ mod loom_arc {
             // of the interleaving Loom picked.
             let after = drop_counter().load(StdOrdering::Relaxed);
             assert_eq!(after - baseline, 1, "DropCounted::drop must run exactly once");
+        });
+    }
+
+    #[cfg(feature = "dst")]
+    #[test]
+    fn sized_and_erased_arc_clone_drop_race() {
+        loom::model(|| {
+            let baseline = drop_counter().load(StdOrdering::Relaxed);
+
+            let arena = fresh_arena();
+            let sized: Arc<DropCounted> = arena.alloc_arc(DropCounted);
+            let erased: Arc<dyn ErasedDropCounted> = Arc::unsize(sized.clone(), coerce!(dyn ErasedDropCounted));
+            let sized_worker = sized.clone();
+            let erased_worker = erased.clone();
+
+            let t1 = thread::spawn(move || drop(sized_worker));
+            let t2 = thread::spawn(move || drop(erased_worker));
+
+            drop(sized);
+            drop(erased);
+            drop(arena);
+            t1.join().unwrap();
+            t2.join().unwrap();
+
+            let after = drop_counter().load(StdOrdering::Relaxed);
+            assert_eq!(after - baseline, 1, "mixed sized and erased Arc handles must drop exactly once");
         });
     }
 
@@ -456,7 +491,7 @@ mod loom_arc {
         // re-store its `next` pointer.
         loom::model(|| {
             let arena = fresh_arena();
-            // Each `Arc<[u32; 256]>` takes ~1 KiB + the per-`Arc` strong
+            // Each `Arc<[u32; 256]>` allocation takes ~1 KiB plus its strong
             // prefix; with `max_normal_alloc = 4 KiB` chunks, two of these
             // allocate in separate chunks via refill, so dropping each on a
             // different worker forces two independent `push`
@@ -489,7 +524,7 @@ mod loom_arc {
         // installed node's `next` field after the push that installed it.
         loom::model(|| {
             let arena = fresh_arena();
-            // Each `Arc<[u32; 256]>` takes ~1 KiB + the per-`Arc` strong
+            // Each `Arc<[u32; 256]>` allocation takes ~1 KiB plus its strong
             // prefix; with `max_normal_alloc = 4 KiB` chunks, these
             // allocations refill into separate chunks so each drop/pop
             // exercises cache traffic.

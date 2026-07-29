@@ -4,22 +4,24 @@
 //! Compiler-checked pointer unsizing for pooled handles.
 //!
 //! Stable Rust cannot unsize user-defined smart pointers directly. A
-//! [`Coercion`] delegates the raw-pointer coercion to the compiler, preserving
-//! address and provenance while adding DST metadata. Use
-//! [`coerce!`](crate::coerce!) for trait objects or [`Coercion::to_slice`] for
-//! arrays.
+//! [`Coercion`] from [`coerce!`](crate::coerce!) or
+//! [`Coercion::to_slice`] delegates raw-pointer coercion to the compiler,
+//! preserving address and provenance while adding DST metadata.
+//! [`Coercion::new`] is an unsafe escape hatch whose validity is instead the
+//! caller's responsibility.
 
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-/// A compiler-checked proof that `*const T` can be unsized to `*const U`.
+/// A proof that `*const T` can be unsized to `*const U`.
 ///
 /// Pass one to [`Box::unsize`](crate::Box::unsize),
 /// [`Arc::unsize`](crate::Arc::unsize) or [`Rc::unsize`](crate::Rc::unsize).
 /// Construct it with the [`coerce!`](crate::coerce!) macro, with
 /// [`Coercion::to_slice`], or — for coercions those cannot express — with the
-/// `unsafe` [`Coercion::new`].
+/// `unsafe` [`Coercion::new`]. The safe constructors are compiler-checked;
+/// `Coercion::new` relies on its caller contract.
 pub struct Coercion<T, U: ?Sized, F: FnOnce(*const T) -> *const U = fn(*const T) -> *const U> {
     coerce: F,
     _phantom: PhantomData<fn(*const T) -> *const U>,
@@ -104,6 +106,8 @@ pub(crate) fn unsize<T, U: ?Sized, F: FnOnce(*const T) -> *const U>(ptr: NonNull
 /// The syntax is `coerce!(dyn Trait)`, including bounds such as
 /// `coerce!(dyn Trait + Send)`. If the trait object refers to an enclosing
 /// generic type, bind it explicitly with `coerce!(<T> dyn Trait<T>)`.
+/// Unlike Multitude's handle-metadata representation, Plurality uses native
+/// fat pointers and accepts any trait-object unsizing that the compiler accepts.
 ///
 /// ```
 /// use core::fmt::Debug;

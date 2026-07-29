@@ -32,6 +32,14 @@ pub struct Alloc<'pool, T, A: Allocator = Global> {
     _pool: PhantomData<&'pool Pool<T, A>>,
 }
 
+// `Alloc` semantically owns its slot and exposes no path to the pool or its
+// allocator; `_pool` only carries the borrow lifetime and thread affinity.
+// Dropping the handle destroys `T` and atomically returns the slot without
+// accessing `A`, so its unwind contracts depend only on `T`. Borrowing it
+// mutably still produces `&mut Alloc`, which remains `!UnwindSafe`.
+impl<T: core::panic::RefUnwindSafe, A: Allocator> core::panic::RefUnwindSafe for Alloc<'_, T, A> {}
+impl<T: core::panic::UnwindSafe, A: Allocator> core::panic::UnwindSafe for Alloc<'_, T, A> {}
+
 impl<T, A: Allocator> Alloc<'_, T, A> {
     #[inline]
     pub(crate) fn from_slot(slot: NonNull<SlotCell<T>>) -> Self {

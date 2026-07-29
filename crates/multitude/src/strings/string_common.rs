@@ -12,7 +12,7 @@
 //! macro because `as_ptr`/`as_mut_ptr` types differ.
 
 macro_rules! impl_arena_string_common {
-    ($Ty:ident, $Elem:ty) => {
+    ($Ty:ident, $Elem:ty, $units:literal) => {
         impl<'a, A: allocator_api2::alloc::Allocator + Clone> $Ty<'a, A> {
             /// Create a new, empty arena-backed string.
             ///
@@ -24,7 +24,7 @@ macro_rules! impl_arena_string_common {
                 }
             }
 
-            /// Create an arena-backed string with capacity for `cap` elements.
+            #[doc = concat!("Create an arena-backed string with capacity for `cap` ", $units, ".")]
             ///
             /// # Panics
             ///
@@ -51,17 +51,9 @@ macro_rules! impl_arena_string_common {
                 })
             }
 
-            /// Returns the length of this string in elements.
+            #[doc = concat!("Returns the length of this string in ", $units, ".")]
             #[must_use]
             #[inline]
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.push_str("rust");
-            /// assert_eq!(value.len(), 4);
-            /// ```
             pub const fn len(&self) -> usize {
                 self.inner.len()
             }
@@ -69,47 +61,23 @@ macro_rules! impl_arena_string_common {
             /// Returns `true` if this string has a length of zero.
             #[must_use]
             #[inline]
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// assert!(value.is_empty());
-            /// value.push('x');
-            /// assert!(!value.is_empty());
-            /// ```
             pub const fn is_empty(&self) -> bool {
                 self.inner.is_empty()
             }
 
-            /// Returns this string's capacity, in elements.
+            #[doc = concat!("Returns this string's capacity, in ", $units, ".")]
             #[must_use]
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let value = arena.alloc_string_with_capacity(8);
-            /// assert!(value.capacity() >= 8);
-            /// ```
             pub const fn capacity(&self) -> usize {
                 self.inner.capacity()
             }
 
-            /// Reserve capacity for at least `additional` more elements.
+            #[doc = concat!("Reserve capacity for at least `additional` more ", $units, ".")]
             ///
             /// # Panics
             ///
             /// Panics if the backing allocator fails. Use
             /// [`Self::try_reserve`] for a fallible variant.
             #[inline]
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.reserve(8);
-            /// assert!(value.capacity() >= 8);
-            /// ```
             pub fn reserve(&mut self, additional: usize) {
                 self.inner.reserve(additional);
             }
@@ -123,33 +91,14 @@ macro_rules! impl_arena_string_common {
             /// [`$crate::AllocError::is_allocator_failure`] and
             /// [`$crate::AllocError::is_capacity_overflow`] to tell the two apart.
             #[inline]
-            /// ```
-            /// # fn main() -> Result<(), multitude::AllocError> {
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.try_reserve(8)?;
-            /// assert!(value.capacity() >= 8);
-            /// # Ok(())
-            /// # }
-            /// ```
             pub fn try_reserve(&mut self, additional: usize) -> Result<(), $crate::AllocError> {
                 self.inner.try_reserve(additional)
             }
 
-            /// Reserve exactly enough capacity for `additional` elements.
+            #[doc = concat!("Reserve exactly enough capacity for `additional` ", $units, ".")]
             ///
             /// This omits the amortized-growth slack of [`Self::reserve`].
             #[inline]
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.reserve_exact(4);
-            /// assert_eq!(value.capacity(), 4);
-            /// ```
             pub fn reserve_exact(&mut self, additional: usize) {
                 self.inner.reserve_exact(additional);
             }
@@ -163,17 +112,6 @@ macro_rules! impl_arena_string_common {
             /// [`$crate::AllocError::is_allocator_failure`] and
             /// [`$crate::AllocError::is_capacity_overflow`] to tell the two apart.
             #[inline]
-            /// ```
-            /// # fn main() -> Result<(), multitude::AllocError> {
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.try_reserve_exact(4)?;
-            /// assert_eq!(value.capacity(), 4);
-            /// # Ok(())
-            /// # }
-            /// ```
             pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), $crate::AllocError> {
                 self.inner.try_reserve_exact(additional)
             }
@@ -182,30 +120,13 @@ macro_rules! impl_arena_string_common {
             ///
             /// O(1) when the backing buffer is at the chunk's bump cursor;
             /// otherwise a no-op. See [`crate::vec::Vec::shrink_to_fit`].
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string_with_capacity(8);
-            /// value.push_str("hi");
-            /// value.shrink_to_fit();
-            /// assert_eq!(value.capacity(), value.len());
-            /// ```
             pub fn shrink_to_fit(&mut self) {
                 self.inner.shrink_to_fit();
             }
 
-            /// Shrink the capacity with a lower bound (in elements). See
-            /// [`crate::vec::Vec::shrink_to`].
-            /// ```
-            /// use multitude::Arena;
+            #[doc = concat!("Shrink the capacity with a lower bound in ", $units, ".")]
             ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string_with_capacity(8);
-            /// value.push_str("hi");
-            /// value.shrink_to(4);
-            /// assert!(value.capacity() >= 4);
-            /// ```
+            /// See [`crate::vec::Vec::shrink_to`].
             pub fn shrink_to(&mut self, min_capacity: usize) {
                 self.inner.shrink_to(min_capacity);
             }
@@ -213,15 +134,6 @@ macro_rules! impl_arena_string_common {
             /// Truncates this string, removing all contents.
             ///
             /// The capacity is preserved.
-            /// ```
-            /// use multitude::Arena;
-            ///
-            /// let arena = Arena::new();
-            /// let mut value = arena.alloc_string();
-            /// value.push_str("text");
-            /// value.clear();
-            /// assert!(value.is_empty());
-            /// ```
             pub fn clear(&mut self) {
                 self.inner.clear();
             }

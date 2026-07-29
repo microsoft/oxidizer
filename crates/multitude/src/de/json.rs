@@ -264,8 +264,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// values borrow `input` and do not allocate.
     ///
     /// If deserialization fails, the callback may already have processed a
-    /// prefix of the input. Trailing input is checked after every array element
-    /// has been delivered.
+    /// prefix of the input. Trailing input is checked once, after all array
+    /// elements have been delivered.
     ///
     /// # Errors
     ///
@@ -434,7 +434,8 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// Reuse is useful for several refreshes between arena resets. The vector
     /// borrows its arena, so it must be dropped before [`Arena::reset`] and
-    /// recreated afterward from the arena's warm chunk cache.
+    /// recreated from the same arena afterward. Reset retains reusable chunk
+    /// memory, so subsequent allocations can reuse it.
     ///
     /// If deserialization fails, the vector remains valid but may contain a
     /// partially deserialized prefix.

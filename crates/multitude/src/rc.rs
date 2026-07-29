@@ -7,13 +7,13 @@ use core::pin::Pin;
 use core::ptr::{self, NonNull};
 
 use allocator_api2::alloc::{Allocator, Global};
-use ptr_meta::Pointee;
 
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::refcount_overflow_abort;
 use crate::internal::thin_dst;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
+use crate::{Coercion, HandleMetadata, SmartPointerPointee};
 
 /// Strong-count saturation threshold. Cloning past this aborts the
 /// process, mirroring `std::rc::Rc`'s `MAX_REFCOUNT` guard (using the
@@ -23,7 +23,7 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// A single-thread, non-atomic smart pointer to an arena-backed `T`.
 ///
 /// `Rc` is the [`!Send`](Send)/[`!Sync`](Sync) sibling of [`Arc`](crate::Arc):
-/// it shares the same 8-byte thin-pointer layout and the same ability to outlive
+/// it shares [`Arc`](crate::Arc)'s compact handle layout and ability to outlive
 /// the arena, but its reference count is non-atomic. Compared to
 /// [`Arc`](crate::Arc):
 ///
@@ -32,8 +32,10 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// - **No `Send`/`Sync` bound on `T`** — `Rc` can wrap thread-affine,
 ///   `!Send`/`!Sync` values (e.g. `Rc<RefCell<…>>`) and still be shared (by
 ///   cloning) within a single thread and outlive the arena.
-/// - **Tighter packing** — for `str` / `[u8]` and other sub-4-aligned payloads,
-///   `Rc` uses a few bytes less than [`Arc`](crate::Arc).
+/// - **Lower alignment overhead** — for `str`, `[u8]`, and other payloads with
+///   alignment below 4, `Rc` avoids the atomic count's 4-byte reservation
+///   alignment floor. This can save up to three bytes of alignment gap between
+///   allocations; the in-allocation prefix itself is the same size.
 ///
 /// Created via [`Arena::alloc_rc`](crate::Arena::alloc_rc). Cloning is **O(1)**.
 /// The value survives [`Arena::reset`](crate::Arena::reset) and the `Rc` can
@@ -98,19 +100,41 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// let b = a.clone();
 /// assert_eq!(*a, *b);
 /// ```
-pub struct Rc<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
-    /// **Thin** pointer to the first byte of the contained value (see
-    /// [`Arc`](crate::Arc) for the masking / metadata-prefix scheme). The
-    /// strong count — an unaligned, non-atomic `u32` — sits in the prefix
-    /// immediately before any metadata, and is read/written only through
-    /// [`ptr::read_unaligned`] / [`ptr::write_unaligned`].
+pub struct Rc<
+    T: ?Sized + SmartPointerPointee,
+    A: Allocator + Clone = Global,
+    M: HandleMetadata<T> = <T as SmartPointerPointee>::StoredMetadata,
+> {
+    /// Pointer to the first byte of the contained value. The strong count is
+    /// stored before any allocation-resident slice/string metadata and is
+    /// accessed with unaligned reads and writes.
     ptr: NonNull<u8>,
+    /// Per-handle metadata. This is zero-sized for sized values, slices, and
+    /// strings; trait-object handles carry their vtable here.
+    metadata: M,
     /// Variance + dropck marker. `NonNull<u8>` + the raw-pointer phantom keep
     /// `Rc` `!Send`/`!Sync` automatically (no `unsafe impl` is added).
     _phantom: PhantomData<(*const T, A)>,
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Rc<T, A> {
+// Both the pointee and allocator may be observed through other owners after an
+// unwind, so shared-reference unwind safety is required for both traits.
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::RefUnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::RefUnwindSafe,
+> core::panic::RefUnwindSafe for Rc<T, A, M>
+{
+}
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::RefUnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::RefUnwindSafe,
+> core::panic::UnwindSafe for Rc<T, A, M>
+{
+}
+
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Rc<T, A> {
     /// Builds an `Rc` from a thin payload pointer.
     ///
     /// # Safety
@@ -118,9 +142,10 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Rc<T, A> {
     /// - `thin` must reference the payload of a fully-initialized `T` whose
     ///   storage was bump-allocated from a [`Chunk<A>`](crate::internal::chunk::Chunk)
     ///   via the [`LocalStrong`](crate::internal::thin_dst::LocalStrong) allocator
-    ///   path: a non-atomic `u32` strong count must already be initialized in the
-    ///   chunk prefix, and for DST `T` the prefix must carry the matching
-    ///   `T::Metadata`.
+    ///   path: a non-atomic `u32` strong count and any allocation-resident
+    ///   metadata must already be initialized in the chunk prefix.
+    ///   Handle-resident metadata must instead be supplied through
+    ///   [`Self::from_raw_with_metadata`].
     /// - The caller must have just acquired a +1 refcount on that chunk for the
     ///   new `Rc` family, and the strong count must account for this handle.
     /// - `thin` must lie within the first `CHUNK_ALIGN` bytes of the chunk.
@@ -128,6 +153,23 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Rc<T, A> {
     pub(crate) unsafe fn from_raw(thin: NonNull<u8>) -> Self {
         Self {
             ptr: thin,
+            metadata: T::metadata_from_allocation(thin),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Builds an `Rc` with explicitly supplied pointer metadata.
+    ///
+    /// # Safety
+    ///
+    /// `thin` and `metadata` must describe the same initialized `T`, and the
+    /// allocation must carry the strong-count and chunk references required by
+    /// [`Self::from_raw`].
+    #[inline]
+    pub(crate) unsafe fn from_raw_with_metadata(thin: NonNull<u8>, metadata: T::Metadata) -> Self {
+        Self {
+            ptr: thin,
+            metadata: T::store_metadata(metadata),
             _phantom: PhantomData,
         }
     }
@@ -194,6 +236,49 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Rc<T, A> {
 }
 
 impl_thin_smart_ptr_common!(Rc);
+
+impl<T, A: Allocator + Clone> Rc<T, A> {
+    /// Converts this owner into a trait-object owner in place.
+    ///
+    /// The value is neither moved nor reallocated. See [`coerce!`](crate::coerce!)
+    /// for the supported trait-object targets.
+    ///
+    /// Existing sized and erased clones continue sharing the same strong
+    /// count. Each erased clone carries its own trait-object vtable.
+    #[must_use]
+    pub fn unsize<U, F>(this: Self, coercion: Coercion<T, U, F>) -> Rc<U, A>
+    where
+        U: ?Sized + SmartPointerPointee + ptr_meta::Pointee<Metadata = ptr_meta::DynMetadata<U>>,
+        F: FnOnce(*const T) -> *const U,
+    {
+        let metadata = crate::coerce::unsize_metadata(this.ptr, coercion);
+        let payload = this.ptr;
+        mem::forget(this);
+        // SAFETY: the coercion produced the vtable for the initialized value at
+        // `payload`; the consumed handle's strong and chunk references transfer to
+        // the returned handle.
+        unsafe { Rc::from_raw_with_metadata(payload, metadata) }
+    }
+
+    /// Converts this pinned owner into a pinned trait-object owner.
+    ///
+    /// The value is neither moved nor exposed. See [`coerce!`](crate::coerce!)
+    /// for the supported trait-object targets.
+    #[must_use]
+    pub fn unsize_pin<U, F>(this: Pin<Self>, coercion: Coercion<T, U, F>) -> Pin<Rc<U, A>>
+    where
+        U: ?Sized + SmartPointerPointee + ptr_meta::Pointee<Metadata = ptr_meta::DynMetadata<U>>,
+        F: FnOnce(*const T) -> *const U,
+    {
+        // SAFETY: the ordinary owner exists only inside this method. `unsize`
+        // changes pointer metadata without moving the allocation, and the
+        // resulting owner is re-pinned before it can escape.
+        unsafe {
+            let owner = Pin::into_inner_unchecked(this);
+            Rc::pin_fresh(Self::unsize(owner, coercion))
+        }
+    }
+}
 
 impl<T, A: Allocator + Clone> Rc<MaybeUninit<T>, A> {
     /// Convert an initialized `MaybeUninit<T>` handle into a `T` handle.
@@ -273,7 +358,7 @@ fn strong_overflow_abort() -> ! {
     refcount_overflow_abort()
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Rc<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone, M: HandleMetadata<T>> Clone for Rc<T, A, M> {
     #[inline]
     fn clone(&self) -> Self {
         let value_align = mem::align_of_val::<T>(&**self);
@@ -284,9 +369,9 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Rc<T, A> {
         // unaligned load/store. `Rc` is `!Send`/`!Sync`, so no other thread can
         // race this read-modify-write.
         //
-        // Store before the cold saturation check so the backend can fuse the
-        // update into one memory increment. This reduces the clone benchmark
-        // from 16,043 to 13,043 instructions (18.7%).
+        // Store before the cold saturation check so backends can combine the
+        // unaligned load, increment, and store into one memory update where
+        // the architecture supports it.
         unsafe {
             let next = ptr::read_unaligned(strong).wrapping_add(1);
             ptr::write_unaligned(strong, next);
@@ -300,12 +385,13 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Rc<T, A> {
         }
         Self {
             ptr: self.ptr,
+            metadata: self.metadata,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Rc<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone, M: HandleMetadata<T>> Drop for Rc<T, A, M> {
     #[inline]
     fn drop(&mut self) {
         let value_align = mem::align_of_val::<T>(&**self);

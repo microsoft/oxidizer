@@ -48,15 +48,15 @@ mod linux {
     }
 
     #[library_benchmark]
-    #[bench::run(&unescaped_state())]
-    fn decode_arena_box_slice(state: &RecordBatchState) {
-        arena_box_slice_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut unescaped_state())]
+    fn decode_arena_box_slice(state: &mut RecordBatchState) {
+        arena_box_slice_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
-    #[bench::run(&unescaped_state())]
-    fn decode_arena_vec_baseline(state: &RecordBatchState) {
-        arena_vec_baseline_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut unescaped_state())]
+    fn decode_arena_vec_baseline(state: &mut RecordBatchState) {
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
@@ -72,15 +72,15 @@ mod linux {
     }
 
     #[library_benchmark]
-    #[bench::run(&unescaped_state())]
-    fn strings_arena_vec_unescaped(state: &RecordBatchState) {
-        arena_vec_baseline_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut unescaped_state())]
+    fn strings_arena_vec_unescaped(state: &mut RecordBatchState) {
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
-    #[bench::run(&escaped_state())]
-    fn strings_arena_vec_escaped(state: &RecordBatchState) {
-        arena_vec_baseline_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut escaped_state())]
+    fn strings_arena_vec_escaped(state: &mut RecordBatchState) {
+        arena_vec_baseline_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
@@ -102,9 +102,9 @@ mod linux {
     }
 
     #[library_benchmark]
-    #[bench::run(&unescaped_state())]
-    fn sparse_retention_arena_one_in_eight(state: &RecordBatchState) {
-        sparse_arena_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut unescaped_state())]
+    fn sparse_retention_arena_one_in_eight(state: &mut RecordBatchState) {
+        sparse_arena_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
@@ -126,15 +126,15 @@ mod linux {
     }
 
     #[library_benchmark]
-    #[bench::run(&malformed_state())]
-    fn errors_malformed_arena(state: &RecordBatchState) {
-        malformed_arena_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut malformed_state())]
+    fn errors_malformed_arena(state: &mut RecordBatchState) {
+        malformed_arena_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]
-    #[bench::run(&unescaped_state())]
-    fn errors_resource_limited_arena(state: &RecordBatchState) {
-        resource_limited_hot_path(&state.arena, &state.input);
+    #[bench::run(&mut unescaped_state())]
+    fn errors_resource_limited_arena(state: &mut RecordBatchState) {
+        resource_limited_hot_path(&mut state.arena, &state.input);
     }
 
     #[library_benchmark]

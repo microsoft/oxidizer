@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise `Rc<[Rc<[u8]>]>` build benchmarks for multitude.
+//! Callgrind allocation benchmarks for multitude.
 //!
-//! Mirrors `benches/criterion_rc_array.rs` 1:1: each gungraun function
-//! `<variant>` corresponds to a criterion benchmark `rc_array/<variant>`.
+//! Paired with `criterion_alloc.rs`: each function named
+//! `<group>_<variant>` corresponds to
+//! `criterion_alloc/<group>/<variant>`.
 //!
-//! Run with `cargo bench --bench gungraun_rc_array` on a Linux host with
+//! Run with `cargo bench --bench criterion_alloc_cg` on a Linux host with
 //! Valgrind.
 
 #![allow(missing_docs, reason = "Benchmark")]
@@ -15,14 +16,13 @@
     clippy::needless_pass_by_value,
     reason = "gungraun bench inputs are passed by value by the framework"
 )]
-#![allow(clippy::type_complexity, reason = "benchmark state tuples are inherently complex")]
+#![allow(clippy::ref_as_ptr, reason = "trivial pointer cast in bench plumbing")]
 #![allow(clippy::too_many_lines, reason = "benchmark file")]
 #![cfg_attr(
     target_os = "linux",
     expect(
         clippy::exit,
         clippy::missing_docs_in_private_items,
-        unused_qualifications,
         reason = "Triggered by Gungraun macro expansion. Upstream tracking issues are pending."
     )
 )]
@@ -33,6 +33,7 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
+#[path = "criterion_alloc_cg/linux.rs"]
 mod linux;
 
 #[cfg(target_os = "linux")]
@@ -42,5 +43,12 @@ use linux::*;
 gungraun::main!(
     config = gungraun::LibraryBenchmarkConfig::default()
         .tool(gungraun::Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = rc_array_group
+    library_benchmark_groups =
+        arena_lifecycle,
+        alloc_u64,
+        alloc_str,
+        alloc_slice,
+        string_builder,
+        vec_builder,
+        allocator_grow
 );

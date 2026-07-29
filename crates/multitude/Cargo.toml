@@ -152,19 +152,19 @@ harness = false
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
 # cfg-gated, so it is unconditional here.
 [[bench]]
-name = "gungraun_alloc"
+name = "criterion_alloc_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_drop"
+name = "criterion_drop_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_arc_array"
+name = "criterion_arc_array_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_rc_array"
+name = "criterion_rc_array_cg"
 harness = false
 
 [[example]]

@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-//! Freeze a transient vector into arena-owned `Arc` or `Box` slices.
+//! Freeze a transient vector into arena-owned `Box`, `Rc`, or `Arc` slices.
 //!
-//! Infallible freezes are [`Vec::into_arc_slice`] / [`Vec::into_boxed_slice`]
-//! (also via `From<Vec<…>>` for [`Arc`](crate::Arc) / [`Box`](crate::Box))
-//! plus [`Vec::leak`]. Fallible freezes are [`Vec::try_into_arc_slice`] and
-//! [`Vec::try_into_boxed_slice`].
+//! Infallible freezes are [`Vec::into_boxed_slice`], [`Vec::into_rc_slice`],
+//! and [`Vec::into_arc_slice`] (also available through the corresponding
+//! `From<Vec<…>>` implementations), plus [`Vec::leak`]. Each owning freeze
+//! also has a fallible `try_*` variant.
 
 use core::mem::{self, ManuallyDrop};
 use core::ptr::{self, NonNull};
@@ -22,7 +22,7 @@ use crate::rc::Rc;
 use crate::{AllocError, Arena};
 
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
-    /// Shared body of the `Box`/`Arc` freeze paths: drain every element
+    /// Shared body of the `Box`/`Rc`/`Arc` freeze paths: drain every element
     /// into a fresh allocation built by `build`, then release this
     /// `Vec`'s now-empty backing buffer. The old buffer is dropped only
     /// *after* `build` consumes the drain iterator, so the moved-out
@@ -39,9 +39,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         result
     }
 
-    /// Whether this `Vec`'s buffer can be frozen into an `Arc<[T]>` /
-    /// `Box<[T]>` in place (no allocation, no copy): `T` is freezable and the
-    /// buffer was reserved with the `Arc<[T]>` freeze prefix.
+    /// Whether this `Vec`'s buffer can be frozen into a `Box<[T]>`, `Rc<[T]>`,
+    /// or `Arc<[T]>` in place (no allocation, no copy): `T` is freezable and
+    /// the buffer was reserved with the shared-owner freeze prefix.
     #[inline]
     fn can_freeze_in_place(&self) -> bool {
         let freezable = const { buffer_freezable::<T>() };
@@ -106,7 +106,8 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Zero-copy freeze core. Acquires one chunk refcount for the new
     /// smart-pointer family, writes the slice length into the reserved
     /// metadata slot, and relinquishes ownership of the buffer and its
-    /// elements. Returns the thin payload pointer for `Arc`/`Box::from_raw`.
+    /// elements. Returns the thin payload pointer for the target owner's
+    /// `from_raw` constructor.
     ///
     /// The strong count was set to `1` at reservation and is left untouched
     /// (used by `Arc`, ignored by `Box`).
@@ -128,7 +129,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // arena reserved and keeps pinned (caller contract).
         let chunk_ref = unsafe { arena.freeze_acquire_chunk_ref(payload) };
         // Write the slice length into the reserved metadata word at
-        // `payload - size_of::<usize>()` (read by `Arc`/`Box`'s DST recovery).
+        // `payload - size_of::<usize>()` (read by each owner's DST recovery).
         // SAFETY: the reservation placed `size_of::<usize>()` metadata bytes
         // immediately before the payload; `write_unaligned` tolerates any
         // alignment.
@@ -296,8 +297,8 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         let len = me.buf.len();
         // SAFETY: `ptr` addresses `len` initialized `T`s in an arena chunk
         // that outlives `'a`. `ManuallyDrop` prevents dropping the buffer or
-        // elements here; `T: !Drop` (const-asserted above) lets arena teardown
-        // reclaim the raw chunk storage directly.
+        // elements here; the const assertion that `T` needs no drop lets arena
+        // teardown reclaim the raw chunk storage directly.
         unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 

@@ -8,9 +8,8 @@ use core::hash::{Hash, Hasher};
 use core::ops::Deref;
 
 use allocator_api2::alloc::{Allocator, Global};
-use ptr_meta::Pointee;
 
-use crate::{AllocError, Arena, Box};
+use crate::{AllocError, Arena, Box, SmartPointerPointee};
 
 /// A value that is either borrowed or owned by an arena-backed [`Box`].
 ///
@@ -27,14 +26,14 @@ use crate::{AllocError, Arena, Box};
 /// assert_eq!(&*value, "HELLO");
 /// assert!(value.is_owned());
 /// ```
-pub enum Cow<'a, T: ?Sized + Pointee, A: Allocator + Clone = Global> {
+pub enum Cow<'a, T: ?Sized + SmartPointerPointee, A: Allocator + Clone = Global> {
     /// A value borrowed from existing storage.
     Borrowed(&'a T),
     /// A value owned by an escape-capable arena smart pointer.
     Owned(Box<T, A>),
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Cow<'_, T, A> {
     /// Returns `true` when the value is borrowed.
     #[must_use]
     pub const fn is_borrowed(&self) -> bool {
@@ -288,19 +287,19 @@ impl<T: Clone, A: Allocator + Clone> Cow<'_, [T], A> {
     }
 }
 
-impl<'a, T: ?Sized + Pointee, A: Allocator + Clone> From<&'a T> for Cow<'a, T, A> {
+impl<'a, T: ?Sized + SmartPointerPointee, A: Allocator + Clone> From<&'a T> for Cow<'a, T, A> {
     fn from(value: &'a T) -> Self {
         Self::Borrowed(value)
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> From<Box<T, A>> for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> From<Box<T, A>> for Cow<'_, T, A> {
     fn from(value: Box<T, A>) -> Self {
         Self::Owned(value)
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Deref for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Deref for Cow<'_, T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -311,58 +310,58 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Deref for Cow<'_, T, A> {
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> AsRef<T> for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> AsRef<T> for Cow<'_, T, A> {
     fn as_ref(&self) -> &T {
         self
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Borrow<T> for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Borrow<T> for Cow<'_, T, A> {
     fn borrow(&self) -> &T {
         self
     }
 }
 
-impl<T: ?Sized + Pointee + fmt::Debug, A: Allocator + Clone> fmt::Debug for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + fmt::Debug, A: Allocator + Clone> fmt::Debug for Cow<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + Pointee + fmt::Display, A: Allocator + Clone> fmt::Display for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + fmt::Display, A: Allocator + Clone> fmt::Display for Cow<'_, T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + Pointee + PartialEq, A: Allocator + Clone> PartialEq for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + PartialEq, A: Allocator + Clone> PartialEq for Cow<'_, T, A> {
     fn eq(&self, other: &Self) -> bool {
         **self == **other
     }
 }
 
-impl<T: ?Sized + Pointee + Eq, A: Allocator + Clone> Eq for Cow<'_, T, A> {}
+impl<T: ?Sized + SmartPointerPointee + Eq, A: Allocator + Clone> Eq for Cow<'_, T, A> {}
 
-impl<T: ?Sized + Pointee + PartialOrd, A: Allocator + Clone> PartialOrd for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + PartialOrd, A: Allocator + Clone> PartialOrd for Cow<'_, T, A> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         (**self).partial_cmp(&**other)
     }
 }
 
-impl<T: ?Sized + Pointee + Ord, A: Allocator + Clone> Ord for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + Ord, A: Allocator + Clone> Ord for Cow<'_, T, A> {
     fn cmp(&self, other: &Self) -> Ordering {
         (**self).cmp(&**other)
     }
 }
 
-impl<T: ?Sized + Pointee + Hash, A: Allocator + Clone> Hash for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + Hash, A: Allocator + Clone> Hash for Cow<'_, T, A> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state);
     }
 }
 
 #[cfg(feature = "serde")]
-impl<T: ?Sized + Pointee + serde::Serialize, A: Allocator + Clone> serde::Serialize for Cow<'_, T, A> {
+impl<T: ?Sized + SmartPointerPointee + serde::Serialize, A: Allocator + Clone> serde::Serialize for Cow<'_, T, A> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         (**self).serialize(serializer)
     }

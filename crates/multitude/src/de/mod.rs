@@ -156,8 +156,9 @@
 //! [`crate::strings::String::deserialize_reusing`] and
 //! [`crate::vec::Vec::deserialize_reusing`] replace an existing growable arena
 //! buffer while retaining reusable capacity. The destination is cleared first.
-//! On an error it remains valid, but may contain the successfully decoded
-//! prefix rather than its previous value.
+//! On an error, `String` is cleared again before the error is returned;
+//! `Vec` remains valid but may contain the successfully decoded element prefix
+//! rather than its previous contents.
 //!
 //! [`Arena::deserialize_json_each`] streams a top-level JSON array through a
 //! callback without constructing a root collection. Values arrive in input
@@ -198,10 +199,9 @@ use core::fmt;
 use core::marker::PhantomData;
 
 use allocator_api2::alloc::Allocator;
-use ptr_meta::Pointee;
 use serde::de::{self, DeserializeSeed as _, Deserializer, Error as _, SeqAccess, Visitor};
 
-use crate::{Alloc, Arc, Arena, Box, Cow, Rc};
+use crate::{Alloc, Arc, Arena, Box, Cow, Rc, SmartPointerPointee};
 
 mod containers;
 mod deserialize_in;
@@ -343,7 +343,7 @@ macro_rules! serialize_smart_pointer {
     ($pointer:ident) => {
         impl<T, A> serde::Serialize for crate::$pointer<T, A>
         where
-            T: serde::Serialize + Pointee,
+            T: serde::Serialize + SmartPointerPointee,
             A: Allocator + Clone,
         {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -596,7 +596,7 @@ where
 
 impl<'de, T, A> DeserializeIn<'de, A> for Box<T, A>
 where
-    T: DeserializeIn<'de, A> + Pointee,
+    T: DeserializeIn<'de, A> + SmartPointerPointee,
     A: Allocator + Clone,
 {
     fn deserialize_in<D>(arena: &Arena<A>, deserializer: D) -> Result<Self, D::Error>
@@ -610,7 +610,7 @@ where
 
 impl<'de, T, A> DeserializeIn<'de, A> for Arc<T, A>
 where
-    T: DeserializeIn<'de, A> + Pointee + Send + Sync,
+    T: DeserializeIn<'de, A> + SmartPointerPointee + Send + Sync,
     A: Allocator + Clone + Send + Sync,
 {
     fn deserialize_in<D>(arena: &Arena<A>, deserializer: D) -> Result<Self, D::Error>
@@ -624,7 +624,7 @@ where
 
 impl<'de, T, A> DeserializeIn<'de, A> for Rc<T, A>
 where
-    T: DeserializeIn<'de, A> + Pointee,
+    T: DeserializeIn<'de, A> + SmartPointerPointee,
     A: Allocator + Clone,
 {
     fn deserialize_in<D>(arena: &Arena<A>, deserializer: D) -> Result<Self, D::Error>
