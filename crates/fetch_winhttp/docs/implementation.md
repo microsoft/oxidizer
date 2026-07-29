@@ -157,8 +157,10 @@ and no blocking pool.
 
 The sole exception is the very first `WinHttpOpen` in a process, which runs
 WinHTTP's one-time global initialization (a lock plus registry reads) and can
-briefly block. Since the transport opens its single session once at build time
-(§3.2), this is a one-time construction cost off the request path.
+briefly block. Since each per-core transport instance opens its own session lazily
+inside the factory when `fetch` materializes it (§3.2), this is a one-time
+per-core construction cost off the request path; the process-wide global
+initialization runs only on the first such open.
 
 The session sets `WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS`: we promise our
 completion callbacks never block, and in return WinHTTP may invoke a callback
@@ -776,6 +778,16 @@ elsewhere in `fetch`). These validate the real OS path end to end:
 - Streaming upload (unknown length -> chunked) and streaming download; assert
   incremental delivery, not just final bytes.
 - Real gzip/deflate responses are transparently decoded.
+- Redirects are never followed (`REDIRECT_POLICY_NEVER`, §5/§10.3): a request to a
+  localhost endpoint returning a 302 whose `Location` points at a sentinel endpoint
+  asserts the 3xx status and `Location` header are surfaced unchanged and that the
+  sentinel endpoint is never hit (server-side hit counter stays zero). This proves the
+  option overrides WinHTTP's default follow-redirects behavior and is set at the right
+  handle scope.
+- Cookies are never stored or replayed (`DISABLE_COOKIES`, §5/§10.3): a first response
+  sets `Set-Cookie`; a second request to the same authority asserts no `Cookie` header is
+  attached (verified server-side). This proves WinHTTP's default cookie jar is disabled at
+  the correct handle scope.
 - `https` against a localhost TLS server, exercising `accept_invalid_certs` and
   `accept_invalid_hostnames` as *independent* relaxations. A valid-cert case proves
   normal trust works. Against a server with an untrusted (self-signed) cert *and* a
@@ -936,7 +948,7 @@ would let two independent `fetch_winhttp` clients - for instance a strict one an
 one built with `accept_invalid_certs` (design.md §4) - reuse each other's pooled
 connections, collapsing the security boundary between them. Disabling global
 pooling scopes the connection pool to this session, so each `HttpClient` gets its
-own pool (still one pool per client, shared across that client's cores, §3.2)
+own pool (one pool per core under the per-core session model, §3.2)
 while different clients stay isolated. Reuse within a client is unaffected.
 
 For draining, WinHTTP exposes only coarse controls:
@@ -1162,3 +1174,30 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
   `testing_aids`.
 
 No Tokio in non-dev code.
+
+## 14. Future opportunities
+
+Design points deliberately deferred in v1, recorded here so they are revisited when
+the `fetch` API or profiling data makes them actionable:
+
+- **Consolidate per-core sessions into one session per client.** v1 opens one WinHTTP
+  session (and therefore one connection pool) per core, because that is the only shape the
+  current `fetch` custom-transport API expresses while still isolating independently built
+  clients (§3.2). This diverges from a single-session-per-client model: it trades
+  cross-core connection reuse and session-granularity connection recycling (the
+  connection-lifetime control WinHTTP otherwise denies us, design.md §2.2) for warmer,
+  uncontended core-local pools. Once `fetch` grows a per-built-client shared-state hook -
+  or once profiling justifies `Isolation::Shared` despite core-local object pools -
+  revisit whether one shared session per client is the better default. Tracked as `fetch`
+  API feedback (../../fetch/docs/stabilization.md, connection-management item) so the
+  divergence is not forgotten when that API becomes more expressive.
+- **Per-core vs shared instancing as a knob.** Whether per-core instancing is the right
+  default at all could become configurable: a low-traffic client gains nothing from
+  per-core instances and might prefer a single shared instance (§3.2). Left unconfigurable
+  in v1 - a knob earns its place only with demonstrated value - but a candidate if
+  profiling shows it matters.
+- **Session-keyed connection pools (`PoolIndex`).** v1 leans on WinHTTP's own per-authority
+  pooling and ignores `fetch`'s `PoolIndex`, collapsing nominally separate pools onto one
+  OS pool (§8). If pool ownership stays a transport concern after the v2 sessions/pools
+  discussion, revisit keying sessions by `PoolIndex` (../../fetch/docs/stabilization.md,
+  connection-management item).
