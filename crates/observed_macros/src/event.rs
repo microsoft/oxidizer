@@ -2275,9 +2275,10 @@ mod coverage_tests {
     #[test]
     fn event_attr_reemits_struct_without_helper_attributes() {
         // The attribute entry point re-emits the struct alongside the generated
-        // impl, with every consumed helper attribute stripped.
+        // impl, with every consumed helper attribute stripped and every
+        // unrelated attribute left untouched.
         let attr: TokenStream = r#""http.request""#.parse().expect("failed to tokenize attribute");
-        let item: TokenStream = r#"#[info("hi")] struct E { #[unredacted] v: i64 }"#
+        let item: TokenStream = r#"#[derive(Debug)] #[info("hi")] struct E { #[allow(dead_code)] #[unredacted] v: i64 }"#
             .parse()
             .expect("failed to tokenize item");
 
@@ -2287,10 +2288,27 @@ mod coverage_tests {
         let syn::Item::Struct(reemitted) = &file.items[0] else {
             panic!("the first generated item should be the re-emitted struct");
         };
-        assert!(reemitted.attrs.is_empty(), "struct-level helpers should be stripped");
-        assert!(
-            reemitted.fields.iter().all(|field| field.attrs.is_empty()),
-            "field-level helpers should be stripped"
+        let struct_attrs: Vec<_> = reemitted
+            .attrs
+            .iter()
+            .map(|a| a.path().get_ident().map(ToString::to_string))
+            .collect();
+        assert_eq!(
+            struct_attrs,
+            vec![Some("derive".to_owned())],
+            "`#[info]` should be stripped and `#[derive]` preserved"
+        );
+
+        let field_attrs: Vec<_> = reemitted
+            .fields
+            .iter()
+            .flat_map(|f| &f.attrs)
+            .map(|a| a.path().get_ident().map(ToString::to_string))
+            .collect();
+        assert_eq!(
+            field_attrs,
+            vec![Some("allow".to_owned())],
+            "`#[unredacted]` should be stripped and `#[allow]` preserved"
         );
     }
 
