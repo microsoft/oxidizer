@@ -61,6 +61,28 @@
 //! different representable range, so such a conversion would have to be fallible or lossy.
 //! Go through [`SystemTime`] instead, which makes the fallible step explicit.
 //!
+//! ```
+//! use std::time::SystemTime;
+//!
+//! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
+//!
+//! // ISO 8601 to RFC 2822, one `SystemTime` hop with the range check in plain sight.
+//! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
+//! let rfc = Rfc2822::try_from(SystemTime::from(iso))?;
+//! assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT");
+//!
+//! // And on to Unix seconds the same way.
+//! let unix = UnixSeconds::try_from(SystemTime::from(rfc))?;
+//! assert_eq!(unix.to_string(), "1722979800");
+//!
+//! // The step that can fail says so: `UnixSeconds` cannot express a pre-epoch instant,
+//! // which an infallible `From<Iso8601>` would have had to invent a value for.
+//! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
+//! UnixSeconds::try_from(SystemTime::from(before_epoch)).unwrap_err();
+//!
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! # Examples
 //!
 //! ## Using format types
