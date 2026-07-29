@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use jiff::{SignedDuration, Timestamp};
 
 use crate::Error;
-use crate::fmt::{Rfc2822, UnixSeconds, to_system_time};
+use crate::fmt::{ensure_system_time_representable, to_system_time};
 
 /// Parser and formatter for system time in ISO 8601 format.
 ///
@@ -53,10 +53,10 @@ use crate::fmt::{Rfc2822, UnixSeconds, to_system_time};
 ///
 /// # Representable range
 ///
-/// This type spans [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) through [`Iso8601::MAX`]
-/// (`9999-12-30T22:00:00.9999999Z`), which is the widest range in the [`fmt`][crate::fmt]
-/// module. Converting an `Iso8601` into a narrower format saturates to that format's nearest
-/// boundary rather than producing an unrelated instant.
+/// The upper bound is [`Iso8601::MAX`] (`9999-12-30T22:00:00.9999999Z`). How far back the
+/// type reaches depends on the platform: an instant is accepted only if the platform's
+/// [`SystemTime`] can represent it, and rejected otherwise, so converting an `Iso8601` back
+/// into a [`SystemTime`] always succeeds.
 ///
 /// # Examples
 ///
@@ -98,14 +98,9 @@ crate::thread_aware_move!(Iso8601);
 impl Iso8601 {
     /// The largest value that can be represented by `Iso8601`.
     ///
-    /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
+    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Timestamp::MAX);
-
-    /// The smallest value that can be represented by `Iso8601`.
-    ///
-    /// This represents a Unix system time of `2 January -9999 01:59:59 UTC`, expressed as an
-    /// expanded ISO 8601 year.
-    pub const MIN: Self = Self(Timestamp::MIN);
 
     /// The Unix epoch represented as `Iso8601`.
     ///
@@ -118,7 +113,7 @@ impl FromStr for Iso8601 {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let timestamp = s.parse::<jiff::Timestamp>().map_err(Error::jiff)?;
-        Ok(Self(timestamp))
+        Ok(Self(ensure_system_time_representable(timestamp)?))
     }
 }
 
@@ -134,7 +129,7 @@ impl Display for Iso8601 {
 
 impl From<Iso8601> for SystemTime {
     fn from(value: Iso8601) -> Self {
-        to_system_time(value.0.as_duration())
+        to_system_time(value.0)
     }
 }
 
@@ -144,18 +139,6 @@ impl TryFrom<SystemTime> for Iso8601 {
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
         Ok(Self(timestamp))
-    }
-}
-
-impl From<Rfc2822> for Iso8601 {
-    fn from(value: Rfc2822) -> Self {
-        Self(value.0)
-    }
-}
-
-impl From<UnixSeconds> for Iso8601 {
-    fn from(value: UnixSeconds) -> Self {
-        Self(Timestamp::UNIX_EPOCH + value.0)
     }
 }
 
@@ -292,48 +275,33 @@ mod tests {
     }
 
     #[test]
-    fn to_unix_seconds_saturates_before_epoch() {
-        // AB#7661495: this used to mirror to `UnixSeconds(1)`, one second *after* the epoch.
-        let iso: Iso8601 = "1969-12-31T23:59:59Z".parse().unwrap();
-
-        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
-        assert_eq!(UnixSeconds::from(iso).to_string(), "0");
-
-        let iso: Iso8601 = "1900-01-01T00:00:00Z".parse().unwrap();
-        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
-
-        // The epoch itself and later instants are unaffected.
-        assert_eq!(UnixSeconds::from(Iso8601::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
-
-        let iso: Iso8601 = "1970-01-01T00:00:01Z".parse().unwrap();
-        assert_eq!(UnixSeconds::from(iso).to_secs(), 1);
-    }
-
-    #[test]
-    fn min_is_timestamp_min() {
-        assert_eq!(Iso8601::MIN.0, Timestamp::MIN);
-        assert!(Iso8601::MIN < Iso8601::UNIX_EPOCH);
-        assert_eq!(Iso8601::MIN.to_string(), "-009999-01-02T01:59:59Z");
-    }
-
-    #[test]
-    fn to_system_time_before_filetime_epoch() {
-        // AB#7663342: instants before the Windows FILETIME epoch (1601-01-01) must convert
-        // without panicking, including on platforms whose `SystemTime` starts at that epoch
-        // and therefore cannot represent them.
+    fn parse_rejects_instants_system_time_cannot_represent() {
+        // AB#7663342: converting a pre-1601 instant used to panic where `SystemTime` is
+        // FILETIME based. Such instants are now rejected at the point of parsing, so a value
+        // that exists can always be converted.
         for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "-000500-01-01T00:00:00Z"] {
-            let iso: Iso8601 = input.parse().unwrap();
-            let system_time = SystemTime::from(iso);
+            let timestamp: jiff::Timestamp = input.parse().unwrap();
+            let parsed = input.parse::<Iso8601>();
 
-            assert!(system_time < SystemTime::UNIX_EPOCH, "{input} must stay before the epoch");
-
-            match SystemTime::UNIX_EPOCH.checked_sub(iso.0.as_duration().unsigned_abs()) {
-                // The platform reaches that far back, so nothing is lost.
-                Some(expected) => assert_eq!(system_time, expected, "{input} must convert exactly"),
-                // Otherwise the conversion saturated to the platform's own lower bound
-                // instead of panicking, which every earlier instant shares.
-                None => assert_eq!(system_time, SystemTime::from(Iso8601::MIN), "{input} must saturate"),
+            if let Some(expected) = crate::fmt::checked_system_time(timestamp) {
+                assert_eq!(SystemTime::from(parsed.unwrap()), expected, "{input}");
+            } else {
+                assert_eq!(
+                    parsed.unwrap_err().to_string(),
+                    "the instant is outside the range that `SystemTime` can represent on this platform",
+                    "{input}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn to_system_time_never_panics_for_parsed_values() {
+        // Every instant that parses is representable, so the round-trip is exact.
+        for input in ["1601-01-01T00:00:00Z", "1970-01-01T00:00:00Z", "2024-08-06T21:30:00Z"] {
+            let iso: Iso8601 = input.parse().unwrap();
+
+            assert_eq!(Iso8601::try_from(SystemTime::from(iso)).unwrap(), iso, "{input}");
         }
     }
 

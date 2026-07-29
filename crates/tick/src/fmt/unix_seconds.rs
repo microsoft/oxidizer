@@ -6,7 +6,6 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use crate::Error;
-use crate::fmt::{Iso8601, Rfc2822, to_unix_epoch_duration};
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
@@ -32,18 +31,18 @@ use crate::fmt::{Iso8601, Rfc2822, to_unix_epoch_duration};
 ///
 /// # Representable range
 ///
-/// The offset from the Unix epoch is unsigned, so this type spans [`UnixSeconds::MIN`] (`0`,
-/// the Unix epoch itself) through [`UnixSeconds::MAX`] (`253402207200`). Converting an instant
-/// that occurs before the Unix epoch saturates to [`UnixSeconds::MIN`].
+/// The offset from the Unix epoch is unsigned, so this type spans
+/// [`UnixSeconds::UNIX_EPOCH`] (`0`) through [`UnixSeconds::MAX`] (`253402207200`). A
+/// [`SystemTime`] before the Unix epoch is rejected rather than clamped.
 ///
 /// ```
-/// use tick::fmt::{Iso8601, UnixSeconds};
+/// use std::time::{Duration, SystemTime};
 ///
-/// let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
+/// use tick::fmt::UnixSeconds;
 ///
-/// assert_eq!(UnixSeconds::from(before_epoch), UnixSeconds::MIN);
+/// let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
 ///
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// UnixSeconds::try_from(before_epoch).unwrap_err();
 /// ```
 ///
 /// # Examples
@@ -74,21 +73,17 @@ pub struct UnixSeconds(pub(super) Duration);
 crate::thread_aware_move!(UnixSeconds);
 
 impl UnixSeconds {
-    /// The largest value that be can represented by `UnixSeconds`.
+    /// The largest value that can be represented by `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `253402207200` seconds, which is
+    /// `9999-12-30T22:00:00Z`.
     // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 
-    /// The smallest value that be can represented by `UnixSeconds`.
-    ///
-    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`. Because the offset
-    /// from the epoch is unsigned, this is the same instant as [`UnixSeconds::UNIX_EPOCH`].
-    pub const MIN: Self = Self(Duration::ZERO);
-
     /// The Unix epoch represented as `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`. Because the
+    /// offset from the epoch is unsigned, this is also the smallest representable value.
     pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
@@ -148,7 +143,9 @@ impl Display for UnixSeconds {
 
 impl From<UnixSeconds> for SystemTime {
     fn from(value: UnixSeconds) -> Self {
-        Self::UNIX_EPOCH + value.0
+        Self::UNIX_EPOCH
+            .checked_add(value.0)
+            .expect("`UnixSeconds::MAX` is year 9999, which every platform's `SystemTime` can represent")
     }
 }
 
@@ -170,19 +167,9 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO))
-    }
-}
-
-impl From<Rfc2822> for UnixSeconds {
-    fn from(value: Rfc2822) -> Self {
-        Self(to_unix_epoch_duration(value.0))
-    }
-}
-
-impl From<Iso8601> for UnixSeconds {
-    fn from(value: Iso8601) -> Self {
-        Self(to_unix_epoch_duration(value.0))
+        // Instants before the Unix epoch are rejected rather than clamped: the offset is
+        // unsigned, so there is no honest way to represent them.
+        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH)?)
     }
 }
 
@@ -216,30 +203,28 @@ mod tests {
 
     use super::*;
 
-    static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
+    static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
 
     #[test]
-    fn min_is_unix_epoch() {
-        assert_eq!(UnixSeconds::MIN, UnixSeconds::UNIX_EPOCH);
-        assert_eq!(UnixSeconds::MIN.to_secs(), 0);
-        assert_eq!(SystemTime::from(UnixSeconds::MIN), SystemTime::UNIX_EPOCH);
-        assert!(UnixSeconds::MIN < UnixSeconds::MAX);
+    fn unix_epoch_is_the_smallest_value() {
+        assert_eq!(UnixSeconds::UNIX_EPOCH.to_secs(), 0);
+        assert_eq!(SystemTime::from(UnixSeconds::UNIX_EPOCH), SystemTime::UNIX_EPOCH);
+        assert!(UnixSeconds::UNIX_EPOCH < UnixSeconds::MAX);
     }
 
     #[test]
-    fn from_pre_epoch_iso_8601_saturates() {
-        let iso: Iso8601 = "1969-12-31T23:59:59Z".parse().unwrap();
-        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
+    fn from_pre_epoch_system_time_is_rejected() {
+        // AB#7661495: the offset is unsigned, so a pre-epoch instant has no honest
+        // representation. It used to be mirrored to the same distance after the epoch.
+        let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
 
-        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
-    }
+        UnixSeconds::try_from(before_epoch).unwrap_err();
 
-    #[test]
-    fn from_pre_epoch_rfc_2822_saturates() {
-        let rfc: Rfc2822 = "Wed, 31 Dec 1969 23:59:59 GMT".parse().unwrap();
-        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::MIN);
+        // The epoch itself and later instants are accepted.
+        assert_eq!(UnixSeconds::try_from(SystemTime::UNIX_EPOCH).unwrap(), UnixSeconds::UNIX_EPOCH);
 
-        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
+        let after_epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        assert_eq!(UnixSeconds::try_from(after_epoch).unwrap().to_secs(), 1);
     }
 
     #[test]
@@ -337,17 +322,17 @@ mod tests {
     }
 
     #[test]
-    fn iso_8601_roundtrip_with_timezone() {
+    fn round_trips_through_system_time() {
         let unix_seconds: UnixSeconds = "9999".parse().unwrap();
-        let iso: Iso8601 = unix_seconds.into();
+        let system_time: SystemTime = unix_seconds.into();
 
-        assert_eq!(iso.to_string(), "1970-01-01T02:46:39Z");
+        assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(9999));
+        assert_eq!(UnixSeconds::try_from(system_time).unwrap(), unix_seconds);
 
-        let iso: Iso8601 = UnixSeconds::MAX.into();
-        assert_eq!(iso, Iso8601::MAX);
-
-        let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
-        assert_eq!(iso, Iso8601::UNIX_EPOCH);
+        // `SystemTime` resolution is platform defined -- 100 ns where it is FILETIME based --
+        // so only whole seconds are guaranteed to survive at the sub-second maximum.
+        let max = UnixSeconds::try_from(SystemTime::from(UnixSeconds::MAX)).unwrap();
+        assert_eq!(max.to_secs(), UnixSeconds::MAX.to_secs());
     }
 
     #[test]

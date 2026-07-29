@@ -9,7 +9,7 @@ use jiff::Timestamp;
 use jiff::fmt::rfc2822;
 
 use crate::Error;
-use crate::fmt::{Iso8601, UnixSeconds, to_system_time};
+use crate::fmt::{ensure_system_time_representable, to_system_time};
 
 static RFC2822_PARSER: rfc2822::DateTimeParser = rfc2822::DateTimeParser::new();
 static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new();
@@ -51,21 +51,17 @@ static RFC2822_PRINTER: rfc2822::DateTimePrinter = rfc2822::DateTimePrinter::new
 ///
 /// # Representable range
 ///
-/// RFC 2822 encodes the year as four digits, so this type spans [`Rfc2822::MIN`]
-/// (`Sat, 01 Jan 0000 00:00:00 GMT`) through [`Rfc2822::MAX`] (`Thu, 30 Dec 9999 22:00:00 GMT`).
-/// Converting an earlier instant into `Rfc2822` saturates to [`Rfc2822::MIN`], so the type can
-/// never hold an instant it is unable to format.
+/// RFC 2822 encodes the year as four digits, so this type cannot express an instant before
+/// `Sat, 01 Jan 0000 00:00:00 GMT`, and its upper bound is [`Rfc2822::MAX`]
+/// (`Thu, 30 Dec 9999 22:00:00 GMT`). Instants outside that range, or outside what the
+/// platform's [`SystemTime`] can represent, are rejected when the value is created, so the
+/// type can never hold something it is unable to format.
 ///
 /// ```
-/// use tick::fmt::{Iso8601, Rfc2822};
+/// use tick::fmt::Rfc2822;
 ///
-/// let before_year_zero: Iso8601 = "-000001-06-15T00:00:00Z".parse()?;
-/// let rfc = Rfc2822::from(before_year_zero);
-///
-/// assert_eq!(rfc, Rfc2822::MIN);
-/// assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
-///
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// // Not an RFC 2822 four-digit year, so it cannot be parsed in the first place.
+/// "-0001-06-15T00:00:00Z".parse::<Rfc2822>().unwrap_err();
 /// ```
 ///
 /// # Examples
@@ -108,29 +104,39 @@ crate::thread_aware_move!(Rfc2822);
 impl Rfc2822 {
     /// The largest value that can be represented by `Rfc2822`.
     ///
-    /// This represents a Unix system time at `31 December 9999 23:59:59 UTC`.
+    /// This represents a Unix system time of `Thu, 30 Dec 9999 22:00:00 GMT`.
+    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
     pub const MAX: Self = Self(Timestamp::MAX);
-
-    /// The smallest value that can be represented by `Rfc2822`.
-    ///
-    /// This represents a Unix system time of `1 January 0000 00:00:00 UTC`. RFC 2822 encodes
-    /// the year as four digits, so it cannot express any earlier instant.
-    pub const MIN: Self = Self(Timestamp::constant(-62_167_219_200, 0));
 
     /// The Unix epoch represented as `Rfc2822`.
     ///
     /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
     pub const UNIX_EPOCH: Self = Self(Timestamp::UNIX_EPOCH);
 
-    /// Creates an `Rfc2822` that is guaranteed to be within the representable range,
-    /// saturating to [`Rfc2822::MIN`] for earlier instants.
+    /// The earliest instant RFC 2822 can encode, `Sat, 01 Jan 0000 00:00:00 GMT`.
     ///
-    /// Every `Rfc2822` is built through this constructor so that the type can never hold an
+    /// RFC 2822 writes the year as four digits, so nothing before year 0 can be formatted.
+    const MIN_TIMESTAMP: Timestamp = Timestamp::constant(-62_167_219_200, 0);
+
+    /// Rejects `timestamp` unless it can be both formatted as RFC 2822 and represented as a
+    /// [`SystemTime`].
+    ///
+    /// Every way to create an `Rfc2822` goes through here, so the type can never hold an
     /// instant its [`Display`] implementation is unable to encode.
-    fn new_saturating(timestamp: Timestamp) -> Self {
-        // Only the lower bound needs clamping: `Rfc2822::MAX` is `Timestamp::MAX`, so no
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the instant is outside either range.
+    fn new_checked(timestamp: Timestamp) -> Result<Self, Error> {
+        // Only the lower bound needs checking: `Rfc2822::MAX` is `Timestamp::MAX`, so no
         // `Timestamp` can exceed it. `max_is_jiff_timestamp_max` guards that assumption.
-        Self(timestamp.max(Self::MIN.0))
+        if timestamp < Self::MIN_TIMESTAMP {
+            return Err(Error::out_of_range(
+                "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year",
+            ));
+        }
+
+        Ok(Self(ensure_system_time_representable(timestamp)?))
     }
 }
 
@@ -140,7 +146,7 @@ impl FromStr for Rfc2822 {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let timestamp = RFC2822_PARSER.parse_timestamp(s).map_err(Error::jiff)?;
 
-        Ok(Self::new_saturating(timestamp))
+        Self::new_checked(timestamp)
     }
 }
 
@@ -158,7 +164,7 @@ impl Display for Rfc2822 {
 
 impl From<Rfc2822> for SystemTime {
     fn from(value: Rfc2822) -> Self {
-        to_system_time(value.0.as_duration())
+        to_system_time(value.0)
     }
 }
 
@@ -167,19 +173,7 @@ impl TryFrom<SystemTime> for Rfc2822 {
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
         let timestamp = Timestamp::try_from(value).map_err(Error::jiff)?;
-        Ok(Self::new_saturating(timestamp))
-    }
-}
-
-impl From<Iso8601> for Rfc2822 {
-    fn from(value: Iso8601) -> Self {
-        Self::new_saturating(value.0)
-    }
-}
-
-impl From<UnixSeconds> for Rfc2822 {
-    fn from(value: UnixSeconds) -> Self {
-        Self::new_saturating(Timestamp::UNIX_EPOCH + value.0)
+        Self::new_checked(timestamp)
     }
 }
 
@@ -214,112 +208,106 @@ mod tests {
     use jiff::SignedDuration;
 
     use super::*;
-    static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
+    static_assertions::assert_impl_all!(Rfc2822: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
 
     #[test]
-    fn display_does_not_panic_for_negative_year() {
-        // AB#7661499: `to_string` used to panic because `Display` returned an error.
-        let iso: Iso8601 = "-000001-06-15T00:00:00Z".parse().unwrap();
-        let rfc: Rfc2822 = iso.into();
+    fn display_cannot_fail_for_any_reachable_value() {
+        // AB#7661499: `to_string` used to panic because `Display` returned an error for a
+        // year RFC 2822 cannot encode. Such a value is now unreachable -- parsing yields a
+        // four-digit year, and `TryFrom<SystemTime>` rejects anything before year 0.
+        for input in ["Thu, 01 Jan 1970 00:00:00 GMT", "Tue, 06 Aug 2024 21:30:00 GMT"] {
+            let rfc: Rfc2822 = input.parse().unwrap();
 
-        assert_eq!(rfc, Rfc2822::MIN);
-        assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
-        assert_eq!(format!("{rfc}"), "Sat, 01 Jan 0000 00:00:00 GMT");
-    }
+            assert_eq!(rfc.to_string(), input);
+            assert_eq!(format!("{rfc}"), input);
+        }
 
-    #[test]
-    fn display_does_not_panic_for_iso_8601_min() {
-        let rfc: Rfc2822 = Iso8601::MIN.into();
-
-        assert_eq!(rfc, Rfc2822::MIN);
-        assert_eq!(rfc.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        // Both ends of what the format itself can encode. `MIN_TIMESTAMP` is constructed
+        // directly because platforms whose `SystemTime` starts at 1601 reject it.
+        assert_eq!(Rfc2822(Rfc2822::MIN_TIMESTAMP).to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        assert_eq!(Rfc2822::MAX.to_string(), "Thu, 30 Dec 9999 22:00:00 GMT");
     }
 
     #[test]
     #[cfg(feature = "serde")]
-    fn serialize_does_not_panic_for_negative_year() {
+    fn serialize_cannot_fail_at_the_lower_bound() {
         // Serialization goes through `collect_str`, which panics on a failing `Display`.
-        let rfc: Rfc2822 = Iso8601::MIN.into();
+        let rfc = Rfc2822(Rfc2822::MIN_TIMESTAMP);
 
         let serialized = serde_json::to_string(&rfc).unwrap();
         assert_eq!(serialized, r#""Sat, 01 Jan 0000 00:00:00 GMT""#);
-
-        let deserialized: Rfc2822 = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, rfc);
     }
 
     #[test]
-    fn min_is_earliest_encodable_instant() {
-        assert_eq!(Rfc2822::MIN.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
-        assert!(Rfc2822::MIN < Rfc2822::UNIX_EPOCH);
+    fn min_timestamp_is_the_earliest_encodable_instant() {
+        let min = Rfc2822(Rfc2822::MIN_TIMESTAMP);
 
-        // Anything earlier is not encodable, so it clamps back up to `MIN`. The clamp is
-        // exercised through `Iso8601` rather than `SystemTime` because a platform whose
-        // `SystemTime` starts at the FILETIME epoch cannot express an instant this early.
+        assert_eq!(min.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
+        assert!(min < Rfc2822::UNIX_EPOCH);
+
+        // Anything earlier cannot be encoded, so `new_checked` rejects it. The RFC 2822 bound
+        // is checked before the platform one, so this error is the same everywhere.
         for earlier in [SignedDuration::from_secs(1), SignedDuration::from_nanos(1)] {
-            let earlier = Iso8601(Rfc2822::MIN.0 - earlier);
-            assert_eq!(Rfc2822::from(earlier), Rfc2822::MIN);
+            let error = Rfc2822::new_checked(Rfc2822::MIN_TIMESTAMP - earlier).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year"
+            );
         }
 
-        // The instant itself is preserved, not clamped away.
-        assert_eq!(Rfc2822::from(Iso8601(Rfc2822::MIN.0)), Rfc2822::MIN);
+        // The instant itself clears the RFC 2822 bound, so it is accepted wherever the
+        // platform's `SystemTime` reaches that far back.
+        if crate::fmt::checked_system_time(Rfc2822::MIN_TIMESTAMP).is_some() {
+            assert_eq!(Rfc2822::new_checked(Rfc2822::MIN_TIMESTAMP).unwrap(), min);
+        } else {
+            assert_eq!(
+                Rfc2822::new_checked(Rfc2822::MIN_TIMESTAMP).unwrap_err().to_string(),
+                "the instant is outside the range that `SystemTime` can represent on this platform"
+            );
+        }
     }
 
     #[test]
     fn max_is_jiff_timestamp_max() {
-        // `new_saturating` only clamps the lower bound, which is sound only while no
+        // `new_checked` only guards the lower bound, which is sound only while no
         // `Timestamp` can exceed `Rfc2822::MAX`.
         assert_eq!(Rfc2822::MAX.0, Timestamp::MAX);
     }
 
     #[test]
-    fn from_system_time_never_yields_an_unencodable_value() {
-        // Whatever range the platform's `SystemTime` covers, `TryFrom` must land inside the
-        // encodable range so `Display` cannot fail.
-        for system_time in [
-            SystemTime::from(Iso8601::MIN),
-            SystemTime::from(Rfc2822::MIN),
-            SystemTime::UNIX_EPOCH,
-        ] {
-            let rfc = Rfc2822::try_from(system_time).unwrap();
+    fn from_system_time_rejects_unencodable_years() {
+        // Where the platform can express an instant before year 0, it must be rejected
+        // rather than silently moved into range.
+        let below_min = Rfc2822::MIN_TIMESTAMP.as_duration().unsigned_abs() + Duration::from_secs(1);
 
-            assert!(rfc >= Rfc2822::MIN);
-            assert!(!rfc.to_string().is_empty());
-        }
-
-        // Where the platform can express an instant before year 0, the clamp is observable.
-        let below_min = Rfc2822::MIN.0.as_duration().unsigned_abs() + Duration::from_secs(1);
         if let Some(below_min) = SystemTime::UNIX_EPOCH.checked_sub(below_min) {
-            assert_eq!(Rfc2822::try_from(below_min).unwrap(), Rfc2822::MIN);
+            assert_eq!(
+                Rfc2822::try_from(below_min).unwrap_err().to_string(),
+                "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year"
+            );
         }
+
+        // In-range instants are accepted and round-trip exactly.
+        let rfc = Rfc2822::try_from(SystemTime::UNIX_EPOCH).unwrap();
+        assert_eq!(rfc, Rfc2822::UNIX_EPOCH);
+        assert_eq!(SystemTime::from(rfc), SystemTime::UNIX_EPOCH);
     }
 
     #[test]
-    fn to_unix_seconds_saturates_before_epoch() {
-        // AB#7661495 for the RFC 2822 source format.
-        let rfc: Rfc2822 = "Wed, 31 Dec 1969 23:59:59 GMT".parse().unwrap();
-        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::MIN);
-
-        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
-
-        // Post-epoch values are unaffected.
-        let rfc: Rfc2822 = "Thu, 01 Jan 1970 00:00:01 GMT".parse().unwrap();
-        assert_eq!(UnixSeconds::from(rfc).to_secs(), 1);
-    }
-
-    #[test]
-    fn to_system_time_before_filetime_epoch() {
+    fn parse_rejects_instants_system_time_cannot_represent() {
         // AB#7663342 for the RFC 2822 source format.
-        let rfc: Rfc2822 = "Wed, 01 Jan 1000 00:00:00 GMT".parse().unwrap();
-        let system_time = SystemTime::from(rfc);
+        let input = "Wed, 01 Jan 1000 00:00:00 GMT";
+        let timestamp = RFC2822_PARSER.parse_timestamp(input).unwrap();
+        let parsed = input.parse::<Rfc2822>();
 
-        assert!(system_time < SystemTime::UNIX_EPOCH);
-
-        match SystemTime::UNIX_EPOCH.checked_sub(rfc.0.as_duration().unsigned_abs()) {
-            // The platform reaches that far back, so nothing is lost.
-            Some(expected) => assert_eq!(system_time, expected),
-            // Otherwise the conversion saturated instead of panicking.
-            None => assert_eq!(system_time, SystemTime::from(Rfc2822::MIN)),
+        if let Some(expected) = crate::fmt::checked_system_time(timestamp) {
+            assert_eq!(SystemTime::from(parsed.unwrap()), expected);
+        } else {
+            assert_eq!(
+                parsed.unwrap_err().to_string(),
+                "the instant is outside the range that `SystemTime` can represent on this platform"
+            );
         }
     }
 

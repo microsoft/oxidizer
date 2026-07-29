@@ -25,37 +25,38 @@
 //! which retrieves current system time and does the automatic conversion to the output format. This conversion never fails because clock
 //! always returns a valid and normalized `SystemTime`.
 //!
-//! # Representable ranges and saturation
+//! # Representable range
 //!
-//! Each format covers a different span of time:
-//!
-//! | Format | Minimum | Maximum |
-//! | --- | --- | --- |
-//! | [`Iso8601`] | [`Iso8601::MIN`] (`-009999-01-02T01:59:59Z`) | [`Iso8601::MAX`] (`9999-12-30T22:00:00.9999999Z`) |
-//! | [`Rfc2822`] | [`Rfc2822::MIN`] (`Sat, 01 Jan 0000 00:00:00 GMT`) | [`Rfc2822::MAX`] (`Thu, 30 Dec 9999 22:00:00 GMT`) |
-//! | [`UnixSeconds`] | [`UnixSeconds::MIN`] (`0`, the Unix epoch) | [`UnixSeconds::MAX`] (`253402207200`) |
-//!
-//! Converting an instant into a format that cannot represent it **saturates to the nearest
-//! boundary of the target range** rather than panicking, wrapping, or mirroring the value.
-//! This keeps every conversion between the formats infallible while never inventing an
-//! instant on the other side of a boundary.
+//! Every value of these types is validated when it is created, whether by parsing or by
+//! converting from a [`SystemTime`]. A value that the platform's [`SystemTime`] cannot
+//! represent, or that the format itself cannot encode, is **rejected** rather than clamped
+//! or wrapped to something else.
 //!
 //! ```
-//! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
+//! use std::time::SystemTime;
 //!
-//! // `UnixSeconds` counts forward from the Unix epoch, so earlier instants saturate to it.
-//! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
-//! assert_eq!(UnixSeconds::from(before_epoch), UnixSeconds::MIN);
+//! use tick::fmt::{Iso8601, UnixSeconds};
 //!
-//! // RFC 2822 encodes the year as four digits, so earlier instants saturate to year 0.
-//! let before_year_zero: Iso8601 = "-000001-06-15T00:00:00Z".parse()?;
-//! assert_eq!(Rfc2822::from(before_year_zero), Rfc2822::MIN);
+//! // Whatever parses can always be converted back, on every platform.
+//! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
+//! let system_time = SystemTime::from(iso);
+//! assert_eq!(Iso8601::try_from(system_time)?, iso);
+//!
+//! // `UnixSeconds` counts forward from the Unix epoch, so an earlier instant is rejected.
+//! UnixSeconds::try_from(SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(1)).unwrap_err();
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! Converting any format back into a [`SystemTime`] saturates the same way, to the furthest
-//! instant the platform can reach from the Unix epoch.
+//! How far back [`Iso8601`] and [`Rfc2822`] reach is platform dependent: where [`SystemTime`]
+//! is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier instants are rejected.
+//!
+//! Because the range is enforced up front, converting any of these types back into a
+//! [`SystemTime`] is infallible and cannot panic.
+//!
+//! Converting directly between the formats is deliberately not supported: each has a
+//! different representable range, so such a conversion would have to be fallible or lossy.
+//! Go through [`SystemTime`] instead, which makes the fallible step explicit.
 //!
 //! # Examples
 //!
@@ -91,9 +92,9 @@
 //! // Output: Time: 1970-01-01T01:00:00Z
 //! ```
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 
 mod iso_8601;
 mod rfc_2822;
@@ -103,69 +104,60 @@ pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
 
-/// Returns how long after the Unix epoch `timestamp` occurs.
+use crate::Error;
+
+/// Converts `timestamp` into a [`SystemTime`], or returns `None` when the platform cannot
+/// represent that instant.
 ///
-/// Instants before the Unix epoch saturate to [`Duration::ZERO`], since the unsigned
-/// [`Duration`] used by [`UnixSeconds`] cannot represent them.
-fn to_unix_epoch_duration(timestamp: Timestamp) -> Duration {
-    timestamp.as_duration().max(SignedDuration::ZERO).unsigned_abs()
-}
+/// The representable range of [`SystemTime`] is platform defined -- where it is FILETIME
+/// based, its epoch is `1601-01-01T00:00:00Z` and nothing earlier can be expressed -- so the
+/// platform is asked directly rather than assumed.
+fn checked_system_time(timestamp: Timestamp) -> Option<SystemTime> {
+    let offset = timestamp.as_duration();
+    let magnitude = offset.unsigned_abs();
 
-/// Converts an offset from the Unix epoch into a [`SystemTime`].
-///
-/// Offsets the platform cannot apply saturate to the furthest [`SystemTime`] reachable from
-/// the Unix epoch in that direction, so the conversion never panics.
-fn to_system_time(offset: SignedDuration) -> SystemTime {
-    saturating_offset(offset.is_negative(), offset.unsigned_abs())
-}
-
-/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, saturating to the furthest instant the
-/// platform can reach when the offset is too large to apply.
-fn saturating_offset(negative: bool, magnitude: Duration) -> SystemTime {
-    checked_offset(negative, magnitude).unwrap_or_else(|| saturating_bound(negative))
-}
-
-/// Offsets [`SystemTime::UNIX_EPOCH`] by `magnitude`, returning `None` when the platform
-/// cannot apply an offset that large.
-fn checked_offset(negative: bool, magnitude: Duration) -> Option<SystemTime> {
-    if negative {
+    if offset.is_negative() {
         SystemTime::UNIX_EPOCH.checked_sub(magnitude)
     } else {
         SystemTime::UNIX_EPOCH.checked_add(magnitude)
     }
 }
 
-/// Returns the [`SystemTime`] furthest from the Unix epoch the platform can reach in the
-/// given direction.
-fn saturating_bound(negative: bool) -> SystemTime {
-    // How large an offset `SystemTime` accepts is platform defined and `std` does not expose
-    // it, so the boundary is discovered here. This path is live: where `SystemTime` is
-    // FILETIME-based its epoch is `1601-01-01T00:00:00Z`, so every earlier instant a
-    // `jiff::Timestamp` can hold (down to year -9999) lands here.
-    //
-    // Representability shrinks monotonically as the offset grows, so the largest acceptable
-    // offset is assembled one bit at a time from the most significant down: keep a bit
-    // whenever the offset it produces still applies. A fixed trip count of `u64::BITS` makes
-    // the walk incapable of looping, which a `lower`/`upper` binary search is not.
-    let mut magnitude = 0_u64;
-
-    for bit in (0..u64::BITS).rev() {
-        // Addition rather than a bitwise set: this bit is always clear in `magnitude`, since
-        // the walk visits each bit once and never revisits a higher one.
-        let candidate = magnitude + (1 << bit);
-
-        if checked_offset(negative, Duration::from_secs(candidate)).is_some() {
-            magnitude = candidate;
-        }
+/// Rejects `timestamp` unless the platform's [`SystemTime`] can represent it.
+///
+/// Applied wherever one of these formats is created, so that converting the result back into
+/// a [`SystemTime`] is infallible.
+///
+/// # Errors
+///
+/// Returns an error if the instant is outside the range of [`SystemTime`].
+fn ensure_system_time_representable(timestamp: Timestamp) -> Result<Timestamp, Error> {
+    if checked_system_time(timestamp).is_none() {
+        return Err(Error::out_of_range(
+            "the instant is outside the range that `SystemTime` can represent on this platform",
+        ));
     }
 
-    checked_offset(negative, Duration::from_secs(magnitude))
-        .expect("the loop above only ever keeps a bit whose resulting offset it verified as applicable")
+    Ok(timestamp)
+}
+
+/// Converts `timestamp` into a [`SystemTime`].
+///
+/// # Panics
+///
+/// Panics if the platform cannot represent the instant. Callers hold a value of one of this
+/// module's format types, and every way to create one runs the instant through
+/// [`ensure_system_time_representable`] first, so this cannot happen.
+fn to_system_time(timestamp: Timestamp) -> SystemTime {
+    checked_system_time(timestamp).expect("every constructor of these format types rejects instants `SystemTime` cannot represent")
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use jiff::SignedDuration;
     use serde::{Deserialize, Serialize};
 
     use super::*;
@@ -238,137 +230,99 @@ mod tests {
         assert_eq!(iso_epoch, SystemTime::UNIX_EPOCH, "Iso8601::UNIX_EPOCH should be Unix epoch");
         assert_eq!(rfc_epoch, SystemTime::UNIX_EPOCH, "Rfc2822::UNIX_EPOCH should be Unix epoch");
         assert_eq!(unix_epoch, SystemTime::UNIX_EPOCH, "UnixSeconds::UNIX_EPOCH should be Unix epoch");
-
-        // Cross-format conversions at UNIX_EPOCH should preserve the value
-        assert_eq!(Iso8601::from(Rfc2822::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
-        assert_eq!(Iso8601::from(UnixSeconds::UNIX_EPOCH), Iso8601::UNIX_EPOCH);
-        assert_eq!(Rfc2822::from(Iso8601::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
-        assert_eq!(Rfc2822::from(UnixSeconds::UNIX_EPOCH), Rfc2822::UNIX_EPOCH);
-        assert_eq!(UnixSeconds::from(Iso8601::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
-        assert_eq!(UnixSeconds::from(Rfc2822::UNIX_EPOCH), UnixSeconds::UNIX_EPOCH);
     }
 
     #[test]
-    fn to_unix_epoch_duration_saturates_before_epoch() {
-        let before_epoch = Timestamp::UNIX_EPOCH - SignedDuration::from_secs(1);
+    fn checked_system_time_reports_platform_range() {
+        assert_eq!(checked_system_time(Timestamp::UNIX_EPOCH), Some(SystemTime::UNIX_EPOCH));
 
-        // Without saturation this mirrors to one second *after* the epoch.
-        assert_eq!(to_unix_epoch_duration(before_epoch), Duration::ZERO);
-        assert_eq!(to_unix_epoch_duration(Timestamp::MIN), Duration::ZERO);
-    }
-
-    #[test]
-    fn to_unix_epoch_duration_keeps_after_epoch() {
-        assert_eq!(to_unix_epoch_duration(Timestamp::UNIX_EPOCH), Duration::ZERO);
-
-        let after_epoch = Timestamp::UNIX_EPOCH + SignedDuration::from_secs(1);
-        assert_eq!(to_unix_epoch_duration(after_epoch), Duration::from_secs(1));
-
-        assert_eq!(to_unix_epoch_duration(Timestamp::MAX), UnixSeconds::MAX.0);
-    }
-
-    #[test]
-    fn to_system_time_matches_epoch_offsets_in_range() {
-        assert_eq!(to_system_time(SignedDuration::ZERO), SystemTime::UNIX_EPOCH);
-
+        let after_epoch = Timestamp::UNIX_EPOCH + SignedDuration::from_secs(90);
         assert_eq!(
-            to_system_time(SignedDuration::from_secs(90)),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(90)
-        );
-        assert_eq!(
-            to_system_time(SignedDuration::from_secs(-90)),
-            SystemTime::UNIX_EPOCH - Duration::from_secs(90)
+            checked_system_time(after_epoch),
+            Some(SystemTime::UNIX_EPOCH + Duration::from_secs(90))
         );
 
-        // How far a platform's `SystemTime` reaches is not universal -- a FILETIME-based
-        // `SystemTime` cannot go below 1601 -- so the extremes of the jiff range are checked
-        // against the platform's own arithmetic rather than an assumed range.
+        let before_epoch = Timestamp::UNIX_EPOCH - SignedDuration::from_secs(90);
+        assert_eq!(
+            checked_system_time(before_epoch),
+            Some(SystemTime::UNIX_EPOCH - Duration::from_secs(90))
+        );
+
+        // How far `SystemTime` reaches is platform defined -- where it is FILETIME based it
+        // stops at 1601 -- so the extremes are checked against the platform's own arithmetic.
         for timestamp in [Timestamp::MIN, Timestamp::MAX] {
             let offset = timestamp.as_duration();
-            let negative = offset.is_negative();
-            let converted = to_system_time(offset);
-
-            let expected = if negative {
+            let expected = if offset.is_negative() {
                 SystemTime::UNIX_EPOCH.checked_sub(offset.unsigned_abs())
             } else {
                 SystemTime::UNIX_EPOCH.checked_add(offset.unsigned_abs())
             };
 
-            match expected {
-                Some(expected) => assert_eq!(converted, expected, "{timestamp} must convert exactly"),
-                None => assert_eq!(converted, saturating_bound(negative), "{timestamp} must saturate"),
+            assert_eq!(checked_system_time(timestamp), expected, "{timestamp}");
+        }
+    }
+
+    #[test]
+    fn ensure_system_time_representable_passes_in_range() {
+        assert_eq!(
+            ensure_system_time_representable(Timestamp::UNIX_EPOCH).unwrap(),
+            Timestamp::UNIX_EPOCH
+        );
+        assert_eq!(ensure_system_time_representable(Timestamp::MAX).unwrap(), Timestamp::MAX);
+    }
+
+    #[test]
+    fn ensure_system_time_representable_rejects_out_of_range() {
+        // Only platforms with a narrower `SystemTime` than the jiff range can observe the
+        // rejection, so the assertion follows whatever this platform actually supports.
+        let error = ensure_system_time_representable(Timestamp::MIN);
+
+        if checked_system_time(Timestamp::MIN).is_none() {
+            assert_eq!(
+                error.unwrap_err().to_string(),
+                "the instant is outside the range that `SystemTime` can represent on this platform"
+            );
+        } else {
+            assert_eq!(error.unwrap(), Timestamp::MIN);
+        }
+    }
+
+    #[test]
+    fn to_system_time_converts_in_range() {
+        assert_eq!(to_system_time(Timestamp::UNIX_EPOCH), SystemTime::UNIX_EPOCH);
+
+        let after_epoch = Timestamp::UNIX_EPOCH + SignedDuration::from_secs(90);
+        assert_eq!(to_system_time(after_epoch), SystemTime::UNIX_EPOCH + Duration::from_secs(90));
+    }
+
+    #[test]
+    fn parsing_agrees_with_system_time_range() {
+        // Whatever the platform supports, parsing and conversion must agree: a value that
+        // parses can always be converted back, and one that cannot be represented is rejected.
+        for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "1601-01-01T00:00:00Z"] {
+            let timestamp: Timestamp = input.parse().unwrap();
+            let parsed = input.parse::<Iso8601>();
+
+            match checked_system_time(timestamp) {
+                Some(expected) => assert_eq!(SystemTime::from(parsed.unwrap()), expected, "{input}"),
+                None => assert!(parsed.is_err(), "{input} must be rejected"),
             }
         }
     }
 
     #[test]
-    fn saturating_offset_saturates_beyond_the_platform_bound() {
-        for negative in [false, true] {
-            // No platform can apply an offset of `Duration::MAX` to the Unix epoch, so this
-            // always exercises the saturating fallback.
-            let saturated = saturating_offset(negative, Duration::MAX);
-
-            let magnitude = if negative {
-                SystemTime::UNIX_EPOCH.duration_since(saturated).unwrap()
-            } else {
-                saturated.duration_since(SystemTime::UNIX_EPOCH).unwrap()
-            };
-
-            // Saturation lands exactly on the boundary: that offset applies, one more second
-            // does not.
-            assert_eq!(checked_offset(negative, magnitude), Some(saturated));
-            assert_eq!(checked_offset(negative, magnitude + Duration::from_secs(1)), None);
-
-            // Saturation is deterministic regardless of how far out of range the input is.
-            assert_eq!(saturated, saturating_offset(negative, Duration::MAX - Duration::from_secs(1)));
-        }
-    }
-
-    #[test]
-    fn min_values_are_aligned() {
-        // `UnixSeconds` cannot go below the epoch, and `Rfc2822` cannot go below year 0.
-        assert_eq!(UnixSeconds::MIN, UnixSeconds::UNIX_EPOCH);
-        assert!(Iso8601::MIN < Iso8601::from(Rfc2822::MIN));
-        assert!(Iso8601::from(Rfc2822::MIN) < Iso8601::from(UnixSeconds::MIN));
-
-        // Converting each format's minimum into a narrower format saturates to that minimum.
-        assert_eq!(Rfc2822::from(Iso8601::MIN), Rfc2822::MIN);
-        assert_eq!(UnixSeconds::from(Iso8601::MIN), UnixSeconds::MIN);
-        assert_eq!(UnixSeconds::from(Rfc2822::MIN), UnixSeconds::MIN);
-
-        // Widening conversions are lossless.
-        assert_eq!(Iso8601::from(UnixSeconds::MIN), Iso8601::UNIX_EPOCH);
-        assert_eq!(Rfc2822::from(UnixSeconds::MIN), Rfc2822::UNIX_EPOCH);
-    }
-
-    #[test]
-    fn pre_epoch_to_unix_seconds_is_consistent_across_formats() {
-        let iso: Iso8601 = "1900-01-01T00:00:00Z".parse().unwrap();
-        let rfc: Rfc2822 = "Mon, 01 Jan 1900 00:00:00 GMT".parse().unwrap();
-
-        assert_eq!(Iso8601::from(rfc), iso, "the two inputs must denote the same instant");
-        assert_eq!(UnixSeconds::from(iso), UnixSeconds::MIN);
-        assert_eq!(UnixSeconds::from(rfc), UnixSeconds::from(iso));
-    }
-
-    #[test]
-    fn boundary_values_render_as_documented() {
-        // Guards the representable-range table in this module's documentation. `Iso8601`
-        // rounds nanoseconds down to 100 ns steps on display, so its `MAX` renders with
-        // seven fractional digits rather than the nine `Timestamp::MAX` carries.
-        assert_eq!(Iso8601::MIN.to_string(), "-009999-01-02T01:59:59Z");
-        assert_eq!(Iso8601::MAX.to_string(), "9999-12-30T22:00:00.9999999Z");
-
-        assert_eq!(Rfc2822::MIN.to_string(), "Sat, 01 Jan 0000 00:00:00 GMT");
-        assert_eq!(Rfc2822::MAX.to_string(), "Thu, 30 Dec 9999 22:00:00 GMT");
-
-        assert_eq!(UnixSeconds::MIN.to_string(), "0");
-        assert_eq!(UnixSeconds::MAX.to_string(), "253402207200");
+    fn formats_do_not_convert_between_each_other() {
+        // Each format has a different representable range, so conversions go through
+        // `SystemTime` and the fallible step stays visible.
+        static_assertions::assert_not_impl_any!(Iso8601: From<Rfc2822>, From<UnixSeconds>);
+        static_assertions::assert_not_impl_any!(Rfc2822: From<Iso8601>, From<UnixSeconds>);
+        static_assertions::assert_not_impl_any!(UnixSeconds: From<Iso8601>, From<Rfc2822>);
     }
 
     #[test]
     fn max_values_are_aligned() {
-        // All MAX values should represent 31 December 9999 23:59:59 UTC
+        // All MAX values represent the same instant, 9999-12-30T22:00:00.999999999Z, which is
+        // the largest jiff timestamp.
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();
@@ -376,12 +330,8 @@ mod tests {
         assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
         assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
 
-        // Cross-format conversions at MAX should preserve the value
-        assert_eq!(Iso8601::from(Rfc2822::MAX), Iso8601::MAX);
-        assert_eq!(Iso8601::from(UnixSeconds::MAX), Iso8601::MAX);
-        assert_eq!(Rfc2822::from(Iso8601::MAX), Rfc2822::MAX);
-        assert_eq!(Rfc2822::from(UnixSeconds::MAX), Rfc2822::MAX);
-        assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
-        assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
+        assert_eq!(Iso8601::MAX.to_string(), "9999-12-30T22:00:00.9999999Z");
+        assert_eq!(Rfc2822::MAX.to_string(), "Thu, 30 Dec 9999 22:00:00 GMT");
+        assert_eq!(UnixSeconds::MAX.to_string(), "253402207200");
     }
 }
