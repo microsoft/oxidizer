@@ -7,7 +7,7 @@ description = "Facilities to support thread-isolated state."
 version = "0.8.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
-categories = ["data-structures"]
+categories = ["data-structures", "no-std"]
 
 edition = { workspace = true }
 rust-version = { workspace = true }
@@ -55,9 +55,12 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = ["derive"]
+default = ["std", "derive"]
+# Enables the per-affinity Arc and hosted-only type impls. Disable for `#![no_std]`
+# environments; the crate then requires only `alloc`.
+std = []
 derive = ["dep:thread_aware_macros"]
-threads = ["dep:many_cpus"]
+threads = ["std", "dep:many_cpus"]
 
 # Optional `ThreadAware` impls for 3rd-party crate types. By default no such
 # features are enabled, so this crate does not pull in any additional
@@ -78,7 +81,7 @@ threads = ["dep:many_cpus"]
 #
 # See the `third_party` module for the list of types each feature covers.
 bytes = ["dep:bytes"]
-http = ["dep:http"]
+http = ["std", "dep:http"]
 jiff02 = ["dep:jiff"]
 uuid = ["dep:uuid"]
 

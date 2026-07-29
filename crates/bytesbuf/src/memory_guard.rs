@@ -40,7 +40,7 @@ impl Default for MemoryGuard {
     ///
     /// Useless for real logic but potentially meaningful as a placeholder in tests.
     fn default() -> Self {
-        Self::new(vec![])
+        Self::new([])
     }
 }
 

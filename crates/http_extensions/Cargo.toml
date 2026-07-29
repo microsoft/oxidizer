@@ -64,7 +64,7 @@ test-util = ["tick/test-util"]
 
 [dependencies]
 bytes = { workspace = true }
-bytesbuf = { workspace = true, features = ["bytes-compat"] }
+bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -76,7 +76,7 @@ recoverable = { workspace = true }
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
-thread_aware = { workspace = true, features = ["derive"] }
+thread_aware = { workspace = true, features = ["derive", "std"] }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]

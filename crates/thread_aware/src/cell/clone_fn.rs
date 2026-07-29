@@ -7,6 +7,8 @@
 //! with a [`CloneAdapter`] that stores the original concrete value `V` and its
 //! clone function.
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
 use std::{fmt, sync};
 
 use crate::ThreadAware;

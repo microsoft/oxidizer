@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use thread_aware::ThreadAware;
 
@@ -25,6 +25,8 @@ use crate::mem::Memory;
 /// anything.
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
 /// use bytesbuf::mem::{CallbackMemory, Memory};
 /// # use bytesbuf::BytesBuf;
 /// # use bytesbuf::mem::GlobalPool;
@@ -36,12 +38,16 @@ use crate::mem::Memory;
 ///
 /// let buf = memory.reserve(64);
 /// assert!(buf.capacity() >= 64);
+/// # }
+/// # }
 /// ```
 ///
 /// The reservation logic often needs more than the wrapped provider alone. Pass a tuple (or any
 /// [`ThreadAware`] value) as the data and destructure it in the callback:
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
 /// use bytesbuf::mem::{CallbackMemory, Memory};
 /// # use bytesbuf::BytesBuf;
 /// # use bytesbuf::mem::GlobalPool;
@@ -54,6 +60,8 @@ use crate::mem::Memory;
 ///
 /// let buf = memory.reserve(64);
 /// assert!(buf.capacity() >= 64);
+/// # }
+/// # }
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
@@ -66,7 +74,7 @@ pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
 }
 
 impl<D: ThreadAware + Clone + Send + Sync + 'static> Debug for CallbackMemory<D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // `data` is deliberately not formatted so that `CallbackMemory` is `Debug` regardless of
         // whether `D` is, which keeps it usable with thread-aware data that is intentionally not
         // `Debug` (e.g. a tuple containing a non-`Debug` field).
@@ -94,8 +102,7 @@ impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
     ///
     /// The memory provider may provide more memory than requested.
     ///
-    /// The memory reservation request will always be fulfilled, obtaining more memory from the
-    /// operating system if necessary.
+    /// If this method returns, the buffer has at least `min_bytes` bytes of capacity.
     ///
     /// # Zero-sized reservations
     ///
@@ -104,7 +111,7 @@ impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
     ///
     /// # Panics
     ///
-    /// May panic if the operating system runs out of memory.
+    /// The callback may panic or abort if the requested capacity cannot be obtained.
     #[must_use]
     pub fn reserve(&self, min_bytes: usize) -> BytesBuf {
         (self.reserve_fn)(&self.data, min_bytes)

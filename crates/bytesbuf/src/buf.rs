@@ -1,15 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
-use std::mem::{self, MaybeUninit};
-use std::num::NonZero;
-use std::ptr;
+use alloc::format;
+#[cfg(not(test))]
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::any::type_name;
+use core::mem::{self, MaybeUninit};
+use core::num::NonZero;
+use core::ptr;
 
 use smallvec::SmallVec;
 
+#[cfg(feature = "std")]
+use crate::BytesBufWriter;
 use crate::mem::{Block, BlockMeta, BlockSize, Memory};
-use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
+use crate::{BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, SpanBuilder};
 
 /// Assembles byte sequences, exposing them as [`BytesView`]s.
 ///
@@ -52,6 +58,8 @@ use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, Span
 /// # Example
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
 /// # use bytesbuf::mem::{GlobalPool, Memory};
 /// use bytesbuf::BytesBuf;
 ///
@@ -69,6 +77,8 @@ use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, Span
 /// // Consume the buffered data as an immutable BytesView.
 /// let message = buf.consume_all();
 /// assert_eq!(message.len(), 18);
+/// # }
+/// # }
 /// ```
 ///
 /// [memory provider]: crate::mem::Memory
@@ -174,6 +184,7 @@ impl BytesBuf {
     }
 
     /// Creates a buffer backed by the capacity of a single memory block.
+    #[cfg(feature = "std")]
     pub(crate) fn from_block(block: Block) -> Self {
         let span_builder = block.into_span_builder();
         let available = span_builder.remaining_capacity();
@@ -222,6 +233,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use bytesbuf::BytesBuf;
     /// # use bytesbuf::mem::GlobalPool;
     ///
@@ -237,6 +250,8 @@ impl BytesBuf {
     /// // Can reserve more capacity at any time.
     /// buf.reserve(100, &memory);
     /// assert!(buf.remaining_capacity() >= 100);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -394,6 +409,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -411,6 +428,8 @@ impl BytesBuf {
     ///
     /// let consumed = buf.consume_all();
     /// assert_eq!(consumed.len(), 4);
+    /// # }
+    /// # }
     /// ```
     ///
     /// [`consume_all()`]: Self::consume_all
@@ -444,6 +463,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -458,6 +479,8 @@ impl BytesBuf {
     ///
     /// _ = buf.consume(4);
     /// assert_eq!(buf.len(), 5);
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     #[cfg_attr(debug_assertions, expect(clippy::missing_panics_doc, reason = "only unreachable panics"))]
@@ -493,6 +516,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use bytesbuf::BytesBuf;
     /// # use bytesbuf::mem::GlobalPool;
     ///
@@ -511,6 +536,8 @@ impl BytesBuf {
     /// // Consuming reduces capacity (memory is transferred to the BytesView).
     /// _ = buf.consume(5);
     /// assert!(buf.capacity() < initial_capacity);
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn capacity(&self) -> usize {
@@ -525,6 +552,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use bytesbuf::BytesBuf;
     /// # use bytesbuf::mem::GlobalPool;
     ///
@@ -547,6 +576,8 @@ impl BytesBuf {
     /// let remaining_before_consume = buf.remaining_capacity();
     /// _ = buf.consume(5);
     /// assert_eq!(buf.remaining_capacity(), remaining_before_consume);
+    /// # }
+    /// # }
     /// ```
     #[cfg_attr(test, mutants::skip)] // Lying about buffer sizes is an easy way to infinite loops.
     pub fn remaining_capacity(&self) -> usize {
@@ -569,6 +600,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -588,6 +621,8 @@ impl BytesBuf {
     /// let mut rest = buf.consume(4);
     /// assert_eq!(rest.get_u16_be(), 0x2222);
     /// assert_eq!(rest.get_u16_be(), 0x3333);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -691,6 +726,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -703,6 +740,8 @@ impl BytesBuf {
     ///
     /// assert_eq!(message, b"Hello, world!!!");
     /// assert!(buf.is_empty());
+    /// # }
+    /// # }
     /// ```
     pub fn consume_all(&mut self) -> BytesView {
         // Delegating to the general consume path is intentional. A dedicated all-at-once path that
@@ -722,6 +761,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -743,6 +784,8 @@ impl BytesBuf {
     /// // The split-off buffer can be used independently.
     /// split.put_u16_be(0xBEEF);
     /// assert_eq!(split.len(), 2);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -887,6 +930,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -913,6 +958,8 @@ impl BytesBuf {
     /// }
     ///
     /// assert_eq!(buf.consume_all(), b"0123456789");
+    /// # }
+    /// # }
     /// ```
     ///
     /// [`advance()`]: Self::advance
@@ -934,6 +981,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// # struct PageAlignedMemory;
     /// use bytesbuf::mem::Memory;
@@ -945,6 +994,8 @@ impl BytesBuf {
     ///     .is_some_and(|meta| meta.is::<PageAlignedMemory>());
     ///
     /// println!("First unfilled slice is page-aligned: {is_page_aligned}");
+    /// # }
+    /// # }
     /// ```
     ///
     /// [`first_unfilled_slice()`]: Self::first_unfilled_slice
@@ -961,6 +1012,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -987,6 +1040,8 @@ impl BytesBuf {
     /// }
     ///
     /// assert_eq!(buf.consume_all(), b"0123456789");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Safety
@@ -1053,6 +1108,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use std::ptr;
     ///
@@ -1081,6 +1138,8 @@ impl BytesBuf {
     /// }
     ///
     /// assert_eq!(buf.len(), capacity);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -1147,6 +1206,9 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
+    /// # (|| {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use std::io::Write;
     ///
@@ -1160,14 +1222,19 @@ impl BytesBuf {
     ///
     /// assert_eq!(buf.consume_all(), b"Hello, world!");
     /// # Ok::<(), std::io::Error>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     #[inline]
     pub fn into_writer<M: Memory>(self, memory: M) -> BytesBufWriter<M> {
         BytesBufWriter::new(self, memory)
     }
 }
 
-impl std::fmt::Debug for BytesBuf {
+impl core::fmt::Debug for BytesBuf {
     #[cfg_attr(test, mutants::skip)] // We have no API contract here.
     #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -1426,6 +1493,7 @@ mod tests {
     use testing_aids::assert_panic;
 
     use super::*;
+    #[cfg(feature = "std")]
     use crate::mem::GlobalPool;
     use crate::mem::testing::{FixedBlockMemory, TestMemoryBlock};
 
@@ -2182,6 +2250,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn from_view() {
         let memory = GlobalPool::new();
 
@@ -2620,6 +2689,7 @@ mod tests {
     }
 
     // Compile time test
+    #[cfg(feature = "std")]
     fn _can_use_in_dyn_traits(mem: &dyn Memory) {
         let buf = mem.reserve(123);
         let _ = buf.into_writer(mem);

@@ -47,7 +47,7 @@ dst = ["ptr_meta/derive"]
 utf16 = ["dep:widestring"]
 bytes = ["dep:bytes"]
 bytemuck = ["dep:bytemuck", "dst"]
-bytesbuf = ["dep:bytesbuf", "std"]
+bytesbuf = ["dep:bytesbuf", "std", "bytesbuf/std"]
 zerocopy = ["dep:zerocopy", "dst"]
 hashbrown = ["dep:hashbrown"]
 # Marker feature selecting the loom model-checking test target via its

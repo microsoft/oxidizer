@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "std")]
 use std::io::IoSlice;
 
 use bytes::Buf;
@@ -18,6 +19,7 @@ impl Buf for BytesView {
         self.first_slice()
     }
 
+    #[cfg(feature = "std")]
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
         if dst.is_empty() {
@@ -40,7 +42,7 @@ impl Buf for BytesView {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use new_zealand::nz;
 

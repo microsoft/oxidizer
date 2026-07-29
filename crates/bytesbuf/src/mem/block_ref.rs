@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::Any;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::ptr::NonNull;
+use core::any::Any;
+use core::fmt::Debug;
+use core::marker::PhantomData;
+use core::ptr::NonNull;
 
 /// Metadata describing a memory block, as provided by the memory provider.
 ///

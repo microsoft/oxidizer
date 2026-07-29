@@ -3,9 +3,10 @@
 
 //! Types for using and implementing memory providers.
 //!
-//! The only production-grade memory provider published by this crate is [`GlobalPool`], which uses
-//! memory from the Rust global memory allocator and adds a layer of pooling to reduce the overhead
-//! from memory allocation churn.
+//! With the `std` feature, this crate provides `GlobalPool`, which uses memory from the Rust global
+//! allocator and adds pooling to reduce allocation churn. Without `std`, applications that already
+//! own a specialized memory provider can integrate it by implementing [`Memory`]; this crate does
+//! not provide a general-purpose allocator-backed provider in that configuration.
 //!
 //! Special-purpose memory providers can be implemented by other crates as needed, providing access
 //! to memory with particular characteristics (e.g. page-aligned memory, memory mapped to specific
@@ -39,6 +40,7 @@ mod block;
 mod block_ref;
 
 mod callback_memory;
+#[cfg(feature = "std")]
 mod global;
 mod has_memory;
 mod memory;
@@ -48,6 +50,8 @@ mod opaque_memory;
 pub use block::{Block, BlockSize};
 pub use block_ref::{BlockMeta, BlockRef, BlockRefDynamic, BlockRefDynamicWithMeta, BlockRefVTable};
 pub use callback_memory::CallbackMemory;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use global::GlobalPool;
 pub use has_memory::HasMemory;
 pub use memory::Memory;

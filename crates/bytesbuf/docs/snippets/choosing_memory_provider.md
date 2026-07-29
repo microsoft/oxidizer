@@ -5,5 +5,7 @@ If you are writing bytes to or reading bytes from an object that either itself i
 you should use [`Memory::reserve()`][crate::mem::Memory::reserve] from this provider
 to obtain memory to store bytes in.
 
-Otherwise, use a shared instance of [`GlobalPool`][crate::mem::GlobalPool], which is a reasonable
-default when there is no specific reason use a different memory provider.
+Otherwise, use a shared instance of `GlobalPool` when the `std` feature is enabled. In `no_std`
+environments, applications that already own a specialized memory provider can integrate it by
+implementing [`Memory`][crate::mem::Memory]. This crate does not provide a general-purpose
+allocator-backed provider without `std`.
