@@ -65,7 +65,7 @@ Rust services and libraries need structured telemetry that is:
    NOTE: That also includes propagation of native OTel `Context`/spans in case a library uses the `opentelemetry` crate directly.
 
 1. **Zero-cost bypass for fields that don't require redaction.** Fields annotated with `unredacted` skip the redaction engine entirely (no `RedactedDisplay` call, no allocation).
-   Also applicable to fileds that have `DataClass` not requiring any redaction.
+   Also applicable to fields that have a `DataClass` not requiring any redaction.
 
 1. **Rust stable toolchain.** The crate targets stable Rust (no nightly-only features). Proc
    macros must work with the minimum supported Rust version (MSRV) defined by the workspace.
@@ -179,7 +179,7 @@ An event can produce any combination of signals defined by its schema.
 
 #### Logs
 
-1. **By default, every event always produces a log record.** By default, all attributes are included in logs, but there is a way to opt-out.
+1. **A log record is produced only when a severity attribute is present.** When present, all attributes are included in logs by default, but there is a way to opt-out per field.
 
 #### Metrics
 
@@ -210,13 +210,13 @@ In summary, the routing is determined by annotations on the event struct:
 
 ### Event properties
 
-Each event uses per-signal attributes at the struct level; both `#[log(...)]` and the instrument attributes are optional.
+Each event uses per-signal attributes at the struct level; both the severity attribute and the instrument attributes are optional.
 
 | Annotation | Effect |
 | --- | --- |
-| `#[event(name = "...")]` | **Required.** Declares the canonical event name used for routing and identification. Add `disabled` (`#[event(name = "...", disabled)]`) to make the event opt-in: by default no processor receives it; processors must explicitly opt in. |
-| `#[log(severity = <ident>, message = "...")]` | Declares the event as a log. `severity` is one of `trace`, `debug`, `info`, `warn`, `error`, `fatal`. `name` defaults to the event name; `message` is optional. |
-| `#[metric(kind = <Kind>[, name = "..."][, field = ...])]` | Declares an event-level metric instrument, where `<Kind>` is `counter`, `updown_counter`, `gauge`, or `histogram`. `name` defaults to the event name. `kind = counter` may be fieldless and records `1` per emission; the others require `field = <ident>` naming the struct field that supplies the metric value. |
+| `#[event("...")]` | **Required.** Declares the canonical event name used for routing and identification. Add `disabled` (`#[event("...", disabled)]`) to make the event opt-in: by default no processor receives it; processors must explicitly opt in. |
+| A severity attribute — `#[trace]`, `#[debug]`, `#[info]`, `#[warning]`, `#[error]`, or `#[fatal]` (optionally with a message: `#[info("...")]`) | Declares the event as a log. `name` defaults to the event name; the message is optional. |
+| One of `#[counter(...)]`, `#[updown_counter(field, ...)]`, `#[gauge(field, ...)]`, `#[histogram(field, ...)]` | Declares an event-level metric instrument. `name` defaults to the event name. A bare `#[counter]` may be fieldless and records `1` per emission; the others require a leading positional field naming the struct field that supplies the metric value. |
 
 ### Dimension (field) properties
 
@@ -247,7 +247,7 @@ Two keys are equal only if they represent the same instance.
 
 A **Sink** is a composable event dispatcher identified by a `SinkId`. It is the unit of telemetry configuration - each sink independently controls:
 
-- **Pipelines** - A sink holds ~~zero~~ one or more "pipeline" instances (there is no upper limit).
+- **Pipelines** - A sink holds one or more "pipeline" instances (there is no upper limit).
   When an event is emitted, every pipeline attached to the sink processes the event independently. This allows a single sink
   to send telemetry to multiple destinations simultaneously (e.g. stdout for development, ETW for production, an in-memory buffer for testing).
 

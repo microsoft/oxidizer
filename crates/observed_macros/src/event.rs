@@ -361,10 +361,10 @@ enum IntegerSignedness {
 /// Returns the signedness of a primitive integer type, matched syntactically on
 /// the last path segment (so `u64`, `std::primitive::u64` are recognized, but a
 /// type aliased to an integer is not). Returns `None` for non-integer types
-/// (e.g. `f64`) or unrecognized paths. `Option<T>`, group, and parenthesis wrappers
-/// are transparent.
+/// (e.g. `f64`) or unrecognized paths. Group and parenthesis wrappers are
+/// transparent; `Option<T>` deliberately is **not**, so an optional field can
+/// never satisfy an instrument's value-type requirement.
 fn integer_signedness(ty: &syn::Type) -> Option<IntegerSignedness> {
-    let ty = option_inner_type(ty).unwrap_or(ty);
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
@@ -553,6 +553,22 @@ fn resolve_metrics(specs: Vec<MetricSpec>, fields: &mut [FieldDef], event_name: 
                 format!(
                     "field `{field_ident}` cannot be both a metric value and a metric dimension \
                      (`#[dimension(metric = ...)]`)",
+                ),
+            ));
+        }
+        // An instrument records a measurement on every emission, so its value field must always
+        // hold one. For an `Option<T>` the `#[if_none(...)]` default fills `None` with a
+        // placeholder *string*, which is not a valid measurement for a numeric instrument -- the
+        // downstream processor would then either drop the point or fail on the type mismatch.
+        if option_inner_type(&field.ty).is_some() {
+            return Err(Error::new_spanned(
+                &attr,
+                format!(
+                    "`#[{}({field_ident})]` requires field `{field_ident}` to hold a value on \
+                     every emission, but it is an `Option<T>`; a metric value cannot be optional. \
+                     Use a non-optional field, or record it as a metric dimension instead \
+                     (`#[dimension(metric = ...)]`)",
+                    kind.attr_name(),
                 ),
             ));
         }
@@ -758,8 +774,8 @@ fn validate_message_placeholders(def: &EventDef) -> Result<()> {
     Ok(())
 }
 
-/// Builds the `Option<LogDescription>` expression for the event's `#[log(...)]`
-/// signal (or `None` when the event declares no log).
+/// Builds the `Option<LogDescription>` expression for the event's log signal
+/// (or `None` when the event declares no severity attribute).
 fn log_description_expr(def: &EventDef) -> TokenStream {
     let Some(log) = &def.log else {
         return quote! { ::core::option::Option::None };
@@ -785,7 +801,7 @@ fn log_description_expr(def: &EventDef) -> TokenStream {
 fn generate_event_impl(def: &EventDef) -> TokenStream {
     let struct_ident = &def.ident;
 
-    // Event identity comes from the required `#[event(name = "...")]` attribute.
+    // Event identity comes from the required `#[event("...")]` attribute.
     let event_name = &def.event_name;
 
     // Add 'static bound to type parameters so TypeId::of works.
@@ -1627,7 +1643,7 @@ mod tests {
 
     #[test]
     fn test_option_field_filled_when_none() {
-        // By default a `None` `Option<T>` is filled with the `"N/A"` placeholder.
+        // By default a `None` `Option<T>` is filled with the `"n/a"` placeholder.
         let output = parse_and_generate(
             r#"
             #[event("http.request")]
@@ -2191,6 +2207,35 @@ mod coverage_tests {
     fn integer_signedness_of_non_path_type_is_none() {
         let reference: syn::Type = syn::parse_str("&u64").expect("parse type");
         assert!(integer_signedness(&reference).is_none());
+    }
+
+    #[test]
+    fn integer_signedness_does_not_see_through_option() {
+        // `Option<u64>` must not satisfy an instrument's value-type requirement --
+        // an optional field has no measurement to record when it is `None`.
+        let optional: syn::Type = syn::parse_str("Option<u64>").expect("parse type");
+        assert!(integer_signedness(&optional).is_none());
+    }
+
+    #[test]
+    fn optional_metric_value_field_is_rejected() {
+        // An instrument records a measurement on every emission, so its value field
+        // cannot be `Option<T>`: `#[if_none(...)]` would fill `None` with a placeholder
+        // string, which is not a valid measurement.
+        for attr in ["counter(v)", "updown_counter(v)", "gauge(v)", "histogram(v)"] {
+            let err = expect_err(&format!(r#"#[event("e")] #[{attr}] struct E {{ #[unredacted] v: Option<u64> }}"#));
+            assert!(
+                err.contains("a metric value cannot be optional"),
+                "unexpected error for `{attr}`: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn optional_metric_dimension_field_is_still_allowed() {
+        // Only the metric *value* is constrained; an optional dimension is fine
+        // because a placeholder is a meaningful attribute value.
+        expect_ok(r#"#[event("e")] #[info] struct E { #[dimension(metric)] #[unredacted] v: Option<u64> }"#);
     }
 
     #[test]

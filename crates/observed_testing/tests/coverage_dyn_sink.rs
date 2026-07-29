@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 //! Coverage-focused tests for the type-erased (`DynEvent`) dispatch path,
-//! synthetic event views, composite/no-op sink behaviour, and the small
+//! synthetic event views, composite/no-op sink behavior, and the small
 //! accessor / conversion / `Debug` surfaces that the feature-level tests do
 //! not otherwise exercise.
 

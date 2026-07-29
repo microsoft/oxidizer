@@ -12,6 +12,23 @@ use opentelemetry::logs::AnyValue;
 ///
 /// Thin wrapper over [`opentelemetry::Value`] that provides ergonomic
 /// conversions from common Rust types.
+///
+/// # Relationship to `OpenTelemetry`
+///
+/// The wrapped type is deliberately part of this crate's public API:
+/// [`from_raw`](Self::from_raw), [`as_inner`](Self::as_inner), and
+/// [`into_inner`](Self::into_inner) let downstream processor crates build and
+/// consume values that have no direct `From` impl (arrays and other composite
+/// shapes) without this crate having to mirror the whole `OTel` value model.
+/// `opentelemetry::Value` is listed in this crate's
+/// `[package.metadata.cargo_check_external_types]` allow-list to record that
+/// choice.
+///
+/// The trade-off is that the `OTel` value representation is part of the
+/// compatibility contract: a breaking change to `opentelemetry::Value` - most
+/// likely a major-version bump of `opentelemetry` - is also a breaking change
+/// for `observed`, and swapping the underlying representation would require a
+/// major version of this crate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Value(opentelemetry::Value);
 

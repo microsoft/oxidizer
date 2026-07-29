@@ -46,7 +46,7 @@ impl EventDescription {
         }
     }
 
-    /// Returns the event name (from `#[event(name = "...")]`).
+    /// Returns the event name (from `#[event("...")]`).
     #[must_use]
     pub const fn name(&self) -> &'static str {
         self.name

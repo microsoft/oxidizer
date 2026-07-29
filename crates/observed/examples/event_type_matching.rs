@@ -9,7 +9,7 @@
 //!    compile-time events (`#[event(...)]`). `TypeId` is `None` for dynamic
 //!    events (e.g. from the tracing bridge).
 //!
-//! 2. **Name matching** - uses the canonical `#[event(name = "...")]` string.
+//! 2. **Name matching** - uses the canonical `#[event("...")]` string.
 //!    Works for all events (compile-time and dynamic), easy to configure from
 //!    external data, but not type-checked at compile time.
 //!
@@ -264,7 +264,7 @@ impl EventProcessor for HttpOnlyProcessor {
 }
 
 /// A processor that accepts events by matching their canonical event name
-/// (from `#[event(name = "...")]`).
+/// (from `#[event("...")]`).
 ///
 /// Unlike `TypeId` matching this works for dynamic events too, and the set of
 /// accepted names can be loaded from configuration at runtime.

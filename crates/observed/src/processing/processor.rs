@@ -40,6 +40,13 @@ pub trait EventProcessor: Send + Sync {
     ///
     /// The processor owns its own redaction engine and passes it to getter
     /// closures when extracting field values.
+    ///
+    /// # Nested telemetry is not supported
+    ///
+    /// Emitting from inside `process()` is silently dropped, including to a
+    /// different [`Sink`](crate::Sink): a thread-wide reentrancy guard skips
+    /// any nested `emit!` for the duration of the outer emission. Report
+    /// processor-internal failures through a non-`observed` channel instead.
     fn process(&self, event: &EventView<'_>);
 
     /// Forces any buffered telemetry produced by this processor out to its

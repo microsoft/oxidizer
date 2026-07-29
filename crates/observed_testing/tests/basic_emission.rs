@@ -99,11 +99,11 @@ fn event_with_custom_field_name() {
     emit!(
         sink,
         DbError {
-            system_id: PublicI64(5), // #[log(name = "db.system")]
+            system_id: PublicI64(5), // #[dimension(log = "db.system")]
         }
     );
 
-    // The field `system_id` is renamed to `db.system` via #[log(name = "db.system")]
+    // The field `system_id` is renamed to `db.system` via #[dimension(log = "db.system")]
     assert_eq!(
         processor.single_event(),
         ExpectedEvent::new("db.error", Severity::Error).dimension("db.system", "5").log(),

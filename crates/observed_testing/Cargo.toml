@@ -15,10 +15,14 @@ homepage.workspace = true
 include.workspace = true
 
 [package.metadata.cargo_check_external_types]
-# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
-# public-API surface, so allow all external types — this opts the crate into the
-# external-types check permissively rather than denying its intentional
-# re-exposure of the observed/data_privacy types it is a test harness for.
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Its
+# public surface intentionally re-exposes the observed/data_privacy types it is
+# a test harness for.
+#
+# This is NOT redundant with INTERNAL_CRATES membership: that list is only read
+# by scripts/check-external-types.rs (the `external-type-exposure` job). The
+# `anvil-external-types` recipe behind `pr-fast` scopes itself from cargo
+# metadata and never consults it, so without this block that job fails.
 allowed_external_types = ["*"]
 
 [dependencies]

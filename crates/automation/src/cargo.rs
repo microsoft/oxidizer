@@ -6,8 +6,15 @@ use ohno::AppError;
 /// Internal crates that should be skipped in CI checks.
 ///
 /// These are workspace-internal, `publish = false` crates — tooling, test
-/// helpers, worked examples, and benchmarks — that expose no stable public API
-/// and whose code is not meaningful to mutation-test or external-type-check.
+/// helpers, worked examples, and benchmarks — that expose no stable public API.
+///
+/// This list is consumed by the `scripts/` runners only: `scripts/mutants.rs`
+/// (never mutated, though a test harness still contributes its tests to its
+/// group) and `scripts/check-external-types.rs`. The anvil check recipes in
+/// `justfiles/anvil/` do **not** read it — they scope themselves from cargo
+/// metadata — so a crate that must also be exempt from `anvil-external-types`
+/// still needs `[package.metadata.cargo_check_external_types]
+/// allowed_external_types = ["*"]` in its own manifest.
 pub const INTERNAL_CRATES: &[&str] = &[
     "automation",
     "observed_testing",

@@ -8,11 +8,11 @@ use crate::severity::Severity;
 /// Static description of an event's **log** signal.
 ///
 /// Present on [`EventDescription::log`](crate::metadata::EventDescription::log)
-/// when the event opts in to log emission (via `#[log(name = "…", severity = …)]`
-/// on the event struct).
+/// when the event opts in to log emission (via a severity attribute such as
+/// `#[info(...)]` on the event struct).
 #[derive(Debug, Clone, Copy)]
 pub struct LogDescription {
-    /// The `OTel` log record event name (from `#[log(name = "...")]`, or the event name if omitted).
+    /// The `OTel` log record event name (from `#[info(name = "...")]`, or the event name if omitted).
     name: &'static str,
     severity: Severity,
     body: Option<&'static str>,
@@ -27,7 +27,8 @@ impl LogDescription {
 
     /// Returns the `OTel` log record event name.
     ///
-    /// This is the `name` from `#[log(name = "...")]`, or the event name if omitted.
+    /// This is the `name` from a severity attribute (e.g. `#[info(name = "...")]`),
+    /// or the event name if omitted.
     #[must_use]
     pub const fn name(&self) -> &'static str {
         self.name
@@ -41,8 +42,8 @@ impl LogDescription {
 
     /// Returns the optional human-readable body.
     ///
-    /// This is the message from `#[log(message = "...")]`. `None` when the event
-    /// declares no message template.
+    /// This is the message from a severity attribute (e.g. `#[info("...")]`).
+    /// `None` when the event declares no message template.
     #[must_use]
     pub const fn body(&self) -> Option<&'static str> {
         self.body

@@ -4,7 +4,7 @@
 //! Tests for the disabled event attribute and runtime event configuration.
 //!
 //! Covers DESIGN.md requirements:
-//! - Events can be disabled by default (`#[event(name = "...", disabled)]`)
+//! - Events can be disabled by default (`#[event("...", disabled)]`)
 //! - Disabled events are not emitted unless a processor explicitly opts in
 
 use std::sync::Arc;

@@ -602,7 +602,7 @@ impl ExpectedEventDescription {
         self
     }
 
-    /// Expects an event-level metric description (from a fieldless struct-level `#[metric(kind = counter)]`).
+    /// Expects an event-level metric description (from a fieldless struct-level `#[counter]`).
     #[must_use]
     pub fn event_metric(mut self, instrument_name: impl Into<String>, kind: InstrumentKind) -> Self {
         self.expected_event_metric = Some((instrument_name.into(), kind));

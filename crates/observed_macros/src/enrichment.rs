@@ -152,8 +152,8 @@ fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
 /// Generates a statement that pushes this field's `EnrichmentEntry` onto `entries`.
 ///
 /// `Option<T>` fields behave like in `#[event(...)]`: on `None`,
-/// `#[no_value_behavior(...)]` decides whether the entry is dropped or filled with
-/// a placeholder string (default `"N/A"`).
+/// `#[if_none(...)]` decides whether the entry is dropped or filled with
+/// a placeholder string (default `"n/a"`).
 fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
     let field_ident = &field.ident;
     let own_name = field.ident.to_string();
@@ -444,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_enrichment_option_field_filled_when_none() {
-        // An `Option<T>` field: by default a `None` value is filled with `"N/A"`.
+        // An `Option<T>` field: by default a `None` value is filled with `"n/a"`.
         let output = parse_and_generate(
             r"
             struct RequestContext {

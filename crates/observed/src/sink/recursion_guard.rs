@@ -1,8 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Thread-local reentrancy guard that stops a sink from dispatching into
-//! itself while an emission is already in progress on the current thread.
+//! Thread-local reentrancy guard that stops telemetry emitted *during* an
+//! emission from re-entering the pipeline on the current thread.
+//!
+//! # Scope: thread-wide, not per-sink
+//!
+//! The guard is a single un-keyed thread-local flag shared by **every**
+//! [`Sink`](crate::Sink) on the thread, not one slot per sink identity. While
+//! an emission is being processed, *any* nested `emit!` on that thread is
+//! skipped - including one targeting a completely unrelated sink.
+//!
+//! This is deliberate: nested telemetry is not a supported scenario. A
+//! processor that emits while handling an event (e.g. reporting its own
+//! failure to a separate diagnostics sink) would otherwise risk unbounded
+//! recursion, and a per-sink guard would only push that risk one hop away
+//! (sink A's processor emits to sink B, whose processor emits back to A).
+//!
+//! The consequence is that such nested events are dropped silently - there is
+//! no warning, log, or error return, because reporting the drop would itself
+//! require an emission. Processors must therefore not rely on emitting
+//! telemetry from inside `process()`.
 
 /// RAII guard that releases the current thread's reentrancy slot on drop.
 struct ReentrancyGuard;
@@ -22,6 +40,10 @@ thread_local! {
 /// slot is released when the returned guard is dropped. Returns `None` when a
 /// guard is already held, signalling a reentrant sink invocation that the
 /// caller must skip to avoid unbounded recursion.
+///
+/// The slot is shared across all sinks on the thread, so a `None` here means
+/// *some* emission is in progress - not necessarily one on the same sink. See
+/// the [module docs](self) for why the guard is thread-wide.
 pub(super) fn try_acquire_reentrancy_guard() -> Option<impl Drop> {
     AVAILABLE.get().then(|| {
         AVAILABLE.set(false);
