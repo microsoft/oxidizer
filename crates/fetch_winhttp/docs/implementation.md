@@ -6,12 +6,13 @@ Status: design, pre-implementation. This document describes the implementation s
 
 This is the whole design in one picture; the numbered chapters below elaborate each part.
 
-- **One OS session per core, scoped to the built client.** Each per-core transport
-  instance opens its own session when `fetch` materializes it, so two independently
+- **One OS session per (core × pool slot), scoped to the built client.** Each per-core
+  transport instance opens its own session - one per configured `multiple_pools` slot,
+  a single slot by default - when `fetch` materializes it, so two independently
   built clients (or clones) never share a session or its connection pool (§3.2).
 - **One transport instance per core.** `fetch` clones and relocates the transport
   per core (`Isolation::Isolated`, §3.2); each instance owns its object and event
-  pools (§5) and its own session `Arc`.
+  pools (§5) and one session `Arc` per pool slot.
 - **One `RequestDriver` future per request** (§4.4). It owns a `RequestGuard`
   bundling the request handle, its connect handle, and a session-`Arc` clone, and
   rents a pooled `RequestContext` - the small slot WinHTTP calls back into (§4.1).
@@ -245,9 +246,12 @@ Opening it inside the factory (exactly as the Tokio transport builds its hyper c
 its own factory) scopes the session to the built client: two independently built clients -
 including two builds of a cloned builder - never share a session or its pool.
 
-Under `Isolation::Isolated` the factory runs once per core, so each core opens its own
-session and a client holds one connection pool per core rather than a single cross-core
-pool. That is an acceptable, even preferable, trade: core-local pools stay warm and
+Under `Isolation::Isolated` the factory runs once per core; `fetch` additionally invokes
+it once per configured `multiple_pools` slot (`0..pool_count` in `client_builder.rs`, a
+single slot by default), so each (core × pool slot) opens its own session and the client
+holds one connection pool per (core × pool slot) rather than a single cross-core pool -
+one pool per core in the default single-slot case. That is an acceptable, even preferable,
+trade: core-local pools stay warm and
 uncontended (see Future exploration below). A single session shared across a client's
 cores *and* isolated between independently built clients is not expressible with today's
 custom-transport API - it exposes only builder-scoped state (shared across clones) or
@@ -801,6 +805,12 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   assert via server-side connection counting that they establish *separate* connections
   and never reuse each other's, proving the per-built-client session/pool boundary
   (design.md §2, §3.2).
+- Pool isolation across slots within one client: a single `HttpClient` built with
+  `multiple_pools(2)` routes requests through both pool slots to the same authority;
+  assert via server-side connection counting that a connection opened for one slot is
+  never reused by the other, proving each slot lands in its own session/pool even though
+  the transport ignores the `PoolIndex` *value* (§8). Optionally pair with a mock-bindings
+  assertion that `WinHttpOpen` runs once per slot (§3.2).
 - HTTP/1.1 vs HTTP/2 negotiation against a server that supports both (wiremock and
   hyper-based localhost servers cover h1 and h2); assert the reported response
   `Version`.
@@ -953,7 +963,7 @@ would let two independent `fetch_winhttp` clients - for instance a strict one an
 one built with `accept_invalid_certs` (design.md §4) - reuse each other's pooled
 connections, collapsing the security boundary between them. Disabling global
 pooling scopes the connection pool to this session, so each `HttpClient` gets its
-own pool (one pool per core under the per-core session model, §3.2)
+own pool (one pool per (core × pool slot) under the per-session model, §3.2)
 while different clients stay isolated. Reuse within a client is unaffected.
 
 For draining, WinHTTP exposes only coarse controls:
@@ -1186,7 +1196,8 @@ Design points deliberately deferred in v1, recorded here so they are revisited w
 the `fetch` API or profiling data makes them actionable:
 
 - **Consolidate per-core sessions into one session per client.** v1 opens one WinHTTP
-  session (and therefore one connection pool) per core, because that is the only shape the
+  session (and therefore one connection pool) per core - and per `multiple_pools` slot
+  within a core (§3.2) - because that is the only shape the
   current `fetch` custom-transport API expresses while still isolating independently built
   clients (§3.2). This diverges from a single-session-per-client model: it trades
   cross-core connection reuse and session-granularity connection recycling (the
