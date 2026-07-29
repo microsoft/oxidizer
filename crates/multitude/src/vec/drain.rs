@@ -27,6 +27,16 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Panics if the start of the range is greater than the end, or if the
     /// end is greater than `len`.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2, 3]);
+    /// let removed: std::vec::Vec<_> = values.drain(1..).collect();
+    /// assert_eq!(removed, [2, 3]);
+    /// assert_eq!(values.as_slice(), &[1]);
+    /// ```
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, 'a, T, A> {
         let len = self.buf.len();
         let start = match range.start_bound() {
@@ -65,6 +75,16 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
 ///
 /// Yields the removed elements (double-ended); the surviving tail is restored
 /// in place on drop.
+/// ```
+/// use multitude::Arena;
+/// use multitude::vec::Drain;
+///
+/// let arena = Arena::new();
+/// let mut values = arena.alloc_vec();
+/// values.extend_from_slice([1, 2, 3]);
+/// let mut drain: Drain<'_, '_, i32, _> = values.drain(1..);
+/// assert_eq!(drain.next(), Some(2));
+/// ```
 pub struct Drain<'d, 'a, T, A: Allocator + Clone> {
     /// Index where the surviving tail begins in the source vector.
     tail_start: usize,
@@ -187,8 +207,13 @@ impl<T, A: Allocator + Clone> Drop for Drain<'_, '_, T, A> {
             // the offset within the same buffer), and drop each exactly once.
             unsafe {
                 let v = vec.as_mut();
-                let offset = drop_ptr.offset_from_unsigned(v.as_ptr());
-                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(v.as_mut_ptr().add(offset), drop_len));
+                let remaining = if mem::size_of::<T>() == 0 {
+                    v.as_mut_ptr()
+                } else {
+                    let offset = drop_ptr.offset_from_unsigned(v.as_ptr());
+                    v.as_mut_ptr().add(offset)
+                };
+                ptr::drop_in_place(ptr::slice_from_raw_parts_mut(remaining, drop_len));
             }
         }
     }

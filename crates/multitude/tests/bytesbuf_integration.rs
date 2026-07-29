@@ -8,6 +8,8 @@
 
 mod common;
 
+use std::thread;
+
 use bytesbuf::mem::Memory;
 use multitude::Arena;
 
@@ -21,13 +23,7 @@ fn reserve_and_consume_basic() {
     assert_eq!(view, b"hello");
 }
 
-/// Fast-fail micro-test for the `BlockRef::drop` last-drop cleanup
-/// gate (`bytesbuf.rs::ArenaBlockState::drop`'s `if prev == 1`).
-/// Under the `==` → `!=` mutation the cleanup runs on every drop
-/// *except* the last, so the chunk hold is never released and the
-/// arena chunk leaks to the tracking allocator. The targeted shape
-/// (single reserve, immediate drop, then arena drop) makes this
-/// observation roughly 1ms instead of ~78s through the stress suite.
+/// The last `BlockRef` drop releases the chunk hold.
 #[test]
 fn reserve_drop_releases_arena_chunk_hold() {
     let alloc = common::SendTrackingAllocator::new();
@@ -57,7 +53,6 @@ fn reserve_exact_size() {
 fn reserve_large() {
     let arena = Arena::new();
     let mut buf = arena.reserve(4096);
-    // Write 4096 bytes in chunks of 256
     for chunk_idx in 0..16u8 {
         let mut chunk = [0u8; 256];
         for (i, byte) in chunk.iter_mut().enumerate() {
@@ -106,7 +101,6 @@ fn view_outlives_arena() {
         buf.put_slice(*b"persist");
         view = buf.consume_all();
     }
-    // Arena dropped; the BytesView data should still be valid.
     assert_eq!(view, b"persist");
 }
 
@@ -154,7 +148,7 @@ fn view_send_across_thread() {
     buf.put_slice(*b"thread-safe");
     let view = buf.consume_all();
 
-    let h = std::thread::spawn(move || {
+    let h = thread::spawn(move || {
         assert_eq!(view, b"thread-safe");
         view.len()
     });
@@ -164,7 +158,6 @@ fn view_send_across_thread() {
 #[test]
 fn arena_implements_memory_trait() {
     let arena = Arena::new();
-    // Use arena directly as a Memory impl
     let mut buf = arena.reserve(16);
     buf.put_slice(*b"trait");
     let view = buf.consume_all();
@@ -173,13 +166,10 @@ fn arena_implements_memory_trait() {
 
 #[test]
 fn single_ref_drop_cleanup() {
-    // Create a view and ensure exactly one reference exists, then drop it.
-    // This exercises the `was == 1` branch in ArenaBlockState::drop.
     let arena = Arena::new();
     let mut buf = arena.reserve(16);
     buf.put_slice(*b"drop me");
     let view = buf.consume_all();
-    // No clone — single reference
     drop(view);
 }
 
@@ -193,32 +183,25 @@ fn single_ref_drop_after_arena_dropped() {
         buf.put_slice(*b"outlive");
         view = buf.consume_all();
     }
-    // Arena dropped, view holds sole reference
     assert_eq!(view, b"outlive");
     drop(view); // exercises full cleanup with arena gone
 }
 
 mod from_coverage_extras_bytesbuf {
-    #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
-    #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
-    #![allow(dead_code, reason = "relocated helpers retain fields for layout")]
-    #![allow(
-        unfulfilled_lint_expectations,
-        reason = "relocated #[expect] may be fulfilled at file or feature level"
-    )]
-    #![allow(
-        clippy::undocumented_unsafe_blocks,
-        reason = "relocated test bodies preserve original safety reasoning"
-    )]
-    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "relocated tests group related unsafe ops")]
-    #![allow(clippy::cast_possible_truncation, reason = "relocated tests use bounded values")]
-    #![allow(clippy::cast_sign_loss, reason = "relocated tests use non-negative values")]
-    #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
-    #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
-    #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
+    #![allow(clippy::items_after_statements, reason = "test-local types are declared near use")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests exercise method-call clone syntax")]
+    #![allow(dead_code, reason = "helper fields preserve test layouts")]
+    #![allow(unfulfilled_lint_expectations, reason = "expectations depend on active features")]
+    #![allow(clippy::undocumented_unsafe_blocks, reason = "unsafe test setup is documented at each call site")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe operations")]
+    #![allow(clippy::cast_possible_truncation, reason = "test values fit the target type")]
+    #![allow(clippy::cast_sign_loss, reason = "test values are non-negative")]
+    #![allow(clippy::empty_drop, reason = "empty Drop impls mark drop-sensitive types")]
+    #![allow(clippy::assertions_on_result_states, reason = "tests assert error returns directly")]
+    #![allow(clippy::empty_line_after_doc_comments, reason = "test documentation is adjacent to declarations")]
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -267,13 +250,10 @@ mod from_coverage_extras_bytesbuf {
 
     #[test]
     fn bytesbuf_reserve_refill_failure_through_allocate_shared_layout() {
-        // Drive `allocate_shared_layout` (3112)'s refill failure path via bytesbuf.
         use bytesbuf::mem::Memory;
         let alloc = common::SendFailingAllocator::new(1);
         let arena = Arena::builder_in(alloc).max_normal_alloc(4096).try_build().unwrap();
-        // First few `reserve` calls succeed (within the initial chunk). Eventually
-        // a `reserve` will need a fresh chunk and fail; we catch the panic from
-        // bytesbuf's `expect("arena allocation failed")` wrapper.
+        // Reserve until a fresh chunk is required and allocator failure panics.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             for _ in 0..32 {
                 let _ = arena.reserve(2048);

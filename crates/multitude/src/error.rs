@@ -4,6 +4,8 @@
 use core::error::Error;
 use core::fmt;
 
+use allocator_api2::alloc::AllocError as BackingAllocError;
+
 /// Why an [`Arena`](crate::Arena) allocation failed.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum ErrorKind {
@@ -33,6 +35,16 @@ enum ErrorKind {
 /// * computing the request's layout overflowed the addressable range.
 ///
 /// Like [`core::alloc::AllocError`], this carries no backtrace or source error.
+///
+/// ```
+/// use multitude::{AllocError, Arena};
+///
+/// let arena = Arena::builder().byte_budget(0).build();
+/// let Some(error): Option<AllocError> = arena.try_alloc(1_u8).err() else {
+///     panic!("zero budget must reject allocation");
+/// };
+/// assert!(error.is_allocator_failure());
+/// ```
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct AllocError {
     kind: ErrorKind,
@@ -63,26 +75,54 @@ impl AllocError {
         kind: ErrorKind::CapacityOverflow,
     };
 
-    /// Returns `true` if allocation failed because the backing allocator could
-    /// not provide memory for a new chunk, or the arena reached its configured
-    /// byte budget and cannot grow.
+    /// Report whether the backing allocator or byte budget prevented growth.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().byte_budget(0).build();
+    /// let Some(error) = arena.try_alloc(1_u8).err() else {
+    ///     panic!("zero budget must reject allocation");
+    /// };
+    /// assert!(error.is_allocator_failure());
+    /// ```
     #[must_use]
     pub fn is_allocator_failure(self) -> bool {
         matches!(self.kind, ErrorKind::AllocatorFailed)
     }
 
-    /// Returns `true` if allocation failed because the request needs an
-    /// alignment larger than the arena can satisfy. Such a request can never
+    /// Report whether the request exceeded the arena's supported alignment.
+    ///
+    /// Such a request can never
     /// succeed, regardless of how much memory is available.
+    ///
+    /// ```
+    /// #[repr(align(32768))]
+    /// struct OverAligned;
+    ///
+    /// let arena = multitude::Arena::new();
+    /// let Some(error) = arena.try_alloc(OverAligned).err() else {
+    ///     panic!("over-aligned values must be rejected");
+    /// };
+    /// assert!(error.is_alignment_too_large());
+    /// ```
     #[must_use]
     pub fn is_alignment_too_large(self) -> bool {
         matches!(self.kind, ErrorKind::AlignmentTooLarge)
     }
 
-    /// Returns `true` if allocation failed because computing the request's
-    /// layout overflowed the addressable range (the size arithmetic wrapped
-    /// `usize` or the total exceeded `isize::MAX`). Such a request can never
+    /// Report whether request layout computation exceeded the addressable range.
+    ///
+    /// This includes wrapped `usize` size arithmetic or totals above
+    /// `isize::MAX`. Such a request can never
     /// succeed.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let mut values = arena.alloc_vec::<u16>();
+    /// let Some(error) = values.try_reserve(usize::MAX).err() else {
+    ///     panic!("the capacity calculation must overflow");
+    /// };
+    /// assert!(error.is_capacity_overflow());
+    /// ```
     #[must_use]
     pub fn is_capacity_overflow(self) -> bool {
         matches!(self.kind, ErrorKind::CapacityOverflow)
@@ -101,20 +141,16 @@ impl fmt::Display for AllocError {
 
 impl Error for AllocError {}
 
-/// Bridges a backing-allocator failure (the `allocator-api2` marker carries no
-/// payload) into the arena's allocator-failure kind, so `?` on a
-/// backing-allocator call inside an arena method produces the right kind.
-impl From<allocator_api2::alloc::AllocError> for AllocError {
+/// Converts a backing allocator failure into an arena allocation failure.
+impl From<BackingAllocError> for AllocError {
     #[inline]
-    fn from(_: allocator_api2::alloc::AllocError) -> Self {
+    fn from(_: BackingAllocError) -> Self {
         Self::ALLOCATOR_FAILED
     }
 }
 
-/// Discards the arena's failure kind when bridging back to the `allocator-api2`
-/// `Allocator` trait, whose error type is a zero-payload marker. Used by the
-/// `Allocator for &Arena<A>` impl when forwarding internal failures.
-impl From<AllocError> for allocator_api2::alloc::AllocError {
+/// Converts an arena failure to the backing allocator's marker error.
+impl From<AllocError> for BackingAllocError {
     #[inline]
     fn from(_: AllocError) -> Self {
         Self
@@ -126,6 +162,8 @@ mod tests {
     use alloc::format;
     use alloc::string::ToString;
     use core::error::Error;
+
+    use allocator_api2::alloc::AllocError as BackingAllocError;
 
     use super::AllocError;
 
@@ -185,17 +223,15 @@ mod tests {
 
     #[test]
     fn bridges_to_and_from_allocator_api2() {
-        // A backing-allocator failure maps to the allocator-failure kind.
-        let bridged: AllocError = allocator_api2::alloc::AllocError.into();
+        let bridged: AllocError = BackingAllocError.into();
         assert!(bridged.is_allocator_failure());
 
-        // Bridging back to the zero-payload marker is infallible for every kind.
         for kind in [
             AllocError::ALLOCATOR_FAILED,
             AllocError::ALIGNMENT_TOO_LARGE,
             AllocError::CAPACITY_OVERFLOW,
         ] {
-            let _: allocator_api2::alloc::AllocError = kind.into();
+            let _: BackingAllocError = kind.into();
         }
     }
 }

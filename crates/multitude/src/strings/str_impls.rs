@@ -21,6 +21,13 @@ impl<A: Allocator + Clone> Arc<str, A> {
     /// Borrow as `&str`. Ergonomic alias for `&**self` (`Deref<Target = str>`).
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let value = arena.alloc_str_arc("shared");
+    /// assert_eq!(value.as_str(), "shared");
+    /// ```
     pub fn as_str(&self) -> &str {
         self
     }
@@ -71,6 +78,13 @@ impl<A: Allocator + Clone> Rc<str, A> {
     /// Borrow as `&str`. Ergonomic alias for `&**self` (`Deref<Target = str>`).
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let value = arena.alloc_str_rc("local");
+    /// assert_eq!(value.as_str(), "local");
+    /// ```
     pub fn as_str(&self) -> &str {
         self
     }
@@ -118,6 +132,13 @@ impl<A: Allocator + Clone> Box<str, A> {
     /// Borrow as `&str`. Ergonomic alias for `&**self` (`Deref<Target = str>`).
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let value = arena.alloc_str_box("owned");
+    /// assert_eq!(value.as_str(), "owned");
+    /// ```
     pub fn as_str(&self) -> &str {
         self
     }
@@ -126,6 +147,14 @@ impl<A: Allocator + Clone> Box<str, A> {
     /// (`DerefMut<Target = str>`).
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_str_box("rust");
+    /// value.as_mut_str().make_ascii_uppercase();
+    /// assert_eq!(&*value, "RUST");
+    /// ```
     pub fn as_mut_str(&mut self) -> &mut str {
         self
     }

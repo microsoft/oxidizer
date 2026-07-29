@@ -363,7 +363,7 @@ fn entrypoint(c: &mut Criterion) {
 
     // Repeatedly writes a u32 into pre-reserved single-block capacity, exercising the fused
     // put_small fast path for numeric writes.
-    group.bench_function("put_num_le", |b| {
+    group.bench_function("put_u32_le", |b| {
         const WRITES: usize = 32;
 
         b.iter_batched_ref(
@@ -374,7 +374,7 @@ fn entrypoint(c: &mut Criterion) {
             },
             |buf| {
                 for _ in 0..WRITES {
-                    buf.put_num_le(black_box(0x1234_5678_u32));
+                    buf.put_u32_le(black_box(0x1234_5678_u32));
                 }
             },
             BatchSize::SmallInput,

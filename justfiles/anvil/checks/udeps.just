@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Required tier. cargo-udeps detects unused dependencies by resolving
 # the full crate graph and seeing which deps are referenced; that's
@@ -20,6 +23,8 @@
 #      surfaces those.
 # A genuinely-unused dep is caught by both; the two together cover all
 # of {unused dep, unused dev-dep, dep that should be a dev-dep}.
+
+# Check required workspace packages for unused dependencies.
 [script("pwsh")]
 anvil-udeps: anvil-udeps-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -33,8 +38,10 @@ anvil-udeps: anvil-udeps-validate-prereqs
     & cargo '+{{ rust_nightly }}' udeps @pkg --all-features --all-targets
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Install prerequisites for the `anvil-udeps` recipe.
 [group("anvil-setup")]
 anvil-udeps-setup installer="install": anvil-toolchain-nightly-install (anvil-tool-cargo-udeps-install installer)
 
+# Validate prerequisites for the `anvil-udeps` recipe.
 [group("anvil-setup")]
 anvil-udeps-validate-prereqs: anvil-toolchain-nightly-validate-prereqs anvil-tool-cargo-udeps-validate-prereqs

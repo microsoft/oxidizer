@@ -177,21 +177,6 @@ fn entrypoint(c: &mut Criterion) {
         });
     });
 
-    let allocs_op = allocs.operation("put_u8");
-    group.bench_function("put_u8", |b| {
-        b.iter_custom(|iters| {
-            let mut buffers: Vec<_> = (0..iters).map(|_| memory.reserve(1)).collect();
-
-            let _span = allocs_op.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for buf in &mut buffers {
-                buf.put_num_ne::<u8>(black_box(0xAB));
-                black_box(buf);
-            }
-            start.elapsed()
-        });
-    });
-
     group.finish();
 
     let mut group = c.benchmark_group("bytesbuf_vs_put_u8_repeated");
@@ -238,7 +223,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_le::<u16>(black_box(0xABCD));
+                buf.put_u16_le(black_box(0xABCD));
                 black_box(buf);
             }
             start.elapsed()
@@ -268,7 +253,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_le::<u32>(black_box(0xABCD_EF01));
+                buf.put_u32_le(black_box(0xABCD_EF01));
                 black_box(buf);
             }
             start.elapsed()
@@ -298,7 +283,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_le::<u64>(black_box(0xABCD_EF01_2345_6789));
+                buf.put_u64_le(black_box(0xABCD_EF01_2345_6789));
                 black_box(buf);
             }
             start.elapsed()
@@ -328,7 +313,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_le::<f64>(black_box(f64::consts::PI));
+                buf.put_f64_le(black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
@@ -358,7 +343,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_be::<u16>(black_box(0xABCD));
+                buf.put_u16_be(black_box(0xABCD));
                 black_box(buf);
             }
             start.elapsed()
@@ -388,7 +373,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_be::<u32>(black_box(0xABCD_EF01));
+                buf.put_u32_be(black_box(0xABCD_EF01));
                 black_box(buf);
             }
             start.elapsed()
@@ -418,7 +403,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_be::<u64>(black_box(0xABCD_EF01_2345_6789));
+                buf.put_u64_be(black_box(0xABCD_EF01_2345_6789));
                 black_box(buf);
             }
             start.elapsed()
@@ -448,7 +433,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for buf in &mut buffers {
-                buf.put_num_be::<f64>(black_box(f64::consts::PI));
+                buf.put_f64_be(black_box(f64::consts::PI));
                 black_box(buf);
             }
             start.elapsed()
@@ -474,7 +459,6 @@ fn entrypoint(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("bytesbuf_vs_put_u8");
 
-    // get_byte is a "manual specialization" of get_num_le::<u8>()
     let allocs_op = allocs.operation("get_byte");
     group.bench_function("get_byte", |b| {
         b.iter_custom(|iters| {
@@ -484,20 +468,6 @@ fn entrypoint(c: &mut Criterion) {
             let start = Instant::now();
             for bytes in &mut inputs {
                 black_box(bytes.get_byte());
-            }
-            start.elapsed()
-        });
-    });
-
-    let allocs_op = allocs.operation("get_u8");
-    group.bench_function("get_u8", |b| {
-        b.iter_custom(|iters| {
-            let mut inputs: Vec<_> = (0..iters).map(|_| many_as_view.clone()).collect();
-
-            let _span = allocs_op.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for bytes in &mut inputs {
-                black_box(bytes.get_num_le::<u8>());
             }
             start.elapsed()
         });
@@ -529,7 +499,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_le::<u16>());
+                black_box(bytes.get_u16_le());
             }
             start.elapsed()
         });
@@ -557,7 +527,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_le::<u32>());
+                black_box(bytes.get_u32_le());
             }
             start.elapsed()
         });
@@ -585,7 +555,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_le::<u64>());
+                black_box(bytes.get_u64_le());
             }
             start.elapsed()
         });
@@ -613,7 +583,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_le::<f64>());
+                black_box(bytes.get_f64_le());
             }
             start.elapsed()
         });
@@ -641,7 +611,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_be::<u16>());
+                black_box(bytes.get_u16_be());
             }
             start.elapsed()
         });
@@ -669,7 +639,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_be::<u32>());
+                black_box(bytes.get_u32_be());
             }
             start.elapsed()
         });
@@ -697,7 +667,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_be::<u64>());
+                black_box(bytes.get_u64_be());
             }
             start.elapsed()
         });
@@ -725,7 +695,7 @@ fn entrypoint(c: &mut Criterion) {
             let _span = allocs_op.measure_thread().iterations(iters);
             let start = Instant::now();
             for bytes in &mut inputs {
-                black_box(bytes.get_num_be::<f64>());
+                black_box(bytes.get_f64_be());
             }
             start.elapsed()
         });

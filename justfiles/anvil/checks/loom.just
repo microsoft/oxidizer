@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Affected tier. `loom` is a permutation-based concurrency model
 # checker: a crate exercises it through a dedicated `[[test]]` target
@@ -42,6 +45,8 @@
 # (layout-agnostic; works for any `members` glob). RUSTFLAGS goes via
 # $env: rather than --config so it propagates to cargo's child rustc
 # invocations cleanly on both pwsh/bash.
+
+# Run Loom concurrency tests for affected workspace packages.
 [script("pwsh")]
 anvil-loom: anvil-loom-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -107,8 +112,11 @@ anvil-loom: anvil-loom-validate-prereqs
 # loom is a regular cargo-test invocation with RUSTFLAGS=--cfg loom;
 # no dedicated tool to install. The rust toolchain (rustc + cargo)
 # is the only prerequisite.
+
+# Install prerequisites for the `anvil-loom` recipe.
 [group("anvil-setup")]
 anvil-loom-setup installer="install": anvil-tool-rustc-validate-prereqs
 
+# Validate prerequisites for the `anvil-loom` recipe.
 [group("anvil-setup")]
 anvil-loom-validate-prereqs: anvil-tool-rustc-validate-prereqs

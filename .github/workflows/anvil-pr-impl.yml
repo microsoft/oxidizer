@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 name: anvil-pr-impl
 
 on:
@@ -55,7 +57,7 @@ jobs:
       include_affected: ${{ steps.delta.outputs.include_affected }}
       include_required: ${{ steps.delta.outputs.include_required }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: delta
@@ -68,7 +70,7 @@ jobs:
       include_affected: ${{ steps.delta.outputs.include_affected }}
       include_required: ${{ steps.delta.outputs.include_required }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: delta
@@ -89,7 +91,17 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # anvil-semver-check compares the affected crates' current API
+          # against the PR's target branch (origin/<base>) via
+          # `cargo semver-checks --baseline-rev`. That resolves the
+          # baseline commit from the LOCAL object store (no fetch), so the
+          # target branch history must be present -- the default shallow
+          # PR checkout narrows the refspec to the PR merge ref and leaves
+          # origin/<base> absent. Full history makes the baseline
+          # resolvable; the other pr-fast checks only touch the HEAD tree.
+          fetch-depth: 0
       - uses: ./.github/actions/anvil-pr-fast
         with:
           include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
@@ -109,13 +121,13 @@ jobs:
       # write tokens).
       - name: Upsert anvil-semver advisory
         if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') != ''
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: anvil-semver
           path: target/anvil/comments/semver.md
       - name: Clear anvil-semver advisory
         if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') == ''
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: anvil-semver
           delete: true
@@ -136,9 +148,10 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-pr-test
         with:
+          free-disk-space: true
           include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
           include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
           include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
@@ -158,7 +171,7 @@ jobs:
         # empty the recipe no-ops and there is no file to upload, so we gate
         # on the impact output. Codecov coalesces the two per-config files.
         if: matrix.os != 'windows-arm' && ((startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected != '--skip') || (matrix.os == 'windows' && needs.impact-windows.outputs.include_affected != '--skip'))
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
           flags: ${{ matrix.os }}
@@ -180,7 +193,7 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-pr-runtime-analysis
         with:
           include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
@@ -203,7 +216,7 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: ./.github/actions/anvil-pr-mutants

@@ -28,31 +28,31 @@ struct Point {
 fn main() {
     let arena = Arena::new();
 
-    // -- Single value --------------------------------------------------
+    // Single value
     // `alloc` returns an owning `Alloc<u32>` borrowed from the arena.
     let mut counter = arena.alloc(0_u32);
     *counter += 1;
     *counter += 10;
     println!("counter = {counter}");
 
-    // -- String --------------------------------------------------------
+    // String
     // `alloc_str` copies `&str` into the arena and returns `Alloc<str>`.
     let greeting = arena.alloc_str("hello, world");
     println!("greeting = {greeting}");
 
-    // -- Slice (Copy) --------------------------------------------------
+    // Copy slice
     let mut primes = arena.alloc_slice_copy([2, 3, 5, 7, 11, 13]);
     primes[0] = 1; // we own the slice, can mutate
     println!("primes = {:?}", &*primes);
 
-    // -- Slice (filled by closure, supports T: Drop) -------------------
+    // Slice filled by a closure, including values with destructors
     let tokens = arena.alloc_slice_fill_with(3, |i| Token {
         kind: "ident",
         text: format!("name_{i}"),
     });
     println!("tokens = {:#?}", &*tokens);
 
-    // -- Many disjoint handles coexist ---------------------------------
+    // Many disjoint handles coexist
     // Each `alloc` reborrows `&arena` for the returned handle's lifetime;
     // the values live at disjoint memory regions so the handles are all
     // simultaneously valid.
@@ -61,7 +61,7 @@ fn main() {
         println!("x = {}", **r);
     }
 
-    // -- Coexists with refcount smart pointers --------------------------------
+    // Coexists with refcounted smart pointers
     // `Alloc` handles and `Arc` smart pointers share the same chunk pool. Use
     // the cheap one when you don't need the value to outlive the arena; use
     // `Arc` when you do.

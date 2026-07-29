@@ -9,11 +9,12 @@
 //! `PhantomData<(*const T, A)>`), an identical metadata-recovery
 //! helper ([`as_fat_ptr`](crate::internal::thin_dst::as_fat)), and
 //! identical forwarding trait impls (`Deref`, `AsRef`, `Borrow`,
-//! `Debug`, `Display`, ordering, hashing, `Pointer`, `Unpin`,
-//! [`Pin`] conversion). The macro below emits all of that for a given
+//! `Debug`, `Display`, ordering, hashing, `Pointer`, and `Unpin`).
+//! The macro below emits all of that for a given
 //! struct name; per-file blocks supply the items that legitimately
 //! differ (`Send`/`Sync` bounds, `Drop`, `Clone` for `Arc`/`Rc`, mutable
-//! accessors for `Box`, iterator forwarding for `Box`, etc.).
+//! accessors and pin conversion for `Box`, iterator forwarding for `Box`,
+//! etc.).
 
 /// Emit shared inherent methods + read-only trait impls for a thin
 /// smart pointer of layout `{ ptr: NonNull<u8>, _phantom }`.
@@ -33,36 +34,20 @@ macro_rules! impl_thin_smart_ptr_common {
             }
 
             /// Returns a raw pointer to the value (fat if `T: ?Sized` is a DST).
+            ///
+            /// ```
+            /// let arena = multitude::Arena::new();
+            /// let arc = arena.alloc_arc(7_u32);
+            /// let rc = arena.alloc_rc(8_u32);
+            /// let boxed = arena.alloc_box(9_u32);
+            /// assert_eq!(unsafe { *arc.as_ptr() }, 7);
+            /// assert_eq!(unsafe { *rc.as_ptr() }, 8);
+            /// assert_eq!(unsafe { *boxed.as_ptr() }, 9);
+            /// ```
             #[inline]
             #[must_use]
             pub fn as_ptr(&self) -> *const T {
                 self.as_fat_ptr().as_ptr().cast_const()
-            }
-
-            /// Convert into a [`Pin`](core::pin::Pin) of `Self`.
-            ///
-            /// Sound for any `T` (including `!Unpin`) because the
-            /// value's address is fixed at allocation time, the
-            /// containing smart pointer keeps the storage alive at the
-            /// same address through `Drop`, and the value is dropped at
-            /// the same address — satisfying `Pin`'s contract.
-            #[must_use]
-            #[inline]
-            pub fn into_pin(this: Self) -> core::pin::Pin<Self> {
-                // SAFETY: the value's address is fixed at allocation time and the
-                // smart pointer keeps the storage alive at that same address
-                // through `Drop`, where the value is finalized — exactly `Pin`'s
-                // contract, so pinning is sound for any `T` (including `!Unpin`).
-                unsafe { core::pin::Pin::new_unchecked(this) }
-            }
-        }
-
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> From<$Ty<T, A>> for core::pin::Pin<$Ty<T, A>> {
-            /// Mirror of `From<std::sync::Arc<T>> for Pin<std::sync::Arc<T>>` /
-            /// `From<std::boxed::Box<T>> for Pin<std::boxed::Box<T>>`.
-            #[inline]
-            fn from(p: $Ty<T, A>) -> Self {
-                $Ty::into_pin(p)
             }
         }
 

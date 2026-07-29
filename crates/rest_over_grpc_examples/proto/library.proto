@@ -1,0 +1,96 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package library;
+
+import "google/api/annotations.proto";
+
+// A library service exposing REST endpoints via google.api.http annotations.
+service Library {
+  // Retrieves a single shelf.
+  rpc GetShelf(GetShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelves/{shelf}"
+    };
+  }
+
+  // Creates a shelf from the request body.
+  rpc CreateShelf(CreateShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      post: "/v1/shelves"
+      body: "shelf"
+    };
+  }
+
+  // Lists shelves, optionally filtered via a query parameter.
+  rpc ListShelves(ListShelvesRequest) returns (ListShelvesResponse) {
+    option (google.api.http) = {
+      get: "/v1/shelves"
+    };
+  }
+
+  // Lists shelves of a given genre, bound from an `enum` path variable — the
+  // value may be given by name (`SCIENCE`) or number (`2`).
+  rpc ListShelvesByGenre(ListShelvesByGenreRequest) returns (ListShelvesResponse) {
+    option (google.api.http) = {
+      get: "/v1/shelves/genre/{genre}"
+    };
+  }
+
+  // Server-streams shelves one at a time, rendered as a streamed JSON body.
+  rpc StreamShelves(ListShelvesRequest) returns (stream Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelves:stream"
+    };
+  }
+}
+
+// A shelf in the library.
+message Shelf {
+  // The resource name of the shelf, e.g. "shelves/history".
+  string name = 1;
+  // The theme of the shelf.
+  string theme = 2;
+}
+
+// Request for retrieving a single shelf.
+message GetShelfRequest {
+  // The id of the shelf to retrieve (bound from the path).
+  string shelf = 1;
+}
+
+// Request for creating a shelf.
+message CreateShelfRequest {
+  // The shelf to create (bound from the request body).
+  Shelf shelf = 1;
+}
+
+// Request for listing shelves.
+message ListShelvesRequest {
+  // Optional theme filter (bound from the query string).
+  string filter = 1;
+}
+
+// A shelf genre, exposed as an `enum` path variable.
+enum Genre {
+  // Default, unset genre.
+  GENRE_UNSPECIFIED = 0;
+  // Historical works.
+  HISTORY = 1;
+  // Scientific works.
+  SCIENCE = 2;
+}
+
+// Request for listing shelves of a given genre.
+message ListShelvesByGenreRequest {
+  // The genre to list (bound from the path, by name or number).
+  Genre genre = 1;
+}
+
+// Response for listing shelves.
+message ListShelvesResponse {
+  // The shelves matching the request.
+  repeated Shelf shelves = 1;
+}

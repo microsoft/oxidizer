@@ -18,8 +18,8 @@ fn main() {
     // Prepare a packet to send and send it.
     let mut buf = connection.memory().reserve(1 + 8 + 16);
     buf.put_byte(42);
-    buf.put_num_be(43_u64);
-    buf.put_num_be(44_u128);
+    buf.put_u64_be(43);
+    buf.put_u128_be(44);
 
     let packet = buf.consume_all();
 

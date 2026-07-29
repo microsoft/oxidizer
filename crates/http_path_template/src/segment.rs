@@ -20,12 +20,15 @@ use crate::variable::Variable;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Segment<'a> {
-    /// A literal path segment that must match verbatim, e.g. `shelves`.
+    /// A path-template literal that must match verbatim, e.g. `shelves`.
+    /// It contains RFC 3986 `pchar` characters except raw `*`, which is reserved
+    /// for wildcard atoms. Any percent encoding must use valid `%HH` escapes.
     Literal(&'a str),
     /// `*` — matches exactly one (non-empty) path segment.
     Single,
-    /// `**` — matches the remaining path segments. Only valid as the final
-    /// element of a template or variable sub-template.
+    /// `**` — matches the remaining path segments. Only valid as the final atom
+    /// of the entire flattened template; a variable sub-template ending in `**`
+    /// must therefore also be the final top-level segment.
     Rest,
     /// `{field.path=sub}` — a variable binding capturing the portion of the
     /// path matched by its sub-template.

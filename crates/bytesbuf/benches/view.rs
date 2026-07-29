@@ -188,14 +188,14 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
-    // Drains a single-span view as u32 values, exercising the fused single-span get_num path
+    // Drains a single-span view as u32 values, exercising the fused single-span numeric read path
     // (the value never straddles a span boundary, so the buffered fallback is never taken).
-    group.bench_function("get_num_le_drain", |b| {
+    group.bench_function("get_u32_le_drain", |b| {
         b.iter_batched_ref(
             || test_data_as_view.clone(),
             |seq| {
                 while seq.len() >= size_of::<u32>() {
-                    black_box(seq.get_num_le::<u32>());
+                    black_box(seq.get_u32_le());
                 }
             },
             BatchSize::SmallInput,

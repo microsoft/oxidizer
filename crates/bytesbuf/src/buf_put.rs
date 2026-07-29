@@ -6,9 +6,45 @@
 use std::borrow::Borrow;
 use std::ptr;
 
-use num_traits::ToBytes;
-
 use crate::{BytesBuf, BytesView};
+
+/// Generates the little-, big-, and native-endian write accessors for a primitive numeric type.
+///
+/// Each generated method serializes the value with the primitive's inherent `to_*_bytes` method
+/// and appends the resulting bytes via [`BytesBuf::put_slice`].
+macro_rules! put_num_accessors {
+    ($t:ty, $le:ident, $be:ident, $ne:ident) => {
+        #[doc = concat!("Appends a `", stringify!($t), "` to the buffer in little-endian byte order.")]
+        ///
+        /// # Panics
+        ///
+        /// Panics if there is insufficient remaining capacity in the buffer.
+        #[inline]
+        pub fn $le(&mut self, value: $t) {
+            self.put_slice(value.to_le_bytes());
+        }
+
+        #[doc = concat!("Appends a `", stringify!($t), "` to the buffer in big-endian byte order.")]
+        ///
+        /// # Panics
+        ///
+        /// Panics if there is insufficient remaining capacity in the buffer.
+        #[inline]
+        pub fn $be(&mut self, value: $t) {
+            self.put_slice(value.to_be_bytes());
+        }
+
+        #[doc = concat!("Appends a `", stringify!($t), "` to the buffer in native-endian byte order.")]
+        ///
+        /// # Panics
+        ///
+        /// Panics if there is insufficient remaining capacity in the buffer.
+        #[inline]
+        pub fn $ne(&mut self, value: $t) {
+            self.put_slice(value.to_ne_bytes());
+        }
+    };
+}
 
 impl BytesBuf {
     /// Appends a slice of bytes to the buffer.
@@ -129,7 +165,7 @@ impl BytesBuf {
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
     pub fn put_byte(&mut self, value: u8) {
-        self.put_num_ne(value);
+        self.put_slice([value]);
     }
 
     /// Appends multiple repetitions of a `u8` to the buffer.
@@ -186,87 +222,16 @@ impl BytesBuf {
         debug_assert!(self.len() >= count);
     }
 
-    /// Appends a number of type `T` in little-endian representation to the buffer.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::mem::Memory;
-    ///
-    /// let mut buf = memory.reserve(16);
-    ///
-    /// buf.put_num_le(0x1234_u16);
-    /// buf.put_num_le(0xDEAD_BEEF_u32);
-    ///
-    /// let data = buf.consume_all();
-    /// // Little-endian: least significant byte first.
-    /// assert_eq!(data.first_slice(), &[0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE]);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is insufficient remaining capacity in the buffer.
-    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
-    pub fn put_num_le<T: ToBytes>(&mut self, value: T) {
-        let bytes = value.to_le_bytes();
-        self.put_slice(bytes.borrow());
-    }
-
-    /// Appends a number of type `T` in big-endian representation to the buffer.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::mem::Memory;
-    ///
-    /// let mut buf = memory.reserve(16);
-    ///
-    /// buf.put_num_be(0xCAFE_u16);
-    /// buf.put_num_be(0xBABE_u16);
-    ///
-    /// let data = buf.consume_all();
-    /// // Big-endian: most significant byte first.
-    /// assert_eq!(data, &[0xCA, 0xFE, 0xBA, 0xBE]);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is insufficient remaining capacity in the buffer.
-    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
-    pub fn put_num_be<T: ToBytes>(&mut self, value: T) {
-        let bytes = value.to_be_bytes();
-        self.put_slice(bytes.borrow());
-    }
-
-    /// Appends a number of type `T` in native-endian representation to the buffer.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::mem::Memory;
-    ///
-    /// let mut buf = memory.reserve(16);
-    ///
-    /// buf.put_num_ne(0xABCD_u16);
-    /// buf.put_num_ne(0x1234_5678_9ABC_DEF0_u64);
-    ///
-    /// let mut view = buf.consume_all();
-    /// // Reading back in native-endian gives the original values.
-    /// assert_eq!(view.get_num_ne::<u16>(), 0xABCD);
-    /// assert_eq!(view.get_num_ne::<u64>(), 0x1234_5678_9ABC_DEF0);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if there is insufficient remaining capacity in the buffer.
-    #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
-    pub fn put_num_ne<T: ToBytes>(&mut self, value: T) {
-        let bytes = value.to_ne_bytes();
-        self.put_slice(bytes.borrow());
-    }
+    put_num_accessors!(u16, put_u16_le, put_u16_be, put_u16_ne);
+    put_num_accessors!(i16, put_i16_le, put_i16_be, put_i16_ne);
+    put_num_accessors!(u32, put_u32_le, put_u32_be, put_u32_ne);
+    put_num_accessors!(i32, put_i32_le, put_i32_be, put_i32_ne);
+    put_num_accessors!(u64, put_u64_le, put_u64_be, put_u64_ne);
+    put_num_accessors!(i64, put_i64_le, put_i64_be, put_i64_ne);
+    put_num_accessors!(u128, put_u128_le, put_u128_be, put_u128_ne);
+    put_num_accessors!(i128, put_i128_le, put_i128_be, put_i128_ne);
+    put_num_accessors!(f32, put_f32_le, put_f32_be, put_f32_ne);
+    put_num_accessors!(f64, put_f64_le, put_f64_be, put_f64_ne);
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -472,9 +437,9 @@ mod tests {
         let memory = TransparentMemory::new();
         let mut buf = memory.reserve(16);
 
-        buf.put_num_le(0x1234_5678_u32);
-        buf.put_num_be(0x9ABC_DEF0_u32);
-        buf.put_num_ne(0x1122_3344_5566_7788_u64);
+        buf.put_u32_le(0x1234_5678);
+        buf.put_u32_be(0x9ABC_DEF0);
+        buf.put_u64_ne(0x1122_3344_5566_7788);
 
         assert_eq!(buf.len(), 16);
         assert_eq!(buf.remaining_capacity(), 0);
@@ -502,5 +467,28 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn put_num_signed_and_float_round_trip() {
+        let memory = TransparentMemory::new();
+        let mut buf = memory.reserve(64);
+
+        buf.put_i16_le(-12345);
+        buf.put_i32_be(-2_000_000_000);
+        buf.put_i64_le(-9_000_000_000_000);
+        buf.put_i128_be(i128::MIN);
+        buf.put_f32_le(std::f32::consts::PI);
+        buf.put_f64_be(std::f64::consts::E);
+
+        let mut view = buf.consume_all();
+
+        assert_eq!(view.get_i16_le(), -12345);
+        assert_eq!(view.get_i32_be(), -2_000_000_000);
+        assert_eq!(view.get_i64_le(), -9_000_000_000_000);
+        assert_eq!(view.get_i128_be(), i128::MIN);
+        assert_eq!(view.get_f32_le().to_bits(), std::f32::consts::PI.to_bits());
+        assert_eq!(view.get_f64_be().to_bits(), std::f64::consts::E.to_bits());
+        assert!(view.is_empty());
     }
 }

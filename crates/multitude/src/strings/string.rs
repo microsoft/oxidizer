@@ -37,6 +37,14 @@ pub struct String<'a, A: Allocator + Clone = Global> {
 impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Returns a string slice view of this string's contents.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello");
+    /// assert_eq!(value.as_str(), "hello");
+    /// ```
     pub fn as_str(&self) -> &str {
         // SAFETY: the only way bytes enter `self.inner` is via `push_str` /
         // `push` / `write_str` / `write_char`, each of which appends a
@@ -48,6 +56,14 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Return the bytes view of this string.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("é");
+    /// assert_eq!(value.as_bytes(), "é".as_bytes());
+    /// ```
     pub fn as_bytes(&self) -> &[u8] {
         self.inner.as_slice()
     }
@@ -58,6 +74,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// in a way that produces invalid UTF-8 is undefined behavior, but
     /// only via the unsafe `str` APIs that allow byte-level edits.
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("rust");
+    /// value.as_mut_str().make_ascii_uppercase();
+    /// assert_eq!(value.as_str(), "RUST");
+    /// ```
     pub fn as_mut_str(&mut self) -> &mut str {
         // SAFETY: same UTF-8 invariant as `as_str`: every byte was
         // appended as part of a well-formed UTF-8 sub-sequence.
@@ -86,6 +111,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Remove the last character from the string and return it.
     ///
     /// Returns `None` if the string is empty.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("a🦀");
+    /// assert_eq!(value.pop(), Some('🦀'));
+    /// assert_eq!(value.as_str(), "a");
+    /// ```
     pub fn pop(&mut self) -> Option<char> {
         let ch = self.as_str().chars().next_back()?;
         let new_len = self.len() - ch.len_utf8();
@@ -101,6 +135,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Panics
     ///
     /// Panics if `new_len` is not on a UTF-8 character boundary.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("rustacean");
+    /// value.truncate(4);
+    /// assert_eq!(value.as_str(), "rust");
+    /// ```
     pub fn truncate(&mut self, new_len: usize) {
         if new_len >= self.len() {
             return;
@@ -119,6 +162,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-8
     /// character boundary, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert`] for a fallible variant.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("ac");
+    /// value.insert(1, 'b');
+    /// assert_eq!(value.as_str(), "abc");
+    /// ```
     pub fn insert(&mut self, idx: usize, ch: char) {
         self.try_insert(idx, ch).expect_alloc();
     }
@@ -133,13 +185,25 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-8
     /// character boundary.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("ac");
+    /// value.try_insert(1, 'b')?;
+    /// assert_eq!(value.as_str(), "abc");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
         self.try_insert_str(idx, s)
     }
 
-    /// Insert a string slice at byte index `idx`.
+    /// Insert a string-like value at byte index `idx`.
     ///
     /// # Panics
     ///
@@ -147,7 +211,16 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// on a UTF-8 character boundary, if the resulting length would
     /// overflow `usize`, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert_str`] for a fallible variant.
-    pub fn insert_str(&mut self, idx: usize, s: &str) {
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("ad");
+    /// value.insert_str(1, "bc");
+    /// assert_eq!(value.as_str(), "abcd");
+    /// ```
+    pub fn insert_str(&mut self, idx: usize, s: impl AsRef<str>) {
         self.try_insert_str(idx, s).expect_alloc();
     }
 
@@ -162,10 +235,23 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or if `idx` is not on a
     /// UTF-8 character boundary.
-    pub fn try_insert_str(&mut self, idx: usize, s: &str) -> Result<(), AllocError> {
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("ad");
+    /// value.try_insert_str(1, "bc")?;
+    /// assert_eq!(value.as_str(), "abcd");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_insert_str(&mut self, idx: usize, s: impl AsRef<str>) -> Result<(), AllocError> {
         let len = self.inner.len();
         assert!(idx <= len, "insertion index out of bounds (was {idx}, len = {len})");
         assert!(self.as_str().is_char_boundary(idx), "insert_str: idx is not on a char boundary");
+        let s = s.as_ref();
         let bytes = s.as_bytes();
         let added = bytes.len();
         if added == 0 {
@@ -189,6 +275,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if `idx >= self.len()` or `idx` is not on a UTF-8
     /// character boundary.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("a🦀b");
+    /// assert_eq!(value.remove(1), '🦀');
+    /// assert_eq!(value.as_str(), "ab");
+    /// ```
     pub fn remove(&mut self, idx: usize) -> char {
         let ch = self.as_str()[idx..].chars().next().expect("remove: idx out of bounds");
         let ch_len = ch.len_utf8();
@@ -203,10 +298,19 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Retain only the characters for which `f` returns `true`, in
     /// order.
     #[cfg_attr(test, mutants::skip)] // `+= → *=` on counter ⇒ infinite loop
-    #[allow(
+    #[expect(
         clippy::missing_panics_doc,
         reason = "the internal `.expect` guards a char-boundary invariant (`idx < len`) and is unreachable; a `# Panics` section would be misleading"
     )]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("a1b2");
+    /// value.retain(char::is_alphabetic);
+    /// assert_eq!(value.as_str(), "ab");
+    /// ```
     pub fn retain<F: FnMut(char) -> bool>(&mut self, mut f: F) {
         // In-place compaction that matches `std::string::String::retain`'s
         // panic contract: if `f` panics, the guard commits the prefix
@@ -264,7 +368,16 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// UTF-8 character boundaries, the resulting length would overflow
     /// `usize`, or the backing allocator fails on growth. Use
     /// [`Self::try_replace_range`] for a fallible variant.
-    pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) {
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello world");
+    /// value.replace_range(6.., "Rust");
+    /// assert_eq!(value.as_str(), "hello Rust");
+    /// ```
+    pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: impl AsRef<str>) {
         self.try_replace_range(range, replace_with).expect_alloc();
     }
 
@@ -280,7 +393,19 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if either bound is out of range or the bounds are not on UTF-8
     /// character boundaries.
-    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) -> Result<(), AllocError> {
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello world");
+    /// value.try_replace_range(6.., "Rust")?;
+    /// assert_eq!(value.as_str(), "hello Rust");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: impl AsRef<str>) -> Result<(), AllocError> {
         let len = self.len();
         let start = match range.start_bound() {
             Bound::Included(&i) => i,
@@ -298,6 +423,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         assert!(s_ref.is_char_boundary(start), "replace_range: start is not on a char boundary");
         assert!(s_ref.is_char_boundary(end), "replace_range: end is not on a char boundary");
 
+        let replace_with = replace_with.as_ref();
         self.inner.try_replace_range_with_slice(start, end, replace_with.as_bytes())
     }
 
@@ -308,6 +434,14 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the backing allocator fails. Use [`Self::try_push`] for a fallible
     /// variant.
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push('🦀');
+    /// assert_eq!(value.as_str(), "🦀");
+    /// ```
     pub fn push(&mut self, ch: char) {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
@@ -323,6 +457,17 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// [`AllocError::is_allocator_failure`] and
     /// [`AllocError::is_capacity_overflow`] to tell the two apart.
     #[inline]
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.try_push('🦀')?;
+    /// assert_eq!(value.as_str(), "🦀");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
@@ -336,6 +481,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the backing allocator fails. Use [`Self::try_push_str`] for a fallible
     /// variant.
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello");
+    /// value.push_str(" world");
+    /// assert_eq!(value.as_str(), "hello world");
+    /// ```
     pub fn push_str(&mut self, s: impl AsRef<str>) {
         self.inner.extend_from_slice(s.as_ref().as_bytes());
     }
@@ -349,10 +503,21 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// [`AllocError::is_allocator_failure`] and
     /// [`AllocError::is_capacity_overflow`] to tell the two apart.
     #[inline(always)]
-    #[allow(
+    #[expect(
         clippy::inline_always,
         reason = "the hot path through `try_push_str` is the bump-then-memcpy fast path; the cold grow branch is `#[inline(never)]` so the inlinable body is small"
     )]
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.try_push_str("hello")?;
+    /// assert_eq!(value.as_str(), "hello");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_push_str(&mut self, s: impl AsRef<str>) -> Result<(), AllocError> {
         self.inner.try_extend_from_slice(s.as_ref().as_bytes())
     }
@@ -360,6 +525,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Consume the `String`, returning the underlying byte vector. Mirrors
     /// [`std::string::String::into_bytes`].
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hi");
+    /// let bytes = value.into_bytes();
+    /// assert_eq!(bytes.as_slice(), b"hi");
+    /// ```
     pub fn into_bytes(self) -> Vec<'a, u8, A> {
         self.inner
     }
@@ -372,6 +546,16 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// The caller must ensure the bytes remain valid UTF-8 before the
     /// borrow ends; the `String` invariant is otherwise violated.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("cat");
+    /// // SAFETY: replacing ASCII with ASCII preserves valid UTF-8.
+    /// unsafe { value.as_mut_vec().as_mut_slice()[0] = b'b' };
+    /// assert_eq!(value.as_str(), "bat");
+    /// ```
     pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<'a, u8, A> {
         &mut self.inner
     }
@@ -386,6 +570,16 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if `at` is not on a `char` boundary, or is past the end. Use
     /// [`Self::try_split_off`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello world");
+    /// let tail = value.split_off(5);
+    /// assert_eq!(value.as_str(), "hello");
+    /// assert_eq!(tail.as_str(), " world");
+    /// ```
     pub fn split_off(&mut self, at: usize) -> Self {
         self.try_split_off(at).expect_alloc()
     }
@@ -400,6 +594,19 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Panics
     ///
     /// Panics if `at` is not on a `char` boundary, or is past the end.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("hello");
+    /// let tail = value.try_split_off(2)?;
+    /// assert_eq!(value.as_str(), "he");
+    /// assert_eq!(tail.as_str(), "llo");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         assert!(self.as_str().is_char_boundary(at), "String::split_off: `at` is not a char boundary");
         Ok(Self {
@@ -416,6 +623,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if the range is out of bounds or its bounds are not on `char`
     /// boundaries. Use [`Self::try_extend_from_within`] for a fallible variant.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("abc");
+    /// value.extend_from_within(1..);
+    /// assert_eq!(value.as_str(), "abcbc");
+    /// ```
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
         self.try_extend_from_within(src).expect_alloc();
     }
@@ -430,6 +646,18 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if the range is out of bounds or its bounds are not on `char`
     /// boundaries.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("abc");
+    /// value.try_extend_from_within(..2)?;
+    /// assert_eq!(value.as_str(), "abcab");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) -> Result<(), AllocError> {
         let len = self.len();
         let start = match src.start_bound() {
@@ -461,6 +689,16 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if `range`'s bounds are out of range or not on `char`
     /// boundaries.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("a🦀b");
+    /// let removed: std::string::String = value.drain(1..5).collect();
+    /// assert_eq!(removed, "🦀");
+    /// assert_eq!(value.as_str(), "ab");
+    /// ```
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, 'a, A> {
         let len = self.len();
         let start = match range.start_bound() {
@@ -495,6 +733,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_boxed_str`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("boxed");
+    /// let frozen = value.into_boxed_str();
+    /// assert_eq!(&*frozen, "boxed");
+    /// ```
     pub fn into_boxed_str(self) -> Box<str, A> {
         self.try_into_boxed_str().expect_alloc()
     }
@@ -504,6 +751,18 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("boxed");
+    /// let frozen = value.try_into_boxed_str()?;
+    /// assert_eq!(&*frozen, "boxed");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_boxed_str(self) -> Result<Box<str, A>, AllocError> {
         // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u8] → str`.
@@ -527,6 +786,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the underlying allocator fails. Use [`Self::try_into_arc_str`]
     /// for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("shared");
+    /// let frozen = value.into_arc_str();
+    /// assert_eq!(&*frozen, "shared");
+    /// ```
     pub fn into_arc_str(self) -> Arc<str, A>
     where
         A: Send + Sync,
@@ -539,6 +807,18 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("shared");
+    /// let frozen = value.try_into_arc_str()?;
+    /// assert_eq!(&*frozen, "shared");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_arc_str(self) -> Result<Arc<str, A>, AllocError>
     where
         A: Send + Sync,
@@ -566,6 +846,15 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the underlying allocator fails. Use [`Self::try_into_rc_str`]
     /// for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("local");
+    /// let frozen = value.into_rc_str();
+    /// assert_eq!(&*frozen, "local");
+    /// ```
     pub fn into_rc_str(self) -> Rc<str, A> {
         self.try_into_rc_str().expect_alloc()
     }
@@ -575,6 +864,18 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("local");
+    /// let frozen = value.try_into_rc_str()?;
+    /// assert_eq!(&*frozen, "local");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_rc_str(self) -> Result<Rc<str, A>, AllocError> {
         // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u8] → str`.
@@ -588,12 +889,23 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         Ok(unsafe { Rc::<str, A>::from_raw(bytes.thin_ptr()) })
     }
 
-    /// Consume the `String`, returning an arena-lifetime mutable string
-    /// reference `&'a mut str`. Mirrors [`std::string::String::leak`].
+    /// Consume the string into an arena-lifetime mutable reference.
+    ///
+    /// This mirrors [`std::string::String::leak`].
     ///
     /// **O(1) and allocation-free**: reinterprets the existing UTF-8 buffer
     /// in place.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_string();
+    /// value.push_str("rust");
+    /// let leaked = value.leak();
+    /// leaked.make_ascii_uppercase();
+    /// assert_eq!(leaked, "RUST");
+    /// ```
     pub fn leak(self) -> &'a mut str {
         let bytes = self.inner.leak();
         // SAFETY: `String` maintains the UTF-8 invariant over its bytes.
@@ -614,9 +926,20 @@ const fn utf8_seq_len(b0: u8) -> usize {
     }
 }
 
-/// Draining iterator over a byte range of a [`String`], returned by
-/// [`String::drain`]. Yields the removed [`char`]s (double-ended). The
-/// arena-bound analog of [`std::string::Drain`].
+/// A draining iterator over a [`String`] byte range.
+///
+/// Returned by [`String::drain`], it yields removed [`char`]s from both ends.
+/// This is the arena-bound analog of [`std::string::Drain`].
+/// ```
+/// use multitude::Arena;
+/// use multitude::strings::Drain;
+///
+/// let arena = Arena::new();
+/// let mut value = arena.alloc_string();
+/// value.push_str("abc");
+/// let mut drain: Drain<'_, '_, _> = value.drain(1..);
+/// assert_eq!(drain.next(), Some('b'));
+/// ```
 pub struct Drain<'d, 'a, A: Allocator + Clone> {
     inner: crate::vec::Drain<'d, 'a, u8, A>,
 }

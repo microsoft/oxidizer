@@ -14,8 +14,8 @@
 
 // These `unsafe fn`s have item-level safety contracts; inner unsafe blocks
 // would not add a boundary here.
-#![allow(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
-#![allow(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
+#![expect(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
+#![expect(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
 
 use alloc::sync::{Arc, Weak};
 use core::mem;
@@ -75,6 +75,16 @@ pub(crate) struct ChunkAllocStats {
     oversized: u64,
 }
 
+/// Snapshot of chunk activity since the owning arena's last reset.
+#[cfg(feature = "stats")]
+#[derive(Clone, Copy)]
+pub(crate) struct ChunkGenerationStats {
+    normal_allocated: u64,
+    oversized_allocated: u64,
+    backing_bytes_allocated: u64,
+    normal_reused: u64,
+}
+
 #[cfg(feature = "stats")]
 impl ChunkAllocStats {
     /// Lifetime count of normal-class chunks allocated.
@@ -90,14 +100,42 @@ impl ChunkAllocStats {
     }
 }
 
+#[cfg(feature = "stats")]
+impl ChunkGenerationStats {
+    #[inline]
+    pub(crate) fn normal_allocated(&self) -> u64 {
+        self.normal_allocated
+    }
+
+    #[inline]
+    pub(crate) fn oversized_allocated(&self) -> u64 {
+        self.oversized_allocated
+    }
+
+    #[inline]
+    pub(crate) fn backing_bytes_allocated(&self) -> u64 {
+        self.backing_bytes_allocated
+    }
+
+    #[inline]
+    pub(crate) fn normal_reused(&self) -> u64 {
+        self.normal_reused
+    }
+}
+
 /// Allocates and caches chunks for one arena.
 pub(crate) struct ChunkProvider<A: Allocator + Clone> {
-    allocator: A,
+    allocator: Arc<A>,
     config: ChunkProviderConfig,
     weak_self: Weak<Self>,
-    /// Bytes currently outstanding (allocated, not yet freed). Updated via
+    /// Bytes currently charged against the allocation budget: successfully
+    /// allocated chunks not yet freed plus in-flight reservations. Updated via
     /// `AcqRel` speculative-add.
     bytes_outstanding: AtomicUsize,
+    /// Bytes successfully obtained from the backing allocator. Unlike
+    /// `bytes_outstanding`, this excludes in-flight budget reservations.
+    #[cfg(feature = "stats")]
+    allocated_bytes: AtomicUsize,
     /// Lock-free chunk cache: single Treiber-stack head for the current class
     /// floor ([`Self::cache_class`]). Any thread may push (an escaped handle
     /// dropped elsewhere); only the owning thread pops.
@@ -109,9 +147,33 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// allocator (cache hits are not counted).
     #[cfg(feature = "stats")]
     normal_chunks_allocated: AtomicU64,
+    /// Normal chunks allocated since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    normal_chunks_allocated_since_reset: AtomicU64,
     /// Lifetime count of oversized one-shot chunks allocated.
     #[cfg(feature = "stats")]
     oversized_chunks_allocated: AtomicU64,
+    /// Oversized chunks allocated since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    oversized_chunks_allocated_since_reset: AtomicU64,
+    /// Bytes successfully obtained from the backing allocator since reset.
+    #[cfg(feature = "stats")]
+    backing_bytes_allocated_since_reset: AtomicU64,
+    /// High-water value of `allocated_bytes`.
+    #[cfg(feature = "stats")]
+    peak_bytes_allocated: AtomicUsize,
+    /// Live number of chunks held by or being returned to the reusable cache.
+    #[cfg(feature = "stats")]
+    cached_chunks: AtomicU64,
+    /// Live footprint of chunks held by or being returned to the cache.
+    #[cfg(feature = "stats")]
+    cached_bytes: AtomicU64,
+    /// Lifetime count of normal chunks acquired from the cache.
+    #[cfg(feature = "stats")]
+    normal_chunks_reused: AtomicU64,
+    /// Normal chunks acquired from the cache since reset.
+    #[cfg(feature = "stats")]
+    normal_chunks_reused_since_reset: AtomicU64,
     /// Unused tail bytes in retired chunks not yet cached or freed. Retire
     /// increments; cache/destroy decrements.
     #[cfg(feature = "stats")]
@@ -121,35 +183,49 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
 // `non_send_fields_in_send_ty`: the `Weak<Self>` back-pointer is the flagged
 // field; it is sound because every owning chunk reaches the provider through it
 // and the provider is single-owner per arena.
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "Weak<Self> back-pointer is sound; provider is single-owner per arena"
-)]
 // SAFETY: `cache` is composed of `AtomicPtr`s, which are `Send + Sync`;
-// `allocator` is `A: Allocator + Clone` (callers must use `Send + Sync`-capable
-// allocators when sharing the provider across threads). Only the owning thread
-// pops the cache (single-popper Treiber-stack invariant).
-unsafe impl<A: Allocator + Clone + Send> Send for ChunkProvider<A> {}
-// SAFETY: `cache` is composed of `AtomicPtr`s (`Send + Sync`) and `allocator`
-// is `A: Sync`; sharing `&ChunkProvider` across threads only exposes those, and
-// the single-popper Treiber-stack invariant is unaffected by shared `&`-access.
-unsafe impl<A: Allocator + Clone + Sync> Sync for ChunkProvider<A> {}
+// the shared allocator handle is `Send` only when `A: Send + Sync`. Only the
+// owning thread pops the cache (single-popper Treiber-stack invariant).
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for ChunkProvider<A> {}
+// SAFETY: `cache` is composed of `AtomicPtr`s (`Send + Sync`), and the shared
+// allocator handle is `Sync` when `A: Send + Sync`. The single-popper
+// Treiber-stack invariant is unaffected by shared `&`-access.
+unsafe impl<A: Allocator + Clone + Send + Sync> Sync for ChunkProvider<A> {}
 
 impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Builds a new provider returning an `Arc` that owning chunks will
     /// reference weakly.
     pub(crate) fn new(allocator: A, config: ChunkProviderConfig) -> Arc<Self> {
-        Arc::new_cyclic(|weak| Self {
+        let allocator = Arc::new(allocator);
+        Arc::new_cyclic(move |weak| Self {
             allocator,
             config,
             weak_self: Weak::clone(weak),
             bytes_outstanding: AtomicUsize::new(0),
+            #[cfg(feature = "stats")]
+            allocated_bytes: AtomicUsize::new(0),
             cache: AtomicPtr::new(ptr::null_mut()),
             cache_class: AtomicU8::new(0),
             #[cfg(feature = "stats")]
             normal_chunks_allocated: AtomicU64::new(0),
             #[cfg(feature = "stats")]
+            normal_chunks_allocated_since_reset: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
             oversized_chunks_allocated: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            oversized_chunks_allocated_since_reset: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            backing_bytes_allocated_since_reset: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            peak_bytes_allocated: AtomicUsize::new(0),
+            #[cfg(feature = "stats")]
+            cached_chunks: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            cached_bytes: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            normal_chunks_reused: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            normal_chunks_reused_since_reset: AtomicU64::new(0),
             #[cfg(feature = "stats")]
             wasted_tail_bytes: AtomicU64::new(0),
         })
@@ -164,14 +240,58 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
+    /// Snapshot of allocation activity since the owning arena's last reset.
+    #[cfg(feature = "stats")]
+    pub(crate) fn generation_stats(&self) -> ChunkGenerationStats {
+        ChunkGenerationStats {
+            normal_allocated: self.normal_chunks_allocated_since_reset.load(Ordering::Relaxed),
+            oversized_allocated: self.oversized_chunks_allocated_since_reset.load(Ordering::Relaxed),
+            backing_bytes_allocated: self.backing_bytes_allocated_since_reset.load(Ordering::Relaxed),
+            normal_reused: self.normal_chunks_reused_since_reset.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Starts a fresh generation after a completed arena reset.
+    #[cfg(feature = "stats")]
+    pub(crate) fn reset_generation_stats(&self) {
+        self.normal_chunks_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.oversized_chunks_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.backing_bytes_allocated_since_reset.store(0, Ordering::Relaxed);
+        self.normal_chunks_reused_since_reset.store(0, Ordering::Relaxed);
+    }
+
     /// Total bytes currently outstanding from the underlying allocator: the
     /// sum of every chunk (header + payload) that has been allocated and not
     /// yet freed. Chunks released back to the size-class cache stay counted;
     /// only chunks returned to the underlying allocator (cache evictions,
     /// oversized one-shots dropped, drain-on-provider-drop) decrement.
     #[cfg(feature = "stats")]
-    pub(crate) fn bytes_outstanding(&self) -> u64 {
-        self.bytes_outstanding.load(Ordering::Relaxed) as u64
+    pub(crate) fn bytes_allocated(&self) -> u64 {
+        self.allocated_bytes.load(Ordering::Relaxed) as u64
+    }
+
+    /// Maximum number of bytes held from the underlying allocator.
+    #[cfg(feature = "stats")]
+    pub(crate) fn peak_bytes_allocated(&self) -> u64 {
+        self.peak_bytes_allocated.load(Ordering::Relaxed) as u64
+    }
+
+    /// Number of normal chunks currently in the reusable cache.
+    #[cfg(feature = "stats")]
+    pub(crate) fn cached_chunks(&self) -> u64 {
+        self.cached_chunks.load(Ordering::Relaxed)
+    }
+
+    /// Allocation footprint of normal chunks currently in the reusable cache.
+    #[cfg(feature = "stats")]
+    pub(crate) fn cached_bytes(&self) -> u64 {
+        self.cached_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Lifetime count of normal chunks acquired from the reusable cache.
+    #[cfg(feature = "stats")]
+    pub(crate) fn normal_chunks_reused(&self) -> u64 {
+        self.normal_chunks_reused.load(Ordering::Relaxed)
     }
 
     /// Currently "wasted" tail bytes (free region between bump cursor and
@@ -206,7 +326,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Returns a borrowed handle to the provider's allocator.
     pub(crate) fn allocator(&self) -> &A {
-        &self.allocator
+        self.allocator.as_ref()
     }
 
     /// Acquires a normal-class chunk with at least `min_payload` bytes.
@@ -224,10 +344,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Acquires a cacheable chunk in `class`, bumping the floor first
     /// when needed.
     //
-    // Mutation testing is suppressed on the `class > floor` branch: `>` with
-    // `<` / `==` only changes when the floor advances (cache memory pressure,
-    // not a correctness bug, and exercised by the stats-driven cache-class
-    // tests), and `>` with `>=` is a redundant no-op floor advance.
+    // Advancing at the current floor is an observationally equivalent no-op.
     #[cfg_attr(test, mutants::skip)]
     fn acquire_normal(&self, class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         // SAFETY: only the owning thread bumps the floor / pops (single-
@@ -274,6 +391,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 let next = (*link).load(Ordering::Acquire);
                 let total =
                     Chunk::<A>::footprint((*chunk_nn.as_ptr()).capacity()).expect("evicted chunk's layout was valid when it was allocated");
+                #[cfg(feature = "stats")]
+                self.record_cache_remove(total);
                 if total >= new_min_total {
                     self.push(chunk_nn);
                 } else {
@@ -292,14 +411,18 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let total = class.bytes();
         let payload_size = total - header;
         self.reserve_bytes(total)?;
-        match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload_size) {
+        match Chunk::<A>::allocate(Arc::clone(&self.allocator), Weak::clone(&self.weak_self), payload_size) {
             Ok(chunk) => {
                 #[cfg(feature = "stats")]
-                self.normal_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                {
+                    self.normal_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                    self.normal_chunks_allocated_since_reset.fetch_add(1, Ordering::Relaxed);
+                    self.record_allocation(total);
+                }
                 Ok(chunk)
             }
             Err(e) => {
-                self.release_bytes(total);
+                self.release_reservation(total);
                 Err(e)
             }
         }
@@ -366,6 +489,12 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     }
 
     fn release_bytes(&self, n: usize) {
+        #[cfg(feature = "stats")]
+        self.allocated_bytes.fetch_sub(n, Ordering::AcqRel);
+        self.bytes_outstanding.fetch_sub(n, Ordering::AcqRel);
+    }
+
+    fn release_reservation(&self, n: usize) {
         self.bytes_outstanding.fetch_sub(n, Ordering::AcqRel);
     }
 
@@ -379,14 +508,18 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let payload = round_up_to_word_align(min_payload.checked_add(slack).ok_or(AllocError::CAPACITY_OVERFLOW)?)?;
         let total = Chunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
-        match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
+        match Chunk::<A>::allocate(Arc::clone(&self.allocator), Weak::clone(&self.weak_self), payload) {
             Ok(chunk) => {
                 #[cfg(feature = "stats")]
-                self.oversized_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                {
+                    self.oversized_chunks_allocated.fetch_add(1, Ordering::Relaxed);
+                    self.oversized_chunks_allocated_since_reset.fetch_add(1, Ordering::Relaxed);
+                    self.record_allocation(total);
+                }
                 Ok(chunk)
             }
             Err(e) => {
-                self.release_bytes(total);
+                self.release_reservation(total);
                 Err(e)
             }
         }
@@ -419,7 +552,14 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             let chunk_nn = NonNull::new_unchecked(fat);
             let total =
                 Chunk::<A>::footprint((*chunk_nn.as_ptr()).capacity()).expect("popped chunk's layout was valid when it was allocated");
+            #[cfg(feature = "stats")]
+            self.record_cache_remove(total);
             if total >= floor_min_total {
+                #[cfg(feature = "stats")]
+                {
+                    self.normal_chunks_reused.fetch_add(1, Ordering::Relaxed);
+                    self.normal_chunks_reused_since_reset.fetch_add(1, Ordering::Relaxed);
+                }
                 return Some(chunk_nn);
             }
             // Below-floor straggler from a concurrent push that raced the
@@ -438,6 +578,12 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let head = &self.cache;
         let link = Chunk::cache_link(chunk);
         let new = chunk.cast::<u8>().as_ptr();
+        #[cfg(feature = "stats")]
+        {
+            let total = Chunk::<A>::footprint((*chunk.as_ptr()).capacity()).expect("cached chunk's layout was valid when it was allocated");
+            self.cached_chunks.fetch_add(1, Ordering::Relaxed);
+            self.cached_bytes.fetch_add(total as u64, Ordering::Relaxed);
+        }
         // Exclusive ownership permits non-atomic link initialization before
         // the publishing CAS; later link changes use atomics.
         let mut cur = head.load(Ordering::Acquire);
@@ -456,6 +602,21 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
+    /// Removes one chunk's footprint from the live cache gauges.
+    #[cfg(feature = "stats")]
+    fn record_cache_remove(&self, total: usize) {
+        self.cached_chunks.fetch_sub(1, Ordering::Relaxed);
+        self.cached_bytes.fetch_sub(total as u64, Ordering::Relaxed);
+    }
+
+    /// Adds a successful backing allocation and updates its high-water mark.
+    #[cfg(feature = "stats")]
+    fn record_allocation(&self, total: usize) {
+        let previous = self.allocated_bytes.fetch_add(total, Ordering::AcqRel);
+        self.backing_bytes_allocated_since_reset.fetch_add(total as u64, Ordering::Relaxed);
+        self.peak_bytes_allocated.fetch_max(previous + total, Ordering::Relaxed);
+    }
+
     /// Drains cached chunks and deallocates their backing memory.
     fn drain_all(&self) {
         // SAFETY: drain runs in Drop with no outstanding mutators; the
@@ -468,7 +629,12 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 let chunk_nn = NonNull::new_unchecked(fat);
                 let link = Chunk::cache_link(chunk_nn);
                 let next = (*link).load(Ordering::Acquire);
+                let total =
+                    Chunk::<A>::footprint((*chunk_nn.as_ptr()).capacity()).expect("drained chunk's layout was valid when it was allocated");
+                #[cfg(feature = "stats")]
+                self.record_cache_remove(total);
                 Chunk::destroy(chunk_nn);
+                self.release_bytes(total);
                 cur = next;
             }
         }
@@ -491,7 +657,7 @@ fn is_cacheable_size(total: usize) -> bool {
 /// alignment (`align_of::<usize>()`). Returns `Err(AllocError)` on overflow.
 /// Keeps the usable capacity from falling below `min_payload` after the bump
 /// cursor pays any payload-start alignment skew.
-#[cfg_attr(test, mutants::skip)] // mask mutations underfit payload → OOM spin
+#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
     let mask = mem::align_of::<usize>() - 1;
@@ -505,10 +671,7 @@ fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
 /// oversized chunk's (possibly unaligned) payload. Added to oversized
 /// requests so the first allocation always fits after alignment.
 #[inline]
-// Mutation testing is suppressed: `align - 1` is the exact maximum skew.
-// The `-`→`+` / `-`→`/` mutants only ever *over*-reserve by a few bytes
-// (never under-allocate), so they are equivalent for correctness and
-// invisible through any public API contract.
+// `align - 1` is the exact maximum skew; extra slack is unobservable.
 #[cfg_attr(test, mutants::skip)]
 fn oversized_payload_align_slack() -> usize {
     mem::align_of::<usize>() - 1
@@ -516,13 +679,11 @@ fn oversized_payload_align_slack() -> usize {
 
 /// Wraps the `needed_total > MAX_CHUNK_BYTES` check used by the
 /// `acquire_*` routing gates.
-#[cfg_attr(test, mutants::skip)] // boundary unreachable: max_normal_alloc capped well below
+#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn exceeds_max_chunk_bytes(needed_total: usize) -> bool {
     needed_total > MAX_CHUNK_BYTES
 }
-
-// --- Helpers wired into the chunk type via an inherent impl -------------------
 
 impl<A: Allocator + Clone> Chunk<A> {
     /// Routes a just-acquired refcount-1 chunk straight to the provider cache
@@ -587,7 +748,6 @@ mod tests {
         PUSH_RETRY_COUNT.with(|c| c.set(c.get() + 1));
     }
 
-    /// Covers `Default for ChunkProviderConfig` (lines 58-63).
     #[test]
     fn chunk_provider_config_default_matches_constants() {
         let c = ChunkProviderConfig::default();
@@ -595,20 +755,15 @@ mod tests {
         assert_eq!(c.max_normal_alloc(), MAX_NORMAL_ALLOC);
     }
 
-    // Kills `reserve_bytes`' `new > byte_budget` boundary mutations
-    // (`> → >=` and `> → ==`): reserving exactly up to the budget must
-    // succeed (rejected by both mutants), while exceeding it must fail.
+    // The byte budget is inclusive.
     #[test]
     fn reserve_bytes_allows_exactly_budget_and_rejects_over() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::new(100, 4096));
-        // Reaching exactly the budget is allowed (`new == budget` is not `> budget`).
         provider.reserve_bytes(100).expect("reaching exactly the budget must be allowed");
-        // One more byte exceeds the budget and must be rejected.
         provider.reserve_bytes(1).expect_err("exceeding the budget must be rejected");
     }
 
-    // Covers `pop`'s below-floor straggler arm by raising the floor,
-    // then pushing a smaller chunk.
+    // Chunks below the current class floor are destroyed rather than cached.
     #[test]
     fn pop_destroys_below_floor_straggler() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
@@ -616,40 +771,26 @@ mod tests {
         // on an empty freelist, then a below-floor straggler is injected
         // and popped, exactly mirroring the documented push/floor race.
         unsafe {
-            // Raise the floor well above class 0 (512 B) — class 3 = 4 KiB.
             provider.advance_cache_floor(SizeClass::new(3));
-            // Allocate a class-0 (512 B) chunk: below the new floor.
             let chunk = provider.allocate_fresh(SizeClass::ZERO).expect("fresh class-0 chunk");
-            // `push` requires a refcount-zero, uniquely-owned chunk.
             assert!(chunk.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(chunk);
-            // The straggler is below the floor, so the pop destroys it and
-            // finds the now-empty cache, returning `None`.
             assert!(provider.pop().is_none());
         }
     }
 
-    /// `is_cacheable_size` checks the closed interval [MIN, MAX] **and**
-    /// power-of-two. Pin both arms so `&&`/`||` mutations flip the
-    /// result on probes that exercise either constraint independently.
+    /// Cacheable sizes are powers of two in the closed supported interval.
     #[test]
     fn is_cacheable_size_requires_range_and_power_of_two() {
-        // In range, power of two → true.
         assert!(is_cacheable_size(MIN_CHUNK_BYTES));
         assert!(is_cacheable_size(MAX_CHUNK_BYTES));
-        // In range, NOT power of two → false (would be `true` under
-        // `&& → ||` if the right arm dominated).
         assert!(!is_cacheable_size(MIN_CHUNK_BYTES + 1));
-        // Out of range, power of two → false (would be `true` under
-        // `&& → ||`).
         assert!(!is_cacheable_size(MAX_CHUNK_BYTES * 2));
         assert!(!is_cacheable_size(MIN_CHUNK_BYTES / 2));
-        // Zero is below the lower bound (and not a power of two).
         assert!(!is_cacheable_size(0));
     }
 
-    // Covers `push`'s contended CAS retry arm via deterministic
-    // thread-local race injection.
+    // A contended cache push retries without losing any chunk.
     #[test]
     fn push_retries_on_contended_cas() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
@@ -659,28 +800,48 @@ mod tests {
         // injected chunk is spliced into the freelist by the hook, so the
         // stack stays valid and the provider's drain frees all three.
         unsafe {
-            // Base chunk C establishes a non-null head for the race.
             let c = provider.allocate_fresh(SizeClass::ZERO).expect("chunk c");
             assert!(c.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(c);
 
-            // Chunk D is injected by the hook during the next push to model
-            // a concurrent pusher mutating `head`.
             let d = provider.allocate_fresh(SizeClass::ZERO).expect("chunk d");
             assert!(d.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             INJECT_PUSH_RACE.with(|slot| slot.set(d.cast::<u8>().as_ptr()));
 
-            // Pushing B loads head == C, but the hook publishes D before B's
-            // CAS, forcing the retry arm before B finally settles on top.
             let b = provider.allocate_fresh(SizeClass::ZERO).expect("chunk b");
             assert!(b.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(b);
         }
-        // At least one retry must have run (CAS may also fail spuriously on
-        // weakly-ordered targets, so we assert a lower bound, not equality).
+        // Weak compare-exchange may also fail spuriously, so only a lower
+        // bound is stable.
         assert!(
             PUSH_RETRY_COUNT.with(Cell::get) >= 1,
             "the contended CAS retry arm must run at least once",
         );
+    }
+
+    #[cfg(feature = "stats")]
+    #[test]
+    fn drain_all_clears_live_allocation_and_cache_accounting() {
+        let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
+        // SAFETY: the fresh chunk is uniquely owned and reaches refcount zero
+        // before being cached.
+        unsafe {
+            let chunk = provider.allocate_fresh(SizeClass::ZERO).expect("fresh chunk");
+            assert!(chunk.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
+            provider.push(chunk);
+        }
+
+        assert_eq!(provider.cached_chunks(), 1);
+        assert!(provider.cached_bytes() > 0);
+        assert!(provider.bytes_allocated() > 0);
+        assert!(provider.bytes_outstanding.load(Ordering::Relaxed) > 0);
+
+        provider.drain_all();
+
+        assert_eq!(provider.cached_chunks(), 0);
+        assert_eq!(provider.cached_bytes(), 0);
+        assert_eq!(provider.bytes_allocated(), 0);
+        assert_eq!(provider.bytes_outstanding.load(Ordering::Relaxed), 0);
     }
 }

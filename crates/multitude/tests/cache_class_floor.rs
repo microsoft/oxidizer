@@ -44,10 +44,7 @@ fn release_below_floor_bypasses_cache() {
         let _a = arena.alloc_arc([0u32; 16]);
     }
     let stats = arena.stats();
-    // We expect a bounded number of chunks: ratchet saturates at class 7,
-    // and the cache holds at most one chunk per refill that hasn't been
-    // released yet. The point is that we don't accumulate `NUM_REFILLS`
-    // chunks worth of memory.
+    // The saturated ratchet keeps retained chunks below the refill count.
     assert!(stats.normal_chunks_allocated <= NUM_REFILLS as u64);
 }
 

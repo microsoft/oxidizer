@@ -152,6 +152,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Panics if the fallback path's underlying allocator fails.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2]);
+    /// let frozen = values.into_boxed_slice();
+    /// assert_eq!(&*frozen, &[1, 2]);
+    /// ```
     pub fn into_boxed_slice(self) -> Box<[T], A> {
         match self.try_freeze_in_place_box() {
             Ok(b) => b,
@@ -169,6 +178,18 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocation
     /// fails. On error, `self` is consumed and any elements remaining
     /// after a partial move are dropped before this function returns.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// let frozen = values.try_into_boxed_slice()?;
+    /// assert_eq!(&*frozen, &[1]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_boxed_slice(self) -> Result<Box<[T], A>, AllocError> {
         match self.try_freeze_in_place_box() {
             Ok(b) => Ok(b),
@@ -176,8 +197,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         }
     }
 
-    /// Fallible variant of the [`Arc<[T], A>`](crate::Arc) freeze
-    /// ([`Arc::from`]).
+    /// Fallible variant of the [`Arc<[T], A>`](crate::Arc) freeze.
+    ///
+    /// The infallible trait form is [`Arc::from`].
     ///
     /// Generally **O(1)** (reuses the existing storage with no copy), except in
     /// rare edge cases where it falls back to an **O(n)** element move.
@@ -187,6 +209,18 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocation
     /// fails. On error, `self` is consumed and any elements remaining
     /// after a partial move are dropped before this function returns.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// let frozen = values.try_into_arc_slice()?;
+    /// assert_eq!(&*frozen, &[1]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_arc_slice(self) -> Result<Arc<[T], A>, AllocError>
     where
         T: Send + Sync,
@@ -207,6 +241,18 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Returns [`AllocError`] if the backing allocation fails. On error, `self`
     /// is consumed and any elements remaining after a partial move are dropped.
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// let frozen = values.try_into_rc_slice()?;
+    /// assert_eq!(&*frozen, &[1]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_into_rc_slice(self) -> Result<Rc<[T], A>, AllocError> {
         match self.try_freeze_in_place_rc() {
             Ok(r) => Ok(r),
@@ -214,8 +260,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         }
     }
 
-    /// Consume the `Vec`, returning an arena-lifetime mutable slice
-    /// reference `&'a mut [T]`. Mirrors [`std::vec::Vec::leak`].
+    /// Consume the vector into an arena-lifetime mutable slice.
+    ///
+    /// This mirrors [`std::vec::Vec::leak`].
     ///
     /// **O(1) and allocation-free**: the existing buffer becomes the returned
     /// slice. The unused tail is reclaimed only while this buffer is still the
@@ -224,6 +271,16 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Available only when `T` does not need `Drop` (compile-time
     /// asserted). For drop types, freeze via [`Box::from`] / [`Arc::from`].
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2]);
+    /// let leaked = values.leak();
+    /// leaked[0] = 3;
+    /// assert_eq!(leaked, &[3, 2]);
+    /// ```
     pub fn leak(mut self) -> &'a mut [T] {
         const {
             assert!(
@@ -255,6 +312,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_arc_slice`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// let frozen = values.into_arc_slice();
+    /// assert_eq!(&*frozen, &[1]);
+    /// ```
     pub fn into_arc_slice(self) -> Arc<[T], A>
     where
         T: Send + Sync,
@@ -276,6 +342,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Panics if the underlying allocator fails. Use [`Self::try_into_rc_slice`]
     /// for a fallible variant.
     #[must_use]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// let frozen = values.into_rc_slice();
+    /// assert_eq!(&*frozen, &[1]);
+    /// ```
     pub fn into_rc_slice(self) -> Rc<[T], A> {
         match self.try_freeze_in_place_rc() {
             Ok(r) => r,

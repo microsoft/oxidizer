@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![no_std]
 #![forbid(unsafe_code)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/http_path_template/logo.png")]
 #![doc(
@@ -28,7 +29,9 @@
 //!
 //! The grammar mirrors the reference [`google.api.HttpRule`] path syntax:
 //!
-//! - a **literal** segment (`shelves`) must match verbatim;
+//! - a **literal** segment (`shelves`) must match verbatim and contain only RFC
+//!   3986 `pchar` characters, with valid `%HH` escapes; raw `*` is reserved for
+//!   the wildcard atoms below and must be percent-encoded in a literal;
 //! - **`*`** ([`Segment::Single`]) matches exactly one non-empty segment;
 //! - **`**`** ([`Segment::Rest`]) matches the remaining segments and may only
 //!   appear as the final element;
@@ -89,8 +92,19 @@
 //! # }
 //! ```
 //!
+//! # Crate features
+//!
+//! - **`std`** (default) — captures a `std::backtrace::Backtrace` into a
+//!   [`ParseError`] for richer diagnostics. Disable (`default-features = false`)
+//!   for `#![no_std]` use; the crate then requires only `alloc` and captures no
+//!   backtrace. `ParseError` implements `core::error::Error` either way.
+//!
 //! [`google.api.http`]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
 //! [`google.api.HttpRule`]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
+
+extern crate alloc;
+#[cfg(any(feature = "std", test))]
+extern crate std;
 
 mod error;
 mod grammar;

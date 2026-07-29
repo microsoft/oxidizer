@@ -324,8 +324,6 @@ fn vec_spare_capacity_mut_write_then_set_len() {
     assert_eq!(&*v, &[10, 20, 30]);
 }
 
-// ---- Coverage of the remaining new surface ----
-
 #[test]
 fn vec_as_mut_and_extend_from_within_bound_variants() {
     use core::ops::Bound;
@@ -621,13 +619,13 @@ fn utf16_collect_in_all_item_types() {
 fn arena_string_from_utf8_variants() {
     let arena = Arena::new();
 
-    let ok = arena.alloc_string_from_utf8(b"h\xC3\xA9llo").unwrap();
+    let ok = arena.alloc_string_from_utf8(std::vec::Vec::from(b"h\xC3\xA9llo")).unwrap();
     assert_eq!(ok.as_str(), "héllo");
 
-    let err = arena.alloc_string_from_utf8(&[0x66, 0xFF, 0x6F]);
+    let err = arena.alloc_string_from_utf8([0x66, 0xFF, 0x6F]);
     assert!(err.is_err());
 
-    let lossy = arena.alloc_string_from_utf8_lossy(&[0x66, 0xFF, 0x6F]);
+    let lossy = arena.alloc_string_from_utf8_lossy(std::vec![0x66, 0xFF, 0x6F]);
     assert_eq!(lossy.as_str(), "f\u{FFFD}o");
 
     // SAFETY: the literal is valid UTF-8.
@@ -641,14 +639,14 @@ fn arena_string_from_utf16_variants() {
 
     // "ab" + U+10000 (surrogate pair D800 DC00).
     let units = [0x0061_u16, 0x0062, 0xD800, 0xDC00];
-    let ok = arena.alloc_string_from_utf16(&units).unwrap();
+    let ok = arena.alloc_string_from_utf16(units).unwrap();
     assert_eq!(ok.as_str(), "ab\u{10000}");
 
     // Unpaired high surrogate.
     let bad = [0x0061_u16, 0xD800, 0x0062];
-    assert!(arena.alloc_string_from_utf16(&bad).is_err());
+    assert!(arena.alloc_string_from_utf16(bad).is_err());
 
-    let lossy = arena.alloc_string_from_utf16_lossy(&bad);
+    let lossy = arena.alloc_string_from_utf16_lossy(bad);
     assert_eq!(lossy.as_str(), "a\u{FFFD}b");
 }
 
@@ -658,24 +656,24 @@ fn arena_string_from_utf16_endian_variants() {
 
     // "ab" + U+10000 (D800 DC00) in little-endian bytes.
     let le = [0x61, 0x00, 0x62, 0x00, 0x00, 0xD8, 0x00, 0xDC];
-    let s = arena.alloc_string_from_utf16le(&le).unwrap();
+    let s = arena.alloc_string_from_utf16le(le).unwrap();
     assert_eq!(s.as_str(), "ab\u{10000}");
 
     // Same in big-endian.
     let be = [0x00, 0x61, 0x00, 0x62, 0xD8, 0x00, 0xDC, 0x00];
-    let s = arena.alloc_string_from_utf16be(&be).unwrap();
+    let s = arena.alloc_string_from_utf16be(be).unwrap();
     assert_eq!(s.as_str(), "ab\u{10000}");
 
     // Odd length → error.
-    assert!(arena.alloc_string_from_utf16le(&[0x61, 0x00, 0x62]).is_err());
+    assert!(arena.alloc_string_from_utf16le([0x61, 0x00, 0x62]).is_err());
     // Unpaired surrogate (lone high surrogate 0xD800 LE) → error.
-    let err = arena.alloc_string_from_utf16le(&[0x00, 0xD8]).unwrap_err();
+    let err = arena.alloc_string_from_utf16le([0x00, 0xD8]).unwrap_err();
     assert!(!err.to_string().is_empty());
 
     // Lossy: odd trailing byte and unpaired surrogate both → U+FFFD.
-    let lossy = arena.alloc_string_from_utf16le_lossy(&[0x61, 0x00, 0x00, 0xD8, 0x62]);
+    let lossy = arena.alloc_string_from_utf16le_lossy([0x61, 0x00, 0x00, 0xD8, 0x62]);
     assert_eq!(lossy.as_str(), "a\u{FFFD}\u{FFFD}");
-    let lossy_be = arena.alloc_string_from_utf16be_lossy(&[0x00, 0x61]);
+    let lossy_be = arena.alloc_string_from_utf16be_lossy([0x00, 0x61]);
     assert_eq!(lossy_be.as_str(), "a");
 }
 
@@ -781,9 +779,7 @@ fn string_drain_forward_back_and_removal() {
     s2.push_str("abçd");
     assert_eq!(bounded_chars(s2.drain(..).rev(), 16), "dçba");
 
-    // Explicit forward `next` values (kills a `next -> Some(Default)` mutant
-    // without iterating to completion); partial consumption still removes the
-    // whole range.
+    // Partial consumption still removes the whole range.
     let mut s3 = arena.alloc_string();
     s3.push_str("0123456789");
     {
@@ -851,8 +847,7 @@ fn utf16_drain_forward_back() {
     s2.push('y');
     assert_eq!(bounded_chars(s2.drain(..).rev(), 8), "y\u{1F600}x");
 
-    // Explicit forward `next` over BMP chars (kills a `next -> Some(Default)`
-    // mutant) plus `Debug`.
+    // Forward iteration over BMP characters and `Debug`.
     let mut s3 = arena.alloc_utf16_string();
     s3.push_str(utf16str!("abc"));
     let mut d3 = s3.drain(..);
@@ -979,12 +974,12 @@ fn arena_string_from_utf16_bytes_capacity_hints() {
 
     // Non-lossy: capacity hint is `bytes.len() / 2` == 10; the decoded ASCII
     // fills it exactly, so the (exact) preallocation leaves capacity == 10.
-    let s = arena.alloc_string_from_utf16le(&bytes).unwrap();
+    let s = arena.alloc_string_from_utf16le(bytes.as_slice()).unwrap();
     assert_eq!(s.as_str(), "ABCDEFGHIJ");
     assert_eq!(s.capacity(), 10);
 
     // Lossy: capacity hint is `bytes.len() / 2 + 1` == 11.
-    let s_lossy = arena.alloc_string_from_utf16le_lossy(&bytes);
+    let s_lossy = arena.alloc_string_from_utf16le_lossy(bytes);
     assert_eq!(s_lossy.as_str(), "ABCDEFGHIJ");
     assert_eq!(s_lossy.capacity(), 11);
 }

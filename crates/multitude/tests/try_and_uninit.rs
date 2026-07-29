@@ -115,15 +115,15 @@ fn try_from_utf8_unchecked_ok_and_err() {
 fn try_from_utf16_lossy_ok_and_err() {
     let arena = Arena::new();
     let units = [0x0048u16, 0x0069]; // "Hi"
-    let s = arena.try_alloc_string_from_utf16_lossy(&units).unwrap();
+    let s = arena.try_alloc_string_from_utf16_lossy(units).unwrap();
     assert_eq!(s.as_str(), "Hi");
     // Unpaired surrogate -> replacement char.
     let bad = [0xD800u16];
-    let s2 = arena.try_alloc_string_from_utf16_lossy(&bad).unwrap();
+    let s2 = arena.try_alloc_string_from_utf16_lossy(bad).unwrap();
     assert_eq!(s2.as_str(), "\u{FFFD}");
 
     let arena = Arena::new_in(FailingAllocator::new(0));
-    assert!(arena.try_alloc_string_from_utf16_lossy(&units).is_err());
+    assert!(arena.try_alloc_string_from_utf16_lossy(units).is_err());
 }
 
 #[test]
@@ -132,15 +132,15 @@ fn try_from_utf16le_be_lossy_ok_and_err() {
     // "Hi" little-endian and big-endian.
     let le = [0x48u8, 0x00, 0x69, 0x00];
     let be = [0x00u8, 0x48, 0x00, 0x69];
-    assert_eq!(arena.try_alloc_string_from_utf16le_lossy(&le).unwrap().as_str(), "Hi");
-    assert_eq!(arena.try_alloc_string_from_utf16be_lossy(&be).unwrap().as_str(), "Hi");
+    assert_eq!(arena.try_alloc_string_from_utf16le_lossy(le).unwrap().as_str(), "Hi");
+    assert_eq!(arena.try_alloc_string_from_utf16be_lossy(be).unwrap().as_str(), "Hi");
     // Odd trailing byte -> trailing replacement char.
     let odd = [0x48u8, 0x00, 0x69];
-    assert_eq!(arena.try_alloc_string_from_utf16le_lossy(&odd).unwrap().as_str(), "H\u{FFFD}");
+    assert_eq!(arena.try_alloc_string_from_utf16le_lossy(odd).unwrap().as_str(), "H\u{FFFD}");
 
     let arena = Arena::new_in(FailingAllocator::new(0));
-    assert!(arena.try_alloc_string_from_utf16le_lossy(&le).is_err());
-    assert!(arena.try_alloc_string_from_utf16be_lossy(&be).is_err());
+    assert!(arena.try_alloc_string_from_utf16le_lossy(le).is_err());
+    assert!(arena.try_alloc_string_from_utf16be_lossy(be).is_err());
 }
 
 #[test]
@@ -154,12 +154,12 @@ fn try_from_utf16_bytes_lossy_reserves_exact_capacity() {
     let be = [0x00u8, 0x74, 0x00, 0x65, 0x00, 0x73, 0x00, 0x74]; // "test"
 
     let arena = Arena::new();
-    let s = arena.try_alloc_string_from_utf16le_lossy(&le).unwrap();
+    let s = arena.try_alloc_string_from_utf16le_lossy(le).unwrap();
     assert_eq!(s.as_str(), "test");
     assert_eq!(s.capacity(), 5);
 
     let arena = Arena::new();
-    let s = arena.try_alloc_string_from_utf16be_lossy(&be).unwrap();
+    let s = arena.try_alloc_string_from_utf16be_lossy(be).unwrap();
     assert_eq!(s.as_str(), "test");
     assert_eq!(s.capacity(), 5);
 }

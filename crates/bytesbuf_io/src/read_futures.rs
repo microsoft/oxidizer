@@ -33,7 +33,7 @@ where
 {
     // References `inner`. Must be defined above `inner` to ensure it gets dropped first.`
     #[expect(clippy::type_complexity, reason = "never needs to be named, good enough")]
-    active_read: Option<Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>>>>>,
+    active_read: Option<Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>> + Send>>>,
 
     // Safety invariant: we can only touch this field if `active_read` is `None`.
     inner: S,
@@ -91,8 +91,8 @@ where
             // or `inner`, and that we do not touch `inner` while the future exists.
             unsafe {
                 mem::transmute::<
-                    Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>> + 'a>>,
-                    Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>>>>,
+                    Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>> + Send + 'a>>,
+                    Pin<Box<dyn Future<Output = Result<BytesBuf, S::Error>> + Send>>,
                 >(boxed_future)
             }
         };
@@ -350,5 +350,14 @@ mod tests {
                 _ => panic!("Expected Some(Err(TestError(_)))"),
             }
         });
+    }
+
+    #[test]
+    fn stream_is_send_when_source_is_send() {
+        const fn assert_send<T: Send>() {}
+
+        // The `Read` contract requires `Send` from both the implementation and any returned
+        // futures, so the adapter stream must remain `Send` for any `Send` source.
+        assert_send::<Pin<Box<ReadAsFuturesStream<FakeRead>>>>();
     }
 }

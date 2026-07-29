@@ -5,10 +5,10 @@
     dead_code,
     unused_imports,
     clippy::unnecessary_safety_comment,
-    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+    reason = "shared test helpers cover feature-gated paths"
 )]
 
-//! Consolidated drop/teardown re-entrancy and drop-behavior regression tests.
+//! Drop and teardown reentrancy tests.
 
 mod common;
 
@@ -26,7 +26,7 @@ mod arena_drop_reentrancy {
 
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
     #[test]
     fn drop_runs_destructors_that_drop_other_smart_pointers() {
@@ -62,12 +62,7 @@ mod arena_drop_reentrancy {
 
     #[test]
     fn drop_handles_pinned_chunk_releasing_arc_into_other_chunk() {
-        // Reproduces "Issue 1" from the correctness audit: a pinned chunk's
-        // drop list contains a value that owns an ArenaArc; dropping the
-        // value tears down the Arc's chunk re-entrantly DURING the pinned
-        // drain. With the old draining order, the re-entrantly cached
-        // chunk would leak silently — destructors all run, but ArenaInner
-        // and the chunks linger forever (caught by Miri as a memory leak).
+        // Draining a pinned chunk may reentrantly release another chunk.
         static OUTER: AtomicUsize = AtomicUsize::new(0);
         static INNER: AtomicUsize = AtomicUsize::new(0);
 
@@ -93,7 +88,6 @@ mod arena_drop_reentrancy {
             let arena: Arena = Arena::builder().max_normal_alloc(4 * 1024).build();
             let inner = arena.alloc_arc(Inner);
             let _ = arena.alloc(Outer { inner: Some(inner) });
-            // Force chunk rotation so Outer's chunk goes onto the pinned list.
             let _ = arena.alloc([0_u8; 4000]);
             let _ = arena.alloc([0_u8; 4000]);
             let _ = arena.alloc([0_u8; 4000]);
@@ -257,30 +251,17 @@ mod arena_drop_reentrancy {
         );
     }
 
-    /// Regression for F-002: a reentrant in-chunk alloc from inside an
-    /// `alloc_*_with` init closure used to overlap the outer slot's
-    /// reservation. The outer write would clobber the inner value, and on
-    /// success the outer would roll the bump cursor *backwards* over the
-    /// inner value, exposing the slot to subsequent allocations.
-    ///
-    /// Fix: pre-advance `data_ptr` (and reserve a noop drop entry) before
-    /// invoking the user closure, so reentrant allocations land safely past
-    /// the outer reservation.
+    /// The outer slot is reserved before its initializer runs, so reentrant
+    /// allocations cannot overlap it or move the cursor backward.
     #[test]
     fn reentrant_in_chunk_alloc_does_not_overlap_outer_slot() {
         use multitude::Arena;
         let arena: Arena = Arena::builder().max_normal_alloc(60 * 1024).with_capacity(64 * 1024).build();
         let arena_ptr: *const Arena = &raw const arena;
 
-        // Allocate a u64 via `alloc_with`, and inside the init closure
-        // reentrantly allocate a small u64. Both should fit in the same
-        // chunk. The outer's value must not be the inner's value.
         let outer = arena.alloc_with::<u64, _>(|| {
             let a = unsafe { &*arena_ptr };
             let inner = a.alloc(0xDEAD_BEEF_u64);
-            // The inner reference points at a slot that must NOT overlap
-            // the outer's slot. If overlap happened, the outer's later
-            // write of 0x1111... would clobber the inner.
             assert_eq!(*inner, 0xDEAD_BEEF_u64);
             0x1111_2222_3333_4444_u64
         });
@@ -297,7 +278,7 @@ mod alloc_reentrancy {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 }
 
@@ -310,6 +291,6 @@ mod drop_behavior {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 }

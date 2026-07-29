@@ -87,22 +87,72 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
     }
 
     unsafe fn grow(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        // Bump-allocators can't reliably extend in place across chunks
-        // and don't need to: fall back to allocate-copy-deallocate. The
-        // new allocation acquires its own +1 chunk refcount; the old
-        // refcount is released by `deallocate` below. We copy only the
-        // overlapping prefix (`min(old, new)`) so the fallback stays
-        // sound even if a caller passes a smaller `new_layout`.
+        // The most recent allocation in the current chunk can grow by simply
+        // advancing the bump cursor. Keep the same alignment requirement so
+        // the original pointer is guaranteed to satisfy `new_layout`.
+        if new_layout.align() == old_layout.align()
+            && self.try_grow_local_in_place(ptr.as_ptr() as usize, old_layout.size(), new_layout.size())
+        {
+            return Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()));
+        }
+
+        // Otherwise allocate-copy-deallocate. The new allocation acquires its
+        // own +1 chunk refcount; the old refcount is released by `deallocate`
+        // below.
         let new = self.allocate(new_layout)?;
-        let copy_bytes = old_layout.size().min(new_layout.size());
-        if copy_bytes != 0 {
+        if old_layout.size() != 0 {
             // SAFETY: the old allocation is initialized for
-            // `old_layout.size()` bytes and the new allocation has
-            // `new_layout.size()` bytes; copying their `min` stays in
-            // bounds of both. The new allocation is non-overlapping
-            // arena storage we just acquired.
+            // `old_layout.size()` bytes, and the grow contract guarantees the
+            // new allocation is at least that large. The allocations do not
+            // overlap.
             unsafe {
-                ptr::copy_nonoverlapping(ptr.as_ptr(), new.cast::<u8>().as_ptr(), copy_bytes);
+                ptr::copy_nonoverlapping(ptr.as_ptr(), new.cast::<u8>().as_ptr(), old_layout.size());
+            }
+        }
+        // SAFETY: caller upholds `deallocate`'s contract for `ptr`.
+        unsafe { self.deallocate(ptr, old_layout) };
+        Ok(new)
+    }
+
+    unsafe fn grow_zeroed(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if new_layout.align() == old_layout.align()
+            && self.try_grow_local_in_place(ptr.as_ptr() as usize, old_layout.size(), new_layout.size())
+        {
+            // SAFETY: successful in-place growth extended this allocation
+            // through `new_layout.size()`; only the newly exposed tail is
+            // written.
+            unsafe {
+                ptr.as_ptr()
+                    .add(old_layout.size())
+                    .write_bytes(0, new_layout.size() - old_layout.size());
+            }
+            return Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()));
+        }
+
+        let new = self.allocate_zeroed(new_layout)?;
+        // SAFETY: the grow contract guarantees the new block is at least as
+        // large as the old block; the allocations do not overlap.
+        unsafe {
+            ptr::copy_nonoverlapping(ptr.as_ptr(), new.cast::<u8>().as_ptr(), old_layout.size());
+            self.deallocate(ptr, old_layout);
+        }
+        Ok(new)
+    }
+
+    unsafe fn shrink(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        // Keeping a larger bump block is legal: `new_layout` fits it, and
+        // deallocation does not require the original size. Avoiding a fresh
+        // allocation also avoids abandoning both the old and copied blocks.
+        if new_layout.size() != 0 && new_layout.align() == old_layout.align() {
+            return Ok(NonNull::slice_from_raw_parts(ptr, new_layout.size()));
+        }
+
+        let new = self.allocate(new_layout)?;
+        if new_layout.size() != 0 {
+            // SAFETY: the shrink contract guarantees the old block covers
+            // `new_layout.size()` bytes; the allocations do not overlap.
+            unsafe {
+                ptr::copy_nonoverlapping(ptr.as_ptr(), new.cast::<u8>().as_ptr(), new_layout.size());
             }
         }
         // SAFETY: caller upholds `deallocate`'s contract for `ptr`.
@@ -111,16 +161,14 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
     }
 }
 
-/// Legacy `allocator-api2` 0.2 `Allocator` impl, so `&Arena<A>` can directly
-/// back collections from crates (notably `hashbrown`) that have not yet moved
-/// to the modern allocator API. Every method forwards verbatim to the 0.4 impl
-/// above; when those crates upgrade, this impl can simply be deleted.
+/// `allocator-api2` 0.2 compatibility for arena-backed collections such as
+/// `hashbrown`.
 // SAFETY: forwards to the 0.4 `Allocator` impl; the 0.2 and 0.4 trait contracts
 // are identical, and the only version-specific type (`AllocError`) is a
 // zero-payload marker.
 unsafe impl<A: Allocator + Clone> allocator_api2_02::alloc::Allocator for &Arena<A> {
     #[inline]
-    #[allow(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    #[expect(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
         <&Arena<A> as Allocator>::allocate(self, layout).map_err(|_| allocator_api2_02::alloc::AllocError)
     }
@@ -132,7 +180,7 @@ unsafe impl<A: Allocator + Clone> allocator_api2_02::alloc::Allocator for &Arena
     }
 
     #[inline]
-    #[allow(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    #[expect(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
@@ -141,6 +189,31 @@ unsafe impl<A: Allocator + Clone> allocator_api2_02::alloc::Allocator for &Arena
     ) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
         // SAFETY: forwarded to the 0.4 impl under the same contract.
         unsafe { <&Arena<A> as Allocator>::grow(self, ptr, old_layout, new_layout) }.map_err(|_| allocator_api2_02::alloc::AllocError)
+    }
+
+    #[inline]
+    #[expect(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
+        // SAFETY: forwarded to the 0.4 impl under the same contract.
+        unsafe { <&Arena<A> as Allocator>::grow_zeroed(self, ptr, old_layout, new_layout) }
+            .map_err(|_| allocator_api2_02::alloc::AllocError)
+    }
+
+    #[inline]
+    #[expect(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
+        // SAFETY: forwarded to the 0.4 impl under the same contract.
+        unsafe { <&Arena<A> as Allocator>::shrink(self, ptr, old_layout, new_layout) }.map_err(|_| allocator_api2_02::alloc::AllocError)
     }
 }
 
@@ -152,9 +225,7 @@ mod tests {
 
     use crate::Arena;
 
-    // Exercises the legacy (`allocator-api2` 0.2) `Allocator` impl directly,
-    // independent of the optional `hashbrown` feature: allocate, grow, and
-    // deallocate, plus the rejected-alignment error arm.
+    // Exercises the complete `allocator-api2` 0.2 interface directly.
     #[test]
     fn arena_backs_legacy_allocator_api2() {
         let arena = Arena::new();
@@ -167,8 +238,39 @@ mod tests {
         // SAFETY: `p` came from `grow` with `new_layout`.
         unsafe { LegacyAllocator::deallocate(&handle, p.cast::<u8>(), new_layout) };
 
-        // An alignment at/above the smart-pointer ceiling is rejected as a
-        // recoverable error through the legacy impl's `map_err` arm.
+        let old_layout = Layout::from_size_align(8, 8).unwrap();
+        let p = LegacyAllocator::allocate(&handle, old_layout).expect("legacy allocate for zeroed growth");
+        // SAFETY: `p` addresses the eight bytes returned above.
+        unsafe { p.cast::<u8>().as_ptr().write_bytes(0xA5, old_layout.size()) };
+        let grown_layout = Layout::from_size_align(32, 16).unwrap();
+        // SAFETY: `p` came from `allocate` with `old_layout`, and
+        // `grown_layout` is larger and suitably aligned.
+        let p = unsafe { LegacyAllocator::grow_zeroed(&handle, p.cast::<u8>(), old_layout, grown_layout) }.expect("legacy zeroed growth");
+        // SAFETY: `p` addresses the 32 initialized bytes returned above.
+        let bytes = unsafe { core::slice::from_raw_parts(p.cast::<u8>().as_ptr(), grown_layout.size()) };
+        assert_eq!(&bytes[..old_layout.size()], &[0xA5; 8]);
+        assert_eq!(&bytes[old_layout.size()..], &[0; 24]);
+
+        let shrunk_layout = Layout::from_size_align(8, 8).unwrap();
+        // SAFETY: `p` came from `grow_zeroed` with `grown_layout`, and
+        // `shrunk_layout` fits within it.
+        let p = unsafe { LegacyAllocator::shrink(&handle, p.cast::<u8>(), grown_layout, shrunk_layout) }.expect("legacy shrink");
+        // SAFETY: `p` addresses the eight initialized bytes retained above.
+        let bytes = unsafe { core::slice::from_raw_parts(p.cast::<u8>().as_ptr(), shrunk_layout.size()) };
+        assert_eq!(bytes, &[0xA5; 8]);
+        // SAFETY: `p` came from `shrink` with `shrunk_layout`.
+        unsafe { LegacyAllocator::deallocate(&handle, p.cast::<u8>(), shrunk_layout) };
+
+        let p = LegacyAllocator::allocate(&handle, old_layout).expect("legacy allocate for zero-sized shrink");
+        let empty_layout = Layout::from_size_align(0, old_layout.align()).unwrap();
+        // SAFETY: `p` came from `allocate` with `old_layout`, and an empty
+        // allocation fits within it.
+        let p = unsafe { LegacyAllocator::shrink(&handle, p.cast::<u8>(), old_layout, empty_layout) }.expect("legacy zero-sized shrink");
+        assert_eq!(p.len(), 0);
+        // SAFETY: `p` came from `shrink` with `empty_layout`.
+        unsafe { LegacyAllocator::deallocate(&handle, p.cast::<u8>(), empty_layout) };
+
+        // Unsupported alignment remains a recoverable allocator error.
         let over_aligned = Layout::from_size_align(8, super::MAX_SMART_PTR_ALIGN).unwrap();
         LegacyAllocator::allocate(&handle, over_aligned).expect_err("over-aligned request must be rejected");
     }

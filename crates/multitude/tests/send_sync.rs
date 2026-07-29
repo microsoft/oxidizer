@@ -1,23 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Static `Send`/`Sync` contract tests for the smart pointers.
-//!
-//! These tests do not run any code at runtime — they assert the
-//! desired auto-trait behaviour at compile time. They will fail to
-//! compile if a future refactor either narrows the auto-trait set
-//! (e.g. by introducing a `!Send` field) or widens it past the
-//! intended bounds.
+//! Static `Send` and `Sync` contract tests.
 
+use core::alloc::Layout;
+use core::cell::Cell;
+use core::ptr::NonNull;
+use std::thread;
+
+use allocator_api2::alloc::{Allocator, Global};
 use multitude::{Alloc, Arc, Arena, Box, Rc};
 
 fn assert_send<T: Send>() {}
 fn assert_sync<T: Sync>() {}
 
-// Compile-time `!Send` / `!Sync` assertions via the two-blanket-impl
-// ambiguity trick: `probe` resolves unambiguously only when the type does
-// *not* implement the trait. If it does, both blanket impls apply and the
-// call fails to compile — exactly the regression we want to catch.
+// Overlapping blanket impls make `probe` ambiguous when a type implements the
+// trait under test.
 trait AmbiguousIfSend<A> {
     fn probe() {}
 }
@@ -36,6 +34,21 @@ fn assert_not_sync<T: ?Sized>() {
     let _ = <T as AmbiguousIfSync<_>>::probe;
 }
 
+#[derive(Clone, Default)]
+struct SendOnlyAllocator(Cell<()>);
+
+// SAFETY: allocation and deallocation forward unchanged to `Global`.
+unsafe impl Allocator for SendOnlyAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+        Global.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded under the caller's Allocator contract.
+        unsafe { Global.deallocate(ptr, layout) };
+    }
+}
+
 #[test]
 fn arena_is_send() {
     // `Arena: Send` is intended to be auto-derived from its fields.
@@ -48,13 +61,20 @@ fn arena_is_send() {
     // And a runtime cross-thread move:
     let arena: Arena = Arena::new();
     let _ = arena.alloc(7_u64);
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         let h = s.spawn(move || {
             let x = arena.alloc(99_u64);
             *x
         });
         assert_eq!(h.join().unwrap(), 99);
     });
+}
+
+#[test]
+fn arena_is_not_send_when_allocator_is_not_sync() {
+    assert_not_send::<Arena<SendOnlyAllocator>>();
+    assert_not_send::<Arc<u64, SendOnlyAllocator>>();
+    assert_not_send::<Box<u64, SendOnlyAllocator>>();
 }
 
 #[test]
@@ -65,7 +85,7 @@ fn arc_is_send_sync_when_t_is() {
     assert_sync::<Arc<[u8]>>();
     let arena: Arena = Arena::new();
     let a = arena.alloc_arc(42_u64);
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         let h = s.spawn(move || *a);
         assert_eq!(h.join().unwrap(), 42);
     });
@@ -84,7 +104,7 @@ fn box_is_send_sync_when_t_is() {
 
     let arena: Arena = Arena::new();
     let b = arena.alloc_box(42_u64);
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         let h = s.spawn(move || *b);
         assert_eq!(h.join().unwrap(), 42);
     });
@@ -99,7 +119,7 @@ fn box_str_is_send_sync() {
 
     let arena: Arena = Arena::new();
     let b = arena.alloc_str_box("hello");
-    std::thread::scope(|s| {
+    thread::scope(|s| {
         let h = s.spawn(move || b.len());
         assert_eq!(h.join().unwrap(), 5);
     });

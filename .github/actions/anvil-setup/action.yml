@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 name: anvil-setup
 description: Install `just` and the anvil tools/components needed by a specific group (or everything if omitted).
 inputs:
@@ -18,15 +20,61 @@ inputs:
           `just anvil-<group>-setup`.
     default: ""
     required: false
+  free-disk-space:
+    description: >-
+      Remove unused pre-installed toolchains from GitHub-hosted Linux and
+      Windows runners before setup. Reclaims approximately 18 GB on Linux and
+      17 GB on Windows. No-op on macOS and self-hosted runners.
+    default: "false"
+    required: false
 runs:
   using: composite
   steps:
+    # Standard GitHub-hosted runners guarantee only 14 GB of SSD space. Heavy
+    # build and test jobs can exceed that with target artifacts alone, so this
+    # opt-in cleanup removes toolchains unused by anvil's Rust checks.
+    # See https://github.com/microsoft/oxidizer/pull/583.
+    - name: Free disk space (Linux)
+      if: inputs.free-disk-space == 'true' && runner.environment == 'github-hosted' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo "Disk before cleanup:"
+        df -h /
+        # Android ~10 GB, Haskell ~4 GB, Swift ~3 GB, browser drivers ~1 GB.
+        sudo rm -rf -- /usr/local/lib/android
+        sudo rm -rf -- /opt/ghc /usr/local/.ghcup
+        sudo rm -rf -- /usr/share/swift
+        sudo rm -rf -- /usr/local/share/chromium /usr/local/share/edge_driver
+        echo "Disk after cleanup:"
+        df -h /
+
+    - name: Free disk space (Windows)
+      if: inputs.free-disk-space == 'true' && runner.environment == 'github-hosted' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        function Get-FreeDiskGiB {
+          [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
+        }
+
+        "Free before cleanup (GiB): $(Get-FreeDiskGiB)"
+        $paths = @(
+          'C:\Program Files (x86)\Android'
+          'C:\Android'
+          'C:\ghcup'
+        )
+        foreach ($path in $paths) {
+          if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+          }
+        }
+        "Free after cleanup (GiB): $(Get-FreeDiskGiB)"
+
     - id: rustc-version
       shell: bash
       run: echo "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
     - name: Restore cargo cache
       id: cargo-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         # Key on OS + arch + rustc version + lockfile hashes + catalog
         # hash so a Rust toolchain bump, a cross-arch matrix leg, or a
@@ -104,7 +152,7 @@ runs:
     # downloads the release binary from cargo-bins/cargo-binstall, so
     # the bootstrap branch in `tools.just` becomes a no-op on GH.
     - name: Install cargo-binstall
-      uses: cargo-bins/cargo-binstall@main
+      uses: cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4 # v1.21.0
 
     - name: Install just
       shell: bash
@@ -135,11 +183,11 @@ runs:
         esac
 
     # Save the cache as the LAST step of setup, regardless of whether
-    # any earlier install step partially failed. `actions/cache@v4`
+    # any earlier install step partially failed. `actions/cache`
     # used to support this via `save-always: true`, but that knob is
     # deprecated as of 2025 with the explicit message "does not work
     # as intended" — failing runs simply don't save. The supported
-    # replacement is to call `actions/cache/save@v4` directly as its
+    # replacement is to call `actions/cache/save` directly as its
     # own step with `if: always()`.
     #
     # Without this, a single catalog issue that fails the install
@@ -151,7 +199,7 @@ runs:
     # until the catalog is complete.
     - name: Save cargo cache
       if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
         path: |
