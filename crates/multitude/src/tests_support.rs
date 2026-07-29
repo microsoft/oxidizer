@@ -5,7 +5,7 @@
 //!
 //! Only compiled under `cfg(test)`.
 
-#![allow(dead_code, reason = "shared test scaffolding; not every helper is used by every test module")]
+#![expect(dead_code, reason = "shared test scaffolding; not every helper is used by every test module")]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use core::alloc::Layout;

@@ -18,3 +18,6 @@ coverage:
         target: 100
         threshold: "0"
         base: auto
+ignore:
+- "crates/rest_over_grpc_examples/**/*"
+- "crates/rest_over_grpc_tests/**/*"

@@ -5,8 +5,8 @@
 //!
 //! Paired with `view.rs`, which covers the same operations under wall-clock measurement.
 //! The `slice_*` benchmarks pair with the Criterion `BytesView/slice_*` benchmarks; `get_byte`
-//! and `get_num_le` pair with the per-element `BytesView/get_byte_drain` and
-//! `BytesView/get_num_le_drain` benchmarks (the Callgrind variants isolate a single call).
+//! and `get_u32_le` pair with the per-element `BytesView/get_byte_drain` and
+//! `BytesView/get_u32_le_drain` benchmarks (the Callgrind variants isolate a single call).
 //!
 //! Each setup function builds the view outside the measured region and the benchmark returns its
 //! state so the view's drop (and the `BlockRef` refcount traffic it triggers) is not counted.
@@ -91,8 +91,8 @@ mod linux {
     // Fused single-span numeric read: the value never straddles a span boundary.
     #[library_benchmark]
     #[bench::single_span(single_span())]
-    fn bytes_view_get_num_le(mut view: BytesView) -> (BytesView, u32) {
-        let value = view.get_num_le::<u32>();
+    fn bytes_view_get_u32_le(mut view: BytesView) -> (BytesView, u32) {
+        let value = view.get_u32_le();
         (view, black_box(value))
     }
 
@@ -100,7 +100,7 @@ mod linux {
         name = bytes_view;
         benchmarks =
             bytes_view_slice_near, bytes_view_slice_far, bytes_view_slice_very_far,
-            bytes_view_get_byte, bytes_view_get_num_le
+            bytes_view_get_byte, bytes_view_get_u32_le
     );
 }
 

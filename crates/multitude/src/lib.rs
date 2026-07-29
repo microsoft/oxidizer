@@ -11,19 +11,11 @@
 
 //! Fast and flexible arena-based bump allocator.
 //!
-//! `multitude` is an arena-based bump allocator designed to improve the performance of applications that have **phase-oriented logic**, which
-//! is when groups of related allocations live and die together. Service request handling and parsers are two examples of this pattern which usually
-//! benefit from a bump allocator.
+//! `multitude` allocates phase-oriented values from chunks and reclaims their
+//! storage in bulk. Escape-capable handles can retain and reclaim individual
+//! chunks independently.
 //!
-//! `multitude` works by accumulating large chunks of memory allocated from the system and then carving out smaller pieces of it for application use
-//! using a fast bump allocation strategy, which is considerably faster than allocating from the system. The downside however is that the individual allocations
-//! can't be freed separately. Instead, memory is reclaimed and returned to the system in bulk when the entire arena is dropped.
-//!
-//! # Why Another Bump Allocator?
-//!
-//! The Rust ecosystem has a few bump allocators, the most popular being [`bumpalo`](https://crates.io/crates/bumpalo).
-//! `multitude` uses a different implementation strategy and has a richer API surface making it suitable for more
-//! use cases. The main features that set `multitude` apart are:
+//! # Key properties
 //!
 //! 1. **Flexibility.** Four allocation styles coexist in the same arena: the
 //!    arena-lifetime owning handle [`Alloc<T>`](Alloc) plus three escape-capable
@@ -31,13 +23,13 @@
 //!    and the unique-owner [`Box`] — each available for sized `T`, `str`, and
 //!    `[T]`. See the [comparison table](#flexibility) for how they differ.
 //!
-//! 2. **Early Reclamation.** In many situations, `multitude` can reclaim memory from individual chunks as soon as their reference counts drop to zero,
-//!    without waiting for the entire arena to be dropped. This allows for more efficient memory usage in long-running arenas with many short-lived allocations.
+//! 2. **Early Reclamation.** A chunk containing only escape-capable allocations
+//!    is reclaimed when its last handle drops.
 //!
-//! 3. **Smart Pointers Can Outlive the Arena.** Some of the smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
-//!    allowing for more flexible memory management and longer-lived data structures.
+//! 3. **Escaping Smart Pointers.** `Arc`, `Rc`, and `Box` can outlive the arena
+//!    by retaining their chunk.
 //!
-//! 4. **Drop Support.** `multitude` automatically runs `Drop` for allocated values at the appropriate time.
+//! 4. **Drop Support.** Owning handles run value destructors eagerly.
 //!
 //! 5. **Uniformly Thin Smart Pointers.** `multitude`'s escape-capable smart
 //!    pointers — [`Arc<T>`](Arc), [`Rc<T>`](Rc), and [`Box<T>`](Box) — are
@@ -47,18 +39,23 @@
 //!    `[T]` it is a fat reference (pointer + length), which costs nothing extra
 //!    since it never escapes the arena and isn't stored at scale.
 //!
-//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String), [`Utf16String`](strings::Utf16String) and [`Vec`](vec::Vec) which are growable collections that live in the arena.
+//! 6. **Growable Collections.** [`String`](strings::String),
+//!    [`Utf16String`](strings::Utf16String), and [`Vec`](vec::Vec) grow in arena
+//!    storage.
 //!
-//! 7. **Dynamically-Sized Types.** `multitude` supports dynamically-sized types (DSTs) like slices and strings, allowing you to allocate and manage them in the
-//!    arena with the same flexibility as sized types. The [`dst-factory`](https://crates.io/crates/dst-factory) crate is a great companion for building DSTs in the arena.
+//! 7. **Dynamically-Sized Types.** Slices, strings, trait objects, and custom
+//!    DSTs use the same ownership forms as sized values.
 //!
-//! 8. **`format!`-style Macro.** `multitude` includes a [`format!`](strings::format!)-style macro that allows you to create formatted strings directly in the arena, avoiding intermediate allocations and copies.
+//! 8. **Serde Support.** Values can be deserialized directly into arena-backed
+//!    storage.
 //!
-//! 9. **UTF-16 Support.** With the `utf16` Cargo feature, `multitude` provides a parallel set of arena-resident UTF-16 string types
-//!    (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`](strings::Utf16String)) and a [`format_utf16!`](strings::format_utf16!) macro for FFI / Windows / JS-engine
-//!    interop without per-call transcoding at every boundary.
+//! 9. **Formatting.** [`format!`](strings::format!) writes formatted strings
+//!    directly into arena storage.
 //!
-//! 10. **`#![no_std]` Support.** `multitude` can be used in `#![no_std]` environments, making it suitable for embedded systems and other resource-constrained contexts.
+//! 10. **UTF-16 Support.** The `utf16` feature provides arena-backed UTF-16
+//!     strings and formatting.
+//!
+//! 11. **`#![no_std]` Support.** The core allocator requires only `alloc`.
 //!
 //! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/BUMPALO.md)
 //! for a feature-by-feature comparison with [`bumpalo`](https://crates.io/crates/bumpalo).
@@ -84,6 +81,7 @@
 //! let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
 //! assert_eq!(&*greeting, "Hello, world!");
 //! ```
+//!
 //! # Flexibility
 //!
 //! `multitude` offers four ways to allocate a value and own it over time. All
@@ -378,6 +376,34 @@
 //! # }
 //! ```
 //!
+//! # Arena-Aware Deserialization
+//!
+//! With the `serde_json` feature, derive [`de::DeserializeIn`] on types that
+//! should place owned fields in the arena, then call an [`Arena`] convenience
+//! method:
+//!
+//! ```
+//! # #[cfg(feature = "serde_json")]
+//! # fn main() -> Result<(), serde_json::Error> {
+//! #[derive(multitude::de::DeserializeIn)]
+//! struct Request {
+//!     id: u64,
+//!     name: multitude::Box<str>,
+//! }
+//!
+//! let arena = multitude::Arena::new();
+//! let request: Request = arena.deserialize_json(r#"{"id":7,"name":"Ada"}"#)?;
+//! assert_eq!(request.name.as_ref(), "Ada");
+//! # Ok(())
+//! # }
+//! # #[cfg(not(feature = "serde_json"))]
+//! # fn main() {}
+//! ```
+//!
+//! Ordinary [`serde::Deserialize`] and [`de::DeserializeIn`] are independent;
+//! see the [`de`] module for field compatibility, third-party types, ownership
+//! choices, limits, and custom implementations.
+//!
 //! # Building DSTs
 //!
 //! With the `dst` Cargo feature enabled, [`Arena`] exposes
@@ -424,7 +450,8 @@
 //! |---------|-------------|
 //! | `std` *(default)* | Enables [`std::io::Write`] on [`Vec<u8>`](vec::Vec) for use with `write!`, `std::io::copy`, `serde_json::to_writer`, and similar. Disable for `#![no_std]` environments (the crate still requires `alloc`). |
 //! | `stats` | Enables runtime instrumentation counters returned by `Arena::stats`. Disable for the tightest allocation throughput when you don't need observability. |
-//! | `serde` | Adds `Serialize` impls for [`Arc<str>`](Arc), [`Box<str>`](Box), [`String`](strings::String), and [`Vec`](vec::Vec). With `serde + utf16`, also adds impls for the UTF-16 types (transcoded to UTF-8 on the wire). |
+//! | `serde` | Adds `Serialize` impls for arena strings and vectors, plus arena-aware deserialization through [`de::DeserializeIn`] and [`Arena::deserialize`]. With `serde + utf16`, also adds serialization for the UTF-16 types (transcoded to UTF-8 on the wire). |
+//! | `serde_json` | Implies `serde` and adds [`Arena::deserialize_json`] convenience methods with trailing-input checks and optional resource limits. |
 //! | `dst` | Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`] / [`Arena::alloc_dst_box`], plus eight `Arena::alloc_slice_*_box` methods. |
 //! | `utf16` | Adds a parallel UTF-16 string surface (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`](strings::Utf16String), and [`format_utf16!`](strings::format_utf16!)) backed by the [`widestring`](https://crates.io/crates/widestring) crate. Lengths are counted in `u16` elements. |
 //! | `zerocopy` | Provides [`ZerocopyView`](zerocopy::ZerocopyView) for safe zero-initialized allocation of types implementing [`zerocopy::FromZeros`](::zerocopy::FromZeros). Access via [`Arena::zerocopy()`]. |
@@ -449,6 +476,10 @@ mod arena_builder;
 #[cfg(feature = "stats")]
 mod arena_stats;
 mod r#box;
+mod cow;
+#[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
+pub mod de;
 #[cfg(feature = "dst")]
 #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
 pub mod dst;
@@ -463,14 +494,8 @@ pub mod vec;
 #[cfg(test)]
 mod tests_support;
 
-// Ecosystem integration modules. Visibility differs by what the
-// integration exposes:
-//   - `bytemuck` / `zerocopy` are `pub` because they introduce types
-//     (`BytemuckView` / `ZerocopyView`) that users need to name in
-//     their own code.
-//   - `bytes` / `bytesbuf` are private because they only add `From`
-//     impls / inherent methods on existing types; nothing in them
-//     needs to be path-addressable from outside.
+// Integrations that expose named types are public; integrations that only
+// add impls and inherent methods remain private.
 #[cfg(feature = "bytemuck")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bytemuck")))]
 pub mod bytemuck;
@@ -492,6 +517,7 @@ pub use self::arena_builder::ArenaBuilder;
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
+pub use self::cow::Cow;
 pub use self::error::AllocError;
 pub use self::from_in::{FromIn, IntoIn};
 pub use self::rc::Rc;

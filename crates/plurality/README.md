@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.png" alt="Plurality Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Plurality Logo" width="96">
 
 # Plurality
 
@@ -8,8 +8,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/plurality)](https://crates.io/crates/plurality)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
@@ -33,63 +33,58 @@ dropped. There are four handle types, covering owned vs. shared and bound vs.
 All four deref to `&T`; [`Box`][__link6] and [`Alloc`][__link7] also give `&mut T`. Dropping a
 handle runs `T`’s destructor and returns the slot to the pool.
 
-## Why a pool?
-
-Calling the global allocator for every short-lived object has real costs:
-each `malloc`/`free` can take a lock, walk size-class free lists, and (under
-churn) fragment the heap, while scattering objects across memory so traversals
-miss cache. A pool front-loads one chunk allocation and then serves individual
-objects from a free list — so the steady-state allocate/free path is a couple
-of pointer ops with no global-allocator round trip (this crate measures about
-2.4 times faster than the system allocator on a graph-churn workload). Because
-every value lives in a pre-allocated slot that never moves, related objects stay
-close in memory and their addresses remain stable.
-
-Reach for a pool when:
-
-* **High-frequency allocate/free of one type.** Connection/buffer pools,
-  packet or message buffers, work items, particles, audio voices — workloads
-  that recycle many same-typed objects in a tight loop.
-* **Stable addresses are required.** Graph nodes, intrusive lists, FFI
-  handles, or self-referential structures that need a value’s address to stay
-  put. A `Vec<T>` reallocates and moves its elements on growth; a pool never
-  does.
-* **Predictable latency / bounded memory.** Capping growth (`max_chunks`)
-  turns exhaustion into a graceful [`AllocError`][__link8] instead of an unbounded
-  heap, and growth happens one chunk at a time with no `O(n)`
-  reallocate-and-copy spike.
-* **Shared ownership without per-object heap allocation.** [`Arc`][__link9]/[`Rc`][__link10]
-  handles refcount within the pool’s storage, so cloned references don’t each
-  carry a separate allocation.
-
-A pool is **not** the right tool for a few large, long-lived, differently-typed
-allocations (just use the global allocator), or for objects that must all be
-freed together with no individual reclamation (an arena like
-[`multitude`][__link11] is simpler). See the comparison table below for
-how it relates to `slab`, `slotmap`, and other crates.
+Pools suit frequently recycled values of one type, stable-address data
+structures, and workloads that need a capacity limit. Slots are reused
+without a backing-allocator call, and `max_chunks` bounds growth. Prefer a
+general allocator for heterogeneous, long-lived values or an arena when
+values can all be reclaimed together.
 
 ## Concurrency model
 
-[`Pool<T>`][__link12] is `Send + !Sync`: allocating takes `&Pool`, so exactly one
+[`Pool<T>`][__link8] is `Send + !Sync`: allocating takes `&Pool`, so exactly one
 thread allocates at a time (the whole pool can still be *moved* between
-threads). The `Send` handles ([`Box`][__link13]/[`Arc`][__link14]) may be dropped from any thread;
-the `!Send` handles ([`Alloc`][__link15]/[`Rc`][__link16]) stay on their thread.
+threads). The `Send` handles ([`Box`][__link9]/[`Arc`][__link10]) may be dropped from any thread;
+the `!Send` handles ([`Alloc`][__link11]/[`Rc`][__link12]) stay on their thread.
 
-## Comparison with other crates
+## Memory allocation
 
-The closest crates in the ecosystem hand out *indices* or *keys* that only
-deref while you hold the container, or recycle whole values behind a lock.
-`plurality` instead returns thin smart pointers that deref (and, for
-[`Arc`][__link17]/[`Rc`][__link18], share ownership) without the pool in hand.
+The pool allocates chunks from the supplied allocator and retains them until
+teardown.
 
-|Capability|[`plurality`][__link19]|[`slab`][__link20]|[`sharded-slab`][__link21]|[`slotmap`][__link22]|[`object-pool`][__link23]|[`opool`][__link24]|[`deadpool`][__link25]|[`infinity-pool`][__link26]|
-|----------|-----------|------|--------------|---------|-------------|-------|----------|---------------|
-|Thin single-pointer handles (deref without the pool)|yes|no (index)|no (guard)|no (key)|no (guard)|no (guard)|no (guard)|yes|
-|Individual free + slot reuse|yes|yes|yes|yes|yes|yes|yes|yes|
-|Shared ownership ([`Arc`][__link27]/[`Rc`][__link28])|yes|no|no|no|no|no|no|yes|
-|Growable, chunked|yes|yes|yes|yes|yes|yes|yes|yes|
-|Stable address (value never moves on grow)|yes|no|yes|no|no|no|no|yes|
-|Thread safety|`Send + !Sync`, cross-thread frees|single-thread|`Send + Sync`|single-thread|`Send + Sync`, lock-based|`Send + Sync`, lock-free|`Send + Sync`, async|`Send + Sync`, or single-thread `Rc`|
+## Cargo features
+
+* **`std`** *(enabled by default)* — integrates with the standard library
+  through [`allocator-api2`][__link13]’s `std` feature. The crate is otherwise
+  `no_std` (it needs only [`alloc`][__link14]); disable default features to build for
+  a `no_std` target.
+* **`stats`** *(disabled by default)* — enables runtime allocation
+  statistics: the `PoolStats` type and the `Pool::stats` method. The
+  accounting counters are compiled in only when this feature is active, so
+  leaving it off keeps the pool free of any tracking overhead.
+
+## Type erasure
+
+[`Box<T>`][__link15], [`Arc<T>`][__link16], and [`Rc<T>`][__link17] are generic over `T: ?Sized`, so they can
+hold an unsized value — a trait object or a slice — while the value stays in
+its pool slot. A sized handle is converted with [`Box::unsize`][__link18] /
+[`Arc::unsize`][__link19] / [`Rc::unsize`][__link20], which take a compiler-checked
+[`Coercion`][__link21]
+token:
+
+```rust
+use core::fmt::Debug;
+
+use plurality::{Box, Pool, coerce};
+
+let pool = Pool::<u32>::new();
+let b = pool.alloc_box(7u32);
+let erased = Box::unsize(b, coerce!(dyn Debug));
+assert_eq!(format!("{erased:?}"), "7");
+```
+
+A sized handle stays exactly one pointer wide; the unsized forms carry the
+extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`][__link22], and
+reclaim the slot from the value’s runtime size and alignment on drop.
 
 ## Examples
 
@@ -123,36 +118,30 @@ assert!(pool.try_alloc_box(2).is_err());
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbDYhwHnp0ppYbTAplEhJy1-QbC9Ei2FOk28IbEtHDOvyLsrphZIGCaXBsdXJhbGl0eWUwLjEuMA
- [__link0]: https://docs.rs/plurality/0.1.0/plurality/?search=Pool
- [__link1]: https://docs.rs/plurality/0.1.0/plurality/?search=Box
- [__link10]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
- [__link11]: https://crates.io/crates/multitude
- [__link12]: https://docs.rs/plurality/0.1.0/plurality/?search=Pool
- [__link13]: https://docs.rs/plurality/0.1.0/plurality/?search=Box
- [__link14]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link15]: https://docs.rs/plurality/0.1.0/plurality/?search=Alloc
- [__link16]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
- [__link17]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link18]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
- [__link19]: https://crates.io/crates/plurality
- [__link2]: https://docs.rs/plurality/0.1.0/plurality/?search=Alloc
- [__link20]: https://crates.io/crates/slab
- [__link21]: https://crates.io/crates/sharded-slab
- [__link22]: https://crates.io/crates/slotmap
- [__link23]: https://crates.io/crates/object-pool
- [__link24]: https://crates.io/crates/opool
- [__link25]: https://crates.io/crates/deadpool
- [__link26]: https://crates.io/crates/infinity_pool
- [__link27]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link28]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
- [__link3]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link4]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
- [__link5]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link6]: https://docs.rs/plurality/0.1.0/plurality/?search=Box
- [__link7]: https://docs.rs/plurality/0.1.0/plurality/?search=Alloc
- [__link8]: https://docs.rs/plurality/0.1.0/plurality/?search=AllocError
- [__link9]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfDTXi-1ZvacbMobUHdvAIBsbUJBXGCRAkM0b9PGuxFO4xL1hZIGCaXBsdXJhbGl0eWUwLjIuMA
+ [__link0]: https://docs.rs/plurality/0.2.0/plurality/?search=Pool
+ [__link1]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
+ [__link10]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
+ [__link11]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
+ [__link12]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
+ [__link13]: https://crates.io/crates/allocator-api2
+ [__link14]: https://doc.rust-lang.org/stable/alloc
+ [__link15]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
+ [__link16]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
+ [__link17]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
+ [__link18]: https://docs.rs/plurality/0.2.0/plurality/?search=Box::unsize
+ [__link19]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc::unsize
+ [__link2]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
+ [__link20]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc::unsize
+ [__link21]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
+ [__link22]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
+ [__link3]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
+ [__link4]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
+ [__link5]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
+ [__link6]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
+ [__link7]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
+ [__link8]: https://docs.rs/plurality/0.2.0/plurality/?search=Pool
+ [__link9]: https://docs.rs/plurality/0.2.0/plurality/?search=Box

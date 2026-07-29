@@ -153,6 +153,7 @@ fn rejects_verb_with_non_literal_characters() {
     // A verb is a LITERAL, so wildcard/brace characters are rejected. Braces are
     // especially important: a stray `{` must not unbalance the colon-depth scan.
     assert!(PathTemplate::parse("/a:bad*", Grammar::default()).unwrap_err().is_invalid_verb());
+    assert!(PathTemplate::parse("/a:bad%GG", Grammar::default()).unwrap_err().is_invalid_verb());
     assert!(PathTemplate::parse("/a:bad}", Grammar::default()).unwrap_err().is_invalid_verb());
     assert!(
         PathTemplate::parse("/a:bad{:still_bad", Grammar::default())
@@ -187,13 +188,17 @@ fn parse_error_display_covers_every_kind() {
             ParseError::is_invalid_field_name,
             "variable field path contains an invalid identifier",
         ),
-        ("/a*b", ParseError::is_invalid_literal, "literal segment contains a misplaced '*'"),
+        (
+            "/a*b",
+            ParseError::is_invalid_literal,
+            "literal contains an invalid character or percent escape",
+        ),
         ("/a/**/b", ParseError::is_rest_not_last, "'**' may only appear as the final segment"),
         ("/a/b:", ParseError::is_empty_verb, "custom verb after ':' is empty"),
         (
             "/v1/a:b/c",
             ParseError::is_invalid_verb,
-            "custom verb after ':' must be a literal (no '/', '*', '{', or '}')",
+            "custom verb after ':' is not a valid path-template literal",
         ),
         (
             "/a:b:c",
@@ -258,12 +263,8 @@ fn accepts_underscore_led_field_name() {
 }
 
 #[test]
-fn rejects_stray_brace_in_literal() {
-    assert!(
-        PathTemplate::parse("/x/a{b}", Grammar::default())
-            .unwrap_err()
-            .is_unbalanced_braces()
-    );
+fn rejects_embedded_braces_in_literal() {
+    assert!(PathTemplate::parse("/x/a{b}", Grammar::default()).unwrap_err().is_invalid_literal());
 }
 
 #[test]
@@ -271,7 +272,7 @@ fn rejects_trailing_chars_after_variable_close() {
     assert!(
         PathTemplate::parse("/v1/{a}b", Grammar::default())
             .unwrap_err()
-            .is_unbalanced_braces()
+            .is_invalid_literal()
     );
 }
 
@@ -304,6 +305,53 @@ fn rejects_wildcard_in_subtemplate_literal() {
 }
 
 #[test]
+fn validates_uri_literal_characters_and_percent_escapes() {
+    for template in ["/a b", "/a?b", "/a#b", "/café", "/bad%", "/bad%2", "/bad%2x", "/{x=bad%GG}"] {
+        let error = PathTemplate::parse(template, Grammar::default()).expect_err(template);
+        assert!(error.is_invalid_literal(), "wrong error for {template:?}: {error}");
+    }
+
+    for template in [
+        "/-._~!$&'()+,;=@",
+        "/caf%C3%A9",
+        "/lower%2fupper%2F",
+        "/{x=part%2Fname}",
+        "/{x=part:detail}",
+        "/a:verb%2Fname",
+    ] {
+        PathTemplate::parse(template, Grammar::default()).unwrap_or_else(|error| {
+            panic!("valid URI literal {template:?}: {error}");
+        });
+    }
+
+    for template in ["/bad%GG{x}", "/{x}bad%GG", "/pré{x}"] {
+        let error = PathTemplate::parse(template, Grammar::default().with_segment_affixes()).expect_err(template);
+        assert!(error.is_invalid_literal(), "wrong affix error for {template:?}: {error}");
+    }
+
+    PathTemplate::parse("/pre%2F{x}suf%2f", Grammar::default().with_segment_affixes())
+        .expect("percent escapes are valid in affix literals");
+}
+
+#[test]
+fn variable_segment_iterator_has_an_exact_fused_length() {
+    let template = PathTemplate::parse("/{x=one/*/**}", Grammar::default()).expect("valid");
+    let Segment::Variable(variable) = template.segments()[0] else {
+        panic!("expected variable");
+    };
+    let mut segments = variable.segments();
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments.size_hint(), (3, Some(3)));
+    assert_eq!(segments.next(), Some(Segment::Literal("one")));
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments.next(), Some(Segment::Single));
+    assert_eq!(segments.next(), Some(Segment::Rest));
+    assert_eq!(segments.len(), 0);
+    assert_eq!(segments.next(), None);
+    assert_eq!(segments.next(), None);
+}
+
+#[test]
 fn display_renders_canonical_template() {
     let cases = [
         // Root template with no segments and no verb.
@@ -319,7 +367,7 @@ fn display_renders_canonical_template() {
         // Variable sub-templates with literals, `*`, and `**`.
         ("/v1/{name=books/*}", "/v1/{name=books/*}"),
         ("/v1/{name=books/**}", "/v1/{name=books/**}"),
-        // A `:` inside braces is part of a literal, not a verb.
+        // A `:` inside braces is part of a path-segment literal, not a verb.
         ("/a/{b=c:d}", "/a/{b=c:d}"),
         // Full template combining variables, a `**` sub-template, and a verb.
         (

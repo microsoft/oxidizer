@@ -20,9 +20,22 @@ use core::ops::{Deref, DerefMut};
 
 use widestring::Utf16Str as WideUtf16Str;
 
-/// An immutable UTF-16 string slice stored in an
-/// [`Arena`](crate::Arena).
+/// An immutable, arena-backed UTF-16 string slice.
 #[repr(transparent)]
+/// ```
+/// # #[cfg(feature = "utf16")]
+/// # fn main() {
+/// use multitude::Arena;
+/// use widestring::utf16str;
+///
+/// let arena = Arena::new();
+/// let value = arena.alloc_utf16_str_box(utf16str!("wide"));
+/// let slice: &multitude::strings::Utf16Str = &value;
+/// assert_eq!(slice.as_widestring_utf16_str(), utf16str!("wide"));
+/// # }
+/// # #[cfg(not(feature = "utf16"))]
+/// # fn main() {}
+/// ```
 pub struct Utf16Str([u16]);
 
 // SAFETY: `Utf16Str` is `#[repr(transparent)]` over `[u16]`, so it shares
@@ -37,6 +50,19 @@ impl Utf16Str {
     /// Borrow as a [`widestring::Utf16Str`].
     #[inline]
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let value = arena.alloc_utf16_str_box(utf16str!("wide"));
+    /// assert_eq!(value.as_widestring_utf16_str(), utf16str!("wide"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn as_widestring_utf16_str(&self) -> &widestring::Utf16Str {
         // SAFETY: the payload is well-formed UTF-16 by construction.
         unsafe { WideUtf16Str::from_slice_unchecked(&self.0) }
@@ -45,6 +71,21 @@ impl Utf16Str {
     /// Borrow as a mutable [`widestring::Utf16Str`].
     #[inline]
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_str_box(utf16str!("rust"));
+    /// // SAFETY: replacing ASCII with ASCII preserves valid UTF-16.
+    /// unsafe { value.as_mut_widestring_utf16_str().as_mut_slice()[0] = b'R' as u16 };
+    /// assert_eq!(&*value, utf16str!("Rust"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn as_mut_widestring_utf16_str(&mut self) -> &mut widestring::Utf16Str {
         // SAFETY: the payload is well-formed UTF-16 by construction, and the
         // `&mut self` borrow grants exclusive access.

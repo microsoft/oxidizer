@@ -1,0 +1,31 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package greeter;
+
+import "google/api/annotations.proto";
+
+// A minimal service exercising the rest_over_grpc::codegen `tonic` bridge: one
+// unary RPC and one server-streaming RPC, both annotated with google.api.http.
+service Greeter {
+  // Unary: `GET /v1/greet/{name}` binds the path variable into the request.
+  rpc SayHello(HelloRequest) returns (HelloReply) {
+    option (google.api.http) = { get: "/v1/greet/{name}" };
+  }
+
+  // Server-streaming: a sequence of greetings, transcoded to a JSON array /
+  // NDJSON / SSE by the runtime depending on the request's `Accept` header.
+  rpc StreamGreetings(HelloRequest) returns (stream HelloReply) {
+    option (google.api.http) = { get: "/v1/greet/{name}:stream" };
+  }
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+}

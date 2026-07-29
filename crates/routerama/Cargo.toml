@@ -1,0 +1,123 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "routerama"
+version = "0.1.0"
+description = "Blazingly fast HTTP route resolution and query string processing"
+readme = "README.md"
+keywords = ["http", "router", "routing", "path", "url"]
+categories = ["web-programming", "network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "routerama_macros::FromQuery",
+    "routerama_macros::ToQuery",
+    "routerama_macros::resolver",
+]
+
+[features]
+default = ["query"]
+query = ["dep:itoa"]
+
+[dependencies]
+http_path_template = { workspace = true }
+itoa = { workspace = true, optional = true }
+routerama_build = { workspace = true, default-features = false }
+routerama_macros = { workspace = true }
+smallvec = { workspace = true }
+
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+# `axum` powers the `web_app` example: it is only the HTTP transport, so
+# `routerama` can do all of the routing from a single fallback handler.
+axum = { workspace = true, features = ["tokio", "http1"] }
+# Do not add actix-router here: its unconditional tracing/log feature changes
+# workspace-wide coverage instrumentation for unrelated telemetry call sites.
+bolero = { workspace = true, features = ["std"] }
+# `std` transitively enables `bolero-engine/any`, which is required
+# because bolero-libfuzzer references `bolero_engine::any::run` but does
+# not itself activate that feature on `bolero-engine`.
+criterion = { workspace = true }
+matchit = { workspace = true }
+mutants = { workspace = true }
+path-tree = { workspace = true }
+regex = { workspace = true, features = ["std", "perf"] }
+route-recognizer = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_html_form = { workspace = true, features = ["de", "ser", "std"] }
+serde_urlencoded = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "criterion_routers"
+harness = false
+
+[[bench]]
+name = "gungraun_routers"
+harness = false
+
+[[bench]]
+name = "routerama_static"
+harness = false
+
+[[bench]]
+name = "routerama_static_cg"
+harness = false
+
+[[bench]]
+name = "routerama_dynamic"
+harness = false
+
+[[bench]]
+name = "routerama_dynamic_cg"
+harness = false
+
+[[bench]]
+name = "routerama_mixed"
+harness = false
+
+[[bench]]
+name = "routerama_mixed_cg"
+harness = false
+
+[[bench]]
+name = "routerama_query"
+harness = false
+required-features = ["query"]
+
+[[bench]]
+name = "routerama_query_cg"
+harness = false
+required-features = ["query"]
+
+[[example]]
+name = "query_strings"
+required-features = ["query"]
+
+[[example]]
+name = "web_app"
+required-features = ["query"]
+
+[[test]]
+name = "query"
+required-features = ["query"]
+
+[[test]]
+name = "query_allocations"
+required-features = ["query"]

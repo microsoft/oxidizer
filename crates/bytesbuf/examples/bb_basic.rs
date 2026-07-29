@@ -35,7 +35,7 @@ fn produce_message(memory: &impl Memory) -> BytesView {
 
     // Each word is just an incrementing binary-serialized number, starting from 0.
     (0..MESSAGE_LEN_WORDS).for_each(|word| {
-        buf.put_num_le(word as u64);
+        buf.put_u64_le(word as u64);
     });
 
     // Creates a BytesView over all the data written into the BytesBuf.
@@ -47,7 +47,7 @@ fn consume_message(mut message: BytesView) {
     let mut sum: u64 = 0;
 
     while !message.is_empty() {
-        let word = message.get_num_le::<u64>();
+        let word = message.get_u64_le();
         sum = sum.saturating_add(word);
     }
 

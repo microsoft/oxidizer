@@ -8,9 +8,9 @@
 //! # Specialization strategy
 //!
 //! `alloc_slice_copy` / `try_alloc_slice_copy` and `alloc_slice_clone` /
-//! `try_alloc_slice_clone` each dispatch into a single
-//! `#[inline(always)]` helper parameterized by `const PANIC: bool`,
-//! exactly like [`super::alloc_value`] and [`super::alloc_str`].
+//! `try_alloc_slice_clone` each dispatch into a shared `#[inline(always)]`
+//! helper. The common reservation path stays inline while refill and oversized
+//! allocation continuations stay out of line.
 
 use core::hint::assert_unchecked;
 use core::mem;
@@ -55,7 +55,6 @@ fn worst_case_slice_payload<T>(len: usize) -> usize {
 /// Rust permits a zero-length slice to alias a well-aligned dangling
 /// pointer.
 #[inline(always)]
-#[allow(clippy::mut_from_ref, reason = "the returned empty slice borrows nothing")]
 fn empty_slice<'a, T>() -> &'a mut [T] {
     // SAFETY: `NonNull::<T>::dangling()` is well-aligned and non-null;
     // an empty `&mut [T]` is well-defined regardless of the pointer
@@ -63,14 +62,8 @@ fn empty_slice<'a, T>() -> &'a mut [T] {
     unsafe { core::slice::from_raw_parts_mut(NonNull::<T>::dangling().as_ptr(), 0) }
 }
 
-/// Optimizer hint: tells codegen that `len` is non-zero. Every caller
-/// guards `len == 0` with an early return first, so this lets LLVM fold
-/// the `size.max(1)` clamp in the reservation probe down to `size`.
+/// Records the caller invariant that `len` is non-zero.
 #[inline(always)]
-// Mutation testing is suppressed: this is purely an optimization hint
-// with no runtime effect. `assert_unchecked(len >= 0)` is vacuously
-// true for `usize` and behaves identically to `len > 0`, so the
-// `>`→`>=` mutant is an equivalent mutant no behavioral test can detect.
 #[cfg_attr(test, mutants::skip)]
 fn assume_nonzero_len(len: usize) {
     // SAFETY: callers handle `len == 0` via an early return before this.
@@ -87,6 +80,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_slice_copy`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_copy([1, 2, 3]);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_copy<T: Copy>(&self, slice: impl AsRef<[T]>) -> Alloc<'_, [T]> {
@@ -99,6 +100,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_copy([2, 4]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[2, 4]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_copy<T: Copy>(&self, slice: impl AsRef<[T]>) -> Result<Alloc<'_, [T]>, AllocError> {
         self.impl_alloc_slice_copy::<T>(slice.as_ref())
@@ -116,6 +127,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// If `f` panics, already-initialized elements are dropped (drop guard) and the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with(3, |i| i * 2);
+    /// assert_eq!(&*value, &[0, 2, 4]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Alloc<'_, [T]> {
@@ -132,6 +151,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// If `f` panics, already-initialized elements are dropped.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Alloc<'_, [T]>, AllocError> {
         self.impl_alloc_slice_fill_with::<T, F>(len, f)
@@ -148,6 +177,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May panic if `T::clone` panics; already-cloned elements are dropped before the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_clone([String::from("a"), String::from("b")]);
+    /// assert_eq!(value[1], "b");
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_clone<T: Clone>(&self, slice: impl AsRef<[T]>) -> Alloc<'_, [T]> {
@@ -165,6 +202,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May panic if a `T::clone` impl panics; already-cloned elements
     /// are dropped before the panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_clone([String::from("x")]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value[0], "x");
+    /// ```
     #[inline]
     pub fn try_alloc_slice_clone<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<Alloc<'_, [T]>, AllocError> {
         self.impl_alloc_slice_clone::<T>(slice.as_ref())
@@ -182,6 +229,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May also panic if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_iter([1, 2, 3]);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_fill_iter<T, I>(&self, iter: I) -> Alloc<'_, [T]>
@@ -203,6 +258,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_iter([3, 2, 1]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[3, 2, 1]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_iter<T, I>(&self, iter: I) -> Result<Alloc<'_, [T]>, AllocError>
     where
@@ -223,14 +288,8 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(unsafe { Alloc::from_mut(slot) })
     }
 
-    /// Closure-free fast path for `alloc_slice_copy` / `try_alloc_slice_copy`.
-    /// Because `T: Copy` implies `!Drop`, this never reserves a drop
-    /// entry; the body monomorphizes to a single bump + memcpy + retry
-    /// loop with the `PANIC` arm folded to either `panic_alloc!()` or `?`.
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_copy"
-    )]
+    /// Raw allocation path shared by `alloc_slice_copy` and
+    /// `try_alloc_slice_copy`. `T: Copy` requires no drop entry.
     #[inline(always)]
     fn alloc_slice_copy_raw<T: Copy>(&self, src: &[T]) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
@@ -238,13 +297,8 @@ impl<A: Allocator + Clone> Arena<A> {
         if len == 0 {
             return Ok(empty_slice::<T>());
         }
-        // `len == 0` was handled above; hint the optimizer so the
-        // `size.max(1)` clamp in `try_alloc`'s probe folds to `size`.
         assume_nonzero_len(len);
-        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
-        // `usize`. Hoisting the precomputed byte size lets the inner
-        // reservation helper skip the `checked_mul` overflow guard,
-        // removing a `shr/jne` pair from the bump-copy loop.
+        // A live slice has a representable byte size.
         let size = mem::size_of_val(src);
         loop {
             if let Some(u) = self.try_reserve_local_slice_with_size::<T>(len, size) {
@@ -256,22 +310,12 @@ impl<A: Allocator + Clone> Arena<A> {
         }
     }
 
-    /// Cold fall-back for [`Self::alloc_slice_copy_raw`]: either refills
-    /// the current chunk (return `Ok(None)` so the caller retries)
-    /// or returns the slice from a dedicated oversized chunk
-    /// (`Ok(Some(_))`). `refill_hint` is computed here so the hot loop
-    /// in the caller doesn't keep it live across iterations.
+    /// Refills the current chunk and returns `Ok(None)` for a retry, or
+    /// returns a slice allocated from a dedicated oversized chunk.
     #[cold]
     #[inline(never)]
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
-    )]
-    // Mutation testing is suppressed: the whole-body `-> Ok(None)`
-    // replacement drops the refill side effect, so the caller's
-    // reserve→refill retry loop spins forever (the suite hangs rather
-    // than fails). The `Ok(None)` return is the correct "refilled,
-    // please retry" signal.
+    // Skipped because removing the refill side effect makes the caller's retry
+    // loop infinite.
     #[cfg_attr(test, mutants::skip)]
     fn refill_or_alloc_oversized_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let refill_hint = worst_case_slice_payload::<T>(src.len());
@@ -282,13 +326,10 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(None)
     }
 
-    /// Cold oversized-fallback for [`Self::alloc_slice_copy_raw`].
-    /// Kept out-of-line so the hot loop doesn't keep `src`/`len`
-    /// addressable for a captured-by-move closure environment (see the
-    /// rationale on [`Self::alloc_oversized_value_with`]).
+    /// Out-of-line oversized fallback for [`Self::alloc_slice_copy_raw`].
     #[cold]
     #[inline(never)]
-    #[allow(
+    #[expect(
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
     )]
@@ -316,10 +357,6 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Closure-free fast path for `alloc_slice_clone` /
     /// `try_alloc_slice_clone`. `PANIC` monomorphizes the error arm.
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_clone"
-    )]
     #[inline(always)]
     fn alloc_slice_clone_raw<T: Clone>(&self, src: &[T]) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
@@ -347,13 +384,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// behind the split.
     #[cold]
     #[inline(never)]
-    #[allow(
+    #[expect(
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
     )]
-    // Mutation testing is suppressed: see
-    // `refill_or_alloc_oversized_slice_copy` — `-> Ok(None)` spins the
-    // caller's retry loop forever.
+    // Skipped because returning without refilling makes the retry loop infinite.
     #[cfg_attr(test, mutants::skip)]
     fn refill_or_alloc_oversized_slice_clone<T: Clone>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let len = src.len();
@@ -385,13 +420,8 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Closure-bearing fast path for `alloc_slice_fill_with` /
-    /// `try_alloc_slice_fill_with`. `f` is only invoked on the success
-    /// arms that `return`, so it stays live across the refill loop
-    /// without an `Option<F>` wrapper.
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_with"
-    )]
+    /// `try_alloc_slice_fill_with`. Keeping the refill continuation out of
+    /// line avoids materializing closure state on the common path.
     #[inline(always)]
     fn alloc_slice_fill_with_raw<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
@@ -401,6 +431,23 @@ impl<A: Allocator + Clone> Arena<A> {
         // See `alloc_slice_copy_raw`.
         assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
+        if let Some(u) = self.try_reserve_local_slice::<T>(len) {
+            return Ok(u.init_with(f));
+        }
+        self.alloc_slice_fill_with_refill(len, refill_hint, f)
+    }
+
+    /// Cold refill path for [`Self::alloc_slice_fill_with_raw`].
+    #[cold]
+    #[inline(never)]
+    #[expect(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_with"
+    )]
+    // Skipped because removing the refill side effect makes the retry loop
+    // infinite.
+    #[cfg_attr(test, mutants::skip)]
+    fn alloc_slice_fill_with_refill<T, F: FnMut(usize) -> T>(&self, len: usize, refill_hint: usize, f: F) -> Result<&mut [T], AllocError> {
         let mut f = Some(f);
         loop {
             if let Some(u) = self.try_reserve_local_slice::<T>(len) {
@@ -436,14 +483,9 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Iterator-bearing fast path for `alloc_slice_fill_iter` /
     /// `try_alloc_slice_fill_iter`. The iterator length is sampled once
-    /// via [`ExactSizeIterator::len`] before reservation; the same
-    /// `const PANIC` monomorphization pattern applies as in
-    /// [`Self::alloc_slice_fill_with_raw`]. The iterator is consumed
-    /// only on the success arms that `return`.
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_iter"
-    )]
+    /// via [`ExactSizeIterator::len`] before reservation. Keeping the refill
+    /// continuation out of line avoids materializing iterator state on the
+    /// common path. The iterator is consumed only on success arms that return.
     #[inline(always)]
     fn alloc_slice_fill_iter_raw<T, I: ExactSizeIterator<Item = T>>(&self, iter: I) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
@@ -458,24 +500,58 @@ impl<A: Allocator + Clone> Arena<A> {
         // See `alloc_slice_copy_raw`.
         assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
-        let mut iter = Some(iter);
+        if let Some(u) = self.try_reserve_local_slice::<T>(len) {
+            return Ok(u.init_from_iter(iter));
+        }
+        self.alloc_slice_fill_iter_refill(len, refill_hint, iter)
+    }
+
+    /// Cold refill path for [`Self::alloc_slice_fill_iter_raw`].
+    #[cold]
+    #[inline(never)]
+    #[expect(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_slice_fill_iter"
+    )]
+    // Skipped because removing the refill side effect makes the retry loop
+    // infinite.
+    #[cfg_attr(test, mutants::skip)]
+    fn alloc_slice_fill_iter_refill<T, I: Iterator<Item = T>>(
+        &self,
+        len: usize,
+        refill_hint: usize,
+        iter: I,
+    ) -> Result<&mut [T], AllocError> {
         loop {
             if let Some(u) = self.try_reserve_local_slice::<T>(len) {
-                let it = iter.take().expect("iterator taken twice");
-                return Ok(u.init_from_iter(it));
+                return Ok(u.init_from_iter(iter));
             }
             if self.is_oversized(refill_hint) {
-                let it = iter.take().expect("iterator taken twice");
                 let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
                     let ticket = mutator
                         .try_alloc_uninit_slice::<T>(len)
                         .expect("dedicated oversized chunk sized to fit slice");
-                    ticket.init_from_iter_ptr(it)
+                    ticket.init_from_iter_ptr(iter)
                 })?;
                 // SAFETY: chunk retained in `retired_local` for `&self`.
                 return Ok(unsafe { ptr.as_mut() });
             }
             self.refill(refill_hint)?;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Arena;
+
+    #[test]
+    fn fill_iter_raw_uses_existing_chunk() {
+        let arena = Arena::new();
+        let _prime = arena.alloc(0_u8);
+
+        let slice = arena.alloc_slice_fill_iter_raw([1_u8, 2, 3].into_iter()).unwrap();
+
+        assert_eq!(slice, [1, 2, 3]);
     }
 }

@@ -28,6 +28,16 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Because the replacement is inserted lazily when the returned [`Splice`]
     /// is dropped, that drop also panics if the backing allocator fails while
     /// growing the vector to hold the replacement elements.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2, 3]);
+    /// let removed: std::vec::Vec<_> = values.splice(1..2, [4, 5]).collect();
+    /// assert_eq!(removed, [2]);
+    /// assert_eq!(values.as_slice(), &[1, 4, 5, 3]);
+    /// ```
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, 'a, I::IntoIter, A>
     where
         R: RangeBounds<usize>,
@@ -44,6 +54,16 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
 ///
 /// Yields the removed elements (double-ended). The replacement is inserted
 /// when this iterator is dropped.
+/// ```
+/// use multitude::Arena;
+/// use multitude::vec::Splice;
+///
+/// let arena = Arena::new();
+/// let mut values = arena.alloc_vec();
+/// values.extend_from_slice([1, 2]);
+/// let mut splice: Splice<'_, '_, _, _> = values.splice(..1, [3]);
+/// assert_eq!(splice.next(), Some(1));
+/// ```
 pub struct Splice<'d, 'a, I: Iterator, A: Allocator + Clone> {
     drain: super::Drain<'d, 'a, I::Item, A>,
     replace_with: I,

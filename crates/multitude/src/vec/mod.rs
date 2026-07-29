@@ -1,7 +1,40 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Arena-backed growable vectors and the `vec!` macro.
+//! Arena-backed growable vectors and the [`vec!`](macro@vec) macro.
+//!
+//! [`Vec`] provides the familiar growable-array operations while obtaining its
+//! storage from an [`Arena`]. Create one with [`Arena::alloc_vec`], collect an
+//! iterator with [`CollectIn`], or use [`vec!`](macro@vec). The vector borrows
+//! its arena, so it cannot outlive the arena or overlap a mutable arena reset.
+//!
+//! Growth first attempts to extend the most recent bump allocation in place.
+//! Otherwise it reserves a larger arena region and moves live elements there;
+//! the abandoned region is reclaimed with its chunk or when the arena is
+//! reset. Consuming freeze operations can turn eligible buffers into
+//! [`crate::Box`], [`crate::Rc`], or [`crate::Arc`] slices without copying.
+//! Element destructors still run when the vector or its consuming iterator is
+//! dropped.
+//!
+//! Capacity growth can panic when allocation fails. Fallible `try_*` methods
+//! return [`crate::AllocError`] and preserve the documented state of their
+//! inputs. Indexing, insertion, draining, and splicing use byte-for-byte
+//! `std::vec::Vec`-style bounds behavior.
+//!
+//! # Example
+//!
+//! ```
+//! use multitude::Arena;
+//! use multitude::vec::{CollectIn as _, Vec};
+//!
+//! let arena = Arena::new();
+//! let mut values = multitude::vec::vec![in &arena; 1, 2, 3];
+//! values.push(4);
+//! assert_eq!(values.as_slice(), &[1, 2, 3, 4]);
+//!
+//! let squares: Vec<i32> = (1..=3).map(|value| value * value).collect_in(&arena);
+//! assert_eq!(squares.as_slice(), &[1, 4, 9]);
+//! ```
 
 use core::marker::PhantomData;
 use core::mem;
@@ -175,23 +208,12 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     }
 }
 
-// `Vec`'s `Drop` runs the live elements' destructors, then hands the
-// now-dead storage back to the chunk's bump cursor (a LIFO reclaim) when
-// this buffer is still the chunk's last allocation.
 impl<T, A: Allocator + Clone> Drop for Vec<'_, T, A> {
     #[inline]
     fn drop(&mut self) {
-        // Drop the live elements *first*, while the storage is still
-        // reserved: any reentrant arena allocation performed by an
-        // element's own `Drop` then lands beyond this buffer rather than
-        // over the elements being dropped. Only afterwards do we reclaim
-        // the (now-dead) storage, returning it to the bump cursor so
-        // later allocations can reuse it instead of waiting for arena
-        // teardown. The reclaim is a no-op when the buffer has been
-        // overtaken by a later allocation, sits in a retired or oversized
-        // chunk, or is a ZST (the cursor-equality guard in
-        // `try_reclaim_tail` fails). The `buf` field's own `Drop` runs
-        // after this body and re-truncates an already-empty buffer.
+        // Drop elements before reclaiming storage so reentrant allocations
+        // cannot overwrite elements still being dropped. Reclaim succeeds only
+        // while this buffer remains at the current chunk's cursor.
         self.buf.truncate(0);
         let _ = self.reclaim_capacity_tail(0);
     }

@@ -1,24 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Consolidated bolero property tests (lifecycle + panic safety).
+//! Lifecycle and panic-safety property tests.
 //!
-//! The whole file is gated out of Miri because:
-//!  * `bolero::check!` corpus replay needs filesystem isolation that
-//!    Miri does not provide;
-//!  * even the four `#[cfg_attr(miri, ignore)]` tests would otherwise
-//!    pull `bolero`, `bolero-engine`, and their generated `TypeGenerator`
-//!    code through Miri's MIR translation, which is the dominant cost
-//!    when the tests themselves are skipped.
-//!
-//! The unsafe lifecycle/drop paths exercised here are independently
-//! covered under Miri by `arena_arc.rs`, `arena_box.rs`,
-//! `arena_string.rs`, `arena_vec.rs`, and `drop_reentrancy.rs`.
+//! Miri excludes this binary because Bolero corpus replay requires filesystem
+//! access; dedicated tests cover the underlying unsafe paths under Miri.
 #![cfg(not(miri))]
 
 mod common;
 
-// === lifecycle property tests ===
 mod bolero_lifecycle {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::std_instead_of_alloc, reason = "test code uses std")]
@@ -43,7 +33,7 @@ mod bolero_lifecycle {
     use bolero::TypeGenerator;
     use multitude::{Arc, Arena, Box as ArenaBox};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     /// Counter shared between the test driver and every [`Tracker`].
@@ -551,9 +541,9 @@ mod bolero_lifecycle {
         }
     }
 
-    fn make_str(len: usize) -> std::string::String {
+    fn make_str(len: usize) -> String {
         let len = len.min(1024);
-        let mut s = std::string::String::with_capacity(len);
+        let mut s = String::with_capacity(len);
         for i in 0..len {
             s.push(char::from(b'a' + ((i % 26) as u8)));
         }
@@ -627,7 +617,6 @@ mod bolero_lifecycle {
     }
 }
 
-// === panic safety property tests ===
 mod bolero_panic_safety {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::std_instead_of_alloc, reason = "test code uses std")]
@@ -646,7 +635,7 @@ mod bolero_panic_safety {
     use bolero::TypeGenerator;
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     type Counter = StdArc<AtomicUsize>;
@@ -770,7 +759,7 @@ mod bolero_panic_safety {
                         payload,
                         armed: false,
                     };
-                    let src: std::vec::Vec<ClonePanicTracker> = (0..n).map(|_| seed.unarmed_dup()).collect();
+                    let src: Vec<ClonePanicTracker> = (0..n).map(|_| seed.unarmed_dup()).collect();
                     let baseline_created = created.load(Ordering::Relaxed);
                     let baseline_dropped = dropped.load(Ordering::Relaxed);
                     let result = catch_unwind(AssertUnwindSafe(|| {

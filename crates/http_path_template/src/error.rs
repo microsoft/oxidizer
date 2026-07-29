@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use core::fmt;
+#[cfg(feature = "std")]
 use std::backtrace::{Backtrace, BacktraceStatus};
 
 /// The specific structural failure behind a [`ParseError`]. Kept crate-internal;
@@ -20,15 +21,14 @@ pub(crate) enum ParseErrorKind {
     EmptyFieldPath,
     /// A field-path identifier was empty or contained invalid characters.
     InvalidFieldName,
-    /// A literal segment contained a misplaced `*` (`*`/`**` are only valid as
-    /// whole segments).
+    /// A literal contained a character outside the URI path-segment grammar, a
+    /// malformed percent escape, or a misplaced `*`.
     InvalidLiteral,
     /// A `**` appeared somewhere other than the final position.
     RestNotLast,
     /// A `:` verb separator was present but the verb was empty.
     EmptyVerb,
-    /// A `:` verb contained a `/`, `*`, `{`, or `}` (a verb must be a single
-    /// trailing literal).
+    /// A `:` verb was not a valid path-template literal.
     InvalidVerb,
     /// More than one top-level `:` verb separator was present.
     MultipleVerbs,
@@ -43,10 +43,10 @@ impl ParseErrorKind {
             Self::NestedVariable => "variable sub-templates may not contain nested variables",
             Self::EmptyFieldPath => "variable has an empty field path",
             Self::InvalidFieldName => "variable field path contains an invalid identifier",
-            Self::InvalidLiteral => "literal segment contains a misplaced '*'",
+            Self::InvalidLiteral => "literal contains an invalid character or percent escape",
             Self::RestNotLast => "'**' may only appear as the final segment",
             Self::EmptyVerb => "custom verb after ':' is empty",
-            Self::InvalidVerb => "custom verb after ':' must be a literal (no '/', '*', '{', or '}')",
+            Self::InvalidVerb => "custom verb after ':' is not a valid path-template literal",
             Self::MultipleVerbs => "template contains more than one ':' verb separator",
         }
     }
@@ -54,17 +54,20 @@ impl ParseErrorKind {
 
 /// A lazily-allocated backtrace for a [`ParseError`].
 ///
-/// A [`Backtrace`] is only allocated (boxed) when it is actually *captured* —
-/// i.e. when `RUST_BACKTRACE` (or `RUST_LIB_BACKTRACE`) is enabled. In the common
-/// case where backtraces are disabled, `Backtrace::capture()` returns a disabled
-/// backtrace that carries no data, so we store [`MaybeBacktrace::Disabled`] and
-/// avoid a heap allocation entirely. This keeps the error path allocation-free by
-/// default while still surfacing a full backtrace in `Debug` when enabled.
+/// A `std::backtrace::Backtrace` is only allocated (boxed) when it
+/// is actually *captured* — i.e. when `RUST_BACKTRACE` (or `RUST_LIB_BACKTRACE`)
+/// is enabled. In the common case where backtraces are disabled,
+/// `Backtrace::capture()` returns a disabled backtrace that carries no data, so
+/// we store [`MaybeBacktrace::Disabled`] and avoid a heap allocation entirely.
+/// This keeps the error path allocation-free by default while still surfacing a
+/// full backtrace in `Debug` when enabled. Without the `std` feature no backtrace
+/// is captured at all.
 #[derive(Debug)]
 enum MaybeBacktrace {
     /// A captured backtrace, boxed to keep [`ParseError`] small. Only produced
     /// when backtrace capture is enabled.
-    Captured(#[expect(dead_code, reason = "captured for Debug output and RUST_BACKTRACE diagnostics")] Box<Backtrace>),
+    #[cfg(feature = "std")]
+    Captured(#[expect(dead_code, reason = "captured for Debug output and RUST_BACKTRACE diagnostics")] alloc::boxed::Box<Backtrace>),
     /// Backtrace capture was disabled or unsupported, so no allocation was made.
     Disabled,
 }
@@ -72,13 +75,22 @@ enum MaybeBacktrace {
 impl MaybeBacktrace {
     /// Captures a backtrace, allocating only if capture is actually enabled.
     fn capture() -> Self {
-        Self::from_backtrace(Backtrace::capture())
+        #[cfg(feature = "std")]
+        {
+            Self::from_backtrace(Backtrace::capture())
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            Self::Disabled
+        }
     }
 
-    /// Wraps a [`Backtrace`], boxing it only when it actually captured frames.
+    /// Wraps a `std::backtrace::Backtrace`, boxing it only when it
+    /// actually captured frames.
+    #[cfg(feature = "std")]
     fn from_backtrace(backtrace: Backtrace) -> Self {
         match backtrace.status() {
-            BacktraceStatus::Captured => Self::Captured(Box::new(backtrace)),
+            BacktraceStatus::Captured => Self::Captured(alloc::boxed::Box::new(backtrace)),
             // `Disabled`/`Unsupported` backtraces hold no frames, so there is
             // nothing worth allocating for.
             _ => Self::Disabled,
@@ -88,7 +100,7 @@ impl MaybeBacktrace {
     /// Unconditionally captures a backtrace, ignoring the `RUST_BACKTRACE`
     /// setting. Used only in tests to exercise the [`MaybeBacktrace::Captured`]
     /// path regardless of the environment.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     fn force_capture() -> Self {
         Self::from_backtrace(Backtrace::force_capture())
     }
@@ -168,7 +180,8 @@ impl ParseError {
         matches!(self.kind, ParseErrorKind::InvalidFieldName)
     }
 
-    /// Whether a literal segment contained a misplaced `*`.
+    /// Whether a literal contained an invalid character, malformed percent
+    /// escape, or misplaced `*`.
     #[must_use]
     pub const fn is_invalid_literal(&self) -> bool {
         matches!(self.kind, ParseErrorKind::InvalidLiteral)
@@ -186,7 +199,7 @@ impl ParseError {
         matches!(self.kind, ParseErrorKind::EmptyVerb)
     }
 
-    /// Whether a `:` verb contained a disallowed character (`/`, `*`, `{`, `}`).
+    /// Whether a `:` verb was not a valid path-template literal.
     #[must_use]
     pub const fn is_invalid_verb(&self) -> bool {
         matches!(self.kind, ParseErrorKind::InvalidVerb)
@@ -205,9 +218,9 @@ impl fmt::Display for ParseError {
     }
 }
 
-impl std::error::Error for ParseError {}
+impl core::error::Error for ParseError {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
 
@@ -217,6 +230,8 @@ mod tests {
         ignore = "Debug-formatting a captured Backtrace symbolicates frames via getcwd, unsupported under Miri isolation"
     )]
     fn force_capture_produces_a_captured_backtrace() {
+        use alloc::format;
+
         // `force_capture` ignores `RUST_BACKTRACE`, so this exercises the
         // `Captured` arm even when backtraces are disabled in the environment.
         let backtrace = MaybeBacktrace::force_capture();

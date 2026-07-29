@@ -23,7 +23,8 @@ use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 /// # Example
 ///
 /// ```
-/// # #[cfg(feature = "utf16")] {
+/// # #[cfg(feature = "utf16")]
+/// # fn main() {
 /// use multitude::Arena;
 /// use widestring::utf16str;
 ///
@@ -35,6 +36,8 @@ use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 /// let frozen = s.into_boxed_utf16_str();
 /// assert_eq!(&*frozen, utf16str!("hello, world!"));
 /// # }
+/// # #[cfg(not(feature = "utf16"))]
+/// # fn main() {}
 /// ```
 pub struct Utf16String<'a, A: Allocator + Clone = Global> {
     inner: Vec<'a, u16, A>,
@@ -43,6 +46,20 @@ pub struct Utf16String<'a, A: Allocator + Clone = Global> {
 impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Borrow as `&Utf16Str`.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello"));
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn as_utf16_str(&self) -> &Utf16Str {
         // SAFETY: the only way `u16`s enter `self.inner` is via push paths
         // that append well-formed UTF-16 code unit sequences (either
@@ -53,12 +70,42 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Return the `u16` slice view.
     #[must_use]
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("A🦀"));
+    /// assert_eq!(value.as_slice(), utf16str!("A🦀").as_slice());
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn as_slice(&self) -> &[u16] {
         self.inner.as_slice()
     }
 
     /// Return a mutable `Utf16Str` view of this string.
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("rust"));
+    /// // SAFETY: replacing ASCII with ASCII preserves valid UTF-16.
+    /// unsafe { value.as_mut_utf16_str().as_mut_slice()[0] = b'R' as u16 };
+    /// assert_eq!(value.as_utf16_str(), utf16str!("Rust"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn as_mut_utf16_str(&mut self) -> &mut Utf16Str {
         // SAFETY: same UTF-16 well-formedness invariant as `as_utf16_str`.
         unsafe { Utf16Str::from_slice_unchecked_mut(self.inner.as_mut_slice()) }
@@ -66,7 +113,20 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
 
     /// Construct an `Utf16String` containing `s`, copied into `arena`.
     #[must_use]
-    pub fn from_utf16_str_in(s: &Utf16Str, arena: &'a Arena<A>) -> Self {
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let value = multitude::strings::Utf16String::from_utf16_str_in(utf16str!("hello"), &arena);
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn from_utf16_str_in(s: impl AsRef<Utf16Str>, arena: &'a Arena<A>) -> Self {
         Self::try_from_utf16_str_in(s, arena).expect_alloc()
     }
 
@@ -75,7 +135,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails.
-    pub fn try_from_utf16_str_in(s: &Utf16Str, arena: &'a Arena<A>) -> Result<Self, AllocError> {
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let value = multitude::strings::Utf16String::try_from_utf16_str_in(utf16str!("hello"), &arena)?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn try_from_utf16_str_in(s: impl AsRef<Utf16Str>, arena: &'a Arena<A>) -> Result<Self, AllocError> {
+        let s = s.as_ref();
         let mut out = Self::try_with_capacity_in(s.len(), arena)?;
         out.try_push_str(s)?;
         Ok(out)
@@ -91,6 +166,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 
     /// Remove the last character from the string and return it.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("a🦀"));
+    /// assert_eq!(value.pop(), Some('🦀'));
+    /// assert_eq!(value.as_utf16_str(), utf16str!("a"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn pop(&mut self) -> Option<char> {
         let ch = self.as_utf16_str().chars().next_back()?;
         let new_len = self.len() - ch.len_utf16();
@@ -104,6 +194,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `new_len` is not on a UTF-16 character boundary
     /// (i.e., it would split a surrogate pair).
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello"));
+    /// value.truncate(2);
+    /// assert_eq!(value.as_utf16_str(), utf16str!("he"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn truncate(&mut self, new_len: usize) {
         if new_len >= self.len() {
             return;
@@ -117,6 +222,20 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
 
     /// Append a single character.
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push('🦀');
+    /// assert_eq!(value.as_utf16_str(), utf16str!("🦀"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn push(&mut self, ch: char) {
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
@@ -129,6 +248,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth.
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.try_push('🦀')?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("🦀"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
@@ -137,6 +271,20 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
 
     /// Append a `Utf16Str`-like value.
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello"));
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn push_str(&mut self, s: impl AsRef<Utf16Str>) {
         self.inner.extend_from_slice(s.as_ref().as_slice());
     }
@@ -147,16 +295,45 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth.
     #[inline(always)]
-    #[allow(
+    #[expect(
         clippy::inline_always,
         reason = "the hot path is bump-then-memcpy; the cold grow branch is `#[inline(never)]` so the inlinable body is small"
     )]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.try_push_str(utf16str!("hello"))?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_push_str(&mut self, s: impl AsRef<Utf16Str>) -> Result<(), AllocError> {
         self.inner.try_extend_from_slice(s.as_ref().as_slice())
     }
 
     /// Append a `&str`-like value, transcoding it to UTF-16.
     #[inline]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_from_str("A🦀");
+    /// assert_eq!(value.as_utf16_str(), utf16str!("A🦀"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn push_from_str(&mut self, s: impl AsRef<str>) {
         let s = s.as_ref();
         self.inner.reserve(s.len());
@@ -172,6 +349,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.try_push_from_str("A🦀")?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("A🦀"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_push_from_str(&mut self, s: impl AsRef<str>) -> Result<(), AllocError> {
         let s = s.as_ref();
         self.inner.try_reserve(s.len())?;
@@ -189,6 +381,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-16
     /// character boundary, or if the backing allocator fails on growth.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("ac"));
+    /// value.insert(1, 'b');
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abc"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn insert(&mut self, idx: usize, ch: char) {
         self.try_insert(idx, ch).expect_alloc();
     }
@@ -203,13 +410,29 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-16
     /// character boundary.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("ac"));
+    /// value.try_insert(1, 'b')?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abc"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
         self.try_insert_units(idx, units)
     }
 
-    /// Insert a `Utf16Str` at element index `idx`.
+    /// Insert a `Utf16Str`-like value at element index `idx`.
     ///
     /// # Panics
     ///
@@ -217,7 +440,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// on a UTF-16 character boundary, if the resulting length would
     /// overflow `usize`, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert_utf16_str`] for a fallible variant.
-    pub fn insert_utf16_str(&mut self, idx: usize, s: &Utf16Str) {
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("ad"));
+    /// value.insert_utf16_str(1, utf16str!("bc"));
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abcd"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn insert_utf16_str(&mut self, idx: usize, s: impl AsRef<Utf16Str>) {
         self.try_insert_utf16_str(idx, s).expect_alloc();
     }
 
@@ -232,8 +470,24 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or if `idx` is not on a
     /// UTF-16 character boundary.
-    pub fn try_insert_utf16_str(&mut self, idx: usize, s: &Utf16Str) -> Result<(), AllocError> {
-        self.try_insert_units(idx, s.as_slice())
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("ad"));
+    /// value.try_insert_utf16_str(1, utf16str!("bc"))?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abcd"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn try_insert_utf16_str(&mut self, idx: usize, s: impl AsRef<Utf16Str>) -> Result<(), AllocError> {
+        self.try_insert_units(idx, s.as_ref().as_slice())
     }
 
     fn try_insert_units(&mut self, idx: usize, units: &[u16]) -> Result<(), AllocError> {
@@ -265,6 +519,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `idx >= self.len()` or `idx` is not on a UTF-16
     /// character boundary.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("a🦀b"));
+    /// assert_eq!(value.remove(1), '🦀');
+    /// assert_eq!(value.as_utf16_str(), utf16str!("ab"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn remove(&mut self, idx: usize) -> char {
         let len = self.inner.len();
         assert!(idx < len, "Utf16String::remove: idx {idx} out of bounds (len = {len})");
@@ -293,10 +562,25 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// characters processed so far are committed (retained ones compacted into
     /// place) and the unprocessed tail is dropped, leaving `self` well-formed
     /// UTF-16. Edits happen in place — no transient allocation.
-    #[allow(
+    #[expect(
         clippy::missing_panics_doc,
         reason = "the internal `.expect` guards a char-boundary invariant (`idx < len`) and is unreachable; closure-panic behaviour is documented under `# Panic safety`"
     )]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("a1b2"));
+    /// value.retain(char::is_alphabetic);
+    /// assert_eq!(value.as_utf16_str(), utf16str!("ab"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn retain<F: FnMut(char) -> bool>(&mut self, mut f: F) {
         struct Guard<'g, 'a, A: Allocator + Clone> {
             inner: &'g mut Vec<'a, u16, A>,
@@ -347,7 +631,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if either bound is out of range, the bounds are not on
     /// UTF-16 character boundaries, the resulting length would overflow
     /// `usize`, or the backing allocator fails on growth.
-    pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &Utf16Str) {
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello world"));
+    /// value.replace_range(6.., utf16str!("Rust"));
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello Rust"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: impl AsRef<Utf16Str>) {
         self.try_replace_range(range, replace_with).expect_alloc();
     }
 
@@ -363,7 +662,23 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if either bound is out of range or the bounds are not on
     /// UTF-16 character boundaries.
-    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &Utf16Str) -> Result<(), AllocError> {
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello world"));
+    /// value.try_replace_range(6.., utf16str!("Rust"))?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("hello Rust"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
+    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: impl AsRef<Utf16Str>) -> Result<(), AllocError> {
         let len = self.len();
         let start = match range.start_bound() {
             Bound::Included(&i) => i,
@@ -386,13 +701,28 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
             s_ref.is_char_boundary(end),
             "Utf16String::replace_range: end is not on a UTF-16 char boundary"
         );
-
+        let replace_with = replace_with.as_ref();
         self.inner.try_replace_range_with_slice(start, end, replace_with.as_slice())
     }
 
     /// Consume the string, returning the underlying `u16` vector. The
     /// `into_bytes` analog for UTF-16.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hi"));
+    /// let units = value.into_vec();
+    /// assert_eq!(units.as_slice(), utf16str!("hi").as_slice());
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn into_vec(self) -> Vec<'a, u16, A> {
         self.inner
     }
@@ -404,6 +734,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// The caller must keep the units well-formed UTF-16 before the borrow
     /// ends; the `Utf16String` invariant is otherwise violated.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("cat"));
+    /// // SAFETY: replacing an ASCII unit preserves valid UTF-16.
+    /// unsafe { value.as_mut_vec().as_mut_slice()[0] = b'b' as u16 };
+    /// assert_eq!(value.as_utf16_str(), utf16str!("bat"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<'a, u16, A> {
         &mut self.inner
     }
@@ -419,6 +765,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// surrogate pair), or is past the end. Use [`Self::try_split_off`] for a
     /// fallible variant.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello"));
+    /// let tail = value.split_off(2);
+    /// assert_eq!(value.as_utf16_str(), utf16str!("he"));
+    /// assert_eq!(tail.as_utf16_str(), utf16str!("llo"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn split_off(&mut self, at: usize) -> Self {
         self.try_split_off(at).expect_alloc()
     }
@@ -434,6 +796,23 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `at` is not on a `char` boundary (i.e. would split a
     /// surrogate pair), or is past the end.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("hello"));
+    /// let tail = value.try_split_off(2)?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("he"));
+    /// assert_eq!(tail.as_utf16_str(), utf16str!("llo"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         assert!(
             self.as_utf16_str().is_char_boundary(at),
@@ -454,6 +833,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if the range is out of bounds or its bounds are not on `char`
     /// boundaries (i.e. would split a surrogate pair). Use
     /// [`Self::try_extend_from_within`] for a fallible variant.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("abc"));
+    /// value.extend_from_within(1..);
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abcbc"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
         self.try_extend_from_within(src).expect_alloc();
     }
@@ -468,6 +862,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if the range is out of bounds or its bounds are not on `char`
     /// boundaries (i.e. would split a surrogate pair).
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("abc"));
+    /// value.try_extend_from_within(..2)?;
+    /// assert_eq!(value.as_utf16_str(), utf16str!("abcab"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) -> Result<(), AllocError> {
         let len = self.inner.len();
         let start = match src.start_bound() {
@@ -488,8 +898,9 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         self.inner.try_extend_from_within(start..end)
     }
 
-    /// Freeze into an owned, mutable
-    /// `Box<Utf16Str>`. [`Box::from`](crate::Box)
+    /// Freeze into an owned, mutable `Box<Utf16Str>`.
+    ///
+    /// [`Box::from`](crate::Box)
     /// is the trait form.
     ///
     /// Generally **O(1)** (reuses the existing storage with no copy), except in
@@ -500,6 +911,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_boxed_utf16_str`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("boxed"));
+    /// let frozen = value.into_boxed_utf16_str();
+    /// assert_eq!(&*frozen, utf16str!("boxed"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn into_boxed_utf16_str(self) -> Box<crate::strings::Utf16Str, A> {
         self.try_into_boxed_utf16_str().expect_alloc()
     }
@@ -509,6 +935,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("boxed"));
+    /// let frozen = value.try_into_boxed_utf16_str()?;
+    /// assert_eq!(&*frozen, utf16str!("boxed"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_into_boxed_utf16_str(self) -> Result<Box<crate::strings::Utf16Str, A>, AllocError> {
         // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
@@ -531,6 +973,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_arc_utf16_str`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("shared"));
+    /// let frozen = value.into_arc_utf16_str();
+    /// assert_eq!(&*frozen, utf16str!("shared"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn into_arc_utf16_str(self) -> Arc<crate::strings::Utf16Str, A>
     where
         A: Send + Sync,
@@ -543,6 +1000,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("shared"));
+    /// let frozen = value.try_into_arc_utf16_str()?;
+    /// assert_eq!(&*frozen, utf16str!("shared"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_into_arc_utf16_str(self) -> Result<Arc<crate::strings::Utf16Str, A>, AllocError>
     where
         A: Send + Sync,
@@ -571,6 +1044,21 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_rc_utf16_str`] for a fallible variant.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("local"));
+    /// let frozen = value.into_rc_utf16_str();
+    /// assert_eq!(&*frozen, utf16str!("local"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn into_rc_utf16_str(self) -> Rc<crate::strings::Utf16Str, A> {
         self.try_into_rc_utf16_str().expect_alloc()
     }
@@ -580,6 +1068,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("local"));
+    /// let frozen = value.try_into_rc_utf16_str()?;
+    /// assert_eq!(&*frozen, utf16str!("local"));
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn try_into_rc_utf16_str(self) -> Result<Rc<crate::strings::Utf16Str, A>, AllocError> {
         // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
@@ -594,8 +1098,9 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         Ok(unsafe { Rc::<crate::strings::Utf16Str, A>::from_raw(units.thin_ptr()) })
     }
 
-    /// Remove the `char`s in the `u16` index range `range`, returning a
-    /// draining iterator over them. The UTF-16 analog of
+    /// Remove and drain the characters in the `u16` index range.
+    ///
+    /// This is the UTF-16 analog of
     /// [`String::drain`](crate::strings::String::drain).
     ///
     /// The drained range is removed immediately; the returned iterator yields
@@ -605,6 +1110,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// Panics if `range`'s bounds are out of range or not on `char`
     /// boundaries (i.e. would split a surrogate pair).
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("a🦀b"));
+    /// let removed: std::string::String = value.drain(1..3).collect();
+    /// assert_eq!(removed, "🦀");
+    /// assert_eq!(value.as_utf16_str(), utf16str!("ab"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Utf16Drain<'_, 'a, A> {
         let len = self.inner.len();
         let start = match range.start_bound() {
@@ -627,11 +1148,29 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         }
     }
 
-    /// Consume the string, returning an arena-lifetime mutable reference
-    /// `&'a mut Utf16Str`. Mirrors [`String::leak`](crate::strings::String::leak).
+    /// Consume the string into an arena-lifetime mutable reference.
+    ///
+    /// This mirrors [`String::leak`](crate::strings::String::leak).
     ///
     /// **O(1) and allocation-free**: reinterprets the existing buffer in place.
     #[must_use]
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # fn main() {
+    /// use multitude::Arena;
+    /// use widestring::utf16str;
+    ///
+    /// let arena = Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push_str(utf16str!("rust"));
+    /// let leaked = value.leak();
+    /// // SAFETY: replacing ASCII with ASCII preserves valid UTF-16.
+    /// unsafe { leaked.as_mut_slice()[0] = b'R' as u16 };
+    /// assert_eq!(leaked, utf16str!("Rust"));
+    /// # }
+    /// # #[cfg(not(feature = "utf16"))]
+    /// # fn main() {}
+    /// ```
     pub fn leak(self) -> &'a mut Utf16Str {
         let units = self.inner.leak();
         // SAFETY: `Utf16String` maintains the well-formed-UTF-16 invariant.
@@ -639,8 +1178,24 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 }
 
-/// Draining iterator over a `u16` index range of a [`Utf16String`], returned
-/// by [`Utf16String::drain`]. Yields the removed [`char`]s (double-ended).
+/// A draining iterator over a [`Utf16String`] range.
+///
+/// Returned by [`Utf16String::drain`], it yields removed [`char`]s from both ends.
+/// ```
+/// # #[cfg(feature = "utf16")]
+/// # fn main() {
+/// use multitude::Arena;
+/// use widestring::utf16str;
+///
+/// let arena = Arena::new();
+/// let mut value = arena.alloc_utf16_string();
+/// value.push_str(utf16str!("abc"));
+/// let mut drain: multitude::strings::Utf16Drain<'_, '_, _> = value.drain(1..);
+/// assert_eq!(drain.next(), Some('b'));
+/// # }
+/// # #[cfg(not(feature = "utf16"))]
+/// # fn main() {}
+/// ```
 pub struct Utf16Drain<'d, 'a, A: Allocator + Clone> {
     inner: crate::vec::Drain<'d, 'a, u16, A>,
 }
@@ -1026,7 +1581,7 @@ impl<'a, 'b, A: Allocator + Clone> FromIn<'a, Cow<'b, Utf16Str>, A> for Utf16Str
     /// Copy a clone-on-write UTF-16 string into the arena.
     #[inline]
     fn from_in(value: Cow<'b, Utf16Str>, arena: &'a Arena<A>) -> Self {
-        Self::from_utf16_str_in(&value, arena)
+        Self::from_utf16_str_in(value, arena)
     }
 }
 

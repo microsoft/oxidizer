@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Criterion wall-clock drop benchmarks for multitude.
+//! Criterion wall-clock clone and drop benchmarks for multitude.
 //!
 //! Mirrors `benches/gungraun_drop.rs` 1:1: each `drop/<variant>` here
 //! corresponds to a gungraun function `drop_<variant>`.
@@ -188,5 +188,48 @@ fn bench_drop(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_drop);
+// =========================================================================
+// clone
+// =========================================================================
+fn bench_clone(c: &mut Criterion) {
+    let mut g = c.benchmark_group("clone");
+
+    g.bench_function("rc_u64", |b| {
+        b.iter_batched(
+            || {
+                let arena = Arena::new();
+                let source = arena.alloc_rc(42_u64);
+                (source, arena, Vec::with_capacity(N))
+            },
+            |(source, arena, mut clones)| {
+                for _ in 0..N {
+                    clones.push(black_box(source.clone()));
+                }
+                (clones, source, arena)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    g.bench_function("arc_u64", |b| {
+        b.iter_batched(
+            || {
+                let arena = Arena::new();
+                let source = arena.alloc_arc(42_u64);
+                (source, arena, Vec::with_capacity(N))
+            },
+            |(source, arena, mut clones)| {
+                for _ in 0..N {
+                    clones.push(black_box(source.clone()));
+                }
+                (clones, source, arena)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    g.finish();
+}
+
+criterion_group!(benches, bench_drop, bench_clone);
 criterion_main!(benches);

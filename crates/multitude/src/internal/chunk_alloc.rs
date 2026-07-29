@@ -23,7 +23,7 @@ use crate::AllocError;
 ///   `Layout::align`; the size is not rounded up to it.
 ///
 /// `base_align >= value_align` and both must be powers of two.
-#[allow(
+#[expect(
     clippy::map_err_ignore,
     reason = "LayoutError carries no payload; only the AllocError variant matters"
 )]

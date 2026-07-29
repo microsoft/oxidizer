@@ -20,8 +20,9 @@
 
 mod common;
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc as StdArc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use common::DropCounter;
 use plurality::Pool;
@@ -64,4 +65,27 @@ fn alloc_uninit_placement() {
     // SAFETY: the value was written just above.
     let a = unsafe { a.assume_init() };
     assert_eq!(*a, 7);
+}
+
+struct PanicOnce(StdArc<AtomicBool>);
+
+impl Drop for PanicOnce {
+    fn drop(&mut self) {
+        // Only the first drop panics, allowing slot reclamation to be checked.
+        let dropped_before = self.0.swap(true, Ordering::SeqCst);
+        assert!(dropped_before, "PanicOnce panics on its first drop");
+    }
+}
+
+#[test]
+fn panicking_destructor_returns_local_slot() {
+    let panicked = StdArc::new(AtomicBool::new(false));
+    let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            drop(pool.alloc(PanicOnce(panicked.clone())));
+        }))
+        .is_err()
+    );
+    drop(pool.alloc(PanicOnce(panicked)));
 }

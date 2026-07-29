@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.png" alt="Recoverable Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Recoverable Logo" width="96">
 
 # Recoverable
 
@@ -8,8 +8,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/recoverable)](https://crates.io/crates/recoverable)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
@@ -83,10 +83,10 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMS43
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMS43
  [__link0]: https://docs.rs/recoverable/0.1.7/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.1.7/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.1.7/recoverable/trait.Recovery.html

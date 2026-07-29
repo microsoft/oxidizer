@@ -119,7 +119,7 @@ impl Strong for AtomicStrong {
     }
 
     #[inline]
-    #[allow(
+    #[expect(
         clippy::cast_ptr_alignment,
         reason = "block_align floors at STRONG_ALIGN, so `base` is aligned for AtomicU32"
     )]

@@ -11,7 +11,7 @@ pub(crate) const MIN_CHUNK_BYTES: usize = 512;
 /// Largest cacheable chunk total allocation size in bytes (header + payload).
 ///
 /// Anything strictly larger is "oversized": sized exactly to fit the request
-/// (plus header and drop-list rounding) and bypasses the cache entirely.
+/// (plus header and alignment rounding) and bypasses the cache entirely.
 pub(in crate::internal) const MAX_CHUNK_BYTES: usize = 65_536;
 
 /// Required alignment for every [`Chunk`](super::chunk::Chunk)
@@ -125,6 +125,13 @@ impl SizeClass {
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)] // unreachable: refcount overflow requires usize::MAX live refs
+#[cfg_attr(
+    not(feature = "std"),
+    allow(
+        clippy::panic,
+        reason = "no_std aborts by panicking during unwinding because process::abort is unavailable"
+    )
+)]
 pub(crate) fn refcount_overflow_abort() -> ! {
     // In tests, panic so overflow guards can be asserted with `#[should_panic]`.
     // Non-test builds abort.
@@ -153,16 +160,12 @@ pub(crate) fn refcount_overflow_abort() -> ! {
 mod tests {
     use super::*;
 
-    // Invokes `max_smart_ptr_align` at runtime (not in a const context)
-    // so coverage instrumentation records its body.
     #[test]
     fn max_smart_ptr_align_is_half_chunk_align() {
         assert_eq!(max_smart_ptr_align(), CHUNK_ALIGN / 2);
     }
 
-    /// `raw()` must return the same byte that was passed to `new()` for every
-    /// valid class — pins the trivial accessor so mutants that hard-code a
-    /// constant (e.g. always-1) are caught.
+    /// `raw()` is the identity for every valid class index.
     #[test]
     fn size_class_raw_round_trips_every_index() {
         for i in 0..NUM_CHUNK_CLASSES {

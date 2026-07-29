@@ -3,18 +3,8 @@
 
 //! Integration test for the `Vec::resize` panic-safety guard.
 //!
-//! This test lives in its own integration-test binary deliberately. It
-//! installs a process-global panic hook (`std::panic::set_hook`) to silence
-//! the default panic logger while it drives an intentional unwind through
-//! `catch_unwind`. The panic hook is process-wide state, so running this test
-//! alongside the ~450 other tests in the shared `arena.rs` binary (which run
-//! in parallel by default) would let the no-op hook suppress panic output from
-//! concurrently panicking tests, and the `take_hook`/`set_hook` save-restore
-//! could race with a hook installed by another test.
-//!
-//! Isolating the test in a single-test binary confines the global panic-hook
-//! mutation, mirroring the precedent in `crates/cachet/tests/eviction.rs` and
-//! `crates/cachet/tests/no_subscriber.rs`.
+//! The separate test binary isolates its process-global panic hook from
+//! concurrently panicking tests.
 
 #![allow(clippy::std_instead_of_core, reason = "test code")]
 #![allow(clippy::unwrap_used, reason = "test code")]
@@ -44,9 +34,7 @@ fn resize_guard_drop_uses_subtraction() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         let arena = Arena::new();
         let mut v: multitude::vec::Vec<'_, Ctor> = arena.alloc_vec();
-        // Start from EMPTY vec so old_len == 0 ⇒ mutated `/ 0` div-by-zero.
-        // Resize to 3: clones template twice, then moves template into last slot.
-        // We make the SECOND clone panic.
+        // Panic on the second clone while resizing an empty vector.
         let template = Ctor(counter.clone(), 2);
         v.resize(3, template);
     }));
@@ -58,14 +46,5 @@ fn resize_guard_drop_uses_subtraction() {
         .cloned()
         .or_else(|| payload.downcast_ref::<&'static str>().map(std::string::ToString::to_string))
         .unwrap_or_default();
-    // Original: panic payload contains "planned clone panic".
-    // Mutated (`/`): the Guard drop triggers div-by-zero, aborting the
-    // process before catch_unwind sees a payload — process aborts.
-    // If we reach this assertion, the test ran without abort; the
-    // payload string must be the *planted* one. The mutated version
-    // would either abort or surface a divide-by-zero panic.
-    assert!(
-        s.contains("planned clone panic"),
-        "unexpected panic payload: {s:?} (mutated `/ 0` in Guard::drop would surface as divide-by-zero)"
-    );
+    assert!(s.contains("planned clone panic"), "unexpected panic payload: {s:?}");
 }

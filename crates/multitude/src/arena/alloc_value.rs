@@ -67,6 +67,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if  `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_arc(7);
+    /// assert_eq!(*value, 7);
+    /// ```
     #[inline]
     pub fn alloc_arc<T: Send + Sync>(&self, value: T) -> Arc<T, A>
     where
@@ -84,6 +92,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_arc(8) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 8);
+    /// ```
     #[inline]
     pub fn try_alloc_arc<T: Send + Sync>(&self, value: T) -> Result<Arc<T, A>, AllocError>
     where
@@ -94,13 +112,21 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Allocate the result of `f` in a chunk and return an [`Arc`].
     ///
-    /// The returned [`Arc`] is safe for cross-thread sharing. The closure
-    /// constructs the value in place — no stack copy of `T`.
+    /// The returned [`Arc`] is safe for cross-thread sharing. Storage is
+    /// reserved before `f` runs, then its result is moved into that storage.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_arc_with`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_arc_with(|| String::from("arc"));
+    /// assert_eq!(&*value, "arc");
+    /// ```
     #[inline]
     pub fn alloc_arc_with<T: Send + Sync, F: FnOnce() -> T>(&self, f: F) -> Arc<T, A>
     where
@@ -122,6 +148,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// Propagates panics from `f`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_arc_with(|| 9) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 9);
+    /// ```
     #[inline]
     pub fn try_alloc_arc_with<T: Send + Sync, F: FnOnce() -> T>(&self, f: F) -> Result<Arc<T, A>, AllocError>
     where
@@ -130,8 +166,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_smart_prefixed_with::<AtomicStrong, T, F>(f)
     }
 
-    /// Allocate `value` in a chunk and return an [`Rc`] — a non-atomic,
-    /// single-thread reference-counted smart pointer.
+    /// Allocate `value` in a non-atomic, reference-counted [`Rc`].
     ///
     /// Like [`Self::alloc_arc`] but `Rc` is [`!Send`](Send)/[`!Sync`](Sync), so
     /// `T` needs no `Send`/`Sync` bound, clone/drop are cheaper (non-atomic),
@@ -141,6 +176,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_rc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_rc(String::from("local"));
+    /// assert_eq!(&*value, "local");
+    /// ```
     #[inline]
     pub fn alloc_rc<T>(&self, value: T) -> Rc<T, A> {
         self.try_alloc_rc_with::<T, _>(move || value).expect_alloc()
@@ -152,6 +195,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_rc(10) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 10);
+    /// ```
     #[inline]
     pub fn try_alloc_rc<T>(&self, value: T) -> Result<Rc<T, A>, AllocError> {
         self.try_alloc_rc_with::<T, _>(move || value)
@@ -159,12 +212,21 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Allocate the result of `f` in a chunk and return an [`Rc`].
     ///
-    /// See [`Self::alloc_rc`]; the closure constructs the value in place.
+    /// See [`Self::alloc_rc`]. Storage is reserved before `f` runs, then its
+    /// result is moved into that storage.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_rc_with`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_rc_with(|| 11);
+    /// assert_eq!(*value, 11);
+    /// ```
     #[inline]
     pub fn alloc_rc_with<T, F: FnOnce() -> T>(&self, f: F) -> Rc<T, A> {
         self.try_alloc_rc_with::<T, F>(f).expect_alloc()
@@ -180,6 +242,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// Propagates panics from `f`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_rc_with(|| 12) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 12);
+    /// ```
     #[inline]
     pub fn try_alloc_rc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Rc<T, A>, AllocError> {
         self.impl_alloc_smart_prefixed_with::<LocalStrong, T, F>(f)
@@ -193,6 +265,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_box(13);
+    /// assert_eq!(*value, 13);
+    /// ```
     #[inline]
     pub fn alloc_box<T>(&self, value: T) -> Box<T, A> {
         (self.impl_alloc_box_with::<T, _>(move || value)).expect_alloc()
@@ -208,6 +288,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_box(14) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 14);
+    /// ```
     #[inline]
     pub fn try_alloc_box<T>(&self, value: T) -> Result<Box<T, A>, AllocError> {
         self.impl_alloc_box_with::<T, _>(move || value)
@@ -229,6 +319,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `T::drop` does not run on the partially-constructed value. The
     /// reserved bump bytes leak in-chunk until the chunk is reset or
     /// reclaimed; the chunk's refcount is *not* leaked.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_box_with(|| String::from("boxed"));
+    /// assert_eq!(&*value, "boxed");
+    /// ```
     #[inline]
     pub fn alloc_box_with<T, F: FnOnce() -> T>(&self, f: F) -> Box<T, A> {
         (self.impl_alloc_box_with::<T, F>(f)).expect_alloc()
@@ -249,18 +347,35 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Propagates panics from `f`. See
     /// [`alloc_box_with`](Self::alloc_box_with) for closure-panic
     /// reservation/refcount semantics.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_box_with(|| 15) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 15);
+    /// ```
     #[inline]
     pub fn try_alloc_box_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Box<T, A>, AllocError> {
         self.impl_alloc_box_with::<T, F>(f)
     }
 
-    /// Allocate `value` and return a pinned [`Box<T, A>`](crate::Box).
-    /// Mirror of `std::boxed::Box::pin`.
+    /// Allocate `value` in a pinned [`Box<T, A>`](crate::Box).
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_box_pin(16);
+    /// assert_eq!(*value, 16);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_box_pin<T>(&self, value: T) -> Pin<Box<T, A>>
@@ -277,6 +392,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB. The supplied `value` is
     /// dropped on failure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_box_pin(17) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 17);
+    /// ```
     #[inline]
     pub fn try_alloc_box_pin<T>(&self, value: T) -> Result<Pin<Box<T, A>>, AllocError>
     where
@@ -285,15 +410,24 @@ impl<A: Allocator + Clone> Arena<A> {
         self.try_alloc_box(value).map(Box::into_pin)
     }
 
-    /// Allocate the result of `f` in place and return a pinned
-    /// [`Box<T, A>`](crate::Box). The closure may construct `!Unpin`
-    /// types (e.g. self-referential futures) directly into the arena
-    /// without first creating them on the stack.
+    /// Allocate the result of `f` in a pinned [`Box<T, A>`](crate::Box).
+    ///
+    /// The closure returns an ordinary value, which is moved into its final
+    /// allocation before the owner is pinned. This is not a pin-initialization
+    /// protocol and cannot construct self-references to the final address.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_box_pin_with(|| 18);
+    /// assert_eq!(*value, 18);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_box_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Pin<Box<T, A>>
@@ -309,6 +443,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_box_pin_with(|| 19) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 19);
+    /// ```
     #[inline]
     pub fn try_alloc_box_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Pin<Box<T, A>>, AllocError>
     where
@@ -325,13 +469,22 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_arc_pin(20);
+    /// assert_eq!(*value, 20);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_arc_pin<T: Send + Sync>(&self, value: T) -> Pin<Arc<T, A>>
     where
         A: Send + Sync + 'static,
     {
-        Arc::into_pin(self.alloc_arc(value))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_arc(value)) }
     }
 
     /// Fallible variant of [`Self::alloc_arc_pin`].
@@ -341,30 +494,52 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB. The supplied `value` is
     /// dropped on failure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_arc_pin(21) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 21);
+    /// ```
     #[inline]
     pub fn try_alloc_arc_pin<T: Send + Sync>(&self, value: T) -> Result<Pin<Arc<T, A>>, AllocError>
     where
         A: Send + Sync + 'static,
     {
-        self.try_alloc_arc(value).map(Arc::into_pin)
+        self.try_alloc_arc(value).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
-    /// Allocate the result of `f` in place and return a pinned
-    /// [`Arc<T, A>`](crate::Arc). The dominant use case is
-    /// `Arena::alloc_arc_pin_with(|| async move { ... })` for type-
-    /// erased futures shared across threads.
+    /// Allocate the result of `f` in a pinned [`Arc<T, A>`](crate::Arc).
+    ///
+    /// The closure result is moved into its final allocation before pinning;
+    /// this is not a pin-initialization protocol.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_arc_pin_with(|| 22);
+    /// assert_eq!(*value, 22);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_arc_pin_with<T: Send + Sync, F: FnOnce() -> T>(&self, f: F) -> Pin<Arc<T, A>>
     where
         A: Send + Sync + 'static,
     {
-        Arc::into_pin(self.alloc_arc_with(f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Arc::pin_fresh(self.alloc_arc_with(f)) }
     }
 
     /// Fallible variant of [`Self::alloc_arc_pin_with`].
@@ -373,12 +548,25 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_arc_pin_with(|| 23) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 23);
+    /// ```
     #[inline]
     pub fn try_alloc_arc_pin_with<T: Send + Sync, F: FnOnce() -> T>(&self, f: F) -> Result<Pin<Arc<T, A>>, AllocError>
     where
         A: Send + Sync + 'static,
     {
-        self.try_alloc_arc_with(f).map(Arc::into_pin)
+        self.try_alloc_arc_with(f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Arc::pin_fresh(owner) }
+        })
     }
 
     /// Allocate `value` and return a pinned [`Rc<T, A>`](crate::Rc).
@@ -388,13 +576,22 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_rc_pin(24);
+    /// assert_eq!(*value, 24);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_rc_pin<T>(&self, value: T) -> Pin<Rc<T, A>>
     where
         A: 'static,
     {
-        Rc::into_pin(self.alloc_rc(value))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_rc(value)) }
     }
 
     /// Fallible variant of [`Self::alloc_rc_pin`].
@@ -404,28 +601,52 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB. The supplied `value` is
     /// dropped on failure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_rc_pin(25) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 25);
+    /// ```
     #[inline]
     pub fn try_alloc_rc_pin<T>(&self, value: T) -> Result<Pin<Rc<T, A>>, AllocError>
     where
         A: 'static,
     {
-        self.try_alloc_rc(value).map(Rc::into_pin)
+        self.try_alloc_rc(value).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 
-    /// Allocate the result of `f` in place and return a pinned
-    /// [`Rc<T, A>`](crate::Rc).
+    /// Allocate the result of `f` in a pinned [`Rc<T, A>`](crate::Rc).
+    ///
+    /// The closure result is moved into its final allocation before pinning;
+    /// this is not a pin-initialization protocol.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_rc_pin_with(|| 26);
+    /// assert_eq!(*value, 26);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_rc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Pin<Rc<T, A>>
     where
         A: 'static,
     {
-        Rc::into_pin(self.alloc_rc_with(f))
+        // SAFETY: the new owner has not been exposed or cloned.
+        unsafe { Rc::pin_fresh(self.alloc_rc_with(f)) }
     }
 
     /// Fallible variant of [`Self::alloc_rc_pin_with`].
@@ -434,16 +655,30 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_rc_pin_with(|| 27) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 27);
+    /// ```
     #[inline]
     pub fn try_alloc_rc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Pin<Rc<T, A>>, AllocError>
     where
         A: 'static,
     {
-        self.try_alloc_rc_with(f).map(Rc::into_pin)
+        self.try_alloc_rc_with(f).map(|owner| {
+            // SAFETY: the new owner has not been exposed or cloned.
+            unsafe { Rc::pin_fresh(owner) }
+        })
     }
 
-    /// Bump-allocate `value` and return an [`Alloc`] handle whose lifetime is
-    /// tied to `&self`. The cheapest owning allocation multitude offers — no
+    /// Bump-allocate `value` in an arena-lifetime [`Alloc`] handle.
+    ///
+    /// This is the cheapest owning allocation multitude offers — no
     /// refcount, no per-pointer bookkeeping. The borrow checker bounds the
     /// returned handle to the arena's lifetime.
     ///
@@ -490,15 +725,26 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator cannot satisfy
     /// the request.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc(28) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 28);
+    /// ```
     #[inline]
     pub fn try_alloc<T>(&self, value: T) -> Result<Alloc<'_, T>, AllocError> {
         self.impl_alloc_value_with::<T, _>(move || value)
     }
 
-    /// Bump-allocate the result of `f`, constructing it in place in the arena.
+    /// Bump-allocate the result of `f`.
     ///
-    /// Avoids a stack copy of `T`. Returns an [`Alloc`] handle whose lifetime
-    /// is tied to `&self`. See [`Self::alloc`] for full semantics.
+    /// Storage is reserved before `f` runs, then its result is moved into that
+    /// storage. The returned [`Alloc`] handle's lifetime is tied to `&self`.
+    /// See [`Self::alloc`] for full semantics.
     ///
     /// # Panics
     ///
@@ -507,6 +753,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// If `f` panics, the reservation is leaked in-chunk (no refcount bumped)
     /// but the chunk itself reclaims normally.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_with(|| String::from("built by closure"));
+    /// assert_eq!(&*value, "built by closure");
+    /// ```
     #[inline]
     pub fn alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Alloc<'_, T> {
         self.impl_alloc_value_with::<T, F>(f).expect_alloc()
@@ -521,6 +775,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_with(|| 29) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*value, 29);
+    /// ```
     #[inline]
     pub fn try_alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Alloc<'_, T>, AllocError> {
         self.impl_alloc_value_with::<T, F>(f)
@@ -542,19 +806,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Raw scalar allocation returning the bare arena `&mut T` (before adoption
     /// into [`Alloc`]). Split out so the single `Alloc::from_mut` lives in
     /// [`Self::impl_alloc_value_with`].
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_value_with"
-    )]
     #[inline(always)]
     fn alloc_value_with_raw<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
-        // Straight-line fast path: a single in-chunk reservation attempt with
-        // no loop, so the caller's own loop induction variable keeps its tight
-        // register schedule. The refill / oversized retries live in the cold
-        // helper. `f` is moved on exactly one of the two arms.
+        // `f` is moved into exactly one of the in-chunk or fallback paths.
         if let Some(u) = self.try_reserve_local::<T>() {
             return Ok(u.init(f()));
         }
@@ -566,10 +823,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// reservation succeeds or the backing allocator fails.
     #[cold]
     #[inline(never)]
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
-    )]
     fn alloc_value_refill_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         // `f` is only invoked on the success arms that `return`, so it
         // is never moved on the fall-through path.
@@ -585,23 +838,12 @@ impl<A: Allocator + Clone> Arena<A> {
         }
     }
 
-    /// Cold oversized-value fallback for [`Self::impl_alloc_value_with`].
-    ///
-    /// Kept `#[inline(never)]` so the fast-path body stays small
-    /// enough for the public scalar entry points to inline into their
-    /// callers; the bench shows that re-inlining this branch into
-    /// `impl_alloc_value_with` blows `alloc`'s instruction budget past
-    /// the inlining heuristic and turns every call site into a real
-    /// function call.
-    ///
-    /// Closure-free in the user-`f` argument: capturing `f` inside an
-    /// `impl FnOnce` passed to `alloc_oversized_local_with` would force
-    /// `f`'s environment (e.g. `&loop_counter` for a default-by-ref
-    /// capture) into an addressable stack slot, adding a per-iteration
-    /// spill on the hot path even when this cold branch is never taken.
+    /// Out-of-line oversized-value fallback for
+    /// [`Self::impl_alloc_value_with`], retaining the chunk after direct
+    /// initialization.
     #[cold]
     #[inline(never)]
-    #[allow(
+    #[expect(
         clippy::mut_from_ref,
         reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
     )]

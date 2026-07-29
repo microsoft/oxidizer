@@ -1,23 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Regression test for ZST + Drop + `alloc_uninit_arc`: multiple
-//! allocations must each commit their own placeholder rather than
-//! collide on `(value_offset, len)`.
+//! ZST initialization, uniqueness, and pointer-routing invariants.
 use core::cell::Cell;
 
 use multitude::Arena;
 
 thread_local! {
-    /// Per-test drop counter. Each `#[test]` runs on its own `libtest`
-    /// thread and performs all of its ZST drops on that thread, so a
-    /// thread-local counter isolates the tests from one another. A shared
-    /// global `AtomicUsize` here was flaky:
-    /// `zst_alloc_arc_never_returns_one_past_chunk_end` drops 512 markers
-    /// that could race the count asserted by
-    /// `each_zst_uninit_arc_assume_init_commits_its_own_placeholder` under
-    /// parallel execution. `ZstDrop`/`ZstMarker` must stay zero-sized (the
-    /// regression targets ZST + Drop), so the counter cannot live inside them.
+    /// Thread-local state isolates parallel tests while keeping marker types
+    /// zero-sized.
     static DROPS: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -67,7 +58,6 @@ fn each_zst_uninit_arc_assume_init_commits_its_own_placeholder() {
         // SAFETY: same.
         let _i3 = unsafe { a3.assume_init() };
     }
-    // After arena drop, every committed drop entry runs.
     assert_eq!(
         DROPS.with(Cell::get),
         3,
@@ -75,25 +65,11 @@ fn each_zst_uninit_arc_assume_init_commits_its_own_placeholder() {
     );
 }
 
-/// Bug #3: ZST `alloc_arc` at the chunk tail used to return a value
-/// pointer at `chunk_base + CHUNK_ALIGN` for the largest chunk class,
-/// breaking the smart-pointer header-recovery mask on Drop. The fix
-/// in `try_alloc` rejects the alloc when the probe end would equal
-/// `drop_top`, forcing a refill.
-///
-/// To reach the failure mode pre-fix, we'd need a class-7 chunk
-/// allocated and entirely consumed up to `drop_top` by other allocs
-/// before the ZST alloc. We simulate it by allocating ZSTs in a loop
-/// on a chunk repeatedly until refill — every ZST allocation must
-/// produce a pointer whose `& CHUNK_BASE_MASK` recovers the same
-/// chunk header (not the next 64 KiB tile).
+/// Every ZST value pointer remains strictly within its chunk tile so mask-based
+/// header recovery routes to the correct chunk.
 struct ZstMarker;
 impl Drop for ZstMarker {
     fn drop(&mut self) {
-        // Side-effecting Drop so a missed destructor would observably
-        // skew the counter; not strictly required for the
-        // header-recovery aspect, but exercises the same drop entry
-        // path.
         bump_drops();
     }
 }
@@ -103,10 +79,7 @@ const CHUNK_BASE_MASK: usize = !(65_536 - 1);
 #[test]
 fn zst_alloc_arc_never_returns_one_past_chunk_end() {
     let arena = multitude::Arena::new();
-    // Allocate enough ZST Arcs to exercise multiple refills, including
-    // the largest size class. Each ZST Arc's value pointer must lie
-    // strictly inside its 64 KiB tile so the chunk-header mask
-    // recovery in `Arc::Drop` lands on the right chunk.
+    // Every pointer must remain strictly inside its 64 KiB tile.
     let mut prev_base: Option<usize> = None;
     for _ in 0..512 {
         let a = arena.alloc_arc(ZstMarker);
@@ -114,20 +87,13 @@ fn zst_alloc_arc_never_returns_one_past_chunk_end() {
         let base = addr & CHUNK_BASE_MASK;
         let offset = addr - base;
         assert!(offset < 65_536, "ZST Arc value pointer must lie strictly inside its 64 KiB tile");
-        // The chunk may rotate (refill); either way `prev_base` either
-        // equals the new base or points at an unrelated valid chunk —
-        // both fine.
         let _ = prev_base;
         prev_base = Some(base);
     }
 }
 
-/// Regression from post-fix audit: `impl_alloc_dst_box` used to check
-/// `is_oversized(total)` but refill with `total + align`. At
-/// `total == max_normal_alloc` but `total + align > max_normal_alloc`,
-/// the in-arena fast path failed, the oversized branch was skipped,
-/// and `refill_shared(refill_hint)` hit the new `debug_assert!` in
-/// `acquire_shared`.
+/// The DST routing decision includes alignment slack consistently at the
+/// normal-allocation boundary.
 #[cfg(feature = "dst")]
 #[test]
 fn dst_box_at_max_normal_alloc_boundary_routes_consistently() {

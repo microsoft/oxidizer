@@ -49,11 +49,19 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_push`] for a fallible variant.
-    #[allow(
+    #[expect(
         clippy::inline_always,
         reason = "hot path; force-inlining keeps the cap-check + bump + write tight in callers' loops"
     )]
     #[inline(always)]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(7);
+    /// assert_eq!(values.as_slice(), &[7]);
+    /// ```
     pub fn push(&mut self, value: T) {
         if let Err(value) = self.buf.push_within_cap(value) {
             if self.try_grow_one().is_err() {
@@ -70,14 +78,25 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
     #[inline(always)]
-    #[allow(
+    #[expect(
         clippy::inline_always,
         reason = "hot path; mirror of `push` — keep cap-check + bump + write tight in callers' loops"
     )]
-    #[allow(
+    #[expect(
         clippy::missing_panics_doc,
         reason = "fallible API: the internal `.expect` guards capacity just grown above and is unreachable; a `# Panics` section would contradict the `try_` contract"
     )]
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.try_push(7)?;
+    /// assert_eq!(values.as_slice(), &[7]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_push(&mut self, value: T) -> Result<(), AllocError> {
         if let Err(value) = self.buf.push_within_cap(value) {
             self.try_grow_one()?;
@@ -87,6 +106,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     }
 
     /// Pop a value.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(7);
+    /// assert_eq!(values.pop(), Some(7));
+    /// assert_eq!(values.pop(), None);
+    /// ```
     pub fn pop(&mut self) -> Option<T> {
         self.buf.pop()
     }
@@ -98,6 +126,14 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_reserve`] for a fallible variant.
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec::<u8>();
+    /// values.reserve(8);
+    /// assert!(values.capacity() >= 8);
+    /// ```
     pub fn reserve(&mut self, additional: usize) {
         if self.try_reserve(additional).is_err() {
             panic_alloc!();
@@ -111,6 +147,17 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
     #[inline]
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec::<u8>();
+    /// values.try_reserve(8)?;
+    /// assert!(values.capacity() >= 8);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), AllocError> {
         let needed = self.buf.len().checked_add(additional).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         if needed <= self.buf.cap() {
@@ -120,6 +167,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     }
 
     /// Drop all elements but keep the capacity.
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2]);
+    /// values.clear();
+    /// assert!(values.is_empty());
+    /// ```
     pub fn clear(&mut self) {
         self.buf.clear();
     }
@@ -127,6 +183,14 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns the number of elements in the vector.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// assert_eq!(values.len(), 1);
+    /// ```
     pub const fn len(&self) -> usize {
         self.buf.len()
     }
@@ -134,6 +198,15 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns `true` if the vector contains no elements.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// assert!(values.is_empty());
+    /// values.push(1);
+    /// assert!(!values.is_empty());
+    /// ```
     pub const fn is_empty(&self) -> bool {
         self.buf.len() == 0
     }
@@ -141,6 +214,13 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns the total number of elements the vector can hold without reallocating.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let values = arena.alloc_vec_with_capacity::<u8>(8);
+    /// assert!(values.capacity() >= 8);
+    /// ```
     pub const fn capacity(&self) -> usize {
         self.buf.cap()
     }
@@ -148,6 +228,14 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns a slice view of the vector's contents.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2]);
+    /// assert_eq!(values.as_slice(), &[1, 2]);
+    /// ```
     pub fn as_slice(&self) -> &[T] {
         self.buf.as_slice()
     }
@@ -155,19 +243,38 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns a mutable slice view of the vector's contents.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2]);
+    /// values.as_mut_slice().reverse();
+    /// assert_eq!(values.as_slice(), &[2, 1]);
+    /// ```
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         self.buf.as_mut_slice()
     }
 
     /// Appends all elements of `other` to this vector by copying them.
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.extend_from_slice([1, 2, 3]);
+    /// assert_eq!(values.as_slice(), &[1, 2, 3]);
+    /// ```
     pub fn extend_from_slice(&mut self, other: impl AsRef<[T]>)
     where
         T: Copy,
     {
-        if self.try_extend_from_slice(other).is_err() {
-            panic_alloc!();
+        let src = other.as_ref();
+        if extend_needs_growth(self.buf.remaining_cap(), src.len()) {
+            self.extend_from_slice_slow(src.len());
         }
+        self.buf.extend_copy(src);
     }
 
     /// Fallible variant of [`Self::extend_from_slice`].
@@ -177,6 +284,17 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
     #[inline]
+    /// ```
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.try_extend_from_slice([1, 2, 3])?;
+    /// assert_eq!(values.as_slice(), &[1, 2, 3]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn try_extend_from_slice(&mut self, other: impl AsRef<[T]>) -> Result<(), AllocError>
     where
         T: Copy,
@@ -194,11 +312,27 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         Ok(())
     }
 
+    #[cold]
+    #[inline(never)]
+    fn extend_from_slice_slow(&mut self, additional: usize) {
+        if self.try_reserve(additional).is_err() {
+            panic_alloc!();
+        }
+    }
+
     /// Build a `Vec` by collecting `iter` into a fresh vector backed by `arena`.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails on growth.
+    /// ```
+    /// use multitude::Arena;
+    /// use multitude::vec::Vec;
+    ///
+    /// let arena = Arena::new();
+    /// let values = Vec::from_iter_in(1..=3, &arena);
+    /// assert_eq!(values.as_slice(), &[1, 2, 3]);
+    /// ```
     pub fn from_iter_in<I: IntoIterator<Item = T>>(iter: I, arena: &'a Arena<A>) -> Self {
         let iter = iter.into_iter();
         let (lower, _) = iter.size_hint();
@@ -212,6 +346,14 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns a raw pointer to the vector's buffer.
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(9);
+    /// assert_eq!(values.as_ptr(), values.as_slice().as_ptr());
+    /// ```
     pub const fn as_ptr(&self) -> *const T {
         self.buf.as_ptr()
     }
@@ -219,15 +361,35 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns an unsafe mutable pointer to the vector's buffer.
     #[must_use]
     #[inline]
-    #[allow(clippy::needless_pass_by_ref_mut, reason = "API shape mirrors std::Vec::as_mut_ptr")]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec();
+    /// values.push(1);
+    /// // SAFETY: the pointer addresses the initialized first element.
+    /// unsafe { values.as_mut_ptr().write(2) };
+    /// assert_eq!(values.as_slice(), &[2]);
+    /// ```
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         self.buf.as_mut_ptr()
     }
 
-    /// Returns the remaining spare capacity of the vector as a slice of
-    /// `MaybeUninit<T>`. Mirrors [`std::vec::Vec::spare_capacity_mut`].
+    /// Return the vector's spare capacity as `MaybeUninit<T>` elements.
+    ///
+    /// This mirrors [`std::vec::Vec::spare_capacity_mut`].
     #[must_use]
     #[inline]
+    /// ```
+    /// use multitude::Arena;
+    ///
+    /// let arena = Arena::new();
+    /// let mut values = arena.alloc_vec_with_capacity::<u8>(1);
+    /// values.spare_capacity_mut()[0].write(5);
+    /// // SAFETY: the first spare slot was initialized above.
+    /// unsafe { values.set_len(1) };
+    /// assert_eq!(values.as_slice(), &[5]);
+    /// ```
     pub fn spare_capacity_mut(&mut self) -> &mut [core::mem::MaybeUninit<T>] {
         self.buf.spare_capacity_mut()
     }
@@ -250,4 +412,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
 #[inline]
 fn grow_target(cur: usize, needed: usize) -> usize {
     needed.max(4).max(cur.saturating_mul(2))
+}
+
+#[inline]
+#[cfg_attr(test, mutants::skip)] // `<` → `<=` only calls the cold no-op reserve path at exact capacity
+const fn extend_needs_growth(remaining: usize, additional: usize) -> bool {
+    remaining < additional
 }

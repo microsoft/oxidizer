@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 # Entry point for the anvil just recipe tree. The user's root Justfile
 # imports this single file; everything else lives in sibling .just files
 # pulled in here.
@@ -28,10 +30,10 @@
 # recipes that inherit the adopter's default shell — they're
 # shell-agnostic.
 #
-# IMPORTANT: [script(...)] requires `set unstable`. The adopter's
-# root justfile must declare it (typically as a top-level line).
-# anvil's mod.just does NOT redeclare it, to avoid conflicting
-# with adopters who already have it.
+# IMPORTANT: [script(...)] requires `set unstable` with just versions
+# earlier than 1.44. The adopter's root justfile must declare it
+# (typically as a top-level line). anvil's mod.just does NOT redeclare
+# it, to avoid conflicting with adopters who already have it.
 
 import 'helpers.just'
 import 'checks/aprz.just'

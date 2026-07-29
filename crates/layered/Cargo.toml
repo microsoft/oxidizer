@@ -4,7 +4,7 @@
 [package]
 name = "layered"
 description = "Build composable async services with layered middleware."
-version = "0.3.5"
+version = "0.3.6"
 readme = "README.md"
 keywords = ["oxidizer", "service", "middleware", "layer", "compose"]
 categories = ["data-structures"]
@@ -26,11 +26,11 @@ allowed_external_types = ["tower_layer::Layer", "tower_service::Service"]
 [features]
 default = []
 intercept = []
-dynamic-service = ["dep:infinity_pool"]
+dynamic-service = ["dep:plurality"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
-infinity_pool = { workspace = true, optional = true }
+plurality = { workspace = true, optional = true }
 tower-layer = { workspace = true }
 tower-service = { workspace = true, optional = true }
 
@@ -39,7 +39,6 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-infinity_pool = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 static_assertions = { workspace = true }

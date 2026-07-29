@@ -72,7 +72,7 @@ loom FILTER="":
             foreach ($f in $loom_files) {
                 $name = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
                 Write-Host "`n=== Loom: $($package.Name)::$name ===" -ForegroundColor Cyan
-                cargo +$env:RUST_LATEST test --release -p $package.Name --test $name --locked -- --test-threads=1 {{ FILTER }}
+                cargo +$env:RUST_LATEST test --release -p $package.Name --test $name --features loom --locked -- --test-threads=1 {{ FILTER }}
             }
         }
     } finally {

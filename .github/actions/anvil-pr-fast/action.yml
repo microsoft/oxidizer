@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 # The token pr-fast is substituted by cargo-anvil at emit time with
 # the concrete check-group name (pr-fast, pr-test, scheduled-runtime-analysis, ...).
 name: anvil-pr-fast
@@ -28,12 +30,17 @@ inputs:
       (affected ∪ workspace-internal transitive deps).
     default: ""
     required: false
+  free-disk-space:
+    description: Remove unused toolchains from GitHub-hosted runners before setup.
+    default: "false"
+    required: false
 runs:
   using: composite
   steps:
     - uses: ./.github/actions/anvil-setup
       with:
         group: pr-fast
+        free-disk-space: ${{ inputs.free-disk-space }}
     - name: Run just anvil-pr-fast
       shell: bash
       env:

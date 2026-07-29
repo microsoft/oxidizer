@@ -1,12 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(
-    clippy::type_repetition_in_bounds,
-    clippy::cast_sign_loss,
-    reason = "trait-impl `where` clauses are kept uniform across all forwarding impls; numeric casts are bounded by upstream `usize` checks documented at call sites"
-)]
-
 use core::borrow::BorrowMut;
 use core::iter::FusedIterator;
 use core::marker::PhantomData;
@@ -22,8 +16,7 @@ use crate::internal::chunk_ref::ChunkRef;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
 
-/// An owned, mutable smart pointer to a `T` stored in an
-/// [`Arena`](crate::Arena).
+/// An owned, mutable smart pointer to an arena-backed `T`.
 ///
 /// Created via [`Arena::alloc_box`](crate::Arena::alloc_box).
 ///
@@ -134,8 +127,27 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
         self.ptr
     }
 
+    /// Convert this uniquely-owned value into a pinned box.
+    ///
+    /// This mirrors [`std::boxed::Box::into_pin`]. The pointee does not move,
+    /// and forgetting the returned pin leaks the allocation rather than making
+    /// its storage available for reuse.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = multitude::Box::into_pin(arena.alloc_box(3_u8));
+    /// assert_eq!(*value, 3);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn into_pin(this: Self) -> Pin<Self> {
+        // SAFETY: `Box` uniquely owns a pointee whose chunk remains retained
+        // until the box is dropped or leaked.
+        unsafe { Pin::new_unchecked(this) }
+    }
+
     /// Returns a raw mutable pointer to the value (fat if `T: ?Sized` is a DST).
-    #[allow(
+    #[expect(
         clippy::needless_pass_by_ref_mut,
         reason = "associated-fn convention (like alloc::rc::Rc::as_ptr); &mut self conveys exclusive access"
     )]
@@ -147,6 +159,13 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
 }
 
 impl_thin_smart_ptr_common!(Box);
+
+impl<T: ?Sized + Pointee, A: Allocator + Clone> From<Box<T, A>> for Pin<Box<T, A>> {
+    #[inline]
+    fn from(value: Box<T, A>) -> Self {
+        Box::into_pin(value)
+    }
+}
 
 // No `leak`: dropping the refcount risks UAF; keeping it leaks the chunk.
 
@@ -171,13 +190,24 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Box<T, A> {
 }
 
 impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
-    /// Convert an [`Box<MaybeUninit<T>, A>`] whose value has been
-    /// fully initialized into an [`Box<T, A>`]. O(1) — no copy,
+    /// Convert an initialized [`Box<MaybeUninit<T>, A>`] into a [`Box<T, A>`].
+    ///
+    /// This is O(1) — no copy,
     /// no allocation.
     ///
     /// # Safety
     ///
     /// The `MaybeUninit<T>` must contain a fully-initialized, valid `T`.
+    ///
+    /// ```
+    /// use multitude::{Arena, Box};
+    ///
+    /// let arena = Arena::new();
+    /// let value = arena.alloc_zeroed_box::<u32>();
+    /// // SAFETY: zero is a valid `u32` representation.
+    /// let value: Box<u32> = unsafe { value.assume_init() };
+    /// assert_eq!(*value, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub unsafe fn assume_init(self) -> Box<T, A> {
@@ -191,8 +221,9 @@ impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
         unsafe { Box::from_raw(thin) }
     }
 
-    /// Convert a pinned `Pin<Box<MaybeUninit<T>, A>>` whose value has
-    /// been fully initialized into a `Pin<Box<T, A>>`. O(1).
+    /// Convert an initialized pinned `Box<MaybeUninit<T>, A>` into `Pin<Box<T, A>>`.
+    ///
+    /// This is O(1).
     ///
     /// The pin is preserved across the cast: the value's address is
     /// the same `Box` allocation's address; nothing moves.
@@ -200,6 +231,18 @@ impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
     /// # Safety
     ///
     /// The `MaybeUninit<T>` must contain a fully-initialized, valid `T`.
+    ///
+    /// ```
+    /// use core::pin::Pin;
+    ///
+    /// use multitude::{Arena, Box};
+    ///
+    /// let arena = Arena::new();
+    /// let value = Pin::new(arena.alloc_zeroed_box::<u32>());
+    /// // SAFETY: zero is a valid `u32` representation.
+    /// let value = unsafe { Box::assume_init_pin(value) };
+    /// assert_eq!(*value, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Box<T, A>>
@@ -218,14 +261,25 @@ impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
 }
 
 impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
-    /// Convert an [`Box<[MaybeUninit<T>], A>`](crate::Box) whose elements have
-    /// all been fully initialized into an [`Box<[T], A>`](crate::Box). O(1) —
+    /// Convert an initialized [`Box<[MaybeUninit<T>], A>`](crate::Box) into `Box<[T], A>`.
+    ///
+    /// This is O(1) —
     /// no copy, no allocation.
     ///
     /// # Safety
     ///
     /// Every element of the slice must contain a fully-initialized,
     /// valid `T`.
+    ///
+    /// ```
+    /// use multitude::{Arena, Box};
+    ///
+    /// let arena = Arena::new();
+    /// let values = arena.alloc_zeroed_slice_box::<u16>(3);
+    /// // SAFETY: zero is a valid `u16` representation.
+    /// let values: Box<[u16]> = unsafe { values.assume_init() };
+    /// assert_eq!(&*values, &[0, 0, 0]);
+    /// ```
     #[must_use]
     #[inline]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
@@ -245,6 +299,18 @@ impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
     /// # Safety
     ///
     /// Every element must contain a fully-initialized, valid `T`.
+    ///
+    /// ```
+    /// use core::pin::Pin;
+    ///
+    /// use multitude::{Arena, Box};
+    ///
+    /// let arena = Arena::new();
+    /// let values = Pin::new(arena.alloc_zeroed_slice_box::<u16>(2));
+    /// // SAFETY: zero is a valid `u16` representation.
+    /// let values = unsafe { Box::assume_init_pin_slice(values) };
+    /// assert_eq!(&*values, &[0, 0]);
+    /// ```
     #[must_use]
     #[inline]
     pub unsafe fn assume_init_pin_slice(this: Pin<Self>) -> Pin<Box<[T], A>>

@@ -77,6 +77,16 @@ fn alloc_str_empty() {
 }
 
 #[test]
+fn alloc_str_copies_every_inline_length() {
+    let arena = Arena::new();
+    let source = "abcdefghi";
+
+    for len in 0..=9 {
+        assert_eq!(&*arena.alloc_str(&source[..len]), &source[..len]);
+    }
+}
+
+#[test]
 fn alloc_slice_copy_mutable() {
     let arena = Arena::new();
     let mut s = arena.alloc_slice_copy([1, 2, 3, 4, 5]);
@@ -482,9 +492,7 @@ fn wasted_tail_decreases_monotonically_as_pinned_arcs_drop() {
         }
     }
     let peak = arena.stats().wasted_tail_bytes;
-    // We may not get a contribution from every iteration (some Arcs
-    // may share a chunk with later ones), but at least some chunks
-    // were retired while pinned.
+    // Shared chunks may coalesce contributions, but pinned retirement adds waste.
     assert!(peak > 0, "expected outstanding pins to keep retired chunks counted");
     // Drop the pins. The counter must never grow, never underflow,
     // and end at most equal to whatever the currently-active chunk
@@ -644,16 +652,13 @@ fn alloc_leak_returns_reference_and_skips_drop() {
 }
 
 // Exercises the `Alloc` forwarding trait impls (AsRef/AsMut/Borrow/BorrowMut/
-// Debug/Display/Pointer/PartialEq/PartialOrd/Ord/Hash/into_pin/From-for-Pin).
+// Debug/Display/Pointer/PartialEq/PartialOrd/Ord/Hash).
 #[test]
 fn alloc_forwarding_trait_impls() {
     use core::borrow::{Borrow, BorrowMut};
     use core::cmp::Ordering;
     use core::hash::{Hash, Hasher};
-    use core::pin::Pin;
     use std::collections::hash_map::DefaultHasher;
-
-    use multitude::Alloc;
 
     let arena = Arena::new();
     let mut a = arena.alloc(10_u32);
@@ -683,17 +688,10 @@ fn alloc_forwarding_trait_impls() {
     assert_eq!(PartialOrd::partial_cmp(&a, &a2), Some(Ordering::Equal));
 
     // Hash
-    // Hash — compare the handle's hash against hashing the underlying value
-    // directly, so a no-op `hash` impl diverges (kills the `hash -> ()` mutant).
+    // Hashing a handle is identical to hashing its value.
     let mut h_handle = DefaultHasher::new();
     a.hash(&mut h_handle);
     let mut h_value = DefaultHasher::new();
     10_u32.hash(&mut h_value);
     assert_eq!(h_handle.finish(), h_value.finish());
-
-    // into_pin + From<Alloc> for Pin
-    let p: Pin<Alloc<'_, u32>> = Alloc::into_pin(a);
-    assert_eq!(*p, 10);
-    let p2: Pin<Alloc<'_, u32>> = b.into();
-    assert_eq!(*p2, 20);
 }

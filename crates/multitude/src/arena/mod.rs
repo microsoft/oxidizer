@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(clippy::inline_always, reason = "hot bump-allocator helpers must inline into their callers")]
+#![expect(clippy::inline_always, reason = "hot bump-allocator helpers must inline into their callers")]
 
 use alloc::sync::Arc as StdArc;
 use core::cell::Cell;
@@ -138,17 +138,21 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// a fresh, larger buffer because they could not grow in place).
     #[cfg(feature = "stats")]
     relocations: Cell<u64>,
+
+    /// Buffer relocations in the current reset generation.
+    #[cfg(feature = "stats")]
+    relocations_since_reset: Cell<u64>,
+
+    /// Number of completed bulk resets.
+    #[cfg(feature = "stats")]
+    resets: Cell<u64>,
 }
 
-// `Arena: Send` is auto-derived: every field is `Send` (ChunkMutator
-// carries its own `unsafe impl Send`, propagated through CurrentChunk's
-// `UnsafeCell` and `RefCell<Vec<_>>`; `StdArc<ChunkProvider<A>>` is Send
-// via `ChunkProvider`'s own `Send + Sync` impls). `Arena: !Sync` is also
-// auto-derived: `CurrentChunk` and `RefCell` are both `!Sync`.
+// Fields make `Arena` sendable when `A: Send + Sync`, but `CurrentChunk` and
+// `RefCell` keep it `!Sync`.
 
 impl Arena<Global> {
-    /// Create a new, empty arena backed by [`Global`] with default
-    /// configuration.
+    /// Create an empty [`Global`]-backed arena with default configuration.
     ///
     /// No chunk is allocated up front: the first allocation lazily
     /// pulls in a chunk on the slow path.
@@ -174,14 +178,29 @@ impl Arena<Global> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails while
     /// preallocating the initial chunks.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let Ok(arena) = multitude::Arena::try_new() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(*arena.alloc(1), 1);
+    /// ```
     #[inline]
     #[cfg_attr(test, mutants::skip)] // `Default::default()` mutation is observationally equivalent
     pub fn try_new() -> Result<Self, AllocError> {
         Self::try_new_in(Global)
     }
 
-    /// Create an [`ArenaBuilder`](crate::ArenaBuilder) using [`Global`]
-    /// as the backing allocator.
+    /// Create a [`Global`]-backed [`ArenaBuilder`](crate::ArenaBuilder).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().with_capacity(4096).build();
+    /// assert_eq!(*arena.alloc(3), 3);
+    /// ```
     #[must_use]
     #[inline]
     #[cfg_attr(test, mutants::skip)] // `Default::default()` mutation is observationally equivalent
@@ -198,21 +217,35 @@ impl Default for Arena<Global> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Create an [`ArenaBuilder`](crate::ArenaBuilder) backed by a custom
-    /// `allocator`.
+    /// Create an [`ArenaBuilder`](crate::ArenaBuilder) backed by `allocator`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use allocator_api2::alloc::Global;
+    /// let arena = multitude::Arena::builder_in(Global).build();
+    /// assert_eq!(*arena.alloc(4), 4);
+    /// ```
     #[must_use]
     #[inline]
     pub fn builder_in(allocator: A) -> ArenaBuilder<A> {
         ArenaBuilder::new_in(allocator)
     }
 
-    /// Create a new, empty arena backed by `allocator` with default
-    /// configuration.
+    /// Create an empty arena backed by `allocator` with default configuration.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails while preallocating the
     /// initial chunks.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use allocator_api2::alloc::Global;
+    /// let arena = multitude::Arena::new_in(Global);
+    /// assert_eq!(*arena.alloc(5), 5);
+    /// ```
     #[must_use]
     #[inline]
     pub fn new_in(allocator: A) -> Self
@@ -228,6 +261,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails while
     /// preallocating the initial chunks.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use allocator_api2::alloc::Global;
+    /// let Ok(arena) = multitude::Arena::try_new_in(Global) else {
+    ///     panic!("arena construction failed");
+    /// };
+    /// assert_eq!(*arena.alloc(6), 6);
+    /// ```
     #[inline]
     pub fn try_new_in(allocator: A) -> Result<Self, AllocError>
     where
@@ -240,7 +283,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// resolved configuration. Construction is lazy: the current mutator
     /// starts empty and the first allocation pulls a real chunk via
     /// [`Self::refill`].
-    #[allow(
+    #[expect(
         clippy::unnecessary_wraps,
         reason = "Result return is part of try_from_config's contract; callers propagate the error"
     )]
@@ -256,6 +299,10 @@ impl<A: Allocator + Clone> Arena<A> {
             provider,
             #[cfg(feature = "stats")]
             relocations: Cell::new(0),
+            #[cfg(feature = "stats")]
+            relocations_since_reset: Cell::new(0),
+            #[cfg(feature = "stats")]
+            resets: Cell::new(0),
         })
     }
 
@@ -272,19 +319,40 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Borrow the backing allocator.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use allocator_api2::alloc::Global;
+    /// let arena = multitude::Arena::new();
+    /// let _: &Global = arena.allocator();
+    /// ```
     #[must_use]
     #[inline]
     pub fn allocator(&self) -> &A {
         self.provider.allocator()
     }
 
-    /// Snapshot of the arena's lifetime statistics.
+    /// Snapshot of the arena's lifetime, live, and current-generation
+    /// statistics.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let _value = arena.alloc(1_u8);
+    /// assert!(arena.stats().normal_chunks_allocated >= 1);
+    /// # }
+    /// ```
     #[cfg(feature = "stats")]
     #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
     #[must_use]
     #[inline]
     pub fn stats(&self) -> ArenaStats {
         let chunks = self.provider.chunk_alloc_stats();
+        let generation = self.provider.generation_stats();
         // `wasted_tail_bytes` is a live gauge over chunks that are
         // currently *not* accepting allocations (retired, or held by
         // outstanding handles). Fold in the currently-active chunk's free
@@ -292,11 +360,21 @@ impl<A: Allocator + Clone> Arena<A> {
         // become wasted if the next alloc forced a refill right now.
         let current_free = u64::from(self.current.borrow().wasted_tail_for_stats());
         ArenaStats {
-            total_bytes_allocated: self.provider.bytes_outstanding(),
+            total_bytes_allocated: self.provider.bytes_allocated(),
+            peak_bytes_allocated: self.provider.peak_bytes_allocated(),
+            cached_chunks: self.provider.cached_chunks(),
+            cached_bytes: self.provider.cached_bytes(),
+            normal_chunks_reused: self.provider.normal_chunks_reused(),
+            resets: self.resets.get(),
             wasted_tail_bytes: self.provider.wasted_tail_bytes() + current_free,
             normal_chunks_allocated: chunks.normal(),
             oversized_chunks_allocated: chunks.oversized(),
             relocations: self.relocations.get(),
+            normal_chunks_allocated_since_reset: generation.normal_allocated(),
+            oversized_chunks_allocated_since_reset: generation.oversized_allocated(),
+            backing_bytes_allocated_since_reset: generation.backing_bytes_allocated(),
+            normal_chunks_reused_since_reset: generation.normal_reused(),
+            relocations_since_reset: self.relocations_since_reset.get(),
             ..ArenaStats::default()
         }
     }
@@ -307,11 +385,13 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     pub(crate) fn record_relocation(&self) {
         self.relocations.set(self.relocations.get() + 1);
+        self.relocations_since_reset.set(self.relocations_since_reset.get() + 1);
     }
 
-    /// Reset the arena for a new allocation phase: the current chunk and all
-    /// retired chunks have their bytes returned to the chunk cache (or kept
-    /// alive by outstanding `Arc`/`Box` handles).
+    /// Reset the arena for a new allocation phase.
+    ///
+    /// The current and retired chunks return their bytes to the chunk cache,
+    /// unless outstanding smart pointers keep them alive.
     ///
     /// Given that this takes `&mut self`, the borrow checker ensures no
     /// outstanding [`Alloc`](crate::Alloc) handles can still be live — each one
@@ -321,16 +401,36 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the reset keep their backing chunks alive independently. `reset` itself
     /// runs no destructors; it is purely a bulk cursor rewind. After reset the
     /// next allocation installs a fresh chunk.
-    #[cold]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let mut arena = multitude::Arena::new();
+    /// {
+    ///     let value = arena.alloc(7);
+    ///     assert_eq!(*value, 7);
+    /// }
+    /// arena.reset();
+    /// assert_eq!(*arena.alloc(8), 8);
+    /// ```
     pub fn reset(&mut self) {
-        // Reconcile the current chunk's pre-credited surplus before its
-        // mutator's Drop releases the `+1`.
-        self.reconcile_shared_surplus();
         self.retired_local.clear();
-        // Dropping the current mutator releases its `+1`; no reference
-        // destructors run here (the `Alloc` handles already ran them).
-        *self.current.get_mut() = ChunkMutator::<A>::empty();
+        let local = self.local_shared_count.replace(0);
+        let displaced = self.current.replace_mut(ChunkMutator::<A>::empty());
+        // Return the unused pre-credited surplus and the mutator's +1 with
+        // one atomic operation. No reference destructors run here (the
+        // `Alloc` handles already ran them).
+        let refund = (LARGE_SHARED_REF_SURPLUS - local) as usize;
+        // SAFETY: `local` counts every surplus reference handed out from the
+        // current chunk, so the remainder is exactly the unused pre-credit.
+        unsafe { displaced.release_with_refund(refund) };
         self.current_has_reference.set(false);
+        #[cfg(feature = "stats")]
+        {
+            self.provider.reset_generation_stats();
+            self.relocations_since_reset.set(0);
+            self.resets.set(self.resets.get() + 1);
+        }
     }
 
     /// Records that the current chunk has handed out an arena-lifetime
@@ -343,6 +443,17 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Returns a [`ZerocopyView`](crate::zerocopy::ZerocopyView)
     /// providing safe zero-initialized allocation for types implementing
     /// [`zerocopy::FromZeros`](::zerocopy::FromZeros).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "zerocopy")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.zerocopy().alloc::<u32>();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// ```
     #[cfg(feature = "zerocopy")]
     #[cfg_attr(docsrs, doc(cfg(feature = "zerocopy")))]
     #[inline]
@@ -354,6 +465,17 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Returns a [`BytemuckView`](crate::bytemuck::BytemuckView)
     /// providing safe zero-initialized allocation for types implementing
     /// [`bytemuck::Zeroable`](::bytemuck::Zeroable).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.bytemuck().alloc::<u32>();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// ```
     #[cfg(feature = "bytemuck")]
     #[cfg_attr(docsrs, doc(cfg(feature = "bytemuck")))]
     #[inline]
@@ -421,9 +543,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// replace (and thus waste) the current chunk.
     #[cold]
     #[inline(never)]
-    // Mutation testing is suppressed: body→`Ok(())` makes refill a
-    // no-op while callers continue to fail `try_alloc` and re-enter
-    // here, producing an infinite loop the timeout traps.
+    // Skipped because a no-op refill makes allocation retry loops infinite.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn refill(&self, min_payload: usize) -> Result<(), AllocError> {
         // Reconcile the surplus on the old chunk before its mutator is
@@ -486,11 +606,8 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(do_alloc(&mutator, chunk))
     }
 
-    /// Closure-free variant of [`Self::alloc_oversized_shared_with`] for
-    /// hot callers whose `do_alloc` would otherwise capture a
-    /// user-provided `FnOnce`. See
-    /// [`Self::acquire_oversized_local_mutator`] for the per-iteration
-    /// spill rationale this avoids.
+    /// Acquires an oversized mutator and its chunk pointer for direct
+    /// initialization.
     ///
     /// Caller contract: the returned `mutator` owns the chunk's `+1`
     /// strong reference. Perform the bump reservation, take any
@@ -500,10 +617,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// otherwise the chunk is torn down here.
     #[cold]
     #[inline(never)]
-    #[allow(
-        clippy::type_complexity,
-        reason = "Returning both the mutator and the chunk pointer keeps the cold helper closure-free"
-    )]
     fn acquire_oversized_shared_mutator(&self, min_payload: usize) -> Result<(ChunkMutator<A>, NonNull<Chunk<A>>), AllocError> {
         let chunk = self.provider.acquire_oversized(min_payload)?;
         // SAFETY: `acquire_oversized` returns a refcount-1 chunk.
@@ -536,22 +649,14 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(result)
     }
 
-    /// Closure-free variant of [`Self::alloc_oversized_local_with`] for
-    /// hot callers whose `do_alloc` would otherwise capture a
-    /// user-provided `FnOnce`. Capturing such a closure into the
-    /// `do_alloc` callback forces the user closure's environment
-    /// (e.g. `&loop_counter` for a default-by-ref capture) to live in
-    /// an addressable stack slot, which materializes as a per-iteration
-    /// spill on the hot path even when the oversized branch is never
-    /// taken.
+    /// Acquires an oversized mutator for direct initialization.
     ///
     /// Caller contract: invoke the bump allocator on the returned
     /// mutator, perform any value init, then call
     /// [`Self::retain_oversized_local_mutator`] to transfer the
     /// mutator's `+1` into `retired_local`. If anything between this
     /// call and the `retain_*` call unwinds, the mutator is dropped
-    /// normally and the oversized chunk is torn down — same panic
-    /// semantics as the closure form.
+    /// normally and the oversized chunk is torn down.
     #[cold]
     #[inline(never)]
     fn acquire_oversized_local_mutator(&self, min_payload: usize) -> Result<ChunkMutator<A>, AllocError> {
@@ -666,18 +771,8 @@ impl<A: Allocator + Clone> fmt::Debug for Arena<A> {
     }
 }
 
-// `Drop` impl above refunds unused pre-credited shared refs; field
-// drops (Cells/RefCells of mutators) then release chunk refcounts,
-// and the `Arc<ChunkProvider>` releases the cache, which returns
-// retained chunks to the backing allocator.
-
 /// Convert a fallible alloc result to its `Ok` value, panicking on
 /// `Err` with the canonical multitude allocator-failure message.
-///
-/// Compared to a bare `(…).expect_alloc()`,
-/// the call site here is a regular method-call expression that LLVM does
-/// not see as diverging — so line-coverage tracks each caller of this
-/// helper without leaving its `Err`-arm uncovered.
 pub(crate) trait ExpectAlloc<T> {
     fn expect_alloc(self) -> T;
 }
@@ -687,8 +782,8 @@ impl<T> ExpectAlloc<T> for Result<T, AllocError> {
     #[track_caller]
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn expect_alloc(self) -> T {
-        #[allow(clippy::panic, reason = "documented panic path of the panicking alloc API")]
-        #[allow(clippy::match_wild_err_arm, reason = "documented panic path of the panicking alloc API")]
+        #[expect(clippy::panic, reason = "documented panic path of the panicking alloc API")]
+        #[expect(clippy::match_wild_err_arm, reason = "documented panic path of the panicking alloc API")]
         match self {
             Ok(v) => v,
             Err(_) => panic!("multitude: allocator returned AllocError"),
@@ -698,13 +793,7 @@ impl<T> ExpectAlloc<T> for Result<T, AllocError> {
 
 /// Cold panicking helper used by the panicking allocator variants.
 ///
-/// Implemented as a macro that expands to an `ExpectAlloc::expect_alloc`
-/// call on a pre-failed `Result`. The method is **not** a `-> !`
-/// function from LLVM's point of view (the trait method itself returns
-/// `T`), so the call site stays a regular function-call expression and
-/// `llvm-cov` is able to count the surrounding line. The divergence
-/// happens inside `expect_alloc`'s body, which is marked
-/// `#[cfg_attr(coverage_nightly, coverage(off))]`.
+/// Expands to `ExpectAlloc::expect_alloc` on a failed result.
 macro_rules! panic_alloc {
     () => {{
         $crate::arena::ExpectAlloc::expect_alloc(::core::result::Result::<(), $crate::AllocError>::Err(
