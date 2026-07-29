@@ -233,6 +233,14 @@ reconciles the current chunk's refcount surplus (below) and returns chunk
 bytes to the cache (or leaves chunks alive if escaped handles still hold
 them).
 
+`ArenaStats` keeps its lifetime counters and live gauges across this boundary,
+while its explicitly named `*_since_reset` counters start a new generation
+only after reset completes successfully. They count backing allocations,
+allocated backing bytes, cache reuse, and collection relocations attributable
+to the current generation. If allocator deallocation panics during reset, the
+generation counters remain intact so the interrupted phase is not reported as
+successfully closed.
+
 **Oversized allocations bypass this entirely.** A request larger than the
 configured `max_normal_alloc` gets a one-shot chunk sized exactly to it,
 filled through a stack-local mutator, and *never installed as current* —
@@ -475,7 +483,10 @@ callback unless the callback moves selected arena-owned fields elsewhere. This
 avoids allocating a root sequence buffer, but does not make decoding lazy:
 every delivered value is fully deserialized first. Syntax, shape, allocation,
 or limit failures may occur after an earlier prefix has already produced
-observable callback effects.
+observable callback effects. The fallible callback variant preserves the
+callback's error and stops immediately; because it intentionally abandons the
+deserializer, the unconsumed suffix is not validated. When every callback
+succeeds, complete-input and trailing-data validation remain unchanged.
 
 JSON support is a convenience layer over the same architecture. It accepts
 string or byte input, requires exactly one complete JSON value, rejects trailing

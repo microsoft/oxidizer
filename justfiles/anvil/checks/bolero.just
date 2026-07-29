@@ -68,8 +68,14 @@ anvil-bolero: anvil-bolero-validate-prereqs
     }
     $failed = $false
     foreach ($t in $targets) {
-        Write-Host "anvil-bolero: $($t.package_name)::$($t.test_name)"
-        & cargo '+{{ rust_nightly }}' bolero test --release --engine libfuzzer -T 60s --package $t.package_name $t.test_name
+        $package = if ($t.package) { $t.package } else { $t.package_name }
+        $test = if ($t.test) { $t.test } else { $t.test_name }
+        if (-not $package -or -not $test) {
+            Write-Error "anvil-bolero: unrecognized target metadata: $($t | ConvertTo-Json -Compress)"
+            exit 1
+        }
+        Write-Host "anvil-bolero: $package::$test"
+        & cargo '+{{ rust_nightly }}' bolero test --engine libfuzzer -T 60s --package $package $test
         if ($LASTEXITCODE -ne 0) { $failed = $true }
     }
     if ($failed) { exit 1 }

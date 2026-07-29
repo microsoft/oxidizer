@@ -160,7 +160,7 @@ impl Builder {
             if filter.path_fields.contains(&proto_path) {
                 continue;
             }
-            if proto_prefix.is_empty() && filter.body_field == Some(field.name()) {
+            if proto_prefix.is_empty() && filter.body_field == Some(field.json_name()) {
                 continue;
             }
 
@@ -342,12 +342,18 @@ impl Builder {
     }
 
     /// Returns a `$ref` to the shared error `Status` schema, building it once.
+    ///
+    /// The schema mirrors `google.rpc.Status` — the message the transcoder maps
+    /// a gRPC error into — including its `details`. Keying it by the proto
+    /// full-name (as message and enum schemas are) keeps it from colliding with
+    /// a user-defined message that happens to be named `Status`.
     fn status_ref(&mut self) -> Schema {
-        let name = "Status";
+        let name = "google.rpc.Status";
         if !self.schemas.contains_key(name) {
             let mut properties = BTreeMap::new();
             properties.insert("code".to_owned(), Schema::scalar("integer", Some("int32")));
             properties.insert("message".to_owned(), Schema::scalar("string", None));
+            properties.insert("details".to_owned(), Schema::array(Schema::scalar("object", None)));
             self.schemas.insert(name.to_owned(), Schema::object(properties));
         }
         Schema::reference(name)
@@ -439,14 +445,10 @@ fn template_field_paths(template: &PathTemplate<'_>) -> Vec<Vec<String>> {
         .iter()
         .filter_map(|segment| match segment {
             Segment::Variable(variable) => Some(variable.field_path().split('.').map(str::to_owned).collect()),
-            // Literal / Single / Rest (and any future `#[non_exhaustive]` variant)
-            // bind no field.
             _ => None,
         })
         .collect()
 }
-
-// --- OpenAPI 3.1 serialization model (only the subset that is emitted) ---
 
 #[derive(Serialize)]
 struct Document {
@@ -713,10 +715,26 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
-    fn path_parameters_resolve_field_types_and_default_to_string() {
-        // Several path-template shapes as distinct RPCs, compiled once: a simple
-        // required string, dotted paths resolving nested field types, and
-        // unresolvable segments that fall back to `string`.
+    fn multiple_methods_on_one_path_coexist_in_the_path_item() {
+        let doc = doc(r#"
+                syntax = "proto3";
+                package test;
+                import "google/api/annotations.proto";
+                service S {
+                  rpc Get(Req) returns (Res) { option (google.api.http) = { get: "/v1/things/{id}" }; }
+                  rpc Delete(Req) returns (Res) { option (google.api.http) = { delete: "/v1/things/{id}" }; }
+                }
+                message Req { string id = 1; }
+                message Res {}
+            "#);
+        let item = &doc["paths"]["/v1/things/{id}"];
+        assert_eq!(item["get"]["operationId"], "Get");
+        assert_eq!(item["delete"]["operationId"], "Delete");
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn path_parameters_resolve_field_types() {
         let doc = doc(r#"
                 syntax = "proto3";
                 package test;
@@ -724,16 +742,13 @@ mod tests {
                 service S {
                   rpc Shelf(ShelfReq) returns (Resp) { option (google.api.http) = { get: "/v1/shelves/{shelf}" }; }
                   rpc Nested(NestedReq) returns (Resp) { option (google.api.http) = { get: "/v1/{params.org}/{params.count}" }; }
-                  rpc Unres(UnresReq) returns (Resp) { option (google.api.http) = { get: "/v1/{missing}/{scalar.x}" }; }
                 }
                 message Resp {}
                 message ShelfReq { string shelf = 1; }
                 message NestedReq { Params params = 1; }
                 message Params { string org = 1; int32 count = 2; }
-                message UnresReq { string scalar = 1; }
             "#);
 
-        // A single `{shelf}` path parameter is a required path-scoped string.
         let params = doc["paths"]["/v1/shelves/{shelf}"]["get"]["parameters"].as_array().expect("params");
         assert_eq!(params.len(), 1);
         assert_eq!(params[0]["name"], "shelf");
@@ -741,7 +756,6 @@ mod tests {
         assert_eq!(params[0]["required"], true);
         assert_eq!(params[0]["schema"]["type"], "string");
 
-        // Dotted path parameters resolve to the nested field's type.
         let params = doc["paths"]["/v1/{params.org}/{params.count}"]["get"]["parameters"]
             .as_array()
             .expect("params");
@@ -750,16 +764,36 @@ mod tests {
         let count = params.iter().find(|p| p["name"] == "params.count").expect("count param");
         assert_eq!(count["schema"]["type"], "integer");
         assert_eq!(count["schema"]["format"], "int32");
-
-        // `{missing}` has no matching field and `{scalar.x}` walks through a
-        // scalar; both default to `string`.
-        let params = doc["paths"]["/v1/{missing}/{scalar.x}"]["get"]["parameters"]
-            .as_array()
-            .expect("params");
-        for p in params {
-            assert_eq!(p["schema"]["type"], "string", "{p:?}");
-        }
     }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn resolve_field_returns_none_for_missing_and_scalar_intermediate_segments() {
+        // Scalar-intermediate paths are rejected upstream by path-field
+        // validation, so the defensive `None` arms are exercised directly.
+        let bytes = compile(
+            r#"
+                syntax = "proto3";
+                package test;
+                message Inner { string leaf = 1; }
+                message Req { string scalar = 1; Inner inner = 2; }
+            "#,
+        );
+        let pool = prost_reflect::DescriptorPool::decode(bytes.as_slice()).expect("pool decodes");
+        let message = pool.get_message_by_name("test.Req").expect("Req exists");
+        let mut builder = Builder {
+            paths: BTreeMap::new(),
+            schemas: BTreeMap::new(),
+        };
+
+        // A non-leaf segment names a scalar, so the walk cannot descend.
+        assert!(builder.resolve_field(&message, &["scalar".to_owned(), "leaf".to_owned()]).is_none());
+        // A missing segment yields `None`.
+        assert!(builder.resolve_field(&message, &["absent".to_owned()]).is_none());
+        // A valid nested path resolves to the leaf schema.
+        assert!(builder.resolve_field(&message, &["inner".to_owned(), "leaf".to_owned()]).is_some());
+    }
+
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn query_parameters_use_json_names_and_nesting() {
@@ -789,9 +823,9 @@ mod tests {
                 package test;
                 import "google/api/annotations.proto";
                 service S { rpc Update(Req) returns (Res) {
-                  option (google.api.http) = { patch: "/v1/things/{id}" body: "payload" };
+                  option (google.api.http) = { patch: "/v1/things/{id}" body: "request_payload" };
                 } }
-                message Req { string id = 1; Payload payload = 2; string extra = 3; }
+                message Req { string id = 1; Payload request_payload = 2; string extra = 3; }
                 message Payload { string data = 1; }
                 message Res {}
             "#);
@@ -800,9 +834,7 @@ mod tests {
         let names: Vec<&str> = params.iter().map(|p| p["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"id"), "path param present");
         assert!(names.contains(&"extra"), "unbound field is a query param");
-        assert!(!names.contains(&"payload"), "body field is not a query param");
-        // The body binds the `payload` field specifically, so its schema is that
-        // field's message, not some other field.
+        assert!(!names.contains(&"requestPayload"), "body field is not a query param");
         assert_eq!(
             op["requestBody"]["content"]["application/json"]["schema"]["$ref"],
             "#/components/schemas/test.Payload"
@@ -834,7 +866,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn unknown_body_field_is_rejected() {
-        // A `body` naming a nonexistent field is rejected at generation time.
         let error = ServiceDefinition::from_fds(
             compile(
                 r#"
@@ -892,7 +923,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn unknown_response_body_field_is_rejected() {
-        // A `response_body` naming a nonexistent field is rejected at generation time.
         let error = ServiceDefinition::from_fds(
             compile(
                 r#"
@@ -945,21 +975,41 @@ mod tests {
         let default = &doc["paths"]["/v1/x"]["get"]["responses"]["default"];
         assert_eq!(
             default["content"]["application/json"]["schema"]["$ref"],
-            "#/components/schemas/Status"
+            "#/components/schemas/google.rpc.Status"
         );
-        let status = &doc["components"]["schemas"]["Status"];
+        let status = &doc["components"]["schemas"]["google.rpc.Status"];
         assert_eq!(status["type"], "object");
         assert_eq!(status["properties"]["code"]["type"], "integer");
         assert_eq!(status["properties"]["code"]["format"], "int32");
         assert_eq!(status["properties"]["message"]["type"], "string");
+        assert_eq!(status["properties"]["details"]["type"], "array");
+        assert_eq!(status["properties"]["details"]["items"]["type"], "object");
+    }
+
+    #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
+    #[test]
+    fn user_message_named_status_does_not_collide_with_the_error_schema() {
+        let doc = doc(r#"
+                syntax = "proto3";
+                package test;
+                import "google/api/annotations.proto";
+                service S { rpc Get(Req) returns (Status) { option (google.api.http) = { get: "/v1/x" }; } }
+                message Req {}
+                message Status { string state = 1; }
+            "#);
+        // The user's `test.Status` and the error `google.rpc.Status` are distinct schemas.
+        let ok = &doc["paths"]["/v1/x"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(ok["$ref"], "#/components/schemas/test.Status");
+        let user_status = &doc["components"]["schemas"]["test.Status"];
+        assert_eq!(user_status["properties"]["state"]["type"], "string");
+        let error_status = &doc["components"]["schemas"]["google.rpc.Status"];
+        assert_eq!(error_status["properties"]["code"]["format"], "int32");
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     #[expect(clippy::too_many_lines, reason = "consolidates schema cases to avoid repeated proto compilations")]
     fn message_field_schemas_cover_scalars_enums_collections_recursion_and_well_known_types() {
-        // One service with several response messages, compiled once, so the
-        // per-message schema assertions share a single (costly) proto compilation.
         let doc = doc(r#"
                 syntax = "proto3";
                 package test;
@@ -1015,7 +1065,6 @@ mod tests {
                 }
             "#);
 
-        // Scalar fields map each proto scalar to its OpenAPI type/format.
         let props = &doc["components"]["schemas"]["test.Types"]["properties"];
         assert_eq!(props["aDouble"], serde_json::json!({"type":"number","format":"double"}));
         assert_eq!(props["aFloat"], serde_json::json!({"type":"number","format":"float"}));
@@ -1033,7 +1082,6 @@ mod tests {
         assert_eq!(props["aString"], serde_json::json!({"type":"string"}));
         assert_eq!(props["aBytes"], serde_json::json!({"type":"string","format":"byte"}));
 
-        // Enum, repeated, and map fields.
         let props = &doc["components"]["schemas"]["test.Palette"]["properties"];
         assert_eq!(props["color"]["$ref"], "#/components/schemas/test.Color");
         assert_eq!(props["accent"]["$ref"], "#/components/schemas/test.Color");
@@ -1046,13 +1094,11 @@ mod tests {
         assert_eq!(color["type"], "string");
         assert_eq!(color["enum"], serde_json::json!(["RED", "GREEN"]));
 
-        // A recursive message is emitted once and refers back to itself by `$ref`.
         let node = &doc["components"]["schemas"]["test.Node"];
         assert_eq!(node["properties"]["id"]["type"], "string");
         assert_eq!(node["properties"]["parent"]["$ref"], "#/components/schemas/test.Node");
         assert_eq!(node["properties"]["children"]["items"]["$ref"], "#/components/schemas/test.Node");
 
-        // Well-known types map to their canonical OpenAPI representations.
         let props = &doc["components"]["schemas"]["test.W"]["properties"];
         assert_eq!(props["ts"], serde_json::json!({"type":"string","format":"date-time"}));
         assert_eq!(props["dur"], serde_json::json!({"type":"string"}));
@@ -1187,8 +1233,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn recursive_request_query_params_terminate() {
-        // A self-referential request message reached via query parameters
-        // terminates: the cycle is cut, yielding a finite parameter set.
         let doc = doc(r#"
                 syntax = "proto3";
                 package test;
@@ -1199,18 +1243,14 @@ mod tests {
             "#);
         let params = doc["paths"]["/v1/nodes"]["get"]["parameters"].as_array().expect("query parameters");
         let names: Vec<&str> = params.iter().filter_map(|p| p["name"].as_str()).collect();
-        // The message's own scalar fields are present...
         assert!(names.contains(&"id"), "{names:?}");
         assert!(names.contains(&"label"), "{names:?}");
-        // ...but the self-referential `parent` field is not expanded (cycle cut).
         assert!(!names.iter().any(|n| n.starts_with("parent")), "{names:?}");
     }
 
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn mutually_recursive_request_query_params_terminate() {
-        // Mutual recursion `A -> B -> A` reached via query params must also
-        // terminate, expanding one level of the cycle before cutting it.
         let doc = doc(r#"
                 syntax = "proto3";
                 package test;
@@ -1224,7 +1264,6 @@ mod tests {
         let names: Vec<&str> = params.iter().filter_map(|p| p["name"].as_str()).collect();
         assert!(names.contains(&"aId"), "{names:?}");
         assert!(names.contains(&"b.bId"), "{names:?}");
-        // `b.a` would re-enter `A` (already on the path) and is cut.
         assert!(!names.iter().any(|n| n.starts_with("b.a")), "{names:?}");
     }
 
@@ -1252,14 +1291,12 @@ mod tests {
             "#,
         );
 
-        // Two packages compiled together yield one document each (module = package).
         let docs = specs_with(&compile_files(&[one, two]), &DescriptorOptions::new(), &info());
         assert_eq!(
             docs.iter().map(|(m, _)| m.clone()).collect::<Vec<_>>(),
             ["one".to_owned(), "two".to_owned()]
         );
 
-        // Package filtering restricts to the requested package.
         let filtered = specs_with(&compile_files(&[one, two]), &DescriptorOptions::new().package(".one"), &info());
         assert_eq!(filtered.iter().map(|(m, _)| m.clone()).collect::<Vec<_>>(), ["one".to_owned()]);
     }
@@ -1267,8 +1304,6 @@ mod tests {
     #[cfg_attr(miri, ignore)] // proto compilation and filesystem I/O are unsupported under Miri.
     #[test]
     fn two_services_in_one_package_produce_a_spec_each() {
-        // Each service carries its own OpenAPI document (both under the same
-        // module, since they share a package).
         let docs = specs_with(
             &compile(
                 r#"

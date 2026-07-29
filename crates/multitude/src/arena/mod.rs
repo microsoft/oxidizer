@@ -139,6 +139,10 @@ pub struct Arena<A: Allocator + Clone = Global> {
     #[cfg(feature = "stats")]
     relocations: Cell<u64>,
 
+    /// Buffer relocations in the current reset generation.
+    #[cfg(feature = "stats")]
+    relocations_since_reset: Cell<u64>,
+
     /// Number of completed bulk resets.
     #[cfg(feature = "stats")]
     resets: Cell<u64>,
@@ -296,6 +300,8 @@ impl<A: Allocator + Clone> Arena<A> {
             #[cfg(feature = "stats")]
             relocations: Cell::new(0),
             #[cfg(feature = "stats")]
+            relocations_since_reset: Cell::new(0),
+            #[cfg(feature = "stats")]
             resets: Cell::new(0),
         })
     }
@@ -327,7 +333,8 @@ impl<A: Allocator + Clone> Arena<A> {
         self.provider.allocator()
     }
 
-    /// Snapshot of the arena's lifetime statistics.
+    /// Snapshot of the arena's lifetime, live, and current-generation
+    /// statistics.
     ///
     /// # Example
     ///
@@ -345,6 +352,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn stats(&self) -> ArenaStats {
         let chunks = self.provider.chunk_alloc_stats();
+        let generation = self.provider.generation_stats();
         // `wasted_tail_bytes` is a live gauge over chunks that are
         // currently *not* accepting allocations (retired, or held by
         // outstanding handles). Fold in the currently-active chunk's free
@@ -362,6 +370,11 @@ impl<A: Allocator + Clone> Arena<A> {
             normal_chunks_allocated: chunks.normal(),
             oversized_chunks_allocated: chunks.oversized(),
             relocations: self.relocations.get(),
+            normal_chunks_allocated_since_reset: generation.normal_allocated(),
+            oversized_chunks_allocated_since_reset: generation.oversized_allocated(),
+            backing_bytes_allocated_since_reset: generation.backing_bytes_allocated(),
+            normal_chunks_reused_since_reset: generation.normal_reused(),
+            relocations_since_reset: self.relocations_since_reset.get(),
             ..ArenaStats::default()
         }
     }
@@ -372,6 +385,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     pub(crate) fn record_relocation(&self) {
         self.relocations.set(self.relocations.get() + 1);
+        self.relocations_since_reset.set(self.relocations_since_reset.get() + 1);
     }
 
     /// Reset the arena for a new allocation phase.
@@ -412,7 +426,11 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { displaced.release_with_refund(refund) };
         self.current_has_reference.set(false);
         #[cfg(feature = "stats")]
-        self.resets.set(self.resets.get() + 1);
+        {
+            self.provider.reset_generation_stats();
+            self.relocations_since_reset.set(0);
+            self.resets.set(self.resets.get() + 1);
+        }
     }
 
     /// Records that the current chunk has handed out an arena-lifetime

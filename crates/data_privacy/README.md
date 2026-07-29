@@ -192,15 +192,15 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEyLjOCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4ygnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTAuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEyLjSCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4ygnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTAuMw
  [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Redactor
  [__link10]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=classified
  [__link11]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=taxonomy
  [__link12]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=classified
- [__link13]: https://docs.rs/data_privacy/0.12.3/data_privacy/?search=RedactionEngine
- [__link14]: https://docs.rs/data_privacy/0.12.3/data_privacy/?search=RedactionEngine::builder
- [__link2]: https://docs.rs/data_privacy/0.12.3/data_privacy/?search=RedactionEngine
+ [__link13]: https://docs.rs/data_privacy/0.12.4/data_privacy/?search=RedactionEngine
+ [__link14]: https://docs.rs/data_privacy/0.12.4/data_privacy/?search=RedactionEngine::builder
+ [__link2]: https://docs.rs/data_privacy/0.12.4/data_privacy/?search=RedactionEngine
  [__link3]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Classified
  [__link4]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=RedactedDebug
  [__link5]: https://docs.rs/data_privacy_macros/0.10.3/data_privacy_macros/?search=RedactedDisplay
