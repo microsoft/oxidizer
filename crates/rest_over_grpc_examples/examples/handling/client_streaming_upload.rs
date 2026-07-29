@@ -71,9 +71,6 @@ where
             return text(StatusCode::PAYLOAD_TOO_LARGE, "upload too large");
         }
         summary.chunks += 1;
-
-        // A real handler streams `chunk` onward here — a gRPC client-streaming
-        // `send`, or a write to blob storage — with backpressure, then drops it.
     }
 
     json(
@@ -92,8 +89,6 @@ where
         return handle_upload(request).await;
     }
 
-    // Everything else is a small unary JSON request: collect the body, transcode,
-    // and buffer the reply.
     let method = request.method().clone();
     let target = request.uri().path_and_query().map_or("/", |pq| pq.as_str()).to_owned();
     let headers = request.headers().clone();
@@ -156,7 +151,6 @@ mod tests {
 async fn main() {
     let library = Transcoder::new(InMemoryLibrary);
 
-    // A normal JSON route, transcoded as usual.
     let get = Request::builder()
         .method(Method::GET)
         .uri("/v1/shelves/history")
@@ -164,8 +158,6 @@ async fn main() {
         .expect("request builds");
     report("GET /v1/shelves/history", &route(&library, get).await);
 
-    // A chunked upload — the client sends the "file" as several body frames,
-    // which the streaming handler consumes one at a time.
     let chunks = [b"chunk-0-data".as_slice(), b"chunk-1-data", b"chunk-2-data"]
         .into_iter()
         .map(|bytes| Ok::<_, Infallible>(Frame::data(Bytes::from_static(bytes))));

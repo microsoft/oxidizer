@@ -28,12 +28,7 @@ pub(crate) const MAX_POOL_SLOTS: u64 = (usize::MAX as u64).saturating_sub(1);
 /// Refcount overflow guard, mirroring `alloc::sync::Arc`.
 const MAX_REFCOUNT: u32 = i32::MAX as u32;
 
-/// Aborts if incrementing the refcount would push the live count past
-/// [`MAX_REFCOUNT`]. `old` is the pre-increment value, so aborting once it has
-/// reached [`MAX_REFCOUNT`] keeps the surviving count from exceeding the bound.
-///
-/// Excluded from coverage: the overflow branch needs an `old` of at least
-/// `i32::MAX`, which a test cannot produce.
+/// Aborts before the refcount exceeds [`MAX_REFCOUNT`].
 #[inline]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)] // Overflow branch needs `old >= i32::MAX`, which a test cannot produce.
@@ -43,11 +38,7 @@ pub(crate) fn check_refcount_overflow(old: u32) {
     }
 }
 
-/// Aborts the process on refcount overflow, via a double panic so it works in
-/// `no_std`.
-///
-/// Excluded from coverage: it is unreachable without a `> i32::MAX` refcount and
-/// aborts the process, so a test can neither trigger nor catch it.
+/// Aborts on overflow via a double panic, including in `no_std`.
 #[cold]
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]

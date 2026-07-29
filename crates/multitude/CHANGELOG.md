@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0] - 2026-07-24
+## [0.7.1] - 2026-07-24
 
 - 🔧 Maintenance
 
@@ -9,6 +9,8 @@
 - ✨ Features
 
   - release bytesbuf v0.7.0 and 23 additional packages
+  - add fallible streaming and generation stats ([#605](https://github.com/microsoft/oxidizer/pull/605))
+  - harden arena pinning and deserialization APIs ([#601](https://github.com/microsoft/oxidizer/pull/601))
   - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
 
 ## [0.6.1] - 2026-07-07

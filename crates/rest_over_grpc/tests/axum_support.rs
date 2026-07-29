@@ -28,8 +28,7 @@ async fn http_response_into_axum_preserves_status_content_type_and_body() {
 #[tokio::test]
 async fn streaming_response_into_axum_streams_frames() {
     use futures_util::stream;
-    use rest_over_grpc::codegen_helpers::StreamEncoding;
-    use rest_over_grpc::transcoding::StreamingResponse;
+    use rest_over_grpc::transcoding::{StreamEncoding, StreamingResponse};
     use serde::Serialize;
 
     #[derive(Serialize)]
@@ -49,8 +48,7 @@ async fn streaming_response_into_axum_streams_frames() {
 #[tokio::test]
 async fn streaming_response_into_axum_applies_custom_headers() {
     use futures_util::stream;
-    use rest_over_grpc::codegen_helpers::StreamEncoding;
-    use rest_over_grpc::transcoding::StreamingResponse;
+    use rest_over_grpc::transcoding::{StreamEncoding, StreamingResponse};
 
     let mut streaming = StreamingResponse::encode(stream::iter(vec![Ok::<_, Status>(1_u32)]), StreamEncoding::JsonArray);
     let mut headers = http::HeaderMap::new();
@@ -65,8 +63,7 @@ async fn streaming_response_into_axum_applies_custom_headers() {
 #[tokio::test]
 async fn transcode_response_into_axum_handles_both_variants() {
     use futures_util::stream;
-    use rest_over_grpc::codegen_helpers::StreamEncoding;
-    use rest_over_grpc::transcoding::{StreamingResponse, TranscodeResponse};
+    use rest_over_grpc::transcoding::{StreamEncoding, StreamingResponse, TranscodeResponse};
 
     let unary = TranscodeResponse::Unary(HttpResponse::ok_json(b"{}".to_vec())).into_response();
     assert_eq!(unary.status(), http::StatusCode::OK);
@@ -93,7 +90,5 @@ async fn transcode_response_into_axum_handles_both_variants() {
 fn adapter_response_body_is_axum_into_response() {
     fn assert_into_response<T: axum_core::response::IntoResponse>() {}
 
-    // The adapters' response body (`serve_http` / `serve_http_fn` /
-    // `RestService`), covering both unary and streaming responses.
     assert_into_response::<http::Response<rest_over_grpc::serving::RestBody>>();
 }

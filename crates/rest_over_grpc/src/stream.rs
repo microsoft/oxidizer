@@ -45,7 +45,7 @@ use crate::transcode::{ResponseBodyKind, TranscodeError, encode_response_into};
 /// ```
 /// # fn main() {
 /// # {
-/// use rest_over_grpc::codegen_helpers::StreamEncoding;
+/// use rest_over_grpc::transcoding::StreamEncoding;
 ///
 /// assert_eq!(StreamEncoding::JsonArray.content_type(), "application/json");
 /// assert_eq!(
@@ -81,7 +81,7 @@ impl StreamEncoding {
     /// ```
     /// # fn main() {
     /// # {
-    /// use rest_over_grpc::codegen_helpers::StreamEncoding;
+    /// use rest_over_grpc::transcoding::StreamEncoding;
     ///
     /// assert_eq!(
     ///     StreamEncoding::NdJson.content_type(),
@@ -114,7 +114,7 @@ impl StreamEncoding {
     /// ```
     /// # fn main() {
     /// # {
-    /// use rest_over_grpc::codegen_helpers::StreamEncoding;
+    /// use rest_over_grpc::transcoding::StreamEncoding;
     ///
     /// assert_eq!(
     ///     StreamEncoding::from_accept("text/event-stream"),
@@ -153,23 +153,56 @@ impl StreamEncoding {
             } else {
                 continue;
             };
-            let quality = parts
-                .find_map(|parameter| {
-                    let (name, value) = parameter.trim().split_once('=')?;
-                    name.trim()
-                        .eq_ignore_ascii_case("q")
-                        .then(|| value.trim().parse::<f32>().ok())
-                        .flatten()
-                })
-                .unwrap_or(1.0);
-            if !(0.0 < quality && quality <= 1.0) {
+            let Some(quality) = accept_quality(parts) else {
                 continue;
-            }
+            };
             if selected.is_none_or(|(_, current)| quality > current) {
                 selected = Some((encoding, quality));
             }
         }
         selected.map_or(Self::JsonArray, |(encoding, _)| encoding)
+    }
+}
+
+fn accept_quality<'a>(parameters: impl Iterator<Item = &'a str>) -> Option<u16> {
+    let mut quality = None;
+    for parameter in parameters {
+        let parameter = parameter.trim();
+        let Some((name, value)) = parameter.split_once('=') else {
+            if parameter.eq_ignore_ascii_case("q") {
+                return None;
+            }
+            continue;
+        };
+        if !name.trim().eq_ignore_ascii_case("q") {
+            continue;
+        }
+        if quality.is_some() {
+            return None;
+        }
+        quality = Some(parse_quality(value.trim())?);
+    }
+
+    let quality = quality.unwrap_or(1_000);
+    (quality > 0).then_some(quality)
+}
+
+fn parse_quality(value: &str) -> Option<u16> {
+    let (integer, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if fraction.len() > 3 || !fraction.bytes().all(|digit| digit.is_ascii_digit()) {
+        return None;
+    }
+    match integer {
+        "0" => {
+            let fraction = if fraction.is_empty() {
+                0
+            } else {
+                fraction.parse::<u16>().ok()? * 10_u16.pow(3 - u32::try_from(fraction.len()).ok()?)
+            };
+            Some(fraction)
+        }
+        "1" if fraction.bytes().all(|digit| digit == b'0') => Some(1_000),
+        _ => None,
     }
 }
 
@@ -190,7 +223,7 @@ fn serialize_framed_item<T: Serialize>(
         ResponseBodyKind::Whole => {
             to_writer(&mut frame, message).map_err(|error| Status::internal(format!("failed to serialize a streamed message: {error}")))?;
         }
-        ResponseBodyKind::Field(_) => {
+        ResponseBodyKind::Field { .. } => {
             encode_response_into(message, response_body, &mut frame).map_err(TranscodeError::into_status)?;
         }
     }
@@ -401,8 +434,17 @@ mod tests {
         }
 
         let items = futures_util::stream::iter(vec![Ok::<_, Status>(Tick { n: 1, ignored: 9 })]);
-        let frames: Vec<_> =
-            futures::executor::block_on(encode_frames_response(items, StreamEncoding::JsonArray, ResponseBodyKind::Field("n")).collect());
+        let frames: Vec<_> = futures::executor::block_on(
+            encode_frames_response(
+                items,
+                StreamEncoding::JsonArray,
+                ResponseBodyKind::Field {
+                    name: "n",
+                    default: "null",
+                },
+            )
+            .collect(),
+        );
         let body: Vec<u8> = frames.into_iter().flat_map(|frame| frame.expect("frame")).collect();
         assert_eq!(body, b"[1]");
     }
@@ -434,6 +476,29 @@ mod tests {
             StreamEncoding::from_accept("application/x-ndjson;q=0.8, text/event-stream;q=0.8"),
             StreamEncoding::NdJson
         );
+        for invalid in ["invalid", "", "NaN", "inf", "-0.1", "1.1", "+0.5", "1e-1", "0.1234"] {
+            let accept = format!("text/event-stream;q={invalid}, application/x-ndjson;q=0.5");
+            assert_eq!(StreamEncoding::from_accept(&accept), StreamEncoding::NdJson, "{accept}");
+        }
+        assert_eq!(
+            StreamEncoding::from_accept("text/event-stream;q, application/x-ndjson;q=0.5"),
+            StreamEncoding::NdJson
+        );
+        // A bare parameter that is not `q` is ignored, leaving the default quality.
+        assert_eq!(StreamEncoding::from_accept("text/event-stream;charset"), StreamEncoding::Sse);
+        assert_eq!(
+            StreamEncoding::from_accept("text/event-stream;q=0.9;q=0.8, application/x-ndjson;q=0.5"),
+            StreamEncoding::NdJson
+        );
+        for (quality, expected) in [
+            ("0.", Some(0)),
+            ("0.001", Some(1)),
+            ("0.5", Some(500)),
+            ("1.", Some(1_000)),
+            ("1.000", Some(1_000)),
+        ] {
+            assert_eq!(parse_quality(quality), expected, "{quality}");
+        }
     }
 
     #[test]

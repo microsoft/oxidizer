@@ -1484,7 +1484,7 @@ mod mutants_for_vec {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[derive(Clone, Debug)]

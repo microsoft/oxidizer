@@ -5,7 +5,7 @@
     dead_code,
     unused_imports,
     clippy::unnecessary_safety_comment,
-    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+    reason = "shared test helpers cover feature-gated paths"
 )]
 
 //! Tests for [`String`]: the growable arena-backed string builder.
@@ -728,6 +728,7 @@ mod arena_str {
     #![allow(clippy::redundant_clone, reason = "tests exercise Clone explicitly")]
     use core::cmp::Ordering;
     use std::collections::{BTreeMap, HashMap};
+    use std::thread;
 
     use multitude::Arena;
 
@@ -741,7 +742,7 @@ mod arena_str {
         assert_eq!(s.len(), 2);
         assert!(!s.is_empty());
         let s2 = s.clone();
-        let h = std::thread::spawn(move || {
+        let h = thread::spawn(move || {
             assert_eq!(&*s2, "hi");
         });
         h.join().unwrap();
@@ -802,7 +803,7 @@ mod arena_str {
         let s: Arc<str> = arena.alloc_str_arc("threaded");
         let bytes: Arc<[u8]> = s.into();
         let bytes2 = bytes.clone();
-        let h = std::thread::spawn(move || bytes2.len());
+        let h = thread::spawn(move || bytes2.len());
         assert_eq!(h.join().unwrap(), bytes.len());
     }
 }
@@ -991,7 +992,7 @@ mod mutants_for_string {
     use multitude::Arena;
     use multitude::strings::String as MString;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -1099,7 +1100,7 @@ mod format_macro {
     #![allow(clippy::unwrap_used, reason = "test code")]
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]

@@ -24,7 +24,7 @@ use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::DropCounter;
-use plurality::Pool;
+use plurality::{Box as PoolBox, Pool};
 
 #[test]
 fn box_alloc_deref_mutate() {
@@ -88,13 +88,13 @@ fn into_raw_from_raw_round_trips_and_frees() {
     assert_eq!(pool.len(), 1);
 
     // Leaking to a raw pointer keeps the slot occupied and runs no destructor.
-    let raw = plurality::Box::into_raw(b);
+    let raw = PoolBox::into_raw(b);
     assert_eq!(pool.len(), 1);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
 
     // Reconstructing and dropping runs the destructor and returns the slot.
     // SAFETY: `raw` came from `into_raw` on this pool and is used exactly once.
-    let b: plurality::Box<DropCounter> = unsafe { plurality::Box::from_raw(raw) };
+    let b: PoolBox<DropCounter> = unsafe { PoolBox::from_raw(raw) };
     drop(b);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     assert_eq!(pool.len(), 0);
@@ -108,11 +108,11 @@ fn into_raw_from_raw_round_trips_and_frees() {
 #[test]
 fn into_raw_pointer_is_stable_and_readable() {
     let pool = Pool::<u64>::builder().chunk_size(4).build();
-    let raw = plurality::Box::into_raw(pool.alloc_box(0xABCD_1234));
+    let raw = PoolBox::into_raw(pool.alloc_box(0xABCD_1234));
     // SAFETY: the slot is kept occupied by the outstanding raw pointer.
     assert_eq!(unsafe { *raw.as_ptr() }, 0xABCD_1234);
     // SAFETY: reconstructed exactly once to free the slot.
-    let b: plurality::Box<u64> = unsafe { plurality::Box::from_raw(raw) };
+    let b: PoolBox<u64> = unsafe { PoolBox::from_raw(raw) };
     drop(b);
     assert_eq!(pool.len(), 0);
 }

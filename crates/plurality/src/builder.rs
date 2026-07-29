@@ -101,12 +101,8 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
         let chunk_size = self.chunk_size.next_power_of_two();
         if let Some(max) = self.max_chunks {
             let total = u64::from(chunk_size) * u64::from(max);
-            // Two independent ceilings bound the total slot count:
-            // - slot indices must stay below the `FREE_END` (`u32::MAX`) sentinel;
-            // - `pool_refcount` (an `AtomicUsize`) holds `1 + live refcounted
-            //   allocations`, so `1 + total` must fit in `usize`.
-            // On 64-bit the u32 index ceiling binds; on 32-bit the `usize` one
-            // does, rejecting `total == u32::MAX` (where `1 + total` would wrap).
+            // Slot indices must avoid `FREE_END`, and `1 + total` must fit in
+            // the pool's `AtomicUsize` refcount.
             assert!(
                 total <= MAX_POOL_SLOTS,
                 "chunk_size * max_chunks exceeds the addressable slot/refcount ceiling"

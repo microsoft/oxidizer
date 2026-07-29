@@ -11,12 +11,13 @@
 #![allow(clippy::redundant_clone, reason = "test code")]
 
 use core::marker::PhantomPinned;
+use core::mem::MaybeUninit;
 use core::pin::Pin;
+use std::thread;
 
 use multitude::{Arc, Arena, Box};
 
-/// `!Unpin` type. Its address must stay stable for as long as the
-/// pinned smart pointer is live.
+/// Address-sensitive pinned test value.
 #[derive(Debug)]
 struct NotUnpin {
     value: u64,
@@ -32,8 +33,6 @@ impl NotUnpin {
     }
 }
 
-// Tier 1: scalar pin allocators.
-
 #[test]
 fn alloc_box_pin_value() {
     let arena = Arena::new();
@@ -47,7 +46,7 @@ fn alloc_box_pin_value() {
 }
 
 #[test]
-fn alloc_box_pin_with_constructs_in_place() {
+fn alloc_box_pin_with_constructs_value() {
     let arena = Arena::new();
     let p: Pin<Box<NotUnpin>> = arena.alloc_box_pin_with(|| NotUnpin::new(7));
     assert_eq!(p.value, 7);
@@ -59,7 +58,8 @@ fn alloc_arc_pin_with_cross_thread() {
     let p: Pin<Arc<NotUnpin>> = arena.alloc_arc_pin_with(|| NotUnpin::new(99));
     let addr_before = (&raw const *p) as usize;
     let p2 = p.clone();
-    let h = std::thread::spawn(move || {
+    drop(p);
+    let h = thread::spawn(move || {
         let addr_in_thread = (&raw const *p2) as usize;
         assert_eq!(p2.value, 99);
         addr_in_thread
@@ -71,20 +71,14 @@ fn alloc_arc_pin_with_cross_thread() {
 #[cfg(not(utc_backend))]
 #[test]
 fn try_alloc_uninit_box_pin_rejects_over_alignment() {
-    // Over-aligned T → AllocError; we expect Err, not panic.
-    // Use the uninit-pin path so the test does NOT stack-construct a
-    // 32 KiB-aligned value (which on Windows can blow past the
-    // committed stack guard pages, causing a STATUS_ACCESS_VIOLATION
-    // before the alignment check even runs).
+    // Avoid constructing the 32 KiB-aligned value on the stack.
     #[repr(align(32768))]
     #[expect(dead_code, reason = "drives the over-alignment guard before init runs")]
     struct HalfChunk(u8);
     let arena = Arena::new();
-    let r: Result<Pin<Box<core::mem::MaybeUninit<HalfChunk>>>, _> = arena.try_alloc_uninit_box_pin::<HalfChunk>();
+    let r: Result<Pin<Box<MaybeUninit<HalfChunk>>>, _> = arena.try_alloc_uninit_box_pin::<HalfChunk>();
     r.unwrap_err();
 }
-
-// Tier 1: From / into_pin conversions.
 
 #[test]
 fn box_from_into_pin_value() {
@@ -99,23 +93,10 @@ fn box_from_into_pin_value() {
 }
 
 #[test]
-fn arc_from_into_pin_value() {
-    let arena = Arena::new();
-    let a = arena.alloc_arc(NotUnpin::new(4));
-    let p: Pin<Arc<NotUnpin>> = Arc::into_pin(a);
-    assert_eq!(p.value, 4);
-}
-
-// Tier 2: uninit pin + assume_init_pin.
-
-#[test]
 fn alloc_uninit_box_pin_then_assume_init_pin() {
-    use core::mem::MaybeUninit;
     let arena = Arena::new();
-    // Use an Unpin payload so the write path is fully safe.
     let mut uninit: Pin<Box<MaybeUninit<u64>>> = arena.alloc_uninit_box_pin::<u64>();
     let addr_before = (&raw const *uninit) as usize;
-    // `MaybeUninit<u64>: Unpin`, so writing through `Pin::get_mut` is safe.
     uninit.as_mut().get_mut().write(50);
     let init: Pin<Box<u64>> = unsafe { Box::assume_init_pin(uninit) };
     let addr_after = (&raw const *init) as usize;
@@ -125,12 +106,9 @@ fn alloc_uninit_box_pin_then_assume_init_pin() {
 
 #[test]
 fn alloc_uninit_box_pin_with_not_unpin_via_unchecked() {
-    use core::mem::MaybeUninit;
     let arena = Arena::new();
     let uninit: Pin<Box<MaybeUninit<NotUnpin>>> = arena.alloc_uninit_box_pin::<NotUnpin>();
-    // For `!Unpin` payloads the user must drop into `unsafe` to write
-    // through the uninit slot. The pin contract is maintained because
-    // no `T` value existed before the write.
+    // SAFETY: no initialized value exists before this write.
     let mut unpinned = unsafe { Pin::into_inner_unchecked(uninit) };
     unpinned.write(NotUnpin::new(99));
     let init: Pin<Box<NotUnpin>> = unsafe { Box::assume_init_pin(Pin::new_unchecked(unpinned)) };
@@ -138,28 +116,13 @@ fn alloc_uninit_box_pin_with_not_unpin_via_unchecked() {
 }
 
 #[test]
-fn alloc_uninit_arc_pin_then_assume_init_pin() {
-    let arena = Arena::new();
-    let uninit: Pin<Arc<core::mem::MaybeUninit<u32>>> = arena.alloc_uninit_arc_pin::<u32>();
-    let unpinned = Pin::into_inner(uninit);
-    unsafe {
-        let p = Arc::as_ptr(&unpinned).cast::<core::mem::MaybeUninit<u32>>().cast_mut();
-        (*p).write(70);
-    }
-    let init: Pin<Arc<u32>> = unsafe { Arc::assume_init_pin(Pin::new(unpinned)) };
-    assert_eq!(*init, 70);
-}
-
-#[test]
 fn alloc_zeroed_box_pin_yields_zeroed_storage() {
     let arena = Arena::new();
-    let zeroed: Pin<Box<core::mem::MaybeUninit<u32>>> = arena.alloc_zeroed_box_pin::<u32>();
+    let zeroed: Pin<Box<MaybeUninit<u32>>> = arena.alloc_zeroed_box_pin::<u32>();
     let unpinned = Pin::into_inner(zeroed);
     let initialized: Pin<Box<u32>> = unsafe { Box::assume_init_pin(Pin::new(unpinned)) };
     assert_eq!(*initialized, 0);
 }
-
-// Tier 3: slice pin allocators.
 
 #[test]
 fn alloc_slice_fill_with_box_pin() {
@@ -169,9 +132,7 @@ fn alloc_slice_fill_with_box_pin() {
     for i in 0..8 {
         assert_eq!(s[i].value, i as u64);
     }
-    // Element addresses are stable.
     let addrs: Vec<usize> = (0..s.len()).map(|i| (&raw const s[i]) as usize).collect();
-    // Move the Pin wrapper; addresses must not change.
     let s2 = s;
     let addrs2: Vec<usize> = (0..s2.len()).map(|i| (&raw const s2[i]) as usize).collect();
     assert_eq!(addrs, addrs2);
@@ -183,14 +144,9 @@ fn alloc_slice_fill_with_arc_pin() {
     let s: Pin<Arc<[NotUnpin]>> = arena.alloc_slice_fill_with_arc_pin::<NotUnpin, _>(4, |i| NotUnpin::new(i as u64));
     assert_eq!(s.len(), 4);
     let clone = s.clone();
-    let h = std::thread::spawn(move || {
-        // The element addresses observed on the other thread match.
-        clone.len()
-    });
+    let h = thread::spawn(move || clone.len());
     assert_eq!(h.join().unwrap(), 4);
 }
-
-// Tier 3: DST (slice) pin allocators.
 
 #[cfg(feature = "dst")]
 #[test]
@@ -233,7 +189,7 @@ fn alloc_dst_arc_pin_slice_cross_thread() {
         })
     };
     let arc_clone = arc.clone();
-    let h = std::thread::spawn(move || arc_clone[3].value);
+    let h = thread::spawn(move || arc_clone[3].value);
     assert_eq!(h.join().unwrap(), 203);
     assert_eq!(arc[0].value, 200);
 }
@@ -328,8 +284,6 @@ fn pin_box_drops_value_in_place() {
     assert_eq!(counter.load(Ordering::Relaxed), 1);
 }
 
-// Tier 5: try_* / _with variants and zeroed_*_pin variants.
-
 #[test]
 fn try_alloc_box_pin_succeeds() {
     let arena = Arena::new();
@@ -366,35 +320,15 @@ fn try_alloc_arc_pin_with_succeeds() {
 }
 
 #[test]
-fn alloc_zeroed_arc_pin_yields_zeroed_storage() {
-    let arena = Arena::new();
-    let p: Pin<Arc<core::mem::MaybeUninit<u128>>> = arena.alloc_zeroed_arc_pin::<u128>();
-    // SAFETY: zeroed_arc_pin guarantees zero-initialized storage.
-    let _ = unsafe { Arc::assume_init_pin(p) };
-}
-
-#[test]
 fn try_alloc_zeroed_box_pin_succeeds() {
     let arena = Arena::new();
     let _ = arena.try_alloc_zeroed_box_pin::<u32>().unwrap();
 }
 
 #[test]
-fn try_alloc_zeroed_arc_pin_succeeds() {
-    let arena = Arena::new();
-    let _ = arena.try_alloc_zeroed_arc_pin::<u32>().unwrap();
-}
-
-#[test]
 fn try_alloc_uninit_box_pin_succeeds() {
     let arena = Arena::new();
     let _ = arena.try_alloc_uninit_box_pin::<u32>().unwrap();
-}
-
-#[test]
-fn try_alloc_uninit_arc_pin_succeeds() {
-    let arena = Arena::new();
-    let _ = arena.try_alloc_uninit_arc_pin::<u32>().unwrap();
 }
 
 #[test]
@@ -418,7 +352,7 @@ fn try_alloc_slice_fill_with_arc_pin_succeeds() {
 #[test]
 fn assume_init_pin_slice_box() {
     let arena = Arena::new();
-    let mut p: Pin<Box<[core::mem::MaybeUninit<u32>]>> = core::pin::Pin::new(arena.alloc_uninit_slice_box::<u32>(3));
+    let mut p: Pin<Box<[MaybeUninit<u32>]>> = Pin::new(arena.alloc_uninit_slice_box::<u32>(3));
     {
         let m = unsafe { Pin::get_unchecked_mut(p.as_mut()) };
         for (i, slot) in m.iter_mut().enumerate() {
@@ -428,15 +362,4 @@ fn assume_init_pin_slice_box() {
     // SAFETY: all elements are initialized above.
     let p: Pin<Box<[u32]>> = unsafe { Box::assume_init_pin_slice(p) };
     assert_eq!(&*p, &[10_u32, 11, 12]);
-}
-
-#[test]
-fn assume_init_pin_slice_arc() {
-    let arena = Arena::new();
-    let s = arena.alloc_zeroed_slice_arc::<u32>(3);
-    // SAFETY: storage address is stable; safe to pin.
-    let p = unsafe { core::pin::Pin::new_unchecked(s) };
-    // SAFETY: zero is a valid u32; assume init.
-    let p = unsafe { Arc::assume_init_pin_slice(p) };
-    assert_eq!(&*p, &[0_u32, 0, 0]);
 }

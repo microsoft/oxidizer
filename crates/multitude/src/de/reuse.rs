@@ -6,15 +6,36 @@
 use core::fmt;
 
 use allocator_api2::alloc::Allocator;
-use serde::de::{Deserializer, Error as _, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, Deserializer, Error as _, SeqAccess, Visitor};
 
-use super::{DeserializeIn, DeserializeInSeed};
+#[cfg(feature = "serde_json")]
+use super::LimitExceeded;
+use super::{DeserializationLimits, DeserializeIn, DeserializeInSeed};
 use crate::strings::String;
 use crate::vec::Vec;
 
 mod deserialize_reuse;
 
 use deserialize_reuse::DeserializeReuse;
+
+struct ReuseSeed<'values, 'arena, T, A: Allocator + Clone> {
+    values: &'values mut Vec<'arena, T, A>,
+}
+
+impl<'de, T, A> DeserializeSeed<'de> for ReuseSeed<'_, '_, T, A>
+where
+    T: DeserializeIn<'de, A>,
+    A: Allocator + Clone,
+{
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        self.values.deserialize_reusing(deserializer)
+    }
+}
 
 impl<A: Allocator + Clone> String<'_, A> {
     /// Replaces this string from a deserializer while retaining reusable
@@ -78,6 +99,38 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         D: Deserializer<'de>,
     {
         <Self as DeserializeReuse<'de>>::deserialize_reusing(self, deserializer)
+    }
+
+    /// Replaces this vector from a deserializer while retaining reusable
+    /// capacity and enforcing resource limits.
+    ///
+    /// As with [`Self::deserialize_reusing`], the vector is cleared first and
+    /// remains valid but may contain a partial prefix if deserialization
+    /// fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error from the deserializer for invalid input, allocation
+    /// failure, or a limit violation.
+    pub fn deserialize_reusing_with_limits<'de, D>(&mut self, deserializer: D, limits: DeserializationLimits) -> Result<(), D::Error>
+    where
+        T: DeserializeIn<'de, A>,
+        D: Deserializer<'de>,
+    {
+        super::limits::deserialize_seed_with_limits(deserializer, ReuseSeed { values: self }, limits)
+    }
+
+    #[cfg(feature = "serde_json")]
+    pub(super) fn deserialize_reusing_with_limits_detailed<'de, D>(
+        &mut self,
+        deserializer: D,
+        limits: DeserializationLimits,
+    ) -> (Result<(), D::Error>, Option<LimitExceeded>)
+    where
+        T: DeserializeIn<'de, A>,
+        D: Deserializer<'de>,
+    {
+        super::limits::deserialize_seed_with_limits_detailed(deserializer, ReuseSeed { values: self }, limits)
     }
 }
 

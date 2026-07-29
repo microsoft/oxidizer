@@ -138,6 +138,14 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// a fresh, larger buffer because they could not grow in place).
     #[cfg(feature = "stats")]
     relocations: Cell<u64>,
+
+    /// Buffer relocations in the current reset generation.
+    #[cfg(feature = "stats")]
+    relocations_since_reset: Cell<u64>,
+
+    /// Number of completed bulk resets.
+    #[cfg(feature = "stats")]
+    resets: Cell<u64>,
 }
 
 // Fields make `Arena` sendable when `A: Send + Sync`, but `CurrentChunk` and
@@ -291,6 +299,10 @@ impl<A: Allocator + Clone> Arena<A> {
             provider,
             #[cfg(feature = "stats")]
             relocations: Cell::new(0),
+            #[cfg(feature = "stats")]
+            relocations_since_reset: Cell::new(0),
+            #[cfg(feature = "stats")]
+            resets: Cell::new(0),
         })
     }
 
@@ -321,7 +333,8 @@ impl<A: Allocator + Clone> Arena<A> {
         self.provider.allocator()
     }
 
-    /// Snapshot of the arena's lifetime statistics.
+    /// Snapshot of the arena's lifetime, live, and current-generation
+    /// statistics.
     ///
     /// # Example
     ///
@@ -339,6 +352,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn stats(&self) -> ArenaStats {
         let chunks = self.provider.chunk_alloc_stats();
+        let generation = self.provider.generation_stats();
         // `wasted_tail_bytes` is a live gauge over chunks that are
         // currently *not* accepting allocations (retired, or held by
         // outstanding handles). Fold in the currently-active chunk's free
@@ -346,11 +360,21 @@ impl<A: Allocator + Clone> Arena<A> {
         // become wasted if the next alloc forced a refill right now.
         let current_free = u64::from(self.current.borrow().wasted_tail_for_stats());
         ArenaStats {
-            total_bytes_allocated: self.provider.bytes_outstanding(),
+            total_bytes_allocated: self.provider.bytes_allocated(),
+            peak_bytes_allocated: self.provider.peak_bytes_allocated(),
+            cached_chunks: self.provider.cached_chunks(),
+            cached_bytes: self.provider.cached_bytes(),
+            normal_chunks_reused: self.provider.normal_chunks_reused(),
+            resets: self.resets.get(),
             wasted_tail_bytes: self.provider.wasted_tail_bytes() + current_free,
             normal_chunks_allocated: chunks.normal(),
             oversized_chunks_allocated: chunks.oversized(),
             relocations: self.relocations.get(),
+            normal_chunks_allocated_since_reset: generation.normal_allocated(),
+            oversized_chunks_allocated_since_reset: generation.oversized_allocated(),
+            backing_bytes_allocated_since_reset: generation.backing_bytes_allocated(),
+            normal_chunks_reused_since_reset: generation.normal_reused(),
+            relocations_since_reset: self.relocations_since_reset.get(),
             ..ArenaStats::default()
         }
     }
@@ -361,6 +385,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     pub(crate) fn record_relocation(&self) {
         self.relocations.set(self.relocations.get() + 1);
+        self.relocations_since_reset.set(self.relocations_since_reset.get() + 1);
     }
 
     /// Reset the arena for a new allocation phase.
@@ -388,16 +413,24 @@ impl<A: Allocator + Clone> Arena<A> {
     /// arena.reset();
     /// assert_eq!(*arena.alloc(8), 8);
     /// ```
-    #[cold]
     pub fn reset(&mut self) {
-        // Reconcile the current chunk's pre-credited surplus before its
-        // mutator's Drop releases the `+1`.
-        self.reconcile_shared_surplus();
         self.retired_local.clear();
-        // Dropping the current mutator releases its `+1`; no reference
-        // destructors run here (the `Alloc` handles already ran them).
-        *self.current.get_mut() = ChunkMutator::<A>::empty();
+        let local = self.local_shared_count.replace(0);
+        let displaced = self.current.replace_mut(ChunkMutator::<A>::empty());
+        // Return the unused pre-credited surplus and the mutator's +1 with
+        // one atomic operation. No reference destructors run here (the
+        // `Alloc` handles already ran them).
+        let refund = (LARGE_SHARED_REF_SURPLUS - local) as usize;
+        // SAFETY: `local` counts every surplus reference handed out from the
+        // current chunk, so the remainder is exactly the unused pre-credit.
+        unsafe { displaced.release_with_refund(refund) };
         self.current_has_reference.set(false);
+        #[cfg(feature = "stats")]
+        {
+            self.provider.reset_generation_stats();
+            self.relocations_since_reset.set(0);
+            self.resets.set(self.resets.get() + 1);
+        }
     }
 
     /// Records that the current chunk has handed out an arena-lifetime
