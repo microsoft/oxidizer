@@ -35,13 +35,19 @@ struct Args {
 }
 
 // Test groups define related packages that should be tested together during mutation testing.
-// Grouping related packages (e.g., a crate and its proc macros) ensures mutations are properly
-// validated by all relevant tests. Ungrouped packages are tested individually, which may miss
-// mutations if their tests reside in dependent packages.
+// Grouping related packages (e.g., a crate and its proc macros, or a crate and its test harness)
+// ensures mutations are properly validated by all relevant tests. Ungrouped packages are tested
+// individually, which may miss mutations if their tests reside in dependent packages.
+//
+// Every member of a group is passed to `cargo mutants` as `--test-package`, so a mutant in any
+// member is validated against the whole group's tests. Members listed in
+// `automation::INTERNAL_CRATES` (e.g. test harnesses) contribute their tests but are never
+// themselves mutated.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
+    &["observed", "observed_macros", "observed_testing"],
     &["ohno", "ohno_macros"],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
@@ -140,7 +146,21 @@ fn main() {
 }
 
 fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
-    println!("Mutating: {}", group.join(", "));
+    // Mutate every group member except internal crates -- those are test harnesses and
+    // fixtures, so mutating them measures the tests' own scaffolding rather than shipped
+    // behavior. Skipping them here keeps them in the `--test-package` list below.
+    let mutated: Vec<_> = group
+        .iter()
+        .filter(|p| !automation::INTERNAL_CRATES.contains(&p.as_str()))
+        .cloned()
+        .collect();
+
+    if mutated.is_empty() {
+        println!("Skipping [{}]: no mutable packages in this group", group.join(", "));
+        return Ok(());
+    }
+
+    println!("Mutating: {} (tested by: {})", mutated.join(", "), group.join(", "));
 
     let mut cargo_args = vec![
         "mutants".to_owned(),
@@ -165,8 +185,12 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
         cargo_args.push(diff.display().to_string());
     }
 
-    let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
-    cargo_args.extend(package_args);
+    cargo_args.extend(mutated.iter().map(|p| format!("--package={p}")));
+
+    // `--test-package` REPLACES the default of "only the mutated package's own tests", so the
+    // mutated packages must be listed alongside their harnesses -- otherwise mutants covered by
+    // a crate's in-crate `#[cfg(test)]` tests would start being reported as MISSED.
+    cargo_args.extend(group.iter().map(|p| format!("--test-package={p}")));
 
     automation::run_cargo(cargo_args.into_iter())
 }

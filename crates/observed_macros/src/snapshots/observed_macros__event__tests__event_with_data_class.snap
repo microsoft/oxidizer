@@ -1,0 +1,55 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for UserLogin {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "user.login",
+            ::core::option::Option::Some(::core::any::TypeId::of::<UserLogin>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "user.login",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "username",
+                    ::core::option::Option::Some(LogFieldEntry::new("username")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            self.username.clone(),
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(LogFieldEntry::new("status")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.status.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

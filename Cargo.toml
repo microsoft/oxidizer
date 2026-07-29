@@ -53,6 +53,7 @@ include = [
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
+all_the_time = { version = "0.4.4", default-features = false }
 alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
@@ -140,6 +141,9 @@ native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
+observed = { path = "crates/observed", default-features = false, version = "0.23.0" }
+observed_macros = { path = "crates/observed_macros", default-features = false, version = "0.23.0" }
+observed_testing = { path = "crates/observed_testing", default-features = false }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.9" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
 once_cell = { version = "1.21.3", default-features = false }
@@ -205,6 +209,7 @@ thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.8.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.5" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.7.4" }
+thread_local = { version = "1.1.8", default-features = false }
 tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.48.0", default-features = false }

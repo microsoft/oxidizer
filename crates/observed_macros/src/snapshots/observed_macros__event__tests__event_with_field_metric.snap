@@ -1,0 +1,81 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for OutgoingRequest {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "outgoing_request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<OutgoingRequest>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "outgoing_request",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("Outgoing request"),
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "method",
+                    ::core::option::Option::Some(LogFieldEntry::new("method")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(&self.method, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "request_id",
+                    ::core::option::Option::Some(LogFieldEntry::new("request_id")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(&self.request_id, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "operation",
+                    ::core::option::Option::Some(LogFieldEntry::new("operation")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(&self.operation, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "duration",
+                    ::core::option::Option::Some(LogFieldEntry::new("duration")),
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "duration",
+                            ::observed::metadata::MetricDescription::new(
+                                "request_duration",
+                                ::observed::metadata::InstrumentKind::Histogram,
+                                "",
+                                "ms",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.duration.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

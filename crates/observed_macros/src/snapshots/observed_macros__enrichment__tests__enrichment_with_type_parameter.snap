@@ -1,0 +1,21 @@
+---
+source: crates/observed_macros/src/enrichment.rs
+expression: output
+---
+const _: () = {
+    impl<T> ::observed::enrichment::Enrichment for GenericCtx<T> {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(1usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "value",
+                        self.value,
+                    ),
+                );
+            entries
+        }
+    }
+};
