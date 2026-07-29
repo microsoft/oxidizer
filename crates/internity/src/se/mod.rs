@@ -3,9 +3,8 @@
 
 //! Reader-aware serialization (behind the `serde` feature).
 //!
-//! Serde's [`serde::Serialize`] trait carries no context, so a [`Sym`] can only
-//! be serialized as its raw integer handle — meaningless without the matching
-//! interner. This module provides the context-carrying counterpart:
+//! Serde's [`serde::Serialize`] trait carries no context for resolving a [`Sym`]
+//! against its interner. This module provides the context-carrying counterpart:
 //! [`SerializeIn`] receives a [`Reader`] and emits each [`Sym`] as the string it
 //! resolves to. Paired with [`DeserializeIn`](crate::de::DeserializeIn), a value
 //! round-trips through a self-describing encoding without shipping the interner

@@ -23,11 +23,12 @@ const MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 /// likely growth.
 ///
 /// With 64 shards, a floor of 8 means preallocation from a capacity hint only
-/// engages once the hint exceeds ~512 strings; below that, eagerly sizing every
-/// shard wastes memory on the many shards that stay empty for a small corpus.
+/// engages once the hint exceeds approximately 512 strings; below that, eagerly
+/// sizing every shard wastes memory on the many shards that stay empty for a
+/// small corpus.
 const MIN_PREALLOCATED_STRINGS_PER_SHARD: usize = 8;
 
-/// A fast, concurrent string interner.
+/// A concurrent string interner.
 ///
 /// Maps each distinct string to a compact 4-byte [`Sym`] handle. Interning takes
 /// `&self`, so many threads can intern at once. The [`ThreadedLexicon`] itself is
@@ -130,7 +131,7 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// # Panics
     ///
     /// Panics if the owning shard would exceed its capacity (approximately 67
-    /// million distinct strings) or 4 GB of bytes.
+    /// million distinct strings) or the `u32` byte-offset limit.
     #[inline]
     pub fn intern(&self, s: impl AsRef<str>) -> Sym {
         self.0.intern(s.as_ref())
@@ -164,7 +165,7 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// # Panics
     ///
     /// Panics if the owning shard would exceed its capacity (approximately 67
-    /// million distinct strings) or 4 GB of bytes.
+    /// million distinct strings) or the `u32` byte-offset limit.
     ///
     /// # Examples
     ///
@@ -257,7 +258,7 @@ impl<T: AsRef<str>> FromIterator<T> for ThreadedLexicon {
 /// Holds the inline shard array and the hasher. Because the `Arc` already puts
 /// this whole struct on the heap, the shard array is stored **inline** (no extra
 /// `Box`): interning reaches a shard with a single index into the `Arc`'s payload.
-/// Interning takes `&self` (each shard is independently mutex-guarded), so this is
+/// Interning takes `&self` (each shard is independently lock-guarded), so this is
 /// `Sync`.
 struct ThreadedLexiconInner<S = FxBuildHasher> {
     shards: [Shard; NUM_SHARDS],

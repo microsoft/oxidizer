@@ -36,10 +36,9 @@ pub(crate) type ShardReadGuard<'a> = RwLockReadGuard<'a, ShardWrite>;
 
 /// One shard: interning state guarded by a `RwLock`.
 ///
-/// `#[repr(align(128))]` keeps distinct shards on distinct cache lines to avoid
-/// false sharing between their locks. 128 bytes (not 64) covers the widest
-/// common unit: x86-64 uses 64-byte lines but prefetches pairs, and Apple and
-/// some ARM cores use 128-byte lines, so aligning to 128 is safe everywhere.
+/// `#[repr(align(128))]` places each shard lock in a separate 128-byte-aligned
+/// region, reducing false sharing on architectures with cache lines up to that
+/// size.
 #[repr(align(128))]
 pub(crate) struct Shard {
     state: RwLock<ShardWrite>,

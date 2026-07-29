@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Regression tests for `DeserializeIn` derive expansion.
+//! Tests for `DeserializeIn` derive expansion.
 
 #![cfg(feature = "serde")]
 

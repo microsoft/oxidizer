@@ -16,7 +16,7 @@ use hashbrown::HashTable;
 
 use crate::sym::{LOCAL_MASK, Sym};
 
-/// A shard's state, guarded by the shard's mutex: the dedup hash table
+/// A shard's state, guarded by the shard's `RwLock`: the dedup hash table
 /// (string hash → handle), the CSR-style string boundaries, and the concatenated
 /// string bytes.
 pub(crate) struct ShardWrite {

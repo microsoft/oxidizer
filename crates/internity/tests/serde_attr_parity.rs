@@ -281,10 +281,8 @@ fn deserialize_with_matches_serde() {
     assert_eq!(lex.resolve(interned.key), "k");
 }
 
-// Downstream regression (review item 5.3): a custom `deserialize_with` function
-// whose name collides with the generated helper unit-struct name must still
-// resolve to the user's function. The derive makes its helper identifiers
-// collision-free, so this compiles and round-trips correctly.
+// Ensure a generated helper name cannot shadow the user's `deserialize_with`
+// function.
 #[expect(non_snake_case, reason = "deliberately collides with a generated helper name")]
 fn __InternityWithSeed0ForCollide<'de, D>(d: D) -> Result<String, D::Error>
 where

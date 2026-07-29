@@ -18,8 +18,8 @@ use crate::LocalLexicon;
 /// (a denial-of-service vector). We therefore cap the preallocated *bytes*, not
 /// the element count, so the bound holds regardless of `T`'s size.
 pub(crate) fn cautious_capacity<T>(hint: Option<usize>) -> usize {
-    // 1 MiB is large enough that honest workloads almost never hit the cap, yet
-    // small enough to bound a single speculative allocation from a bad hint.
+    // Allow useful preallocation while limiting each speculative allocation from
+    // an untrusted hint to 1 MiB.
     const MAX_PREALLOC_BYTES: usize = 1024 * 1024;
 
     hint.unwrap_or(0).min(MAX_PREALLOC_BYTES / core::mem::size_of::<T>().max(1))

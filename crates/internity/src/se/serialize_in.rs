@@ -7,10 +7,10 @@ use crate::Reader;
 
 /// Reader-aware serialization, the counterpart to [`DeserializeIn`](crate::de::DeserializeIn).
 ///
-/// Serde's [`serde::Serialize`] carries no context, so a [`Sym`](crate::Sym) can
-/// only be serialized as its raw integer handle — meaningless without the
-/// matching interner. `SerializeIn` instead receives a [`Reader`] and resolves
-/// every [`Sym`](crate::Sym) to the string it stands for, producing a
+/// Serde's [`serde::Serialize`] carries no context for resolving a
+/// [`Sym`](crate::Sym) against its interner. `SerializeIn` instead receives a
+/// [`Reader`] and resolves every [`Sym`](crate::Sym) to the string it stands for,
+/// producing a
 /// self-describing encoding: serialize with `SerializeIn` threading a
 /// [`Reader`], then deserialize with
 /// [`DeserializeIn`](crate::de::DeserializeIn) threading a fresh interner to

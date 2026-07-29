@@ -3,15 +3,15 @@
 
 //! Lexicon-aware deserialization (behind the `serde` feature).
 //!
-//! Serde's [`serde::Deserialize`] trait carries no context, so a [`Sym`] can
-//! only be deserialized as its raw integer handle — meaningless without the
-//! matching interner. This module provides the context-carrying counterpart:
+//! Serde's [`serde::Deserialize`] trait carries no context for choosing the
+//! interner that owns a [`Sym`]. This module provides the context-carrying
+//! counterpart:
 //! [`DeserializeIn`] receives a [`Lexicon`] and produces each [`Sym`] by
 //! interning the decoded string into a [`LocalLexicon`] or [`ThreadedLexicon`]
 //! of your choosing.
 //!
 //! Most users derive [`DeserializeIn`](derive@DeserializeIn) on their structs
-//! and call [`LocalLexicon::deserialize_in`] or
+//! and call [`LocalLexicon::deserialize_in`](crate::LocalLexicon::deserialize_in) or
 //! [`ThreadedLexicon::deserialize_in`](crate::ThreadedLexicon::deserialize_in).
 //!
 //! ```

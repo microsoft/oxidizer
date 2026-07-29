@@ -14,11 +14,8 @@ use core::num::NonZeroU32;
 /// Number of bits used to select a shard. Must satisfy `1 << SHARD_BITS == N`
 /// (the shard count).
 ///
-/// Six bits yields 64 shards: enough independent locks to keep interning
-/// contention low across common server core counts, while small enough that the
-/// fixed per-shard state (lock, maps, backing storage) stays a negligible
-/// overhead for a single lexicon. It also leaves 26 bits of per-shard index
-/// (~67M entries), far more than any realistic corpus needs.
+/// Six bits yields 64 shards and leaves 26 bits for the per-shard index
+/// (approximately 67 million entries per shard).
 #[cfg(feature = "std")]
 pub(crate) const SHARD_BITS: u32 = 6;
 

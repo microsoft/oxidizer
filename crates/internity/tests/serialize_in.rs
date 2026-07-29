@@ -317,10 +317,8 @@ fn serialize_with_adapter_is_applied() {
     assert_eq!(json, r#"{"name":"k","bumped":42}"#);
 }
 
-// Downstream regression (review item 5.3): a `serialize_with` function whose
-// name collides with the generated adapter unit-struct name must still resolve
-// to the user's function. Collision-free helper identifiers make this compile
-// and serialize correctly.
+// Ensure a generated adapter name cannot shadow the user's `serialize_with`
+// function.
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde `serialize_with` requires the `fn(&T, S)` signature"
@@ -393,9 +391,8 @@ fn out_of_range_handle_is_a_serialize_error() {
 
 #[test]
 fn in_range_foreign_handle_serializes_the_wrong_string() {
-    // SerializeIn does NOT validate handle provenance: an in-range handle from a
-    // different lexicon resolves to whichever string occupies that slot in the
-    // target reader and serializes successfully. Documented, not a bug.
+    // `SerializeIn` cannot validate provenance: an in-range foreign handle
+    // resolves to the string occupying that slot in the target reader.
     let mut source = LocalLexicon::new();
     let handle = source.intern("from-source");
 

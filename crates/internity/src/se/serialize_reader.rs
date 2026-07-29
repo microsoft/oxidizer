@@ -5,7 +5,8 @@ use serde::{Serialize, Serializer};
 
 use crate::Reader;
 
-/// Serializes an interner's strings as a sequence, in [`Reader`] iteration order.
+/// Serializes the strings from an interner as a sequence, in [`Reader`] iteration
+/// order.
 ///
 /// # Handle preservation requires a matching layout
 ///

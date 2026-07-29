@@ -4,10 +4,9 @@
 //! Consumer-level compile-fail tests that pin the crate's serde safety contract.
 //!
 //! These exercise the *public* proc-macro entry points and trait bounds a
-//! downstream crate would hit, so a regression that (for example) started
-//! emitting a plain `Serialize`/`Deserialize` for [`Sym`](internity::Sym), or
-//! silently accepted `skip_serializing_if`, would fail the build here even
-//! though the positive round-trip tests keep passing.
+//! downstream crate uses. They ensure [`Sym`](internity::Sym) has no plain
+//! `Serialize`/`Deserialize` implementation and `skip_serializing_if` remains
+//! unsupported.
 
 #![cfg(feature = "serde")]
 

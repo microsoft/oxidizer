@@ -15,12 +15,12 @@ use crate::flat_reader::FlatReader;
 use crate::reader::Reader;
 use crate::sym::Sym;
 
-/// A fast, single-threaded string interner.
+/// A single-threaded string interner.
 ///
 /// Maps each distinct string to a compact 4-byte [`Sym`] handle, and resolves
 /// handles back to strings. Interning takes `&mut self`; resolving takes `&self`.
-/// This is the fastest choice when you build the table from a single thread — to
-/// intern concurrently from many threads, use [`ThreadedLexicon`](crate::ThreadedLexicon) instead.
+/// Use it when building the table from one thread; to intern concurrently, use
+/// [`ThreadedLexicon`](crate::ThreadedLexicon) instead.
 ///
 /// The usual lifecycle is **intern, then freeze, then read**: call
 /// [`freeze`](LocalLexicon::freeze) once you're done interning to get a cheap,
@@ -29,7 +29,7 @@ use crate::sym::Sym;
 ///
 /// By default, [`LocalLexicon`] uses a fast, non-cryptographic hasher; supply your own with
 /// [`with_hasher`](LocalLexicon::with_hasher) (for example a DoS-resistant one when
-/// interning untrusted input). Capacity is bounded by a 4 GB string buffer.
+/// interning untrusted input). Capacity is bounded by a 4 GiB string buffer.
 ///
 /// # Examples
 ///
@@ -91,10 +91,10 @@ impl LocalLexicon {
     /// Creates an interner preallocated for `strings` strings and `bytes` bytes.
     ///
     /// Uses the default hasher ([`FxBuildHasher`]). This is a capacity *hint*: the
-    /// interner still grows automatically past it,
-    /// and the usual limits (≤ 4 GB of string bytes, approximately 4.29 billion
-    /// strings) still apply. `strings` sizes the dedup table and offset index;
-    /// `bytes` sizes the string buffer.
+    /// interner still grows automatically past it, and the usual limits (less
+    /// than 4 GiB of string bytes, approximately 4.29 billion strings) still
+    /// apply. `strings` sizes the dedup table and offset index; `bytes` sizes the
+    /// string buffer.
     ///
     /// # Examples
     ///
@@ -161,8 +161,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     ///
     /// # Panics
     ///
-    /// Panics if the total interned bytes would exceed 4 GB (the `u32` buffer
-    /// limit).
+    /// Panics if the total interned bytes would exceed the `u32` buffer limit.
     #[inline]
     pub fn intern(&mut self, s: impl AsRef<str>) -> Sym {
         let s = s.as_ref();
@@ -242,8 +241,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     ///
     /// # Panics
     ///
-    /// Panics if the total interned bytes would exceed 4 GB (the `u32` buffer
-    /// limit).
+    /// Panics if the total interned bytes would exceed the `u32` buffer limit.
     ///
     /// # Examples
     ///

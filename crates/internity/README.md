@@ -13,7 +13,7 @@
 
 </div>
 
-A blazingly fast string interning infrastructure.
+Compact string interning with local and concurrent engines.
 
 String interning is a common technique to reduce memory use and improve
 performance when code handles the same strings over and over
@@ -22,11 +22,11 @@ The benefits of interning include:
 
 * Strings are stored once and reused which saves memory and CPU cycles
 
-* Strings are referenced with a 4 byte handle instead of an 8 or 16 byte reference.
+* Strings are referenced with a 4-byte handle instead of an 8- or 16-byte reference.
   This can save considerable memory.
 
 * Hashing and comparison of interned strings is faster since it doesn’t require
-  hashing or comparing whole strings, merely their 4 byte handle.
+  hashing or comparing whole strings, merely their 4-byte handle.
 
 To intern a string, you supply it to the interning engine and it hands back a handle.
 No matter how many times you try to intern a given string, it gets deduplicated and
@@ -44,12 +44,12 @@ in for string equality and a `Sym` works directly as a `HashMap` key.
 
 `internity` supports two different string interners for different scenarios:
 
-* [`LocalLexicon`][__link1]. This is a single-threaded engine: only one thread can be interning strings,
-  although any number of threads can access the interned strings. This is the faster of the two
-  engines.
+* [`LocalLexicon`][__link1]. This engine interns strings from one thread and avoids
+  synchronization during the fill phase. Shared readers can resolve strings
+  concurrently.
 
-* [`ThreadedLexicon`][__link2]. This engine allows multiple threads to be interning words concurrently.
-  It’s naturally a bit slower due to the need for synchronization.
+* [`ThreadedLexicon`][__link2]. This engine allows multiple threads to intern words
+  concurrently and uses synchronization to coordinate inserts.
 
 Both engines can be used through the [`Lexicon`][__link3] trait, allowing generic code
 to intern strings without selecting a concrete engine.
@@ -106,8 +106,8 @@ example a DoS-resistant hasher when interning untrusted input.
 
 ## Capacity
 
-A single [`LocalLexicon`][__link14] holds up to approximately 4 GB of string bytes; a
-[`ThreadedLexicon`][__link15] up to approximately 256 GB (across its shards). Either way
+A single [`LocalLexicon`][__link14] holds up to approximately 4 GiB of string bytes; a
+[`ThreadedLexicon`][__link15] up to approximately 256 GiB (across its shards). Either way
 the number of distinct strings is bounded by the 4-byte handle (approximately
 4.29 billion). Exceeding these limits panics rather than corrupting data.
 
@@ -128,7 +128,7 @@ the number of distinct strings is bounded by the 4-byte handle (approximately
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/internity">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbrqRvBKhFnJcb6iOmTeNRXwobOYhbo61cmUAbW0P1GZPXhL1hZIKCaWludGVybml0eWUwLjEuMIJlc2VyZGVnMS4wLjIyOA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb2G7EdP2hZtcblfzsjF5fRG4bjHbu2fkr7Ysb3M2rIQy6E39hZIKCaWludGVybml0eWUwLjEuMIJlc2VyZGVnMS4wLjIyOA
  [__link0]: https://docs.rs/internity/0.1.0/internity/?search=Sym
  [__link1]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
  [__link10]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeIn

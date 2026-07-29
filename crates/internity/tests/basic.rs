@@ -66,9 +66,7 @@ fn sym_as_u32_roundtrips_and_debug() {
     assert_ne!(raw, 0);
     assert_eq!(Sym::from_u32(raw), Some(a));
     assert_eq!(Sym::from_u32(0), None);
-    // `From<Sym> for u32` matches the inherent `as_u32`.
     assert_eq!(u32::from(a), raw);
-    // `Debug` renders the raw handle value.
     assert!(format!("{a:?}").contains("Sym"));
 }
 
@@ -90,10 +88,8 @@ fn lexicon_and_threaded_debug() {
 
 #[test]
 fn from_iter_and_extend() {
-    // `FromIterator` builds an interner from strings.
     let mut it: LocalLexicon = ["a", "b", "a", "c"].into_iter().collect();
     assert_eq!(it.len(), 3);
-    // `Extend` interns more.
     it.extend(["c", "d"]);
     assert_eq!(it.len(), 4);
 
@@ -221,7 +217,6 @@ fn freeze_preserves_handles_and_strings() {
     let n = it.len();
     let reader = it.freeze();
     assert_eq!(reader.len(), n);
-    // Every handle from the live lexicon still resolves to the same string.
     for (sym, s) in &syms {
         assert_eq!(reader.resolve(*sym), s.as_str());
     }
@@ -331,7 +326,6 @@ fn many_strings_across_chunks() {
         let s = format!("symbol-number-{i:08}-with-some-padding");
         syms.push((it.intern(&s), s));
     }
-    // Re-interning yields identical handles; resolve returns the right bytes.
     for (sym, s) in &syms {
         assert_eq!(it.intern(s), *sym);
         assert_eq!(it.resolve(*sym), s.as_str());
@@ -362,10 +356,8 @@ fn freeze_while_shared_copies_and_preserves_handles() {
     assert_eq!(reader.resolve(a), "alpha");
     assert_eq!(reader.resolve(b), "beta");
     assert_eq!(reader.len(), 2);
-    // A foreign/out-of-range handle on the frozen sharded reader is range-checked.
     assert_eq!(reader.try_resolve(Sym::from_u32(u32::MAX).unwrap()), None);
 
-    // The surviving handle is unaffected and still interns.
     assert_eq!(other.get("alpha"), Some(a));
     assert_ne!(other.intern("gamma"), a);
 }
@@ -399,7 +391,6 @@ fn concurrent_intern_is_consistent() {
 
     let maps: Vec<HashMap<String, Sym>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
-    // Cross-check: every thread saw the same handle for a given string.
     let first = &maps[0];
     for m in &maps[1..] {
         for (k, v) in m {
@@ -407,10 +398,8 @@ fn concurrent_intern_is_consistent() {
         }
     }
 
-    // Exactly `distinct` distinct strings were interned.
     assert_eq!(it.len(), distinct);
 
-    // Freeze (sole handle after joins), then resolve every handle to its string.
     let reader = it.freeze();
     for (k, v) in first {
         assert_eq!(reader.resolve(*v), k.as_str());
@@ -427,7 +416,6 @@ fn concurrent_intern_then_concurrent_resolve() {
     let (n_threads, distinct, read_iters) = (8, 5_000usize, 50);
     let words = Arc::new((0..distinct).map(|i| format!("word-{i}")).collect::<Vec<_>>());
 
-    // Fill phase: every thread interns the same set concurrently.
     let writers: Vec<_> = (0..n_threads)
         .map(|_| {
             let it = it.clone();
@@ -444,14 +432,12 @@ fn concurrent_intern_then_concurrent_resolve() {
     }
     assert_eq!(it.len(), distinct);
 
-    // Capture each string's handle, then freeze for the read phase.
     let syms: Vec<Sym> = words
         .iter()
         .map(|word| it.get(word).expect("every word was interned before all writer threads joined"))
         .collect();
     let reader = Arc::new(it.freeze());
 
-    // Read phase: many threads resolve the frozen reader concurrently.
     let readers: Vec<_> = (0..n_threads)
         .map(|_| {
             let reader = Arc::clone(&reader);
@@ -480,7 +466,6 @@ fn lexicon_iter_yields_pairs_in_order() {
     let pairs: Vec<_> = it.iter().collect();
     assert_eq!(pairs, vec![(a, "a"), (b, "bb"), (c, "ccc")]);
 
-    // The frozen reader iterates the same pairs.
     let reader = it.freeze();
     let mut got: Vec<_> = reader.iter().collect();
     got.sort_by_key(|&(s, _)| s.as_u32());
@@ -500,7 +485,6 @@ fn threaded_reader_iter_roundtrips() {
     let mut expect: Vec<String> = words.iter().map(|s| (*s).to_string()).collect();
     expect.sort();
     assert_eq!(got, expect);
-    // Every yielded handle resolves back to its string.
     for (sym, s) in reader.iter() {
         assert_eq!(reader.resolve(sym), s);
     }
@@ -533,7 +517,6 @@ fn serde_lexicon_roundtrips_handles() {
     let json = serde_json::to_string(&it).unwrap();
     let it2: LocalLexicon = serde_json::from_str(&json).unwrap();
     assert_eq!(it2.len(), 3);
-    // Handles are reproduced identically, resolving to the same strings.
     for (sym, s) in &syms {
         assert_eq!(it2.resolve(*sym), s.as_str());
     }
@@ -577,16 +560,13 @@ fn sym_hasher_write_fallback_is_deterministic() {
 fn serde_lexicon_rejects_non_sequence() {
     let error = serde_json::from_str::<LocalLexicon>("42").unwrap_err();
     assert!(error.to_string().contains("a sequence of interned strings"));
-    // A non-string element mid-sequence is an error.
     serde_json::from_str::<LocalLexicon>("[\"a\", 42]").unwrap_err();
 }
 
 #[test]
 fn foreign_sym_resolves_to_none_without_panicking() {
-    // A frozen `ThreadedLexicon` reader must treat handles it never issued as
-    // out of range (return `None`) rather than panicking — even for crafted
-    // handles whose per-shard local bits are zero, which previously underflowed
-    // the local-index decode in debug builds.
+    // Crafted handles with a zero local index must be rejected without
+    // underflowing.
     let it = ThreadedLexicon::new();
     let real = it.intern("hello");
     let reader = it.freeze();
@@ -598,7 +578,6 @@ fn foreign_sym_resolves_to_none_without_panicking() {
     let zero_local = Sym::from_u32(1u32 << 26).unwrap();
     assert_eq!(reader.try_resolve(zero_local), None);
 
-    // All bits set: valid shard, but a local index far past the shard's length.
     let past_end = Sym::from_u32(u32::MAX).unwrap();
     assert_eq!(reader.try_resolve(past_end), None);
 }
@@ -667,23 +646,18 @@ fn freeze_races_writer_and_stays_prefix_consistent() {
     // writer already exited, the receiver is gone and `send` fails harmlessly.
     let _ = release_tx.send(());
 
-    // Freeze repeatedly while the writer runs, plus once after it finishes. The
-    // loop is bounded by `is_finished`, which becomes true even if the writer
-    // panics, so a broken writer can never spin this loop forever.
+    // `is_finished` also terminates the loop if the writer panics.
     loop {
         let done = writer.is_finished();
         let reader = freezer_lex.clone().freeze();
 
-        // Length and content agree: exactly `len()` handles resolve.
         let present: BTreeSet<String> = reader.iter().map(|(_, s)| s.to_owned()).collect();
         assert_eq!(present.len(), reader.len(), "torn length vs content");
 
-        // Every resolved handle round-trips to the string `iter` reported.
         for (sym, s) in reader.iter() {
             assert_eq!(reader.resolve(sym), s);
         }
 
-        // The committed set is a contiguous prefix of the writer's sequence.
         let expected: BTreeSet<String> = (0..present.len()).map(|i| format!("s{i}")).collect();
         assert_eq!(present, expected, "snapshot is not a prefix — cross-shard tear");
 
@@ -692,10 +666,8 @@ fn freeze_races_writer_and_stays_prefix_consistent() {
         }
     }
 
-    // Join surfaces any writer panic rather than leaving it unobserved.
     writer.join().expect("writer panicked");
 
-    // Final snapshot after the writer joined contains the whole sequence.
     let reader = freezer_lex.freeze();
     assert_eq!(reader.len(), COUNT);
 }
@@ -742,7 +714,6 @@ fn intern_bytes_interns_valid_utf8_and_resolves_to_str() {
 fn intern_bytes_rejects_invalid_utf8_on_first_insert() {
     let mut lexicon = LocalLexicon::new();
     let err = lexicon.intern_bytes(&[0xff, 0xfe]).unwrap_err();
-    // A lone continuation/leading byte is invalid at offset 0.
     assert_eq!(err.valid_up_to(), 0);
     assert_eq!(lexicon.len(), 0); // nothing was stored
 }
@@ -757,7 +728,6 @@ fn intern_bytes_hit_skips_revalidation_and_dedups() {
     assert_eq!(a, b);
     assert_eq!(lexicon.len(), 1);
 
-    // Byte-path insert followed by byte-path hit.
     let c = lexicon.intern_bytes(b"world").expect("valid UTF-8");
     assert_eq!(lexicon.intern_bytes(b"world").expect("hit"), c);
     assert_ne!(a, c);
@@ -827,14 +797,12 @@ fn intern_bytes_walks_collision_chain_by_byte_comparison() {
     assert_ne!(gamma, delta);
     assert_ne!(alpha, delta);
 
-    // Exact dedup across the chain, through both entry points.
     assert_eq!(lexicon.intern_bytes(b"alpha").unwrap(), alpha);
     assert_eq!(lexicon.intern_bytes(b"beta").unwrap(), beta);
     assert_eq!(lexicon.intern("gamma"), gamma);
     assert_eq!(lexicon.intern_bytes("δ".as_bytes()).unwrap(), delta);
     assert_eq!(lexicon.len(), 4); // no duplicates created
 
-    // A new distinct key on the same chain still inserts (no false hit).
     let epsilon = lexicon.intern_bytes(b"epsilon").unwrap();
     assert_ne!(epsilon, alpha);
     assert_eq!(lexicon.len(), 5);
