@@ -134,9 +134,9 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbGp43Vram4A8bNuIDzonQg34brLrA3bOFdkgbQx1WD1o4dllhZIKCbGRhdGFfcHJpdmFjeWYwLjEyLjOCaG9ic2VydmVkZjAuMjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbGp43Vram4A8bNuIDzonQg34brLrA3bOFdkgbQx1WD1o4dllhZIKCbGRhdGFfcHJpdmFjeWYwLjEyLjSCaG9ic2VydmVkZjAuMjMuMA
  [__link0]: `emit!`
- [__link1]: https://docs.rs/data_privacy/0.12.3/data_privacy/?search=RedactionEngine
+ [__link1]: https://docs.rs/data_privacy/0.12.4/data_privacy/?search=RedactionEngine
  [__link2]: https://docs.rs/observed/0.23.0/observed/?search=processing::EventProcessor
  [__link3]: https://docs.rs/observed/0.23.0/observed/?search=enrichment::EnrichFutureExt::enrich
  [__link4]: https://docs.rs/observed/0.23.0/observed/?search=enrichment::EnrichFnExt::enrich
