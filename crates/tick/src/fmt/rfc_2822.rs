@@ -105,7 +105,8 @@ impl Rfc2822 {
     /// The largest value that can be represented by `Rfc2822`.
     ///
     /// This represents a Unix system time of `Thu, 30 Dec 9999 22:00:00 GMT`.
-    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
+    // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
+    // instant everywhere.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `Rfc2822`.
@@ -129,7 +130,8 @@ impl Rfc2822 {
     /// Returns an error if the instant is outside either range.
     fn new_checked(timestamp: Timestamp) -> Result<Self, Error> {
         // Only the lower bound needs checking: `Rfc2822::MAX` is `Timestamp::MAX`, so no
-        // `Timestamp` can exceed it. `max_is_jiff_timestamp_max` guards that assumption.
+        // `Timestamp` can exceed it. `max_is_the_largest_supported_instant` guards that
+        // assumption.
         if timestamp < Self::MIN_TIMESTAMP {
             return Err(Error::out_of_range(
                 "the instant is before year 0 and cannot be encoded as an RFC 2822 four-digit year",
@@ -269,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn max_is_jiff_timestamp_max() {
+    fn max_is_the_largest_supported_instant() {
         // `new_checked` only guards the lower bound, which is sound only while no
         // `Timestamp` can exceed `Rfc2822::MAX`.
         assert_eq!(Rfc2822::MAX.0, Timestamp::MAX);

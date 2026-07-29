@@ -77,7 +77,8 @@ impl UnixSeconds {
     ///
     /// This represents a Unix system time of `253402207200` seconds, which is
     /// `9999-12-30T22:00:00Z`.
-    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
+    // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
+    // instant everywhere.
     pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
 
     /// The Unix epoch represented as `UnixSeconds`.
