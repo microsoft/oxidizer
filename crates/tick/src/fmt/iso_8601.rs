@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use jiff::{SignedDuration, Timestamp};
 
 use crate::Error;
-use crate::fmt::{ensure_system_time_representable, to_system_time};
+use crate::fmt::ensure_system_time_representable;
 
 /// Parser and formatter for system time in ISO 8601 format.
 ///
@@ -130,7 +130,11 @@ impl Display for Iso8601 {
 
 impl From<Iso8601> for SystemTime {
     fn from(value: Iso8601) -> Self {
-        to_system_time(value.0)
+        // jiff's conversion panics for an instant this platform's `SystemTime` cannot hold,
+        // which no `Iso8601` can be: parsing runs the instant through
+        // `ensure_system_time_representable`, `TryFrom<SystemTime>` starts from a
+        // `SystemTime` in the first place, and the constants are within range everywhere.
+        value.0.into()
     }
 }
 
