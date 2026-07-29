@@ -1085,7 +1085,7 @@ name = "data_privacy_macros_impl"
 version = "0.10.3"
 dependencies = [
  "insta",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.2",
@@ -1548,7 +1548,7 @@ version = "0.3.5"
 dependencies = [
  "insta",
  "mutants",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.2",
@@ -2401,7 +2401,7 @@ dependencies = [
  "quote",
  "regex-syntax",
  "rustc_version",
- "syn",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2415,7 +2415,7 @@ dependencies = [
  "quote",
  "regex-automata",
  "regex-syntax",
- "syn",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2524,7 +2524,7 @@ checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2611,17 +2611,17 @@ version = "0.1.0"
 dependencies = [
  "multitude_macros_impl",
  "mutants",
- "syn",
+ "syn 3.0.2",
 ]
 
 [[package]]
 name = "multitude_macros_impl"
 version = "0.1.0"
 dependencies = [
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 3.0.2",
 ]
 
 [[package]]
@@ -2782,7 +2782,7 @@ version = "0.3.5"
 dependencies = [
  "insta",
  "mutants",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.2",
@@ -3158,6 +3158,16 @@ checksum = "9a65843dfefbafd3c879c683306959a6de478443ffe9c9adf02f5976432402d7"
 
 [[package]]
 name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "prettyplease"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
@@ -3259,11 +3269,11 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prettyplease",
+ "prettyplease 0.2.37",
  "prost",
  "prost-types",
  "regex",
- "syn",
+ "syn 2.0.119",
  "tempfile",
 ]
 
@@ -3277,7 +3287,7 @@ dependencies = [
  "itertools 0.14.0",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3514,7 +3524,7 @@ dependencies = [
  "http_path_template",
  "layered",
  "mutants",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "prost-reflect",
  "prost-types",
@@ -3525,7 +3535,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "syn",
+ "syn 3.0.2",
  "tokio",
  "tower-service",
 ]
@@ -3637,11 +3647,11 @@ dependencies = [
  "criterion",
  "http_path_template",
  "mutants",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 3.0.2",
  "unicode-ident",
 ]
 
@@ -4241,7 +4251,7 @@ dependencies = [
  "insta",
  "mutants",
  "ohno 0.3.9",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.2",
@@ -4320,7 +4330,7 @@ name = "thread_aware_macros_impl"
 version = "0.7.4"
 dependencies = [
  "insta",
- "prettyplease",
+ "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.2",
@@ -4575,10 +4585,10 @@ version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
 dependencies = [
- "prettyplease",
+ "prettyplease 0.2.37",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -4598,12 +4608,12 @@ version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
 dependencies = [
- "prettyplease",
+ "prettyplease 0.2.37",
  "proc-macro2",
  "prost-build",
  "prost-types",
  "quote",
- "syn",
+ "syn 2.0.119",
  "tempfile",
  "tonic-build",
 ]
