@@ -717,9 +717,11 @@
 //!
 //! The HTTP client supports two TLS backends for making HTTPS requests:
 //!
-//! - **`rustls`** (default): Uses [`rustls`](https://docs.rs/rustls) with the
-//!   [`aws-lc-rs`](https://docs.rs/aws-lc-rs) crypto provider. This is the recommended
-//!   backend and is selected by default when the `tls` feature is enabled.
+//! - **`rustls`** (default): Uses [`rustls`](https://docs.rs/rustls) with a pluggable
+//!   crypto provider. This is the recommended backend and is selected by default when the
+//!   `tls` feature is enabled. `tls` also brings in the
+//!   [`aws-lc-rs`](https://docs.rs/aws-lc-rs) crypto provider; enabling `rustls` on its own
+//!   leaves the provider choice to the application (see below).
 //! - **`native-tls`**: Uses the platform's native TLS implementation (`SChannel` on Windows,
 //!   Security Framework on `macOS`, `OpenSSL` on Linux). This can be explicitly selected, or is
 //!   chosen automatically when the `native-tls` feature is enabled and `rustls` is not.
@@ -763,6 +765,31 @@
 //! fetch = { version = "*", features = ["native-tls", "tokio"] }
 //! ```
 //!
+//! ## Choosing a rustls crypto provider
+//!
+//! rustls has no built-in cryptography; it delegates to a *crypto provider*. `fetch` never
+//! derives that choice from the runtime you select, so a transport feature such as `tokio`
+//! never pulls a provider (and its native build) into your dependency graph.
+//!
+//! - `tls` (or `rustls-aws-lc-rs`) enables the `aws-lc-rs` provider. This is what most
+//!   applications want.
+//! - `rustls` on its own enables the backend without a provider. The client then uses the
+//!   process-wide default provider, which the application must install before creating a
+//!   client:
+//!
+//! ```toml
+//! fetch = { version = "*", features = ["rustls", "tokio"] }
+//! ```
+//!
+//! ```rust,ignore
+//! rustls::crypto::CryptoProvider::install_default(my_provider())
+//!     .expect("a crypto provider must not already be installed");
+//! let client = fetch::HttpClient::new_tokio();
+//! ```
+//!
+//! Creating a Tokio client with the `rustls` backend and no installed provider panics with a
+//! message pointing at these two options.
+//!
 //! You can also select the TLS backend at runtime via [`TlsOptions::builder_rustls()`](tls::TlsOptions::builder_rustls) or
 //! `TlsOptions::builder_native_tls()` when both features are enabled, allowing different client
 //! instances to use different backends.
@@ -777,16 +804,22 @@
 //! ```
 //!
 //! - **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
-//!   constructor and related APIs for using the HTTP client in a Tokio-based application.
+//!   constructor and related APIs for using the HTTP client in a Tokio-based application. It selects a
+//!   runtime only; it never selects a TLS backend or a crypto provider.
 //!
 //! - **`json`**: Adds support for JSON serialization and deserialization, enabling methods like
 //!   `HttpRequestBuilder::json` for sending JSON data and `HttpRequestBuilder::fetch_json` for receiving JSON responses.
 //!
 //! - **`tls`**: Enables TLS support using `rustls` with the `aws-lc-rs` crypto provider. This is the
-//!   recommended way to enable HTTPS support and is an alias for the `rustls` feature.
+//!   recommended way to enable HTTPS support and is an alias for `rustls` plus `rustls-aws-lc-rs`.
 //!
-//! - **`rustls`**: Enables the `rustls` TLS backend with `aws-lc-rs`. This is the default TLS backend
-//!   and is selected automatically by the `tls` feature.
+//! - **`rustls`**: Enables the `rustls` TLS backend without choosing a crypto provider. Use this when
+//!   your application installs its own provider through
+//!   `rustls::crypto::CryptoProvider::install_default`; otherwise prefer `tls`.
+//!
+//! - **`rustls-aws-lc-rs`**: Adds the `aws-lc-rs` crypto provider to the `rustls` backend. Enabling it
+//!   pulls in `aws-lc-rs` (and its `aws-lc-sys` native build), which is why it is opt-in and is not
+//!   implied by any runtime feature.
 //!
 //! - **`native-tls`**: Enables the platform native TLS backend (`SChannel` on Windows, Security Framework
 //!   on `macOS`, `OpenSSL` on Linux). Use this when you need the platform's native TLS stack. When both

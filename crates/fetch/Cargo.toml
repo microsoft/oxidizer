@@ -53,13 +53,22 @@ ignored = ["ctor"]
 
 [features]
 default = []
-tls = ["rustls"]
+# Batteries-included TLS: the `rustls` backend together with the `aws-lc-rs`
+# crypto provider.
+tls = ["rustls", "rustls-aws-lc-rs"]
+# The `rustls` backend without a crypto provider. Callers must either enable
+# `rustls-aws-lc-rs` (or `tls`), or install a process-wide provider through
+# `rustls::crypto::CryptoProvider::install_default`.
 rustls = [
     "dep:rustls",
     "dep:rustls-platform-verifier",
     "fetch_hyper?/rustls",
     "fetch_tls/rustls",
 ]
+# Opt-in crypto provider for the `rustls` backend. Kept separate from the
+# runtime/transport features so that selecting a runtime never selects a crypto
+# provider (and never drags in `aws-lc-sys`' native build).
+rustls-aws-lc-rs = ["rustls", "rustls/aws-lc-rs"]
 native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
@@ -73,10 +82,6 @@ tokio = [
     "hyper-util/http1",
     "hyper-util/http2",
     "tick/tokio",
-    # The aws-lc-rs crypto provider is only pulled in when both `tokio` and
-    # `rustls` are enabled, because it is exclusively used by the Tokio
-    # transport's rustls backend (`tokio::build_tls_backend`).
-    "rustls?/aws-lc-rs",
 ]
 
 [dependencies]
@@ -187,7 +192,7 @@ required-features = ["test-util"]
 
 [[example]]
 name = "http_client_tokio"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_native_tls"
@@ -214,7 +219,7 @@ required-features = ["native-tls", "tokio"]
 
 [[example]]
 name = "http_client_advanced"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_api_with_templated_uri"
@@ -222,11 +227,11 @@ required-features = ["test-util", "json"]
 
 [[example]]
 name = "http_client_app"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_connection_scaling"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_json"
@@ -234,11 +239,11 @@ required-features = ["test-util", "json"]
 
 [[example]]
 name = "http_client_minimal_pipeline"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_mtls"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[example]]
 name = "http_client_pooling"
@@ -246,7 +251,7 @@ required-features = ["test-util"]
 
 [[example]]
 name = "http_client_streaming"
-required-features = ["tokio", "rustls"]
+required-features = ["tokio", "tls"]
 
 [[bench]]
 harness = false
@@ -260,11 +265,11 @@ required-features = ["test-util"]
 
 [[test]]
 name = "requests"
-required-features = ["tokio", "rustls", "test-util"]
+required-features = ["tokio", "tls", "test-util"]
 
 [[test]]
 name = "telemetry_scope"
-required-features = ["tokio", "rustls", "test-util"]
+required-features = ["tokio", "tls", "test-util"]
 
 [[test]]
 name = "uri_handling"
@@ -272,7 +277,7 @@ required-features = ["test-util"]
 
 [[test]]
 name = "thread_aware"
-required-features = ["tokio", "rustls", "test-util"]
+required-features = ["tokio", "tls", "test-util"]
 
 [[test]]
 name = "resilience"
