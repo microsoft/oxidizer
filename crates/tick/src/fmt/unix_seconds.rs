@@ -60,9 +60,9 @@ crate::thread_aware_move!(UnixSeconds);
 impl UnixSeconds {
     /// The largest value that can be represented by `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`.
-    // NOTE: This value is aligned with the max jiff timestamp for easier interoperability.
-    pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
+    /// This represents a Unix system time of `9999-12-30T22:00:00Z`, the
+    /// whole-second floor of the maximum jiff timestamp.
+    pub const MAX: Self = Self(Duration::from_secs(253_402_207_200));
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///
@@ -107,6 +107,15 @@ impl UnixSeconds {
     pub fn to_secs(self) -> u64 {
         self.0.as_secs()
     }
+
+    /// Drops any sub-second component so the stored value is canonical.
+    ///
+    /// `UnixSeconds` formats and serializes as whole seconds, so retaining only
+    /// whole seconds internally keeps equality, ordering, and hashing in
+    /// agreement with `Display` and serde.
+    fn canonicalize(duration: Duration) -> Self {
+        Self(Duration::from_secs(duration.as_secs()))
+    }
 }
 
 impl FromStr for UnixSeconds {
@@ -134,13 +143,14 @@ impl TryFrom<Duration> for UnixSeconds {
     type Error = Error;
 
     fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        if value > Self::MAX.0 {
+        let canonical = Self::canonicalize(value);
+        if canonical.0 > Self::MAX.0 {
             return Err(Error::out_of_range(
                 "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
             ));
         }
 
-        Ok(Self(value))
+        Ok(canonical)
     }
 }
 
@@ -154,19 +164,19 @@ impl TryFrom<SystemTime> for UnixSeconds {
 
 impl From<Rfc2822> for UnixSeconds {
     fn from(value: Rfc2822) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self::canonicalize(value.to_unix_epoch_duration())
     }
 }
 
 impl From<Iso8601> for UnixSeconds {
     fn from(value: Iso8601) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self::canonicalize(value.to_unix_epoch_duration())
     }
 }
 
 impl From<EcmaScript> for UnixSeconds {
     fn from(value: EcmaScript) -> Self {
-        Self(value.to_unix_epoch_duration())
+        Self::canonicalize(value.to_unix_epoch_duration())
     }
 }
 
@@ -203,11 +213,11 @@ mod tests {
     static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
 
     #[test]
-    fn max_duration_is_jiff_duration() {
+    fn max_is_jiff_max_floored_to_whole_seconds() {
         let jiff_max = Timestamp::MAX.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs();
 
-        // equals to 123
-        assert_eq!(UnixSeconds::MAX.0, jiff_max);
+        assert_eq!(UnixSeconds::MAX.0, Duration::from_secs(jiff_max.as_secs()));
+        assert_eq!(UnixSeconds::MAX.to_secs(), 253_402_207_200);
     }
 
     #[test]
@@ -304,7 +314,7 @@ mod tests {
         assert_eq!(iso.to_string(), "1970-01-01T02:46:39Z");
 
         let iso: Iso8601 = UnixSeconds::MAX.into();
-        assert_eq!(iso, Iso8601::MAX);
+        assert_eq!(iso.to_string(), "9999-12-30T22:00:00Z");
 
         let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
         assert_eq!(iso, Iso8601::UNIX_EPOCH);
@@ -314,5 +324,25 @@ mod tests {
     fn try_from_max_ensure_accepted() {
         let unix_seconds = UnixSeconds::try_from(UnixSeconds::MAX.0).unwrap();
         assert_eq!(unix_seconds, UnixSeconds::MAX);
+    }
+
+    #[test]
+    fn sub_second_precision_is_canonical() {
+        // A Duration carrying sub-second precision is floored to whole seconds, so
+        // two instants within the same second compare equal and format identically.
+        let a = UnixSeconds::try_from(Duration::new(9999, 400_000_000)).unwrap();
+        let b = UnixSeconds::try_from(Duration::new(9999, 900_000_000)).unwrap();
+
+        assert_eq!(a, b);
+        assert_eq!(a.to_string(), "9999");
+    }
+
+    #[test]
+    fn from_ecmascript_floors_to_whole_seconds() {
+        let ecma: EcmaScript = "1970-01-01T00:00:08.123Z".parse().unwrap();
+        let unix: UnixSeconds = ecma.into();
+
+        assert_eq!(unix, UnixSeconds::from_secs(8).unwrap());
+        assert_eq!(unix.to_string(), "8");
     }
 }

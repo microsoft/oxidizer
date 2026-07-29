@@ -180,29 +180,27 @@ mod tests {
 
     #[test]
     fn max_values_are_aligned() {
-        // Iso8601, Rfc2822, and UnixSeconds share the full-precision boundary
+        // Iso8601 and Rfc2822 are full nanosecond precision and share the boundary
         // 9999-12-30T22:00:00.999999999Z.
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
-        let unix_max: SystemTime = UnixSeconds::MAX.into();
 
         assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
-        assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
-
-        // Conversions among the full-precision formats preserve the boundary.
         assert_eq!(Iso8601::from(Rfc2822::MAX), Iso8601::MAX);
-        assert_eq!(Iso8601::from(UnixSeconds::MAX), Iso8601::MAX);
         assert_eq!(Rfc2822::from(Iso8601::MAX), Rfc2822::MAX);
-        assert_eq!(Rfc2822::from(UnixSeconds::MAX), Rfc2822::MAX);
-        assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
-        assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
 
-        // EcmaScript is a millisecond-resolution format, so its MAX is the same
-        // boundary floored to the millisecond: 9999-12-30T22:00:00.999Z. Converting
-        // any higher-precision MAX into EcmaScript truncates it to EcmaScript::MAX.
+        // EcmaScript is millisecond-resolution and UnixSeconds is whole-second
+        // resolution, so each MAX is that same boundary floored to the format's
+        // resolution.
         assert_eq!(EcmaScript::MAX.to_string(), "9999-12-30T22:00:00.999Z");
+        assert_eq!(UnixSeconds::MAX.to_string(), "253402207200");
+
+        // Converting a finer format's MAX into a coarser format truncates it to the
+        // coarser MAX.
         assert_eq!(EcmaScript::from(Iso8601::MAX), EcmaScript::MAX);
         assert_eq!(EcmaScript::from(Rfc2822::MAX), EcmaScript::MAX);
-        assert_eq!(EcmaScript::from(UnixSeconds::MAX), EcmaScript::MAX);
+        assert_eq!(UnixSeconds::from(Iso8601::MAX), UnixSeconds::MAX);
+        assert_eq!(UnixSeconds::from(Rfc2822::MAX), UnixSeconds::MAX);
+        assert_eq!(UnixSeconds::from(EcmaScript::MAX), UnixSeconds::MAX);
     }
 }
