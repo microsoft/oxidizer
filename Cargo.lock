@@ -214,30 +214,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ade012bac4db278517a0132c8c10c6427025868dca16c801087c28d5a411f1"
 
 [[package]]
-name = "arty_executor"
-version = "0.1.0"
-dependencies = [
- "all_the_time",
- "alloc_tracker",
- "criterion",
- "derive_more",
- "events_once",
- "foldhash 0.2.0",
- "gungraun",
- "infinity_pool",
- "mockall",
- "mutants",
- "nm",
- "pin-project",
- "scopeguard",
- "static_assertions",
- "testing_aids",
- "tick",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "assert-json-diff"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.12.0"
+version = "0.11.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -838,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.6.1"
+version = "0.6.0"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -852,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.4.0"
+version = "0.3.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -861,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.4.0"
+version = "0.3.0"
 dependencies = [
  "dynosaur",
  "ohno 0.4.0",
@@ -1496,9 +1472,9 @@ dependencies = [
 
 [[package]]
 name = "events_once"
-version = "0.5.30"
+version = "0.5.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0134d74e73f9079df1f9661ef68434225b6586dbd25d39694ed86c35b682020"
+checksum = "8a4c28c9839f55f72d398fa4b5cd52cad41a57a6640bbbff8aa8dbfdad2465d5"
 dependencies = [
  "hash_hasher",
  "infinity_pool",
@@ -1660,6 +1636,7 @@ name = "fetch_winhttp"
 version = "0.1.0"
 dependencies = [
  "bytesbuf",
+ "events_once",
  "fetch",
  "futures",
  "http",
@@ -1669,6 +1646,7 @@ dependencies = [
  "observed",
  "observed_testing",
  "ohno 0.3.9",
+ "plurality",
  "recoverable",
  "static_assertions",
  "thread_aware",
@@ -1992,9 +1970,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.16"
+version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
+checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2401,9 +2379,9 @@ dependencies = [
 
 [[package]]
 name = "infinity_pool"
-version = "0.8.20"
+version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4215a607b37bd02262364db7fddd6eef32030f321a41f09c2f6a3e57ddc216e8"
+checksum = "311345ee974f4be8d645a1605528e7e8c1339fe3ab0bcff5a37b6582b64e87fb"
 dependencies = [
  "new_zealand",
  "num-integer",
@@ -2912,7 +2890,7 @@ dependencies = [
  "cfg-if",
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn",
 ]
 
 [[package]]
@@ -3018,9 +2996,9 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "new_zealand"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1a6f5fd5c95c0c913af85fa74168f6bd49f467c3fd6b479521a2791101128f"
+checksum = "0cf6121a4c6dd6898a645cfd54cb7d7fc4e537932afcbe1b39012d34e7b3c039"
 
 [[package]]
 name = "nm"
@@ -3204,15 +3182,8 @@ dependencies = [
 name = "ohno_macros"
 version = "0.4.0"
 dependencies = [
- "mutants",
- "ohno_macros_impl",
-]
-
-[[package]]
-name = "ohno_macros_impl"
-version = "0.5.0"
-dependencies = [
  "insta",
+ "mutants",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -3511,7 +3482,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plurality"
-version = "0.2.2"
+version = "0.2.1"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",

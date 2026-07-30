@@ -32,12 +32,14 @@ default-target = "x86_64-pc-windows-msvc"
 
 [target.'cfg(windows)'.dependencies]
 bytesbuf = { workspace = true }
+events_once = { workspace = true }
 fetch = { workspace = true }
 http = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true }
 observed = { workspace = true }
 ohno = { workspace = true }
+plurality = { workspace = true }
 recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }
 tick = { workspace = true }

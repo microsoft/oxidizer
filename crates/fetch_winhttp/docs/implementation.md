@@ -16,8 +16,8 @@ This is the whole design in one picture; the numbered chapters below elaborate e
   share their original client's resources (§3.2).
 - **One transport instance per (core × pool slot).** `fetch` clones and relocates the
   transport per core (`Isolation::Isolated`, §3.2), then materializes one factory result
-  for each configured pool slot. Each instance owns its object/event pools (§5) and one
-  session `Arc`.
+  for each configured pool slot. Each instance owns its context pool (§5) and one session
+  `Arc`.
 - **One `RequestDriver` future per request** (§4.4). It owns a `RequestGuard`
   containing the request handle and rents a pooled `RequestContext` - the slot
   WinHTTP calls back into, which retains the connect handle and session owner
@@ -188,12 +188,13 @@ worker. We want this - it removes a thread-pool hop on the hot path (§3.1).
 The callback trampoline (§4) is safe to run reentrantly because it does a small,
 bounded, non-blocking amount of work: recover the `*mut RequestContext`, take the
 in-flight `events_once` sender and buffer, and send the `CompletionResult`. It
-performs no I/O and never waits on WinHTTP. Returning pooled memory (an
-`events_once` endpoint, the context `Box`, a `BytesBuf`) on a cancellation or
-`HANDLE_CLOSING` path is likewise non-blocking. The one heavier case - the last
-context `Box` drop freeing the `plurality` pool's chunks - happens only at shutdown,
-where cost is irrelevant and only correctness matters; it is a heap free, not a wait
-on WinHTTP, so the assurance still holds.
+performs no I/O and never waits on WinHTTP. Each completion event is embedded in
+the already-pinned request context, so cancellation never returns an event endpoint
+through a mutex-protected pool on the callback thread. Returning the context `Box`
+or a `BytesBuf` on `HANDLE_CLOSING` is likewise non-blocking. The one heavier case -
+the last context `Box` drop freeing the `plurality` pool's chunks - happens only at
+shutdown, where cost is irrelevant and only correctness matters; it is a heap free,
+not a wait on WinHTTP, so the assurance still holds.
 
 Reentrancy is sound because of one submitting-side rule (§4.5): the driver fully
 populates the `RequestContext` and drops every borrow to it **before** issuing the
@@ -246,9 +247,9 @@ stores the *config plus a factory* and, the first time each core touches it, clo
 and relocates the configuration to that core. Within that core it invokes the factory
 once for every configured `multiple_pools` slot, caching each resulting
 `WinHttpTransport` separately. Each (core × pool slot) therefore has its own transport,
-session, and object/event pools (§5). (`Isolation::Shared` would instead share
+session, and context pool (§5). (`Isolation::Shared` would instead share
 materialized handlers across cores.) We choose `Isolated` so the `!Sync` `plurality`
-object pool (§5) remains instance-local; the handler must still be `Sync`, so that pool
+context pool (§5) remains instance-local; the handler must still be `Sync`, so that pool
 sits behind a coarse `Mutex` (§5). `WinHttpDeps` derives `ThreadAware` so `fetch` can
 clone and relocate the configuration per core.
 
@@ -275,10 +276,9 @@ custom-transport API - it exposes only builder-scoped state (shared across clone
 per-core/per-slot state (not shared across cores), with no per-built-client scope - so it
 is noted as `fetch` API feedback (../../fetch/docs/stabilization.md, connection-management
 item). Each instance's session is immutable after setup, so a plain `Arc` cloned into
-that instance's in-flight requests suffices. The instance-local object pool is the only
-mutable shared state (`Mutex`-guarded, §5), while the event pool and read-buffer
-`GlobalPool` are already thread-safe. All are normally uncontended under thread-per-core
-use.
+that instance's in-flight requests suffices. The instance-local context pool is the only
+mutable shared state (`Mutex`-guarded, §5), while the read-buffer `GlobalPool` is already
+thread-safe. All are normally uncontended under thread-per-core use.
 
 **Contrast with `fetch_hyper`.** `fetch_hyper` uses `Isolation::Shared`: one hyper
 client, already fully thread-safe, shared across cores, so its pool is process-wide by
@@ -307,26 +307,35 @@ Each async WinHTTP step is a one-time signal from the callback (whether it fires
 inline on the submitting thread or later on a WinHTTP worker thread, §3.1) to one
 awaiting future, carrying a small payload. That is exactly `events_once`.
 
-For each async step the `RequestDriver` (§4.4) rents a
-`(sender, receiver)` pair from an instance-owned
-`events_once::EventPool<CompletionResult>` (§5), stores the sender in the
-request's `RequestContext`, issues the async call through `Bindings`, and awaits
-the receiver. When WinHTTP later invokes the callback trampoline, the trampoline
-reconstructs the `RequestContext` from the context value, takes the stored
-sender, builds a `CompletionResult`, and sends it. The executor wakes and the
-driver advances to the next state.
+For each async step the `RequestDriver` (§4.4) places an `events_once` event in
+the pinned request context, stores its sender in the active-operation slot, issues
+the async call through `Bindings`, and awaits the receiver. The receiver mutably
+borrows the `RequestGuard`, so another operation cannot reuse the embedded storage
+until both endpoints are gone. When WinHTTP later invokes the callback trampoline,
+the trampoline reconstructs the `RequestContext` from the context value, takes the
+stored sender, builds a `CompletionResult`, and sends it. The executor wakes and
+the driver advances to the next state.
 
 ```rust,ignore
 enum CompletionResult {
-    SendComplete,
-    WriteComplete,
+    SendRequestComplete,
+    WriteComplete { buffer: bytesbuf::BytesView, len: u32 },
     HeadersAvailable,
     DataAvailable(u32),
     // Ownership of the read buffer is returned to the future here. `len` is the
     // number of bytes WinHTTP appended (metadata; the buffer may have carried
     // earlier bytes, since a BytesBuf need not be empty to be appended to).
     ReadComplete { buffer: bytesbuf::BytesBuf, len: u32 },
-    Error(HttpError),
+    Error {
+        error: WinHttpError,
+        api_result: Option<usize>,
+        buffer: Option<CompletionBuffer>,
+    },
+    InvalidStatusInfo {
+        status: u32,
+        len: u32,
+        buffer: Option<CompletionBuffer>,
+    },
 }
 ```
 
@@ -393,35 +402,29 @@ handle and session owner move into the context before it is installed so closing
 request cannot invalidate its parents while WinHTTP is still tearing it down.
 
 ```rust,ignore
-// `Idle` between operations; `Active` for the single in-flight async operation.
-// Modeling the operation as an enum makes its ownership invariant structural.
+// `Idle` between operations; generation-tagged `Active` for one in-flight
+// operation. The atomic state grants access to the payload.
 struct RequestContext {
-    operation: OperationSlot,
+    operation: SequentialOperation,
     // Retained until HANDLE_CLOSING drops the context. Microsoft documents that
     // closing a parent invalidates children and pending child operations cannot
     // be relied on to complete correctly.
-    parents: Option<RequestParents>,
-    // Request-scoped, best-effort diagnostics independent of operation state.
-    // The REQUEST_ERROR code, not callback order, determines classification.
-    secure_failure_flags: core::sync::atomic::AtomicU32,
-}
-
-struct RequestParents {
     connect: ConnectHandle,
     session: std::sync::Arc<WinHttpSession>,
+    // Request-scoped, best-effort diagnostics independent of operation state.
+    // The REQUEST_ERROR code, not callback order, determines classification.
+    secure_failure_flags: core::sync::atomic::AtomicU64,
 }
 
-enum OperationSlot {
-    Idle,
-    Active {
-        // Completion sender for the in-flight operation; the callback takes it.
-        completion: events_once::PooledSender<CompletionResult>,
-        // The buffer this operation borrows (if any). Read ops borrow a mutable
-        // BytesBuf (WinHTTP appends response bytes); write ops borrow an immutable
-        // BytesView (WinHTTP reads request bytes); send/receive/query ops borrow
-        // none. Ownership passes to WinHTTP for the operation's duration (§4).
-        buffer: OperationBuffer,
-    },
+struct ActiveOperation {
+    kind: OperationKind,
+    // Completion sender for the in-flight operation; the callback takes it.
+    completion: events_once::RawSender<CompletionResult>,
+    // The buffer this operation borrows (if any). Read ops borrow a mutable
+    // BytesBuf (WinHTTP appends response bytes); write ops borrow an immutable
+    // BytesView (WinHTTP reads request bytes); send/receive/query ops borrow
+    // none. Ownership passes to WinHTTP for the operation's duration (§4).
+    buffer: OperationBuffer,
 }
 
 enum OperationBuffer {
@@ -429,14 +432,26 @@ enum OperationBuffer {
     Read(bytesbuf::BytesBuf),
     Write(bytesbuf::BytesView),
 }
+
+struct SequentialOperation {
+    // Idle, transition, or a generation-tagged active OperationKind.
+    state: core::sync::atomic::AtomicU64,
+    active: core::cell::UnsafeCell<core::mem::MaybeUninit<ActiveOperation>>,
+    // Pinned in RequestContext and reused only after both one-shot endpoints end.
+    completion: core::cell::UnsafeCell<events_once::EmbeddedEvent<CompletionResult>>,
+}
 ```
 
-The operation enum makes the field relationships explicit: `Active` always carries a
+The active operation makes the field relationships explicit: it always carries a
 completion sender and at most one borrowed buffer (a handle never has a read and a write
-outstanding at once); `Idle` carries neither. The callback moves `Active -> Idle` by
-`take`-ing the sender and buffer. Secure-failure flags remain available independently
-of that transition because `SECURE_FAILURE` and `REQUEST_ERROR` have no documented
-relative ordering.
+outstanding at once); the idle state carries neither. The callback returns it to idle by
+atomically claiming the generation-tagged active token and moving out the sender and
+buffer. Competing or late callbacks fail that claim and do nothing. The
+`UnsafeCell` is not a source of unsynchronized mutation: the atomic state grants exactly
+one side access to its initialized contents at a time. Secure-failure flags remain
+available independently of that transition because `SECURE_FAILURE` and
+`REQUEST_ERROR` have no documented relative ordering. Their packed atomic value records
+presence separately from the flags, so even a zero-valued diagnostic is representable.
 
 ### 4.2 dwContext is pointer-sized
 
@@ -512,25 +527,23 @@ the final callback drops the context and parents as described in §4.3.
 
 ### 4.5 Exclusive access without locks
 
-The buffers and sender in `RequestContext` are shared between the driver and the
-callback with no lock. This is sound because access is strictly non-overlapping in
-time, enforced by one discipline:
+The buffers and sender in `RequestContext` are shared between the driver and callbacks
+with no application lock. Access is strictly non-overlapping, enforced by an atomic
+ownership state:
 
-- **The driver populates the context and drops every borrow to it before issuing
-  the async call.** It moves the `RequestContext` to `Active { .. }` (installing the
-  completion sender and the operation's buffer) through the raw pointer, ends that
-  borrow, *then* calls `Bindings::read_data` (etc.). It holds no
-  `&mut RequestContext` across the submit boundary.
+- **The driver arms before issuing the async call.** It claims `Idle`, writes the
+  completion sender and optional buffer, and publishes a generation-tagged active token
+  with a release store. It drops every borrow before calling `Bindings::read_data`
+  (etc.) and holds no `&mut RequestContext` across the submit boundary.
 - From the submit call until the `events_once` receiver resolves, the driver
   touches nothing in the context. WinHTTP holds exclusive ownership of the leaked
   pointer for the operation's duration (§4.2).
-- The **completion** for the operation - inline on the submitting thread, or later
-  on a worker thread - is the sole accessor of the `Active` fields: it `take`s the
-  sender and buffer (moving the context back to `Idle`) and sends. WinHTTP delivers
-  exactly one completion per async operation, and the driver keeps one operation
-  outstanding per handle, so no second callback ever touches those fields. This
-  exclusivity does **not** rely on any undocumented per-handle callback
-  serialization; it follows from "one completion per op" plus "one op outstanding".
+- A **completion** - inline on the submitting thread or later on a worker - validates
+  that its status matches the published operation kind and uses compare-exchange to
+  claim that exact generation. Only the winner moves out the sender and buffer and
+  returns the slot to `Idle`; competing error/success notifications and late callbacks
+  observe a failed claim and are harmless. This does **not** rely on undocumented
+  per-handle callback serialization.
 - The `events_once` send-then-receive is the release/acquire edge that transfers
   buffer ownership back to the driver. Only after the receiver resolves does the
   driver read the returned buffer.
@@ -541,7 +554,7 @@ and the two sides never hold it at the same time. No lock is needed on the
 sender/buffer fields; the temporal handoff does the work.
 
 **The one field that is not covered by the temporal handoff** is
-`secure_failure_flags`, and that is why it is an `AtomicU32` rather than a `Cell`.
+`secure_failure_flags`, and that is why it is atomic rather than a `Cell`.
 `SECURE_FAILURE` and `REQUEST_ERROR` may run on different WinHTTP threads and in either
 order. A `SECURE_FAILURE` status publishes its certificate-error bitmask with a `Release`
 store and touches nothing else. `REQUEST_ERROR` classifies the failure from its WinHTTP
@@ -564,21 +577,15 @@ fires, the driver closes the request handle - which cancels the in-flight connec
 future is dropped. `tick::Clock` is the sole source of time on this path; the
 transport never calls `std::thread::sleep` or `tokio::time`.
 
-## 5. Object and event pooling
+## 5. Context and buffer pooling
 
-Callbacks are hot and frequent and each request issues several async steps, so
-each materialized transport avoids per-step allocation by keeping two instance-owned
-pools that
-requests rent from. Both must fit the `Send + Sync` bound a `fetch` handler
-requires: the handler is stored in an `Arc<T>` shared into every request
-future, and `Isolation::Isolated` gives each core its own instance but does not
-relax that bound.
+Each request issues several async steps, so its pinned `RequestContext` embeds one
+reusable `events_once::EmbeddedEvent<CompletionResult>`. This avoids per-step
+allocation without making callback-side endpoint reclamation acquire the internal
+mutex used by `events_once::EventPool`. The sequential-operation state and the
+receiver's mutable borrow of `RequestGuard` ensure the embedded storage is never
+reinitialized while either endpoint remains live.
 
-- **`events_once::EventPool<CompletionResult>`.** For each async step the driver
-  (or the response body reader) rents one `(sender, receiver)` pair, and the callback
-  sends the completion through it (§3.3). The pool is already `Send + Sync`, so it is
-  held as a plain field, cloned into each request, and a callback may complete an
-  event on any thread.
 - **`plurality::Pool<RequestContext>` behind a `Mutex`.** A request rents one
   `plurality::Box<RequestContext>` at start and holds it for its whole lifetime
   (reclaimed when the callback drops it on `HANDLE_CLOSING`, §4.3). `plurality::Pool`
@@ -588,9 +595,10 @@ relax that bound.
   already-rented context), and never in a callback (the context returns itself to the
   pool through its own `Drop`, holding no `&Pool`).
 
-Read buffers come from neither pool. `WinHttpDeps` retains a clone of its mandatory
-`bytesbuf::mem::GlobalPool` in the transport extras while also supplying that pool to
-`fetch::custom::CustomDeps` for the response `HttpBodyBuilder`. Each materialized
+Read buffers come from the separate shared memory pool. `WinHttpDeps` retains a clone
+of its mandatory `bytesbuf::mem::GlobalPool` in the transport extras while also
+supplying that pool to `fetch::custom::CustomDeps` for the response
+`HttpBodyBuilder`. Each materialized
 transport receives the retained clone through `CustomContext::extras`; the body reader
 clones it and rents buffers with no lock.
 
@@ -739,10 +747,10 @@ an `http::HeaderMap`. Method and URI come from the `http::Request` parts.
 **Response-body handle ownership.** The request handle must outlive `execute`'s
 return, because the body is read lazily *after* the driver returns the
 `HttpResponse`. So at the point the response is built the `RequestGuard` **moves
-into** the `WinHttpBodyReader`, carrying the request handle, its per-request connect
-handle, the core's session `Arc<WinHttpSession>`, and the `RequestContext` pointer
-with it. Holding the session `Arc` in every live request (driver or body reader)
-keeps the session handle alive for exactly as long as any request needs it.
+into** the `WinHttpBodyReader`, carrying the request handle and the
+`RequestContext` pointer with it. The context itself retains the per-request connect
+handle and the core's session `Arc<WinHttpSession>` through final `HANDLE_CLOSING`,
+so asynchronous teardown cannot outlive either parent.
 
 Whoever owns the guard when the request ends runs the single synchronous teardown of
 §4.3: the body reader on EOF (a zero-length `READ_COMPLETE`, §6.2), on error, or on
@@ -1260,10 +1268,10 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
   metrics),
   `widestring` (UTF-16), `smallvec`. No `anyspawn`: nothing the transport calls
   can block (§2.1), so there is no blocking pool and no `Spawner`.
-- `events_once` provides the reusable one-shot event pool
-  ([folo-rs/folo](https://github.com/folo-rs/folo)); its `EventPool<T>` is
-  `Send + Sync`, cheaply clonable, and returns rented endpoints to the pool on
-  drop with no external access (§5).
+- `events_once` provides the embedded reusable one-shot event
+  ([folo-rs/folo](https://github.com/folo-rs/folo)); placing it in the pinned
+  request context avoids both per-operation allocation and callback-side pool
+  locking (§5).
 - `plurality` provides the FFI raw-pointer round-trip (`Box::into_raw`/`from_raw`,
   §4.3).
 - Dev: `mockall`, `static_assertions`, a localhost test server (`wiremock` or a

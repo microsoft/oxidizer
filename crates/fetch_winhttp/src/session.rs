@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use std::error::Error;
-use std::ffi::c_void;
 use std::fmt;
 
 use widestring::U16CString;
@@ -16,6 +15,7 @@ use windows::Win32::Networking::WinHttp::{
 
 use crate::WinHttpOptions;
 use crate::bindings::{Bindings as _, Facade};
+use crate::callback::status_callback;
 use crate::error::WinHttpError;
 use crate::handle::SessionHandle;
 use crate::options::{WINHTTP_FLAG_ASYNC, timeout_millis};
@@ -70,7 +70,7 @@ impl WinHttpSession {
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
         handle
             .bindings()
-            .set_status_callback(handle.raw(), Some(inert_status_callback), SESSION_NOTIFICATION_FLAGS)
+            .set_status_callback(handle.raw(), Some(status_callback), SESSION_NOTIFICATION_FLAGS)
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
 
         Ok(Self { handle })
@@ -78,6 +78,11 @@ impl WinHttpSession {
 
     pub(crate) const fn handle(&self) -> &SessionHandle {
         &self.handle
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn from_handle(handle: SessionHandle) -> Self {
+        Self { handle }
     }
 }
 
@@ -134,15 +139,6 @@ impl Error for SessionInitializationFailure {
     }
 }
 
-unsafe extern "system" fn inert_status_callback(
-    _handle: *mut c_void,
-    _context: usize,
-    _status: u32,
-    _status_info: *mut c_void,
-    _status_info_len: u32,
-) {
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
@@ -165,7 +161,8 @@ mod tests {
         USER_AGENT, WinHttpSession,
     };
     use crate::WinHttpOptions;
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{Facade, MockBindings, StatusCallback};
+    use crate::callback::status_callback;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
     use crate::options::{WINHTTP_FLAG_ASYNC, timeout_millis};
@@ -307,9 +304,16 @@ mod tests {
                     | FailurePoint::AssuredNonBlockingCallbacks
             )
         ) {
+            let expected_callback: StatusCallback = Some(status_callback);
             bindings
                 .expect_set_status_callback()
-                .withf(move |handle, callback, flags| *handle == raw && callback.is_some() && *flags == SESSION_NOTIFICATION_FLAGS)
+                .withf(move |handle, callback, flags| {
+                    *handle == raw
+                        && callback
+                            .zip(expected_callback)
+                            .is_some_and(|(actual, expected)| std::ptr::fn_addr_eq(actual, expected))
+                        && *flags == SESSION_NOTIFICATION_FLAGS
+                })
                 .once()
                 .in_sequence(&mut sequence)
                 .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::SetStatusCallback));

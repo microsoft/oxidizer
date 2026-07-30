@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytesbuf::mem::GlobalPool;
 use fetch::options::TransportOptions;
@@ -13,6 +13,7 @@ use tick::Clock;
 use crate::WinHttpTlsConfig;
 use crate::bindings::Facade;
 use crate::error_labels;
+use crate::request::ContextPool;
 use crate::session::{SessionInitializationFailure, WinHttpSession};
 use crate::telemetry::Telemetry;
 
@@ -33,6 +34,7 @@ impl WinHttpTransport {
                 body_builder: inputs.body_builder,
                 clock: inputs.clock,
                 global_pool: inputs.global_pool,
+                contexts: Mutex::new(plurality::Pool::new()),
                 options: inputs.options,
                 tls: inputs.tls,
             })),
@@ -59,6 +61,7 @@ impl Service<HttpRequest> for WinHttpTransport {
                     &ready.body_builder,
                     &ready.clock,
                     &ready.global_pool,
+                    &ready.contexts,
                     &ready.options,
                     &ready.tls,
                 );
@@ -85,6 +88,7 @@ struct ReadyTransport {
     body_builder: HttpBodyBuilder,
     clock: Clock,
     global_pool: GlobalPool,
+    contexts: ContextPool,
     options: TransportOptions,
     tls: WinHttpTlsConfig,
 }
@@ -120,12 +124,17 @@ mod tests {
     use static_assertions::assert_impl_all;
     use tick::{Clock, ClockControl};
 
-    use super::{TransportInputs, UNAVAILABLE_MESSAGE, WinHttpTransport};
+    use super::{ReadyTransport, TransportInputs, TransportState, UNAVAILABLE_MESSAGE, WinHttpTransport};
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
+    use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
+    use crate::request::ContextPool;
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
+    assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
+    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug);
+    assert_impl_all!(plurality::Box<RequestContext>: Send, Sync);
 
     #[test]
     fn failed_transport_returns_fresh_never_recoverable_errors_with_requests() {
@@ -202,6 +211,19 @@ mod tests {
         let transport = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(bindings)));
 
         assert_send(transport.execute(request("https://example.com/")));
+    }
+
+    #[test]
+    fn ready_transports_own_distinct_context_pools() {
+        let first = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(successful_bindings())));
+        let second = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(successful_bindings())));
+
+        match (&first.state, &second.state) {
+            (TransportState::Ready(first), TransportState::Ready(second)) => {
+                assert!(!std::ptr::eq(&raw const first.contexts, &raw const second.contexts));
+            }
+            _ => panic!("both transports must initialize successfully"),
+        }
     }
 
     fn assert_send<T: Send>(_value: T) {}

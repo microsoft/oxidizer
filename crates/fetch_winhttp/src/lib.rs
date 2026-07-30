@@ -34,6 +34,12 @@
 )]
 mod bindings;
 mod builder;
+#[expect(clippy::allow_attributes, reason = "callback decoding is consumed by the request lifecycle")]
+#[allow(dead_code, reason = "callback decoding is consumed by the request lifecycle")]
+mod callback;
+#[expect(clippy::allow_attributes, reason = "request callback state is consumed by the request lifecycle")]
+#[allow(dead_code, reason = "request callback state is consumed by the request lifecycle")]
+mod context;
 #[expect(clippy::allow_attributes, reason = "request error mappings are used by the request lifecycle")]
 #[allow(dead_code, reason = "request error mappings are used by the request lifecycle")]
 mod error;
@@ -44,6 +50,12 @@ mod handle;
 #[expect(clippy::allow_attributes, reason = "request option mappings are used by the request lifecycle")]
 #[allow(dead_code, reason = "request option mappings are used by the request lifecycle")]
 mod options;
+#[expect(
+    clippy::allow_attributes,
+    reason = "request ownership primitives are consumed by the request lifecycle"
+)]
+#[allow(dead_code, reason = "request ownership primitives are consumed by the request lifecycle")]
+mod request;
 mod session;
 mod telemetry;
 mod tls;
