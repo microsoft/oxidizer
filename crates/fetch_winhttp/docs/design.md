@@ -1,6 +1,9 @@
 # `fetch_winhttp` design
 
-Status: design, pre-implementation. This document describes the architecture, behavior, and design tenets of the `fetch_winhttp` crate. The implementation strategy - threading, FFI ownership, pooling, body-streaming mechanics, and the test plan - is documented separately in [implementation.md](implementation.md). The crate currently ships only these design documents and a placeholder `lib.rs`.
+This document describes the architecture, behavior, and design tenets of the
+`fetch_winhttp` crate. The implementation strategy - threading, FFI ownership,
+pooling, body-streaming mechanics, and the test plan - is documented separately
+in [implementation.md](implementation.md).
 
 ## 1. Purpose and scope
 
@@ -231,9 +234,11 @@ bundle and configures only a small set of `WinHttpTlsConfig` knobs (§1.2):
 - **`https` selection.** `https://` targets use TLS. `http://` is issued only when the
   client is built with `insecure_allow_http()` and the request filter admits it -
   identical policy to the other transports.
-- **Insecure mode.** `accept_invalid_certs` / `accept_invalid_hostnames` disable
-  certificate and host-name validation respectively. This is the insecure mode called out
-  in the requirements; it is opt-in and documented as dangerous.
+- **Insecure mode.** `accept_invalid_certs` relaxes Schannel failures for an
+  unknown CA, an invalid validity period, and an invalid intended usage.
+  `accept_invalid_hostnames` relaxes certificate host-name mismatch failures.
+  These options do not suppress every possible Schannel or certificate failure.
+  They are opt-in and documented as dangerous.
 - **Server certificate inspection / pinning.** Beyond accept/reject, not offered in v1.
 
 (How these knobs reach Schannel is implementation.md §10.2.)
@@ -376,9 +381,12 @@ transport noise or a deterministic condition.
 - **Retryable** (transient transport/connection faults): connection reset or
   closed mid-flight, `NAME_NOT_RESOLVED` (DNS can be flaky), `CANNOT_CONNECT`
   (transient server/pool state), `TIMEOUT` and `CONNECTION_ERROR` (transient
-  load). Re-issuing may land on a healthy connection.
+  load), and certificate-revocation checks that fail because the revocation
+  server is unavailable. Re-issuing may land on a healthy connection or reach
+  the external revocation service.
 - **Never** (deterministic failures): TLS/certificate validation failures (given
-  a fixed trust configuration, a retry yields the same verdict) and
+  a fixed trust configuration and a completed revocation check, a retry yields
+  the same verdict) and
   `OPERATION_CANCELLED` (the caller initiated teardown; retrying would contradict
   intent). Malformed-response/protocol violations that indicate a stable server
   or configuration problem are also non-retryable.

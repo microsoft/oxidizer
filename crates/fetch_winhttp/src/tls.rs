@@ -20,18 +20,10 @@ impl WinHttpTlsConfig {
         WinHttpTlsConfigBuilder { config: Self::default() }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "configuration access is part of the transport module boundary")
-    )]
     pub(crate) fn accepts_invalid_certs(&self) -> bool {
         self.accept_invalid_certs
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "configuration access is part of the transport module boundary")
-    )]
     pub(crate) fn accepts_invalid_hostnames(&self) -> bool {
         self.accept_invalid_hostnames
     }
@@ -47,9 +39,12 @@ pub struct WinHttpTlsConfigBuilder {
 impl WinHttpTlsConfigBuilder {
     /// Controls whether invalid server certificates are accepted.
     ///
-    /// Enabling this option disables certificate trust, validity-period, and
-    /// intended-usage checks. This is dangerous and should be limited to
-    /// controlled scenarios.
+    /// Relaxes selected server-certificate validation failures.
+    ///
+    /// This covers an unknown CA, an invalid validity period, and an invalid
+    /// intended usage. Other Schannel failures remain enforced.
+    ///
+    /// This is dangerous and should be limited to controlled scenarios.
     #[must_use]
     pub fn accept_invalid_certs(mut self, accept: bool) -> Self {
         self.config.accept_invalid_certs = accept;

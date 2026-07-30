@@ -33,13 +33,23 @@ default-target = "x86_64-pc-windows-msvc"
 [target.'cfg(windows)'.dependencies]
 bytesbuf = { workspace = true }
 fetch = { workspace = true }
+http = { workspace = true }
+http_extensions = { workspace = true }
 layered = { workspace = true }
 observed = { workspace = true }
+ohno = { workspace = true }
+recoverable = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }
 tick = { workspace = true }
+widestring = { workspace = true, features = ["alloc"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+] }
 
 [target.'cfg(windows)'.dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
+mockall = { workspace = true }
 static_assertions = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 

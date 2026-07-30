@@ -1662,11 +1662,18 @@ dependencies = [
  "bytesbuf",
  "fetch",
  "futures",
+ "http",
+ "http_extensions",
  "layered",
+ "mockall",
  "observed",
+ "ohno 0.3.9",
+ "recoverable",
  "static_assertions",
  "thread_aware",
  "tick",
+ "widestring",
+ "windows",
 ]
 
 [[package]]

@@ -24,7 +24,21 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
+#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
+#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+mod bindings;
 mod builder;
+#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
+#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+mod error;
+#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
+#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+mod error_labels;
+#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
+#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+mod handle;
+#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
+#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
 mod options;
 mod tls;
 
