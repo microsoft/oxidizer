@@ -123,15 +123,13 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("consume_all_chunks");
     group.bench_function("consume_all_chunks", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| test_data_as_view.clone()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || test_data_as_view.clone(),
-                |mut seq| {
-                    seq.consume_all_slices(|chunk| {
-                        _ = black_box(chunk);
-                    });
-                },
-            )(iters)
+            time_sample_with_inputs(inputs, |mut seq| {
+                seq.consume_all_slices(|chunk| {
+                    _ = black_box(chunk);
+                });
+            })
         });
     });
 
@@ -264,8 +262,9 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("from_many");
     group.bench_function("from_many", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| many.iter().cloned()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(|| many.iter().cloned(), |many_clones| BytesView::from_views(black_box(many_clones)))(iters)
+            time_sample_with_inputs(inputs, |many_clones| BytesView::from_views(black_box(many_clones)))
         });
     });
 
@@ -280,11 +279,9 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("from_max_inline");
     group.bench_function("from_max_inline", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| max_inline.iter().cloned()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || max_inline.iter().cloned(),
-                |max_inline_clones| BytesView::from_views(black_box(max_inline_clones)),
-            )(iters)
+            time_sample_with_inputs(inputs, |max_inline_clones| BytesView::from_views(black_box(max_inline_clones)))
         });
     });
 

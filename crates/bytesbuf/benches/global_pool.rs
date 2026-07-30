@@ -73,22 +73,24 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_tiny_cold");
     group.bench_function("fill_tiny_cold", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(GlobalPool::new, |memory| {
+            time_sample_with_inputs(inputs, |memory| {
                 let mut buf = memory.reserve(TINY);
                 buf.put_byte_repeated(66, TINY);
-            })(iters)
+            })
         });
     });
 
     let allocs_op = allocs.operation("fill_1mb_cold");
     group.bench_function("fill_1mb_cold", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(GlobalPool::new, |memory| {
+            time_sample_with_inputs(inputs, |memory| {
                 let mut buf = memory.reserve(ONE_MB);
                 buf.put_byte_repeated(66, ONE_MB);
-            })(iters)
+            })
         });
     });
 
@@ -105,8 +107,9 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copied_from_slice_cold");
     group.bench_function("copied_from_slice_cold", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(GlobalPool::new, |memory| BytesView::copied_from_slice(&test_data, &memory))(iters)
+            time_sample_with_inputs(inputs, |memory| BytesView::copied_from_slice(&test_data, &memory))
         });
     });
 

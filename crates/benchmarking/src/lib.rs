@@ -17,15 +17,11 @@ pub fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Durati
     }
 }
 
-/// Times a Criterion sample after preparing per-iteration inputs ahead of time.
-pub fn time_sample_with_inputs<T, R>(mut setup: impl FnMut() -> T, mut bench: impl FnMut(T) -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let inputs = (0..iters).map(|_| setup()).collect::<Vec<_>>();
-
-        let start = Instant::now();
-        for input in inputs {
-            _ = black_box(bench(input));
-        }
-        start.elapsed()
+/// Times a Criterion sample over an already-prepared per-iteration input vector.
+pub fn time_sample_with_inputs<T, R>(inputs: Vec<T>, mut bench: impl FnMut(T) -> R) -> Duration {
+    let start = Instant::now();
+    for input in inputs {
+        _ = black_box(bench(input));
     }
+    start.elapsed()
 }

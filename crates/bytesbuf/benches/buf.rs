@@ -110,90 +110,91 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("put_view_clean");
     group.bench_function("put_view_clean", |b| {
         b.iter_custom(|iters| {
+            let inputs = (0..iters).map(|_| BytesBuf::new()).collect::<Vec<_>>();
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(BytesBuf::new, |mut buf| {
+            time_sample_with_inputs(inputs, |mut buf| {
                 buf.put_bytes(test_data_as_view.clone());
-            })(iters)
+            })
         });
     });
 
     let allocs_op = allocs.operation("put_view_dirty");
     group.bench_function("put_view_dirty", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
                     buf.put_byte(123);
                     buf
-                },
-                |mut buf| {
-                    buf.put_bytes(test_data_as_view.clone());
-                },
-            )(iters)
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| {
+                buf.put_bytes(test_data_as_view.clone());
+            })
         });
     });
 
     let allocs_op = allocs.operation("consume_one_span");
     group.bench_function("consume_one_span", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.put_bytes(many_as_view.clone());
                     buf
-                },
-                |mut buf| buf.consume(TEST_SPAN_SIZE.get() as usize),
-            )(iters)
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| buf.consume(TEST_SPAN_SIZE.get() as usize))
         });
     });
 
     let allocs_op = allocs.operation("consume_max_inline_spans");
     group.bench_function("consume_max_inline_spans", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.put_bytes(max_inline_as_view.clone());
                     buf
-                },
-                |mut buf| {
-                    buf.consume(TEST_SPAN_SIZE.get() as usize);
-                },
-            )(iters)
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| {
+                buf.consume(TEST_SPAN_SIZE.get() as usize);
+            })
         });
     });
 
     let allocs_op = allocs.operation("consume_many_spans");
     group.bench_function("consume_many_spans", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.put_bytes(many_as_view.clone());
                     buf
-                },
-                |mut buf| buf.consume_all(),
-            )(iters)
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| buf.consume_all())
         });
     });
 
     let allocs_op = allocs.operation("extend_lifetime");
     group.bench_function("extend_lifetime", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.put_bytes(test_data_as_view.clone());
                     buf
-                },
-                |buf| buf.extend_lifetime(),
-            )(iters)
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |buf| buf.extend_lifetime())
         });
     });
 
@@ -203,23 +204,23 @@ fn entrypoint(c: &mut Criterion) {
         let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.reserve(BLOCK_SIZE.get() as usize, &memory);
                     buf
-                },
-                |mut buf| {
-                    let write = buf.begin_vectored_write(None);
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| {
+                let write = buf.begin_vectored_write(None);
 
-                    // SAFETY: Yes, I promise I wrote this many bytes.
-                    // This is a lie but we do not touch the bytes, so should be a harmless lie.
-                    unsafe {
-                        write.commit(BLOCK_SIZE.get() as usize);
-                    }
-                },
-            )(iters)
+                // SAFETY: Yes, I promise I wrote this many bytes.
+                // This is a lie but we do not touch the bytes, so should be a harmless lie.
+                unsafe {
+                    write.commit(BLOCK_SIZE.get() as usize);
+                }
+            })
         });
     });
 
@@ -229,23 +230,23 @@ fn entrypoint(c: &mut Criterion) {
         let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.reserve(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS, &memory);
                     buf
-                },
-                |mut buf| {
-                    let write = buf.begin_vectored_write(None);
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| {
+                let write = buf.begin_vectored_write(None);
 
-                    // SAFETY: Yes, I promise I wrote this many bytes.
-                    // This is a lie but we do not touch the bytes, so should be a harmless lie.
-                    unsafe {
-                        write.commit(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS);
-                    }
-                },
-            )(iters)
+                // SAFETY: Yes, I promise I wrote this many bytes.
+                // This is a lie but we do not touch the bytes, so should be a harmless lie.
+                unsafe {
+                    write.commit(BLOCK_SIZE.get() as usize * MAX_INLINE_SPANS);
+                }
+            })
         });
     });
 
@@ -255,23 +256,23 @@ fn entrypoint(c: &mut Criterion) {
         let memory = FixedBlockMemory::new(BLOCK_SIZE);
 
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.reserve(BLOCK_SIZE.get() as usize * MANY_SPANS, &memory);
                     buf
-                },
-                |mut buf| {
-                    let write = buf.begin_vectored_write(None);
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |mut buf| {
+                let write = buf.begin_vectored_write(None);
 
-                    // SAFETY: Yes, I promise I wrote this many bytes.
-                    // This is a lie but we do not touch the bytes, so should be a harmless lie.
-                    unsafe {
-                        write.commit(BLOCK_SIZE.get() as usize * MANY_SPANS);
-                    }
-                },
-            )(iters)
+                // SAFETY: Yes, I promise I wrote this many bytes.
+                // This is a lie but we do not touch the bytes, so should be a harmless lie.
+                unsafe {
+                    write.commit(BLOCK_SIZE.get() as usize * MANY_SPANS);
+                }
+            })
         });
     });
 
@@ -301,45 +302,45 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("peek_frozen_all");
     group.bench_function("peek_frozen_all", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.put_bytes(many_as_view.clone());
                     buf
-                },
-                |buf| {
-                    let mut peeked = buf.peek();
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |buf| {
+                let mut peeked = buf.peek();
 
-                    // We just seek to the end, that is all.
-                    while !peeked.is_empty() {
-                        peeked.advance(peeked.first_slice().len());
-                    }
-                },
-            )(iters)
+                // We just seek to the end, that is all.
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
+                }
+            })
         });
     });
 
     let allocs_op = allocs.operation("peek_unfrozen_all");
     group.bench_function("peek_unfrozen_all", |b| {
         b.iter_custom(|iters| {
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(
-                || {
+            let inputs = (0..iters)
+                .map(|_| {
                     let mut buf = BytesBuf::new();
                     buf.reserve(TEST_SPAN_SIZE.get() as usize, &memory);
                     buf.put_byte(123);
                     buf
-                },
-                |buf| {
-                    let mut peeked = buf.peek();
+                })
+                .collect::<Vec<_>>();
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(inputs, |buf| {
+                let mut peeked = buf.peek();
 
-                    // We just seek to the end, that is all.
-                    while !peeked.is_empty() {
-                        peeked.advance(peeked.first_slice().len());
-                    }
-                },
-            )(iters)
+                // We just seek to the end, that is all.
+                while !peeked.is_empty() {
+                    peeked.advance(peeked.first_slice().len());
+                }
+            })
         });
     });
 
