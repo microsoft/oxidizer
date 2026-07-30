@@ -52,6 +52,12 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [AGENTS-feature-gated-doctests.md](AGENTS-feature-gated-doctests.md).
 
+## `no_std` Support
+
+`no_std` support is a best-effort, nice-to-have capability, not a requirement to support every embedded target. Preserve it when it comes with little implementation complexity, but do not complicate code, add extensive `cfg` branching, or introduce specialized fallbacks solely to support constrained targets such as platforms without pointer-width atomics.
+
+Public crate documentation must state the actual prerequisites and supported boundary, including requirements such as `alloc`, pointer-width atomics, or specific target capabilities. CI should cover the configurations the crate explicitly promises.
+
 ## Required CI Checks
 
 The `required-checks` job in `.github/workflows/main.yml` is a "fan-in"
