@@ -17,6 +17,7 @@ use crate::tls::WinHttpTlsConfig;
 pub(crate) const WINHTTP_FLAG_ASYNC: u32 = 0x1000_0000;
 pub(crate) const WINHTTP_FLAG_AUTOMATIC_CHUNKING: u32 = 0x0000_0200;
 pub(crate) const WINHTTP_FLAG_SECURE: u32 = 0x0080_0000;
+pub(crate) const WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH: u32 = 0;
 
 pub(crate) const WINHTTP_OPTION_CONTEXT_VALUE: u32 = 45;
 pub(crate) const WINHTTP_OPTION_DECOMPRESSION: u32 = 118;

@@ -32,6 +32,7 @@ default-target = "x86_64-pc-windows-msvc"
 
 [target.'cfg(windows)'.dependencies]
 bytesbuf = { workspace = true }
+bytesbuf_io = { workspace = true }
 events_once = { workspace = true }
 fetch = { workspace = true }
 http = { workspace = true }

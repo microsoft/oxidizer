@@ -390,10 +390,10 @@ WinHTTP allows at most one outstanding async operation per request handle at a
 time, and it delivers every completion for a handle to the same callback context
 pointer. `RequestContext` contains an operation slot plus the parent handles whose
 lifetime must extend through the request handle's final callback. The operation slot
-is reused across the request's sequence of sequential operations (send, then receive,
-then each read) instead of being reallocated per step. Its pointer is what we hand to
-WinHTTP as the callback context; WinHTTP echoes it back on every notification for that
-request handle.
+is reused across the request's sequence of sequential operations (send, each request
+write, receive, then each response read) instead of being reallocated per step. Its
+pointer is what we hand to WinHTTP as the callback context; WinHTTP echoes it back on
+every notification for that request handle.
 
 The request handle lives in the driver (§4.4), not in this context: the callback
 only recovers the context, takes the sender and buffer, and signals (§2.1), while
@@ -617,7 +617,8 @@ request bodies.
 ### 6.1 Outgoing request body -> `bytesbuf_io::Write`
 
 `HttpRequest`'s body is an `HttpBody: http_body::Body<Data = BytesView>`
-(pull-based `poll_frame`). The WinHTTP write side is a `bytesbuf_io::Write`:
+(pull-based `poll_frame`). The WinHTTP write side is a `bytesbuf_io::Write`, implemented in
+`body/write.rs`; `body/mod.rs` contains only module declarations and re-exports:
 
 ```rust,ignore
 impl bytesbuf_io::Write for WinHttpBodyWriter {
@@ -630,7 +631,7 @@ impl bytesbuf_io::Write for WinHttpBodyWriter {
 }
 ```
 
-The sending strategy is chosen in `RequestDriver::send_body`. In **both** cases
+The sending strategy is chosen by the request driver's upload stage. In **both** cases
 `WinHttpSendRequest` is called with a `NULL`/zero `lpOptional` buffer; the request
 body is never passed inline to `WinHttpSendRequest` and is always streamed with
 `WinHttpWriteData`. This sidesteps the `lpOptional` lifetime rule (an inline
@@ -735,6 +736,7 @@ translate req (method/uri/headers -> UTF-16)
   -> WinHttpOpenRequest + set options (protocol, decompression, redirect, cookies/auth off, security, timeouts)
   -> set RequestContext pointer as WINHTTP_OPTION_CONTEXT_VALUE
   -> WinHttpSendRequest ->async SENDREQUEST_COMPLETE
+  -> poll HttpBody frame -> WinHttpWriteData ->async WRITE_COMPLETE  [repeat through end-of-stream]
   -> WinHttpReceiveResponse ->async HEADERS_AVAILABLE
   -> WinHttpQueryHeaders/Option (status, negotiated version, header block)  [sync]
   -> build HttpResponse { parts, HttpBodyBuilder::empty() } through HttpResponseBuilder
@@ -763,15 +765,31 @@ Windows 11 version 21H2 minimum documented in design.md; no runtime compatibilit
 is attempted. The numeric status query and the legacy `WINHTTP_QUERY_VERSION` string
 query retain their existing DWORD and UTF-16 buffers, respectively.
 
-The headers-only lifecycle constructs the response with `HttpBodyBuilder::empty`
+The current response lifecycle constructs the response with `HttpBodyBuilder::empty`
 through `HttpResponseBuilder`, attaches no `ConnectionInfo`, and drops the
 `RequestGuard` after all response metadata has been queried. The builder preserves a
 native `Content-Length` and synthesizes `Content-Length: 0` only when the native
 response omitted it. The context retains the connect handle and session owner until
-the resulting `HANDLE_CLOSING` callback reclaims it. A request body is accepted only
-when `content_length()` is exactly `Some(0)` and `is_end_stream()` is true;
-unknown-length, nonempty, and exact-zero bodies that may still yield trailers or errors
-are rejected rather than silently discarded.
+the resulting `HANDLE_CLOSING` callback reclaims it.
+
+The upload lifecycle polls every outgoing body frame lazily after
+`SENDREQUEST_COMPLETE`. Empty data frames are inert. Each nonempty data frame is
+written one contiguous `BytesView` span at a time, further split at `u32::MAX`, and the
+next frame is not polled until every write for the current frame completes. Body-stream
+errors propagate directly, and a trailer frame fails with `invalid_request` because
+WinHTTP cannot submit request trailers. Only after end-of-stream does the driver issue
+`WinHttpReceiveResponse`, so request upload and response reception are never concurrent.
+
+Before driver execution, the transport captures `HttpBody::try_clone()` when the
+outgoing body is replayable and tracks whether `poll_frame` has been attempted. An
+error before the first poll retains the unchanged request. After the first poll, the
+request is attached only when the captured body clone can replace the consumed body;
+non-cloneable streaming requests are omitted from the error. Replacement changes only
+the body, leaving the request method, URI, version, headers, and extensions untouched.
+The transport first removes any attachment supplied by a propagated body error, so only
+this eligibility policy can expose a request to the retry layer. This makes an attached
+request eligible for replay rather than exposing a consumed suffix or an unrelated
+request to the retry layer.
 
 The lazy response-body implementation extends this ownership path by moving the guard
 into `WinHttpBodyReader`; that reader then becomes the same single close authority on

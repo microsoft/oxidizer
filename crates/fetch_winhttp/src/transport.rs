@@ -31,7 +31,7 @@ impl WinHttpTransport {
                 session: Arc::new(session),
                 body_builder: inputs.body_builder,
                 _clock: inputs.clock,
-                _global_pool: inputs.global_pool,
+                global_pool: inputs.global_pool,
                 contexts: Mutex::new(plurality::Pool::new()),
                 options: inputs.options,
                 tls: inputs.tls,
@@ -49,19 +49,22 @@ impl WinHttpTransport {
 impl Service<HttpRequest> for WinHttpTransport {
     type Out = fetch::Result<HttpResponse>;
 
-    async fn execute(&self, input: HttpRequest) -> Self::Out {
+    async fn execute(&self, mut input: HttpRequest) -> Self::Out {
         self.telemetry.request_attempted();
 
+        let replay_body = input.body().try_clone();
+        let mut body_polled = false;
         let result = match &self.state {
             TransportState::Ready(ready) => match RequestDriver::new(
-                &input,
+                &mut input,
                 Arc::clone(&ready.session),
                 ready.body_builder.clone(),
+                ready.global_pool.clone(),
                 &ready.contexts,
                 &ready.options,
                 &ready.tls,
             ) {
-                Ok(driver) => driver.execute().await,
+                Ok(driver) => driver.execute(&mut body_polled).await,
                 Err(error) => Err(error),
             },
             TransportState::Failed(failed) => Err(HttpError::other(
@@ -73,9 +76,17 @@ impl Service<HttpRequest> for WinHttpTransport {
 
         match result {
             Ok(response) => Ok(response),
-            Err(error) => {
+            Err(mut error) => {
                 self.telemetry.request_failed();
-                Err(error.with_request(input))
+                let _ = error.take_request();
+                if !body_polled {
+                    Err(error.with_request(input))
+                } else if let Some(replay_body) = replay_body {
+                    *input.body_mut() = replay_body;
+                    Err(error.with_request(input))
+                } else {
+                    Err(error)
+                }
             }
         }
     }
@@ -92,7 +103,7 @@ struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
     _clock: Clock,
-    _global_pool: GlobalPool,
+    global_pool: GlobalPool,
     contexts: ContextPool,
     options: TransportOptions,
     tls: WinHttpTlsConfig,
@@ -120,9 +131,11 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
     use fetch::options::TransportOptions;
-    use fetch::{HttpBodyBuilder, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
+    use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
+    use http_extensions::HttpBodyOptions;
     use layered::Service;
     use observed::Sink;
     use observed_testing::{TEST_ID, test_emitter};
@@ -234,8 +247,7 @@ mod tests {
         let bindings = successful_request_bindings(Arc::clone(&context), Arc::clone(&closes));
         let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
 
-        let response =
-            futures::executor::block_on(transport.execute(request("https://example.com/"))).expect("headers-only request succeeds");
+        let response = futures::executor::block_on(transport.execute(request("https://example.com/"))).expect("request succeeds");
 
         assert_eq!(response.status(), 200);
         assert_eq!(response.version(), http::Version::HTTP_2);
@@ -254,6 +266,153 @@ mod tests {
             1,
             "the request handle closes before context reclamation"
         );
+
+        let context = std::ptr::with_exposed_provenance_mut(context.load(Ordering::SeqCst));
+        // SAFETY: the mock records the live installed RequestContext pointer,
+        // and HANDLE_CLOSING is its final synthetic callback.
+        unsafe {
+            dispatch_completion(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+        }
+        drop(transport);
+
+        assert_eq!(closes.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn polled_non_cloneable_body_error_omits_request_and_emits_telemetry_once() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let context = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
+        let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Body, 0);
+        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
+        let body_error = HttpError::unavailable("upload stream failed").with_request(request("https://unrelated.example/attached-by-body"));
+        let body = body_builder.stream(
+            futures::stream::iter([Err::<BytesView, _>(body_error)]),
+            &HttpBodyOptions::default(),
+        );
+        let mut input = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("https://example.com/upload")
+            .body(body)
+            .expect("test request is valid");
+        *input.version_mut() = http::Version::HTTP_2;
+        input
+            .headers_mut()
+            .insert("x-original", http::HeaderValue::from_static("preserved"));
+
+        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("body error fails the request");
+
+        assert_eq!(error.label(), "unavailable");
+        assert_eq!(error.recovery(), RecoveryInfo::unavailable());
+        assert!(error.to_string().contains("upload stream failed"));
+        assert!(error.take_request().is_none(), "a consumed streaming request is not replayable");
+        assert_eq!(
+            processor
+                .events()
+                .into_iter()
+                .map(|event| event.name().to_owned())
+                .collect::<Vec<_>>(),
+            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+        );
+        finish_failed_request(transport, &context, &closes);
+    }
+
+    #[test]
+    fn send_failure_attaches_untouched_non_cloneable_streaming_request() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let context = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
+        let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Send, 0);
+        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &clock());
+        let body = body_builder.stream(
+            futures::stream::iter([Ok(BytesView::copied_from_slice(b"streaming", &memory))]),
+            &HttpBodyOptions::default(),
+        );
+        let mut input = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("https://example.com/upload")
+            .body(body)
+            .expect("test request is valid");
+        *input.version_mut() = http::Version::HTTP_2;
+        input
+            .headers_mut()
+            .insert("x-original", http::HeaderValue::from_static("preserved"));
+        input.extensions_mut().insert(42_u32);
+
+        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("send failure reaches the caller");
+
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        let attached = error.take_request().expect("the unpolled request is attached");
+        assert_eq!(attached.method(), http::Method::POST);
+        assert_eq!(attached.uri().to_string(), "https://example.com/upload");
+        assert_eq!(attached.version(), http::Version::HTTP_2);
+        assert_eq!(
+            attached.headers().get("x-original"),
+            Some(&http::HeaderValue::from_static("preserved"))
+        );
+        assert_eq!(attached.extensions().get::<u32>(), Some(&42));
+        let text = futures::executor::block_on(attached.into_body().into_text()).expect("the untouched stream remains readable");
+        assert_eq!(text, "streaming");
+        assert_eq!(
+            processor
+                .events()
+                .into_iter()
+                .map(|event| event.name().to_owned())
+                .collect::<Vec<_>>(),
+            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+        );
+        finish_failed_request(transport, &context, &closes);
+    }
+
+    #[test]
+    fn write_failure_attaches_replayable_body_from_original_clone() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let context = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
+        let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Write, 10);
+        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
+        let mut input = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("https://example.com/upload")
+            .body(body_builder.text("replayable"))
+            .expect("test request is valid");
+        *input.version_mut() = http::Version::HTTP_2;
+        input
+            .headers_mut()
+            .insert("x-original", http::HeaderValue::from_static("preserved"));
+        input.extensions_mut().insert(42_u32);
+
+        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("write failure reaches the caller");
+
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        let attached = error.take_request().expect("the replayable request is attached");
+        assert_eq!(attached.method(), http::Method::POST);
+        assert_eq!(attached.uri().to_string(), "https://example.com/upload");
+        assert_eq!(attached.version(), http::Version::HTTP_2);
+        assert_eq!(
+            attached.headers().get("x-original"),
+            Some(&http::HeaderValue::from_static("preserved"))
+        );
+        assert_eq!(attached.extensions().get::<u32>(), Some(&42));
+        let text = futures::executor::block_on(attached.into_body().into_text()).expect("the restored body remains readable");
+        assert_eq!(text, "replayable");
+        assert_eq!(
+            processor
+                .events()
+                .into_iter()
+                .map(|event| event.name().to_owned())
+                .collect::<Vec<_>>(),
+            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+        );
+        finish_failed_request(transport, &context, &closes);
+    }
+
+    fn finish_failed_request(transport: WinHttpTransport, context: &Arc<AtomicUsize>, closes: &Arc<AtomicUsize>) {
+        assert_eq!(closes.load(Ordering::SeqCst), 1);
 
         let context = std::ptr::with_exposed_provenance_mut(context.load(Ordering::SeqCst));
         // SAFETY: the mock records the live installed RequestContext pointer,
@@ -414,6 +573,71 @@ mod tests {
             Ok(())
         });
         drop(context);
+        bindings
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum UploadFailure {
+        Send,
+        Body,
+        Write,
+    }
+
+    fn upload_failure_bindings(
+        context: &Arc<AtomicUsize>,
+        closes: Arc<AtomicUsize>,
+        failure: UploadFailure,
+        expected_total_len: u32,
+    ) -> MockBindings {
+        let mut bindings = MockBindings::new();
+        bindings.expect_open().once().returning(|_, _| Ok(raw_handle_value(1)));
+        bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
+
+        let context_option = Arc::clone(context);
+        bindings.expect_set_option().returning(move |_, option, value| {
+            if option == WINHTTP_OPTION_CONTEXT_VALUE {
+                context_option.store(
+                    usize::from_ne_bytes(value.try_into().expect("the context option is pointer-sized")),
+                    Ordering::SeqCst,
+                );
+            }
+            Ok(())
+        });
+        bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
+        bindings.expect_connect().once().returning(|_, _, _| Ok(raw_handle_value(2)));
+        bindings
+            .expect_open_request()
+            .once()
+            .returning(|_, _, _, _| Ok(raw_handle_value(3)));
+        bindings.expect_send_request().once().returning(move |_, _, total_len, context| {
+            assert_eq!(total_len, expected_total_len);
+            if failure == UploadFailure::Send {
+                return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
+            }
+            // SAFETY: send receives the installed live context and dispatch is
+            // synchronous while the operation is armed.
+            unsafe {
+                dispatch_completion(
+                    std::ptr::with_exposed_provenance_mut(context),
+                    WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+            Ok(())
+        });
+        bindings
+            .expect_write_data()
+            .times(usize::from(failure == UploadFailure::Write))
+            .returning(|_, _, _| Err(WinHttpError::new(12030, WinHttpOperation::WriteData)));
+        bindings.expect_receive_response().never();
+        bindings.expect_query_headers().never();
+        bindings.expect_query_option().never();
+        bindings.expect_close_handle().times(3).returning(move |_| {
+            closes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
         bindings
     }
 

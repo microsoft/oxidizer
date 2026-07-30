@@ -1636,6 +1636,7 @@ name = "fetch_winhttp"
 version = "0.1.0"
 dependencies = [
  "bytesbuf",
+ "bytesbuf_io",
  "events_once",
  "fetch",
  "futures",

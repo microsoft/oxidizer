@@ -33,6 +33,7 @@
     reason = "the bindings facade includes request operations used by the request lifecycle"
 )]
 mod bindings;
+mod body;
 mod builder;
 #[expect(clippy::allow_attributes, reason = "callback decoding is consumed by the request lifecycle")]
 #[allow(dead_code, reason = "callback decoding is consumed by the request lifecycle")]

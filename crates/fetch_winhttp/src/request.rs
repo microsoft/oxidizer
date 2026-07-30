@@ -8,18 +8,19 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use bytesbuf::mem::GlobalPool;
 use events_once::{Disconnected, RawReceiver};
 use fetch::options::{RequestFilter, TransportOptions};
-use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, RecoveryInfo};
+use fetch::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, RecoveryInfo};
 use http::header::{HeaderName, HeaderValue};
 use http::uri::Authority;
 use http::{HeaderMap, StatusCode, Version};
-use http_body::Body as _;
 use plurality::Pool;
 use widestring::U16CString;
 
 use crate::bindings::Bindings as _;
 use crate::bindings::Facade;
+use crate::body::{RequestBodyPlan, WinHttpBodyWriter, send_body};
 use crate::context::{CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
 use crate::error_labels;
@@ -194,47 +195,54 @@ impl Future for OperationFuture<'_> {
     }
 }
 
-pub(crate) struct RequestDriver<'a> {
+pub(crate) struct RequestDriver<'body, 'contexts> {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
-    contexts: &'a ContextPool,
+    global_pool: GlobalPool,
+    contexts: &'contexts ContextPool,
     request: TranslatedRequest,
     settings: RequestSettings,
+    body: &'body mut HttpBody,
+    body_plan: RequestBodyPlan,
 }
 
-impl<'a> RequestDriver<'a> {
+impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
     pub(crate) fn new(
-        request: &HttpRequest,
+        request: &'body mut HttpRequest,
         session: Arc<WinHttpSession>,
         body_builder: HttpBodyBuilder,
-        contexts: &'a ContextPool,
+        global_pool: GlobalPool,
+        contexts: &'contexts ContextPool,
         options: &TransportOptions,
         tls: &WinHttpTlsConfig,
     ) -> fetch::Result<Self> {
-        if request.body().content_length() != Some(0) || !request.body().is_end_stream() {
-            return Err(invalid_request(RequestTranslationError::UnsupportedBodyLength));
-        }
         if matches!(request.version(), Version::HTTP_09 | Version::HTTP_10) {
             return Err(invalid_request(RequestTranslationError::LegacyVersion(request.version())));
         }
 
-        let request = TranslatedRequest::new(request, &options.request_filter)?;
+        let mut headers = request.headers().clone();
+        let body_plan = RequestBodyPlan::new(&mut headers, request.body().content_length()).map_err(invalid_request)?;
+        let translated = TranslatedRequest::new(request, &headers, &options.request_filter)?;
         let protocol = protocol_options(&options.supported_http_versions).map_err(invalid_request)?;
         let settings = RequestSettings {
             protocol,
-            security_flags: if request.secure { security_flags(tls) } else { 0 },
+            security_flags: if translated.secure { security_flags(tls) } else { 0 },
         };
+        let body = request.body_mut();
 
         Ok(Self {
             session,
             body_builder,
+            global_pool,
             contexts,
-            request,
+            request: translated,
             settings,
+            body,
+            body_plan,
         })
     }
 
-    pub(crate) async fn execute(self) -> fetch::Result<HttpResponse> {
+    pub(crate) async fn execute(self, body_polled: &mut bool) -> fetch::Result<HttpResponse> {
         let bindings = self.session.handle().bindings().clone();
         let connect = bindings
             .connect(self.session.handle().raw(), &self.request.host, self.request.port)
@@ -245,7 +253,7 @@ impl<'a> RequestDriver<'a> {
                 connect.raw(),
                 &self.request.method,
                 &self.request.path,
-                request_open_flags(self.request.secure, false),
+                request_open_flags(self.request.secure, self.body_plan.automatic_chunking()),
             )
             .map_err(crate::error::WinHttpError::into_http_error)?;
         let request = RequestHandle::new(request, bindings.clone());
@@ -262,13 +270,18 @@ impl<'a> RequestDriver<'a> {
                     // SAFETY: the installed context is the exact pointer passed as
                     // dwContext, and the UTF-16 header buffer remains alive until
                     // the completion is awaited below.
-                    unsafe { bindings.send_request(request, &self.request.headers, 0, context) }
+                    unsafe { bindings.send_request(request, &self.request.headers, self.body_plan.total_length(), context) }
                 })
                 .map_err(|_active| callback_protocol_error("the send operation slot was already active"))?;
             let completion = send
                 .await
                 .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))?;
             expect_completion(completion, OperationKind::SendRequest)?;
+        }
+
+        {
+            let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool);
+            send_body(self.body, &mut writer, body_polled).await?;
         }
 
         {
@@ -317,7 +330,7 @@ struct TranslatedRequest {
 }
 
 impl TranslatedRequest {
-    fn new(request: &HttpRequest, filter: &RequestFilter) -> fetch::Result<Self> {
+    fn new(request: &HttpRequest, headers: &HeaderMap, filter: &RequestFilter) -> fetch::Result<Self> {
         let uri = request.uri();
         let scheme = uri
             .scheme_str()
@@ -349,7 +362,7 @@ impl TranslatedRequest {
             method: method_to_utf16(request.method()).map_err(invalid_request)?,
             host: host_to_utf16(host).map_err(invalid_request)?,
             path: path_to_utf16(path).map_err(invalid_request)?,
-            headers: headers_to_utf16(request.headers()).map_err(invalid_request)?,
+            headers: headers_to_utf16(headers).map_err(invalid_request)?,
             port,
             secure,
         })
@@ -465,7 +478,6 @@ enum RequestTranslationError {
     MissingScheme,
     NonNumericPort(String),
     OutOfRangePort(String),
-    UnsupportedBodyLength,
     UnsupportedScheme(String),
     UserInfo,
     ZeroPort,
@@ -474,9 +486,7 @@ enum RequestTranslationError {
 impl fmt::Display for RequestTranslationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyPort => {
-                f.write_str("the request URI has an empty explicit port; omit the colon or provide a port from 1 to 65535")
-            }
+            Self::EmptyPort => f.write_str("the request URI has an empty explicit port; omit the colon or provide a port from 1 to 65535"),
             Self::HttpDisallowed => f.write_str("plain HTTP requests are disabled for this client"),
             Self::InvalidAuthority(authority) => write!(f, "the request URI has a malformed authority: '{authority}'"),
             Self::InvalidPath(path) => write!(f, "the request URI path must start with '/': {path}"),
@@ -485,15 +495,13 @@ impl fmt::Display for RequestTranslationError {
             Self::MissingHost => f.write_str("the request URI has no host"),
             Self::MissingScheme => f.write_str("the request URI has no scheme"),
             Self::NonNumericPort(port) => {
-                write!(f, "the request URI explicit port '{port}' is not decimal; provide a port from 1 to 65535")
+                write!(
+                    f,
+                    "the request URI explicit port '{port}' is not decimal; provide a port from 1 to 65535"
+                )
             }
             Self::OutOfRangePort(port) => {
                 write!(f, "the request URI explicit port '{port}' is outside the valid range 1 to 65535")
-            }
-            Self::UnsupportedBodyLength => {
-                f.write_str(
-                    "the headers-only WinHTTP transport requires a request body with exact zero content length that is already at end of stream",
-                )
             }
             Self::UnsupportedScheme(scheme) => write!(f, "the request URI uses unsupported scheme '{scheme}'"),
             Self::UserInfo => f.write_str("the request URI authority contains unsupported user information"),
@@ -596,9 +604,11 @@ fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::ffi::c_void;
     use std::pin::Pin;
     use std::ptr::NonNull;
+    use std::slice;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
@@ -609,8 +619,8 @@ mod tests {
     use fetch::options::{RequestFilter, TransportOptions};
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest};
     use http::header::HeaderValue;
-    use http::{Method, Version};
-    use http_body::{Body as _, Frame, SizeHint};
+    use http::{HeaderMap, Method, Version};
+    use http_body::{Frame, SizeHint};
     use http_extensions::HttpBodyOptions;
     use ohno::Labeled as _;
     use plurality::Pool;
@@ -632,10 +642,10 @@ mod tests {
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
     use crate::options::{
-        WINHTTP_FLAG_SECURE, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
-        WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY,
-        WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
-        WINHTTP_QUERY_VERSION,
+        WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH, WINHTTP_OPTION_CONTEXT_VALUE,
+        WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+        WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS,
+        WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
     use crate::session::WinHttpSession;
 
@@ -651,22 +661,53 @@ mod tests {
     const REQUEST: usize = 3;
 
     #[derive(Debug)]
-    struct ExactZeroNonEndBody;
+    struct ScriptedBody {
+        frames: VecDeque<(usize, fetch::Result<Frame<BytesView>>)>,
+        completed_writes: Arc<AtomicUsize>,
+        expected_writes_at_end: usize,
+        content_length: Option<u64>,
+    }
 
-    impl http_body::Body for ExactZeroNonEndBody {
+    impl ScriptedBody {
+        fn new(
+            frames: impl IntoIterator<Item = (usize, fetch::Result<Frame<BytesView>>)>,
+            completed_writes: Arc<AtomicUsize>,
+            expected_writes_at_end: usize,
+            content_length: Option<u64>,
+        ) -> Self {
+            Self {
+                frames: frames.into_iter().collect(),
+                completed_writes,
+                expected_writes_at_end,
+                content_length,
+            }
+        }
+    }
+
+    impl http_body::Body for ScriptedBody {
         type Data = BytesView;
         type Error = HttpError;
 
-        fn poll_frame(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-            Poll::Pending
+        fn poll_frame(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            let expected_writes = self
+                .frames
+                .front()
+                .map_or(self.expected_writes_at_end, |(expected_writes, _frame)| *expected_writes);
+            assert_eq!(
+                self.completed_writes.load(Ordering::SeqCst),
+                expected_writes,
+                "the next request-body frame must not be polled before the previous frame is fully written"
+            );
+
+            Poll::Ready(self.frames.pop_front().map(|(_expected_writes, frame)| frame))
         }
 
         fn is_end_stream(&self) -> bool {
-            false
+            self.frames.is_empty()
         }
 
         fn size_hint(&self) -> SizeHint {
-            SizeHint::with_exact(0)
+            self.content_length.map_or_else(SizeHint::default, SizeHint::with_exact)
         }
     }
 
@@ -1013,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_requested_versions_and_nonempty_bodies_are_invalid_requests() {
+    fn legacy_requested_versions_are_invalid_requests() {
         for version in [Version::HTTP_09, Version::HTTP_10] {
             let mut options = TransportOptions::default();
             options.supported_http_versions = vec![version];
@@ -1040,67 +1081,390 @@ mod tests {
         );
         assert_eq!(result.expect_err("legacy request version is rejected").label(), "invalid_request");
         assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
-
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
-        let request = http::Request::builder()
-            .method(Method::POST)
-            .uri("https://example.com/")
-            .body(body_builder.text("payload"))
-            .expect("test request is valid");
-        let (result, record) = run_lifecycle(
-            request,
-            TransportOptions::default(),
-            WinHttpTlsConfig::default(),
-            LifecycleConfig::default(),
-        );
-
-        let error = result.expect_err("nonempty body is not silently dropped");
-        assert_eq!(error.label(), "invalid_request");
-        assert!(error.to_string().contains("exact zero content length"));
-        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
-
-        let request = http::Request::builder()
-            .method(Method::POST)
-            .uri("https://example.com/")
-            .body(body_builder.stream(futures::stream::empty::<fetch::Result<BytesView>>(), &HttpBodyOptions::default()))
-            .expect("test request is valid");
-        assert_eq!(request.body().content_length(), None);
-        let (result, record) = run_lifecycle(
-            request,
-            TransportOptions::default(),
-            WinHttpTlsConfig::default(),
-            LifecycleConfig::default(),
-        );
-
-        let error = result.expect_err("unknown-length body is not silently dropped");
-        assert_eq!(error.label(), "invalid_request");
-        assert!(error.to_string().contains("exact zero content length"));
-        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]
-    fn exact_zero_non_end_stream_body_is_rejected_before_native_io() {
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
-        let body = body_builder.body(ExactZeroNonEndBody, &HttpBodyOptions::default());
-        assert_eq!(body.content_length(), Some(0));
-        assert!(!body.is_end_stream());
+    fn request_upload_writes_every_frame_and_contiguous_span_sequentially() {
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+        let first = BytesView::copied_from_slice(b"ab", &memory);
+        let second = BytesView::copied_from_slice(b"cd", &memory);
+        let third = BytesView::copied_from_slice(b"ef", &memory);
+        let expected_addresses = [
+            first.first_slice().as_ptr().addr(),
+            second.first_slice().as_ptr().addr(),
+            third.first_slice().as_ptr().addr(),
+        ];
+        let segmented = BytesView::from_views([first, second]);
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new(
+                [
+                    (0, Ok(Frame::data(BytesView::new()))),
+                    (0, Ok(Frame::data(segmented))),
+                    (2, Ok(Frame::data(third))),
+                ],
+                Arc::clone(&completed_writes),
+                3,
+                Some(6),
+            ),
+            &HttpBodyOptions::default(),
+        );
         let request = http::Request::builder()
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
             .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            ..LifecycleConfig::default()
+        };
 
-        let (result, record) = run_lifecycle(
-            request,
-            TransportOptions::default(),
-            WinHttpTlsConfig::default(),
-            LifecycleConfig::default(),
+        let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+
+        response.expect("all request body frames are written");
+        assert_eq!(record.sent_total_length.load(Ordering::SeqCst), 6);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *record.writes.lock().expect("record lock is not poisoned"),
+            [
+                RecordedWrite {
+                    address: expected_addresses[0],
+                    bytes: b"ab".to_vec(),
+                },
+                RecordedWrite {
+                    address: expected_addresses[1],
+                    bytes: b"cd".to_vec(),
+                },
+                RecordedWrite {
+                    address: expected_addresses[2],
+                    bytes: b"ef".to_vec(),
+                },
+            ]
         );
+        assert_lifecycle_closed(&record);
+    }
 
-        let error = result.expect_err("a body with remaining frames is not silently dropped");
+    #[test]
+    fn partial_write_completions_advance_within_the_active_span() {
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+        let data = BytesView::copied_from_slice(b"abcd", &memory);
+        let address = data.first_slice().as_ptr().addr();
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new([(0, Ok(Frame::data(data)))], Arc::clone(&completed_writes), 2, Some(4)),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            max_write_completion: Some(2),
+            ..LifecycleConfig::default()
+        };
+
+        let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+
+        response.expect("partial completions are continued sequentially");
+        assert_eq!(
+            *record.writes.lock().expect("record lock is not poisoned"),
+            [
+                RecordedWrite {
+                    address,
+                    bytes: b"abcd".to_vec(),
+                },
+                RecordedWrite {
+                    address: address + 2,
+                    bytes: b"cd".to_vec(),
+                },
+            ]
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn unknown_length_uploads_use_automatic_chunking_for_every_supported_protocol() {
+        for (versions, protocol) in [(vec![Version::HTTP_11], 0), (vec![Version::HTTP_2], 1), (vec![Version::HTTP_3], 2)] {
+            let memory = GlobalPool::new();
+            let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+            let completed_writes = Arc::new(AtomicUsize::new(0));
+            let body = body_builder.body(
+                ScriptedBody::new(
+                    [(0, Ok(Frame::data(BytesView::copied_from_slice(b"x", &memory))))],
+                    Arc::clone(&completed_writes),
+                    1,
+                    None,
+                ),
+                &HttpBodyOptions::default(),
+            );
+            let request = http::Request::builder()
+                .method(Method::POST)
+                .uri("https://example.com/")
+                .body(body)
+                .expect("test request is valid");
+            let mut options = TransportOptions::default();
+            options.supported_http_versions = versions;
+            let config = LifecycleConfig {
+                protocol,
+                completed_writes,
+                ..LifecycleConfig::default()
+            };
+
+            let (response, record) = run_lifecycle(request, options, WinHttpTlsConfig::default(), config);
+
+            response.expect("unknown-length upload succeeds");
+            assert_eq!(
+                record
+                    .open_request
+                    .lock()
+                    .expect("record lock is not poisoned")
+                    .as_ref()
+                    .expect("request was opened")
+                    .2,
+                WINHTTP_FLAG_SECURE | WINHTTP_FLAG_AUTOMATIC_CHUNKING
+            );
+            assert_eq!(
+                record.sent_total_length.load(Ordering::SeqCst),
+                WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH as usize
+            );
+            assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
+            assert_lifecycle_closed(&record);
+        }
+    }
+
+    #[test]
+    fn large_known_length_uses_explicit_content_length_without_allocating_the_body() {
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let length = u64::from(u32::MAX) + 1;
+        let body = body_builder.body(
+            ScriptedBody::new([], Arc::clone(&completed_writes), 0, Some(length)),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            ..LifecycleConfig::default()
+        };
+
+        let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+
+        response.expect("large declared body length reaches WinHTTP");
+        assert_eq!(
+            record.sent_total_length.load(Ordering::SeqCst),
+            WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH as usize
+        );
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
+        let sent_headers = String::from_utf16(&record.sent_headers.lock().expect("record lock is not poisoned"))
+            .expect("translated headers are valid UTF-16");
+        assert!(sent_headers.contains("content-length: 4294967296\r\n"));
+        assert_eq!(
+            record
+                .open_request
+                .lock()
+                .expect("record lock is not poisoned")
+                .as_ref()
+                .expect("request was opened")
+                .2,
+            WINHTTP_FLAG_SECURE
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn request_body_errors_and_trailers_stop_before_response_reception() {
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new(
+                [(0, Err(HttpError::validation("request body stream failed")))],
+                Arc::clone(&completed_writes),
+                0,
+                None,
+            ),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            ..LifecycleConfig::default()
+        };
+
+        let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+        let error = result.expect_err("body stream errors are propagated");
+        assert_eq!(error.label(), "validation");
+        assert!(error.to_string().contains("request body stream failed"));
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+        assert_lifecycle_closed(&record);
+
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new([(0, Ok(Frame::trailers(HeaderMap::new())))], Arc::clone(&completed_writes), 0, None),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            ..LifecycleConfig::default()
+        };
+
+        let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+        let error = result.expect_err("request trailers are rejected");
         assert_eq!(error.label(), "invalid_request");
-        assert!(error.to_string().contains("already at end of stream"));
-        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+        assert!(error.to_string().contains("cannot submit request trailer frames"));
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn synchronous_callback_and_zero_length_write_failures_are_reported() {
+        for failure in [LifecycleFailure::WriteSync, LifecycleFailure::WriteCallback] {
+            let memory = GlobalPool::new();
+            let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+            let completed_writes = Arc::new(AtomicUsize::new(0));
+            let body = body_builder.body(
+                ScriptedBody::new(
+                    [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
+                    Arc::clone(&completed_writes),
+                    0,
+                    Some(4),
+                ),
+                &HttpBodyOptions::default(),
+            );
+            let request = http::Request::builder()
+                .method(Method::POST)
+                .uri("https://example.com/")
+                .body(body)
+                .expect("test request is valid");
+            let config = LifecycleConfig {
+                failure: Some(failure),
+                completed_writes,
+                ..LifecycleConfig::default()
+            };
+
+            let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+            let error = result.expect_err("write failure reaches the caller");
+            assert_eq!(error.label(), "request_winhttp");
+            assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+            assert_lifecycle_closed(&record);
+        }
+
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new(
+                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"data", &memory))))],
+                Arc::clone(&completed_writes),
+                0,
+                Some(4),
+            ),
+            &HttpBodyOptions::default(),
+        );
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            max_write_completion: Some(0),
+            ..LifecycleConfig::default()
+        };
+
+        let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+        let error = result.expect_err("a zero-byte write completion is rejected");
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("without writing any bytes"));
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn cancelling_an_active_upload_retains_the_buffer_and_parents_until_handle_closing() {
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new(
+                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"outstanding", &memory))))],
+                Arc::clone(&completed_writes),
+                0,
+                Some(11),
+            ),
+            &HttpBodyOptions::default(),
+        );
+        let mut request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            defer_write_completion: true,
+            ..LifecycleConfig::default()
+        };
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let response_body_builder = HttpBodyBuilder::new(memory.clone(), &Clock::new_frozen());
+        let options = TransportOptions::default();
+        let tls = WinHttpTlsConfig::default();
+        let driver = RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            response_body_builder,
+            memory,
+            &contexts,
+            &options,
+            &tls,
+        )
+        .expect("request setup succeeds");
+        let mut body_polled = false;
+        let mut future = Box::pin(driver.execute(&mut body_polled));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+
+        drop(future);
+        drop(session);
+
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+
+        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        closing(context);
+
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -1243,6 +1607,8 @@ mod tests {
         Option(usize),
         SendSync,
         SendCallback,
+        WriteSync,
+        WriteCallback,
         ReceiveSync,
         ReceiveCallback,
         QueryStatus,
@@ -1258,6 +1624,9 @@ mod tests {
         legacy_version: String,
         failure: Option<LifecycleFailure>,
         complete_send_on_foreign_thread: bool,
+        completed_writes: Arc<AtomicUsize>,
+        defer_write_completion: bool,
+        max_write_completion: Option<u32>,
     }
 
     impl Default for LifecycleConfig {
@@ -1269,8 +1638,17 @@ mod tests {
                 legacy_version: "HTTP/1.1".to_owned(),
                 failure: None,
                 complete_send_on_foreign_thread: false,
+                completed_writes: Arc::new(AtomicUsize::new(0)),
+                defer_write_completion: false,
+                max_write_completion: None,
             }
         }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct RecordedWrite {
+        address: usize,
+        bytes: Vec<u8>,
     }
 
     #[derive(Default)]
@@ -1279,8 +1657,11 @@ mod tests {
         open_request: Mutex<Option<(String, String, u32)>>,
         options: Mutex<Vec<(u32, Vec<u8>)>>,
         sent_headers: Mutex<Vec<u16>>,
+        sent_total_length: AtomicUsize,
+        writes: Mutex<Vec<RecordedWrite>>,
         connect_calls: AtomicUsize,
         send_calls: AtomicUsize,
+        write_calls: AtomicUsize,
         receive_calls: AtomicUsize,
         installed_context: AtomicUsize,
         send_context: AtomicUsize,
@@ -1290,7 +1671,7 @@ mod tests {
     }
 
     fn run_lifecycle(
-        request: HttpRequest,
+        mut request: HttpRequest,
         options: TransportOptions,
         tls: WinHttpTlsConfig,
         config: LifecycleConfig,
@@ -1299,13 +1680,22 @@ mod tests {
         let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
         let session = session(facade);
         let contexts = ContextPool::new(Pool::new());
-        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
-        let driver = RequestDriver::new(&request, Arc::clone(&session), body_builder, &contexts, &options, &tls);
-        drop((request, options, tls));
-        let result = match driver {
-            Ok(driver) => futures::executor::block_on(driver.execute()),
+        let global_pool = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(global_pool.clone(), &Clock::new_frozen());
+        let mut body_polled = false;
+        let result = match RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            body_builder,
+            global_pool,
+            &contexts,
+            &options,
+            &tls,
+        ) {
+            Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)),
             Err(error) => Err(error),
         };
+        drop((request, options, tls));
 
         let context = record.installed_context.load(Ordering::SeqCst);
         if context != 0 {
@@ -1382,8 +1772,8 @@ mod tests {
         bindings.expect_send_request().returning(move |_, headers, total_len, context| {
             send_record.send_calls.fetch_add(1, Ordering::SeqCst);
             send_record.send_context.store(context, Ordering::SeqCst);
+            send_record.sent_total_length.store(total_len as usize, Ordering::SeqCst);
             *send_record.sent_headers.lock().expect("record lock is not poisoned") = headers.as_slice().to_vec();
-            assert_eq!(total_len, 0);
 
             if send_config.failure == Some(LifecycleFailure::SendSync) {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
@@ -1414,10 +1804,55 @@ mod tests {
             Ok(())
         });
 
+        let write_config = Arc::clone(&config);
+        let write_record = Arc::clone(&record);
+        bindings.expect_write_data().returning(move |_, buffer, len| {
+            write_record.write_calls.fetch_add(1, Ordering::SeqCst);
+            // SAFETY: the active OperationBuffer retains the exact contiguous
+            // span passed to the mock for at least the duration of this call.
+            let bytes = unsafe { slice::from_raw_parts(buffer.as_ptr(), len as usize) }.to_vec();
+            write_record
+                .writes
+                .lock()
+                .expect("record lock is not poisoned")
+                .push(RecordedWrite {
+                    address: buffer.as_ptr().addr(),
+                    bytes,
+                });
+
+            if write_config.failure == Some(LifecycleFailure::WriteSync) {
+                return Err(WinHttpError::new(12030, WinHttpOperation::WriteData));
+            }
+            if write_config.defer_write_completion {
+                return Ok(());
+            }
+
+            let context = write_record.installed_context.load(Ordering::SeqCst);
+            if write_config.failure == Some(LifecycleFailure::WriteCallback) {
+                complete_request_error(context, 12030);
+            } else {
+                let mut written = write_config.max_write_completion.map_or(len, |maximum| maximum.min(len));
+                write_config.completed_writes.fetch_add(1, Ordering::SeqCst);
+                complete(
+                    std::ptr::with_exposed_provenance_mut(context),
+                    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                    (&raw mut written).cast(),
+                    status_info_len::<u32>(),
+                );
+            }
+
+            Ok(())
+        });
+
         let receive_config = Arc::clone(&config);
         let receive_record = Arc::clone(&record);
         bindings.expect_receive_response().returning(move |_| {
             receive_record.receive_calls.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(
+                receive_record.write_calls.load(Ordering::SeqCst),
+                receive_config.completed_writes.load(Ordering::SeqCst),
+                "response reception must not begin before the final write completes"
+            );
             if receive_config.failure == Some(LifecycleFailure::ReceiveSync) {
                 return Err(WinHttpError::new(12002, WinHttpOperation::ReceiveResponse));
             }
