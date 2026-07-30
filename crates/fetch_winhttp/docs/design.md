@@ -36,20 +36,18 @@ except the constructors arrive through an extension trait this crate implements 
 use fetch::HttpClient;
 use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpOptions, WinHttpTlsConfig};
 
-// Defaults:
-let client = HttpClient::new_winhttp();
-
-// Configured. Every WinHTTP config type is built through a builder, never a struct
-// literal, so all of them are `#[non_exhaustive]` and can gain knobs in later versions
-// without a breaking change:
+// Clock, memory pool, and telemetry sink come from the application's environment.
+// TLS and WinHTTP-specific user configuration default when omitted.
 let deps = WinHttpDeps::builder()
+    .clock(clock)
+    .global_pool(global_pool)
+    .sink(sink)
     .tls(WinHttpTlsConfig::builder()
         .accept_invalid_certs(true)                 // Schannel knobs, §4
         .build())
     .options(WinHttpOptions::builder()
-        .resolve_timeout(Duration::from_secs(10))   // transport-specific tuning, §3, §5, §6
+        .resolve_timeout(Duration::from_secs(10))   // optional native DNS-only deadline, §6
         .build())
-    .sink(observed::Sink::noop())                   // telemetry sink; detailed in v1.1
     .build();
 
 let client = HttpClient::builder_winhttp(deps)
@@ -57,8 +55,10 @@ let client = HttpClient::builder_winhttp(deps)
 ```
 
 The result is an ordinary `fetch` `HttpClient`; no other caller code changes.
-`WinHttpDeps` carries only WinHTTP-specific configuration - the clock, memory pool, and
-telemetry meter are supplied by `fetch` itself and are not configured here. It and its
+`WinHttpDeps` carries the mandatory environment dependencies needed by this transport:
+the timer-capable `tick::Clock`, `bytesbuf::mem::GlobalPool`, and `observed::Sink`.
+These values cannot be invented by the crate and therefore have no defaults. Its TLS
+and WinHTTP option fields are user configuration and do default. `WinHttpDeps` and its
 component config types are `#[non_exhaustive]` and constructed through builders so new
 fields can be added compatibly:
 
@@ -66,10 +66,13 @@ fields can be added compatibly:
 /// WinHTTP-specific dependencies. Construct with [`WinHttpDeps::builder`].
 #[derive(thread_aware::ThreadAware)]
 #[non_exhaustive]
-pub struct WinHttpDeps { /* tls, options, sink - private; set via the builder */ }
+pub struct WinHttpDeps { /* clock, global pool, sink, TLS, options - private */ }
 
 impl WinHttpDeps {
-    /// Starts building a `WinHttpDeps`. `tls`/`options`/`sink` default when unset.
+    /// Starts building a `WinHttpDeps`.
+    ///
+    /// `clock`, `global_pool`, and `sink` are mandatory. `build()` panics with an
+    /// actionable programming-error message if any is missing.
     pub fn builder() -> WinHttpDepsBuilder;
 }
 
@@ -77,13 +80,16 @@ impl WinHttpDeps {
 pub trait HttpClientWinHttpExt {
     /// Returns a builder for an `HttpClient` on the WinHTTP transport.
     fn builder_winhttp(deps: impl Into<WinHttpDeps>) -> HttpClientBuilder;
-    /// Builds an `HttpClient` on the WinHTTP transport with default deps.
-    fn new_winhttp() -> HttpClient;
 }
 ```
 
 `WinHttpTlsConfig` (§4) and `WinHttpOptions` (§3, §5, §6) follow the same
 builder + `#[non_exhaustive]` pattern.
+
+The crate is pre-1.0 and the extension-trait constructor shape may change as the
+`fetch` custom-transport API is stabilized. The behavioral contract in this document
+guides v1 implementation; it does not promise that this provisional construction API is
+already stable.
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
 
@@ -104,27 +110,43 @@ This chapter states what that means for the caller: the guarantees the transport
 provides, which `fetch` connection options it honors and to what fidelity (§2.1), and
 which it cannot honor (§2.2).
 
-**Pool isolation is guaranteed.** Each `HttpClient` this transport builds gets its own
-connection pool; two independently built clients never reuse each other's connections,
-even in the same process. This is a security boundary: a strict client and one built
-with `accept_invalid_certs` (§4) must not share a pooled TLS connection. Within a single
-client, connections are reused normally.
+**Pool isolation is guaranteed.** Each independently built `HttpClient` gets its own
+isolated set of connection pools - one per materialized (core × pool slot) transport
+instance. Two independently built clients never reuse each other's connections, even in
+the same process. This is a security boundary: a strict client and one built with
+`accept_invalid_certs` (§4) must not share a pooled TLS connection. Cloned `HttpClient`
+values share the original client's pool set; within each pool, connections are reused
+normally.
 
-### 2.1 Mapping `fetch` connection-pool options onto WinHTTP
+### 2.1 Mapping generic transport options onto WinHTTP
 
-`fetch_options::ConnectionPoolOptions` (reached via `TransportOptions`) exposes
-`max_connections`, `connection_idle_timeout`, and `connection_lifetime`, plus
-`ConnectionKeepAlive`. WinHTTP's controls do not map one-to-one, so some options are
-honored only approximately and others cannot be honored at all:
+`fetch::custom::CustomContext` supplies generic `TransportOptions` and `TlsOptions`.
+WinHTTP's controls do not map one-to-one, so some values are exact, some approximate,
+and some ignored:
 
 | `fetch` option | WinHTTP mechanism | Fidelity |
 |----------------|-------------------|----------|
-| `max_connections` (per pool) | `WINHTTP_OPTION_MAX_CONNS_PER_SERVER` | Approximate: the limit is applied, but WinHTTP enforces it per authority whereas `fetch` counts per pool, so a multi-host pool's effective cap differs. |
+| `connect_timeout` | `tick::Clock` race around connection establishment | Exact total deadline; no native connect timer. |
+| `request_filter` | request URI validation plus `WINHTTP_FLAG_SECURE` | Exact. |
+| `supported_http_versions` | WinHTTP enable/required protocol options | Exact for HTTP/1.1, HTTP/2, and HTTP/3; other versions are rejected. |
+| `multiple_pools` | `fetch` materializes a separate transport/session for every pool slot | Exact structural isolation; the selection strategy remains owned by `fetch`. |
+| `max_connections = usize::MAX` (default) | nothing to do | Exact. |
+| finite `max_connections` | ignored | Not honored: `fetch` limits idle retained connections, whereas WinHTTP's available option limits all physical connections and could throttle active HTTP/1.1 requests. |
 | `connection_idle_timeout` | WinHTTP's own idle keep-alive management; `PurgeKeepAlives` to force-clear | Not honored: WinHTTP exposes no idle-TTL knob, so the configured value has no effect and WinHTTP applies its own default. |
 | `connection_lifetime = Unlimited` (default) | nothing to do | Exact. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | not honored in v1 (see §2.2) | Not honored (see §2.2). |
-| `ConnectionKeepAlive::ActiveConnections{..}` | `WINHTTP_OPTION_HTTP2_KEEPALIVE` / `WINHTTP_OPTION_HTTP3_KEEPALIVE` (floor 5000 ms) | Approximate for h2/h3; HTTP/1.1 keep-alive is automatic. |
 | `ConnectionKeepAlive::Disabled` (default) | leave keep-alive at WinHTTP defaults | n/a |
+| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | HTTP/2/3 keep-alive interval, floored to 5000 ms | Approximate: WinHTTP also probes idle connections and manages its own response timeout; HTTP/1.1 has no equivalent probe. |
+| `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | same as `ActiveConnections` | Approximate: WinHTTP does not distinguish the two modes and ignores the generic `timeout`. |
+| `Http2Options::initial_max_send_streams` | ignored | Not honored: WinHTTP owns HTTP/2 stream concurrency. |
+| `Http2Options::adaptive_window` | ignored | Not honored: WinHTTP owns HTTP/2 flow control. |
+| `TransportOptions::extra` | ignored | No v1 WinHTTP extension types are defined in the generic extension map. |
+| generic TLS `supported_http_versions` | ignored | Protocol selection comes from `TransportOptions::supported_http_versions`. |
+| generic TLS `client_identity` | ignored | Client certificates are out of scope (§4.1). |
+| generic TLS automatic/backend selection | ignored | Schannel/WinHTTP is always the backend. |
+| preconfigured rustls/native-tls backend | ignored | Those backend objects cannot configure WinHTTP. |
+| rustls crypto provider or certificate verifier | ignored | Schannel owns cryptography and certificate verification. |
+| rustls client-certificate resolver | ignored | Client certificates are out of scope (§4.1). |
 
 `ConnectionInfo` (age, `is_expired`, poisoning) that `fetch_hyper` attaches to
 responses cannot be reproduced: WinHTTP hides individual connections, so per
@@ -158,15 +180,27 @@ Because none is faithful, **v1 does not implement `connection_lifetime` for
 (`WINHTTP_OPTION_EXPIRE_CONNECTION` remains a candidate for a different feature:
 error-driven poisoning of a connection after a protocol failure.)
 
-Rather than silently ignore a `Fixed`/`PerConnection` setting - which would let a
-caller believe a bounded-connection-age guarantee is in force when it is not - the
-transport warns at build time per the general unhonorable-option policy
-(implementation.md §11). A
-future version may add a proper mechanism (most likely whole-session recycling gated
-behind an explicit opt-in, given its cost and coarse granularity). That this option
-arrives from the `fetch` layer at all, rather than being configured on the transport
-that owns the connections, is noted as `fetch` API feedback in the fetch API
-stabilization feedback (../../fetch/docs/stabilization.md).
+Unsupported generic connection options are ignored without runtime diagnostics. Their
+fidelity is documented here so callers can select transport-specific configuration
+knowingly. A future version may add a proper connection-lifetime mechanism (most likely
+whole-session recycling gated behind an explicit opt-in, given its cost and coarse
+granularity). That this option arrives from the `fetch` layer at all, rather than being
+configured on the transport that owns the connections, is noted as `fetch` API feedback
+in the fetch API stabilization feedback (../../fetch/docs/stabilization.md).
+
+### 2.3 Proxy discovery
+
+The session is opened with `WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY`. WinHTTP applies the
+current Windows proxy policy, including automatic discovery and PAC handling available
+through that mode. v1 exposes no proxy configuration and has no `DEFAULT_PROXY` or direct
+connection fallback: silently bypassing OS proxy policy would violate the purpose of
+using the Windows networking stack.
+
+The transport targets modern Windows versions where automatic proxy mode and every other
+WinHTTP option required by this design are available. It performs no old-Windows
+compatibility probing or degradation. A required session option that cannot be applied
+leaves that materialized transport in its permanent initialization-failure state; a
+required request option that cannot be applied fails that request.
 
 ## 3. HTTP protocol negotiation
 
@@ -184,7 +218,10 @@ versions a request may use comes from `fetch`'s `TransportOptions.supported_http
 Negotiation, including ALPN, is performed by the OS during the TLS handshake; the
 transport does not negotiate manually. The version actually negotiated is reported on the
 returned `HttpResponse`, so telemetry reflects what was negotiated rather than what was
-requested. (How the version set is expressed to WinHTTP is implementation.md §10.1.)
+requested. The transport assumes the required modern WinHTTP protocol options exist and
+does not probe feature availability or provide an older-version fallback. Failure to
+apply a required protocol option fails the request. (How the version set is expressed to
+WinHTTP is implementation.md §10.1.)
 
 ## 4. TLS
 
@@ -221,7 +258,7 @@ behaves consistently with the rest of `fetch`:
 
 - **Automatic decompression (always on).** The transport advertises
   `Accept-Encoding: gzip, deflate`; gzip/deflate responses are transparently decoded
-  before the body is streamed up, with `Content-Encoding`/`Content-Length` stripped, so
+  before the body is returned, with `Content-Encoding`/`Content-Length` stripped, so
   callers always see a decoded body. `fetch` itself has no content decoding, so there is
   no double-decode risk. No opt-out is exposed in v1, since it would only hand callers an
   encoded body nothing downstream can decode.
@@ -229,6 +266,14 @@ behaves consistently with the rest of `fetch`:
   still-encoded with `Content-Encoding` intact and pass through verbatim.
 - **Request-body compression.** Not performed automatically; a caller that pre-encodes its
   body and sets `Content-Encoding` has it sent as-is.
+- **Streaming request bodies.** Known- and unknown-length bodies are supported with
+  HTTP/1.1, HTTP/2, and HTTP/3. The transport streams every data frame through
+  `WinHttpWriteData`, waits for each write completion, and calls
+  `WinHttpReceiveResponse` only after the request body reaches end-of-stream. WinHTTP is
+  responsible for the protocol-appropriate framing of an unknown total length.
+- **Trailers.** Response trailers exposed by WinHTTP are returned as `HttpBody` trailer
+  frames rather than discarded. WinHTTP has no request-trailer submission API, so an
+  outgoing trailer frame fails the request rather than being silently dropped.
 - **Redirects are not followed.** Like `fetch_hyper` (and unlike WinHTTP's own default),
   3xx responses are surfaced to the caller unchanged rather than followed, with no knob
   to re-enable automatic redirects.
@@ -241,30 +286,28 @@ behaves consistently with the rest of `fetch`:
 
 ## 6. Timeouts and time
 
-`fetch` enforces most timeouts above the transport; WinHTTP provides native
-timers for the transport-owned steps. The transport owns exactly one timeout that
-`fetch` does not enforce for us: connect.
+Timeouts are enforced by `fetch`-layer futures driven by the caller-supplied `tick::Clock`
+wherever the required interval is observable outside WinHTTP. Native WinHTTP timers are
+configured as unlimited by default and are used only for a deadline that cannot be
+expressed outside WinHTTP.
 
 ### 6.1 Which timeouts the transport honors
 
 - **Connect timeout** (`TransportOptions.connect_timeout`, default 30 s): honored by this
-  transport as a *total* deadline on connection establishment (§6.2). `fetch` models this
-  option but leaves each transport to enforce it. This is the sole source of the connect
-  deadline: `WinHttpOptions` deliberately exposes no separate connect-timeout knob, so the
-  two can never diverge.
+  transport as a *total* deadline on connection establishment (§6.2). `fetch` core models
+  this option but leaves each transport to enforce it. The WinHTTP transport races the
+  observable connection-establishment phase against `tick::Clock`; it does not use
+  WinHTTP's per-address native connect timer.
 - **Response timeout** (`http_extensions::ResponseTimeout`, read per-request from the
   request extensions): a *total* deadline over connection setup, sending the request, and
   receiving the response headers. `fetch` enforces this above the transport (the same way
-  `fetch_hyper` relies on it), and it surfaces as `HttpError::timeout`. WinHTTP has no
-  native timer with matching semantics - its receive-response timer covers only the
-  post-send wait for the first response byte, excluding connect and send - so the transport
-  does not remap `ResponseTimeout` onto a native timer; it only sets the native
-  receive-response timer as a looser liveness backstop (implementation.md §10.4).
+  `fetch_hyper` relies on it), and it surfaces as `HttpError::timeout`. The transport does
+  not remap it onto any native WinHTTP timer.
 - **Body idle timeout** (`http_extensions::BodyTimeout`, read per-request from the request
-  extensions): the maximum idle gap between response body chunks, reset on progress. This
-  *does* match WinHTTP's `WINHTTP_OPTION_RECEIVE_TIMEOUT` (a per-receive-operation idle
-  timer, reset each read), so the transport honors it natively by programming that timer
-  per-request from the request's `BodyTimeout`. It surfaces as `HttpError::timeout`.
+  extensions): the maximum idle gap between response body frames, reset on progress. The
+  transport passes this value to the supplied `HttpBodyBuilder`, which merges it with
+  client-level response-body defaults and applies the `fetch` body timeout wrapper. No
+  native WinHTTP receive timer is required.
 - **Seatbelt request timeout**: enforced above the transport; the transport is not
   involved.
 - **Send timeout**: not a distinct concept. Sending the request and waiting for the
@@ -272,29 +315,27 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
   already governs, after which `BodyTimeout` takes over; there is no separate send
   deadline to honor.
 - **Resolve timeout**: `fetch` has no concept for a standalone DNS-resolution deadline
-  (it is otherwise subsumed by `connect_timeout`), so it is exposed as a transport-specific
-  `WinHttpOptions` knob for callers that need to bound resolution finely, as discussed in
-  the fetch API stabilization feedback (../../fetch/docs/stabilization.md).
+  and WinHTTP does not expose the DNS stage as a separately awaitable operation. It is
+  therefore the one native timeout exposed through transport-specific
+  `WinHttpOptions::resolve_timeout`. It defaults to unlimited; when explicitly configured,
+  it is applied through `WinHttpSetTimeouts`.
 
-Cancellation is the transport's backstop for every timeout it does not enforce natively:
-when `fetch` (or any layer above) drops the request future on a timeout, the transport
-honors it by closing the WinHTTP handle and tearing the request down (the drop-safety
-contract in §7 and implementation.md §4).
+When any `fetch`-layer timeout drops the request future or response body, the transport
+closes the WinHTTP handle and tears the request down (implementation.md §4).
 
 ### 6.2 The outer connect timeout
 
-WinHTTP's native connect timer bounds only a single per-address connection
-*attempt*. A multi-homed host has several addresses that WinHTTP tries in turn,
-retrying transient failures, so the *total* time to establish a connection can
-exceed `TransportOptions.connect_timeout` even though every individual attempt
-honored the native per-attempt timer. `fetch` callers expect `connect_timeout`
-to be a *total* deadline, so the transport enforces the total itself, above the
-native per-attempt timer (how it does so is implementation.md §4.6).
+WinHTTP's native connect timer bounds only a single per-address connection attempt.
+A multi-homed host can therefore exceed `TransportOptions.connect_timeout` while trying
+several addresses. `fetch` callers expect a total deadline, so the transport enforces it
+itself with `tick::Clock` and leaves the native connect timer unlimited (how it does so
+is implementation.md §4.6).
 
 The deadline spans connection establishment: name resolution, TCP/TLS connect,
 proxy discovery, and sending the request line and headers. The request body is
-streamed afterward, so it lies outside this deadline and is governed by the
-body idle timer (§6.1) instead.
+streamed afterward, so it lies outside this connect deadline. It remains inside the
+per-request `ResponseTimeout`, which continues through the complete upload and response
+headers (§6.1).
 
 One consequence: the deadline can fire after the headers reached the server, so a
 bodyless non-idempotent request may already be in processing when it trips.
@@ -309,8 +350,8 @@ transport's; the transport only reports the timeout.
 
 - **Error surface.** Two Win32 error sources: the last-error from a failing
   synchronous call, and `dwError` from `WINHTTP_ASYNC_RESULT` on a
-  `REQUEST_ERROR` callback. `SECURE_FAILURE` supplies a bitmask of certificate
-  problems that we capture and attach.
+  `REQUEST_ERROR` callback. `SECURE_FAILURE` may additionally supply a bitmask of
+  certificate problems, which is attached when available as best-effort diagnostics.
 - **Mapping.** A Win32/`WINHTTP_*` code is turned into
   `HttpError::other(WinHttpError { code, .. }, recovery, label)`.
 - **Labels** (mirroring `fetch`'s own error labels):
@@ -319,7 +360,7 @@ transport's; the transport only reports the timeout.
   |-----------|--------------|
   | `ERROR_WINHTTP_CANNOT_CONNECT`, `NAME_NOT_RESOLVED` | `connect` |
   | `ERROR_WINHTTP_TIMEOUT` | `timeout` |
-  | `ERROR_WINHTTP_SECURE_FAILURE` and secure-failure bits | `tls` |
+  | `ERROR_WINHTTP_SECURE_FAILURE` | `tls` |
   | `ERROR_WINHTTP_OPERATION_CANCELLED` | `abandoned` |
   | send/receive/protocol failures | `request_winhttp` |
 
