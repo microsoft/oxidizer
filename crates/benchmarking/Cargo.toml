@@ -27,3 +27,6 @@ min-lines-percent = 0
 [lints]
 workspace = true
 # <<< anvil-managed: anvil-lints
+
+[dependencies]
+criterion.workspace = true
