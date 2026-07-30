@@ -1,24 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(windows)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! WinHTTP-based HTTP transport for the [`fetch`] HTTP client.
 //!
-//! This crate is a Windows-only custom transport that services `fetch`
-//! [`HttpClient`] requests through the operating system's
+//! This Windows-only crate adds a `WinHTTP` transport constructor to
+//! [`HttpClient`]. Callers supply the clock, memory pool, and telemetry sink
+//! required by the transport through [`WinHttpDeps`].
+//!
+//! WinHTTP-specific TLS and timeout configuration is available through
+//! [`WinHttpTlsConfig`] and [`WinHttpOptions`]. Independently built clients use
+//! isolated transport resources, while cloned clients share their resources.
+//!
+//! Requests are serviced through the operating system's
 //! [WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp)
-//! API, running in fully asynchronous mode.
-//!
-//! # Status
-//!
-//! This crate is a placeholder. Only the design exists so far; there is no
-//! implementation yet. See
-//! [`docs/design.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md)
-//! for the architecture, behavior, and design tenets, and
-//! [`docs/implementation.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/implementation.md)
-//! for the implementation strategy (threading, cancellation and FFI ownership,
-//! pooling, body streaming) and the test plan.
+//! API.
 //!
 //! [`fetch`]: https://docs.rs/fetch
 //! [`HttpClient`]: https://docs.rs/fetch
@@ -26,11 +24,10 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
-#[cfg(test)]
-mod tests {
-    /// The crate is a design-only placeholder with no implementation yet, so it
-    /// exposes no behavior to exercise. This test gives the test runner a target
-    /// to execute (`cargo nextest` treats an empty test set as an error).
-    #[test]
-    fn placeholder() {}
-}
+mod builder;
+mod options;
+mod tls;
+
+pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};
+pub use options::{WinHttpOptions, WinHttpOptionsBuilder};
+pub use tls::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};

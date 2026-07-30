@@ -17,13 +17,35 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytesbuf::mem::global::GlobalPool",
+    "fetch::client_builder::HttpClientBuilder",
+    "observed::*",
+    "thread_aware::core::ThreadAware",
+    "tick::clock::Clock",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 default-target = "x86_64-pc-windows-msvc"
 
-[dependencies]
+[target.'cfg(windows)'.dependencies]
+bytesbuf = { workspace = true }
+fetch = { workspace = true }
+layered = { workspace = true }
+observed = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
 
-[dev-dependencies]
+[target.'cfg(windows)'.dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
+static_assertions = { workspace = true }
+tick = { path = "../tick", features = ["test-util"] }
+
+[[test]]
+name = "non_windows"
+path = "tests/non_windows.rs"
 
 [lints]
 workspace = true

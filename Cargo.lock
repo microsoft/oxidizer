@@ -1658,6 +1658,16 @@ dependencies = [
 [[package]]
 name = "fetch_winhttp"
 version = "0.1.0"
+dependencies = [
+ "bytesbuf",
+ "fetch",
+ "futures",
+ "layered",
+ "observed",
+ "static_assertions",
+ "thread_aware",
+ "tick",
+]
 
 [[package]]
 name = "find-msvc-tools"
