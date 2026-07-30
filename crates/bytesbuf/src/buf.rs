@@ -128,6 +128,21 @@ pub struct BytesBuf {
     available: usize,
 }
 
+/// Panics if the true (non-wrapping) sum `len + available` would overflow `usize`.
+///
+/// `capacity()` returns `len + available`, so that sum must fit in `usize` for `capacity()` not to
+/// wrap. The two capacity-growing sites (`reserve` and `append`) each grow only one of `len` or
+/// `available`. A bounds check on the grown component alone is insufficient: `len` can grow via
+/// appended shared memory while `available` holds separately reserved capacity, so only their sum
+/// is bounded.
+#[track_caller]
+fn assert_capacity_within_bounds(len: usize, available: usize) {
+    assert!(
+        len.checked_add(available).is_some(),
+        "buffer capacity cannot exceed usize::MAX (len={len}, available={available})"
+    );
+}
+
 impl BytesBuf {
     /// Creates an instance without any memory capacity.
     #[must_use]
@@ -246,10 +261,17 @@ impl BytesBuf {
         debug_assert!(additional_memory.capacity() >= bytes.get());
         debug_assert!(additional_memory.is_empty());
 
-        self.available = self
+        let new_available = self
             .available
             .checked_add(additional_memory.capacity())
             .expect("buffer capacity cannot exceed usize::MAX");
+
+        // Growing `available` must not push the total capacity (`len + available`) past `usize::MAX`.
+        // Checking `available` alone is insufficient because `len` can grow independently via
+        // appended shared memory (see `append`). This upholds the invariant relied on by `capacity()`.
+        assert_capacity_within_bounds(self.len, new_available);
+
+        self.available = new_available;
 
         // We put the new ones in front (existing content needs to stay at the end).
         self.span_builders_reversed.insert_many(0, additional_memory.span_builders_reversed);
@@ -273,6 +295,17 @@ impl BytesBuf {
 
         let bytes_len = bytes.len();
 
+        // Validate capacity before performing any mutation (including the freeze below), so a
+        // rejected append leaves the buffer untouched. Freezing changes neither `len` nor
+        // `available`, so this check is equivalent whether run before or after it.
+        //
+        // Appended memory is shared (immutable) and may be aliased by other views, so the logical
+        // length can grow independently of physical address-space consumption. We must guard the
+        // total capacity (`len + available`), not just `len`, to uphold the invariant `capacity()`
+        // relies on.
+        let new_len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
+        assert_capacity_within_bounds(new_len, self.available);
+
         // Only the first span builder may hold unfrozen data (the rest are for spare capacity).
         let total_unfrozen_bytes = NonZero::new(self.span_builders_reversed.last().map_or(0, SpanBuilder::len));
 
@@ -285,9 +318,7 @@ impl BytesBuf {
             debug_assert_eq!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len), 0);
         }
 
-        // We do this first so if we do panic, we have not performed any incomplete operations.
-        // The freezing above is safe even if we panic here - freezing is an atomic operation.
-        self.len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
+        self.len = new_len;
 
         // Any appended BytesView is frozen by definition, as contents of a BytesView are immutable.
         // This cannot wrap because we verified `len` is in-bounds and `frozen <= len` is a type invariant.
@@ -442,7 +473,8 @@ impl BytesBuf {
         let frozen_len = self.frozen_spans.iter().map(|x| x.len() as usize).sum::<usize>();
         let unfrozen_len = self.span_builders_reversed.last().map_or(0, SpanBuilder::len) as usize;
 
-        // Will not overflow - `capacity <= usize::MAX` is a type invariant and obviously `len < capacity`.
+        // Will not overflow: `len` is a component of the total capacity `len + available`, which
+        // never overflows `usize` (enforced at the growth sites).
         frozen_len.wrapping_add(unfrozen_len)
     }
 
@@ -482,7 +514,8 @@ impl BytesBuf {
     /// ```
     #[must_use]
     pub fn capacity(&self) -> usize {
-        // Will not overflow - `capacity <= usize::MAX` is a type invariant.
+        // Will not overflow: `len + available` never overflows `usize` - the growth sites enforce
+        // this via `assert_capacity_within_bounds`.
         self.len().wrapping_add(self.remaining_capacity())
     }
 
@@ -626,8 +659,8 @@ impl BytesBuf {
             let span_len = span.len();
 
             if span_len as usize <= len {
-                // Will not wrap because a type invariant is `capacity <= usize::MAX`, so if
-                // capacity is in-bounds, the number of spans could not possibly be greater.
+                // Will not wrap: `len + available` never overflows `usize`, so the number of
+                // spans (each holding at least one byte) certainly cannot be a greater number.
                 detach_complete_frozen_spans = detach_complete_frozen_spans.wrapping_add(1);
 
                 len = len
@@ -1178,8 +1211,8 @@ struct ConsumeManifest {
 impl ConsumeManifest {
     const fn required_spans_capacity(&self) -> usize {
         if self.consume_partial_span_bytes != 0 {
-            // This will not wrap because a type invariant is `capacity <= usize::MAX`, so if
-            // capacity is already in-bounds, the count of spans certainly is not a greater number.
+            // This will not wrap: `len + available` never overflows `usize`, so the count of
+            // spans certainly cannot be a greater number.
             self.detach_complete_frozen_spans.wrapping_add(1)
         } else {
             self.detach_complete_frozen_spans
@@ -1301,8 +1334,8 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
         let next_span_builder_index = self.next_span_builder_index?;
 
         self.next_span_builder_index = Some(
-            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
-            // so the count of span builders certainly cannot be greater.
+            // Will not overflow: `len + available` never overflows `usize`, so the count of span
+            // builders certainly cannot be greater.
             next_span_builder_index.wrapping_add(1),
         );
         if self.next_span_builder_index == Some(self.buf.span_builders_reversed.len()) {
@@ -1315,8 +1348,8 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
             .buf
             .span_builders_reversed
             .len()
-            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
-            // so the count of span builders certainly cannot be greater.
+            // Will not overflow: `len + available` never overflows `usize`, so the count of span
+            // builders certainly cannot be greater.
             .wrapping_sub(next_span_builder_index + 1);
 
         let span_builder = self
@@ -2564,6 +2597,26 @@ mod tests {
 
         // Buffer is unmodified.
         assert_eq!(buf.remaining_capacity(), capacity);
+    }
+
+    #[test]
+    fn capacity_bounds_check_accepts_maximum_total() {
+        // The largest representable total capacity is permitted; only exceeding it is rejected.
+        assert_capacity_within_bounds(usize::MAX, 0);
+        assert_capacity_within_bounds(0, usize::MAX);
+        assert_capacity_within_bounds(usize::MAX - 1, 1);
+        assert_capacity_within_bounds(usize::MAX / 2, usize::MAX / 2);
+    }
+
+    #[test]
+    fn capacity_bounds_check_rejects_len_plus_available_overflow() {
+        // Neither component overflows on its own, but their sum exceeds usize::MAX. This is the
+        // situation that arises when `len` grows via appended shared memory (in `append`) while
+        // `available` holds separately reserved capacity (in `extend_capacity_by_at_least`): each
+        // site guards only the component it grows, so only this combined check catches the overflow.
+        assert_panic!(assert_capacity_within_bounds(usize::MAX, 1));
+        assert_panic!(assert_capacity_within_bounds(usize::MAX - 4, 8));
+        assert_panic!(assert_capacity_within_bounds(usize::MAX / 2 + 1, usize::MAX / 2 + 1));
     }
 
     // Compile time test

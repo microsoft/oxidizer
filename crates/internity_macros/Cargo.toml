@@ -1,0 +1,45 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "internity_macros"
+version = "0.1.0"
+description = "Procedural macros for the internity crate."
+readme = "README.md"
+keywords = ["intern", "interner", "serde", "macro", "derive"]
+categories = ["data-structures", "development-tools::procedural-macro-helpers"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/internity_macros"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["internity_macros_impl::*", "syn::*"]
+
+# Thin proc-macro entry crate: the only coverage source for the `#[proc_macro_derive]`
+# entry points is compile-time expansion in consumers, which is non-deterministic under
+# impact-scoped `cargo llvm-cov nextest`. The shims carry `#[coverage(off)]` and the
+# delegated logic lives in `internity_macros_impl` (gated normally at 100%), so this crate
+# reports no instrumented lines; opt it out of the per-package line gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+internity_macros_impl = { workspace = true }
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+
+[dev-dependencies]
+mutants = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.1] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `layered`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- ⚡ Performance
+
+  - use a BTreeMap for circuit breaker partition lookup ([#562](https://github.com/microsoft/oxidizer/pull/562))
+  - cache default breaker engine and drop metrics allocation ([#560](https://github.com/microsoft/oxidizer/pull/560))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.6.0] - 2026-07-07
 
 - ⚠️ Breaking

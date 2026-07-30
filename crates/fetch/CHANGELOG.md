@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.14.0] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.0` of `fetch_hyper`
+  - Now requires `0.8.0` of `http_extensions`
+  - Now requires `0.6.0` of `seatbelt_http`
+
+- ⚠️ Breaking
+
+  - use SimpleClock and add total-duration + http.client.name metrics ([#549](https://github.com/microsoft/oxidizer/pull/549))
+  - Now requires `0.7.0` of `bytesbuf`
+  - Now requires `0.12.4` of `data_privacy`
+  - Now requires `0.2.6` of `fetch_tls`
+  - Now requires `0.3.5` of `fundle`
+  - Now requires `0.3.6` of `layered`
+  - Now requires `0.3.9` of `ohno`
+  - Now requires `0.6.1` of `seatbelt`
+  - Now requires `0.3.5` of `templated_uri`
+
+- ✨ Features
+
+  - release bytesbuf v0.7.0 and 23 additional packages
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
+- 🔄 Continuous Integration
+
+  - add cargo-machete for workspace-wide unused-dependency detection ([#578](https://github.com/microsoft/oxidizer/pull/578))
+
 ## [0.13.0] - 2026-07-07
 
 - ⚠️ Breaking

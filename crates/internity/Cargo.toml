@@ -1,0 +1,115 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "internity"
+version = "0.1.0"
+description = "Blazingly fast string interning with compact handles, compact storage, and concurrent fill support"
+readme = "README.md"
+keywords = ["intern", "interner", "string", "symbol", "concurrent"]
+categories = ["data-structures", "concurrency", "no-std"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/internity"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "rustc_hash::FxBuildHasher",
+    "internity_macros::*",
+    "serde::*",
+    "serde_core::*",
+]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["std"]
+std = ["dep:parking_lot"]
+serde = ["dep:serde", "dep:internity_macros"]
+# Marker feature selecting the Loom model-checking test target. The model itself
+# is compiled under `--cfg loom` by the workspace's `just loom` recipe.
+loom = []
+
+[dependencies]
+hashbrown = { workspace = true, features = ["default-hasher", "inline-more"] }
+internity_macros = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
+serde = { workspace = true, features = ["alloc"], optional = true }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+foldhash = { workspace = true }
+lasso = { workspace = true, features = ["multi-threaded"] }
+mutants = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+string-interner = { workspace = true, features = ["backends", "inline-more", "std"] }
+string_cache = { workspace = true }
+symbol_table = { workspace = true, features = ["global"] }
+trybuild = { workspace = true }
+ustr = { workspace = true }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[[bench]]
+name = "internity_compare"
+harness = false
+required-features = ["std"]
+
+[[bench]]
+name = "internity_compare_cg"
+harness = false
+required-features = ["std"]
+
+[[bench]]
+name = "internity_mem"
+harness = false
+required-features = ["std"]
+
+[[test]]
+name = "loom_algorithm_sketches"
+path = "tests/loom_algorithm_sketches.rs"
+required-features = ["loom"]
+
+[[test]]
+name = "basic"
+required-features = ["std"]
+
+[[test]]
+name = "serde_in"
+required-features = ["serde"]
+
+[[test]]
+name = "serialize_in"
+required-features = ["serde"]
+
+[[test]]
+name = "serde_attr_parity"
+required-features = ["serde"]
+
+[[test]]
+name = "derive_regressions"
+required-features = ["serde"]
+
+[[test]]
+name = "compile_fail"
+required-features = ["serde"]
+
+[[test]]
+name = "bolero_internity"
+required-features = ["std"]
+
+[lints]
+workspace = true

@@ -39,9 +39,11 @@ These are the primary crates built out of this repo:
 - [`fetch_azure`](./crates/fetch_azure/README.md) - Azure SDK HTTP transport backed by the fetch HTTP client.
 - [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
+- [`fetch_winhttp`](./crates/fetch_winhttp/README.md) - WinHTTP-based HTTP transport for the fetch client (Windows only).
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar.
+- [`internity`](./crates/internity/README.md) - Blazingly fast string interning with compact handles, compact storage, and concurrent fill support.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.

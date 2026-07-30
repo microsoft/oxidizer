@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.7] - 2026-07-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.7` of `templated_uri_macros_impl`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.2.6] - 2026-06-26
 
 - 🔧 Maintenance

@@ -121,17 +121,17 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1x3f-sqleXEbdw9CAf8hrTobKWN7nCN8vwwbwhSXly9kwANhZIGCZ2xheWVyZWRlMC4zLjU
- [__link0]: https://docs.rs/layered/0.3.5/layered/?search=Service
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb1x3f-sqleXEbdw9CAf8hrTobKWN7nCN8vwwbwhSXly9kwANhZIGCZ2xheWVyZWRlMC4zLjY
+ [__link0]: https://docs.rs/layered/0.3.6/layered/?search=Service
  [__link1]: https://docs.rs/tower
- [__link10]: https://docs.rs/layered/0.3.5/layered/?search=Intercept
- [__link11]: https://docs.rs/layered/0.3.5/layered/?search=DynamicService
- [__link12]: https://docs.rs/layered/0.3.5/layered/tower/index.html
- [__link2]: https://docs.rs/layered/0.3.5/layered/?search=Service
- [__link3]: https://docs.rs/layered/0.3.5/layered/?search=Execute
- [__link4]: https://docs.rs/layered/0.3.5/layered/?search=Service
- [__link5]: https://docs.rs/layered/0.3.5/layered/?search=Layer
- [__link6]: https://docs.rs/layered/0.3.5/layered/?search=Layer
+ [__link10]: https://docs.rs/layered/0.3.6/layered/?search=Intercept
+ [__link11]: https://docs.rs/layered/0.3.6/layered/?search=DynamicService
+ [__link12]: https://docs.rs/layered/0.3.6/layered/tower/index.html
+ [__link2]: https://docs.rs/layered/0.3.6/layered/?search=Service
+ [__link3]: https://docs.rs/layered/0.3.6/layered/?search=Execute
+ [__link4]: https://docs.rs/layered/0.3.6/layered/?search=Service
+ [__link5]: https://docs.rs/layered/0.3.6/layered/?search=Layer
+ [__link6]: https://docs.rs/layered/0.3.6/layered/?search=Layer
  [__link7]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link8]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
  [__link9]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
