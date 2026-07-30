@@ -1,0 +1,374 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+use std::error::Error;
+use std::ffi::c_void;
+use std::fmt;
+
+use widestring::U16CString;
+use windows::Win32::Networking::WinHttp::{
+    WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE, WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE,
+    WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE, WINHTTP_CALLBACK_FLAG_READ_COMPLETE, WINHTTP_CALLBACK_FLAG_REQUEST_ERROR,
+    WINHTTP_CALLBACK_FLAG_SECURE_FAILURE, WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+    WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
+};
+
+use crate::WinHttpOptions;
+use crate::bindings::{Bindings as _, Facade};
+use crate::error::WinHttpError;
+use crate::handle::SessionHandle;
+use crate::options::{WINHTTP_FLAG_ASYNC, timeout_millis};
+
+const USER_AGENT: &str = "fetch_winhttp";
+const UNLIMITED_TIMEOUT: i32 = -1;
+const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
+
+const ALL_COMPLETIONS: u32 = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
+    | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
+    | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
+    | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
+    | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
+    | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR
+    | WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE
+    | WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE;
+const HANDLES: u32 = WINHTTP_CALLBACK_STATUS_HANDLE_CREATED | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING;
+const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
+
+pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
+
+#[derive(Debug)]
+pub(crate) struct WinHttpSession {
+    handle: SessionHandle,
+}
+
+impl WinHttpSession {
+    pub(crate) fn new(bindings: Facade, options: &WinHttpOptions) -> Result<Self, SessionInitializationFailure> {
+        let user_agent = U16CString::from_str(USER_AGENT).expect("the static WinHTTP user agent contains no NUL characters");
+        let raw = bindings
+            .open(&user_agent, WINHTTP_FLAG_ASYNC)
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Open, error))?;
+        let handle = SessionHandle::new(raw, bindings);
+
+        handle
+            .bindings()
+            .set_timeouts(
+                handle.raw(),
+                timeout_millis(options.resolve_timeout()),
+                UNLIMITED_TIMEOUT,
+                UNLIMITED_TIMEOUT,
+                UNLIMITED_TIMEOUT,
+            )
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetTimeouts, error))?;
+        handle
+            .bindings()
+            .set_option(handle.raw(), WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, &TRUE_BYTES)
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::DisableGlobalPooling, error))?;
+        handle
+            .bindings()
+            .set_option(handle.raw(), WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, &TRUE_BYTES)
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
+        handle
+            .bindings()
+            .set_status_callback(handle.raw(), Some(inert_status_callback), SESSION_NOTIFICATION_FLAGS)
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
+
+        Ok(Self { handle })
+    }
+
+    pub(crate) const fn handle(&self) -> &SessionHandle {
+        &self.handle
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SessionInitializationFailure {
+    operation: SessionInitializationOperation,
+    error: WinHttpError,
+}
+
+impl SessionInitializationFailure {
+    pub(crate) const fn new(operation: SessionInitializationOperation, error: WinHttpError) -> Self {
+        Self { operation, error }
+    }
+
+    pub(crate) const fn code(&self) -> u32 {
+        self.error.code()
+    }
+
+    pub(crate) const fn operation(&self) -> SessionInitializationOperation {
+        self.operation
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SessionInitializationOperation {
+    Open,
+    SetTimeouts,
+    DisableGlobalPooling,
+    AssuredNonBlockingCallbacks,
+    SetStatusCallback,
+}
+
+impl fmt::Display for SessionInitializationOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Open => "opening the WinHTTP session",
+            Self::SetTimeouts => "configuring WinHTTP session timeouts",
+            Self::DisableGlobalPooling => "disabling WinHTTP global connection pooling",
+            Self::AssuredNonBlockingCallbacks => "enabling assured non-blocking WinHTTP callbacks",
+            Self::SetStatusCallback => "registering the WinHTTP status callback",
+        })
+    }
+}
+
+impl fmt::Display for SessionInitializationFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} failed with Win32 error {}", self.operation, self.error.code())
+    }
+}
+
+impl Error for SessionInitializationFailure {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+unsafe extern "system" fn inert_status_callback(
+    _handle: *mut c_void,
+    _context: usize,
+    _status: u32,
+    _status_info: *mut c_void,
+    _status_info_len: u32,
+) {
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::c_void;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use mockall::Sequence;
+    use static_assertions::assert_impl_all;
+    use windows::Win32::Networking::WinHttp::{
+        WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE,
+        WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE, WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE, WINHTTP_CALLBACK_FLAG_READ_COMPLETE,
+        WINHTTP_CALLBACK_FLAG_REQUEST_ERROR, WINHTTP_CALLBACK_FLAG_SECURE_FAILURE, WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE,
+        WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS,
+        WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
+    };
+
+    use super::{
+        SESSION_NOTIFICATION_FLAGS, SessionInitializationFailure, SessionInitializationOperation, TRUE_BYTES, UNLIMITED_TIMEOUT,
+        USER_AGENT, WinHttpSession,
+    };
+    use crate::WinHttpOptions;
+    use crate::bindings::{Facade, MockBindings};
+    use crate::error::{WinHttpError, WinHttpOperation};
+    use crate::handle::RawHandle;
+    use crate::options::{WINHTTP_FLAG_ASYNC, timeout_millis};
+
+    assert_impl_all!(WinHttpSession: Send, Sync, std::fmt::Debug);
+    assert_impl_all!(SessionInitializationFailure: Send, Sync, Clone, std::fmt::Debug, std::error::Error);
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum FailurePoint {
+        Open,
+        SetTimeouts,
+        DisableGlobalPooling,
+        AssuredNonBlockingCallbacks,
+        SetStatusCallback,
+    }
+
+    #[test]
+    fn session_setup_succeeds_in_exact_order_with_expected_values() {
+        let bindings = configured_bindings(None, timeout_millis(Some(Duration::from_micros(1_500))));
+        let options = WinHttpOptions::builder().resolve_timeout(Duration::from_micros(1_500)).build();
+
+        let session = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &options).expect("all required session configuration succeeds");
+
+        assert_eq!(session.handle().raw(), raw_handle());
+        drop(session);
+    }
+
+    #[test]
+    fn notification_mask_contains_every_required_status() {
+        let expected = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
+            | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
+            | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
+            | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
+            | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
+            | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR
+            | WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE
+            | WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE
+            | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE
+            | WINHTTP_CALLBACK_STATUS_HANDLE_CREATED
+            | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING
+            | WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER
+            | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
+
+        assert_eq!(SESSION_NOTIFICATION_FLAGS, expected);
+    }
+
+    #[test]
+    fn open_failure_does_not_close_a_handle() {
+        assert_failure(FailurePoint::Open);
+    }
+
+    #[test]
+    fn timeout_failure_closes_the_session_once() {
+        assert_failure(FailurePoint::SetTimeouts);
+    }
+
+    #[test]
+    fn global_pooling_failure_closes_the_session_once() {
+        assert_failure(FailurePoint::DisableGlobalPooling);
+    }
+
+    #[test]
+    fn callback_assurance_failure_closes_the_session_once() {
+        assert_failure(FailurePoint::AssuredNonBlockingCallbacks);
+    }
+
+    #[test]
+    fn callback_registration_failure_closes_the_session_once() {
+        assert_failure(FailurePoint::SetStatusCallback);
+    }
+
+    fn assert_failure(point: FailurePoint) {
+        let bindings = configured_bindings(Some(point), UNLIMITED_TIMEOUT);
+        let error = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &WinHttpOptions::default())
+            .expect_err("the selected setup operation fails");
+
+        assert_eq!(error.code(), error_code(point));
+        assert_eq!(error.operation(), initialization_operation(point));
+    }
+
+    fn configured_bindings(failure: Option<FailurePoint>, expected_resolve_timeout: i32) -> MockBindings {
+        let mut bindings = MockBindings::new();
+        let mut sequence = Sequence::new();
+        let raw = raw_handle();
+
+        bindings
+            .expect_open()
+            .withf(|user_agent, flags| user_agent.to_string_lossy() == USER_AGENT && *flags == WINHTTP_FLAG_ASYNC)
+            .once()
+            .in_sequence(&mut sequence)
+            .return_once(move |_, _| setup_result(failure, FailurePoint::Open, raw));
+
+        if failure != Some(FailurePoint::Open) {
+            bindings
+                .expect_set_timeouts()
+                .withf(move |handle, resolve, connect, send, receive| {
+                    *handle == raw
+                        && *resolve == expected_resolve_timeout
+                        && *connect == UNLIMITED_TIMEOUT
+                        && *send == UNLIMITED_TIMEOUT
+                        && *receive == UNLIMITED_TIMEOUT
+                })
+                .once()
+                .in_sequence(&mut sequence)
+                .return_once(move |_, _, _, _, _| setup_unit_result(failure, FailurePoint::SetTimeouts));
+        }
+
+        if !matches!(failure, Some(FailurePoint::Open | FailurePoint::SetTimeouts)) {
+            bindings
+                .expect_set_option()
+                .withf(move |handle, option, value| {
+                    *handle == raw && *option == WINHTTP_OPTION_DISABLE_GLOBAL_POOLING && value == TRUE_BYTES
+                })
+                .once()
+                .in_sequence(&mut sequence)
+                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::DisableGlobalPooling));
+        }
+
+        if !matches!(
+            failure,
+            Some(FailurePoint::Open | FailurePoint::SetTimeouts | FailurePoint::DisableGlobalPooling)
+        ) {
+            bindings
+                .expect_set_option()
+                .withf(move |handle, option, value| {
+                    *handle == raw && *option == WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS && value == TRUE_BYTES
+                })
+                .once()
+                .in_sequence(&mut sequence)
+                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::AssuredNonBlockingCallbacks));
+        }
+
+        if !matches!(
+            failure,
+            Some(
+                FailurePoint::Open
+                    | FailurePoint::SetTimeouts
+                    | FailurePoint::DisableGlobalPooling
+                    | FailurePoint::AssuredNonBlockingCallbacks
+            )
+        ) {
+            bindings
+                .expect_set_status_callback()
+                .withf(move |handle, callback, flags| *handle == raw && callback.is_some() && *flags == SESSION_NOTIFICATION_FLAGS)
+                .once()
+                .in_sequence(&mut sequence)
+                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::SetStatusCallback));
+        }
+
+        if failure != Some(FailurePoint::Open) {
+            bindings
+                .expect_close_handle()
+                .withf(move |handle| *handle == raw)
+                .once()
+                .in_sequence(&mut sequence)
+                .returning(|_| Ok(()));
+        }
+
+        bindings
+    }
+
+    fn setup_result(failure: Option<FailurePoint>, point: FailurePoint, raw: RawHandle) -> crate::error::Result<RawHandle> {
+        setup_unit_result(failure, point).map(|()| raw)
+    }
+
+    fn setup_unit_result(failure: Option<FailurePoint>, point: FailurePoint) -> crate::error::Result<()> {
+        if failure == Some(point) {
+            Err(WinHttpError::new(error_code(point), operation(point)))
+        } else {
+            Ok(())
+        }
+    }
+
+    const fn error_code(point: FailurePoint) -> u32 {
+        match point {
+            FailurePoint::Open => 12_000,
+            FailurePoint::SetTimeouts => 12_001,
+            FailurePoint::DisableGlobalPooling => 12_002,
+            FailurePoint::AssuredNonBlockingCallbacks => 12_003,
+            FailurePoint::SetStatusCallback => 12_004,
+        }
+    }
+
+    const fn operation(point: FailurePoint) -> WinHttpOperation {
+        match point {
+            FailurePoint::Open => WinHttpOperation::Open,
+            FailurePoint::SetTimeouts => WinHttpOperation::SetTimeouts,
+            FailurePoint::DisableGlobalPooling | FailurePoint::AssuredNonBlockingCallbacks => WinHttpOperation::SetOption,
+            FailurePoint::SetStatusCallback => WinHttpOperation::SetStatusCallback,
+        }
+    }
+
+    const fn initialization_operation(point: FailurePoint) -> SessionInitializationOperation {
+        match point {
+            FailurePoint::Open => SessionInitializationOperation::Open,
+            FailurePoint::SetTimeouts => SessionInitializationOperation::SetTimeouts,
+            FailurePoint::DisableGlobalPooling => SessionInitializationOperation::DisableGlobalPooling,
+            FailurePoint::AssuredNonBlockingCallbacks => SessionInitializationOperation::AssuredNonBlockingCallbacks,
+            FailurePoint::SetStatusCallback => SessionInitializationOperation::SetStatusCallback,
+        }
+    }
+
+    fn raw_handle() -> RawHandle {
+        RawHandle::new(std::ptr::dangling_mut::<c_void>()).expect("the standard dangling pointer is non-null")
+    }
+}

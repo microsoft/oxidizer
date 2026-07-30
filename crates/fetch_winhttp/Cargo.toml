@@ -50,6 +50,7 @@ windows = { workspace = true, features = [
 [target.'cfg(windows)'.dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
 mockall = { workspace = true }
+observed_testing = { path = "../observed_testing" }
 static_assertions = { workspace = true }
 tick = { path = "../tick", features = ["test-util"] }
 

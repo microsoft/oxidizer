@@ -24,23 +24,30 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
-#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
-#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+#[expect(
+    clippy::allow_attributes,
+    reason = "the bindings facade includes request operations used by the request lifecycle"
+)]
+#[allow(
+    dead_code,
+    reason = "the bindings facade includes request operations used by the request lifecycle"
+)]
 mod bindings;
 mod builder;
-#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
-#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+#[expect(clippy::allow_attributes, reason = "request error mappings are used by the request lifecycle")]
+#[allow(dead_code, reason = "request error mappings are used by the request lifecycle")]
 mod error;
-#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
-#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
 mod error_labels;
-#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
-#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+#[expect(clippy::allow_attributes, reason = "connect and request handles are used by the request lifecycle")]
+#[allow(dead_code, reason = "connect and request handles are used by the request lifecycle")]
 mod handle;
-#[expect(clippy::allow_attributes, reason = "Phase 2 establishes PAL code before transport integration")]
-#[allow(dead_code, reason = "Phase 2 PAL code is consumed by later phases")]
+#[expect(clippy::allow_attributes, reason = "request option mappings are used by the request lifecycle")]
+#[allow(dead_code, reason = "request option mappings are used by the request lifecycle")]
 mod options;
+mod session;
+mod telemetry;
 mod tls;
+mod transport;
 
 pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};
 pub use options::{WinHttpOptions, WinHttpOptionsBuilder};

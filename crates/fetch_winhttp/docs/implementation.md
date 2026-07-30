@@ -973,7 +973,7 @@ clock comes from `CustomContext`. Because `CustomContext` exposes only the deriv
 `HttpBodyBuilder`, not the underlying `GlobalPool`, `WinHttpDeps` also retains a pool
 clone in `Extras` for WinHTTP read buffers. The `observed::Sink` rides in the same extras
 and relocates per core with the rest of the config; the transport emits its telemetry
-through it (detailed in v1.1). There is no
+through it (§12). There is no
 `anyspawn::Spawner`: no WinHTTP call the transport makes can block (§2.1).
 
 Session creation uses automatic proxy discovery and applies every required session

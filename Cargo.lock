@@ -1667,6 +1667,7 @@ dependencies = [
  "layered",
  "mockall",
  "observed",
+ "observed_testing",
  "ohno 0.3.9",
  "recoverable",
  "static_assertions",
