@@ -22,10 +22,9 @@
 //! always infallible.
 //!
 //! To retrieve the current system time in the respective format, use the [`Clock::system_time_as`][crate::Clock::system_time_as] function
-//! which retrieves current system time and does the automatic conversion to the output format. That function panics when the target
-//! format cannot represent the clock's current instant, which a controlled clock can produce: [`UnixSeconds`] rejects anything before
-//! the Unix epoch, and [`Iso8601`] and [`Rfc2822`] reject instants outside the platform's `SystemTime` range. Use
-//! [`Clock::system_time`][crate::Clock::system_time] with the target type's [`TryFrom`] implementation where that has to be handled.
+//! which retrieves current system time and does the automatic conversion to the output format. It panics when the target format cannot
+//! represent the clock's instant, which a controlled clock can produce; use [`Clock::system_time`][crate::Clock::system_time] with the
+//! target type's [`TryFrom`] where that has to be handled.
 //!
 //! # Representable range
 //!
@@ -39,8 +38,7 @@
 //!
 //! use tick::fmt::{Iso8601, UnixSeconds};
 //!
-//! // Whatever parses can always be converted back, on every platform. An instant finer than
-//! // the platform's `SystemTime` resolution comes back truncated to it.
+//! // Whatever parses can always be converted back, on every platform.
 //! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! let system_time = SystemTime::from(iso);
 //! assert_eq!(Iso8601::try_from(system_time)?, iso);
@@ -53,12 +51,8 @@
 //!
 //! How far back [`Iso8601`] and [`Rfc2822`] reach is platform dependent: where [`SystemTime`]
 //! is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier instants are rejected.
-//!
-//! [`SystemTime`] also bounds the *resolution*, not just the range. A FILETIME based platform
-//! counts in 100-nanosecond intervals, so a finer instant is truncated to that grid on the way
-//! through. Any conversion routed through [`SystemTime`], including format to format, inherits
-//! that ceiling. [`Iso8601`] already formats at the same resolution, so its output is
-//! unaffected, and [`Rfc2822`] and [`UnixSeconds`] encode whole seconds.
+//! It also bounds resolution, counting in 100-nanosecond intervals there, so any conversion
+//! routed through it, including format to format, truncates a finer instant to that grid.
 //!
 //! Because the range is enforced up front, converting any of these types back into a
 //! [`SystemTime`] is infallible and cannot panic.
@@ -72,7 +66,7 @@
 //!
 //! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
 //!
-//! // ISO 8601 to RFC 2822, one `SystemTime` hop with the range check in plain sight.
+//! // ISO 8601 to RFC 2822, with the range check in plain sight.
 //! let iso: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! let rfc = Rfc2822::try_from(SystemTime::from(iso))?;
 //! assert_eq!(rfc.to_string(), "Tue, 06 Aug 2024 21:30:00 GMT");
@@ -81,8 +75,7 @@
 //! let unix = UnixSeconds::try_from(SystemTime::from(rfc))?;
 //! assert_eq!(unix.to_string(), "1722979800");
 //!
-//! // The step that can fail says so: `UnixSeconds` cannot express a pre-epoch instant,
-//! // which an infallible `From<Iso8601>` would have had to invent a value for.
+//! // The fallible step is explicit: `UnixSeconds` cannot express a pre-epoch instant.
 //! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
 //! UnixSeconds::try_from(SystemTime::from(before_epoch)).unwrap_err();
 //!

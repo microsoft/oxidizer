@@ -17,11 +17,9 @@ use crate::fmt::ensure_system_time_representable;
 /// consistency across different systems and regions.
 ///
 /// This type also supports parsing [RFC 3339](https://datatracker.ietf.org/doc/html/rfc3339)
-/// timestamps. Output is always ISO 8601, and is also valid RFC 3339 for every year from
-/// `0000` through `9999`. RFC 3339 fixes the year at four digits, so an earlier instant,
-/// which only a platform whose [`SystemTime`] reaches that far back can hold in the first
-/// place, is written with an ISO 8601 expanded year such as `-000500-01-01T00:00:00Z` and is
-/// not RFC 3339.
+/// timestamps. Output is ISO 8601, and is also valid RFC 3339 for years `0000` through `9999`.
+/// An earlier instant uses an ISO 8601 expanded year, such as `-000500-01-01T00:00:00Z`, which
+/// is not RFC 3339.
 ///
 /// Examples:
 ///
@@ -103,8 +101,7 @@ impl Iso8601 {
     /// The largest value that can be represented by `Iso8601`.
     ///
     /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`, which
-    /// [`Display`] writes as `9999-12-30T22:00:00.9999999Z` after rounding to 100-nanosecond
-    /// resolution.
+    /// [`Display`] writes as `9999-12-30T22:00:00.9999999Z` at 100-nanosecond resolution.
     // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
     // instant everywhere.
     pub const MAX: Self = Self(Timestamp::MAX);

@@ -20,9 +20,7 @@ const MIN_ENCODABLE: &str = "Sat, 01 Jan 0000 00:00:00 GMT";
 
 /// [`MIN_ENCODABLE`] as a [`Timestamp`].
 ///
-/// RFC 2822 writes the year as four digits, so nothing before year 0 can be formatted. The
-/// bound is parsed from the literal rather than written as an epoch offset so that it stays
-/// legible and cannot drift from the string it stands for.
+/// RFC 2822 writes the year as four digits, so nothing before year 0 can be formatted.
 static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
     RFC2822_PARSER
         .parse_timestamp(MIN_ENCODABLE)
@@ -45,8 +43,7 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 /// UTC time zone with an offset of `GMT` (zero).
 ///
 /// Output follows the [IMF-fixdate](https://datatracker.ietf.org/doc/html/rfc9110#section-5.6.7)
-/// profile that RFC 9110 defines for HTTP dates: a two-digit day and a `GMT` zone. Parsing is
-/// the broader RFC 2822 grammar, so any offset form is accepted on the way in.
+/// profile RFC 9110 defines for HTTP dates; parsing accepts the broader RFC 2822 grammar.
 ///
 /// # Serialization and deserialization
 ///
@@ -79,14 +76,11 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 /// ```
 /// use tick::fmt::Rfc2822;
 ///
-/// // RFC 2822 syntax cannot write a year outside `0000` through `9999` at all, so an
-/// // earlier instant cannot be spelled for parsing. This string is ISO 8601, and the parser
-/// // rejects it as malformed rather than as out of range.
+/// // This string is ISO 8601, not RFC 2822, so the parser rejects it as malformed; RFC 2822
+/// // cannot write a year outside `0000` through `9999` at all. The year bound itself is
+/// // enforced on the `TryFrom<SystemTime>` path, where such an instant can arrive.
 /// "-0001-06-15T00:00:00Z".parse::<Rfc2822>().unwrap_err();
 /// ```
-///
-/// The year bound therefore only has to be enforced on the [`TryFrom<SystemTime>`] path,
-/// where a platform whose [`SystemTime`] reaches before year 0 can supply such an instant.
 ///
 /// # Examples
 ///
