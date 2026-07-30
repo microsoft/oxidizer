@@ -19,7 +19,7 @@ use crate::fmt::ensure_system_time_representable;
 /// rounded), and the UTC designator `Z`. For example: `2024-08-06T21:30:00.123Z`.
 ///
 /// Years outside `0000..=9999` render in the ECMAScript expanded-year form - a
-/// sign and six year digits, e.g. `-009999-01-02T01:59:59.000Z` - matching the
+/// sign and a six-digit year, e.g. `-009999-01-02T01:59:59.000Z` - matching the
 /// shape the ECMAScript `Date.prototype.toISOString` method produces. On
 /// platforms whose [`SystemTime`] supports such years, they are reachable through
 /// fallible constructors such as [`FromStr`]; other platforms reject them.
@@ -29,8 +29,8 @@ use crate::fmt::ensure_system_time_representable;
 /// [`SystemTime`] range may narrow it further.
 ///
 /// Within `0000..=9999` this fixed width - unlike the variable-precision output of
-/// [`Iso8601`], which trims trailing fractional zeros - keeps tabular columns
-/// aligned.
+/// [`Iso8601`](crate::fmt::Iso8601), which trims trailing fractional zeros - keeps
+/// tabular columns aligned.
 ///
 /// The format is defined by the [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format),
 /// the profile produced by the ECMAScript `Date.prototype.toISOString` method.
@@ -63,10 +63,10 @@ use crate::fmt::ensure_system_time_representable;
 /// converting an `EcmaScript` back into a [`SystemTime`] always succeeds.
 ///
 /// To format an arbitrary [`SystemTime`] without the possibility of failure -
-/// saturating instants outside the supported timestamp range to the nearest boundary - use
-/// [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript],
-/// which returns a formatter. Years outside `0000..=9999` use the wider ECMAScript
-/// expanded-year form.
+/// saturating instants outside the supported timestamp range to the nearest
+/// boundary - use
+/// [`SystemTimeExt::display_ecmascript`][crate::SystemTimeExt::display_ecmascript].
+/// Years outside `0000..=9999` use the wider ECMAScript expanded-year form.
 ///
 /// # Examples
 ///

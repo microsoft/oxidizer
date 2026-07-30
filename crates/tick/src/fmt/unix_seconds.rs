@@ -352,6 +352,13 @@ mod tests {
     }
 
     #[test]
+    fn try_from_fractional_jiff_max_floors_to_max() {
+        let fractional_max = Duration::new(253_402_207_200, 999_999_999);
+
+        assert_eq!(UnixSeconds::try_from(fractional_max).unwrap(), UnixSeconds::MAX);
+    }
+
+    #[test]
     fn sub_second_precision_is_canonical() {
         // A Duration carrying sub-second precision is floored to whole seconds, so
         // two instants within the same second compare equal and format identically.
