@@ -9,14 +9,30 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use events_once::{Disconnected, RawReceiver};
+use fetch::options::{RequestFilter, TransportOptions};
+use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, RecoveryInfo};
+use http::header::{HeaderName, HeaderValue};
+use http::uri::Authority;
+use http::{HeaderMap, StatusCode, Version};
+use http_body::Body as _;
 use plurality::Pool;
+use widestring::U16CString;
 
 use crate::bindings::Bindings as _;
+use crate::bindings::Facade;
 use crate::context::{CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
-use crate::error::Result;
+use crate::error::Result as WinHttpResult;
+use crate::error_labels;
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
-use crate::options::{WINHTTP_OPTION_CONTEXT_VALUE, context_bytes};
+use crate::options::{
+    ProtocolOptions, QueryError, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
+    WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY,
+    WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_OPTION_SECURITY_FLAGS, context_bytes, decompression_mask, disable_feature_mask,
+    dword_bytes, headers_to_utf16, host_to_utf16, method_to_utf16, path_to_utf16, protocol_options, query_protocol_used, query_raw_headers,
+    query_status_code, request_open_flags, security_flags,
+};
 use crate::session::WinHttpSession;
+use crate::tls::WinHttpTlsConfig;
 
 pub(crate) type ContextPool = Mutex<Pool<RequestContext>>;
 
@@ -35,7 +51,7 @@ impl RequestSetup {
         Self { request, context }
     }
 
-    pub(crate) fn install(self) -> Result<RequestGuard> {
+    pub(crate) fn install(self) -> WinHttpResult<RequestGuard> {
         let Self { request, context } = self;
         let context = plurality::Box::into_raw(context);
         let mut raw_owner = RawContextOwner::new(context);
@@ -122,7 +138,7 @@ impl RequestGuard {
         &mut self,
         kind: OperationKind,
         buffer: OperationBuffer,
-        submit: impl FnOnce(RawHandle, usize) -> Result<()>,
+        submit: impl FnOnce(RawHandle, usize) -> WinHttpResult<()>,
     ) -> std::result::Result<OperationFuture<'_>, OperationAlreadyActive> {
         // SAFETY: the context was installed from stable pooled storage. The
         // returned future mutably borrows this guard, preventing another
@@ -178,18 +194,429 @@ impl Future for OperationFuture<'_> {
     }
 }
 
+pub(crate) struct RequestDriver<'a> {
+    session: Arc<WinHttpSession>,
+    body_builder: HttpBodyBuilder,
+    contexts: &'a ContextPool,
+    request: TranslatedRequest,
+    settings: RequestSettings,
+}
+
+impl<'a> RequestDriver<'a> {
+    pub(crate) fn new(
+        request: &HttpRequest,
+        session: Arc<WinHttpSession>,
+        body_builder: HttpBodyBuilder,
+        contexts: &'a ContextPool,
+        options: &TransportOptions,
+        tls: &WinHttpTlsConfig,
+    ) -> fetch::Result<Self> {
+        if request.body().content_length() != Some(0) || !request.body().is_end_stream() {
+            return Err(invalid_request(RequestTranslationError::UnsupportedBodyLength));
+        }
+        if matches!(request.version(), Version::HTTP_09 | Version::HTTP_10) {
+            return Err(invalid_request(RequestTranslationError::LegacyVersion(request.version())));
+        }
+
+        let request = TranslatedRequest::new(request, &options.request_filter)?;
+        let protocol = protocol_options(&options.supported_http_versions).map_err(invalid_request)?;
+        let settings = RequestSettings {
+            protocol,
+            security_flags: if request.secure { security_flags(tls) } else { 0 },
+        };
+
+        Ok(Self {
+            session,
+            body_builder,
+            contexts,
+            request,
+            settings,
+        })
+    }
+
+    pub(crate) async fn execute(self) -> fetch::Result<HttpResponse> {
+        let bindings = self.session.handle().bindings().clone();
+        let connect = bindings
+            .connect(self.session.handle().raw(), &self.request.host, self.request.port)
+            .map_err(crate::error::WinHttpError::into_http_error)?;
+        let connect = ConnectHandle::new(connect, bindings.clone());
+        let request = bindings
+            .open_request(
+                connect.raw(),
+                &self.request.method,
+                &self.request.path,
+                request_open_flags(self.request.secure, false),
+            )
+            .map_err(crate::error::WinHttpError::into_http_error)?;
+        let request = RequestHandle::new(request, bindings.clone());
+
+        apply_request_settings(&request, self.settings).map_err(crate::error::WinHttpError::into_http_error)?;
+
+        let mut guard = RequestSetup::new(request, connect, Arc::clone(&self.session), self.contexts)
+            .install()
+            .map_err(crate::error::WinHttpError::into_http_error)?;
+
+        {
+            let send = guard
+                .submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
+                    // SAFETY: the installed context is the exact pointer passed as
+                    // dwContext, and the UTF-16 header buffer remains alive until
+                    // the completion is awaited below.
+                    unsafe { bindings.send_request(request, &self.request.headers, 0, context) }
+                })
+                .map_err(|_active| callback_protocol_error("the send operation slot was already active"))?;
+            let completion = send
+                .await
+                .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))?;
+            expect_completion(completion, OperationKind::SendRequest)?;
+        }
+
+        {
+            let receive = guard
+                .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
+                    bindings.receive_response(request)
+                })
+                .map_err(|_active| callback_protocol_error("the receive-response operation slot was already active"))?;
+            let completion = receive
+                .await
+                .map_err(|_disconnected| callback_protocol_error("the headers completion channel disconnected"))?;
+            expect_completion(completion, OperationKind::HeadersAvailable)?;
+        }
+
+        let status = query_status_code(&bindings, guard.raw()).map_err(query_error)?;
+        let status = u16::try_from(status)
+            .ok()
+            .and_then(|status| StatusCode::from_u16(status).ok())
+            .ok_or_else(|| invalid_response(format!("WinHTTP returned an invalid HTTP status code: {status}")))?;
+        let raw_headers = query_raw_headers(&bindings, guard.raw()).map_err(query_error)?;
+        let headers = parse_response_headers(&raw_headers).map_err(invalid_response)?;
+        let version = query_protocol_used(&bindings, guard.raw()).map_err(query_error)?;
+
+        let mut response = HttpResponseBuilder::new(&self.body_builder)
+            .status(status)
+            .version(version)
+            .body(self.body_builder.empty());
+        *response
+            .headers_mut()
+            .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))? = headers;
+        let response = response.build().map_err(invalid_response)?;
+
+        drop(guard);
+
+        Ok(response)
+    }
+}
+
+struct TranslatedRequest {
+    method: U16CString,
+    host: U16CString,
+    path: U16CString,
+    headers: U16CString,
+    port: u16,
+    secure: bool,
+}
+
+impl TranslatedRequest {
+    fn new(request: &HttpRequest, filter: &RequestFilter) -> fetch::Result<Self> {
+        let uri = request.uri();
+        let scheme = uri
+            .scheme_str()
+            .ok_or_else(|| invalid_request(RequestTranslationError::MissingScheme))?;
+        let secure = match scheme {
+            "https" => true,
+            "http" if matches!(filter, RequestFilter::HttpAndHttps) => false,
+            "http" => return Err(invalid_request(RequestTranslationError::HttpDisallowed)),
+            scheme => return Err(invalid_request(RequestTranslationError::UnsupportedScheme(scheme.to_owned()))),
+        };
+        let authority = uri
+            .authority()
+            .ok_or_else(|| invalid_request(RequestTranslationError::MissingAuthority))?;
+        if authority.as_str().contains('@') {
+            return Err(invalid_request(RequestTranslationError::UserInfo));
+        }
+        let host = uri
+            .host()
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| invalid_request(RequestTranslationError::MissingHost))?;
+        let port = authority_port(authority, host, if secure { 443 } else { 80 }).map_err(invalid_request)?;
+        let path = uri.path_and_query().map_or("/", |path| path.as_str());
+        let path = if path.is_empty() { "/" } else { path };
+        if !(path.starts_with('/') || path.starts_with('?')) {
+            return Err(invalid_request(RequestTranslationError::InvalidPath(path.to_owned())));
+        }
+
+        Ok(Self {
+            method: method_to_utf16(request.method()).map_err(invalid_request)?,
+            host: host_to_utf16(host).map_err(invalid_request)?,
+            path: path_to_utf16(path).map_err(invalid_request)?,
+            headers: headers_to_utf16(request.headers()).map_err(invalid_request)?,
+            port,
+            secure,
+        })
+    }
+}
+
+fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16, RequestTranslationError> {
+    let suffix = authority
+        .as_str()
+        .strip_prefix(host)
+        .ok_or_else(|| RequestTranslationError::InvalidAuthority(authority.as_str().to_owned()))?;
+    if suffix.is_empty() {
+        return Ok(default);
+    }
+
+    let explicit = suffix
+        .strip_prefix(':')
+        .ok_or_else(|| RequestTranslationError::InvalidAuthority(authority.as_str().to_owned()))?;
+    if explicit.is_empty() {
+        return Err(RequestTranslationError::EmptyPort);
+    }
+    if !explicit.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(RequestTranslationError::NonNumericPort(explicit.to_owned()));
+    }
+
+    let port = explicit
+        .parse::<u16>()
+        .map_err(|_out_of_range| RequestTranslationError::OutOfRangePort(explicit.to_owned()))?;
+    if port == 0 {
+        return Err(RequestTranslationError::ZeroPort);
+    }
+
+    Ok(port)
+}
+
+#[derive(Clone, Copy)]
+struct RequestSettings {
+    protocol: ProtocolOptions,
+    security_flags: u32,
+}
+
+fn apply_request_settings(request: &RequestHandle, settings: RequestSettings) -> WinHttpResult<()> {
+    let bindings = request.bindings();
+    let raw = request.raw();
+
+    if settings.protocol.advanced_mask() != 0 {
+        set_dword(
+            bindings,
+            raw,
+            WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+            settings.protocol.advanced_mask(),
+        )?;
+    }
+    if settings.protocol.required() {
+        set_dword(bindings, raw, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, 1)?;
+    }
+    if settings.security_flags != 0 {
+        set_dword(bindings, raw, WINHTTP_OPTION_SECURITY_FLAGS, settings.security_flags)?;
+    }
+    set_dword(bindings, raw, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER)?;
+    set_dword(bindings, raw, WINHTTP_OPTION_DISABLE_FEATURE, disable_feature_mask())?;
+    set_dword(bindings, raw, WINHTTP_OPTION_DECOMPRESSION, decompression_mask())?;
+
+    Ok(())
+}
+
+fn set_dword(bindings: &Facade, request: RawHandle, option: u32, value: u32) -> WinHttpResult<()> {
+    bindings.set_option(request, option, &dword_bytes(value))
+}
+
+fn expect_completion(completion: CompletionResult, expected: OperationKind) -> fetch::Result<()> {
+    match (expected, completion) {
+        (OperationKind::SendRequest, CompletionResult::SendRequestComplete)
+        | (OperationKind::HeadersAvailable, CompletionResult::HeadersAvailable) => Ok(()),
+        (_, CompletionResult::Error { error, .. }) => Err(error.into_http_error()),
+        (_, CompletionResult::InvalidStatusInfo { status, len, .. }) => Err(callback_protocol_error(format!(
+            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
+        ))),
+        (_, unexpected) => Err(callback_protocol_error(format!(
+            "WinHTTP returned an unexpected completion for {expected:?}: {unexpected:?}"
+        ))),
+    }
+}
+
+fn query_error(error: QueryError) -> HttpError {
+    match error {
+        QueryError::WinHttp(error) => error.into_http_error(),
+        QueryError::Conversion(error) => invalid_response(error),
+    }
+}
+
+fn invalid_request(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    HttpError::other(error, RecoveryInfo::never(), error_labels::INVALID_REQUEST)
+}
+
+fn invalid_response(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    HttpError::other(error, RecoveryInfo::never(), error_labels::REQUEST_WINHTTP)
+}
+
+fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    invalid_response(error)
+}
+
+#[derive(Debug)]
+enum RequestTranslationError {
+    EmptyPort,
+    HttpDisallowed,
+    InvalidAuthority(String),
+    InvalidPath(String),
+    LegacyVersion(Version),
+    MissingAuthority,
+    MissingHost,
+    MissingScheme,
+    NonNumericPort(String),
+    OutOfRangePort(String),
+    UnsupportedBodyLength,
+    UnsupportedScheme(String),
+    UserInfo,
+    ZeroPort,
+}
+
+impl fmt::Display for RequestTranslationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyPort => {
+                f.write_str("the request URI has an empty explicit port; omit the colon or provide a port from 1 to 65535")
+            }
+            Self::HttpDisallowed => f.write_str("plain HTTP requests are disabled for this client"),
+            Self::InvalidAuthority(authority) => write!(f, "the request URI has a malformed authority: '{authority}'"),
+            Self::InvalidPath(path) => write!(f, "the request URI path must start with '/': {path}"),
+            Self::LegacyVersion(version) => write!(f, "WinHTTP does not support requested HTTP version {version:?}"),
+            Self::MissingAuthority => f.write_str("the request URI has no authority"),
+            Self::MissingHost => f.write_str("the request URI has no host"),
+            Self::MissingScheme => f.write_str("the request URI has no scheme"),
+            Self::NonNumericPort(port) => {
+                write!(f, "the request URI explicit port '{port}' is not decimal; provide a port from 1 to 65535")
+            }
+            Self::OutOfRangePort(port) => {
+                write!(f, "the request URI explicit port '{port}' is outside the valid range 1 to 65535")
+            }
+            Self::UnsupportedBodyLength => {
+                f.write_str(
+                    "the headers-only WinHTTP transport requires a request body with exact zero content length that is already at end of stream",
+                )
+            }
+            Self::UnsupportedScheme(scheme) => write!(f, "the request URI uses unsupported scheme '{scheme}'"),
+            Self::UserInfo => f.write_str("the request URI authority contains unsupported user information"),
+            Self::ZeroPort => f.write_str("the request URI explicit port is zero; provide a port from 1 to 65535"),
+        }
+    }
+}
+
+impl std::error::Error for RequestTranslationError {}
+
+#[derive(Debug)]
+enum ResponseHeadersError {
+    InvalidHeaderName(String),
+    InvalidHeaderValue(String),
+    InvalidStatusLine,
+    MissingHeaderTerminator,
+    MissingNameValueSeparator,
+    NonAsciiHeaderName(u8),
+    TrailingData,
+}
+
+impl fmt::Display for ResponseHeadersError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidHeaderName(error) => write!(f, "WinHTTP returned an invalid response header name: {error}"),
+            Self::InvalidHeaderValue(error) => write!(f, "WinHTTP returned an invalid response header value: {error}"),
+            Self::InvalidStatusLine => f.write_str("WinHTTP returned a malformed response status line"),
+            Self::MissingHeaderTerminator => f.write_str("WinHTTP returned a response header block without a terminating empty line"),
+            Self::MissingNameValueSeparator => f.write_str("WinHTTP returned a response header without a ':' separator"),
+            Self::NonAsciiHeaderName(byte) => write!(f, "WinHTTP returned a non-ASCII response header name byte: 0x{byte:02x}"),
+            Self::TrailingData => f.write_str("WinHTTP returned data after the response header terminator"),
+        }
+    }
+}
+
+impl std::error::Error for ResponseHeadersError {}
+
+fn parse_response_headers(raw: &[u8]) -> Result<HeaderMap, ResponseHeadersError> {
+    let mut cursor = 0;
+    let status_line = take_crlf_line(raw, &mut cursor).ok_or(ResponseHeadersError::InvalidStatusLine)?;
+    if !status_line.starts_with(b"HTTP/") {
+        return Err(ResponseHeadersError::InvalidStatusLine);
+    }
+
+    let mut headers = HeaderMap::new();
+
+    loop {
+        let line = take_crlf_line(raw, &mut cursor).ok_or(ResponseHeadersError::MissingHeaderTerminator)?;
+        if line.is_empty() {
+            if cursor != raw.len() {
+                return Err(ResponseHeadersError::TrailingData);
+            }
+            return Ok(headers);
+        }
+
+        let separator = line
+            .iter()
+            .position(|byte| *byte == b':')
+            .filter(|separator| *separator != 0)
+            .ok_or(ResponseHeadersError::MissingNameValueSeparator)?;
+        let name = header_name(&line[..separator])?;
+        let value = header_value(&line[separator + 1..])?;
+        headers.append(name, value);
+    }
+}
+
+fn take_crlf_line<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    let remaining = raw.get(*cursor..)?;
+    let end = remaining.windows(2).position(|pair| pair == b"\r\n")?;
+    let start = *cursor;
+    *cursor += end + 2;
+
+    raw.get(start..start + end)
+}
+
+fn header_name(bytes: &[u8]) -> Result<HeaderName, ResponseHeadersError> {
+    if let Some(byte) = bytes.iter().copied().find(|byte| !byte.is_ascii()) {
+        return Err(ResponseHeadersError::NonAsciiHeaderName(byte));
+    }
+
+    HeaderName::from_bytes(bytes).map_err(|error| ResponseHeadersError::InvalidHeaderName(error.to_string()))
+}
+
+fn header_value(bytes: &[u8]) -> Result<HeaderValue, ResponseHeadersError> {
+    let bytes = trim_optional_whitespace(bytes);
+
+    HeaderValue::from_bytes(bytes).map_err(|error| ResponseHeadersError::InvalidHeaderValue(error.to_string()))
+}
+
+fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
+    while bytes.first().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
+        bytes = &bytes[1..];
+    }
+    while bytes.last().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
+    use std::pin::Pin;
     use std::ptr::NonNull;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll};
     use std::thread;
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
+    use fetch::options::{RequestFilter, TransportOptions};
+    use fetch::{HttpBodyBuilder, HttpError, HttpRequest};
+    use http::header::HeaderValue;
+    use http::{Method, Version};
+    use http_body::{Body as _, Frame, SizeHint};
+    use http_extensions::HttpBodyOptions;
+    use ohno::Labeled as _;
     use plurality::Pool;
+    use recoverable::{Recovery as _, RecoveryInfo};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use tick::Clock;
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
         WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED,
@@ -197,13 +624,19 @@ mod tests {
         WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{ContextPool, OperationFuture, RequestGuard, RequestSetup};
+    use super::{ContextPool, OperationFuture, RequestDriver, RequestGuard, RequestSetup};
+    use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
     use crate::callback::dispatch_completion;
     use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
-    use crate::options::WINHTTP_OPTION_CONTEXT_VALUE;
+    use crate::options::{
+        WINHTTP_FLAG_SECURE, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
+        WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY,
+        WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
+        WINHTTP_QUERY_VERSION,
+    };
     use crate::session::WinHttpSession;
 
     assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug);
@@ -216,6 +649,949 @@ mod tests {
     const SESSION: usize = 1;
     const CONNECT: usize = 2;
     const REQUEST: usize = 3;
+
+    #[derive(Debug)]
+    struct ExactZeroNonEndBody;
+
+    impl http_body::Body for ExactZeroNonEndBody {
+        type Data = BytesView;
+        type Error = HttpError;
+
+        fn poll_frame(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            Poll::Pending
+        }
+
+        fn is_end_stream(&self) -> bool {
+            false
+        }
+
+        fn size_hint(&self) -> SizeHint {
+            SizeHint::with_exact(0)
+        }
+    }
+
+    #[test]
+    fn get_https_headers_only_lifecycle_translates_and_builds_response() {
+        let mut request = request(Method::GET, "https://example.com/resource?q=1");
+        request.headers_mut().append("x-request", HeaderValue::from_static("first"));
+        request.headers_mut().append("x-request", HeaderValue::from_static("second"));
+        let expected_headers = crate::options::headers_to_utf16(request.headers())
+            .expect("typed request headers are valid")
+            .as_slice()
+            .to_vec();
+        let config = LifecycleConfig {
+            status: 404,
+            raw_headers: raw_headers(&[
+                ("content-type", b"text/plain"),
+                ("set-cookie", b"first=1"),
+                ("set-cookie", b"second=2"),
+            ]),
+            protocol: 1,
+            ..LifecycleConfig::default()
+        };
+
+        let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+        let response = response.expect("4xx is a successful transport response");
+
+        assert_eq!(response.status(), 404);
+        assert_eq!(response.version(), Version::HTTP_2);
+        assert!(response.body().is_empty());
+        assert!(response.extensions().is_empty(), "ConnectionInfo is not attached");
+        assert_eq!(response.headers().get("content-length"), Some(&HeaderValue::from_static("0")));
+        assert_eq!(
+            response
+                .headers()
+                .get_all("set-cookie")
+                .iter()
+                .map(HeaderValue::as_bytes)
+                .collect::<Vec<_>>(),
+            [b"first=1".as_slice(), b"second=2".as_slice()]
+        );
+        assert_eq!(
+            *record.connect.lock().expect("record lock is not poisoned"),
+            Some(("example.com".to_owned(), 443))
+        );
+        assert_eq!(
+            *record.open_request.lock().expect("record lock is not poisoned"),
+            Some(("GET".to_owned(), "/resource?q=1".to_owned(), WINHTTP_FLAG_SECURE))
+        );
+        assert_eq!(*record.sent_headers.lock().expect("record lock is not poisoned"), expected_headers);
+        assert!(
+            record
+                .sent_headers
+                .lock()
+                .expect("record lock is not poisoned")
+                .ends_with(&[u16::from(b'\r'), u16::from(b'\n')])
+        );
+        assert_eq!(
+            record.send_context.load(Ordering::SeqCst),
+            record.installed_context.load(Ordering::SeqCst)
+        );
+        assert_ne!(record.send_context.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            dword_options(&record),
+            [
+                (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_REDIRECT_POLICY, 0),
+                (WINHTTP_OPTION_DISABLE_FEATURE, 5),
+                (WINHTTP_OPTION_DECOMPRESSION, 3),
+            ]
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn head_http_uses_explicit_port_root_path_and_legacy_version_query() {
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.supported_http_versions = vec![Version::HTTP_11];
+        let config = LifecycleConfig {
+            status: 204,
+            protocol: 0,
+            legacy_version: "HTTP/1.1".to_owned(),
+            raw_headers: raw_headers(&[("x-head", b"yes")]),
+            ..LifecycleConfig::default()
+        };
+
+        let (response, record) = run_lifecycle(
+            request(Method::HEAD, "http://example.com:8080"),
+            options,
+            WinHttpTlsConfig::default(),
+            config,
+        );
+        let response = response.expect("HEAD succeeds");
+
+        assert_eq!(response.status(), 204);
+        assert_eq!(response.version(), Version::HTTP_11);
+        assert!(response.body().is_empty());
+        assert_eq!(
+            *record.connect.lock().expect("record lock is not poisoned"),
+            Some(("example.com".to_owned(), 8080))
+        );
+        assert_eq!(
+            *record.open_request.lock().expect("record lock is not poisoned"),
+            Some(("HEAD".to_owned(), "/".to_owned(), 0))
+        );
+        assert_eq!(
+            dword_options(&record),
+            [
+                (WINHTTP_OPTION_REDIRECT_POLICY, 0),
+                (WINHTTP_OPTION_DISABLE_FEATURE, 5),
+                (WINHTTP_OPTION_DECOMPRESSION, 3),
+            ]
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn absolute_uri_defaults_ports_and_preserves_query_with_an_empty_path() {
+        let mut http_options = TransportOptions::default();
+        http_options.request_filter = RequestFilter::HttpAndHttps;
+        let (plain_response, plain_record) = run_lifecycle(
+            request(Method::GET, "http://example.com?mode=http"),
+            http_options,
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+        plain_response.expect("absolute HTTP URI succeeds");
+        assert_eq!(
+            *plain_record.connect.lock().expect("record lock is not poisoned"),
+            Some(("example.com".to_owned(), 80))
+        );
+        assert_eq!(
+            *plain_record.open_request.lock().expect("record lock is not poisoned"),
+            Some(("GET".to_owned(), "/?mode=http".to_owned(), 0))
+        );
+        assert_lifecycle_closed(&plain_record);
+
+        let (secure_response, secure_record) = run_lifecycle(
+            request(Method::GET, "https://example.com"),
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+        secure_response.expect("absolute HTTPS URI succeeds");
+        assert_eq!(
+            *secure_record.connect.lock().expect("record lock is not poisoned"),
+            Some(("example.com".to_owned(), 443))
+        );
+        assert_eq!(
+            *secure_record.open_request.lock().expect("record lock is not poisoned"),
+            Some(("GET".to_owned(), "/".to_owned(), WINHTTP_FLAG_SECURE))
+        );
+        assert_lifecycle_closed(&secure_record);
+    }
+
+    #[test]
+    fn explicit_and_default_ports_support_bracketed_ipv6_authorities() {
+        for (uri, expected_host, expected_port) in [
+            ("https://example.com:8443/", "example.com", 8443),
+            ("https://[::1]:8443/", "[::1]", 8443),
+            ("https://[::1]/", "[::1]", 443),
+        ] {
+            let (response, record) = run_lifecycle(
+                request(Method::GET, uri),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig::default(),
+            );
+
+            response.expect("valid URI port succeeds");
+            assert_eq!(
+                *record.connect.lock().expect("record lock is not poisoned"),
+                Some((expected_host.to_owned(), expected_port))
+            );
+            assert_lifecycle_closed(&record);
+        }
+    }
+
+    #[test]
+    fn invalid_explicit_ports_fail_before_native_io() {
+        for (uri, message) in [
+            ("https://example.com:/", "empty explicit port"),
+            ("https://example.com:12x/", "is not decimal"),
+            ("https://example.com:65536/", "outside the valid range"),
+            ("https://example.com:0/", "explicit port is zero"),
+            ("https://[::1]:/", "empty explicit port"),
+            ("https://[::1]:65536/", "outside the valid range"),
+        ] {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, uri),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig::default(),
+            );
+
+            let error = result.expect_err("invalid explicit port is rejected");
+            assert_eq!(error.label(), "invalid_request");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(error.to_string().contains(message), "{uri}: {error}");
+            assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn advanced_protocol_combinations_apply_required_semantics_without_downgrade() {
+        for (versions, expected_mask, negotiated) in [
+            (vec![Version::HTTP_2], 1, Version::HTTP_2),
+            (vec![Version::HTTP_3], 2, Version::HTTP_3),
+            (vec![Version::HTTP_2, Version::HTTP_3], 3, Version::HTTP_3),
+        ] {
+            let mut options = TransportOptions::default();
+            options.supported_http_versions = versions;
+            let config = LifecycleConfig {
+                protocol: if negotiated == Version::HTTP_2 { 1 } else { 2 },
+                ..LifecycleConfig::default()
+            };
+
+            let (response, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                options,
+                WinHttpTlsConfig::default(),
+                config,
+            );
+
+            assert_eq!(response.expect("required protocol succeeds").version(), negotiated);
+            assert_eq!(
+                &dword_options(&record)[..2],
+                [
+                    (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, expected_mask),
+                    (WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, 1),
+                ]
+            );
+            assert_lifecycle_closed(&record);
+        }
+    }
+
+    #[test]
+    fn tls_relaxations_are_independent_request_masks() {
+        for (tls, expected) in [
+            (WinHttpTlsConfig::default(), None),
+            (WinHttpTlsConfig::builder().accept_invalid_certs(true).build(), Some(0x2300)),
+            (WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build(), Some(0x1000)),
+            (
+                WinHttpTlsConfig::builder()
+                    .accept_invalid_certs(true)
+                    .accept_invalid_hostnames(true)
+                    .build(),
+                Some(0x3300),
+            ),
+        ] {
+            let (response, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                tls,
+                LifecycleConfig::default(),
+            );
+
+            response.expect("TLS option setup succeeds");
+            let actual = dword_options(&record)
+                .into_iter()
+                .find_map(|(option, value)| (option == WINHTTP_OPTION_SECURITY_FLAGS).then_some(value));
+            assert_eq!(actual, expected);
+            assert_lifecycle_closed(&record);
+        }
+
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        let tls = WinHttpTlsConfig::builder()
+            .accept_invalid_certs(true)
+            .accept_invalid_hostnames(true)
+            .build();
+        let (response, record) = run_lifecycle(
+            request(Method::GET, "http://example.com/"),
+            options,
+            tls,
+            LifecycleConfig::default(),
+        );
+
+        response.expect("TLS relaxations are irrelevant to plain HTTP");
+        assert!(
+            dword_options(&record)
+                .into_iter()
+                .all(|(option, _)| option != WINHTTP_OPTION_SECURITY_FLAGS)
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn redirect_cookie_auth_and_decompression_options_are_required() {
+        let (response, record) = run_lifecycle(
+            request(Method::GET, "https://example.com/"),
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        response.expect("request options succeed");
+        assert_eq!(
+            dword_options(&record),
+            [
+                (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_REDIRECT_POLICY, 0),
+                (WINHTTP_OPTION_DISABLE_FEATURE, 5),
+                (WINHTTP_OPTION_DECOMPRESSION, 3),
+            ]
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn malformed_or_unsupported_requests_fail_before_native_io() {
+        let cases = [
+            (
+                request(Method::GET, "/relative"),
+                TransportOptions::default(),
+                "request URI has no scheme",
+            ),
+            (
+                request(Method::GET, "ftp://example.com/"),
+                TransportOptions::default(),
+                "unsupported scheme",
+            ),
+            (
+                request(Method::GET, "http://example.com/"),
+                TransportOptions::default(),
+                "plain HTTP requests are disabled",
+            ),
+        ];
+
+        for (request, options, message) in cases {
+            let (result, record) = run_lifecycle(request, options, WinHttpTlsConfig::default(), LifecycleConfig::default());
+            let error = result.expect_err("invalid requests fail");
+            assert_eq!(error.label(), "invalid_request");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(error.to_string().contains(message));
+            assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
+            assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+        }
+
+        Method::from_bytes(b"GET\r\nInjected").expect_err("a method cannot contain CRLF");
+        http::HeaderName::from_bytes(b"bad header").expect_err("a header name cannot contain spaces");
+        HeaderValue::from_bytes(b"value\r\nInjected: true").expect_err("a header value cannot contain CRLF");
+    }
+
+    #[test]
+    fn legacy_requested_versions_and_nonempty_bodies_are_invalid_requests() {
+        for version in [Version::HTTP_09, Version::HTTP_10] {
+            let mut options = TransportOptions::default();
+            options.supported_http_versions = vec![version];
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                options,
+                WinHttpTlsConfig::default(),
+                LifecycleConfig::default(),
+            );
+
+            let error = result.expect_err("legacy HTTP is rejected");
+            assert_eq!(error.label(), "invalid_request");
+            assert!(error.to_string().contains("does not support requested HTTP version"));
+            assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+        }
+
+        let mut legacy_request = request(Method::GET, "https://example.com/");
+        *legacy_request.version_mut() = Version::HTTP_10;
+        let (result, record) = run_lifecycle(
+            legacy_request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+        assert_eq!(result.expect_err("legacy request version is rejected").label(), "invalid_request");
+        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body_builder.text("payload"))
+            .expect("test request is valid");
+        let (result, record) = run_lifecycle(
+            request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        let error = result.expect_err("nonempty body is not silently dropped");
+        assert_eq!(error.label(), "invalid_request");
+        assert!(error.to_string().contains("exact zero content length"));
+        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body_builder.stream(futures::stream::empty::<fetch::Result<BytesView>>(), &HttpBodyOptions::default()))
+            .expect("test request is valid");
+        assert_eq!(request.body().content_length(), None);
+        let (result, record) = run_lifecycle(
+            request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        let error = result.expect_err("unknown-length body is not silently dropped");
+        assert_eq!(error.label(), "invalid_request");
+        assert!(error.to_string().contains("exact zero content length"));
+        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn exact_zero_non_end_stream_body_is_rejected_before_native_io() {
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let body = body_builder.body(ExactZeroNonEndBody, &HttpBodyOptions::default());
+        assert_eq!(body.content_length(), Some(0));
+        assert!(!body.is_end_stream());
+        let request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+
+        let (result, record) = run_lifecycle(
+            request,
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        let error = result.expect_err("a body with remaining frames is not silently dropped");
+        assert_eq!(error.label(), "invalid_request");
+        assert!(error.to_string().contains("already at end of stream"));
+        assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn every_required_request_option_failure_aborts_before_send() {
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = vec![Version::HTTP_2, Version::HTTP_3];
+        let tls = WinHttpTlsConfig::builder()
+            .accept_invalid_certs(true)
+            .accept_invalid_hostnames(true)
+            .build();
+
+        for failed_index in 0..7 {
+            let config = LifecycleConfig {
+                failure: Some(LifecycleFailure::Option(failed_index)),
+                ..LifecycleConfig::default()
+            };
+            let (result, record) = run_lifecycle(request(Method::GET, "https://example.com/"), options.clone(), tls.clone(), config);
+
+            assert!(result.is_err(), "option {failed_index} must fail the request");
+            assert_eq!(record.send_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+            assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+            assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn synchronous_and_callback_errors_fail_the_matching_stage() {
+        for (failure, expected_label, expected_recovery) in [
+            (LifecycleFailure::Connect, "connect", RecoveryInfo::retry()),
+            (LifecycleFailure::OpenRequest, "request_winhttp", RecoveryInfo::unknown()),
+            (LifecycleFailure::SendSync, "connect", RecoveryInfo::retry()),
+            (LifecycleFailure::SendCallback, "request_winhttp", RecoveryInfo::retry()),
+            (LifecycleFailure::ReceiveSync, "timeout", RecoveryInfo::retry()),
+            (LifecycleFailure::ReceiveCallback, "tls", RecoveryInfo::never()),
+            (LifecycleFailure::QueryStatus, "timeout", RecoveryInfo::retry()),
+            (LifecycleFailure::QueryHeaders, "request_winhttp", RecoveryInfo::never()),
+            (LifecycleFailure::QueryProtocol, "tls", RecoveryInfo::never()),
+        ] {
+            let config = LifecycleConfig {
+                failure: Some(failure),
+                ..LifecycleConfig::default()
+            };
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                config,
+            );
+
+            let error = result.expect_err("injected failure reaches the caller");
+            assert_eq!(error.label(), expected_label, "{failure:?}");
+            assert_eq!(error.recovery(), expected_recovery, "{failure:?}");
+            assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+            if failure != LifecycleFailure::Connect {
+                assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn response_header_validation_and_foreign_thread_completion_are_deterministic() {
+        let config = LifecycleConfig {
+            complete_send_on_foreign_thread: true,
+            status: 500,
+            protocol: 2,
+            raw_headers: raw_headers(&[("content-length", b"123"), ("x-duplicate", b"one"), ("x-duplicate", &[0x80, 0xff])]),
+            ..LifecycleConfig::default()
+        };
+        let (response, record) = run_lifecycle(
+            request(Method::GET, "https://example.com/"),
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            config,
+        );
+        let response = response.expect("5xx and obs-text headers are successful");
+
+        assert_eq!(response.status(), 500);
+        assert_eq!(response.version(), Version::HTTP_3);
+        assert_eq!(response.headers().get("content-length"), Some(&HeaderValue::from_static("123")));
+        assert_eq!(
+            response
+                .headers()
+                .get_all("x-duplicate")
+                .iter()
+                .map(HeaderValue::as_bytes)
+                .collect::<Vec<_>>(),
+            [b"one".as_slice(), &[0x80, 0xff]]
+        );
+        assert_lifecycle_closed(&record);
+
+        for (raw_headers, message) in [
+            (b"HTTP/1.1 200 OK\r\nmissing-colon\r\n\r\n".to_vec(), "without a ':' separator"),
+            (
+                [b"HTTP/1.1 200 OK\r\n".as_slice(), &[0x80], b": value\r\n\r\n"].concat(),
+                "non-ASCII response header name",
+            ),
+            (
+                b"HTTP/1.1 200 OK\r\nx-invalid: contains\nnewline\r\n\r\n".to_vec(),
+                "invalid response header value",
+            ),
+        ] {
+            let malformed = LifecycleConfig {
+                raw_headers,
+                ..LifecycleConfig::default()
+            };
+            let (result, record) = run_lifecycle(
+                request(Method::GET, "https://example.com/"),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                malformed,
+            );
+            let error = result.expect_err("malformed headers fail");
+            assert_eq!(error.label(), "request_winhttp");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(error.to_string().contains(message), "{error}");
+            assert_lifecycle_closed(&record);
+        }
+
+        let malformed_protocol = LifecycleConfig {
+            protocol: 3,
+            ..LifecycleConfig::default()
+        };
+        let (result, record) = run_lifecycle(
+            request(Method::GET, "https://example.com/"),
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            malformed_protocol,
+        );
+        let error = result.expect_err("malformed queried protocol data fails");
+        assert_eq!(error.label(), "request_winhttp");
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert_lifecycle_closed(&record);
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum LifecycleFailure {
+        Connect,
+        OpenRequest,
+        Option(usize),
+        SendSync,
+        SendCallback,
+        ReceiveSync,
+        ReceiveCallback,
+        QueryStatus,
+        QueryHeaders,
+        QueryProtocol,
+    }
+
+    #[derive(Clone)]
+    struct LifecycleConfig {
+        status: u32,
+        raw_headers: Vec<u8>,
+        protocol: u32,
+        legacy_version: String,
+        failure: Option<LifecycleFailure>,
+        complete_send_on_foreign_thread: bool,
+    }
+
+    impl Default for LifecycleConfig {
+        fn default() -> Self {
+            Self {
+                status: 200,
+                raw_headers: raw_headers(&[("content-length", b"0")]),
+                protocol: 1,
+                legacy_version: "HTTP/1.1".to_owned(),
+                failure: None,
+                complete_send_on_foreign_thread: false,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct LifecycleRecord {
+        connect: Mutex<Option<(String, u16)>>,
+        open_request: Mutex<Option<(String, String, u32)>>,
+        options: Mutex<Vec<(u32, Vec<u8>)>>,
+        sent_headers: Mutex<Vec<u16>>,
+        connect_calls: AtomicUsize,
+        send_calls: AtomicUsize,
+        receive_calls: AtomicUsize,
+        installed_context: AtomicUsize,
+        send_context: AtomicUsize,
+        session_closes: AtomicUsize,
+        connect_closes: AtomicUsize,
+        request_closes: AtomicUsize,
+    }
+
+    fn run_lifecycle(
+        request: HttpRequest,
+        options: TransportOptions,
+        tls: WinHttpTlsConfig,
+        config: LifecycleConfig,
+    ) -> (fetch::Result<fetch::HttpResponse>, Arc<LifecycleRecord>) {
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let driver = RequestDriver::new(&request, Arc::clone(&session), body_builder, &contexts, &options, &tls);
+        drop((request, options, tls));
+        let result = match driver {
+            Ok(driver) => futures::executor::block_on(driver.execute()),
+            Err(error) => Err(error),
+        };
+
+        let context = record.installed_context.load(Ordering::SeqCst);
+        if context != 0 {
+            assert_eq!(
+                record.request_closes.load(Ordering::SeqCst),
+                1,
+                "the request guard closes before HANDLE_CLOSING"
+            );
+            closing(std::ptr::with_exposed_provenance_mut(context));
+        }
+
+        drop(session);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+
+        (result, record)
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the lifecycle mock keeps one complete WinHTTP script visible in one place"
+    )]
+    fn lifecycle_bindings(config: Arc<LifecycleConfig>, record: Arc<LifecycleRecord>) -> Facade {
+        let mut bindings = MockBindings::new();
+
+        let connect_config = Arc::clone(&config);
+        let connect_record = Arc::clone(&record);
+        bindings.expect_connect().returning(move |_, host, port| {
+            connect_record.connect_calls.fetch_add(1, Ordering::SeqCst);
+            *connect_record.connect.lock().expect("record lock is not poisoned") = Some((host.to_string_lossy(), port));
+            if connect_config.failure == Some(LifecycleFailure::Connect) {
+                Err(WinHttpError::new(12029, WinHttpOperation::Connect))
+            } else {
+                Ok(raw_handle(CONNECT))
+            }
+        });
+
+        let open_config = Arc::clone(&config);
+        let open_record = Arc::clone(&record);
+        bindings.expect_open_request().returning(move |_, method, path, flags| {
+            *open_record.open_request.lock().expect("record lock is not poisoned") =
+                Some((method.to_string_lossy(), path.to_string_lossy(), flags));
+            if open_config.failure == Some(LifecycleFailure::OpenRequest) {
+                Err(WinHttpError::new(12005, WinHttpOperation::OpenRequest))
+            } else {
+                Ok(raw_handle(REQUEST))
+            }
+        });
+
+        let option_index = Arc::new(AtomicUsize::new(0));
+        let option_config = Arc::clone(&config);
+        let option_record = Arc::clone(&record);
+        bindings.expect_set_option().returning(move |_, option, value| {
+            let index = option_index.fetch_add(1, Ordering::SeqCst);
+            option_record
+                .options
+                .lock()
+                .expect("record lock is not poisoned")
+                .push((option, value.to_vec()));
+            if option_config.failure == Some(LifecycleFailure::Option(index)) {
+                return Err(WinHttpError::new(
+                    13_000 + u32::try_from(index).expect("test option index fits u32"),
+                    WinHttpOperation::SetOption,
+                ));
+            }
+            if option == WINHTTP_OPTION_CONTEXT_VALUE {
+                let context = usize::from_ne_bytes(value.try_into().expect("context option is pointer-sized"));
+                option_record.installed_context.store(context, Ordering::SeqCst);
+            }
+            Ok(())
+        });
+
+        let send_config = Arc::clone(&config);
+        let send_record = Arc::clone(&record);
+        bindings.expect_send_request().returning(move |_, headers, total_len, context| {
+            send_record.send_calls.fetch_add(1, Ordering::SeqCst);
+            send_record.send_context.store(context, Ordering::SeqCst);
+            *send_record.sent_headers.lock().expect("record lock is not poisoned") = headers.as_slice().to_vec();
+            assert_eq!(total_len, 0);
+
+            if send_config.failure == Some(LifecycleFailure::SendSync) {
+                return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
+            }
+
+            if send_config.failure == Some(LifecycleFailure::SendCallback) {
+                complete_request_error(context, 12030);
+            } else if send_config.complete_send_on_foreign_thread {
+                thread::spawn(move || {
+                    complete(
+                        std::ptr::with_exposed_provenance_mut(context),
+                        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                })
+                .join()
+                .expect("completion thread does not panic");
+            } else {
+                complete(
+                    std::ptr::with_exposed_provenance_mut(context),
+                    WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+
+            Ok(())
+        });
+
+        let receive_config = Arc::clone(&config);
+        let receive_record = Arc::clone(&record);
+        bindings.expect_receive_response().returning(move |_| {
+            receive_record.receive_calls.fetch_add(1, Ordering::SeqCst);
+            if receive_config.failure == Some(LifecycleFailure::ReceiveSync) {
+                return Err(WinHttpError::new(12002, WinHttpOperation::ReceiveResponse));
+            }
+
+            let context = receive_record.installed_context.load(Ordering::SeqCst);
+            if receive_config.failure == Some(LifecycleFailure::ReceiveCallback) {
+                complete_request_error(context, 12175);
+            } else {
+                complete(
+                    std::ptr::with_exposed_provenance_mut(context),
+                    WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
+            Ok(())
+        });
+
+        let header_config = Arc::clone(&config);
+        bindings
+            .expect_query_headers()
+            .returning(move |_, info_level, buffer, byte_len| match info_level {
+                level if level == (WINHTTP_QUERY_STATUS_CODE | 0x2000_0000) => {
+                    if header_config.failure == Some(LifecycleFailure::QueryStatus) {
+                        return Err(WinHttpError::new(12002, WinHttpOperation::QueryHeaders));
+                    }
+                    let output = buffer.expect("status query supplies a DWORD").cast::<u32>();
+                    // SAFETY: the lifecycle supplies a writable DWORD buffer.
+                    unsafe { output.as_ptr().write(header_config.status) };
+                    *byte_len = 4;
+                    Ok(())
+                }
+                level if level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING) => {
+                    if header_config.failure == Some(LifecycleFailure::QueryHeaders) {
+                        return Err(WinHttpError::new(12152, WinHttpOperation::QueryHeaders));
+                    }
+                    write_byte_query(&header_config.raw_headers, buffer, byte_len)
+                }
+                WINHTTP_QUERY_VERSION => {
+                    let units = header_config.legacy_version.encode_utf16().collect::<Vec<_>>();
+                    write_utf16_query(&units, buffer, byte_len)
+                }
+                _ => panic!("unexpected header query level {info_level}"),
+            });
+
+        let protocol_config = Arc::clone(&config);
+        bindings.expect_query_option().returning(move |_, _, buffer, byte_len| {
+            if protocol_config.failure == Some(LifecycleFailure::QueryProtocol) {
+                return Err(WinHttpError::new(12175, WinHttpOperation::QueryOption));
+            }
+            let output = buffer.expect("protocol query supplies a DWORD").cast::<u32>();
+            // SAFETY: the lifecycle supplies a writable DWORD buffer.
+            unsafe { output.as_ptr().write(protocol_config.protocol) };
+            *byte_len = 4;
+            Ok(())
+        });
+
+        let close_record = Arc::clone(&record);
+        bindings.expect_close_handle().returning(move |handle| {
+            match handle.as_ptr().addr() {
+                SESSION => &close_record.session_closes,
+                CONNECT => &close_record.connect_closes,
+                REQUEST => &close_record.request_closes,
+                _ => panic!("unexpected lifecycle handle"),
+            }
+            .fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        drop((config, record));
+
+        Facade::mock(Arc::new(bindings))
+    }
+
+    fn write_utf16_query(units: &[u16], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
+        let required_units = units.len().checked_add(1).expect("test header length does not overflow");
+        let required_bytes = required_units.checked_mul(2).expect("test header byte length does not overflow");
+        let required_bytes = u32::try_from(required_bytes).expect("test header byte length fits a DWORD");
+
+        let Some(buffer) = buffer else {
+            *byte_len = required_bytes;
+            return Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders));
+        };
+
+        assert!(*byte_len >= required_bytes);
+        let output = buffer.cast::<u16>();
+        // SAFETY: the sizing query reserved required_units writable UTF-16
+        // units; this copies the content and writes the trailing NUL.
+        // SAFETY: the destination has capacity for every source unit.
+        unsafe { output.as_ptr().copy_from_nonoverlapping(units.as_ptr(), units.len()) };
+        // SAFETY: required_units includes one element after the copied content.
+        let terminator = unsafe { output.as_ptr().add(units.len()) };
+        // SAFETY: terminator points to the final writable UTF-16 unit.
+        unsafe { terminator.write(0) };
+        *byte_len = u32::try_from(units.len() * 2).expect("test returned byte length fits a DWORD");
+        Ok(())
+    }
+
+    fn write_byte_query(bytes: &[u8], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
+        let required_bytes = bytes.len().checked_add(1).expect("test header byte length does not overflow");
+        let required_bytes = u32::try_from(required_bytes).expect("test header byte length fits a DWORD");
+
+        let Some(output) = buffer else {
+            *byte_len = required_bytes;
+            return Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders));
+        };
+
+        assert!(*byte_len >= required_bytes);
+        // SAFETY: the sizing query reserved required_bytes writable bytes;
+        // this copies the content and writes the trailing NUL.
+        unsafe { output.as_ptr().copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
+        // SAFETY: required_bytes includes one byte after the copied content.
+        let terminator = unsafe { output.as_ptr().add(bytes.len()) };
+        // SAFETY: terminator points to the final writable byte.
+        unsafe { terminator.write(0) };
+        *byte_len = u32::try_from(bytes.len()).expect("test returned byte length fits a DWORD");
+        Ok(())
+    }
+
+    fn complete_request_error(context: usize, code: u32) {
+        let mut result = WINHTTP_ASYNC_RESULT {
+            dwResult: 0,
+            dwError: code,
+        };
+        complete(
+            std::ptr::with_exposed_provenance_mut(context),
+            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+            (&raw mut result).cast(),
+            status_info_len::<WINHTTP_ASYNC_RESULT>(),
+        );
+    }
+
+    fn dword_options(record: &LifecycleRecord) -> Vec<(u32, u32)> {
+        record
+            .options
+            .lock()
+            .expect("record lock is not poisoned")
+            .iter()
+            .filter(|(option, value)| *option != WINHTTP_OPTION_CONTEXT_VALUE && value.len() == size_of::<u32>())
+            .map(|(option, value)| {
+                (
+                    *option,
+                    u32::from_ne_bytes(value.as_slice().try_into().expect("DWORD option has four bytes")),
+                )
+            })
+            .collect()
+    }
+
+    fn assert_lifecycle_closed(record: &LifecycleRecord) {
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+    }
+
+    fn request(method: Method, uri: &str) -> HttpRequest {
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        http::Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(body_builder.empty())
+            .expect("test request is valid")
+    }
+
+    fn raw_headers(headers: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut bytes = b"HTTP/1.1 200 OK\r\n".to_vec();
+        for (name, value) in headers {
+            bytes.extend(name.bytes());
+            bytes.extend(b": ");
+            bytes.extend_from_slice(value);
+            bytes.extend(b"\r\n");
+        }
+        bytes.extend(b"\r\n");
+        bytes
+    }
 
     #[test]
     fn context_option_failure_returns_context_and_closes_each_handle_once() {

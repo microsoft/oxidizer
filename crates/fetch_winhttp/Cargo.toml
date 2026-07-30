@@ -35,6 +35,7 @@ bytesbuf = { workspace = true }
 events_once = { workspace = true }
 fetch = { workspace = true }
 http = { workspace = true }
+http-body = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true }
 observed = { workspace = true }

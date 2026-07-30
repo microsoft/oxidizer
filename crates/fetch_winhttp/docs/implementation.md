@@ -145,7 +145,7 @@ A single request drives this WinHTTP handle chain and callback sequence:
 | Step | Call | Sync/async | Completion callback |
 |------|------|-----------|---------------------|
 | S1 | `WinHttpOpen(WINHTTP_FLAG_ASYNC)` | sync | - (build-time) |
-| S2 | `WinHttpSetTimeouts` (session-level unlimited defaults), `WinHttpSetStatusCallback` | sync | - (build-time; mask in §4.3) |
+| S2 | `WinHttpSetTimeouts`, session-scoped pool/callback/keep-alive options, `WinHttpSetStatusCallback` | sync | - (build-time; mask in §4.3) |
 | 3 | `WinHttpConnect` | sync, inline (see §2.1) | - |
 | 4 | `WinHttpOpenRequest` | sync | - |
 | 5 | `WinHttpSetOption`xN (including context and request behavior) | sync | - |
@@ -488,13 +488,14 @@ delivers a `HANDLE_CLOSING` that carries the pointer, so the callback reclaims t
 the context installed *after* the send, a synchronous send failure could close the
 handle with a null context and strand the `Box`.
 
-Before that `SetOption` succeeds, the driver moves the connect handle and session
-owner into the still-owned context. A failed `WinHttpOpenRequest` or `SetOption`
-then lets the driver drop the `Box` directly back into the pool, which also closes
-the connect handle and releases the session owner. This is safe because WinHTTP
-initializes a handle's context to null, and the trampoline ignores any callback
-(including `HANDLE_CLOSING`) whose context is null - so early-failed request,
-connect, and session handles never reconstruct a `Box`.
+The driver applies the other synchronous request options before allocating the
+context. A failure there drops the locally owned request and connect handles
+directly. Immediately before installing `CONTEXT_VALUE`, the driver allocates the
+context and moves the connect handle and session owner into it. If that final option
+call fails, the still-owned context returns to the pool, closing the connect handle
+and releasing the session owner. This is safe because WinHTTP initializes a handle's
+context to null, and the trampoline ignores any callback (including
+`HANDLE_CLOSING`) whose context is null.
 
 After `SetOption` succeeds, dropping the `RequestGuard` owner (the driver or the
 `WinHttpBodyReader` it moves into, §6.3) synchronously closes only the request
@@ -697,10 +698,11 @@ possibly segmented `BytesBuf`, bounded by that span's length and `u32::MAX`.
 `WinHttpBodyReader` implements both methods required by `bytesbuf_io::Read`:
 `read_at_most_into` and `read_more_into`. Its data path can use
 `ReadExt::into_futures_stream`, whose boxed in-flight read future is `Send`.
-After the zero-length EOF read, the reader calls `query_trailers_raw`, implemented as
+After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
-WINHTTP_QUERY_FLAG_TRAILERS)`. A missing trailer block becomes `None`; returned trailers
-are parsed into a `HeaderMap`. The final response adapter is a custom
+WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING)`. A missing trailer
+block becomes `None`; returned trailer bytes are parsed into a `HeaderMap`. The final
+response adapter is a custom
 `http_body::Body`, passed through `HttpBodyBuilder::body`, so it yields data frames and
 one final trailer frame instead of erasing trailers through a data-only stream conversion:
 
@@ -733,30 +735,47 @@ translate req (method/uri/headers -> UTF-16)
   -> WinHttpOpenRequest + set options (protocol, decompression, redirect, cookies/auth off, security, timeouts)
   -> set RequestContext pointer as WINHTTP_OPTION_CONTEXT_VALUE
   -> WinHttpSendRequest ->async SENDREQUEST_COMPLETE
-  -> [streaming body] loop poll_frame -> WinHttpBodyWriter.write ->async WRITE_COMPLETE
   -> WinHttpReceiveResponse ->async HEADERS_AVAILABLE
-  -> WinHttpQueryHeaders (status, negotiated version, header block)  [sync]
-  -> build HttpResponse { parts, HttpBody streamed from WinHttpBodyReader }
-  -> return Ok(response)   // body streamed lazily by the caller
+  -> WinHttpQueryHeaders/Option (status, negotiated version, header block)  [sync]
+  -> build HttpResponse { parts, HttpBodyBuilder::empty() } through HttpResponseBuilder
+  -> drop RequestGuard and return Ok(response)
 ```
 
-Header translation is mechanical: request headers serialize to a WinHTTP CRLF
-header blob; the response `WINHTTP_QUERY_RAW_HEADERS_CRLF` blob parses back into
-an `http::HeaderMap`. Method and URI come from the `http::Request` parts.
+Header translation is mechanical. Request header names and values are written
+directly from their validated `http` byte representations into one NUL-terminated
+UTF-16 CRLF blob, preserving repeated fields and opaque header-value bytes without an
+intermediate UTF-8 string. Method, authority host, and path/query are materialized as
+separate UTF-16 inputs from the `http::Request` parts. An omitted path becomes `/`;
+a query-only path is prefixed with `/` before it is passed to WinHTTP.
 
-**Response-body handle ownership.** The request handle must outlive `execute`'s
-return, because the body is read lazily *after* the driver returns the
-`HttpResponse`. So at the point the response is built the `RequestGuard` **moves
-into** the `WinHttpBodyReader`, carrying the request handle and the
-`RequestContext` pointer with it. The context itself retains the per-request connect
-handle and the core's session `Arc<WinHttpSession>` through final `HANDLE_CLOSING`,
-so asynchronous teardown cannot outlive either parent.
+After `HEADERS_AVAILABLE`, the numeric status is queried with
+`WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER`. The raw response header block
+is queried with `WINHTTP_QUERY_RAW_HEADERS_CRLF |
+WINHTTP_QUERY_FLAG_WIRE_ENCODING`, so WinHTTP writes wire-encoded bytes directly rather
+than first converting them to UTF-16. The two-call query treats both the required
+capacity and returned length as byte counts: it allocates exactly the reported byte
+capacity, then truncates to the returned byte length. Parsing operates on `&[u8]` line
+by line: the status line is skipped, names must be ASCII, optional whitespace is
+trimmed, opaque `obs-text` value bytes are preserved, and repeated fields are appended
+to the `http::HeaderMap` rather than overwritten. Invalid header names and values are
+rejected. `WINHTTP_QUERY_FLAG_WIRE_ENCODING` and the trailer query flag establish the
+Windows 11 version 21H2 minimum documented in design.md; no runtime compatibility path
+is attempted. The numeric status query and the legacy `WINHTTP_QUERY_VERSION` string
+query retain their existing DWORD and UTF-16 buffers, respectively.
 
-Whoever owns the guard when the request ends runs the single synchronous teardown of
-§4.3: the body reader on EOF (a zero-length `READ_COMPLETE`, §6.2), on error, or on
-drop; or the driver itself when there is no response body (HEAD, 204) and it never
-hands off a guard. This is the one close authority on every path - exactly one owner,
-closing exactly once.
+The headers-only lifecycle constructs the response with `HttpBodyBuilder::empty`
+through `HttpResponseBuilder`, attaches no `ConnectionInfo`, and drops the
+`RequestGuard` after all response metadata has been queried. The builder preserves a
+native `Content-Length` and synthesizes `Content-Length: 0` only when the native
+response omitted it. The context retains the connect handle and session owner until
+the resulting `HANDLE_CLOSING` callback reclaims it. A request body is accepted only
+when `content_length()` is exactly `Some(0)` and `is_end_stream()` is true;
+unknown-length, nonempty, and exact-zero bodies that may still yield trailers or errors
+are rejected rather than silently discarded.
+
+The lazy response-body implementation extends this ownership path by moving the guard
+into `WinHttpBodyReader`; that reader then becomes the same single close authority on
+EOF, read error, or body drop.
 
 ## 7. Test plan
 
@@ -1159,13 +1178,16 @@ The behaviors in design.md §5 are configured through these options.
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_AUTHENTICATION` (WinHTTP
   does not intercept 401/407 or attach credentials).
 - **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2) maps to
-  `WINHTTP_OPTION_HTTP2_KEEPALIVE` / `WINHTTP_OPTION_HTTP3_KEEPALIVE`, which make
+  session-scoped `WINHTTP_OPTION_HTTP2_KEEPALIVE` /
+  `WINHTTP_OPTION_HTTP3_KEEPALIVE` settings applied during transport
+  materialization, before any connect or request handle is created. They make
   WinHTTP send an HTTP/2 or HTTP/3 PING once a connection has been idle for the
   configured interval, keeping pooled connections warm past the server's
-  idle-close. `Disabled` leaves the options unset. `interval` sets the option
-  value; HTTP/2 values below WinHTTP's documented 5000 ms minimum round up to
-  5000 ms, while HTTP/3 values round and clamp to the finite DWORD range starting
-  at 1 ms. The fit is
+  idle-close. Failure to apply either required session option leaves the
+  materialized transport in its initialization-failure state. `Disabled` leaves
+  the options unset. `interval` sets the option value; HTTP/2 values below
+  WinHTTP's documented 5000 ms minimum round up to 5000 ms, while HTTP/3 values
+  round and clamp to the finite DWORD range starting at 1 ms. The fit is
   imperfect and is documented rather than diagnosed at runtime: WinHTTP PINGs idle
   pooled connections and has no separate "active-only" mode (so
   `ActiveConnections` and `ActiveAndIdleConnections` behave alike), it exposes a single

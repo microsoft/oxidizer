@@ -235,6 +235,7 @@ mod tests {
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
+            .supported_http_versions(&[http::Version::HTTP_10])
             .build();
         let clone = client.clone();
 
@@ -242,7 +243,7 @@ mod tests {
         drop(clone);
         assert_eq!(closes.load(Ordering::SeqCst), 0);
 
-        let error = futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("request lifecycle is unavailable");
+        let error = futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
         assert_eq!(error.recovery(), RecoveryInfo::never());
 
         drop(client);
@@ -254,12 +255,13 @@ mod tests {
         let (facade, opens, closes) = successful_facade(2);
         let builder = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
-            .minimal_pipeline();
+            .minimal_pipeline()
+            .supported_http_versions(&[http::Version::HTTP_10]);
         let first = builder.clone().build();
         let second = builder.build();
 
         for client in [&first, &second] {
-            futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("request lifecycle is unavailable");
+            futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
         }
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
@@ -290,6 +292,7 @@ mod tests {
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
+            .supported_http_versions(&[http::Version::HTTP_10])
             .build();
         let affinities = pinned_affinities(&[2]);
         let mut relocated = client.clone();
@@ -297,7 +300,7 @@ mod tests {
         relocated.relocate(None, affinities[1]);
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
-        futures::executor::block_on(relocated.get("http://example.com").fetch()).expect_err("request lifecycle is unavailable");
+        futures::executor::block_on(relocated.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
 
         drop(relocated);
         drop(client);

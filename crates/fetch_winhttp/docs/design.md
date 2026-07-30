@@ -199,7 +199,8 @@ through that mode. v1 exposes no proxy configuration and has no `DEFAULT_PROXY` 
 connection fallback: silently bypassing OS proxy policy would violate the purpose of
 using the Windows networking stack.
 
-The transport targets modern Windows versions where automatic proxy mode and every other
+The transport requires Windows 11 version 21H2 (build 22000) or later, where automatic
+proxy mode, wire-encoded response-header queries, response trailers, and every other
 WinHTTP option required by this design are available. It performs no old-Windows
 compatibility probing or degradation. A required session option that cannot be applied
 leaves that materialized transport in its permanent initialization-failure state; a

@@ -1640,6 +1640,7 @@ dependencies = [
  "fetch",
  "futures",
  "http",
+ "http-body",
  "http_extensions",
  "layered",
  "mockall",

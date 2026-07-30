@@ -67,6 +67,8 @@ const fn operation_name(operation: SessionInitializationOperation) -> &'static s
         SessionInitializationOperation::SetTimeouts => "set_timeouts",
         SessionInitializationOperation::DisableGlobalPooling => "disable_global_pooling",
         SessionInitializationOperation::AssuredNonBlockingCallbacks => "assured_non_blocking_callbacks",
+        SessionInitializationOperation::Http2KeepAlive => "http2_keep_alive",
+        SessionInitializationOperation::Http3KeepAlive => "http3_keep_alive",
         SessionInitializationOperation::SetStatusCallback => "set_status_callback",
     }
 }
