@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn display_ecmascript_saturates_year_10001() {
-        let year_10001 = SystemTime::UNIX_EPOCH + Duration::from_secs(253_433_923_200);
+        let year_10001 = SystemTime::UNIX_EPOCH + Duration::from_hours(70_398_312);
         assert_eq!(year_10001.display_ecmascript().to_string(), "9999-12-30T22:00:00.999Z");
     }
 
