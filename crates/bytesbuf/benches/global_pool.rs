@@ -36,7 +36,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("alloc_tiny", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| warm_memory.reserve(TINY))(iters)
+            time_sample(iters, || warm_memory.reserve(TINY))
         });
     });
 
@@ -44,7 +44,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("alloc_1mb", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| warm_memory.reserve(ONE_MB))(iters)
+            time_sample(iters, || warm_memory.reserve(ONE_MB))
         });
     });
 
@@ -52,10 +52,10 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("fill_tiny", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let mut buf = warm_memory.reserve(TINY);
                 buf.put_byte_repeated(66, TINY);
-            })(iters)
+            })
         });
     });
 
@@ -63,10 +63,10 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("fill_1mb", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let mut buf = warm_memory.reserve(ONE_MB);
                 buf.put_byte_repeated(66, ONE_MB);
-            })(iters)
+            })
         });
     });
 
@@ -100,7 +100,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("copied_from_slice", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| BytesView::copied_from_slice(&test_data, &warm_memory))(iters)
+            time_sample(iters, || BytesView::copied_from_slice(&test_data, &warm_memory))
         });
     });
 

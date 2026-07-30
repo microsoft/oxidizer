@@ -24,7 +24,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("no-breaker", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input(0))))(iters)
+            time_sample(iters, || block_on(service.execute(Input(0))))
         });
     });
 
@@ -44,7 +44,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("with-breaker", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input(0))))(iters)
+            time_sample(iters, || block_on(service.execute(Input(0))))
         });
     });
 
@@ -55,7 +55,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("with-partitioned", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input(0))))(iters)
+            time_sample(iters, || block_on(service.execute(Input(0))))
         });
     });
 
@@ -65,7 +65,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("with-partitioned-many", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input(0))))(iters)
+            time_sample(iters, || block_on(service.execute(Input(0))))
         });
     });
 
@@ -75,7 +75,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("with-partitioned-large", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input(0))))(iters)
+            time_sample(iters, || block_on(service.execute(Input(0))))
         });
     });
 

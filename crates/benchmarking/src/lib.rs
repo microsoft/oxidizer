@@ -7,14 +7,12 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 /// Times a Criterion sample by running the benchmark body `iters` times.
-pub fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = black_box(bench());
-        }
-        start.elapsed()
+pub fn time_sample<R>(iters: u64, mut bench: impl FnMut() -> R) -> Duration {
+    let start = Instant::now();
+    for _ in 0..iters {
+        _ = black_box(bench());
     }
+    start.elapsed()
 }
 
 /// Times a Criterion sample over an already-prepared per-iteration input vector.

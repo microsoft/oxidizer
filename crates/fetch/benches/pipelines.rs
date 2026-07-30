@@ -43,7 +43,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("standard_pipeline", |b| {
         b.iter_custom(|iters| {
             let _measure = standard_allocs.measure_thread().iterations(iters);
-            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
+            time_sample(iters, || block_on(client.get(get_uri()).fetch()).unwrap())
         });
     });
 
@@ -54,7 +54,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("minimal_pipeline", |b| {
         b.iter_custom(|iters| {
             let _measure = minimal_allocs.measure_thread().iterations(iters);
-            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
+            time_sample(iters, || block_on(client.get(get_uri()).fetch()).unwrap())
         });
     });
 
@@ -65,7 +65,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("custom_minimal_pipeline", |b| {
         b.iter_custom(|iters| {
             let _measure = custom_minimal_allocs.measure_thread().iterations(iters);
-            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
+            time_sample(iters, || block_on(client.get(get_uri()).fetch()).unwrap())
         });
     });
 
@@ -93,7 +93,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("custom_standard_pipeline", |b| {
         b.iter_custom(|iters| {
             let _measure = custom_standard_allocs.measure_thread().iterations(iters);
-            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
+            time_sample(iters, || block_on(client.get(get_uri()).fetch()).unwrap())
         });
     });
 

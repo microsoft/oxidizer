@@ -39,13 +39,13 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri_from_string", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(URI_STRING)
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -54,13 +54,13 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri_pre_parsed", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(uri.clone())
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -71,13 +71,13 @@ fn entry(c: &mut Criterion) {
     group.bench_function("empty_body", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(uri.clone())
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -86,14 +86,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("text_body", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::POST)
                     .uri(uri.clone())
                     .text("Hello World!")
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -107,14 +107,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("json_body_owned", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::POST)
                     .uri(uri.clone())
                     .json(&person)
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -128,14 +128,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("json_body_borrowed", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::POST)
                     .uri(uri.clone())
                     .json(&person)
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -158,14 +158,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("json_body_large_transparent", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&transparent_body_builder)
                     .method(Method::POST)
                     .uri(uri.clone())
                     .json(&large_payload)
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -176,13 +176,13 @@ fn entry(c: &mut Criterion) {
     group.bench_function("no_header", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(uri.clone())
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -191,13 +191,13 @@ fn entry(c: &mut Criterion) {
     group.bench_function("single_header", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(uri.clone())
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 
@@ -206,14 +206,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("two_headers", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                     .method(Method::GET)
                     .uri(uri.clone())
                     .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                     .build()
                     .unwrap();
-            })(iters)
+            })
         });
     });
 

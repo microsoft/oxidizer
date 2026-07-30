@@ -27,7 +27,7 @@ fn bodies_benchmarks(c: &mut Criterion) {
     group.bench_function("empty_body", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| HttpResponseBuilder::new(&body_builder).build().unwrap())(iters)
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).build().unwrap())
         });
     });
 
@@ -35,7 +35,9 @@ fn bodies_benchmarks(c: &mut Criterion) {
     group.bench_function("text_body", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap())(iters)
+            time_sample(iters, || {
+                HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap()
+            })
         });
     });
 
@@ -48,7 +50,7 @@ fn bodies_benchmarks(c: &mut Criterion) {
     group.bench_function("json_body_owned", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())(iters)
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())
         });
     });
 
@@ -61,7 +63,7 @@ fn bodies_benchmarks(c: &mut Criterion) {
     group.bench_function("json_body_borrowed", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())(iters)
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())
         });
     });
 

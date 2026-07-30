@@ -37,7 +37,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("retry-no-telemetry", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input)))(iters)
+            time_sample(iters, || block_on(service.execute(Input)))
         });
     });
 
@@ -56,7 +56,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("retry-metrics", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input)))(iters)
+            time_sample(iters, || block_on(service.execute(Input)))
         });
     });
 
@@ -74,7 +74,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("retry-logs", |b| {
         b.iter_custom(|iters| {
             let _span = operation.measure_thread().iterations(iters);
-            time_sample(|| block_on(service.execute(Input)))(iters)
+            time_sample(iters, || block_on(service.execute(Input)))
         });
     });
 

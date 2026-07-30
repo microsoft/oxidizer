@@ -51,7 +51,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("new", |b| {
         b.iter_custom(|iters| {
             let _span = new_allocs.measure_thread().iterations(iters);
-            time_sample(BytesBuf::new)(iters)
+            time_sample(iters, BytesBuf::new)
         });
     });
 

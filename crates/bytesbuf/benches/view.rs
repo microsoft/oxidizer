@@ -63,7 +63,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("new", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(BytesView::new)(iters)
+            time_sample(iters, BytesView::new)
         });
     });
 
@@ -83,7 +83,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("extend_lifetime", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| test_data_as_view.extend_lifetime())(iters)
+            time_sample(iters, || test_data_as_view.extend_lifetime())
         });
     });
 
@@ -91,7 +91,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("extend_lifetime_many", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| many_as_view.extend_lifetime())(iters)
+            time_sample(iters, || many_as_view.extend_lifetime())
         });
     });
 
@@ -99,7 +99,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_near", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| test_data_as_view.range(black_box(0..10)))(iters)
+            time_sample(iters, || test_data_as_view.range(black_box(0..10)))
         });
     });
 
@@ -107,7 +107,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_far", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| test_data_as_view.range(black_box(12300..12310)))(iters)
+            time_sample(iters, || test_data_as_view.range(black_box(12300..12310)))
         });
     });
 
@@ -116,7 +116,7 @@ fn entrypoint(c: &mut Criterion) {
         // There are 10 spans in this sequence, with our slice being from the last one.
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample(|| ten_as_view.range(black_box(123_000..123_010)))(iters)
+            time_sample(iters, || ten_as_view.range(black_box(123_000..123_010)))
         });
     });
 
@@ -170,7 +170,7 @@ fn entrypoint(c: &mut Criterion) {
 
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_process().iterations(iters);
-            time_sample(|| view.to_bytes())(iters)
+            time_sample(iters, || view.to_bytes())
         });
     });
 
@@ -255,7 +255,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("to_bytes_many_spans", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_process().iterations(iters);
-            time_sample(|| many_as_view.to_bytes())(iters)
+            time_sample(iters, || many_as_view.to_bytes())
         });
     });
 
@@ -272,7 +272,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("clone_many", |b| {
         b.iter_custom(|iters| {
             let _span = allocs_op.measure_process().iterations(iters);
-            time_sample(|| many_as_view.clone())(iters)
+            time_sample(iters, || many_as_view.clone())
         });
     });
 

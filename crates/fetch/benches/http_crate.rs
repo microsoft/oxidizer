@@ -28,7 +28,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri", |b| {
         b.iter_custom(|iters| {
             let _measure = uri_allocs.measure_thread().iterations(iters);
-            time_sample(|| Request::builder().method(Method::GET).uri(get_uri()).body(()).unwrap())(iters)
+            time_sample(iters, || Request::builder().method(Method::GET).uri(get_uri()).body(()).unwrap())
         });
     });
 
@@ -36,7 +36,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri_raw", |b| {
         b.iter_custom(|iters| {
             let _measure = uri_raw_allocs.measure_thread().iterations(iters);
-            time_sample(|| Request::builder().method(Method::GET).uri(URI_STRING).body(()).unwrap())(iters)
+            time_sample(iters, || Request::builder().method(Method::GET).uri(URI_STRING).body(()).unwrap())
         });
     });
 
@@ -44,14 +44,14 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri_single_header", |b| {
         b.iter_custom(|iters| {
             let _measure = single_header_allocs.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 Request::builder()
                     .method(Method::GET)
                     .uri(get_uri())
                     .header(CONTENT_LENGTH, HeaderValue::from_static("0"))
                     .body(())
                     .unwrap()
-            })(iters)
+            })
         });
     });
 
@@ -59,7 +59,7 @@ fn entry(c: &mut Criterion) {
     group.bench_function("uri_two_headers", |b| {
         b.iter_custom(|iters| {
             let _measure = two_headers_allocs.measure_thread().iterations(iters);
-            time_sample(|| {
+            time_sample(iters, || {
                 Request::builder()
                     .method(Method::GET)
                     .uri(get_uri())
@@ -67,7 +67,7 @@ fn entry(c: &mut Criterion) {
                     .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
                     .body(())
                     .unwrap()
-            })(iters)
+            })
         });
     });
 
