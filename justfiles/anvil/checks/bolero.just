@@ -56,7 +56,7 @@ anvil-bolero: anvil-bolero-validate-prereqs
     }
     # `cargo bolero list` emits one JSON object per target on stdout;
     # we want the set of (package, test) pairs over the affected set.
-    $targetsJson = & cargo bolero list @bareArgs 2>$null
+    $targetsJson = & cargo '+{{ rust_nightly }}' bolero list @bareArgs 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'anvil-bolero: bolero list failed; assuming no targets'
         exit 0

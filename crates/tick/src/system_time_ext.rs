@@ -23,15 +23,15 @@ pub trait SystemTimeExt: sealed::Sealed {
     #[cfg(any(feature = "fmt", test))]
     fn display_iso_8601(&self) -> impl std::fmt::Display;
 
-    /// Returns a value that formats the [`SystemTime`] in the ECMAScript Date Time String Format.
+    /// Formats the [`SystemTime`] in the ECMAScript Date Time String Format.
     ///
     /// For years `0000` through `9999` the output has the fixed 24-character shape
     /// `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to millisecond precision. See
     /// [`EcmaScript`][crate::fmt::EcmaScript] for details.
     ///
-    /// Times outside the valid range (before year -9999 or after year 9999) are saturated
-    /// to the nearest boundary. Saturating below the minimum yields a negative year, which
-    /// renders in the wider ECMAScript expanded-year form rather than the fixed 24-character shape.
+    /// Times outside the supported timestamp range are saturated to the nearest
+    /// boundary. The lower boundary has a negative year and renders in the wider
+    /// ECMAScript expanded-year form rather than the fixed 24-character shape.
     ///
     /// # Examples
     ///

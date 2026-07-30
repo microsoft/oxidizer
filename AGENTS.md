@@ -4,7 +4,7 @@ Code in this repository should follow the guidelines specified in the [Microsoft
 
 ## README Files
 
-Crate README files are auto-generated via `just readme`. Do not manually update them.
+Crate README files are auto-generated via `just readme`. Do not manually update them. Because they are generated, do not edit them by hand and do not raise their formatting, wording, or casing (for example the title-cased crate name) as issues in code review - such content is not authored here and is regenerated from the crate's doc comments.
 
 ## Executing `just` commands
 

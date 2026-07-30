@@ -6,7 +6,6 @@ use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 use crate::Error;
-use crate::fmt::{EcmaScript, Iso8601, Rfc2822};
 
 /// A system time represented as the number of whole seconds since the Unix epoch.
 ///
@@ -29,6 +28,22 @@ use crate::fmt::{EcmaScript, Iso8601, Rfc2822};
 /// # Leap seconds
 ///
 /// This value represents the number of non-leap seconds since the Unix epoch.
+///
+/// # Representable range
+///
+/// The offset from the Unix epoch is unsigned, so this type spans
+/// [`UnixSeconds::UNIX_EPOCH`] (`0`) through [`UnixSeconds::MAX`] (`253402207200`). A
+/// [`SystemTime`] before the Unix epoch is rejected rather than clamped.
+///
+/// ```
+/// use std::time::{Duration, SystemTime};
+///
+/// use tick::fmt::UnixSeconds;
+///
+/// let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+///
+/// UnixSeconds::try_from(before_epoch).unwrap_err();
+/// ```
 ///
 /// # Examples
 ///
@@ -53,15 +68,14 @@ use crate::fmt::{EcmaScript, Iso8601, Rfc2822};
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UnixSeconds(pub(super) Duration);
+pub struct UnixSeconds(Duration);
 
 crate::thread_aware_move!(UnixSeconds);
 
 impl UnixSeconds {
     /// The largest value that can be represented by `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `9999-12-30T22:00:00Z`, the
-    /// whole-second floor of the maximum jiff timestamp.
+    /// This represents `253402207200`, or `9999-12-30T22:00:00Z`.
     #[expect(
         clippy::duration_suboptimal_units,
         reason = "UnixSeconds represents whole seconds since the Unix epoch, so seconds is the natural unit, matching to_secs() and Display"
@@ -70,7 +84,8 @@ impl UnixSeconds {
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`.
+    /// This represents a Unix system time of `1 January 1970 00:00:00 UTC`. Because the
+    /// offset from the epoch is unsigned, this is also the smallest representable value.
     pub const UNIX_EPOCH: Self = Self(Duration::ZERO);
 
     /// Creates a new `UnixSeconds` from the given number of seconds since the Unix epoch.
@@ -139,7 +154,9 @@ impl Display for UnixSeconds {
 
 impl From<UnixSeconds> for SystemTime {
     fn from(value: UnixSeconds) -> Self {
-        Self::UNIX_EPOCH + value.0
+        Self::UNIX_EPOCH
+            .checked_add(value.0)
+            .expect("`UnixSeconds::MAX` is year 9999, which every platform's `SystemTime` can represent")
     }
 }
 
@@ -162,25 +179,9 @@ impl TryFrom<SystemTime> for UnixSeconds {
     type Error = crate::Error;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH).unwrap_or(Duration::ZERO))
-    }
-}
-
-impl From<Rfc2822> for UnixSeconds {
-    fn from(value: Rfc2822) -> Self {
-        Self::canonicalize(value.to_unix_epoch_duration())
-    }
-}
-
-impl From<Iso8601> for UnixSeconds {
-    fn from(value: Iso8601) -> Self {
-        Self::canonicalize(value.to_unix_epoch_duration())
-    }
-}
-
-impl From<EcmaScript> for UnixSeconds {
-    fn from(value: EcmaScript) -> Self {
-        Self::canonicalize(value.to_unix_epoch_duration())
+        // Instants before the Unix epoch are rejected rather than clamped: the offset is
+        // unsigned, so there is no honest way to represent them.
+        Self::try_from(value.duration_since(SystemTime::UNIX_EPOCH)?)
     }
 }
 
@@ -214,7 +215,29 @@ mod tests {
 
     use super::*;
 
-    static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, From<Iso8601>, FromStr);
+    static_assertions::assert_impl_all!(UnixSeconds: Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TryFrom<SystemTime>, FromStr);
+
+    #[test]
+    fn unix_epoch_is_the_smallest_value() {
+        assert_eq!(UnixSeconds::UNIX_EPOCH.to_secs(), 0);
+        assert_eq!(SystemTime::from(UnixSeconds::UNIX_EPOCH), SystemTime::UNIX_EPOCH);
+        assert!(UnixSeconds::UNIX_EPOCH < UnixSeconds::MAX);
+    }
+
+    #[test]
+    fn from_pre_epoch_system_time_is_rejected() {
+        // The offset is unsigned, so a pre-epoch instant has no representation and is
+        // rejected. AB#7661495.
+        let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+
+        UnixSeconds::try_from(before_epoch).unwrap_err();
+
+        // The epoch itself and later instants are accepted.
+        assert_eq!(UnixSeconds::try_from(SystemTime::UNIX_EPOCH).unwrap(), UnixSeconds::UNIX_EPOCH);
+
+        let after_epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        assert_eq!(UnixSeconds::try_from(after_epoch).unwrap().to_secs(), 1);
+    }
 
     #[test]
     fn max_is_jiff_max_floored_to_whole_seconds() {
@@ -311,17 +334,15 @@ mod tests {
     }
 
     #[test]
-    fn iso_8601_roundtrip_with_timezone() {
+    fn round_trips_through_system_time() {
         let unix_seconds: UnixSeconds = "9999".parse().unwrap();
-        let iso: Iso8601 = unix_seconds.into();
+        let system_time: SystemTime = unix_seconds.into();
 
-        assert_eq!(iso.to_string(), "1970-01-01T02:46:39Z");
+        assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(9999));
+        assert_eq!(UnixSeconds::try_from(system_time).unwrap(), unix_seconds);
 
-        let iso: Iso8601 = UnixSeconds::MAX.into();
-        assert_eq!(iso.to_string(), "9999-12-30T22:00:00Z");
-
-        let iso: Iso8601 = UnixSeconds::UNIX_EPOCH.into();
-        assert_eq!(iso, Iso8601::UNIX_EPOCH);
+        let max = UnixSeconds::try_from(SystemTime::from(UnixSeconds::MAX)).unwrap();
+        assert_eq!(max, UnixSeconds::MAX);
     }
 
     #[test]
@@ -339,14 +360,5 @@ mod tests {
 
         assert_eq!(a, b);
         assert_eq!(a.to_string(), "9999");
-    }
-
-    #[test]
-    fn from_ecmascript_floors_to_whole_seconds() {
-        let ecma: EcmaScript = "1970-01-01T00:00:08.123Z".parse().unwrap();
-        let unix: UnixSeconds = ecma.into();
-
-        assert_eq!(unix, UnixSeconds::from_secs(8).unwrap());
-        assert_eq!(unix.to_string(), "8");
     }
 }
