@@ -25,7 +25,6 @@ fn iters_per_batch(batch_size: BatchSize, iters: u64) -> u64 {
     match batch_size {
         BatchSize::SmallInput => div_ceil(iters, 10),
         BatchSize::LargeInput => div_ceil(iters, 1000),
-        BatchSize::PerIteration => 1,
         BatchSize::NumBatches(batches) => div_ceil(iters, batches),
         BatchSize::NumIterations(batch_iters) => batch_iters.max(1),
         _ => 1,
@@ -49,7 +48,7 @@ pub fn time_sample_with_batched_inputs<T, R, M>(
         let mut inputs = (0..current_batch).map(|_| setup()).collect::<Vec<_>>();
         let mut outputs = Vec::with_capacity(inputs.len());
 
-        let _measurement = measure(current_batch);
+        let measurement = measure(current_batch);
         let start = Instant::now();
 
         for input in &mut inputs {
@@ -57,11 +56,16 @@ pub fn time_sample_with_batched_inputs<T, R, M>(
         }
 
         elapsed += start.elapsed();
-        drop(_measurement);
+        drop(measurement);
         drop(outputs);
         drop(inputs);
 
-        remaining -= current_batch;
+        let previous_remaining = remaining;
+        remaining = remaining.saturating_sub(current_batch);
+        debug_assert!(
+            remaining < previous_remaining,
+            "current_batch is never zero because iters_per_batch always returns at least one",
+        );
     }
 
     elapsed
