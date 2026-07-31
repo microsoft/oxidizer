@@ -23,6 +23,10 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
         exit 0
     }
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $namesById = @{}
+    foreach ($p in $meta.packages) { $namesById[$p.id] = $p.name }
     # Drop coverage-opted-out packages from the measured set. A crate that
     # is entirely `#![cfg_attr(coverage_nightly, coverage(off))]` (e.g. a
     # script-only crate) compiles to a test binary with no __llvm_covmap,
@@ -35,20 +39,19 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     # so we skip exactly like the empty-affected ('--skip') case.
     if ($pkg -contains '--package') {
         $optedOut = @(
-            (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages |
+            $meta.packages |
                 Where-Object { $null -ne $_.metadata.'coverage-gate'.'min-lines-percent' -and [double]$_.metadata.'coverage-gate'.'min-lines-percent' -eq 0 } |
                 ForEach-Object { $_.name }
         )
         if ($optedOut.Count -gt 0) {
             $filtered = [System.Collections.Generic.List[string]]::new()
             for ($i = 0; $i -lt $pkg.Count; $i++) {
-                # Impact emits version-qualified specs (name@version);
-                # compare the bare name against the opt-out set, but keep
-                # the full name@version token in $pkg so the llvm-cov
-                # measurement below resolves unambiguously.
-                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains (($pkg[$i + 1] -split '@', 2)[0])) {
-                    $i++
-                    continue
+                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
+                    $name = $namesById[$pkg[$i + 1]]
+                    if ($optedOut -contains $name) {
+                        $i++
+                        continue
+                    }
                 }
                 $filtered.Add($pkg[$i])
             }
@@ -129,20 +132,19 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     # workflows -- the Codecov upload stays purely for display, not the gate.
     #
     # Scope the gate to the SAME package set we measured. When impact
-    # scoping is active, $pkg holds `--package X@ver ...` (already opt-out
-    # filtered above); pass those through so the gate only gates packages
-    # that were actually instrumented -- otherwise unmeasured members would
+    # scoping is active, $pkg holds source-qualified package specs
+    # (already opt-out filtered above); pass them through so the gate only
+    # gates packages actually instrumented; otherwise unmeasured members
     # report NO DATA and fail the gate. When unscoped, $pkg is `--workspace`
     # (no gate flag); drop it so the gate defaults to every member.
     #
-    # cargo-coverage-gate keys on bare package names from cargo metadata, so
-    # strip the @version qualifier the measurement used for disambiguation.
+    # cargo-coverage-gate keys on bare package names from cargo metadata.
     $gateArgs = [System.Collections.Generic.List[string]]::new()
     for ($i = 0; $i -lt $pkg.Count; $i++) {
         if ($pkg[$i] -eq '--workspace') { continue }
         if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
             $gateArgs.Add('--package')
-            $gateArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
+            $gateArgs.Add($namesById[$pkg[$i + 1]])
             $i++
             continue
         }

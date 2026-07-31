@@ -56,16 +56,18 @@ anvil-loom: anvil-loom-validate-prereqs
     }
     $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $namesById = @{}
+    foreach ($p in $meta.packages) { $namesById[$p.id] = $p.name }
 
     # Optional impact-scoping: recover bare package names from the
-    # impact step's version-qualified `--package name@version` pairs.
+    # impact step's source-qualified package specs.
     $affected = $null
     if ($env:ANVIL_INCLUDE_AFFECTED) {
         $tokens = @(-split $env:ANVIL_INCLUDE_AFFECTED)
         $affected = @()
         for ($i = 0; $i -lt $tokens.Count; $i++) {
             if ($tokens[$i] -eq '--package' -and ($i + 1) -lt $tokens.Count) {
-                $affected += ($tokens[$i + 1] -split '@', 2)[0]
+                $affected += $namesById[$tokens[$i + 1]]
                 $i++
             }
         }
