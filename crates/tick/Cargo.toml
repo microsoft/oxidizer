@@ -48,7 +48,7 @@ futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
-thread_aware = { workspace = true }
+thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]

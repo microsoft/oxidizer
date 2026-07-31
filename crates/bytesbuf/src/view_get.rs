@@ -3,8 +3,8 @@
 
 //! We separate out all the consumption methods for ease of maintenance.
 
-use std::mem::MaybeUninit;
-use std::ptr;
+use core::mem::MaybeUninit;
+use core::ptr;
 
 use crate::BytesView;
 
@@ -66,6 +66,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -75,6 +77,8 @@ impl BytesView {
     /// assert_eq!(view.get_byte(), b'B');
     /// assert_eq!(view.get_byte(), b'C');
     /// assert!(view.is_empty());
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -115,6 +119,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -124,7 +130,9 @@ impl BytesView {
     /// view.copy_to_slice(&mut buffer);
     ///
     /// assert_eq!(&buffer, b"Hello");
-    /// assert_eq!(view.len(), 8); // ", world!" remains
+    /// assert_eq!(view.len(), 8);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -158,6 +166,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use std::mem::MaybeUninit;
     ///
@@ -171,6 +181,8 @@ impl BytesView {
     /// // SAFETY: The buffer has been fully initialized by copy_to_uninit_slice.
     /// let buffer: [u8; 5] = unsafe { std::mem::transmute(buffer) };
     /// assert_eq!(&buffer, b"Hello");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics

@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use alloc::sync::Arc;
+use core::ops::{Deref, DerefMut};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
 
-/// Allows transferring a value that doesn't implement [`ThreadAware`].
+/// Allows transferring a value that doesn't implement [`trait@ThreadAware`].
 ///
-/// Since the [`ThreadAware`] trait is not commonly implemented, this wrapper can
-/// be used to allow transferring values that don't implement [`ThreadAware`].
+/// Since the [`trait@ThreadAware`] trait is not commonly implemented, this wrapper can
+/// be used to allow transferring values that don't implement [`trait@ThreadAware`].
 ///
 /// # Performance Considerations
 ///
@@ -18,13 +18,13 @@ use crate::affinity::Affinity;
 /// as is, if it contains shared references to data other threads may use,
 /// it can introduce contention, resulting in performance impact.
 ///
-/// You should never wrap types that are immediately [`ThreadAware`], hence its
+/// You should never wrap types that are immediately [`trait@ThreadAware`], hence its
 /// name `Unaware`.
 ///
-/// In addition, if the wrapped value contains an [`std::sync::Arc`] with interior mutability
-/// somewhere inside, this wrapper should not be used, and an [`Arc`](crate::Arc) with a
-/// [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma)
-/// with independent initialization per affinity is a better option.
+/// In addition, if the wrapped value contains an [`alloc::sync::Arc`] with interior mutability
+/// somewhere inside, this wrapper should not be used. With the `std` feature, a thread-aware
+/// [`Arc`](crate::Arc) using [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma) with
+/// independent initialization per affinity is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
 pub struct Unaware<T>(pub T);
@@ -64,7 +64,7 @@ impl<T> Unaware<T> {
     /// Converts an `Arc<Unaware<T>>` into an `Arc<T>`.
     pub fn into_arc(self: Arc<Self>) -> Arc<T> {
         // SAFETY: `Unaware` is a transparent wrapper around `T`,
-        unsafe { std::mem::transmute(self) }
+        unsafe { core::mem::transmute(self) }
     }
 }
 
@@ -72,8 +72,8 @@ impl<T> Unaware<T> {
 ///
 /// # Performance Considerations
 ///
-/// This function should not be called on types that are [`ThreadAware`] or contain
-/// an [`std::sync::Arc`], compare the [`Unaware`] documentation.
+/// This function should not be called on types that are [`trait@ThreadAware`] or contain
+/// an [`alloc::sync::Arc`], compare the [`Unaware`] documentation.
 pub const fn unaware<T>(value: T) -> Unaware<T> {
     Unaware(value)
 }

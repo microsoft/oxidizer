@@ -3,8 +3,21 @@
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(test), no_std)]
 
 //! Essential building blocks for thread-per-core libraries.
+//!
+//! # Crate features
+//!
+//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//!   hosted-only type implementations.
+//! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
+//! * **`threads`** enables the `registry` module and implies `std`.
+//! * Disable default features for `#![no_std]` environments. The [`ThreadAware`] trait, affinity
+//!   identifiers, closures, wrappers, and implementations for `alloc` types remain available.
+//!   Enable `derive` explicitly if the derive macro is needed.
+//!
+//! `no_std` environments require `alloc` and pointer-width atomics.
 //!
 //! This crate allows you to express migrations between NUMA nodes, threads, or specific CPU cores.
 //! It can serve as a foundation for building components and runtimes that operate across multiple
@@ -32,8 +45,9 @@
 //! so the macro should 'just work' on most compounds of built-ins.
 //!
 //! External crates might often not implement [`ThreadAware`]. In many of these cases using our
-//! [`thread_aware::Arc`](Arc) offers a convenient solution: It combines an upstream
-//! [`std::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and implements [`ThreadAware`] for it. For
+//! [`thread_aware::Arc`](Arc) offers a convenient solution when the `std` feature is enabled: it
+//! combines an upstream [`alloc::sync::Arc`] with a relocation [`Strategy`](storage::Strategy), and
+//! implements [`ThreadAware`] for it. For
 //! example, while an `Arc<Foo, PerProcess>` effectively acts as vanilla `Arc`, an
 //! `Arc<Foo, PerCore>` ensures a separate `Foo` is available any time the types moves a core boundary.
 //!
@@ -81,16 +95,21 @@
 //! ## Provided Implementations
 //!
 //! [`ThreadAware`] is implemented for many standard library types, including primitive types, Vec,
-//! String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`std::sync::Arc`]
+//! String, Option, Result, tuples, etc. However, it's explicitly not implemented for [`alloc::sync::Arc`]
 //! as that type implies some level of cross-thread sharing and thus needs special attention when used
 //! from types that implement [`ThreadAware`].
 //!
 //! # Features
 //!
+//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//!   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
+//!   requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
-//!   environments: `default-features = false`.
-//! * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
+//!   environments. For derive support without `std`, use
+//!   `default-features = false, features = ["derive"]`.
+//! * **`threads`**: Enables features mainly used by async runtimes for OS interactions and implies
+//!   `std`.
 //!
 //! ## 3rd-party crate impls
 //!
@@ -108,7 +127,7 @@
 //! * `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
 //!
 //! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-//! * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
+//! * **`http`**: Enables `std` and provides impls for `http::StatusCode`, `http::Method`, `http::Version`,
 //!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
 //!   `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
 //!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
@@ -118,12 +137,15 @@
 //!
 //! # Examples
 //!
-//! ## Deriving [`ThreadAware`]
+//! ## Using the [`ThreadAware` derive macro](thread_aware_macros::ThreadAware)
 //!
 //! When the `derive` feature (enabled by default) is active you can simply
-//! derive [`ThreadAware`] instead of writing the implementation manually.
+//! use the [`ThreadAware` derive macro](thread_aware_macros::ThreadAware) instead of writing the
+//! implementation manually.
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "derive")] {
 //! use thread_aware::ThreadAware;
 //!
 //! #[derive(Debug, Clone, ThreadAware)]
@@ -131,15 +153,19 @@
 //!     x: i32,
 //!     y: i32,
 //! }
+//! # }
+//! # }
 //! ```
 //!
 //! ## Enabling [`ThreadAware`] via `Arc<T, S>`
 //!
-//! For types containing fields not [`ThreadAware`], you can use [`Arc`] to specify a
-//! strategy, and wrap them in an [`Arc`] that implements the trait.
+//! With the `std` feature, types containing fields not [`ThreadAware`] can use [`Arc`] to specify a
+//! strategy and wrap them in an [`Arc`] that implements the trait.
 //!
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! use thread_aware::{Arc, PerCore, ThreadAware};
 //! # #[derive(Debug, Default)]
 //! # struct Client;
@@ -158,11 +184,21 @@
 //!         }
 //!     }
 //! }
+//! # }
+//! # }
 //! ```
+//!
+//! [`ThreadAware`]: crate::core::ThreadAware
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
+extern crate alloc;
+#[cfg(all(feature = "std", not(test)))]
+extern crate std;
+
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod cell;
 mod core;
 mod impls;
@@ -229,5 +265,7 @@ pub use core::ThreadAware;
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 pub use wrappers::{Unaware, unaware};

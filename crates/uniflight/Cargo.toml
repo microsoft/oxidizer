@@ -29,7 +29,7 @@ ahash = { workspace = true, default-features = false, features = ["std"] }
 async-once-cell = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true, default-features = false, features = ["std", "alloc"] }
-thread_aware = { workspace = true }
+thread_aware = { workspace = true, default-features = false, features = ["std"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }

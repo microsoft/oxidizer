@@ -32,7 +32,7 @@ cachet_tier = { workspace = true }
 foldhash = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 ohno = { workspace = true }
-thread_aware = { workspace = true, features = ["derive"] }
+thread_aware = { workspace = true, features = ["derive", "std"] }
 
 [dev-dependencies]
 criterion = { workspace = true }

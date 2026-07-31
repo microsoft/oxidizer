@@ -29,7 +29,7 @@ futures-stream = ["dep:futures-core"]
 test-util = ["bytesbuf/test-util"]
 
 [dependencies]
-bytesbuf = { workspace = true }
+bytesbuf = { workspace = true, features = ["std"] }
 futures-core = { workspace = true, optional = true }
 ohno = { workspace = true }
 trait-variant = { workspace = true }

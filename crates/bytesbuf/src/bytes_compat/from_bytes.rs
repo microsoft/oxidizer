@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::mem::MaybeUninit;
-use std::num::NonZero;
-use std::ptr::NonNull;
-use std::sync::atomic::{self, AtomicUsize};
+#[cfg(not(test))]
+use alloc::boxed::Box;
+use core::mem::MaybeUninit;
+use core::num::NonZero;
+use core::ptr::NonNull;
+use core::sync::atomic::{self, AtomicUsize};
 
 use bytes::Bytes;
 use smallvec::SmallVec;

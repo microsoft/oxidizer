@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
+
 use thread_aware::ThreadAware;
 
 use crate::mem::Memory;
