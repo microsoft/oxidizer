@@ -423,11 +423,7 @@ mod tests {
             bindings
                 .expect_set_status_callback()
                 .withf(move |handle, callback, flags| {
-                    *handle == raw
-                        && callback
-                            .zip(expected_callback)
-                            .is_some_and(|(actual, expected)| std::ptr::fn_addr_eq(actual, expected))
-                        && *flags == SESSION_NOTIFICATION_FLAGS
+                    *handle == raw && status_callback_matches(*callback, expected_callback) && *flags == SESSION_NOTIFICATION_FLAGS
                 })
                 .once()
                 .in_sequence(&mut sequence)
@@ -444,6 +440,24 @@ mod tests {
         }
 
         bindings
+    }
+
+    fn status_callback_matches(actual: StatusCallback, expected: StatusCallback) -> bool {
+        let (Some(actual), Some(expected)) = (actual, expected) else {
+            return false;
+        };
+
+        #[cfg(miri)]
+        {
+            // Miri may materialize distinct shims for the same function item.
+            let _ = (actual, expected);
+            true
+        }
+
+        #[cfg(not(miri))]
+        {
+            std::ptr::fn_addr_eq(actual, expected)
+        }
     }
 
     fn setup_result(failure: Option<FailurePoint>, point: FailurePoint, raw: RawHandle) -> crate::error::Result<RawHandle> {
