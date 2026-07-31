@@ -9,7 +9,7 @@ use std::iter;
 use std::num::NonZero;
 
 use alloc_tracker::{Allocator, Session};
-use benchmarking::{time_sample, time_sample_with_batched_inputs};
+use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::BytesView;
 use bytesbuf::mem::BlockSize;
 use bytesbuf::mem::testing::FixedBlockMemory;
@@ -123,11 +123,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("consume_all_chunks");
     group.bench_function("consume_all_chunks", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::SmallInput,
-                || test_data_as_view.clone(),
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| test_data_as_view.clone()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |seq| {
                     seq.consume_all_slices(|chunk| {
                         _ = black_box(chunk);
@@ -266,11 +265,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("from_many");
     group.bench_function("from_many", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::SmallInput,
-                || many.clone(),
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| many.clone()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |many_clones| BytesView::from_views(black_box(many_clones.iter().cloned())),
             )
         });
@@ -287,11 +285,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("from_max_inline");
     group.bench_function("from_max_inline", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::SmallInput,
-                || max_inline.clone(),
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| max_inline.clone()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |max_inline_clones| BytesView::from_views(black_box(max_inline_clones.iter().cloned())),
             )
         });

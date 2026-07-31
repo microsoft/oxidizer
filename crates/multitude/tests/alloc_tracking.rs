@@ -42,11 +42,13 @@ fn quiet_session() -> Session {
 }
 
 fn total_bytes_allocated(session: &Session, operation_name: &str) -> u64 {
+    let missing_operation = format!("operation {operation_name:?} must match a name registered with Session::operation on this session");
+
     session
         .to_report()
         .operations()
         .find_map(|(name, operation)| (name == operation_name).then(|| operation.total_bytes_allocated()))
-        .expect("measured operation must be present in the session report")
+        .expect(&missing_operation)
 }
 
 /// After [`Arena::reset`], re-allocating the same workload reuses the arena's

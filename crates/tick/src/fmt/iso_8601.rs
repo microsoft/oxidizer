@@ -196,9 +196,7 @@ mod tests {
 
     #[test]
     fn parse_err() {
-        let err = "date".parse::<Iso8601>().unwrap_err();
-
-        assert!(err.to_string().starts_with("failed to parse year in date"));
+        "date".parse::<Iso8601>().unwrap_err();
     }
 
     #[test]

@@ -80,6 +80,7 @@ loom = { workspace = true }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
+benchmarking = { path = "../benchmarking" }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
 # because bolero-libfuzzer 0.13.0 references `bolero_engine::any::run`

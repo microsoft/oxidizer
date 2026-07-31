@@ -52,11 +52,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || (many_as_view.clone(), [0u8; WORKING_SLICE_LEN]));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |(mut bytes, mut target)| {
-                bytes.copy_to_slice(&mut target);
-                black_box(target);
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |(bytes, target)| {
+                    bytes.copy_to_slice(target);
+                    black_box(target);
+                },
+            )
         });
     });
 
@@ -64,11 +67,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || (many_as_view.clone(), [0u8; WORKING_SLICE_LEN]));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |(mut bytes, mut target)| {
-                Buf::copy_to_slice(&mut bytes, &mut target);
-                black_box(target);
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |(bytes, target)| {
+                    Buf::copy_to_slice(bytes, target);
+                    black_box(target);
+                },
+            )
         });
     });
 
@@ -76,11 +82,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("uninit_slice", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || (many_as_view.clone(), [MaybeUninit::<u8>::uninit(); WORKING_SLICE_LEN]));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |(mut bytes, mut target)| {
-                bytes.copy_to_uninit_slice(&mut target);
-                black_box(target);
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |(bytes, target)| {
+                    bytes.copy_to_uninit_slice(target);
+                    black_box(target);
+                },
+            )
         });
     });
 
@@ -94,11 +103,14 @@ fn entrypoint(c: &mut Criterion) {
             let buffers = prepared_inputs(iters, || memory.reserve(WORKING_SLICE_LEN));
             let data = [0xCD_u8; WORKING_SLICE_LEN];
 
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_slice(data);
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_slice(data);
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -108,11 +120,14 @@ fn entrypoint(c: &mut Criterion) {
             let buffers = prepared_inputs(iters, || memory.reserve(WORKING_SLICE_LEN));
             let data = [0xCD_u8; WORKING_SLICE_LEN];
 
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put(&mut buf, &data[..]);
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put(buf, &data[..]);
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -120,11 +135,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_bytes_view", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, BytesBuf::new);
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_bytes(test_data_view.clone());
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_bytes(test_data_view.clone());
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -136,11 +154,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_byte", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(1));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_byte(black_box(0xAB));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_byte(black_box(0xAB));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -148,11 +169,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_byte_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(1));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u8(&mut buf, black_box(0xAB));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u8(buf, black_box(0xAB));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -164,11 +188,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_byte_repeated", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(WORKING_SLICE_LEN));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_byte_repeated(black_box(0xCD), WORKING_SLICE_LEN);
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_byte_repeated(black_box(0xCD), WORKING_SLICE_LEN);
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -176,11 +203,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(WORKING_SLICE_LEN));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_bytes(&mut buf, black_box(0xCD), WORKING_SLICE_LEN);
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_bytes(buf, black_box(0xCD), WORKING_SLICE_LEN);
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -192,11 +222,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u16_le", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(2));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u16_le(black_box(0xABCD));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u16_le(black_box(0xABCD));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -204,11 +237,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u16_le_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(2));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u16_le(&mut buf, black_box(0xABCD));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u16_le(buf, black_box(0xABCD));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -216,11 +252,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u32_le", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(4));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u32_le(black_box(0xABCD_EF01));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u32_le(black_box(0xABCD_EF01));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -228,11 +267,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u32_le_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(4));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u32_le(&mut buf, black_box(0xABCD_EF01));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u32_le(buf, black_box(0xABCD_EF01));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -240,11 +282,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u64_le", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u64_le(black_box(0xABCD_EF01_2345_6789));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u64_le(black_box(0xABCD_EF01_2345_6789));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -252,11 +297,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u64_le_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u64_le(&mut buf, black_box(0xABCD_EF01_2345_6789));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u64_le(buf, black_box(0xABCD_EF01_2345_6789));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -264,11 +312,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_f64_le", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_f64_le(black_box(f64::consts::PI));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_f64_le(black_box(f64::consts::PI));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -276,11 +327,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_f64_le_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_f64_le(&mut buf, black_box(f64::consts::PI));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_f64_le(buf, black_box(f64::consts::PI));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -288,11 +342,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u16_be", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(2));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u16_be(black_box(0xABCD));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u16_be(black_box(0xABCD));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -300,11 +357,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u16_be_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(2));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u16(&mut buf, black_box(0xABCD));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u16(buf, black_box(0xABCD));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -312,11 +372,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u32_be", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(4));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u32_be(black_box(0xABCD_EF01));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u32_be(black_box(0xABCD_EF01));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -324,11 +387,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u32_be_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(4));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u32(&mut buf, black_box(0xABCD_EF01));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u32(buf, black_box(0xABCD_EF01));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -336,11 +402,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u64_be", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_u64_be(black_box(0xABCD_EF01_2345_6789));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_u64_be(black_box(0xABCD_EF01_2345_6789));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -348,11 +417,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_u64_be_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_u64(&mut buf, black_box(0xABCD_EF01_2345_6789));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_u64(buf, black_box(0xABCD_EF01_2345_6789));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -360,11 +432,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_f64_be", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                buf.put_f64_be(black_box(f64::consts::PI));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    buf.put_f64_be(black_box(f64::consts::PI));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -372,11 +447,14 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("put_f64_be_bytes", |b| {
         b.iter_custom(|iters| {
             let buffers = prepared_inputs(iters, || memory.reserve(8));
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(buffers, |mut buf| {
-                BufMut::put_f64(&mut buf, black_box(f64::consts::PI));
-                black_box(buf);
-            })
+            time_sample_with_inputs(
+                buffers,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |buf| {
+                    BufMut::put_f64(buf, black_box(f64::consts::PI));
+                    black_box(buf);
+                },
+            )
         });
     });
 
@@ -388,10 +466,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_byte", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_byte());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_byte());
+                },
+            )
         });
     });
 
@@ -399,10 +480,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u8_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u8());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u8());
+                },
+            )
         });
     });
 
@@ -414,10 +498,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u16_le", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u16_le());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u16_le());
+                },
+            )
         });
     });
 
@@ -425,8 +512,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u16_le_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u16_le(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u16_le(bytes)),
+            )
         });
     });
 
@@ -434,10 +524,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u32_le", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u32_le());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u32_le());
+                },
+            )
         });
     });
 
@@ -445,8 +538,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u32_le_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u32_le(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u32_le(bytes)),
+            )
         });
     });
 
@@ -454,10 +550,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u64_le", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u64_le());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u64_le());
+                },
+            )
         });
     });
 
@@ -465,8 +564,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u64_le_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u64_le(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u64_le(bytes)),
+            )
         });
     });
 
@@ -474,10 +576,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_f64_le", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_f64_le());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_f64_le());
+                },
+            )
         });
     });
 
@@ -485,8 +590,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_f64_le_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_f64_le(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_f64_le(bytes)),
+            )
         });
     });
 
@@ -494,10 +602,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u16_be", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u16_be());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u16_be());
+                },
+            )
         });
     });
 
@@ -505,8 +616,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u16_be_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u16(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u16(bytes)),
+            )
         });
     });
 
@@ -514,10 +628,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u32_be", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u32_be());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u32_be());
+                },
+            )
         });
     });
 
@@ -525,8 +642,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u32_be_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u32(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u32(bytes)),
+            )
         });
     });
 
@@ -534,10 +654,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u64_be", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_u64_be());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_u64_be());
+                },
+            )
         });
     });
 
@@ -545,8 +668,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_u64_be_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_u64(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_u64(bytes)),
+            )
         });
     });
 
@@ -554,10 +680,13 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_f64_be", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| {
-                black_box(bytes.get_f64_be());
-            })
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| {
+                    black_box(bytes.get_f64_be());
+                },
+            )
         });
     });
 
@@ -565,8 +694,11 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("get_f64_be_bytes", |b| {
         b.iter_custom(|iters| {
             let inputs = prepared_inputs(iters, || many_as_view.clone());
-            let _span = allocs_op.measure_thread().iterations(iters);
-            time_sample_with_inputs(inputs, |mut bytes| black_box(Buf::get_f64(&mut bytes)))
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
+                |bytes| black_box(Buf::get_f64(bytes)),
+            )
         });
     });
 

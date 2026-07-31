@@ -486,6 +486,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 name = "benchmarking"
 version = "0.1.0"
 dependencies = [
+ "alloc_tracker",
  "criterion",
 ]
 
@@ -698,6 +699,7 @@ version = "0.10.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
+ "benchmarking",
  "bytesbuf",
  "cachet_memory",
  "cachet_service",
@@ -2728,6 +2730,7 @@ dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
  "allocator-api2 0.4.0",
+ "benchmarking",
  "bolero",
  "bumpalo",
  "bytemuck",

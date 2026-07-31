@@ -6,10 +6,10 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use benchmarking::{time_sample, time_sample_with_batched_inputs};
+use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use testing_aids::repeating_incrementing_bytes;
 
 criterion_group!(benches, entrypoint);
@@ -73,11 +73,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_tiny_cold");
     group.bench_function("fill_tiny_cold", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::LargeInput,
-                GlobalPool::new,
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |memory| {
                     let mut buf = memory.reserve(TINY);
                     buf.put_byte_repeated(66, TINY);
@@ -89,11 +88,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_1mb_cold");
     group.bench_function("fill_1mb_cold", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::LargeInput,
-                GlobalPool::new,
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |memory| {
                     let mut buf = memory.reserve(ONE_MB);
                     buf.put_byte_repeated(66, ONE_MB);
@@ -115,11 +113,10 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copied_from_slice_cold");
     group.bench_function("copied_from_slice_cold", |b| {
         b.iter_custom(|iters| {
-            time_sample_with_batched_inputs(
-                iters,
-                BatchSize::LargeInput,
-                GlobalPool::new,
-                |batch_iters| allocs_op.measure_thread().iterations(batch_iters),
+            let inputs = (0..iters).map(|_| GlobalPool::new()).collect();
+            time_sample_with_inputs(
+                inputs,
+                |sample_iters| allocs_op.measure_thread().iterations(sample_iters),
                 |memory| BytesView::copied_from_slice(&test_data, memory),
             )
         });

@@ -12,11 +12,13 @@ use routerama::query::{FromQuery, ToQuery};
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn total_bytes_allocated(session: &Session, operation_name: &str) -> u64 {
+    let missing_operation = format!("operation {operation_name:?} must match a name registered with Session::operation on this session");
+
     session
         .to_report()
         .operations()
         .find_map(|(name, operation)| (name == operation_name).then(|| operation.total_bytes_allocated()))
-        .expect("measured operation must be present in the session report")
+        .expect(&missing_operation)
 }
 
 #[derive(routerama::query::FromQuery, routerama::query::ToQuery)]

@@ -18,15 +18,24 @@ publish = false
 # public-API surface, so allow all external types.
 allowed_external_types = ["*"]
 
+# These dependencies are used only by rustdoc examples, which the unused
+# dependency scanners do not attribute.
+[package.metadata.cargo-machete]
+ignored = ["alloc_tracker", "criterion"]
+
+[package.metadata.cargo-udeps.ignore]
+development = ["alloc_tracker", "criterion"]
+
 # Benchmark-helper crate: it is exercised by benchmark targets rather than the
 # regular test suite, so it may legitimately produce no coverage data.
 [package.metadata.coverage-gate]
 min-lines-percent = 0
 
+[dev-dependencies]
+alloc_tracker = { workspace = true }
+criterion = { workspace = true }
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
 # <<< anvil-managed: anvil-lints
-
-[dependencies]
-criterion.workspace = true

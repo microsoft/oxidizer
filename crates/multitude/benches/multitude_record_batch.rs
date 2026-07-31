@@ -14,9 +14,9 @@
 use std::alloc::System;
 #[cfg(feature = "stats")]
 use std::hint::black_box;
-use std::time::Instant;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 #[path = "multitude_record_batch/shared.rs"]
@@ -47,11 +47,7 @@ fn decode(criterion: &mut Criterion) {
     group.bench_function("standard_vec", |bencher| {
         bencher.iter_custom(|iters| {
             let _span = standard_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                standard_vec_hot_path(&input);
-            }
-            start.elapsed()
+            time_sample(iters, || standard_vec_hot_path(&input))
         });
     });
     group.bench_function("arena_box_slice", |bencher| {
@@ -59,11 +55,7 @@ fn decode(criterion: &mut Criterion) {
         arena_box_slice_hot_path(&mut arena, &input);
         bencher.iter_custom(|iters| {
             let _span = box_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_box_slice_hot_path(&mut arena, &input);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_box_slice_hot_path(&mut arena, &input))
         });
     });
     group.bench_function("arena_vec_baseline", |bencher| {
@@ -71,11 +63,7 @@ fn decode(criterion: &mut Criterion) {
         arena_vec_baseline_hot_path(&mut arena, &input);
         bencher.iter_custom(|iters| {
             let _span = vec_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_vec_baseline_hot_path(&mut arena, &input);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_vec_baseline_hot_path(&mut arena, &input))
         });
     });
     group.finish();
@@ -113,22 +101,14 @@ fn reuse(criterion: &mut Criterion) {
         let mut state = reusable_vector_state();
         bencher.iter_custom(|iters| {
             let _span = repeated_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                repeated_no_reset_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || repeated_no_reset_iteration(&mut state))
         });
     });
     group.bench_function("reset_recreate", |bencher| {
         let mut state = reset_recreate_state();
         bencher.iter_custom(|iters| {
             let _span = reset_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                reset_recreate_hot_path(&mut state.arena, &state.input);
-            }
-            start.elapsed()
+            time_sample(iters, || reset_recreate_hot_path(&mut state.arena, &state.input))
         });
     });
     group.finish();
@@ -209,55 +189,35 @@ fn refresh_workload(criterion: &mut Criterion) {
         let mut state = standard_refresh_state();
         bencher.iter_custom(|iters| {
             let _span = standard_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                standard_refresh_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || standard_refresh_iteration(&mut state))
         });
     });
     group.bench_function("arena_vec_reset_global_select", |bencher| {
         let mut state = arena_vec_refresh_state();
         bencher.iter_custom(|iters| {
             let _span = vector_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_vec_refresh_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_vec_refresh_iteration(&mut state))
         });
     });
     group.bench_function("arena_each_reset_global_select", |bencher| {
         let mut state = arena_each_refresh_state();
         bencher.iter_custom(|iters| {
             let _span = streaming_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_each_refresh_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_each_refresh_iteration(&mut state))
         });
     });
     group.bench_function("arena_raw_each_reset_global_select", |bencher| {
         let mut state = arena_raw_each_refresh_state();
         bencher.iter_custom(|iters| {
             let _span = raw_streaming_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_raw_each_refresh_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_raw_each_refresh_iteration(&mut state))
         });
     });
     group.bench_function("arena_raw_index_reset_global_select", |bencher| {
         let mut state = arena_raw_index_refresh_state();
         bencher.iter_custom(|iters| {
             let _span = raw_index_allocations.measure_thread().iterations(iters);
-            let start = Instant::now();
-            for _ in 0..iters {
-                arena_raw_index_refresh_iteration(&mut state);
-            }
-            start.elapsed()
+            time_sample(iters, || arena_raw_index_refresh_iteration(&mut state))
         });
     });
     group.finish();
