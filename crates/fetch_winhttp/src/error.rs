@@ -220,7 +220,7 @@ mod tests {
     use ohno::Labeled as _;
     use recoverable::{Recovery, RecoveryInfo};
 
-    use super::{WinHttpError, WinHttpOperation, raw_win32_from_hresult};
+    use super::{ERROR_MAPPINGS, ErrorClass, WinHttpError, WinHttpOperation, raw_win32_from_hresult};
 
     #[test]
     fn extracts_raw_win32_code_from_hresult() {
@@ -245,20 +245,35 @@ mod tests {
     }
 
     #[test]
-    fn maps_documented_error_families() {
+    fn maps_every_documented_error() {
+        for mapping in ERROR_MAPPINGS {
+            let error = WinHttpError::new(mapping.code, WinHttpOperation::SendRequest).into_http_error();
+
+            assert_eq!(error.label(), mapping.class.label().as_str(), "code {}", mapping.code);
+            assert_eq!(error.recovery(), mapping.class.recovery(), "code {}", mapping.code);
+            assert!(
+                error.source().is_some_and(|source| source.downcast_ref::<WinHttpError>().is_some()),
+                "code {}",
+                mapping.code
+            );
+        }
+
+        let unknown = WinHttpError::new(12004, WinHttpOperation::SendRequest).into_http_error();
+        assert_eq!(unknown.label(), ErrorClass::RequestUnknown.label().as_str());
+        assert_eq!(unknown.recovery(), RecoveryInfo::unknown());
+    }
+
+    #[test]
+    fn representative_error_families_have_independent_contract_expectations() {
         let cases = [
             (12029, "connect", RecoveryInfo::retry()),
-            (12007, "connect", RecoveryInfo::retry()),
-            (10061, "connect", RecoveryInfo::retry()),
             (12002, "timeout", RecoveryInfo::retry()),
             (10060, "timeout", RecoveryInfo::retry()),
-            (12175, "tls", RecoveryInfo::never()),
-            (12057, "tls", RecoveryInfo::retry()),
             (12017, "abandoned", RecoveryInfo::never()),
             (12030, "request_winhttp", RecoveryInfo::retry()),
-            (10054, "request_winhttp", RecoveryInfo::retry()),
             (12152, "request_winhttp", RecoveryInfo::never()),
-            (12190, "request_winhttp", RecoveryInfo::never()),
+            (12175, "tls", RecoveryInfo::never()),
+            (12057, "tls", RecoveryInfo::retry()),
             (12004, "request_winhttp", RecoveryInfo::unknown()),
         ];
 
@@ -267,10 +282,6 @@ mod tests {
 
             assert_eq!(error.label(), expected_label, "code {code}");
             assert_eq!(error.recovery(), expected_recovery, "code {code}");
-            assert!(
-                error.source().is_some_and(|source| source.downcast_ref::<WinHttpError>().is_some()),
-                "code {code}"
-            );
         }
     }
 }

@@ -185,7 +185,8 @@ mod tests {
     use std::time::Duration;
 
     use bytesbuf::mem::GlobalPool;
-    use fetch::options::{ConnectionPoolOptions, PoolSelection};
+    use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolSelection};
+    use fetch::tls::TlsOptions;
     use fetch::{Recovery, RecoveryInfo};
     use observed::Sink;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -308,12 +309,19 @@ mod tests {
     }
 
     #[test]
-    fn finite_connection_limit_is_ignored_without_extra_session_options() {
+    fn unsupported_generic_configuration_is_ignored_without_extra_session_options() {
         let (facade, opens, closes) = successful_facade(1);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
-            .connection_pool_options(ConnectionPoolOptions::default().max_connections(1))
+            .connection_pool_options(
+                ConnectionPoolOptions::default()
+                    .connection_idle_timeout(Duration::from_secs(1))
+                    .max_connections(1)
+                    .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(2))),
+            )
+            .http2_options(Http2Options::default().initial_max_send_streams(1).adaptive_window(true))
+            .tls_options(TlsOptions::default())
             .build();
 
         assert_eq!(opens.load(Ordering::SeqCst), 1);

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::time::Duration;
+
 use observed::{Sink, emit, event};
 
 use crate::session::{SessionInitializationFailure, SessionInitializationOperation};
@@ -29,8 +31,14 @@ impl Telemetry {
         emit!(self.sink, RequestAttempt);
     }
 
-    pub(crate) fn request_failed(&self) {
-        emit!(self.sink, RequestError);
+    pub(crate) fn request_failed(&self, cold_connect_duration: Option<Duration>) {
+        emit!(
+            self.sink,
+            RequestError {
+                fresh_connection: cold_connect_duration.map(|_| true),
+                connect_duration: cold_connect_duration.map(|duration| duration.as_secs_f64()),
+            }
+        );
     }
 }
 
@@ -54,12 +62,22 @@ struct InitializationFailure {
 struct RequestAttempt;
 
 #[event("fetch.winhttp.request.error")]
+#[error("WinHTTP transport request failed")]
 #[counter(
     name = "fetch.winhttp.request.error.count",
     desc = "Failed WinHTTP transport request attempts",
     unit = "{error}"
 )]
-struct RequestError;
+struct RequestError {
+    #[dimension(log = "winhttp.connection.fresh")]
+    #[if_none(drop)]
+    #[unredacted]
+    fresh_connection: Option<bool>,
+    #[dimension(log = "winhttp.connect.duration")]
+    #[if_none(drop)]
+    #[unredacted]
+    connect_duration: Option<f64>,
+}
 
 const fn operation_name(operation: SessionInitializationOperation) -> &'static str {
     match operation {
@@ -75,6 +93,9 @@ const fn operation_name(operation: SessionInitializationOperation) -> &'static s
 
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+    use std::time::Duration;
+
     use observed::metadata::InstrumentKind;
     use observed::{Event as _, Severity};
     use observed_testing::{ExpectedEvent, ExpectedEventDescription, TEST_ID, test_emitter};
@@ -98,7 +119,9 @@ mod tests {
         );
         assert_eq!(
             RequestError::DESCRIPTION,
-            ExpectedEventDescription::new("fetch.winhttp.request.error", Severity::Info)
+            ExpectedEventDescription::new("fetch.winhttp.request.error", Severity::Error)
+                .body("WinHTTP transport request failed")
+                .log()
                 .event_metric("fetch.winhttp.request.error.count", InstrumentKind::Counter),
         );
 
@@ -122,7 +145,7 @@ mod tests {
 
         telemetry.initialization_failed(&failure);
         telemetry.request_attempted();
-        telemetry.request_failed();
+        telemetry.request_failed(None);
 
         let events = processor.events();
         assert_eq!(events.len(), 3);
@@ -137,9 +160,52 @@ mod tests {
         assert_eq!(events[1], ExpectedEvent::new("fetch.winhttp.request", Severity::Info).metric(),);
         assert_eq!(
             events[2],
-            ExpectedEvent::new("fetch.winhttp.request.error", Severity::Info).metric(),
+            ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
+                .body("WinHTTP transport request failed")
+                .log()
+                .metric(),
         );
         assert!(events[1].dimensions().is_empty());
         assert!(events[2].dimensions().is_empty());
+    }
+
+    #[test]
+    fn cold_connect_fields_are_log_only() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let telemetry = Telemetry::new(sink);
+
+        telemetry.request_failed(Some(Duration::from_millis(250)));
+
+        assert_eq!(
+            processor.single_event(),
+            ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
+                .body("WinHTTP transport request failed")
+                .dimension("winhttp.connect.duration", 0.25_f64)
+                .dimension("winhttp.connection.fresh", true)
+                .log()
+                .metric(),
+        );
+
+        let event = RequestError {
+            fresh_connection: Some(true),
+            connect_duration: Some(0.25),
+        };
+        let mut routing = Vec::new();
+        let mut visitor = |field: &observed::metadata::FieldDescriptor, _: &observed::processing::FieldValueFn<'_>| {
+            routing.push((
+                field.field_name(),
+                field.log().map(observed::metadata::LogFieldEntry::key),
+                field.metric().map(observed::metadata::MetricFieldEntry::key),
+            ));
+            ControlFlow::Continue(())
+        };
+        assert_eq!(event.visit_fields(&mut visitor), ControlFlow::Continue(()));
+        assert_eq!(
+            routing,
+            [
+                ("fresh_connection", Some("winhttp.connection.fresh"), None),
+                ("connect_duration", Some("winhttp.connect.duration"), None),
+            ]
+        );
     }
 }

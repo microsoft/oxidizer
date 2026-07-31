@@ -30,7 +30,7 @@ impl WinHttpTransport {
             Ok(session) => TransportState::Ready(Box::new(ReadyTransport {
                 session: Arc::new(session),
                 body_builder: inputs.body_builder,
-                _clock: inputs.clock,
+                clock: inputs.clock,
                 global_pool: inputs.global_pool,
                 contexts: Mutex::new(plurality::Pool::new()),
                 options: inputs.options,
@@ -59,25 +59,28 @@ impl Service<HttpRequest> for WinHttpTransport {
                 &mut input,
                 Arc::clone(&ready.session),
                 ready.body_builder.clone(),
+                &ready.clock,
                 ready.global_pool.clone(),
                 &ready.contexts,
                 &ready.options,
                 &ready.tls,
             ) {
-                Ok(driver) => driver.execute(&mut body_polled).await,
-                Err(error) => Err(error),
+                Ok(driver) => driver.execute(&mut body_polled).await.map_err(|failure| {
+                    let cold_connect_duration = failure.cold_connect_duration();
+                    (failure.into_error(), cold_connect_duration)
+                }),
+                Err(error) => Err((error, None)),
             },
-            TransportState::Failed(failed) => Err(HttpError::other(
-                failed.failure.clone(),
-                RecoveryInfo::never(),
-                error_labels::INITIALIZATION,
+            TransportState::Failed(failed) => Err((
+                HttpError::other(failed.failure.clone(), RecoveryInfo::never(), error_labels::INITIALIZATION),
+                None,
             )),
         };
 
         match result {
             Ok(response) => Ok(response),
-            Err(mut error) => {
-                self.telemetry.request_failed();
+            Err((mut error, cold_connect_duration)) => {
+                self.telemetry.request_failed(cold_connect_duration);
                 let _ = error.take_request();
                 if !body_polled {
                     Err(error.with_request(input))
@@ -102,7 +105,7 @@ enum TransportState {
 struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
-    _clock: Clock,
+    clock: Clock,
     global_pool: GlobalPool,
     contexts: ContextPool,
     options: TransportOptions,
@@ -130,6 +133,7 @@ mod tests {
     use std::ffi::c_void;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
@@ -137,8 +141,9 @@ mod tests {
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
     use http_extensions::HttpBodyOptions;
     use layered::Service;
+    use observed::Severity;
     use observed::Sink;
-    use observed_testing::{TEST_ID, test_emitter};
+    use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
     use ohno::Labeled as _;
     use static_assertions::assert_impl_all;
     use tick::{Clock, ClockControl};
@@ -155,7 +160,8 @@ mod tests {
     };
     use crate::request::ContextPool;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
     };
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
@@ -413,6 +419,34 @@ mod tests {
         finish_failed_request(transport, &context, &closes);
     }
 
+    #[test]
+    fn cold_connect_failure_emits_log_only_attribution() {
+        let (sink, processor) = test_emitter(TEST_ID);
+        let control = ClockControl::new();
+        let context = Arc::new(AtomicUsize::new(0));
+        let closes = Arc::new(AtomicUsize::new(0));
+        let bindings = cold_connect_failure_bindings(&context, Arc::clone(&closes), control.clone());
+        let transport = WinHttpTransport::new(inputs_with_clock(sink, control.to_clock()), Facade::mock(Arc::new(bindings)));
+
+        let mut error = futures::executor::block_on(transport.execute(request("https://example.com/"))).expect_err("cold connect fails");
+
+        assert_eq!(error.label(), "connect");
+        assert!(error.take_request().is_some());
+        assert_eq!(
+            processor.events(),
+            [
+                ExpectedEvent::new("fetch.winhttp.request", Severity::Info).metric(),
+                ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
+                    .body("WinHTTP transport request failed")
+                    .dimension("winhttp.connect.duration", 0.25_f64)
+                    .dimension("winhttp.connection.fresh", true)
+                    .log()
+                    .metric(),
+            ]
+        );
+        finish_failed_request(transport, &context, &closes);
+    }
+
     fn finish_failed_request(transport: WinHttpTransport, context: &Arc<AtomicUsize>, closes: &Arc<AtomicUsize>) {
         assert_eq!(closes.load(Ordering::SeqCst), 1);
 
@@ -455,7 +489,10 @@ mod tests {
     fn assert_send<T: Send>(_value: T) {}
 
     fn inputs(sink: Sink) -> TransportInputs {
-        let clock = clock();
+        inputs_with_clock(sink, clock())
+    }
+
+    fn inputs_with_clock(sink: Sink, clock: Clock) -> TransportInputs {
         let global_pool = GlobalPool::new();
 
         TransportInputs {
@@ -484,6 +521,64 @@ mod tests {
         bindings.expect_set_option().times(2).returning(|_, _, _| Ok(()));
         bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
         bindings.expect_close_handle().once().returning(|_| Ok(()));
+        bindings
+    }
+
+    fn cold_connect_failure_bindings(context: &Arc<AtomicUsize>, closes: Arc<AtomicUsize>, control: ClockControl) -> MockBindings {
+        let mut bindings = MockBindings::new();
+        bindings.expect_open().once().returning(|_, _| Ok(raw_handle_value(1)));
+        bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
+
+        let context_option = Arc::clone(context);
+        bindings.expect_set_option().returning(move |_, option, value| {
+            if option == WINHTTP_OPTION_CONTEXT_VALUE {
+                context_option.store(
+                    usize::from_ne_bytes(value.try_into().expect("the context option is pointer-sized")),
+                    Ordering::SeqCst,
+                );
+            }
+            Ok(())
+        });
+        bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
+        bindings.expect_connect().once().returning(|_, _, _| Ok(raw_handle_value(2)));
+        bindings
+            .expect_open_request()
+            .once()
+            .returning(|_, _, _, _| Ok(raw_handle_value(3)));
+        bindings.expect_send_request().once().returning(move |_, _, total_len, context| {
+            assert_eq!(total_len, 0);
+            let context = std::ptr::with_exposed_provenance_mut(context);
+            // SAFETY: send receives the installed live context and dispatch is
+            // synchronous while the operation is armed.
+            unsafe {
+                dispatch_completion(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+            }
+            control.advance(Duration::from_millis(250));
+            let mut result = WINHTTP_ASYNC_RESULT {
+                dwResult: 0,
+                dwError: 12029,
+            };
+            // SAFETY: the result storage remains valid for the synchronous
+            // callback, and the context still owns the active send operation.
+            unsafe {
+                dispatch_completion(
+                    context,
+                    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+                    (&raw mut result).cast(),
+                    u32::try_from(size_of::<WINHTTP_ASYNC_RESULT>()).expect("status info length fits a DWORD"),
+                );
+            }
+            Ok(())
+        });
+        bindings.expect_write_data().never();
+        bindings.expect_receive_response().never();
+        bindings.expect_query_headers().never();
+        bindings.expect_query_option().never();
+        bindings.expect_close_handle().times(3).returning(move |_| {
+            closes.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
         bindings
     }
 

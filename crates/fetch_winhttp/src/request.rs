@@ -2,11 +2,13 @@
 // Licensed under the MIT License.
 
 use std::fmt;
+use std::future::poll_fn;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytesbuf::mem::GlobalPool;
 use events_once::{Disconnected, RawReceiver};
@@ -18,12 +20,13 @@ use http::{HeaderMap, StatusCode, Version};
 use http_extensions::HttpBodyOptions;
 use http_extensions::timeout::BodyTimeout;
 use plurality::Pool;
+use tick::Clock;
 use widestring::U16CString;
 
 use crate::bindings::Bindings as _;
 use crate::bindings::Facade;
 use crate::body::{RequestBodyPlan, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
-use crate::context::{CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
+use crate::context::{ColdConnectState, CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
 use crate::error_labels;
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
@@ -137,6 +140,12 @@ impl RequestGuard {
         self.context.as_ptr().expose_provenance()
     }
 
+    pub(crate) fn cold_connect_state(&self) -> ColdConnectState {
+        // SAFETY: the guard remains alive, so callback ownership keeps the
+        // installed context valid.
+        unsafe { self.context.as_ref() }.cold_connect_state()
+    }
+
     pub(crate) fn submit(
         &mut self,
         kind: OperationKind,
@@ -197,9 +206,44 @@ impl Future for OperationFuture<'_> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct RequestFailure {
+    error: HttpError,
+    cold_connect_duration: Option<Duration>,
+}
+
+impl RequestFailure {
+    fn without_attribution(error: HttpError) -> Self {
+        Self {
+            error,
+            cold_connect_duration: None,
+        }
+    }
+
+    fn after_context_installation(error: HttpError, state: ColdConnectState, duration: Duration) -> Self {
+        Self {
+            error,
+            cold_connect_duration: match state {
+                ColdConnectState::Unobserved => None,
+                ColdConnectState::Connecting | ColdConnectState::Connected => Some(duration),
+            },
+        }
+    }
+
+    pub(crate) const fn cold_connect_duration(&self) -> Option<Duration> {
+        self.cold_connect_duration
+    }
+
+    pub(crate) fn into_error(self) -> HttpError {
+        self.error
+    }
+}
+
 pub(crate) struct RequestDriver<'body, 'contexts> {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
+    clock: Clock,
+    connect_timeout: Duration,
     global_pool: GlobalPool,
     contexts: &'contexts ContextPool,
     request: TranslatedRequest,
@@ -210,10 +254,15 @@ pub(crate) struct RequestDriver<'body, 'contexts> {
 }
 
 impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "translation requires the transport-owned session, clock, pools, options, and TLS policy"
+    )]
     pub(crate) fn new(
         request: &'body mut HttpRequest,
         session: Arc<WinHttpSession>,
         body_builder: HttpBodyBuilder,
+        clock: &Clock,
         global_pool: GlobalPool,
         contexts: &'contexts ContextPool,
         options: &TransportOptions,
@@ -241,6 +290,8 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         Ok(Self {
             session,
             body_builder,
+            clock: clock.clone(),
+            connect_timeout: options.connect_timeout,
             global_pool,
             contexts,
             request: translated,
@@ -251,11 +302,12 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         })
     }
 
-    pub(crate) async fn execute(self, body_polled: &mut bool) -> fetch::Result<HttpResponse> {
+    pub(crate) async fn execute(self, body_polled: &mut bool) -> Result<HttpResponse, RequestFailure> {
         let bindings = self.session.handle().bindings().clone();
         let connect = bindings
             .connect(self.session.handle().raw(), &self.request.host, self.request.port)
-            .map_err(crate::error::WinHttpError::into_http_error)?;
+            .map_err(crate::error::WinHttpError::into_http_error)
+            .map_err(RequestFailure::without_attribution)?;
         let connect = ConnectHandle::new(connect, bindings.clone());
         let request = bindings
             .open_request(
@@ -264,55 +316,80 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
                 &self.request.path,
                 request_open_flags(self.request.secure, self.body_plan.automatic_chunking()),
             )
-            .map_err(crate::error::WinHttpError::into_http_error)?;
+            .map_err(crate::error::WinHttpError::into_http_error)
+            .map_err(RequestFailure::without_attribution)?;
         let request = RequestHandle::new(request, bindings.clone());
 
-        apply_request_settings(&request, self.settings).map_err(crate::error::WinHttpError::into_http_error)?;
+        apply_request_settings(&request, self.settings)
+            .map_err(crate::error::WinHttpError::into_http_error)
+            .map_err(RequestFailure::without_attribution)?;
 
         let mut guard = RequestSetup::new(request, connect, Arc::clone(&self.session), self.contexts)
             .install()
-            .map_err(crate::error::WinHttpError::into_http_error)?;
+            .map_err(crate::error::WinHttpError::into_http_error)
+            .map_err(RequestFailure::without_attribution)?;
+        let connect_watch = self.clock.stopwatch();
 
-        {
-            let send = guard
-                .submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
-                    // SAFETY: the installed context is the exact pointer passed as
-                    // dwContext, and the UTF-16 header buffer remains alive until
-                    // the completion is awaited below.
-                    unsafe { bindings.send_request(request, &self.request.headers, self.body_plan.total_length(), context) }
-                })
-                .map_err(|_active| callback_protocol_error("the send operation slot was already active"))?;
-            let completion = send
-                .await
-                .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))?;
-            expect_completion(completion, OperationKind::SendRequest)?;
+        let send_result = send_request_headers(
+            &mut guard,
+            &bindings,
+            &self.request.headers,
+            self.body_plan.total_length(),
+            &self.clock,
+            self.connect_timeout,
+        )
+        .await;
+        if let Err(error) = send_result {
+            return Err(RequestFailure::after_context_installation(
+                error,
+                guard.cold_connect_state(),
+                connect_watch.elapsed(),
+            ));
         }
+        let cold_connect_state = guard.cold_connect_state();
+        let connect_duration = connect_watch.elapsed();
 
-        {
-            let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool.clone());
-            send_body(self.body, &mut writer, body_polled).await?;
+        let response_metadata = async {
+            {
+                let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool.clone());
+                send_body(self.body, &mut writer, body_polled).await?;
+            }
+
+            {
+                let receive = guard
+                    .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
+                        bindings.receive_response(request)
+                    })
+                    .map_err(|_active| callback_protocol_error("the receive-response operation slot was already active"))?;
+                let completion = receive
+                    .await
+                    .map_err(|_disconnected| callback_protocol_error("the headers completion channel disconnected"))?;
+                expect_completion(completion, OperationKind::HeadersAvailable)?;
+            }
+
+            let status = query_status_code(&bindings, guard.raw()).map_err(query_error)?;
+            let status = u16::try_from(status)
+                .ok()
+                .and_then(|status| StatusCode::from_u16(status).ok())
+                .ok_or_else(|| invalid_response(format!("WinHTTP returned an invalid HTTP status code: {status}")))?;
+            let raw_headers = query_raw_headers(&bindings, guard.raw()).map_err(query_error)?;
+            let headers = parse_response_headers(&raw_headers).map_err(invalid_response)?;
+            let version = query_protocol_used(&bindings, guard.raw()).map_err(query_error)?;
+
+            Ok::<_, HttpError>((status, headers, version))
         }
+        .await;
 
-        {
-            let receive = guard
-                .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
-                    bindings.receive_response(request)
-                })
-                .map_err(|_active| callback_protocol_error("the receive-response operation slot was already active"))?;
-            let completion = receive
-                .await
-                .map_err(|_disconnected| callback_protocol_error("the headers completion channel disconnected"))?;
-            expect_completion(completion, OperationKind::HeadersAvailable)?;
-        }
-
-        let status = query_status_code(&bindings, guard.raw()).map_err(query_error)?;
-        let status = u16::try_from(status)
-            .ok()
-            .and_then(|status| StatusCode::from_u16(status).ok())
-            .ok_or_else(|| invalid_response(format!("WinHTTP returned an invalid HTTP status code: {status}")))?;
-        let raw_headers = query_raw_headers(&bindings, guard.raw()).map_err(query_error)?;
-        let headers = parse_response_headers(&raw_headers).map_err(invalid_response)?;
-        let version = query_protocol_used(&bindings, guard.raw()).map_err(query_error)?;
+        let (status, headers, version) = match response_metadata {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return Err(RequestFailure::after_context_installation(
+                    error,
+                    cold_connect_state,
+                    connect_duration,
+                ));
+            }
+        };
 
         let reader = WinHttpBodyReader::new(guard, bindings, self.global_pool);
         let body = self.body_builder.body(WinHttpResponseBody::new(reader), &self.body_options);
@@ -322,9 +399,54 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             .body(body);
         *response
             .headers_mut()
-            .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))? = headers;
-        response.build().map_err(invalid_response)
+            .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))
+            .map_err(|error| RequestFailure::after_context_installation(error, cold_connect_state, connect_duration))? = headers;
+        response
+            .build()
+            .map_err(invalid_response)
+            .map_err(|error| RequestFailure::after_context_installation(error, cold_connect_state, connect_duration))
     }
+}
+
+async fn send_request_headers(
+    guard: &mut RequestGuard,
+    bindings: &Facade,
+    headers: &U16CString,
+    total_length: u32,
+    clock: &Clock,
+    timeout: Duration,
+) -> fetch::Result<()> {
+    let send = async {
+        let send = guard
+            .submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
+                // SAFETY: the installed context is the exact pointer passed as
+                // dwContext, and the UTF-16 header buffer remains alive until
+                // the completion is awaited below.
+                unsafe { bindings.send_request(request, headers, total_length, context) }
+            })
+            .map_err(|_active| callback_protocol_error("the send operation slot was already active"))?;
+        let completion = send
+            .await
+            .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))?;
+        expect_completion(completion, OperationKind::SendRequest)
+    };
+    let mut send = std::pin::pin!(send);
+    let mut deadline = std::pin::pin!(clock.delay(timeout));
+    let mut deadline_registered = false;
+
+    poll_fn(|cx| {
+        if !deadline_registered {
+            let _ = deadline.as_mut().poll(cx);
+            deadline_registered = true;
+        }
+
+        match send.as_mut().poll(cx) {
+            Poll::Ready(result) => Poll::Ready(result),
+            Poll::Pending if deadline.as_mut().poll(cx).is_ready() => Poll::Ready(Err(HttpError::timeout(timeout))),
+            Poll::Pending => Poll::Pending,
+        }
+    })
+    .await
 }
 
 struct TranslatedRequest {
@@ -632,7 +754,7 @@ mod tests {
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
-    use fetch::options::{RequestFilter, TransportOptions};
+    use fetch::options::{ConnectionLifetime, ConnectionPoolOptions, Http2Options, RequestFilter, TransportOptions};
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest};
     use http::header::HeaderValue;
     use http::{HeaderMap, Method, Version};
@@ -651,7 +773,7 @@ mod tests {
         WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{ContextPool, OperationFuture, RequestDriver, RequestGuard, RequestSetup};
+    use super::{ContextPool, OperationFuture, RequestDriver, RequestFailure, RequestGuard, RequestSetup};
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
     use crate::callback::dispatch_completion;
@@ -1022,6 +1144,36 @@ mod tests {
         );
 
         response.expect("request options succeed");
+        assert_eq!(
+            dword_options(&record),
+            [
+                (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 1),
+                (WINHTTP_OPTION_REDIRECT_POLICY, 0),
+                (WINHTTP_OPTION_DISABLE_FEATURE, 5),
+                (WINHTTP_OPTION_DECOMPRESSION, 3),
+            ]
+        );
+        assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn unsupported_generic_options_do_not_add_native_request_configuration() {
+        let mut options = TransportOptions::default();
+        options.connection_pool = ConnectionPoolOptions::default()
+            .connection_idle_timeout(Duration::from_secs(1))
+            .max_connections(1)
+            .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(2)));
+        options.http_2 = Http2Options::default().initial_max_send_streams(1).adaptive_window(true);
+        options.extra.insert(42_u32);
+
+        let (response, record) = run_lifecycle(
+            request(Method::GET, "https://example.com/"),
+            options,
+            WinHttpTlsConfig::default(),
+            LifecycleConfig::default(),
+        );
+
+        response.expect("ignored generic options do not affect the request");
         assert_eq!(
             dword_options(&record),
             [
@@ -1452,6 +1604,7 @@ mod tests {
             &mut request,
             Arc::clone(&session),
             response_body_builder,
+            &Clock::new_frozen(),
             memory,
             &contexts,
             &options,
@@ -1485,6 +1638,141 @@ mod tests {
     }
 
     #[test]
+    fn connect_timeout_closes_the_request_and_retains_parents_until_handle_closing() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let mut request = request(Method::GET, "https://example.com/");
+        let config = LifecycleConfig {
+            defer_send_completion: true,
+            cold_connect_state: ColdConnectState::Connecting,
+            ..LifecycleConfig::default()
+        };
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
+        let mut options = TransportOptions::default();
+        options.connect_timeout = Duration::from_secs(1);
+        let tls = WinHttpTlsConfig::default();
+        let driver = RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            body_builder,
+            &clock,
+            memory,
+            &contexts,
+            &options,
+            &tls,
+        )
+        .expect("request setup succeeds");
+        let mut body_polled = false;
+        let mut future = Box::pin(driver.execute(&mut body_polled));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(record.send_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+
+        control.advance(Duration::from_secs(1));
+        let Poll::Ready(Err(failure)) = future.as_mut().poll(&mut cx) else {
+            panic!("the total connect deadline must fail the pending send");
+        };
+        drop(future);
+        assert_eq!(failure.cold_connect_duration(), Some(Duration::from_secs(1)));
+        let error = failure.into_error();
+        assert_eq!(error.label(), "response_timeout");
+        assert_eq!(error.recovery(), RecoveryInfo::retry());
+        assert!(!body_polled);
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+
+        drop(session);
+        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        closing(context);
+
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn completed_send_cancels_connect_timeout_before_upload() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let memory = GlobalPool::new();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new(
+                [(0, Ok(Frame::data(BytesView::copied_from_slice(b"pending upload", &memory))))],
+                Arc::clone(&completed_writes),
+                0,
+                Some(14),
+            ),
+            &HttpBodyOptions::default(),
+        );
+        let mut request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            defer_write_completion: true,
+            ..LifecycleConfig::default()
+        };
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let mut options = TransportOptions::default();
+        options.connect_timeout = Duration::from_secs(1);
+        let tls = WinHttpTlsConfig::default();
+        let driver = RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            body_builder,
+            &clock,
+            memory,
+            &contexts,
+            &options,
+            &tls,
+        )
+        .expect("request setup succeeds");
+        let mut body_polled = false;
+        let mut future = Box::pin(driver.execute(&mut body_polled));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
+
+        control.advance(Duration::from_secs(1));
+        assert!(
+            future.as_mut().poll(&mut cx).is_pending(),
+            "upload remains outside the completed connect deadline"
+        );
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
+
+        drop(future);
+        assert!(body_polled);
+        drop(session);
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        closing(context);
+
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn request_body_timeout_reaches_the_response_body_and_closes_a_pending_read() {
         let mut request = request(Method::GET, "https://example.com/");
         request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
@@ -1501,8 +1789,17 @@ mod tests {
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
         let options = TransportOptions::default();
         let tls = WinHttpTlsConfig::default();
-        let driver = RequestDriver::new(&mut request, Arc::clone(&session), body_builder, memory, &contexts, &options, &tls)
-            .expect("request setup succeeds");
+        let driver = RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            body_builder,
+            &clock,
+            memory,
+            &contexts,
+            &options,
+            &tls,
+        )
+        .expect("request setup succeeds");
         let mut body_polled = false;
         let response = futures::executor::block_on(driver.execute(&mut body_polled)).expect("response headers succeed");
 
@@ -1673,6 +1970,10 @@ mod tests {
     }
 
     #[derive(Clone)]
+    #[expect(
+        clippy::struct_excessive_bools,
+        reason = "the lifecycle mock independently scripts completion, upload, and read behavior"
+    )]
     struct LifecycleConfig {
         status: u32,
         raw_headers: Vec<u8>,
@@ -1680,6 +1981,8 @@ mod tests {
         legacy_version: String,
         failure: Option<LifecycleFailure>,
         complete_send_on_foreign_thread: bool,
+        defer_send_completion: bool,
+        cold_connect_state: ColdConnectState,
         completed_writes: Arc<AtomicUsize>,
         defer_write_completion: bool,
         max_write_completion: Option<u32>,
@@ -1695,6 +1998,8 @@ mod tests {
                 legacy_version: "HTTP/1.1".to_owned(),
                 failure: None,
                 complete_send_on_foreign_thread: false,
+                defer_send_completion: false,
+                cold_connect_state: ColdConnectState::Unobserved,
                 completed_writes: Arc::new(AtomicUsize::new(0)),
                 defer_write_completion: false,
                 max_write_completion: None,
@@ -1740,18 +2045,20 @@ mod tests {
         let session = session(facade);
         let contexts = ContextPool::new(Pool::new());
         let global_pool = GlobalPool::new();
-        let body_builder = HttpBodyBuilder::new(global_pool.clone(), &Clock::new_frozen());
+        let clock = Clock::new_frozen();
+        let body_builder = HttpBodyBuilder::new(global_pool.clone(), &clock);
         let mut body_polled = false;
         let result = match RequestDriver::new(
             &mut request,
             Arc::clone(&session),
             body_builder.clone(),
+            &clock,
             global_pool,
             &contexts,
             &options,
             &tls,
         ) {
-            Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)),
+            Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)).map_err(RequestFailure::into_error),
             Err(error) => Err(error),
         };
         let result = result.map(|response| {
@@ -1843,8 +2150,34 @@ mod tests {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
             }
 
+            match send_config.cold_connect_state {
+                ColdConnectState::Unobserved => {}
+                ColdConnectState::Connecting => complete(
+                    std::ptr::with_exposed_provenance_mut(context),
+                    WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                    std::ptr::null_mut(),
+                    0,
+                ),
+                ColdConnectState::Connected => {
+                    complete(
+                        std::ptr::with_exposed_provenance_mut(context),
+                        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                    complete(
+                        std::ptr::with_exposed_provenance_mut(context),
+                        WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                }
+            }
+
             if send_config.failure == Some(LifecycleFailure::SendCallback) {
                 complete_request_error(context, 12030);
+            } else if send_config.defer_send_completion {
+                return Ok(());
             } else if send_config.complete_send_on_foreign_thread {
                 thread::spawn(move || {
                     complete(
