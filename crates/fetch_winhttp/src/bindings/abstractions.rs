@@ -9,8 +9,14 @@ use widestring::U16CStr;
 use crate::error::Result;
 use crate::handle::RawHandle;
 
+/// Callback ABI accepted by WinHTTP, with `None` clearing the callback.
 pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, usize, u32, *mut c_void, u32)>;
 
+/// Defines the OS boundary used by the transport and its deterministic tests.
+///
+/// Implementations provide only the WinHTTP operations the transport needs.
+/// Callers remain responsible for the handle, context, and asynchronous buffer
+/// lifetime contracts stated on the unsafe methods.
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Bindings: Send + Sync + 'static {
     fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;

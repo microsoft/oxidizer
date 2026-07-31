@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(dead_code, reason = "shared integration-test helpers are used by different test binaries")]
+#![expect(
+    dead_code,
+    reason = "each integration-test binary compiles this shared module independently and sees helpers used only by sibling binaries"
+)]
 #![allow(unused_imports, reason = "shared integration-test helpers are used by different test binaries")]
 
 mod http3_server;

@@ -42,6 +42,7 @@ const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WI
 pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
 
 #[derive(Debug)]
+/// Owns the configured asynchronous WinHTTP session handle.
 pub(crate) struct WinHttpSession {
     handle: SessionHandle,
 }
@@ -122,6 +123,7 @@ impl WinHttpSession {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Preserves the exact operation and error that prevented session startup.
 pub(crate) struct SessionInitializationFailure {
     operation: SessionInitializationOperation,
     error: WinHttpError,
@@ -142,6 +144,7 @@ impl SessionInitializationFailure {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Identifies a required step in configuring a WinHTTP session.
 pub(crate) enum SessionInitializationOperation {
     Open,
     SetTimeouts,
@@ -181,6 +184,7 @@ impl Error for SessionInitializationFailure {
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -207,8 +211,11 @@ mod tests {
     use crate::handle::RawHandle;
     use crate::options::{WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE, dword_bytes, timeout_millis};
 
-    assert_impl_all!(WinHttpSession: Send, Sync, std::fmt::Debug);
-    assert_impl_all!(SessionInitializationFailure: Send, Sync, Clone, std::fmt::Debug, std::error::Error);
+    assert_impl_all!(WinHttpSession: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(
+        SessionInitializationFailure: Send, Sync, Clone, std::fmt::Debug, std::error::Error, UnwindSafe, RefUnwindSafe
+    );
+    assert_impl_all!(SessionInitializationOperation: UnwindSafe, RefUnwindSafe);
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum FailurePoint {
@@ -227,8 +234,7 @@ mod tests {
         let options = WinHttpOptions::builder().resolve_timeout(Duration::from_micros(1_500)).build();
         let keep_alive = active_keep_alive();
 
-        let session = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &options, &keep_alive)
-            .expect("all required session configuration succeeds");
+        let session = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &options, &keep_alive).unwrap();
 
         assert_eq!(session.handle().raw(), raw_handle());
         drop(session);
@@ -243,7 +249,7 @@ mod tests {
             &WinHttpOptions::default(),
             &ConnectionKeepAlive::Disabled,
         )
-        .expect("session setup succeeds without keep-alive probes");
+        .unwrap();
 
         drop(session);
     }
@@ -304,8 +310,7 @@ mod tests {
 
     fn assert_failure(point: FailurePoint) {
         let bindings = configured_bindings(Some(point), UNLIMITED_TIMEOUT, true);
-        let error = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &active_keep_alive())
-            .expect_err("the selected setup operation fails");
+        let error = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &active_keep_alive()).unwrap_err();
 
         assert_eq!(error.code(), error_code(point));
         assert_eq!(error.operation(), initialization_operation(point));
@@ -513,6 +518,6 @@ mod tests {
     }
 
     fn raw_handle() -> RawHandle {
-        RawHandle::new(std::ptr::dangling_mut::<c_void>()).expect("the standard dangling pointer is non-null")
+        RawHandle::new(std::ptr::dangling_mut::<c_void>()).unwrap()
     }
 }

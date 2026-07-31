@@ -27,6 +27,7 @@ const SECURE_FAILURE_PRESENT: u64 = 1 << u32::BITS;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
+/// Identifies the one asynchronous WinHTTP operation currently in flight.
 pub(crate) enum OperationKind {
     SendRequest = 2,
     HeadersAvailable = 3,
@@ -73,10 +74,11 @@ impl OperationKind {
     clippy::large_enum_variant,
     reason = "borrowed buffers stay inline so arming an operation does not allocate"
 )]
+/// Owns any buffer that must remain stable until an operation completes.
 pub(crate) enum OperationBuffer {
     None,
     Read { buffer: BytesBuf, address: usize, capacity: u32 },
-    Write { buffer: BytesView, address: usize, len: u32 },
+    Write { buffer: BytesView, len: u32 },
 }
 
 impl OperationBuffer {
@@ -88,15 +90,15 @@ impl OperationBuffer {
         Self::Read { buffer, address, capacity }
     }
 
-    pub(crate) fn write(buffer: BytesView, address: usize, len: u32) -> Self {
-        Self::Write { buffer, address, len }
+    pub(crate) fn write(buffer: BytesView, len: u32) -> Self {
+        Self::Write { buffer, len }
     }
 
     pub(crate) fn into_completion(self) -> Option<CompletionBuffer> {
         match self {
             Self::None => None,
-            Self::Read { buffer, .. } => Some(CompletionBuffer::Read(buffer)),
-            Self::Write { buffer, .. } => Some(CompletionBuffer::Write(buffer)),
+            Self::Read { buffer, .. } => Some(CompletionBuffer::Read { _buffer: buffer }),
+            Self::Write { buffer, .. } => Some(CompletionBuffer::Write { _buffer: buffer }),
         }
     }
 }
@@ -106,12 +108,14 @@ impl OperationBuffer {
     clippy::large_enum_variant,
     reason = "completed buffers transfer inline through the embedded event without allocation"
 )]
+/// Returns retained operation buffers to the completion consumer.
 pub(crate) enum CompletionBuffer {
-    Read(BytesBuf),
-    Write(BytesView),
+    Read { _buffer: BytesBuf },
+    Write { _buffer: BytesView },
 }
 
 #[derive(Debug)]
+/// Carries a validated WinHTTP callback result to the awaiting request task.
 pub(crate) enum CompletionResult {
     SendRequestComplete,
     HeadersAvailable,
@@ -126,22 +130,20 @@ pub(crate) enum CompletionResult {
     },
     Error {
         error: WinHttpError,
-        api_result: Option<usize>,
-        buffer: Option<CompletionBuffer>,
+        _buffer: Option<CompletionBuffer>,
     },
     InvalidStatusInfo {
         status: u32,
         len: u32,
-        buffer: Option<CompletionBuffer>,
+        _buffer: Option<CompletionBuffer>,
     },
 }
 
 impl CompletionResult {
-    pub(crate) fn error(error: WinHttpError, api_result: Option<usize>, buffer: OperationBuffer) -> Self {
+    pub(crate) fn error(error: WinHttpError, buffer: OperationBuffer) -> Self {
         Self::Error {
             error,
-            api_result,
-            buffer: buffer.into_completion(),
+            _buffer: buffer.into_completion(),
         }
     }
 
@@ -149,11 +151,12 @@ impl CompletionResult {
         Self::InvalidStatusInfo {
             status,
             len,
-            buffer: buffer.into_completion(),
+            _buffer: buffer.into_completion(),
         }
     }
 }
 
+/// Holds the callback-owned state for the currently armed operation.
 pub(crate) struct ActiveOperation {
     pub(crate) kind: OperationKind,
     pub(crate) completion: RawSender<CompletionResult>,
@@ -161,11 +164,14 @@ pub(crate) struct ActiveOperation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Uniquely identifies one operation generation and its expected callback kind.
 pub(crate) struct OperationToken(u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Indicates that a request attempted to overlap WinHTTP operations.
 pub(crate) struct OperationAlreadyActive;
 
+/// Coordinates exclusive callback ownership of one pinned operation slot.
 struct SequentialOperation {
     state: AtomicU64,
     generation: AtomicU64,
@@ -290,12 +296,14 @@ fn active_kind(token: u64) -> Option<OperationKind> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
+/// Tracks whether a request observed a newly established connection.
 pub(crate) enum ColdConnectState {
     Unobserved = 0,
     Connecting = 1,
     Connected = 2,
 }
 
+/// Stores pinned callback state for the lifetime of a WinHTTP request handle.
 pub(crate) struct RequestContext {
     operation: SequentialOperation,
     secure_failure: AtomicU64,
@@ -400,10 +408,27 @@ unsafe impl Sync for RequestContext {}
 
 #[cfg(test)]
 mod tests {
-    use static_assertions::assert_impl_all;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
 
-    use super::{CompletionResult, RequestContext};
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
 
-    assert_impl_all!(CompletionResult: Send, std::fmt::Debug);
-    assert_impl_all!(RequestContext: Send, Sync, std::fmt::Debug);
+    use super::{
+        ActiveOperation, ColdConnectState, CompletionBuffer, CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind,
+        OperationToken, RequestContext, SequentialOperation,
+    };
+
+    assert_impl_all!(OperationKind: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(OperationBuffer: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(CompletionBuffer: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(CompletionResult: Send, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ActiveOperation: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(OperationToken: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(OperationAlreadyActive: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(SequentialOperation: UnwindSafe);
+    // The operation slot uses UnsafeCell for callback-owned state.
+    assert_not_impl_any!(SequentialOperation: RefUnwindSafe);
+    assert_impl_all!(ColdConnectState: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestContext: Send, Sync, std::fmt::Debug, UnwindSafe);
+    // The context contains the operation slot's actual UnsafeCell state.
+    assert_not_impl_any!(RequestContext: RefUnwindSafe);
 }

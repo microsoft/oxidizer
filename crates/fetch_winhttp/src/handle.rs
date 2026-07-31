@@ -5,10 +5,15 @@ use std::cell::Cell;
 use std::ffi::c_void;
 use std::fmt;
 use std::marker::PhantomData;
+use std::panic::RefUnwindSafe;
 use std::ptr::NonNull;
 
 use crate::bindings::{Bindings as _, Facade};
 
+/// A non-null WinHTTP handle token that Rust treats only as an opaque value.
+///
+/// This type centralizes pointer validity and thread-safety assumptions without
+/// granting ownership or closing the underlying WinHTTP handle.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct RawHandle(NonNull<c_void>);
 
@@ -43,6 +48,10 @@ unsafe impl Send for RawHandle {}
 // higher-level wrappers restrict which handle classes may be shared.
 unsafe impl Sync for RawHandle {}
 
+/// Owns a WinHTTP session handle and closes it when the transport session drops.
+///
+/// Session handles may be shared because WinHTTP serializes session-scoped
+/// operations and the wrapper exposes no mutable Rust state.
 #[derive(Debug)]
 pub(crate) struct SessionHandle {
     raw: RawHandle,
@@ -69,6 +78,10 @@ impl Drop for SessionHandle {
     }
 }
 
+/// Owns the logical WinHTTP connection handle used to open one request.
+///
+/// The wrapper is movable between threads but intentionally not `Sync`, which
+/// prevents concurrent request creation through the same logical handle.
 #[derive(Debug)]
 pub(crate) struct ConnectHandle {
     raw: RawHandle,
@@ -88,10 +101,6 @@ impl ConnectHandle {
     pub(crate) const fn raw(&self) -> RawHandle {
         self.raw
     }
-
-    pub(crate) const fn bindings(&self) -> &Facade {
-        &self.bindings
-    }
 }
 
 impl Drop for ConnectHandle {
@@ -100,6 +109,15 @@ impl Drop for ConnectHandle {
     }
 }
 
+// `not_sync` is a marker-only `Cell` that stores no value or state. Sharing a
+// reference across an unwind boundary therefore cannot expose a partial
+// mutation, while the marker continues to keep the handle `!Sync`.
+impl RefUnwindSafe for ConnectHandle {}
+
+/// Owns one WinHTTP request handle for its complete asynchronous lifecycle.
+///
+/// The wrapper is movable between threads but intentionally not `Sync`; the
+/// request driver serializes all operations issued through it.
 #[derive(Debug)]
 pub(crate) struct RequestHandle {
     raw: RawHandle,
@@ -131,9 +149,15 @@ impl Drop for RequestHandle {
     }
 }
 
+// `not_sync` is a marker-only `Cell` that stores no value or state. Sharing a
+// reference across an unwind boundary therefore cannot expose a partial
+// mutation, while the marker continues to keep the handle `!Sync`.
+impl RefUnwindSafe for RequestHandle {}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
 
     use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -141,9 +165,12 @@ mod tests {
     use super::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
     use crate::bindings::{Facade, MockBindings};
 
-    assert_impl_all!(SessionHandle: Send, Sync);
-    assert_impl_all!(ConnectHandle: Send);
-    assert_impl_all!(RequestHandle: Send);
+    // This asserts the test-build enum, including its MockBindings variant.
+    assert_impl_all!(Facade: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RawHandle: Send, Sync, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(SessionHandle: Send, Sync, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ConnectHandle: Send, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestHandle: Send, UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(ConnectHandle: Sync);
     assert_not_impl_any!(RequestHandle: Sync);
 
@@ -171,6 +198,6 @@ mod tests {
     }
 
     fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).expect("test handle values are nonzero")
+        RawHandle::new(value as *mut c_void).unwrap()
     }
 }

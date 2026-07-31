@@ -16,6 +16,7 @@ use crate::error::Result;
 use crate::handle::RawHandle;
 
 #[derive(Clone)]
+/// Selects the production bindings or the test double behind one interface.
 pub(crate) enum Facade {
     Real,
     #[cfg(test)]

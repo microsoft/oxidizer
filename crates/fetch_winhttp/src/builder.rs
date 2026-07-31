@@ -12,7 +12,7 @@ use crate::bindings::Facade;
 use crate::transport::{TransportInputs, WinHttpTransport};
 use crate::{WinHttpOptions, WinHttpTlsConfig};
 
-/// Dependencies and configuration for the `WinHTTP` transport.
+/// Dependencies and configuration for the WinHTTP transport.
 ///
 /// Construct this type with [`WinHttpDeps::builder`], passing the mandatory
 /// clock, global memory pool, and telemetry sink. TLS and WinHTTP-specific
@@ -28,7 +28,7 @@ pub struct WinHttpDeps {
 }
 
 impl WinHttpDeps {
-    /// Starts building dependencies for the `WinHTTP` transport.
+    /// Starts building dependencies for the WinHTTP transport.
     #[must_use]
     pub fn builder(clock: Clock, global_pool: GlobalPool, sink: Sink) -> WinHttpDepsBuilder {
         WinHttpDepsBuilder {
@@ -83,7 +83,7 @@ impl WinHttpDepsBuilder {
         self
     }
 
-    /// Builds the `WinHTTP` transport dependencies.
+    /// Builds the WinHTTP transport dependencies.
     #[must_use]
     pub fn build(self) -> WinHttpDeps {
         WinHttpDeps {
@@ -96,7 +96,7 @@ impl WinHttpDepsBuilder {
     }
 }
 
-/// Adds `WinHTTP` construction to [`fetch::HttpClient`].
+/// Adds WinHTTP construction to [`fetch::HttpClient`].
 pub trait HttpClientWinHttpExt {
     /// Creates a WinHTTP-backed HTTP client builder.
     ///
@@ -147,6 +147,7 @@ fn into_custom_deps(deps: WinHttpDeps) -> CustomDeps<WinHttpDeps> {
 mod tests {
     use std::ffi::c_void;
     use std::fmt::Debug;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -168,6 +169,9 @@ mod tests {
 
     assert_impl_all!(WinHttpDeps: Send, Sync, Clone, Debug, ThreadAware);
     assert_impl_all!(WinHttpDepsBuilder: Send, Sync, Clone, Debug, ThreadAware);
+    // The configured memory pool and telemetry sink contain user-erased state.
+    assert_not_impl_any!(WinHttpDeps: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(WinHttpDepsBuilder: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(WinHttpDeps: Default);
     assert_not_impl_any!(WinHttpDepsBuilder: Default);
 
@@ -211,7 +215,7 @@ mod tests {
         drop(clone);
         assert_eq!(closes.load(Ordering::SeqCst), 0);
 
-        let error = futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
+        let error = futures::executor::block_on(client.get("http://example.com").fetch()).unwrap_err();
         assert_eq!(error.recovery(), RecoveryInfo::never());
 
         drop(client);
@@ -229,7 +233,7 @@ mod tests {
         let second = builder.build();
 
         for client in [&first, &second] {
-            futures::executor::block_on(client.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
+            futures::executor::block_on(client.get("http://example.com").fetch()).unwrap_err();
         }
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
@@ -268,7 +272,7 @@ mod tests {
         relocated.relocate(None, affinities[1]);
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
-        futures::executor::block_on(relocated.get("http://example.com").fetch()).expect_err("legacy HTTP is rejected");
+        futures::executor::block_on(relocated.get("http://example.com").fetch()).unwrap_err();
 
         drop(relocated);
         drop(client);
@@ -334,6 +338,6 @@ mod tests {
     }
 
     fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).expect("test handle values are nonzero")
+        RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).unwrap()
     }
 }

@@ -17,6 +17,7 @@ use crate::telemetry::Telemetry;
 use crate::{WinHttpTlsConfig, error_labels};
 
 #[derive(Debug)]
+/// Dispatches requests through either a ready or permanently failed session.
 pub(crate) struct WinHttpTransport {
     telemetry: Telemetry,
     state: TransportState,
@@ -95,12 +96,14 @@ impl Service<HttpRequest> for WinHttpTransport {
 }
 
 #[derive(Debug)]
+/// Captures whether transport initialization produced a usable session.
 enum TransportState {
     Ready(Box<ReadyTransport>),
     Failed(FailedTransport),
 }
 
 #[derive(Debug)]
+/// Holds the shared resources used to execute requests on a live session.
 struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
@@ -112,11 +115,13 @@ struct ReadyTransport {
 }
 
 #[derive(Debug)]
+/// Retains an initialization failure so every request reports it consistently.
 struct FailedTransport {
     failure: SessionInitializationFailure,
 }
 
 #[derive(Debug)]
+/// Transfers builder-owned dependencies into a new WinHTTP transport.
 pub(crate) struct TransportInputs {
     pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) clock: Clock,
@@ -130,6 +135,7 @@ pub(crate) struct TransportInputs {
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
@@ -143,28 +149,34 @@ mod tests {
     use observed::{Severity, Sink};
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
     use ohno::Labeled as _;
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
     use tick::{Clock, ClockControl};
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
         WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
     };
 
-    use super::{ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
+    use super::{FailedTransport, ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
     use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::options::{
-        WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF,
-        WINHTTP_QUERY_STATUS_CODE,
+        WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_FLAG_WIRE_ENCODING,
+        WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
     };
     use crate::request::ContextPool;
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
-    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug);
+    // Transport resources contain user-erased memory, body-builder, clock, or sink state.
+    assert_not_impl_any!(WinHttpTransport: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(TransportState: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(ReadyTransport: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(FailedTransport: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(TransportInputs: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(plurality::Box<RequestContext>: Send, Sync);
 
     #[test]
@@ -178,15 +190,11 @@ mod tests {
         let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
 
         for uri in ["https://first.example/", "https://second.example/"] {
-            let mut error =
-                futures::executor::block_on(transport.execute(request(uri))).expect_err("failed transport rejects every request");
+            let mut error = futures::executor::block_on(transport.execute(request(uri))).unwrap_err();
 
             assert_eq!(error.label(), "winhttp_initialization");
             assert_eq!(error.recovery(), RecoveryInfo::never());
-            assert_eq!(
-                error.take_request().expect("the current request is attached").uri().to_string(),
-                uri
-            );
+            assert_eq!(error.take_request().unwrap().uri().to_string(), uri);
             assert!(error.take_request().is_none(), "the request is attached exactly once");
         }
 
@@ -220,12 +228,12 @@ mod tests {
         input
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("untouched"));
-        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("plain HTTP is disabled");
+        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
 
         assert!(error.to_string().contains("plain HTTP requests are disabled"));
         assert_eq!(error.label(), "invalid_request");
         assert_eq!(error.recovery(), RecoveryInfo::never());
-        let attached = error.take_request().expect("the request is attached");
+        let attached = error.take_request().unwrap();
         assert_eq!(attached.method(), http::Method::GET);
         assert_eq!(attached.uri().to_string(), "http://example.com/");
         assert_eq!(attached.version(), http::Version::HTTP_2);
@@ -251,7 +259,7 @@ mod tests {
         let bindings = successful_request_bindings(Arc::clone(&context), Arc::clone(&closes));
         let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
 
-        let response = futures::executor::block_on(transport.execute(request("https://example.com/"))).expect("request succeeds");
+        let response = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap();
 
         assert_eq!(response.status(), 200);
         assert_eq!(response.version(), http::Version::HTTP_2);
@@ -301,13 +309,13 @@ mod tests {
             .method(http::Method::POST)
             .uri("https://example.com/upload")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         *input.version_mut() = http::Version::HTTP_2;
         input
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("preserved"));
 
-        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("body error fails the request");
+        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.label(), "unavailable");
         assert_eq!(error.recovery(), RecoveryInfo::unavailable());
@@ -341,17 +349,17 @@ mod tests {
             .method(http::Method::POST)
             .uri("https://example.com/upload")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         *input.version_mut() = http::Version::HTTP_2;
         input
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("preserved"));
         input.extensions_mut().insert(42_u32);
 
-        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("send failure reaches the caller");
+        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
-        let attached = error.take_request().expect("the unpolled request is attached");
+        let attached = error.take_request().unwrap();
         assert_eq!(attached.method(), http::Method::POST);
         assert_eq!(attached.uri().to_string(), "https://example.com/upload");
         assert_eq!(attached.version(), http::Version::HTTP_2);
@@ -360,7 +368,7 @@ mod tests {
             Some(&http::HeaderValue::from_static("preserved"))
         );
         assert_eq!(attached.extensions().get::<u32>(), Some(&42));
-        let text = futures::executor::block_on(attached.into_body().into_text()).expect("the untouched stream remains readable");
+        let text = futures::executor::block_on(attached.into_body().into_text()).unwrap();
         assert_eq!(text, "streaming");
         assert_eq!(
             processor
@@ -385,17 +393,17 @@ mod tests {
             .method(http::Method::POST)
             .uri("https://example.com/upload")
             .body(body_builder.text("replayable"))
-            .expect("test request is valid");
+            .unwrap();
         *input.version_mut() = http::Version::HTTP_2;
         input
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("preserved"));
         input.extensions_mut().insert(42_u32);
 
-        let mut error = futures::executor::block_on(transport.execute(input)).expect_err("write failure reaches the caller");
+        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
-        let attached = error.take_request().expect("the replayable request is attached");
+        let attached = error.take_request().unwrap();
         assert_eq!(attached.method(), http::Method::POST);
         assert_eq!(attached.uri().to_string(), "https://example.com/upload");
         assert_eq!(attached.version(), http::Version::HTTP_2);
@@ -404,7 +412,7 @@ mod tests {
             Some(&http::HeaderValue::from_static("preserved"))
         );
         assert_eq!(attached.extensions().get::<u32>(), Some(&42));
-        let text = futures::executor::block_on(attached.into_body().into_text()).expect("the restored body remains readable");
+        let text = futures::executor::block_on(attached.into_body().into_text()).unwrap();
         assert_eq!(text, "replayable");
         assert_eq!(
             processor
@@ -426,7 +434,7 @@ mod tests {
         let bindings = cold_connect_failure_bindings(&context, Arc::clone(&closes), control.clone());
         let transport = WinHttpTransport::new(inputs_with_clock(sink, control.to_clock()), Facade::mock(Arc::new(bindings)));
 
-        let mut error = futures::executor::block_on(transport.execute(request("https://example.com/"))).expect_err("cold connect fails");
+        let mut error = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap_err();
 
         assert_eq!(error.label(), "connect");
         assert!(error.take_request().is_some());
@@ -506,10 +514,7 @@ mod tests {
 
     fn request(uri: &str) -> HttpRequest {
         let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
-        HttpRequestBuilder::new(&body_builder)
-            .get(uri)
-            .build()
-            .expect("test request is valid")
+        HttpRequestBuilder::new(&body_builder).get(uri).build().unwrap()
     }
 
     fn successful_bindings() -> MockBindings {
@@ -530,10 +535,7 @@ mod tests {
         let context_option = Arc::clone(context);
         bindings.expect_set_option().returning(move |_, option, value| {
             if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(
-                    usize::from_ne_bytes(value.try_into().expect("the context option is pointer-sized")),
-                    Ordering::SeqCst,
-                );
+                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
             }
             Ok(())
         });
@@ -563,7 +565,7 @@ mod tests {
                     context,
                     WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
                     (&raw mut result).cast(),
-                    u32::try_from(size_of::<WINHTTP_ASYNC_RESULT>()).expect("status info length fits a DWORD"),
+                    u32::try_from(size_of::<WINHTTP_ASYNC_RESULT>()).unwrap(),
                 );
             }
             Ok(())
@@ -588,10 +590,7 @@ mod tests {
         let context_option = Arc::clone(&context);
         bindings.expect_set_option().returning(move |_, option, value| {
             if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(
-                    usize::from_ne_bytes(value.try_into().expect("the context option is pointer-sized")),
-                    Ordering::SeqCst,
-                );
+                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
             }
             Ok(())
         });
@@ -631,8 +630,8 @@ mod tests {
             Ok(())
         });
         bindings.expect_query_headers().returning(|_, info_level, buffer, byte_len| {
-            if info_level == (WINHTTP_QUERY_STATUS_CODE | 0x2000_0000) {
-                let output = buffer.expect("status query supplies a DWORD").cast::<u32>();
+            if info_level == (WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER) {
+                let output = buffer.unwrap().cast::<u32>();
                 // SAFETY: the transport supplies a writable DWORD.
                 unsafe { output.as_ptr().write(200) };
                 *byte_len = 4;
@@ -640,7 +639,7 @@ mod tests {
             }
             assert_eq!(info_level, WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING);
             let bytes = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n";
-            let required = u32::try_from(bytes.len() + 1).expect("test headers fit a DWORD");
+            let required = u32::try_from(bytes.len() + 1).unwrap();
             let Some(buffer) = buffer else {
                 *byte_len = required;
                 return Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders));
@@ -651,12 +650,12 @@ mod tests {
             let terminator = unsafe { buffer.as_ptr().add(bytes.len()) };
             // SAFETY: terminator points to the final writable byte.
             unsafe { terminator.write(0) };
-            *byte_len = u32::try_from(bytes.len()).expect("test headers fit a DWORD");
+            *byte_len = u32::try_from(bytes.len()).unwrap();
             Ok(())
         });
         bindings.expect_query_option().once().returning(|_, option, buffer, byte_len| {
             assert_eq!(option, WINHTTP_OPTION_HTTP_PROTOCOL_USED);
-            let output = buffer.expect("protocol query supplies a DWORD").cast::<u32>();
+            let output = buffer.unwrap().cast::<u32>();
             // SAFETY: the transport supplies a writable DWORD.
             unsafe { output.as_ptr().write(1) };
             *byte_len = 4;
@@ -691,10 +690,7 @@ mod tests {
         let context_option = Arc::clone(context);
         bindings.expect_set_option().returning(move |_, option, value| {
             if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(
-                    usize::from_ne_bytes(value.try_into().expect("the context option is pointer-sized")),
-                    Ordering::SeqCst,
-                );
+                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
             }
             Ok(())
         });
@@ -737,11 +733,11 @@ mod tests {
     }
 
     fn raw_handle() -> crate::handle::RawHandle {
-        crate::handle::RawHandle::new(std::ptr::dangling_mut::<c_void>()).expect("the standard dangling pointer is non-null")
+        crate::handle::RawHandle::new(std::ptr::dangling_mut::<c_void>()).unwrap()
     }
 
     fn raw_handle_value(value: usize) -> crate::handle::RawHandle {
-        crate::handle::RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).expect("test handle values are nonzero")
+        crate::handle::RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).unwrap()
     }
 
     fn clock() -> Clock {

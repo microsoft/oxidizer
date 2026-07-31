@@ -39,8 +39,10 @@ use crate::options::{
 use crate::session::WinHttpSession;
 use crate::tls::WinHttpTlsConfig;
 
+/// Reuses stable request-context allocations across sequential requests.
 pub(crate) type ContextPool = Mutex<Pool<RequestContext>>;
 
+/// Owns a new request and context until callback ownership is installed.
 pub(crate) struct RequestSetup {
     request: RequestHandle,
     context: plurality::Box<RequestContext>,
@@ -90,6 +92,7 @@ impl fmt::Debug for RequestSetup {
     }
 }
 
+/// Reclaims an extracted pooled context if installation fails.
 struct RawContextOwner {
     context: Option<NonNull<RequestContext>>,
 }
@@ -118,6 +121,7 @@ impl Drop for RawContextOwner {
 }
 
 #[derive(Debug)]
+/// Retains a request handle and its callback context through final close.
 pub(crate) struct RequestGuard {
     request: Option<RequestHandle>,
     context: NonNull<RequestContext>,
@@ -131,6 +135,7 @@ impl RequestGuard {
             .raw()
     }
 
+    #[cfg(test)]
     pub(crate) fn context_ptr(&self) -> *mut RequestContext {
         self.context.as_ptr()
     }
@@ -169,7 +174,7 @@ impl RequestGuard {
             // token atomically wins only if no inline callback already consumed
             // the operation, so synchronous failure cannot double-complete it.
             if let Some(active) = unsafe { self.context.as_ref() }.take_token(token) {
-                active.completion.send(CompletionResult::error(error, None, active.buffer));
+                active.completion.send(CompletionResult::error(error, active.buffer));
             }
         }
 
@@ -191,6 +196,7 @@ impl Drop for RequestGuard {
 }
 
 #[derive(Debug)]
+/// Awaits one completion while borrowing the guard that keeps it valid.
 pub(crate) struct OperationFuture<'guard> {
     receiver: RawReceiver<CompletionResult>,
     _guard: PhantomData<&'guard mut RequestGuard>,
@@ -206,6 +212,7 @@ impl Future for OperationFuture<'_> {
 }
 
 #[derive(Debug)]
+/// Couples a request error with optional cold-connect attribution.
 pub(crate) struct RequestFailure {
     error: HttpError,
     cold_connect_duration: Option<Duration>,
@@ -238,6 +245,7 @@ impl RequestFailure {
     }
 }
 
+/// Drives one translated request through the sequential WinHTTP lifecycle.
 pub(crate) struct RequestDriver<'body, 'contexts> {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
@@ -451,6 +459,7 @@ async fn send_request_headers(
     .await
 }
 
+/// Stores the UTF-16 request components and endpoint metadata WinHTTP needs.
 struct TranslatedRequest {
     method: U16CString,
     host: U16CString,
@@ -530,6 +539,7 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
 }
 
 #[derive(Clone, Copy)]
+/// Collects per-request WinHTTP protocol and certificate validation options.
 struct RequestSettings {
     protocol: ProtocolOptions,
     security_flags: u32,
@@ -598,6 +608,7 @@ fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + S
 }
 
 #[derive(Debug)]
+/// Describes request metadata that cannot be translated into WinHTTP inputs.
 enum RequestTranslationError {
     EmptyPort,
     HttpDisallowed,
@@ -644,6 +655,7 @@ impl fmt::Display for RequestTranslationError {
 impl std::error::Error for RequestTranslationError {}
 
 #[derive(Debug)]
+/// Describes malformed response header bytes returned by WinHTTP.
 pub(crate) enum ResponseHeadersError {
     InvalidHeaderName(String),
     InvalidHeaderValue(String),
@@ -745,6 +757,7 @@ fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
 mod tests {
     use std::collections::VecDeque;
     use std::ffi::c_void;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -774,7 +787,10 @@ mod tests {
         WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{ContextPool, OperationFuture, RequestDriver, RequestFailure, RequestGuard, RequestSetup};
+    use super::{
+        ContextPool, OperationFuture, RawContextOwner, RequestDriver, RequestFailure, RequestGuard, RequestSettings, RequestSetup,
+        RequestTranslationError, ResponseHeadersError, TranslatedRequest,
+    };
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
     use crate::callback::dispatch_completion;
@@ -784,17 +800,32 @@ mod tests {
     use crate::options::{
         WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH, WINHTTP_OPTION_CONTEXT_VALUE,
         WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
-        WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS,
+        WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
     use crate::session::WinHttpSession;
 
-    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug);
-    assert_impl_all!(RequestSetup: Send, std::fmt::Debug);
+    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestSetup: Send, std::fmt::Debug, UnwindSafe);
     assert_impl_all!(RequestGuard: Send, std::fmt::Debug);
+    // The setup owns the context, whose actual UnsafeCell state prevents safe shared observation.
+    assert_not_impl_any!(RequestSetup: RefUnwindSafe);
+    // These pointer owners refer to the callback context's actual UnsafeCell state.
+    assert_not_impl_any!(RawContextOwner: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: Sync);
     assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
+    // The future mutably borrows a guard and its receiver observes interior state.
+    assert_not_impl_any!(OperationFuture<'static>: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(OperationFuture<'static>: Sync);
+    // HttpError contains user-erased error state without unwind-safety bounds.
+    assert_not_impl_any!(RequestFailure: UnwindSafe, RefUnwindSafe);
+    // The driver holds a mutable body borrow whose erased implementation may expose partial mutation.
+    assert_not_impl_any!(RequestDriver<'static, 'static>: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(TranslatedRequest: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestSettings: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestTranslationError: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ResponseHeadersError: UnwindSafe, RefUnwindSafe);
 
     const SESSION: usize = 1;
     const CONNECT: usize = 2;
@@ -856,10 +887,7 @@ mod tests {
         let mut request = request(Method::GET, "https://example.com/resource?q=1");
         request.headers_mut().append("x-request", HeaderValue::from_static("first"));
         request.headers_mut().append("x-request", HeaderValue::from_static("second"));
-        let expected_headers = crate::options::headers_to_utf16(request.headers())
-            .expect("typed request headers are valid")
-            .as_slice()
-            .to_vec();
+        let expected_headers = crate::options::headers_to_utf16(request.headers()).unwrap().as_slice().to_vec();
         let config = LifecycleConfig {
             status: 404,
             raw_headers: raw_headers(&[
@@ -872,7 +900,7 @@ mod tests {
         };
 
         let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-        let response = response.expect("4xx is a successful transport response");
+        let response = response.unwrap();
 
         assert_eq!(response.status(), 404);
         assert_eq!(response.version(), Version::HTTP_2);
@@ -888,22 +916,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             [b"first=1".as_slice(), b"second=2".as_slice()]
         );
+        assert_eq!(*record.connect.lock().unwrap(), Some(("example.com".to_owned(), 443)));
         assert_eq!(
-            *record.connect.lock().expect("record lock is not poisoned"),
-            Some(("example.com".to_owned(), 443))
+            *record.open_request.lock().unwrap(),
+            Some(("GET".to_owned(), "/resource?q=1".to_owned(), WINHTTP_FLAG_SECURE.0))
         );
-        assert_eq!(
-            *record.open_request.lock().expect("record lock is not poisoned"),
-            Some(("GET".to_owned(), "/resource?q=1".to_owned(), WINHTTP_FLAG_SECURE))
-        );
-        assert_eq!(*record.sent_headers.lock().expect("record lock is not poisoned"), expected_headers);
-        assert!(
-            record
-                .sent_headers
-                .lock()
-                .expect("record lock is not poisoned")
-                .ends_with(&[u16::from(b'\r'), u16::from(b'\n')])
-        );
+        assert_eq!(*record.sent_headers.lock().unwrap(), expected_headers);
+        assert!(record.sent_headers.lock().unwrap().ends_with(&[u16::from(b'\r'), u16::from(b'\n')]));
         assert_eq!(
             record.send_context.load(Ordering::SeqCst),
             record.installed_context.load(Ordering::SeqCst)
@@ -940,19 +959,13 @@ mod tests {
             WinHttpTlsConfig::default(),
             config,
         );
-        let response = response.expect("HEAD succeeds");
+        let response = response.unwrap();
 
         assert_eq!(response.status(), 204);
         assert_eq!(response.version(), Version::HTTP_11);
         assert!(response.body().is_empty());
-        assert_eq!(
-            *record.connect.lock().expect("record lock is not poisoned"),
-            Some(("example.com".to_owned(), 8080))
-        );
-        assert_eq!(
-            *record.open_request.lock().expect("record lock is not poisoned"),
-            Some(("HEAD".to_owned(), "/".to_owned(), 0))
-        );
+        assert_eq!(*record.connect.lock().unwrap(), Some(("example.com".to_owned(), 8080)));
+        assert_eq!(*record.open_request.lock().unwrap(), Some(("HEAD".to_owned(), "/".to_owned(), 0)));
         assert_eq!(
             dword_options(&record),
             [
@@ -974,13 +987,10 @@ mod tests {
             WinHttpTlsConfig::default(),
             LifecycleConfig::default(),
         );
-        plain_response.expect("absolute HTTP URI succeeds");
+        plain_response.unwrap();
+        assert_eq!(*plain_record.connect.lock().unwrap(), Some(("example.com".to_owned(), 80)));
         assert_eq!(
-            *plain_record.connect.lock().expect("record lock is not poisoned"),
-            Some(("example.com".to_owned(), 80))
-        );
-        assert_eq!(
-            *plain_record.open_request.lock().expect("record lock is not poisoned"),
+            *plain_record.open_request.lock().unwrap(),
             Some(("GET".to_owned(), "/?mode=http".to_owned(), 0))
         );
         assert_lifecycle_closed(&plain_record);
@@ -991,14 +1001,11 @@ mod tests {
             WinHttpTlsConfig::default(),
             LifecycleConfig::default(),
         );
-        secure_response.expect("absolute HTTPS URI succeeds");
+        secure_response.unwrap();
+        assert_eq!(*secure_record.connect.lock().unwrap(), Some(("example.com".to_owned(), 443)));
         assert_eq!(
-            *secure_record.connect.lock().expect("record lock is not poisoned"),
-            Some(("example.com".to_owned(), 443))
-        );
-        assert_eq!(
-            *secure_record.open_request.lock().expect("record lock is not poisoned"),
-            Some(("GET".to_owned(), "/".to_owned(), WINHTTP_FLAG_SECURE))
+            *secure_record.open_request.lock().unwrap(),
+            Some(("GET".to_owned(), "/".to_owned(), WINHTTP_FLAG_SECURE.0))
         );
         assert_lifecycle_closed(&secure_record);
     }
@@ -1017,11 +1024,8 @@ mod tests {
                 LifecycleConfig::default(),
             );
 
-            response.expect("valid URI port succeeds");
-            assert_eq!(
-                *record.connect.lock().expect("record lock is not poisoned"),
-                Some((expected_host.to_owned(), expected_port))
-            );
+            response.unwrap();
+            assert_eq!(*record.connect.lock().unwrap(), Some((expected_host.to_owned(), expected_port)));
             assert_lifecycle_closed(&record);
         }
     }
@@ -1043,7 +1047,7 @@ mod tests {
                 LifecycleConfig::default(),
             );
 
-            let error = result.expect_err("invalid explicit port is rejected");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "invalid_request");
             assert_eq!(error.recovery(), RecoveryInfo::never());
             assert!(error.to_string().contains(message), "{uri}: {error}");
@@ -1072,7 +1076,7 @@ mod tests {
                 config,
             );
 
-            assert_eq!(response.expect("required protocol succeeds").version(), negotiated);
+            assert_eq!(response.unwrap().version(), negotiated);
             assert_eq!(
                 &dword_options(&record)[..2],
                 [
@@ -1105,7 +1109,7 @@ mod tests {
                 LifecycleConfig::default(),
             );
 
-            response.expect("TLS option setup succeeds");
+            response.unwrap();
             let actual = dword_options(&record)
                 .into_iter()
                 .find_map(|(option, value)| (option == WINHTTP_OPTION_SECURITY_FLAGS).then_some(value));
@@ -1126,7 +1130,7 @@ mod tests {
             LifecycleConfig::default(),
         );
 
-        response.expect("TLS relaxations are irrelevant to plain HTTP");
+        response.unwrap();
         assert!(
             dword_options(&record)
                 .into_iter()
@@ -1144,7 +1148,7 @@ mod tests {
             LifecycleConfig::default(),
         );
 
-        response.expect("request options succeed");
+        response.unwrap();
         assert_eq!(
             dword_options(&record),
             [
@@ -1174,7 +1178,7 @@ mod tests {
             LifecycleConfig::default(),
         );
 
-        response.expect("ignored generic options do not affect the request");
+        response.unwrap();
         assert_eq!(
             dword_options(&record),
             [
@@ -1209,7 +1213,7 @@ mod tests {
 
         for (request, options, message) in cases {
             let (result, record) = run_lifecycle(request, options, WinHttpTlsConfig::default(), LifecycleConfig::default());
-            let error = result.expect_err("invalid requests fail");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "invalid_request");
             assert_eq!(error.recovery(), RecoveryInfo::never());
             assert!(error.to_string().contains(message));
@@ -1218,9 +1222,9 @@ mod tests {
             assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
         }
 
-        Method::from_bytes(b"GET\r\nInjected").expect_err("a method cannot contain CRLF");
-        http::HeaderName::from_bytes(b"bad header").expect_err("a header name cannot contain spaces");
-        HeaderValue::from_bytes(b"value\r\nInjected: true").expect_err("a header value cannot contain CRLF");
+        Method::from_bytes(b"GET\r\nInjected").unwrap_err();
+        http::HeaderName::from_bytes(b"bad header").unwrap_err();
+        HeaderValue::from_bytes(b"value\r\nInjected: true").unwrap_err();
     }
 
     #[test]
@@ -1235,7 +1239,7 @@ mod tests {
                 LifecycleConfig::default(),
             );
 
-            let error = result.expect_err("legacy HTTP is rejected");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "invalid_request");
             assert!(error.to_string().contains("does not support requested HTTP version"));
             assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
@@ -1249,7 +1253,7 @@ mod tests {
             WinHttpTlsConfig::default(),
             LifecycleConfig::default(),
         );
-        assert_eq!(result.expect_err("legacy request version is rejected").label(), "invalid_request");
+        assert_eq!(result.unwrap_err().label(), "invalid_request");
         assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
     }
 
@@ -1284,7 +1288,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             ..LifecycleConfig::default()
@@ -1292,11 +1296,11 @@ mod tests {
 
         let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
 
-        response.expect("all request body frames are written");
+        response.unwrap();
         assert_eq!(record.sent_total_length.load(Ordering::SeqCst), 6);
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
         assert_eq!(
-            *record.writes.lock().expect("record lock is not poisoned"),
+            *record.writes.lock().unwrap(),
             [
                 RecordedWrite {
                     address: expected_addresses[0],
@@ -1330,7 +1334,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             max_write_completion: Some(2),
@@ -1339,9 +1343,9 @@ mod tests {
 
         let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
 
-        response.expect("partial completions are continued sequentially");
+        response.unwrap();
         assert_eq!(
-            *record.writes.lock().expect("record lock is not poisoned"),
+            *record.writes.lock().unwrap(),
             [
                 RecordedWrite {
                     address,
@@ -1375,7 +1379,7 @@ mod tests {
                 .method(Method::POST)
                 .uri("https://example.com/")
                 .body(body)
-                .expect("test request is valid");
+                .unwrap();
             let mut options = TransportOptions::default();
             options.supported_http_versions = versions;
             let config = LifecycleConfig {
@@ -1386,16 +1390,10 @@ mod tests {
 
             let (response, record) = run_lifecycle(request, options, WinHttpTlsConfig::default(), config);
 
-            response.expect("unknown-length upload succeeds");
+            response.unwrap();
             assert_eq!(
-                record
-                    .open_request
-                    .lock()
-                    .expect("record lock is not poisoned")
-                    .as_ref()
-                    .expect("request was opened")
-                    .2,
-                WINHTTP_FLAG_SECURE | WINHTTP_FLAG_AUTOMATIC_CHUNKING
+                record.open_request.lock().unwrap().as_ref().unwrap().2,
+                WINHTTP_FLAG_SECURE.0 | WINHTTP_FLAG_AUTOMATIC_CHUNKING
             );
             assert_eq!(
                 record.sent_total_length.load(Ordering::SeqCst),
@@ -1423,7 +1421,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             defer_write_completion: true,
@@ -1445,7 +1443,7 @@ mod tests {
             &options,
             &tls,
         )
-        .expect("request setup succeeds");
+        .unwrap();
         let mut body_polled = false;
         let mut future = Box::pin(driver.execute(&mut body_polled));
         let waker = futures::task::noop_waker();
@@ -1470,7 +1468,7 @@ mod tests {
         let Poll::Ready(response) = future.as_mut().poll(&mut cx) else {
             panic!("response becomes ready after the terminal write completes");
         };
-        let response = response.expect("unknown-length upload succeeds");
+        let response = response.unwrap();
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
 
         drop(future);
@@ -1481,7 +1479,7 @@ mod tests {
         drop(session);
 
         assert!(body_polled);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_lifecycle_closed(&record);
     }
 
@@ -1498,7 +1496,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             ..LifecycleConfig::default()
@@ -1506,25 +1504,15 @@ mod tests {
 
         let (response, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
 
-        response.expect("large declared body length reaches WinHTTP");
+        response.unwrap();
         assert_eq!(
             record.sent_total_length.load(Ordering::SeqCst),
             WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH as usize
         );
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
-        let sent_headers = String::from_utf16(&record.sent_headers.lock().expect("record lock is not poisoned"))
-            .expect("translated headers are valid UTF-16");
+        let sent_headers = String::from_utf16(&record.sent_headers.lock().unwrap()).unwrap();
         assert!(sent_headers.contains("content-length: 4294967296\r\n"));
-        assert_eq!(
-            record
-                .open_request
-                .lock()
-                .expect("record lock is not poisoned")
-                .as_ref()
-                .expect("request was opened")
-                .2,
-            WINHTTP_FLAG_SECURE
-        );
+        assert_eq!(record.open_request.lock().unwrap().as_ref().unwrap().2, WINHTTP_FLAG_SECURE.0);
         assert_lifecycle_closed(&record);
     }
 
@@ -1545,14 +1533,14 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             ..LifecycleConfig::default()
         };
 
         let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-        let error = result.expect_err("body stream errors are propagated");
+        let error = result.unwrap_err();
         assert_eq!(error.label(), "validation");
         assert!(error.to_string().contains("request body stream failed"));
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
@@ -1568,14 +1556,14 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             ..LifecycleConfig::default()
         };
 
         let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-        let error = result.expect_err("request trailers are rejected");
+        let error = result.unwrap_err();
         assert_eq!(error.label(), "invalid_request");
         assert!(error.to_string().contains("cannot submit request trailer frames"));
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
@@ -1596,7 +1584,7 @@ mod tests {
                 .method(Method::POST)
                 .uri("https://example.com/")
                 .body(body)
-                .expect("test request is valid");
+                .unwrap();
             let config = LifecycleConfig {
                 failure: Some(failure),
                 completed_writes,
@@ -1604,7 +1592,7 @@ mod tests {
             };
 
             let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-            let error = result.expect_err("the final request write failure reaches the caller");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
             assert_eq!(record.end_write_calls.load(Ordering::SeqCst), 1);
@@ -1632,7 +1620,7 @@ mod tests {
                 .method(Method::POST)
                 .uri("https://example.com/")
                 .body(body)
-                .expect("test request is valid");
+                .unwrap();
             let config = LifecycleConfig {
                 failure: Some(failure),
                 completed_writes,
@@ -1640,7 +1628,7 @@ mod tests {
             };
 
             let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-            let error = result.expect_err("write failure reaches the caller");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
             assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
@@ -1663,7 +1651,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             max_write_completion: Some(0),
@@ -1671,7 +1659,7 @@ mod tests {
         };
 
         let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
-        let error = result.expect_err("a zero-byte write completion is rejected");
+        let error = result.unwrap_err();
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("without writing any bytes"));
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
@@ -1696,7 +1684,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             defer_write_completion: true,
@@ -1719,7 +1707,7 @@ mod tests {
             &options,
             &tls,
         )
-        .expect("request setup succeeds");
+        .unwrap();
         let mut body_polled = false;
         let mut future = Box::pin(driver.execute(&mut body_polled));
         let waker = futures::task::noop_waker();
@@ -1728,7 +1716,7 @@ mod tests {
         assert!(future.as_mut().poll(&mut cx).is_pending());
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+        assert_eq!(contexts.lock().unwrap().len(), 1);
 
         drop(future);
         drop(session);
@@ -1736,12 +1724,12 @@ mod tests {
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+        assert_eq!(contexts.lock().unwrap().len(), 1);
 
         let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
         closing(context);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
@@ -1775,7 +1763,7 @@ mod tests {
             &options,
             &tls,
         )
-        .expect("request setup succeeds");
+        .unwrap();
         let mut body_polled = false;
         let mut future = Box::pin(driver.execute(&mut body_polled));
         let waker = futures::task::noop_waker();
@@ -1784,7 +1772,7 @@ mod tests {
         assert!(future.as_mut().poll(&mut cx).is_pending());
         assert_eq!(record.send_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+        assert_eq!(contexts.lock().unwrap().len(), 1);
 
         control.advance(Duration::from_secs(1));
         let Poll::Ready(Err(failure)) = future.as_mut().poll(&mut cx) else {
@@ -1799,13 +1787,13 @@ mod tests {
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+        assert_eq!(contexts.lock().unwrap().len(), 1);
 
         drop(session);
         let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
         closing(context);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
@@ -1830,7 +1818,7 @@ mod tests {
             .method(Method::POST)
             .uri("https://example.com/")
             .body(body)
-            .expect("test request is valid");
+            .unwrap();
         let config = LifecycleConfig {
             completed_writes,
             defer_write_completion: true,
@@ -1853,7 +1841,7 @@ mod tests {
             &options,
             &tls,
         )
-        .expect("request setup succeeds");
+        .unwrap();
         let mut body_polled = false;
         let mut future = Box::pin(driver.execute(&mut body_polled));
         let waker = futures::task::noop_waker();
@@ -1876,7 +1864,7 @@ mod tests {
         let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
         closing(context);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
@@ -1908,12 +1896,12 @@ mod tests {
             &options,
             &tls,
         )
-        .expect("request setup succeeds");
+        .unwrap();
         let mut body_polled = false;
-        let response = futures::executor::block_on(driver.execute(&mut body_polled)).expect("response headers succeed");
+        let response = futures::executor::block_on(driver.execute(&mut body_polled)).unwrap();
 
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
-        let error = futures::executor::block_on(response.into_body().into_bytes()).expect_err("the pending body read times out");
+        let error = futures::executor::block_on(response.into_body().into_bytes()).unwrap_err();
         assert_eq!(error.label(), "body_timeout");
         assert_eq!(record.data_available_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
@@ -1924,7 +1912,7 @@ mod tests {
         closing(context);
         drop(session);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
@@ -1977,7 +1965,7 @@ mod tests {
                 config,
             );
 
-            let error = result.expect_err("injected failure reaches the caller");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), expected_label, "{failure:?}");
             assert_eq!(error.recovery(), expected_recovery, "{failure:?}");
             assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
@@ -2002,7 +1990,7 @@ mod tests {
             WinHttpTlsConfig::default(),
             config,
         );
-        let response = response.expect("5xx and obs-text headers are successful");
+        let response = response.unwrap();
 
         assert_eq!(response.status(), 500);
         assert_eq!(response.version(), Version::HTTP_3);
@@ -2039,7 +2027,7 @@ mod tests {
                 WinHttpTlsConfig::default(),
                 malformed,
             );
-            let error = result.expect_err("malformed headers fail");
+            let error = result.unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(error.recovery(), RecoveryInfo::never());
             assert!(error.to_string().contains(message), "{error}");
@@ -2056,7 +2044,7 @@ mod tests {
             WinHttpTlsConfig::default(),
             malformed_protocol,
         );
-        let error = result.expect_err("malformed queried protocol data fails");
+        let error = result.unwrap_err();
         assert_eq!(error.label(), "request_winhttp");
         assert_eq!(error.recovery(), RecoveryInfo::never());
         assert_lifecycle_closed(&record);
@@ -2192,7 +2180,7 @@ mod tests {
         }
 
         drop(session);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
 
         (result, record)
     }
@@ -2208,7 +2196,7 @@ mod tests {
         let connect_record = Arc::clone(&record);
         bindings.expect_connect().returning(move |_, host, port| {
             connect_record.connect_calls.fetch_add(1, Ordering::SeqCst);
-            *connect_record.connect.lock().expect("record lock is not poisoned") = Some((host.to_string_lossy(), port));
+            *connect_record.connect.lock().unwrap() = Some((host.to_string_lossy(), port));
             if connect_config.failure == Some(LifecycleFailure::Connect) {
                 Err(WinHttpError::new(12029, WinHttpOperation::Connect))
             } else {
@@ -2219,8 +2207,7 @@ mod tests {
         let open_config = Arc::clone(&config);
         let open_record = Arc::clone(&record);
         bindings.expect_open_request().returning(move |_, method, path, flags| {
-            *open_record.open_request.lock().expect("record lock is not poisoned") =
-                Some((method.to_string_lossy(), path.to_string_lossy(), flags));
+            *open_record.open_request.lock().unwrap() = Some((method.to_string_lossy(), path.to_string_lossy(), flags));
             if open_config.failure == Some(LifecycleFailure::OpenRequest) {
                 Err(WinHttpError::new(12005, WinHttpOperation::OpenRequest))
             } else {
@@ -2233,19 +2220,15 @@ mod tests {
         let option_record = Arc::clone(&record);
         bindings.expect_set_option().returning(move |_, option, value| {
             let index = option_index.fetch_add(1, Ordering::SeqCst);
-            option_record
-                .options
-                .lock()
-                .expect("record lock is not poisoned")
-                .push((option, value.to_vec()));
+            option_record.options.lock().unwrap().push((option, value.to_vec()));
             if option_config.failure == Some(LifecycleFailure::Option(index)) {
                 return Err(WinHttpError::new(
-                    13_000 + u32::try_from(index).expect("test option index fits u32"),
+                    13_000 + u32::try_from(index).unwrap(),
                     WinHttpOperation::SetOption,
                 ));
             }
             if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                let context = usize::from_ne_bytes(value.try_into().expect("context option is pointer-sized"));
+                let context = usize::from_ne_bytes(value.try_into().unwrap());
                 option_record.installed_context.store(context, Ordering::SeqCst);
             }
             Ok(())
@@ -2257,7 +2240,7 @@ mod tests {
             send_record.send_calls.fetch_add(1, Ordering::SeqCst);
             send_record.send_context.store(context, Ordering::SeqCst);
             send_record.sent_total_length.store(total_len as usize, Ordering::SeqCst);
-            *send_record.sent_headers.lock().expect("record lock is not poisoned") = headers.as_slice().to_vec();
+            *send_record.sent_headers.lock().unwrap() = headers.as_slice().to_vec();
 
             if send_config.failure == Some(LifecycleFailure::SendSync) {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
@@ -2301,7 +2284,7 @@ mod tests {
                     );
                 })
                 .join()
-                .expect("completion thread does not panic");
+                .unwrap();
             } else {
                 complete(
                     std::ptr::with_exposed_provenance_mut(context),
@@ -2324,14 +2307,10 @@ mod tests {
                 // contiguous span passed to the mock for at least the
                 // duration of this call.
                 let bytes = unsafe { slice::from_raw_parts(buffer.as_ptr(), len as usize) }.to_vec();
-                write_record
-                    .writes
-                    .lock()
-                    .expect("record lock is not poisoned")
-                    .push(RecordedWrite {
-                        address: buffer.as_ptr().addr(),
-                        bytes,
-                    });
+                write_record.writes.lock().unwrap().push(RecordedWrite {
+                    address: buffer.as_ptr().addr(),
+                    bytes,
+                });
             } else {
                 assert_eq!(len, 0, "only the final zero-length write has no buffer");
                 write_record.end_write_calls.fetch_add(1, Ordering::SeqCst);
@@ -2444,11 +2423,11 @@ mod tests {
         bindings
             .expect_query_headers()
             .returning(move |_, info_level, buffer, byte_len| match info_level {
-                level if level == (WINHTTP_QUERY_STATUS_CODE | 0x2000_0000) => {
+                level if level == (WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER) => {
                     if header_config.failure == Some(LifecycleFailure::QueryStatus) {
                         return Err(WinHttpError::new(12002, WinHttpOperation::QueryHeaders));
                     }
-                    let output = buffer.expect("status query supplies a DWORD").cast::<u32>();
+                    let output = buffer.unwrap().cast::<u32>();
                     // SAFETY: the lifecycle supplies a writable DWORD buffer.
                     unsafe { output.as_ptr().write(header_config.status) };
                     *byte_len = 4;
@@ -2475,7 +2454,7 @@ mod tests {
             if protocol_config.failure == Some(LifecycleFailure::QueryProtocol) {
                 return Err(WinHttpError::new(12175, WinHttpOperation::QueryOption));
             }
-            let output = buffer.expect("protocol query supplies a DWORD").cast::<u32>();
+            let output = buffer.unwrap().cast::<u32>();
             // SAFETY: the lifecycle supplies a writable DWORD buffer.
             unsafe { output.as_ptr().write(protocol_config.protocol) };
             *byte_len = 4;
@@ -2500,9 +2479,9 @@ mod tests {
     }
 
     fn write_utf16_query(units: &[u16], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
-        let required_units = units.len().checked_add(1).expect("test header length does not overflow");
-        let required_bytes = required_units.checked_mul(2).expect("test header byte length does not overflow");
-        let required_bytes = u32::try_from(required_bytes).expect("test header byte length fits a DWORD");
+        let required_units = units.len().checked_add(1).unwrap();
+        let required_bytes = required_units.checked_mul(2).unwrap();
+        let required_bytes = u32::try_from(required_bytes).unwrap();
 
         let Some(buffer) = buffer else {
             *byte_len = required_bytes;
@@ -2519,13 +2498,13 @@ mod tests {
         let terminator = unsafe { output.as_ptr().add(units.len()) };
         // SAFETY: terminator points to the final writable UTF-16 unit.
         unsafe { terminator.write(0) };
-        *byte_len = u32::try_from(units.len() * 2).expect("test returned byte length fits a DWORD");
+        *byte_len = u32::try_from(units.len() * 2).unwrap();
         Ok(())
     }
 
     fn write_byte_query(bytes: &[u8], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
-        let required_bytes = bytes.len().checked_add(1).expect("test header byte length does not overflow");
-        let required_bytes = u32::try_from(required_bytes).expect("test header byte length fits a DWORD");
+        let required_bytes = bytes.len().checked_add(1).unwrap();
+        let required_bytes = u32::try_from(required_bytes).unwrap();
 
         let Some(output) = buffer else {
             *byte_len = required_bytes;
@@ -2540,7 +2519,7 @@ mod tests {
         let terminator = unsafe { output.as_ptr().add(bytes.len()) };
         // SAFETY: terminator points to the final writable byte.
         unsafe { terminator.write(0) };
-        *byte_len = u32::try_from(bytes.len()).expect("test returned byte length fits a DWORD");
+        *byte_len = u32::try_from(bytes.len()).unwrap();
         Ok(())
     }
 
@@ -2561,15 +2540,10 @@ mod tests {
         record
             .options
             .lock()
-            .expect("record lock is not poisoned")
+            .unwrap()
             .iter()
             .filter(|(option, value)| *option != WINHTTP_OPTION_CONTEXT_VALUE && value.len() == size_of::<u32>())
-            .map(|(option, value)| {
-                (
-                    *option,
-                    u32::from_ne_bytes(value.as_slice().try_into().expect("DWORD option has four bytes")),
-                )
-            })
+            .map(|(option, value)| (*option, u32::from_ne_bytes(value.as_slice().try_into().unwrap())))
             .collect()
     }
 
@@ -2581,11 +2555,7 @@ mod tests {
 
     fn request(method: Method, uri: &str) -> HttpRequest {
         let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
-        http::Request::builder()
-            .method(method)
-            .uri(uri)
-            .body(body_builder.empty())
-            .expect("test request is valid")
+        http::Request::builder().method(method).uri(uri).body(body_builder.empty()).unwrap()
     }
 
     fn raw_headers(headers: &[(&str, &[u8])]) -> Vec<u8> {
@@ -2612,11 +2582,11 @@ mod tests {
             &contexts,
         );
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
-        let error = setup.install().expect_err("the context option is configured to fail");
+        assert_eq!(contexts.lock().unwrap().len(), 1);
+        let error = setup.install().unwrap_err();
 
         assert_eq!(error.code(), 12019);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 0);
@@ -2637,7 +2607,7 @@ mod tests {
             &contexts,
         )
         .install()
-        .expect("context installation succeeds");
+        .unwrap();
         let context = guard.context_ptr();
 
         drop(session);
@@ -2646,11 +2616,11 @@ mod tests {
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
         assert_eq!(closes.session.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+        assert_eq!(contexts.lock().unwrap().len(), 1);
 
         closing(context);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
     }
@@ -2665,10 +2635,10 @@ mod tests {
                 complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
                 Ok(())
             })
-            .expect("no operation is already active");
+            .unwrap();
 
         assert!(matches!(
-            futures::executor::block_on(future).expect("sender remains connected"),
+            futures::executor::block_on(future).unwrap(),
             CompletionResult::SendRequestComplete
         ));
         finish(guard, context, &contexts, session, &closes);
@@ -2685,10 +2655,10 @@ mod tests {
                 });
                 Ok(())
             })
-            .expect("no operation is already active");
+            .unwrap();
 
         assert!(matches!(
-            futures::executor::block_on(future).expect("sender remains connected"),
+            futures::executor::block_on(future).unwrap(),
             CompletionResult::HeadersAvailable
         ));
         finish(guard, context, &contexts, session, &closes);
@@ -2701,14 +2671,12 @@ mod tests {
             .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
                 Err(WinHttpError::new(12029, WinHttpOperation::SendRequest))
             })
-            .expect("no operation is already active");
+            .unwrap();
 
-        let CompletionResult::Error { error, api_result, buffer } = futures::executor::block_on(future).expect("sender remains connected")
-        else {
+        let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
             panic!("synchronous failure must produce an error completion");
         };
         assert_eq!(error.code(), 12029);
-        assert_eq!(api_result, None);
         assert!(buffer.is_none());
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
         finish(guard, context, &contexts, session, &closes);
@@ -2723,9 +2691,9 @@ mod tests {
                 complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
                 Ok(())
             })
-            .expect("send slot is idle");
+            .unwrap();
         assert!(matches!(
-            futures::executor::block_on(send).expect("send completion"),
+            futures::executor::block_on(send).unwrap(),
             CompletionResult::SendRequestComplete
         ));
 
@@ -2734,9 +2702,9 @@ mod tests {
                 complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
                 Ok(())
             })
-            .expect("headers slot is idle");
+            .unwrap();
         assert!(matches!(
-            futures::executor::block_on(headers).expect("headers completion"),
+            futures::executor::block_on(headers).unwrap(),
             CompletionResult::HeadersAvailable
         ));
 
@@ -2751,9 +2719,9 @@ mod tests {
                 );
                 Ok(())
             })
-            .expect("data slot is idle");
+            .unwrap();
         assert!(matches!(
-            futures::executor::block_on(data).expect("data completion"),
+            futures::executor::block_on(data).unwrap(),
             CompletionResult::DataAvailable(17)
         ));
 
@@ -2768,9 +2736,9 @@ mod tests {
                     Ok(())
                 },
             )
-            .expect("read slot is idle");
+            .unwrap();
         assert!(matches!(
-            futures::executor::block_on(read).expect("read completion"),
+            futures::executor::block_on(read).unwrap(),
             CompletionResult::ReadComplete { len: 5, .. }
         ));
 
@@ -2778,11 +2746,7 @@ mod tests {
         let write = guard
             .submit(
                 OperationKind::Write,
-                OperationBuffer::write(
-                    BytesView::copied_from_slice(b"data", &GlobalPool::new()),
-                    NonNull::<u8>::dangling().as_ptr().addr(),
-                    4,
-                ),
+                OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
                 |_, _| {
                     complete(
                         context,
@@ -2793,9 +2757,9 @@ mod tests {
                     Ok(())
                 },
             )
-            .expect("write slot is idle");
+            .unwrap();
         assert!(matches!(
-            futures::executor::block_on(write).expect("write completion"),
+            futures::executor::block_on(write).unwrap(),
             CompletionResult::WriteComplete { len: 4, .. }
         ));
         finish(guard, context, &contexts, session, &closes);
@@ -2805,11 +2769,7 @@ mod tests {
     fn cancellation_retains_read_and_write_operations_until_handle_closing() {
         for buffer in [
             OperationBuffer::read(GlobalPool::new().reserve(8), NonNull::<u8>::dangling().as_ptr().addr(), 8),
-            OperationBuffer::write(
-                BytesView::copied_from_slice(b"outstanding", &GlobalPool::new()),
-                NonNull::<u8>::dangling().as_ptr().addr(),
-                11,
-            ),
+            OperationBuffer::write(BytesView::copied_from_slice(b"outstanding", &GlobalPool::new()), 11),
         ] {
             let (mut guard, context, contexts, session, closes) = installed();
             let kind = match buffer {
@@ -2817,9 +2777,9 @@ mod tests {
                 OperationBuffer::Write { .. } => OperationKind::Write,
                 OperationBuffer::None => unreachable!("test buffers are read or write"),
             };
-            let future = guard.submit(kind, buffer, |_, _| Ok(())).expect("no operation is already active");
+            let future = guard.submit(kind, buffer, |_, _| Ok(())).unwrap();
 
-            assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+            assert_eq!(contexts.lock().unwrap().len(), 1);
             drop(future);
             drop(session);
             drop(guard);
@@ -2827,11 +2787,11 @@ mod tests {
             assert_eq!(closes.request.load(Ordering::SeqCst), 1);
             assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
             assert_eq!(closes.session.load(Ordering::SeqCst), 0);
-            assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 1);
+            assert_eq!(contexts.lock().unwrap().len(), 1);
 
             closing(context);
 
-            assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+            assert_eq!(contexts.lock().unwrap().len(), 0);
             assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
             assert_eq!(closes.session.load(Ordering::SeqCst), 1);
         }
@@ -2843,7 +2803,7 @@ mod tests {
             let (mut guard, context, contexts, session, closes) = installed();
             let future = guard
                 .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-                .expect("no operation is already active");
+                .unwrap();
             let mut secure_flags = 0x20_u32;
             let mut async_result = WINHTTP_ASYNC_RESULT {
                 dwResult: 7,
@@ -2865,12 +2825,10 @@ mod tests {
                 status_info_len::<WINHTTP_ASYNC_RESULT>(),
             );
 
-            let CompletionResult::Error { error, api_result, buffer } = futures::executor::block_on(future).expect("error completion")
-            else {
+            let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
                 panic!("request error must produce an error completion");
             };
             assert_eq!(error.code(), 12175);
-            assert_eq!(api_result, Some(7));
             assert!(buffer.is_none());
             assert_eq!(error.secure_failure_flags(), secure_first.then_some(0x20));
 
@@ -2895,12 +2853,12 @@ mod tests {
         let (mut guard, context, contexts, session, closes) = installed();
         let future = guard
             .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-            .expect("no operation is already active");
+            .unwrap();
 
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
         assert!(matches!(
-            futures::executor::block_on(future).expect("first completion"),
+            futures::executor::block_on(future).unwrap(),
             CompletionResult::SendRequestComplete
         ));
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
@@ -2913,11 +2871,11 @@ mod tests {
         let (mut guard, context, contexts, session, closes) = installed();
         let future = guard
             .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-            .expect("no operation is already active");
+            .unwrap();
         let mut bytes = [0_u8; size_of::<WINHTTP_ASYNC_RESULT>() + align_of::<WINHTTP_ASYNC_RESULT>()];
         let offset = (0..align_of::<WINHTTP_ASYNC_RESULT>())
             .find(|offset| !(bytes.as_ptr().addr() + offset).is_multiple_of(align_of::<WINHTTP_ASYNC_RESULT>()))
-            .expect("WINHTTP_ASYNC_RESULT has alignment greater than one");
+            .unwrap();
         // SAFETY: offset is less than the type alignment, and the byte array has
         // that much padding beyond the status structure's required length.
         let unaligned = unsafe { bytes.as_mut_ptr().add(offset) }.cast();
@@ -2930,7 +2888,7 @@ mod tests {
         );
 
         assert!(matches!(
-            futures::executor::block_on(future).expect("invalid-info completion"),
+            futures::executor::block_on(future).unwrap(),
             CompletionResult::InvalidStatusInfo {
                 status: WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
                 ..
@@ -2971,7 +2929,7 @@ mod tests {
             &contexts,
         )
         .install()
-        .expect("context installation succeeds");
+        .unwrap();
         let context = guard.context_ptr();
 
         drop(contexts);
@@ -3001,7 +2959,7 @@ mod tests {
             &contexts,
         )
         .install()
-        .expect("context installation succeeds");
+        .unwrap();
         let context = guard.context_ptr();
 
         (guard, context, contexts, session, closes)
@@ -3018,7 +2976,7 @@ mod tests {
         drop(guard);
         closing(context);
 
-        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
@@ -3033,7 +2991,7 @@ mod tests {
     }
 
     fn status_info_len<T>() -> u32 {
-        u32::try_from(size_of::<T>()).expect("WinHTTP status-info types fit in a DWORD length")
+        u32::try_from(size_of::<T>()).unwrap()
     }
 
     fn closing(context: *mut crate::context::RequestContext) {
@@ -3054,14 +3012,13 @@ mod tests {
                 *handle == raw_handle(REQUEST)
                     && *option == WINHTTP_OPTION_CONTEXT_VALUE
                     && value.len() == size_of::<usize>()
-                    && usize::from_ne_bytes(value.try_into().expect("the context option is exactly pointer-sized")) != 0
+                    && usize::from_ne_bytes(value.try_into().unwrap()) != 0
             })
             .once()
             .returning(move |_, _, value| {
-                context_counts.context.store(
-                    usize::from_ne_bytes(value.try_into().expect("the context option is exactly pointer-sized")),
-                    Ordering::SeqCst,
-                );
+                context_counts
+                    .context
+                    .store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
                 if fail_context_option {
                     Err(WinHttpError::new(12019, WinHttpOperation::SetOption))
                 } else {
@@ -3092,6 +3049,6 @@ mod tests {
     }
 
     fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).expect("test handle values are nonzero")
+        RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).unwrap()
     }
 }

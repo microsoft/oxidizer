@@ -18,6 +18,7 @@ use crate::error::{Result, WinHttpError, WinHttpOperation};
 use crate::handle::RawHandle;
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Calls the operating system's WinHTTP API through the binding abstraction.
 pub(super) struct RealBindings;
 
 impl RealBindings {
@@ -191,15 +192,22 @@ impl Bindings for RealBindings {
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::ptr::null_mut;
 
+    use static_assertions::assert_impl_all;
+
     use super::RealBindings;
+    use crate::bindings::StatusCallback;
     use crate::error::{WinHttpError, WinHttpOperation};
+
+    assert_impl_all!(StatusCallback: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RealBindings: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn null_handle_path_captures_failure() {
-        let error = RealBindings::handle_result_with(null_mut::<c_void>(), || WinHttpError::new(1234, WinHttpOperation::OpenRequest))
-            .expect_err("a null WinHTTP handle must fail");
+        let error =
+            RealBindings::handle_result_with(null_mut::<c_void>(), || WinHttpError::new(1234, WinHttpOperation::OpenRequest)).unwrap_err();
 
         assert_eq!(error.code(), 1234);
         assert_eq!(error.operation(), WinHttpOperation::OpenRequest);
@@ -208,7 +216,7 @@ mod tests {
     #[test]
     fn callback_sentinel_path_captures_failure() {
         let error = RealBindings::callback_result_with(Some(usize::MAX), || WinHttpError::new(5678, WinHttpOperation::SetStatusCallback))
-            .expect_err("the invalid callback sentinel must fail");
+            .unwrap_err();
 
         assert_eq!(error.code(), 5678);
         assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
@@ -216,7 +224,6 @@ mod tests {
 
     #[test]
     fn ordinary_callback_result_succeeds() {
-        RealBindings::callback_result_with(None, || WinHttpError::new(1, WinHttpOperation::SetStatusCallback))
-            .expect("an ordinary callback return value succeeds");
+        RealBindings::callback_result_with(None, || WinHttpError::new(1, WinHttpOperation::SetStatusCallback)).unwrap();
     }
 }

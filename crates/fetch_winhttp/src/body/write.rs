@@ -21,6 +21,7 @@ use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
 use crate::request::RequestGuard;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Captures the WinHTTP length and chunking mode for one request body.
 pub(crate) struct RequestBodyPlan {
     total_length: u32,
     automatic_chunking: bool,
@@ -150,6 +151,7 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Reports a request body length that cannot be represented safely for WinHTTP.
 pub(crate) enum RequestBodyPlanError {
     InvalidContentLength,
     InvalidLargeContentLength { expected: u64 },
@@ -170,6 +172,7 @@ impl fmt::Display for RequestBodyPlanError {
 impl std::error::Error for RequestBodyPlanError {}
 
 #[derive(Debug)]
+/// Serializes a request body through the request's single operation slot.
 pub(crate) struct WinHttpBodyWriter<'guard> {
     guard: &'guard mut RequestGuard,
     bindings: Facade,
@@ -188,20 +191,15 @@ impl<'guard> WinHttpBodyWriter<'guard> {
 
             let len = next_write_len(span.len() as u64).expect("a nonempty span always produces a write length");
             let buffer = NonNull::from(span).cast::<u8>();
-            let address = buffer.as_ptr().addr();
             let bindings = self.bindings.clone();
             let write = self
                 .guard
-                .submit(
-                    OperationKind::Write,
-                    OperationBuffer::write(data, address, len),
-                    move |request, _context| {
-                        // SAFETY: the exact BytesView and contiguous span
-                        // identified by buffer/len are retained in the active
-                        // operation until its completion.
-                        unsafe { bindings.write_data(request, Some(buffer), len) }
-                    },
-                )
+                .submit(OperationKind::Write, OperationBuffer::write(data, len), move |request, _context| {
+                    // SAFETY: the exact BytesView and contiguous span
+                    // identified by buffer/len are retained in the active
+                    // operation until its completion.
+                    unsafe { bindings.write_data(request, Some(buffer), len) }
+                })
                 .map_err(|_active| callback_protocol_error("the write operation slot was already active"))?;
             let completion = write
                 .await
@@ -219,7 +217,7 @@ impl<'guard> WinHttpBodyWriter<'guard> {
             .guard
             .submit(
                 OperationKind::Write,
-                OperationBuffer::write(BytesView::new(), 0, 0),
+                OperationBuffer::write(BytesView::new(), 0),
                 move |request, _context| {
                     // SAFETY: WinHTTP accepts a null buffer only for this
                     // zero-length operation, which marks end-of-body.
@@ -296,6 +294,7 @@ fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + S
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Identifies body frame shapes that WinHTTP cannot submit.
 enum RequestBodyError {
     TrailersUnsupported,
     UnsupportedFrame,
@@ -314,24 +313,36 @@ impl std::error::Error for RequestBodyError {}
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{RefUnwindSafe, UnwindSafe};
+
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
     use http::HeaderValue;
     use ohno::Labeled as _;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
 
-    use super::{RequestBodyPlan, RequestBodyPlanError, end_chunked_completion, next_write_len, write_completion};
+    use super::{
+        RequestBodyError, RequestBodyPlan, RequestBodyPlanError, WinHttpBodyWriter, end_chunked_completion, next_write_len,
+        write_completion,
+    };
     use crate::context::CompletionResult;
     use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
+
+    assert_impl_all!(RequestBodyPlan: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestBodyPlanError: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestBodyError: UnwindSafe, RefUnwindSafe);
+    // The writer mutably borrows a guard pointing at the callback context's UnsafeCell state.
+    assert_not_impl_any!(WinHttpBodyWriter<'static>: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn request_body_plan_maps_known_and_unknown_lengths() {
         let mut headers = http::HeaderMap::new();
-        let small = RequestBodyPlan::new(&mut headers, Some(42)).expect("small known length is supported");
+        let small = RequestBodyPlan::new(&mut headers, Some(42)).unwrap();
         assert_eq!(small.total_length(), 42);
         assert!(!small.automatic_chunking());
 
         let large_length = u64::from(u32::MAX) + 1;
-        let large = RequestBodyPlan::new(&mut headers, Some(large_length)).expect("large known length is supported");
+        let large = RequestBodyPlan::new(&mut headers, Some(large_length)).unwrap();
         assert_eq!(large.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(!large.automatic_chunking());
         assert_eq!(
@@ -340,7 +351,7 @@ mod tests {
         );
 
         headers.remove(http::header::CONTENT_LENGTH);
-        let unknown = RequestBodyPlan::new(&mut headers, None).expect("unknown length is supported");
+        let unknown = RequestBodyPlan::new(&mut headers, None).unwrap();
         assert_eq!(unknown.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(unknown.automatic_chunking());
     }
@@ -352,7 +363,7 @@ mod tests {
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("04294967296"));
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("4294967296"));
 
-        RequestBodyPlan::new(&mut headers, Some(expected)).expect("equivalent values are valid");
+        RequestBodyPlan::new(&mut headers, Some(expected)).unwrap();
 
         assert_eq!(
             headers.get_all(http::header::CONTENT_LENGTH).iter().collect::<Vec<_>>(),
@@ -361,10 +372,7 @@ mod tests {
 
         for invalid in ["4294967295", "not-a-number", "18446744073709551616"] {
             let mut headers = http::HeaderMap::new();
-            headers.insert(
-                http::header::CONTENT_LENGTH,
-                HeaderValue::from_str(invalid).expect("test header value is syntactically valid"),
-            );
+            headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(invalid).unwrap());
 
             assert_eq!(
                 RequestBodyPlan::new(&mut headers, Some(expected)),
@@ -378,16 +386,13 @@ mod tests {
         let mut headers = http::HeaderMap::new();
         headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("10"));
 
-        let plan = RequestBodyPlan::new(&mut headers, None).expect("the header declares the body length");
+        let plan = RequestBodyPlan::new(&mut headers, None).unwrap();
         assert_eq!(plan.total_length(), 10);
         assert!(!plan.automatic_chunking());
 
         for invalid in ["invalid", "18446744073709551616"] {
             let mut headers = http::HeaderMap::new();
-            headers.insert(
-                http::header::CONTENT_LENGTH,
-                HeaderValue::from_str(invalid).expect("test header value is syntactically valid"),
-            );
+            headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(invalid).unwrap());
             assert_eq!(
                 RequestBodyPlan::new(&mut headers, None),
                 Err(RequestBodyPlanError::InvalidContentLength)
@@ -423,7 +428,7 @@ mod tests {
 
     #[test]
     fn unexpected_write_completions_are_rejected() {
-        let error = write_completion(CompletionResult::HeadersAvailable).expect_err("wrong completion kind is rejected");
+        let error = write_completion(CompletionResult::HeadersAvailable).unwrap_err();
 
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("unexpected completion for Write"));
@@ -432,7 +437,7 @@ mod tests {
             buffer: BytesView::copied_from_slice(b"x", &GlobalPool::new()),
             len: 0,
         })
-        .expect_err("zero-byte completion is rejected");
+        .unwrap_err();
 
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("without writing any bytes"));
@@ -441,13 +446,13 @@ mod tests {
             buffer: BytesView::new(),
             len: 0,
         })
-        .expect("the final zero-length write accepts a zero-byte completion");
+        .unwrap();
 
         let error = end_chunked_completion(CompletionResult::WriteComplete {
             buffer: BytesView::new(),
             len: 1,
         })
-        .expect_err("the final zero-length write rejects a nonzero completion");
+        .unwrap_err();
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("reported 1 bytes"));
     }

@@ -71,14 +71,15 @@ impl WinHttpTlsConfigBuilder {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use static_assertions::assert_impl_all;
     use thread_aware::ThreadAware;
 
     use super::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};
 
-    assert_impl_all!(WinHttpTlsConfig: Send, Sync, Clone, Debug, Default, ThreadAware);
-    assert_impl_all!(WinHttpTlsConfigBuilder: Send, Sync, Clone, Debug, ThreadAware);
+    assert_impl_all!(WinHttpTlsConfig: Send, Sync, Clone, Debug, Default, ThreadAware, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(WinHttpTlsConfigBuilder: Send, Sync, Clone, Debug, ThreadAware, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn default_uses_strict_validation() {

@@ -15,7 +15,7 @@
 
 WinHTTP-based HTTP transport for the [`fetch`][__link0] HTTP client.
 
-This Windows-only crate adds a `WinHTTP` transport constructor to
+This Windows-only crate adds a WinHTTP transport constructor to
 [`HttpClient`][__link1]. Callers supply the clock, memory pool, and telemetry sink
 required by the transport through [`WinHttpDeps`][__link2].
 
@@ -29,12 +29,12 @@ not share connections.
 * The transport currently follows automatic Windows proxy policy and exposes
   no proxy override or direct-connection fallback. Future requirements may
   add explicit control.
-* Generic TLS configuration and generic transport options that `WinHTTP`
+* Generic TLS configuration and generic transport options that WinHTTP
   cannot represent, including finite connection limits and connection
   idle/lifetime settings, are accepted but ignored.
 * The request body is fully sent before response reception begins.
-* Response trailers exposed by `WinHTTP` are preserved for HTTP/2 and HTTP/3.
-  HTTP/1.1 permits trailer fields, but `WinHTTP` does not expose them.
+* Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
+  HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
   Request trailers are rejected.
 
 Requests are serviced through the operating system’s
@@ -47,7 +47,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbGdGXW4iTGGwb-8X2VDrDT6Ub3L57PFxe6-cbngYc-E3MdzhhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbFAlMEAP_PzAbrtP28mvN9d8bxez0WHnr64UbsZYFavsTLu9hZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps

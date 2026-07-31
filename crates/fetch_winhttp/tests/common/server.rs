@@ -163,24 +163,21 @@ impl TestServer {
 
     pub(crate) fn https(responses: impl IntoIterator<Item = ResponsePlan>, certificate_names: &[&str]) -> Self {
         let certificate_names = certificate_names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
-        let CertifiedKey { cert, signing_key } =
-            generate_simple_self_signed(certificate_names).expect("test certificate generation succeeds");
+        let CertifiedKey { cert, signing_key } = generate_simple_self_signed(certificate_names).unwrap();
         let private_key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
         let mut config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert.der().clone()], private_key)
-            .expect("generated certificate and key are compatible");
+            .unwrap();
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
         Self::start(responses, Transport::Https, Some(TlsAcceptor::from(Arc::new(config))))
     }
 
     fn start(responses: impl IntoIterator<Item = ResponsePlan>, transport: Transport, tls_acceptor: Option<TlsAcceptor>) -> Self {
-        let listener = StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("loopback test server binds to an ephemeral port");
-        listener
-            .set_nonblocking(true)
-            .expect("the Tokio listener requires a nonblocking socket");
-        let address = listener.local_addr().expect("bound listener has a local address");
+        let listener = StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
         let state = Arc::new(State {
             responses: responses.into_iter().collect(),
             next_response: AtomicUsize::new(0),
@@ -193,13 +190,10 @@ impl TestServer {
         let thread = thread::Builder::new()
             .name("fetch-winhttp-test-server".to_owned())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("test server Tokio runtime starts");
+                let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
                 runtime.block_on(run_server(listener, server_state, tls_acceptor, shutdown_rx));
             })
-            .expect("test server thread starts");
+            .unwrap();
 
         Self {
             address,
@@ -224,7 +218,7 @@ impl TestServer {
 
     pub(crate) fn finish(mut self) -> ServerSnapshot {
         self.stop();
-        let mut requests = self.state.requests.lock().expect("request record lock is not poisoned").clone();
+        let mut requests = self.state.requests.lock().unwrap().clone();
         requests.sort_by_key(|(index, _)| *index);
 
         ServerSnapshot {
@@ -239,7 +233,7 @@ impl TestServer {
             let _ = shutdown.send(());
         }
         if let Some(thread) = self.thread.take() {
-            thread.join().expect("test server thread does not panic");
+            thread.join().unwrap();
         }
     }
 }
@@ -251,7 +245,7 @@ impl Drop for TestServer {
 }
 
 async fn run_server(listener: StdTcpListener, state: Arc<State>, tls_acceptor: Option<TlsAcceptor>, mut shutdown: oneshot::Receiver<()>) {
-    let listener = TcpListener::from_std(listener).expect("standard listener converts to Tokio");
+    let listener = TcpListener::from_std(listener).unwrap();
     let mut connections = JoinSet::new();
 
     loop {
@@ -311,11 +305,7 @@ async fn handle_request(request: Request<Incoming>, state: Arc<State>) -> Result
             return Ok(ResponsePlan::status(StatusCode::BAD_REQUEST).into_response());
         }
     };
-    state
-        .requests
-        .lock()
-        .expect("request record lock is not poisoned")
-        .push((index, recorded));
+    state.requests.lock().unwrap().push((index, recorded));
 
     let response = state
         .responses

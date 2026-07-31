@@ -23,6 +23,7 @@ use crate::request::{RequestGuard, parse_response_trailers};
 const PREFERRED_READ_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
+/// Streams one response body while retaining its request until completion.
 pub(crate) struct WinHttpBodyReader {
     guard: Option<RequestGuard>,
     bindings: Facade,
@@ -168,6 +169,7 @@ impl Read for WinHttpBodyReader {
     }
 }
 
+/// Adapts the WinHTTP reader to the `http_body` frame protocol.
 pub(crate) struct WinHttpResponseBody {
     stream: Option<Pin<Box<ReadAsFuturesStream<WinHttpBodyReader>>>>,
     done: bool,
@@ -285,6 +287,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::ffi::c_void;
     use std::future::poll_fn;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
     use std::slice;
@@ -298,10 +301,11 @@ mod tests {
     use http_body::Body as _;
     use ohno::Labeled as _;
     use plurality::Pool;
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
-        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+        ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
     };
 
     use super::{PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, next_read_capacity};
@@ -317,11 +321,12 @@ mod tests {
     const SESSION: usize = 101;
     const CONNECT: usize = 102;
     const REQUEST: usize = 103;
-    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-    const ERROR_WINHTTP_HEADER_NOT_FOUND: u32 = 12150;
 
     assert_impl_all!(WinHttpBodyReader: Send, std::fmt::Debug);
     assert_impl_all!(WinHttpResponseBody: Send, std::fmt::Debug, http_body::Body<Data = bytesbuf::BytesView, Error = fetch::HttpError>);
+    // Both body types retain a guard pointing at the callback context's UnsafeCell state.
+    assert_not_impl_any!(WinHttpBodyReader: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(WinHttpResponseBody: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn read_capacity_obeys_empty_caller_tail_and_dword_bounds() {
@@ -423,13 +428,11 @@ mod tests {
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 0);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
 
-        let frame = futures::executor::block_on(next_frame(&mut body))
-            .expect("the body yields data")
-            .expect("the data read succeeds");
-        assert_eq!(frame.into_data().expect("the first frame is data"), b"abc");
+        let frame = futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap();
+        assert_eq!(frame.into_data().unwrap(), b"abc");
         assert_eq!(record.query_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(*record.requested.lock().expect("record lock is not poisoned"), [3]);
+        assert_eq!(*record.requested.lock().unwrap(), [3]);
 
         assert!(
             futures::executor::block_on(next_frame(&mut body)).is_none(),
@@ -437,9 +440,9 @@ mod tests {
         );
         assert_eq!(record.query_calls.load(Ordering::SeqCst), 2);
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 2);
-        let requested = record.requested.lock().expect("record lock is not poisoned");
+        let requested = record.requested.lock().unwrap();
         assert!(requested[1] > 0);
-        assert!(requested[1] <= u32::try_from(PREFERRED_READ_SIZE).expect("the preferred read size fits u32"));
+        assert!(requested[1] <= u32::try_from(PREFERRED_READ_SIZE).unwrap());
         drop(requested);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
 
@@ -458,17 +461,15 @@ mod tests {
         into.put_slice(*b"prefix");
         let prefix_address = into.peek().first_slice().as_ptr().addr();
 
-        let (first_read, into) =
-            futures::executor::block_on(harness.reader.read_at_most_into(3, into)).expect("the first partial read succeeds");
+        let (first_read, into) = futures::executor::block_on(harness.reader.read_at_most_into(3, into)).unwrap();
         assert_eq!(first_read, 2);
         assert_eq!(into.peek(), b"prefixxy");
         assert_eq!(into.peek().first_slice().as_ptr().addr(), prefix_address);
 
-        let (second_read, mut into) =
-            futures::executor::block_on(harness.reader.read_at_most_into(5, into)).expect("the second read succeeds");
+        let (second_read, mut into) = futures::executor::block_on(harness.reader.read_at_most_into(5, into)).unwrap();
         assert_eq!(second_read, 5);
         assert_eq!(into.consume_all(), b"prefixxy12345");
-        assert_eq!(*harness.record.requested.lock().expect("record lock is not poisoned"), [3, 5]);
+        assert_eq!(*harness.record.requested.lock().unwrap(), [3, 5]);
 
         harness.finish();
     }
@@ -477,12 +478,12 @@ mod tests {
     fn zero_availability_uses_a_positive_bounded_probe() {
         let mut harness = reader([ReadStep::data(0, b"z".to_vec())], TrailerBehavior::None);
 
-        let data = futures::executor::block_on(harness.reader.read_any()).expect("the zero-availability probe can return data");
+        let data = futures::executor::block_on(harness.reader.read_any()).unwrap();
 
         assert_eq!(data.peek(), b"z");
-        let requested = harness.record.requested.lock().expect("record lock is not poisoned")[0];
+        let requested = harness.record.requested.lock().unwrap()[0];
         assert!(requested > 0);
-        assert!(requested <= u32::try_from(PREFERRED_READ_SIZE).expect("the preferred read size fits u32"));
+        assert!(requested <= u32::try_from(PREFERRED_READ_SIZE).unwrap());
         harness.finish();
     }
 
@@ -496,15 +497,11 @@ mod tests {
         into.reserve(PREFERRED_READ_SIZE, &memory);
         assert!(into.remaining_capacity() >= PREFERRED_READ_SIZE);
 
-        let (read, mut into) =
-            futures::executor::block_on(harness.reader.read_at_most_into(PREFERRED_READ_SIZE, into)).expect("the segmented read succeeds");
+        let (read, mut into) = futures::executor::block_on(harness.reader.read_at_most_into(PREFERRED_READ_SIZE, into)).unwrap();
 
         assert_eq!(read, 1);
         assert_eq!(into.consume_all(), b"x");
-        assert_eq!(
-            harness.record.requested.lock().expect("record lock is not poisoned")[0],
-            u32::try_from(first_tail).expect("the first tail fits u32")
-        );
+        assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(first_tail).unwrap());
         harness.finish();
     }
 
@@ -525,17 +522,17 @@ mod tests {
         let BodyHarness { mut body, context, record } = harness;
 
         let data = futures::executor::block_on(next_frame(&mut body))
-            .expect("data frame is present")
-            .expect("data frame succeeds")
+            .unwrap()
+            .unwrap()
             .into_data()
-            .expect("the first frame is data");
+            .unwrap();
         assert_eq!(data, b"data");
 
         let trailers = futures::executor::block_on(next_frame(&mut body))
-            .expect("trailer frame is present")
-            .expect("trailer frame succeeds")
+            .unwrap()
+            .unwrap()
             .into_trailers()
-            .expect("the second frame is trailers");
+            .unwrap();
         assert_eq!(
             trailers.get_all("x-trailer").iter().map(HeaderValue::as_bytes).collect::<Vec<_>>(),
             [b"first".as_slice(), &[0x80, 0xff]]
@@ -567,10 +564,10 @@ mod tests {
 
         assert!(!body.is_end_stream());
         let trailers = futures::executor::block_on(next_frame(&mut body))
-            .expect("the empty trailer frame is present")
-            .expect("the trailer frame succeeds")
+            .unwrap()
+            .unwrap()
             .into_trailers()
-            .expect("the frame contains trailers");
+            .unwrap();
         assert!(trailers.is_empty());
         assert!(body.is_end_stream());
         assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
@@ -586,9 +583,7 @@ mod tests {
             let harness = reader([ReadStep::data(0, Vec::new())], trailers).into_body();
             let BodyHarness { mut body, context, record } = harness;
 
-            let error = futures::executor::block_on(next_frame(&mut body))
-                .expect("the body reports the trailer failure")
-                .expect_err("the trailer operation fails");
+            let error = futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
 
@@ -628,7 +623,7 @@ mod tests {
 
         for step in cases {
             let mut harness = reader([step], TrailerBehavior::None);
-            let error = futures::executor::block_on(harness.reader.read_any()).expect_err("the injected read failure is reported");
+            let error = futures::executor::block_on(harness.reader.read_any()).unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
             harness.finish();
@@ -651,14 +646,12 @@ mod tests {
         let BodyHarness { mut body, context, record } = harness;
 
         let data = futures::executor::block_on(next_frame(&mut body))
-            .expect("the first frame is present")
-            .expect("the first frame succeeds")
+            .unwrap()
+            .unwrap()
             .into_data()
-            .expect("the first frame is data");
+            .unwrap();
         assert_eq!(data, b"a");
-        futures::executor::block_on(next_frame(&mut body))
-            .expect("the error frame is present")
-            .expect_err("the second frame reports the read error");
+        futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap_err();
         assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
 
@@ -716,7 +709,7 @@ mod tests {
         bindings.expect_set_option().returning(move |handle, option, value| {
             assert_eq!(handle.as_ptr().addr(), REQUEST);
             assert_eq!(option, WINHTTP_OPTION_CONTEXT_VALUE);
-            let context = usize::from_ne_bytes(value.try_into().expect("the context value is pointer-sized"));
+            let context = usize::from_ne_bytes(value.try_into().unwrap());
             option_record.context.store(context, Ordering::SeqCst);
             Ok(())
         });
@@ -725,13 +718,7 @@ mod tests {
         let query_record = Arc::clone(&record);
         bindings.expect_query_data_available().returning(move |_| {
             query_record.query_calls.fetch_add(1, Ordering::SeqCst);
-            let query = query_steps
-                .lock()
-                .expect("script lock is not poisoned")
-                .front()
-                .expect("the read script contains a query step")
-                .query
-                .clone();
+            let query = query_steps.lock().unwrap().front().unwrap().query.clone();
             let context = query_record.context.load(Ordering::SeqCst);
 
             match query {
@@ -761,12 +748,8 @@ mod tests {
         let read_record = Arc::clone(&record);
         bindings.expect_read_data().returning(move |_, buffer, len| {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
-            read_record.requested.lock().expect("record lock is not poisoned").push(len);
-            let step = read_steps
-                .lock()
-                .expect("script lock is not poisoned")
-                .pop_front()
-                .expect("the read script contains a read step");
+            read_record.requested.lock().unwrap().push(len);
+            let step = read_steps.lock().unwrap().pop_front().unwrap();
             let context = read_record.context.load(Ordering::SeqCst);
 
             match step.read {
@@ -784,7 +767,7 @@ mod tests {
                             context,
                             WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
                             buffer.as_ptr().cast(),
-                            u32::try_from(data.len()).expect("test data length fits u32"),
+                            u32::try_from(data.len()).unwrap(),
                         );
                     }
                     Ok(())
@@ -839,7 +822,7 @@ mod tests {
             &contexts,
         )
         .install()
-        .expect("the request context installs");
+        .unwrap();
         let context = guard.context_ptr();
         drop((session, contexts));
 
@@ -887,11 +870,10 @@ mod tests {
     }
 
     fn write_byte_query(bytes: &[u8], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
-        let required = u32::try_from(bytes.len().checked_add(1).expect("test trailer length does not overflow"))
-            .expect("test trailer length fits u32");
+        let required = u32::try_from(bytes.len().checked_add(1).unwrap()).unwrap();
         let Some(output) = buffer else {
             *byte_len = required;
-            return Err(WinHttpError::new(ERROR_INSUFFICIENT_BUFFER, WinHttpOperation::QueryHeaders));
+            return Err(WinHttpError::new(ERROR_INSUFFICIENT_BUFFER.0, WinHttpOperation::QueryHeaders));
         };
 
         assert!(*byte_len >= required);
@@ -901,15 +883,15 @@ mod tests {
         let terminator = unsafe { output.as_ptr().add(bytes.len()) };
         // SAFETY: `terminator` points to the final writable byte.
         unsafe { terminator.write(0) };
-        *byte_len = u32::try_from(bytes.len()).expect("test trailer length fits u32");
+        *byte_len = u32::try_from(bytes.len()).unwrap();
         Ok(())
     }
 
     fn status_info_len<T>() -> u32 {
-        u32::try_from(size_of::<T>()).expect("WinHTTP callback status information fits u32")
+        u32::try_from(size_of::<T>()).unwrap()
     }
 
     fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).expect("test handles are non-null")
+        RawHandle::new(value as *mut c_void).unwrap()
     }
 }

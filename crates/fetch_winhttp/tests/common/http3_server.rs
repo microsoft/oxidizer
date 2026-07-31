@@ -47,19 +47,16 @@ impl Http3Server {
         let thread = thread::Builder::new()
             .name("fetch-winhttp-http3-test-server".to_owned())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("HTTP/3 test server Tokio runtime starts");
+                let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
                 runtime.block_on(async move {
                     let endpoint = create_endpoint();
-                    let address = endpoint.local_addr().expect("HTTP/3 endpoint has a local address");
-                    address_tx.send(address).expect("HTTP/3 server address is published");
+                    let address = endpoint.local_addr().unwrap();
+                    address_tx.send(address).unwrap();
                     run_server(endpoint, server_state, shutdown_rx).await;
                 });
             })
-            .expect("HTTP/3 test server thread starts");
-        let address = address_rx.recv().expect("HTTP/3 test server publishes its address");
+            .unwrap();
+        let address = address_rx.recv().unwrap();
 
         Self {
             address,
@@ -76,12 +73,7 @@ impl Http3Server {
     pub(crate) fn finish(mut self) -> ServerSnapshot {
         self.stop();
         ServerSnapshot {
-            requests: self
-                .state
-                .requests
-                .lock()
-                .expect("HTTP/3 request record lock is not poisoned")
-                .clone(),
+            requests: self.state.requests.lock().unwrap().clone(),
             connections: self.state.connections.load(Ordering::SeqCst),
         }
     }
@@ -91,7 +83,7 @@ impl Http3Server {
             let _ = shutdown.send(());
         }
         if let Some(thread) = self.thread.take() {
-            thread.join().expect("HTTP/3 test server thread does not panic");
+            thread.join().unwrap();
         }
     }
 }
@@ -103,18 +95,17 @@ impl Drop for Http3Server {
 }
 
 fn create_endpoint() -> Endpoint {
-    let CertifiedKey { cert, signing_key } =
-        generate_simple_self_signed(["localhost".to_owned()]).expect("HTTP/3 test certificate generation succeeds");
+    let CertifiedKey { cert, signing_key } = generate_simple_self_signed(["localhost".to_owned()]).unwrap();
     let private_key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
     let mut tls = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(vec![cert.der().clone()], private_key)
-        .expect("generated HTTP/3 certificate and key are compatible");
+        .unwrap();
     tls.alpn_protocols = vec![b"h3".to_vec()];
-    let crypto = QuicServerConfig::try_from(tls).expect("rustls configuration supports QUIC");
+    let crypto = QuicServerConfig::try_from(tls).unwrap();
     let server_config = ServerConfig::with_crypto(Arc::new(crypto));
 
-    Endpoint::server(server_config, (Ipv4Addr::LOCALHOST, 0).into()).expect("HTTP/3 endpoint binds to loopback")
+    Endpoint::server(server_config, (Ipv4Addr::LOCALHOST, 0).into()).unwrap()
 }
 
 async fn run_server(endpoint: Endpoint, state: Arc<State>, mut shutdown: oneshot::Receiver<()>) {
@@ -172,24 +163,20 @@ async fn serve_connection(incoming: Incoming, state: Arc<State>) {
             return;
         };
         let index = state.next_response.fetch_add(1, Ordering::SeqCst);
-        state
-            .requests
-            .lock()
-            .expect("HTTP/3 request record lock is not poisoned")
-            .push(RecordedRequest {
-                method: request.method().clone(),
-                uri: request.uri().clone(),
-                version: Version::HTTP_3,
-                headers: request.headers().clone(),
-                body: body.freeze(),
-                trailers,
-            });
+        state.requests.lock().unwrap().push(RecordedRequest {
+            method: request.method().clone(),
+            uri: request.uri().clone(),
+            version: Version::HTTP_3,
+            headers: request.headers().clone(),
+            body: body.freeze(),
+            trailers,
+        });
         let response_body = state.responses.get(index).cloned().unwrap_or_default();
         let response = Response::builder()
             .status(200)
             .header("content-length", response_body.len())
             .body(())
-            .expect("HTTP/3 response is valid");
+            .unwrap();
         if stream.send_response(response).await.is_err() {
             return;
         }

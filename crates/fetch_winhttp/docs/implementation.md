@@ -138,6 +138,17 @@ on non-Windows targets. A non-Windows integration test keeps package-scoped test
 runs nonempty, while target-specific dependencies ensure those builds do not pull
 in the `windows` crate.
 
+`options.rs` and `error.rs` import WinHTTP, Win32, and Winsock constants from
+the generated `windows` bindings rather than duplicating SDK numeric values.
+The only local numeric policy constants are transport-level rounding minima,
+timeout sentinels, and the documented `HRESULT_FROM_WIN32` extraction masks.
+
+Conversion failures use one `ohno` source type per condition and are wrapped in
+`ConversionError` through generated `From` implementations. `QueryError` remains
+the routing boundary between a WinHTTP operation failure and malformed data
+returned by a successful query because callers map those categories to different
+`HttpError` classifications.
+
 ## 2. WinHTTP asynchronous model primer
 
 A single request drives this WinHTTP handle chain and callback sequence:
@@ -328,16 +339,18 @@ enum CompletionResult {
     ReadComplete { buffer: bytesbuf::BytesBuf, len: u32 },
     Error {
         error: WinHttpError,
-        api_result: Option<usize>,
-        buffer: Option<CompletionBuffer>,
+        _buffer: Option<CompletionBuffer>,
     },
     InvalidStatusInfo {
         status: u32,
         len: u32,
-        buffer: Option<CompletionBuffer>,
+        _buffer: Option<CompletionBuffer>,
     },
 }
 ```
+
+The `_buffer` fields retain callback-owned read or write storage until the
+completion payload is consumed and dropped.
 
 `events_once` is the right primitive because each step is a single, non-blocking,
 one-shot, payload-carrying signal with exactly one waiter.

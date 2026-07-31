@@ -5,16 +5,15 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED,
-    WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+    ERROR_WINHTTP_OPERATION_CANCELLED, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
+    WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+    WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
 
 use crate::context::{ActiveOperation, CompletionResult, OperationBuffer, RequestContext};
 use crate::error::WinHttpError;
-
-const ERROR_WINHTTP_OPERATION_CANCELLED: u32 = 12017;
 
 pub(crate) unsafe extern "system" fn status_callback(
     _handle: *mut c_void,
@@ -33,7 +32,7 @@ pub(crate) unsafe extern "system" fn status_callback(
     }
 }
 
-/// Dispatches one `WinHTTP` status notification.
+/// Dispatches one WinHTTP status notification.
 ///
 /// # Safety
 ///
@@ -90,7 +89,7 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
                         error = error.with_secure_failure_flags(flags);
                     }
 
-                    CompletionResult::error(error, Some(async_result.dwResult), active.buffer)
+                    CompletionResult::error(error, active.buffer)
                 }
                 None => CompletionResult::invalid_status_info(status, status_info_len, active.buffer),
             };
@@ -181,7 +180,7 @@ unsafe fn close_context(context: NonNull<RequestContext>) {
         if let Some(flags) = context_ref.secure_failure_flags() {
             error = error.with_secure_failure_flags(flags);
         }
-        completion.send(CompletionResult::error(error, None, buffer));
+        completion.send(CompletionResult::error(error, buffer));
     }
 
     // SAFETY: this is the exact pointer produced by plurality::Box::into_raw.

@@ -50,6 +50,7 @@ widestring = { workspace = true, features = ["alloc"] }
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]

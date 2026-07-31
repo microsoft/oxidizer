@@ -8,6 +8,7 @@ use observed::{Sink, emit, event};
 use crate::session::{SessionInitializationFailure, SessionInitializationOperation};
 
 #[derive(Clone, Debug)]
+/// Emits bounded WinHTTP lifecycle events through the configured sink.
 pub(crate) struct Telemetry {
     sink: Sink,
 }
@@ -44,6 +45,7 @@ impl Telemetry {
 
 #[event("fetch.winhttp.session.initialization.failure")]
 #[error("WinHTTP transport initialization failed")]
+/// Records the failed session setup step and operating-system error code.
 struct InitializationFailure {
     #[dimension(log = "winhttp.operation")]
     #[unredacted]
@@ -59,6 +61,7 @@ struct InitializationFailure {
     desc = "WinHTTP transport request attempts",
     unit = "{request}"
 )]
+/// Counts requests accepted by the WinHTTP transport.
 struct RequestAttempt;
 
 #[event("fetch.winhttp.request.error")]
@@ -68,6 +71,7 @@ struct RequestAttempt;
     desc = "Failed WinHTTP transport request attempts",
     unit = "{error}"
 )]
+/// Records failed requests and optional fresh-connection timing.
 struct RequestError {
     #[dimension(log = "winhttp.connection.fresh")]
     #[if_none(drop)]
@@ -94,15 +98,23 @@ const fn operation_name(operation: SessionInitializationOperation) -> &'static s
 #[cfg(test)]
 mod tests {
     use std::ops::ControlFlow;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::time::Duration;
 
     use observed::metadata::InstrumentKind;
     use observed::{Event as _, Severity};
     use observed_testing::{ExpectedEvent, ExpectedEventDescription, TEST_ID, test_emitter};
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{InitializationFailure, RequestAttempt, RequestError, Telemetry};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::session::{SessionInitializationFailure, SessionInitializationOperation};
+
+    // Sink contains a user-erased event emitter without unwind-safety bounds.
+    assert_not_impl_any!(Telemetry: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(InitializationFailure: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestAttempt: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestError: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn event_metadata_uses_exact_names_and_zero_dimensional_metrics() {
@@ -125,11 +137,11 @@ mod tests {
                 .event_metric("fetch.winhttp.request.error.count", InstrumentKind::Counter),
         );
 
-        let request_metric = RequestAttempt::DESCRIPTION.metric().expect("request event has a counter");
+        let request_metric = RequestAttempt::DESCRIPTION.metric().unwrap();
         assert_eq!(request_metric.description(), "WinHTTP transport request attempts");
         assert_eq!(request_metric.unit(), "{request}");
 
-        let error_metric = RequestError::DESCRIPTION.metric().expect("request-error event has a counter");
+        let error_metric = RequestError::DESCRIPTION.metric().unwrap();
         assert_eq!(error_metric.description(), "Failed WinHTTP transport request attempts");
         assert_eq!(error_metric.unit(), "{error}");
     }

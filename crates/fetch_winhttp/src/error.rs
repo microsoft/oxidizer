@@ -6,12 +6,29 @@ use std::fmt;
 use http_extensions::HttpError;
 use ohno::ErrorLabel;
 use recoverable::RecoveryInfo;
+use windows::Win32::Foundation::{
+    ERROR_BROKEN_PIPE, ERROR_CONNECTION_ABORTED, ERROR_CONNECTION_REFUSED, ERROR_NETNAME_DELETED, ERROR_OPERATION_ABORTED,
+};
+use windows::Win32::Networking::WinHttp::{
+    ERROR_WINHTTP_CANNOT_CONNECT, ERROR_WINHTTP_CHUNKED_ENCODING_HEADER_SIZE_OVERFLOW, ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED,
+    ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED_PROXY, ERROR_WINHTTP_CLIENT_CERT_NO_ACCESS_PRIVATE_KEY, ERROR_WINHTTP_CLIENT_CERT_NO_PRIVATE_KEY,
+    ERROR_WINHTTP_CONNECTION_ERROR, ERROR_WINHTTP_HEADER_COUNT_EXCEEDED, ERROR_WINHTTP_HEADER_SIZE_OVERFLOW,
+    ERROR_WINHTTP_HTTP_PROTOCOL_MISMATCH, ERROR_WINHTTP_INVALID_HEADER, ERROR_WINHTTP_INVALID_SERVER_RESPONSE,
+    ERROR_WINHTTP_NAME_NOT_RESOLVED, ERROR_WINHTTP_OPERATION_CANCELLED, ERROR_WINHTTP_RESEND_REQUEST,
+    ERROR_WINHTTP_RESPONSE_DRAIN_OVERFLOW, ERROR_WINHTTP_SECURE_CERT_CN_INVALID, ERROR_WINHTTP_SECURE_CERT_DATE_INVALID,
+    ERROR_WINHTTP_SECURE_CERT_REV_FAILED, ERROR_WINHTTP_SECURE_CERT_REVOKED, ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE,
+    ERROR_WINHTTP_SECURE_CHANNEL_ERROR, ERROR_WINHTTP_SECURE_FAILURE, ERROR_WINHTTP_SECURE_FAILURE_PROXY, ERROR_WINHTTP_SECURE_INVALID_CA,
+    ERROR_WINHTTP_SECURE_INVALID_CERT, ERROR_WINHTTP_SHUTDOWN, ERROR_WINHTTP_TIMEOUT,
+};
+use windows::Win32::Networking::WinSock::{WSAECONNABORTED, WSAECONNREFUSED, WSAECONNRESET, WSAESHUTDOWN, WSAETIMEDOUT};
 
 use crate::error_labels;
 
+/// Result type for direct WinHTTP binding operations.
 pub(crate) type Result<T> = std::result::Result<T, WinHttpError>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Identifies the WinHTTP operation that produced an operating-system error.
 pub(crate) enum WinHttpOperation {
     CloseHandle,
     Connect,
@@ -51,6 +68,7 @@ impl fmt::Display for WinHttpOperation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Preserves a Win32 error code and its WinHTTP operation context.
 pub(crate) struct WinHttpError {
     code: u32,
     operation: WinHttpOperation,
@@ -79,10 +97,12 @@ impl WinHttpError {
         self.code
     }
 
+    #[cfg(test)]
     pub(crate) const fn operation(&self) -> WinHttpOperation {
         self.operation
     }
 
+    #[cfg(test)]
     pub(crate) const fn secure_failure_flags(&self) -> Option<u32> {
         self.secure_failure_flags
     }
@@ -116,14 +136,21 @@ impl std::error::Error for WinHttpError {}
 pub(crate) const fn raw_win32_from_hresult(hresult: i32) -> Option<u32> {
     let bits = hresult.cast_unsigned();
 
-    if bits & 0xffff_0000 == 0x8007_0000 {
-        Some(bits & 0x0000_ffff)
+    if bits & HRESULT_WIN32_PREFIX_MASK == HRESULT_WIN32_PREFIX {
+        Some(bits & HRESULT_CODE_MASK)
     } else {
         None
     }
 }
 
+// HRESULT_FROM_WIN32 encodes the Win32 facility and low 16-bit error code:
+// https://learn.microsoft.com/windows/win32/api/winerror/nf-winerror-hresult_from_win32
+const HRESULT_WIN32_PREFIX_MASK: u32 = 0xffff_0000;
+const HRESULT_WIN32_PREFIX: u32 = 0x8007_0000;
+const HRESULT_CODE_MASK: u32 = 0x0000_ffff;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Groups WinHTTP errors by public recovery and telemetry semantics.
 enum ErrorClass {
     Abandoned,
     Connect,
@@ -156,50 +183,51 @@ impl ErrorClass {
 }
 
 #[derive(Clone, Copy)]
+/// Associates one documented WinHTTP error code with its semantic class.
 struct ErrorMapping {
     code: u32,
     class: ErrorClass,
 }
 
 const ERROR_MAPPINGS: &[ErrorMapping] = &[
-    mapping(12029, ErrorClass::Connect),      // ERROR_WINHTTP_CANNOT_CONNECT
-    mapping(12007, ErrorClass::Connect),      // ERROR_WINHTTP_NAME_NOT_RESOLVED
-    mapping(1225, ErrorClass::Connect),       // ERROR_CONNECTION_REFUSED
-    mapping(10061, ErrorClass::Connect),      // WSAECONNREFUSED
-    mapping(12002, ErrorClass::Timeout),      // ERROR_WINHTTP_TIMEOUT
-    mapping(10060, ErrorClass::Timeout),      // WSAETIMEDOUT
-    mapping(12017, ErrorClass::Abandoned),    // ERROR_WINHTTP_OPERATION_CANCELLED
-    mapping(995, ErrorClass::Abandoned),      // ERROR_OPERATION_ABORTED
-    mapping(12012, ErrorClass::Abandoned),    // ERROR_WINHTTP_SHUTDOWN
-    mapping(12030, ErrorClass::RequestRetry), // ERROR_WINHTTP_CONNECTION_ERROR
-    mapping(12032, ErrorClass::RequestRetry), // ERROR_WINHTTP_RESEND_REQUEST
-    mapping(64, ErrorClass::RequestRetry),    // ERROR_NETNAME_DELETED
-    mapping(109, ErrorClass::RequestRetry),   // ERROR_BROKEN_PIPE
-    mapping(1236, ErrorClass::RequestRetry),  // ERROR_CONNECTION_ABORTED
-    mapping(10053, ErrorClass::RequestRetry), // WSAECONNABORTED
-    mapping(10054, ErrorClass::RequestRetry), // WSAECONNRESET
-    mapping(10058, ErrorClass::RequestRetry), // WSAESHUTDOWN
-    mapping(12152, ErrorClass::RequestNever), // ERROR_WINHTTP_INVALID_SERVER_RESPONSE
-    mapping(12190, ErrorClass::RequestNever), // ERROR_WINHTTP_HTTP_PROTOCOL_MISMATCH
-    mapping(12153, ErrorClass::RequestNever), // ERROR_WINHTTP_INVALID_HEADER
-    mapping(12181, ErrorClass::RequestNever), // ERROR_WINHTTP_HEADER_COUNT_EXCEEDED
-    mapping(12182, ErrorClass::RequestNever), // ERROR_WINHTTP_HEADER_SIZE_OVERFLOW
-    mapping(12183, ErrorClass::RequestNever), // ERROR_WINHTTP_CHUNKED_ENCODING_HEADER_SIZE_OVERFLOW
-    mapping(12184, ErrorClass::RequestNever), // ERROR_WINHTTP_RESPONSE_DRAIN_OVERFLOW
-    mapping(12037, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_CERT_DATE_INVALID
-    mapping(12038, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_CERT_CN_INVALID
-    mapping(12044, ErrorClass::Tls),          // ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED
-    mapping(12045, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_INVALID_CA
-    mapping(12057, ErrorClass::TlsRetry),     // ERROR_WINHTTP_SECURE_CERT_REV_FAILED
-    mapping(12157, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_CHANNEL_ERROR
-    mapping(12169, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_INVALID_CERT
-    mapping(12170, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_CERT_REVOKED
-    mapping(12175, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_FAILURE
-    mapping(12179, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE
-    mapping(12185, ErrorClass::Tls),          // ERROR_WINHTTP_CLIENT_CERT_NO_PRIVATE_KEY
-    mapping(12186, ErrorClass::Tls),          // ERROR_WINHTTP_CLIENT_CERT_NO_ACCESS_PRIVATE_KEY
-    mapping(12187, ErrorClass::Tls),          // ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED_PROXY
-    mapping(12188, ErrorClass::Tls),          // ERROR_WINHTTP_SECURE_FAILURE_PROXY
+    mapping(ERROR_WINHTTP_CANNOT_CONNECT, ErrorClass::Connect),
+    mapping(ERROR_WINHTTP_NAME_NOT_RESOLVED, ErrorClass::Connect),
+    mapping(ERROR_CONNECTION_REFUSED.0, ErrorClass::Connect),
+    mapping(WSAECONNREFUSED.0.cast_unsigned(), ErrorClass::Connect),
+    mapping(ERROR_WINHTTP_TIMEOUT, ErrorClass::Timeout),
+    mapping(WSAETIMEDOUT.0.cast_unsigned(), ErrorClass::Timeout),
+    mapping(ERROR_WINHTTP_OPERATION_CANCELLED, ErrorClass::Abandoned),
+    mapping(ERROR_OPERATION_ABORTED.0, ErrorClass::Abandoned),
+    mapping(ERROR_WINHTTP_SHUTDOWN, ErrorClass::Abandoned),
+    mapping(ERROR_WINHTTP_CONNECTION_ERROR, ErrorClass::RequestRetry),
+    mapping(ERROR_WINHTTP_RESEND_REQUEST, ErrorClass::RequestRetry),
+    mapping(ERROR_NETNAME_DELETED.0, ErrorClass::RequestRetry),
+    mapping(ERROR_BROKEN_PIPE.0, ErrorClass::RequestRetry),
+    mapping(ERROR_CONNECTION_ABORTED.0, ErrorClass::RequestRetry),
+    mapping(WSAECONNABORTED.0.cast_unsigned(), ErrorClass::RequestRetry),
+    mapping(WSAECONNRESET.0.cast_unsigned(), ErrorClass::RequestRetry),
+    mapping(WSAESHUTDOWN.0.cast_unsigned(), ErrorClass::RequestRetry),
+    mapping(ERROR_WINHTTP_INVALID_SERVER_RESPONSE, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_HTTP_PROTOCOL_MISMATCH, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_INVALID_HEADER, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_HEADER_COUNT_EXCEEDED, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_HEADER_SIZE_OVERFLOW, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_CHUNKED_ENCODING_HEADER_SIZE_OVERFLOW, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_RESPONSE_DRAIN_OVERFLOW, ErrorClass::RequestNever),
+    mapping(ERROR_WINHTTP_SECURE_CERT_DATE_INVALID, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_CERT_CN_INVALID, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_INVALID_CA, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_CERT_REV_FAILED, ErrorClass::TlsRetry),
+    mapping(ERROR_WINHTTP_SECURE_CHANNEL_ERROR, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_INVALID_CERT, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_CERT_REVOKED, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_FAILURE, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_CLIENT_CERT_NO_PRIVATE_KEY, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_CLIENT_CERT_NO_ACCESS_PRIVATE_KEY, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED_PROXY, ErrorClass::Tls),
+    mapping(ERROR_WINHTTP_SECURE_FAILURE_PROXY, ErrorClass::Tls),
 ];
 
 const fn mapping(code: u32, class: ErrorClass) -> ErrorMapping {
@@ -216,29 +244,46 @@ fn classify(code: u32) -> ErrorClass {
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use ohno::Labeled as _;
     use recoverable::{Recovery, RecoveryInfo};
+    use static_assertions::assert_impl_all;
+    use windows::Win32::Foundation::E_FAIL;
+    use windows::Win32::Networking::WinHttp::{
+        ERROR_WINHTTP_CANNOT_CONNECT, ERROR_WINHTTP_CONNECTION_ERROR, ERROR_WINHTTP_INTERNAL_ERROR, ERROR_WINHTTP_INVALID_SERVER_RESPONSE,
+        ERROR_WINHTTP_OPERATION_CANCELLED, ERROR_WINHTTP_SECURE_CERT_REV_FAILED, ERROR_WINHTTP_SECURE_FAILURE, ERROR_WINHTTP_TIMEOUT,
+    };
+    use windows::Win32::Networking::WinSock::WSAETIMEDOUT;
 
-    use super::{ERROR_MAPPINGS, ErrorClass, WinHttpError, WinHttpOperation, raw_win32_from_hresult};
+    use super::{
+        ERROR_MAPPINGS, ErrorClass, ErrorMapping, HRESULT_WIN32_PREFIX, Result, WinHttpError, WinHttpOperation, raw_win32_from_hresult,
+    };
+
+    assert_impl_all!(Result<()>: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(WinHttpOperation: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(WinHttpError: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ErrorClass: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ErrorMapping: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn extracts_raw_win32_code_from_hresult() {
-        assert_eq!(raw_win32_from_hresult(0x8007_2efd_u32.cast_signed()), Some(12029));
-        assert_eq!(raw_win32_from_hresult(0x8000_4005_u32.cast_signed()), None);
+        let hresult = (HRESULT_WIN32_PREFIX | ERROR_WINHTTP_CANNOT_CONNECT).cast_signed();
+        assert_eq!(raw_win32_from_hresult(hresult), Some(ERROR_WINHTTP_CANNOT_CONNECT));
+        assert_eq!(raw_win32_from_hresult(E_FAIL.0), None);
     }
 
     #[test]
     fn hresult_constructor_preserves_non_win32_hresult_bits() {
-        let error = WinHttpError::from_hresult(0x8000_4005_u32.cast_signed(), WinHttpOperation::SetOption);
+        let error = WinHttpError::from_hresult(E_FAIL.0, WinHttpOperation::SetOption);
 
-        assert_eq!(error.code(), 0x8000_4005);
+        assert_eq!(error.code(), E_FAIL.0.cast_unsigned());
         assert_eq!(error.operation(), WinHttpOperation::SetOption);
     }
 
     #[test]
     fn secure_failure_flags_are_retained() {
-        let error = WinHttpError::new(12175, WinHttpOperation::SendRequest).with_secure_failure_flags(0x20);
+        let error = WinHttpError::new(ERROR_WINHTTP_SECURE_FAILURE, WinHttpOperation::SendRequest).with_secure_failure_flags(0x20);
 
         assert_eq!(error.secure_failure_flags(), Some(0x20));
         assert!(error.to_string().contains("0x00000020"));
@@ -258,7 +303,7 @@ mod tests {
             );
         }
 
-        let unknown = WinHttpError::new(12004, WinHttpOperation::SendRequest).into_http_error();
+        let unknown = WinHttpError::new(ERROR_WINHTTP_INTERNAL_ERROR, WinHttpOperation::SendRequest).into_http_error();
         assert_eq!(unknown.label(), ErrorClass::RequestUnknown.label().as_str());
         assert_eq!(unknown.recovery(), RecoveryInfo::unknown());
     }
@@ -266,15 +311,15 @@ mod tests {
     #[test]
     fn representative_error_families_have_independent_contract_expectations() {
         let cases = [
-            (12029, "connect", RecoveryInfo::retry()),
-            (12002, "timeout", RecoveryInfo::retry()),
-            (10060, "timeout", RecoveryInfo::retry()),
-            (12017, "abandoned", RecoveryInfo::never()),
-            (12030, "request_winhttp", RecoveryInfo::retry()),
-            (12152, "request_winhttp", RecoveryInfo::never()),
-            (12175, "tls", RecoveryInfo::never()),
-            (12057, "tls", RecoveryInfo::retry()),
-            (12004, "request_winhttp", RecoveryInfo::unknown()),
+            (ERROR_WINHTTP_CANNOT_CONNECT, "connect", RecoveryInfo::retry()),
+            (ERROR_WINHTTP_TIMEOUT, "timeout", RecoveryInfo::retry()),
+            (WSAETIMEDOUT.0.cast_unsigned(), "timeout", RecoveryInfo::retry()),
+            (ERROR_WINHTTP_OPERATION_CANCELLED, "abandoned", RecoveryInfo::never()),
+            (ERROR_WINHTTP_CONNECTION_ERROR, "request_winhttp", RecoveryInfo::retry()),
+            (ERROR_WINHTTP_INVALID_SERVER_RESPONSE, "request_winhttp", RecoveryInfo::never()),
+            (ERROR_WINHTTP_SECURE_FAILURE, "tls", RecoveryInfo::never()),
+            (ERROR_WINHTTP_SECURE_CERT_REV_FAILED, "tls", RecoveryInfo::retry()),
+            (ERROR_WINHTTP_INTERNAL_ERROR, "request_winhttp", RecoveryInfo::unknown()),
         ];
 
         for (code, expected_label, expected_recovery) in cases {

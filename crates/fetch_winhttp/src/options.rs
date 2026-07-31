@@ -7,50 +7,34 @@ use std::time::Duration;
 
 use http::{HeaderMap, Method, Version};
 use thread_aware::ThreadAware;
-use widestring::{U16CStr, U16CString};
+use widestring::U16CString;
+use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+use windows::Win32::Networking::WinHttp::{
+    ERROR_WINHTTP_HEADER_NOT_FOUND, SECURITY_FLAG_IGNORE_CERT_CN_INVALID, SECURITY_FLAG_IGNORE_CERT_DATE_INVALID,
+    SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE, SECURITY_FLAG_IGNORE_UNKNOWN_CA, WINHTTP_DECOMPRESSION_FLAG_DEFLATE,
+    WINHTTP_DECOMPRESSION_FLAG_GZIP, WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_PROTOCOL_FLAG_HTTP2,
+    WINHTTP_PROTOCOL_FLAG_HTTP3, WINHTTP_QUERY_FLAG_TRAILERS,
+};
+pub(crate) use windows::Win32::Networking::WinHttp::{
+    WINHTTP_FLAG_ASYNC, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH,
+    WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+    WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_OPTION_HTTP2_KEEPALIVE,
+    WINHTTP_OPTION_HTTP3_KEEPALIVE, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_OPTION_SECURITY_FLAGS,
+    WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
+    WINHTTP_QUERY_VERSION,
+};
 
 use crate::bindings::{Bindings as _, Facade};
 use crate::error::WinHttpError;
 use crate::handle::RawHandle;
 use crate::tls::WinHttpTlsConfig;
 
-pub(crate) const WINHTTP_FLAG_ASYNC: u32 = 0x1000_0000;
-pub(crate) const WINHTTP_FLAG_AUTOMATIC_CHUNKING: u32 = 0x0000_0200;
-pub(crate) const WINHTTP_FLAG_SECURE: u32 = 0x0080_0000;
-pub(crate) const WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH: u32 = 0;
-
-pub(crate) const WINHTTP_OPTION_CONTEXT_VALUE: u32 = 45;
-pub(crate) const WINHTTP_OPTION_DECOMPRESSION: u32 = 118;
-pub(crate) const WINHTTP_OPTION_DISABLE_FEATURE: u32 = 63;
-pub(crate) const WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL: u32 = 133;
-pub(crate) const WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED: u32 = 145;
-pub(crate) const WINHTTP_OPTION_HTTP_PROTOCOL_USED: u32 = 134;
-pub(crate) const WINHTTP_OPTION_HTTP2_KEEPALIVE: u32 = 164;
-pub(crate) const WINHTTP_OPTION_HTTP3_KEEPALIVE: u32 = 188;
-pub(crate) const WINHTTP_OPTION_REDIRECT_POLICY: u32 = 88;
-pub(crate) const WINHTTP_OPTION_SECURITY_FLAGS: u32 = 31;
-
-pub(crate) const WINHTTP_QUERY_RAW_HEADERS_CRLF: u32 = 22;
-pub(crate) const WINHTTP_QUERY_STATUS_CODE: u32 = 19;
-pub(crate) const WINHTTP_QUERY_VERSION: u32 = 18;
-const WINHTTP_QUERY_FLAG_TRAILERS: u32 = 0x0200_0000;
-pub(crate) const WINHTTP_QUERY_FLAG_WIRE_ENCODING: u32 = 0x0100_0000;
-const WINHTTP_QUERY_FLAG_NUMBER: u32 = 0x2000_0000;
-
-const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
-const ERROR_WINHTTP_HEADER_NOT_FOUND: u32 = 12150;
-const WINHTTP_PROTOCOL_FLAG_HTTP2: u32 = 1;
-const WINHTTP_PROTOCOL_FLAG_HTTP3: u32 = 2;
-const WINHTTP_DISABLE_COOKIES: u32 = 1;
-const WINHTTP_DISABLE_AUTHENTICATION: u32 = 4;
-const WINHTTP_DECOMPRESSION_FLAG_GZIP: u32 = 1;
-const WINHTTP_DECOMPRESSION_FLAG_DEFLATE: u32 = 2;
-const SECURITY_FLAG_IGNORE_UNKNOWN_CA: u32 = 0x0100;
-const SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE: u32 = 0x0200;
-const SECURITY_FLAG_IGNORE_CERT_CN_INVALID: u32 = 0x1000;
-const SECURITY_FLAG_IGNORE_CERT_DATE_INVALID: u32 = 0x2000;
+// WinHTTP documents a 5000 ms minimum for HTTP/2 and a 1 ms minimum for
+// HTTP/3: https://learn.microsoft.com/windows/win32/winhttp/option-flags
 const HTTP2_KEEP_ALIVE_MINIMUM_MS: u32 = 5_000;
-pub(crate) const WINHTTP_OPTION_REDIRECT_POLICY_NEVER: u32 = 0;
+const HTTP3_KEEP_ALIVE_MINIMUM_MS: u32 = 1;
+// WinHttpSetTimeouts uses -1 for an unlimited timeout:
+// https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpsettimeouts
 const UNLIMITED_TIMEOUT: i32 = -1;
 const DWORD_BYTES: u32 = 4;
 
@@ -76,7 +60,7 @@ impl WinHttpOptions {
     }
 }
 
-/// Builds [`WinHttpOptions`].
+/// Accumulates optional WinHTTP settings before producing [`WinHttpOptions`].
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpOptionsBuilder {
@@ -90,7 +74,10 @@ impl WinHttpOptionsBuilder {
     /// configured through the generic `fetch` client options.
     ///
     /// Configured values below one millisecond are rounded up to one
-    /// millisecond. Values beyond `WinHTTP`'s finite range are clamped.
+    /// millisecond. Values beyond the signed [`WinHttpSetTimeouts`] parameter
+    /// range are clamped.
+    ///
+    /// [`WinHttpSetTimeouts`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpsettimeouts
     #[must_use]
     pub fn resolve_timeout(mut self, timeout: Duration) -> Self {
         self.options.resolve_timeout = Some(timeout);
@@ -104,43 +91,96 @@ impl WinHttpOptionsBuilder {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ConversionError {
-    EmbeddedNul(&'static str),
-    HeaderBufferTooSmall,
-    HeaderByteLengthIsOdd(u32),
-    InvalidHeaderUtf16,
-    InvalidProtocolMask(u32),
-    InvalidProtocolVersion(String),
-    RequestHeadersTooLarge,
-    UnsupportedHttpVersion(Version),
+/// Collects conversion failures while retaining the precise source condition.
+#[ohno::error]
+#[from(
+    EmbeddedNulError,
+    HeaderByteLengthIsOddError,
+    InteriorZeroCodeUnitError,
+    InvalidProtocolMaskError,
+    InvalidProtocolVersionError,
+    InvalidUtf16Error,
+    RequestHeadersTooLargeError,
+    ReturnedLengthOutOfBoundsError,
+    UnexpectedByteLengthError,
+    UnsupportedHttpVersionError
+)]
+#[display("WinHTTP value conversion failed")]
+pub(crate) struct ConversionError;
+
+/// Reports an embedded zero that cannot be represented by a WinHTTP string.
+#[ohno::error]
+#[display("{field} contains an embedded zero character")]
+struct EmbeddedNulError {
+    field: &'static str,
 }
 
-impl fmt::Display for ConversionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmbeddedNul(field) => write!(f, "{field} contains a NUL character"),
-            Self::HeaderBufferTooSmall => f.write_str("the WinHTTP header buffer is smaller than the returned length"),
-            Self::HeaderByteLengthIsOdd(length) => {
-                write!(f, "WinHTTP returned an odd UTF-16 byte length: {length}")
-            }
-            Self::InvalidHeaderUtf16 => f.write_str("WinHTTP returned invalid UTF-16 header data"),
-            Self::InvalidProtocolMask(mask) => {
-                write!(f, "WinHTTP returned an invalid HTTP protocol mask: {mask}")
-            }
-            Self::InvalidProtocolVersion(version) => {
-                write!(f, "WinHTTP returned an unsupported HTTP version: {version}")
-            }
-            Self::RequestHeadersTooLarge => f.write_str("the request headers are too large to materialize"),
-            Self::UnsupportedHttpVersion(version) => {
-                write!(f, "WinHTTP does not support requested HTTP version {version:?}")
-            }
-        }
-    }
+/// Reports a WinHTTP UTF-16 byte count that cannot contain whole code units.
+#[ohno::error]
+#[display("WinHTTP returned an odd UTF-16 byte length: {length}")]
+struct HeaderByteLengthIsOddError {
+    length: u32,
 }
 
-impl std::error::Error for ConversionError {}
+/// Reports a zero code unit in a WinHTTP string that must not contain one.
+#[ohno::error]
+#[display("WinHTTP returned an interior zero code unit in {value}")]
+struct InteriorZeroCodeUnitError {
+    value: &'static str,
+}
 
+/// Reports a negotiated-protocol bitmask that does not identify one protocol.
+#[ohno::error]
+#[display("WinHTTP returned an invalid HTTP protocol mask: {mask}")]
+struct InvalidProtocolMaskError {
+    mask: u32,
+}
+
+/// Reports a textual HTTP version that the transport cannot represent.
+#[ohno::error]
+#[display("WinHTTP returned an unsupported HTTP version: {version}")]
+struct InvalidProtocolVersionError {
+    version: String,
+}
+
+/// Reports malformed UTF-16 returned by WinHTTP.
+#[ohno::error]
+#[display("WinHTTP returned invalid UTF-16 for {value}")]
+struct InvalidUtf16Error {
+    value: &'static str,
+}
+
+/// Reports request headers whose UTF-16 representation cannot fit WinHTTP.
+#[ohno::error]
+#[display("the request headers are too large to materialize")]
+struct RequestHeadersTooLargeError;
+
+/// Reports a native returned length outside the supplied buffer.
+#[ohno::error]
+#[display("WinHTTP returned {returned} bytes for {value}, but its buffer holds {capacity} bytes")]
+struct ReturnedLengthOutOfBoundsError {
+    value: &'static str,
+    capacity: usize,
+    returned: usize,
+}
+
+/// Reports a fixed-size native value returned with the wrong byte length.
+#[ohno::error]
+#[display("WinHTTP returned {actual} bytes for {value}; expected {expected}")]
+struct UnexpectedByteLengthError {
+    value: &'static str,
+    expected: u32,
+    actual: u32,
+}
+
+/// Reports a caller-requested HTTP version that WinHTTP does not support.
+#[ohno::error]
+#[display("WinHTTP does not support requested HTTP version {version:?}")]
+struct UnsupportedHttpVersionError {
+    version: Version,
+}
+
+/// Distinguishes WinHTTP query failures from malformed returned values.
 #[derive(Debug)]
 pub(crate) enum QueryError {
     Conversion(ConversionError),
@@ -177,6 +217,7 @@ impl From<WinHttpError> for QueryError {
     }
 }
 
+/// Carries the protocol bitmask and whether WinHTTP must forbid HTTP/1.1 fallback.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ProtocolOptions {
     advanced_mask: u32,
@@ -210,7 +251,7 @@ pub(crate) fn http2_keep_alive_millis(duration: Duration) -> u32 {
 }
 
 pub(crate) fn http3_keep_alive_millis(duration: Duration) -> u32 {
-    dword_millis(duration).max(1)
+    dword_millis(duration).max(HTTP3_KEEP_ALIVE_MINIMUM_MS)
 }
 
 fn ceil_millis(duration: Duration) -> u128 {
@@ -236,7 +277,7 @@ pub(crate) fn path_to_utf16(path: &str) -> Result<U16CString, ConversionError> {
         let mut units = Vec::with_capacity(path.len().saturating_add(1));
         units.push(u16::from(b'/'));
         units.extend(path.encode_utf16());
-        return U16CString::from_vec(units).map_err(|_contains_nul| ConversionError::EmbeddedNul("request path"));
+        return U16CString::from_vec(units).map_err(|_contains_nul| EmbeddedNulError::new("request path").into());
     }
 
     string_to_utf16(path, "request path")
@@ -249,9 +290,11 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
             .and_then(|unit_count| unit_count.checked_add(value.as_bytes().len()))
             .and_then(|unit_count| unit_count.checked_add(4))
     });
-    let unit_count = unit_count.ok_or(ConversionError::RequestHeadersTooLarge)?;
+    let unit_count = unit_count.ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
     validate_request_header_unit_count(unit_count)?;
-    let capacity = unit_count.checked_add(1).ok_or(ConversionError::RequestHeadersTooLarge)?;
+    let capacity = unit_count
+        .checked_add(1)
+        .ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
     let mut units = Vec::with_capacity(capacity);
 
     for (name, value) in headers {
@@ -261,21 +304,17 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
         units.extend([u16::from(b'\r'), u16::from(b'\n')]);
     }
 
-    U16CString::from_vec(units).map_err(|_contains_nul| ConversionError::EmbeddedNul("request headers"))
+    U16CString::from_vec(units).map_err(|_contains_nul| EmbeddedNulError::new("request headers").into())
 }
 
 fn validate_request_header_unit_count(unit_count: usize) -> Result<(), ConversionError> {
     u32::try_from(unit_count)
         .map(|_unit_count| ())
-        .map_err(|_too_large| ConversionError::RequestHeadersTooLarge)
+        .map_err(|_too_large| RequestHeadersTooLargeError::new().into())
 }
 
 fn string_to_utf16(value: &str, field: &'static str) -> Result<U16CString, ConversionError> {
-    U16CString::from_str(value).map_err(|_contains_nul| ConversionError::EmbeddedNul(field))
-}
-
-pub(crate) fn header_units_without_nul(headers: &U16CStr) -> &[u16] {
-    headers.as_slice()
+    U16CString::from_str(value).map_err(|_contains_nul| EmbeddedNulError::new(field).into())
 }
 
 pub(crate) const fn dword_bytes(value: u32) -> [u8; size_of::<u32>()] {
@@ -298,7 +337,7 @@ pub(crate) const fn request_open_flags(secure: bool, automatic_chunking: bool) -
     let mut flags = 0;
 
     if secure {
-        flags |= WINHTTP_FLAG_SECURE;
+        flags |= WINHTTP_FLAG_SECURE.0;
     }
     if automatic_chunking {
         flags |= WINHTTP_FLAG_AUTOMATIC_CHUNKING;
@@ -335,7 +374,7 @@ pub(crate) fn protocol_options(versions: &[Version]) -> Result<ProtocolOptions, 
             Version::HTTP_2 => advanced_mask |= WINHTTP_PROTOCOL_FLAG_HTTP2,
             Version::HTTP_3 => advanced_mask |= WINHTTP_PROTOCOL_FLAG_HTTP3,
             unsupported => {
-                return Err(ConversionError::UnsupportedHttpVersion(unsupported));
+                return Err(UnsupportedHttpVersionError::new(unsupported).into());
             }
         }
     }
@@ -351,9 +390,10 @@ pub(crate) fn parse_protocol_used(protocol_mask: u32, legacy_version: Option<&st
         WINHTTP_PROTOCOL_FLAG_HTTP2 => Ok(Version::HTTP_2),
         WINHTTP_PROTOCOL_FLAG_HTTP3 => Ok(Version::HTTP_3),
         0 => parse_legacy_version(
-            legacy_version.ok_or_else(|| ConversionError::InvalidProtocolVersion("missing WINHTTP_QUERY_VERSION value".to_owned()))?,
+            legacy_version
+                .ok_or_else(|| ConversionError::from(InvalidProtocolVersionError::new("missing WINHTTP_QUERY_VERSION value".to_owned())))?,
         ),
-        invalid => Err(ConversionError::InvalidProtocolMask(invalid)),
+        invalid => Err(InvalidProtocolMaskError::new(invalid).into()),
     }
 }
 
@@ -362,27 +402,34 @@ fn parse_legacy_version(version: &str) -> Result<Version, ConversionError> {
         "HTTP/0.9" => Ok(Version::HTTP_09),
         "HTTP/1.0" => Ok(Version::HTTP_10),
         "HTTP/1.1" => Ok(Version::HTTP_11),
-        invalid => Err(ConversionError::InvalidProtocolVersion(invalid.to_owned())),
+        invalid => Err(InvalidProtocolVersionError::new(invalid.to_owned()).into()),
     }
 }
 
 pub(crate) fn header_buffer_units(byte_len: u32) -> Result<usize, ConversionError> {
     if !byte_len.is_multiple_of(2) {
-        return Err(ConversionError::HeaderByteLengthIsOdd(byte_len));
+        return Err(HeaderByteLengthIsOddError::new(byte_len).into());
     }
 
-    usize::try_from(byte_len / 2).map_err(|_too_large| ConversionError::HeaderBufferTooSmall)
+    Ok(dword_to_usize(byte_len / 2))
 }
 
+#[cfg(test)]
 pub(crate) fn parse_header_buffer(buffer: &[u16], returned_bytes: u32) -> Result<String, ConversionError> {
     let units = header_buffer_units(returned_bytes)?;
-    let content = buffer.get(..units).ok_or(ConversionError::HeaderBufferTooSmall)?;
+    let content = buffer.get(..units).ok_or_else(|| {
+        ConversionError::from(ReturnedLengthOutOfBoundsError::new(
+            "header UTF-16 data",
+            size_of_val(buffer),
+            dword_to_usize(returned_bytes),
+        ))
+    })?;
 
     if content.contains(&0) {
-        return Err(ConversionError::InvalidHeaderUtf16);
+        return Err(InteriorZeroCodeUnitError::new("header data").into());
     }
 
-    String::from_utf16(content).map_err(|_invalid_utf16| ConversionError::InvalidHeaderUtf16)
+    String::from_utf16(content).map_err(|_invalid_utf16| InvalidUtf16Error::new("header data").into())
 }
 
 pub(crate) fn query_status_code(bindings: &Facade, request: RawHandle) -> Result<u32, QueryError> {
@@ -402,7 +449,7 @@ pub(crate) fn query_status_code(bindings: &Facade, request: RawHandle) -> Result
     }?;
 
     if byte_len != DWORD_BYTES {
-        return Err(ConversionError::HeaderBufferTooSmall.into());
+        return Err(ConversionError::from(UnexpectedByteLengthError::new("HTTP status code", DWORD_BYTES, byte_len)).into());
     }
 
     Ok(status_code)
@@ -433,21 +480,21 @@ pub(crate) fn query_protocol_used(bindings: &Facade, request: RawHandle) -> Resu
     unsafe { bindings.query_option(request, WINHTTP_OPTION_HTTP_PROTOCOL_USED, Some(buffer), &mut byte_len) }?;
 
     if byte_len != DWORD_BYTES {
-        return Err(ConversionError::HeaderBufferTooSmall.into());
+        return Err(ConversionError::from(UnexpectedByteLengthError::new("negotiated HTTP protocol", DWORD_BYTES, byte_len)).into());
     }
 
     if protocol_mask == 0 {
-        let version = query_header_string(bindings, request, WINHTTP_QUERY_VERSION)?;
+        let version = query_header_string(bindings, request, WINHTTP_QUERY_VERSION, "HTTP version")?;
         Ok(parse_protocol_used(0, Some(&version))?)
     } else {
         Ok(parse_protocol_used(protocol_mask, None)?)
     }
 }
 
-fn query_header_string(bindings: &Facade, request: RawHandle, info_level: u32) -> Result<String, QueryError> {
-    let buffer = query_header_units(bindings, request, info_level)?;
+fn query_header_string(bindings: &Facade, request: RawHandle, info_level: u32, value: &'static str) -> Result<String, QueryError> {
+    let buffer = query_header_units(bindings, request, info_level, value)?;
 
-    String::from_utf16(&buffer).map_err(|_invalid_utf16| ConversionError::InvalidHeaderUtf16.into())
+    String::from_utf16(&buffer).map_err(|_invalid_utf16| QueryError::from(ConversionError::from(InvalidUtf16Error::new(value))))
 }
 
 fn query_header_bytes(bindings: &Facade, request: RawHandle, info_level: u32) -> Result<Vec<u8>, QueryError> {
@@ -455,36 +502,41 @@ fn query_header_bytes(bindings: &Facade, request: RawHandle, info_level: u32) ->
 
     // SAFETY: a null buffer with zero capacity is the documented sizing query.
     match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
-        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER => {}
+        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
         Err(error) => return Err(error.into()),
         Ok(()) if required_bytes == 0 => return Ok(Vec::new()),
         Ok(()) => {}
     }
 
-    let capacity = usize::try_from(required_bytes).map_err(|_too_large| ConversionError::HeaderBufferTooSmall)?;
+    let capacity = dword_to_usize(required_bytes);
     let mut buffer = vec![0_u8; capacity];
-    let output = NonNull::new(buffer.as_mut_ptr()).ok_or(ConversionError::HeaderBufferTooSmall)?;
+    let output = NonNull::new(buffer.as_mut_ptr()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
     let mut returned_bytes = required_bytes;
 
     // SAFETY: output points to a writable buffer of required_bytes and remains
     // valid for the duration of the synchronous query.
     unsafe { bindings.query_headers(request, info_level, Some(output), &mut returned_bytes) }?;
 
-    let returned_bytes = usize::try_from(returned_bytes).map_err(|_too_large| ConversionError::HeaderBufferTooSmall)?;
+    let returned_bytes = dword_to_usize(returned_bytes);
     if returned_bytes > buffer.len() {
-        return Err(ConversionError::HeaderBufferTooSmall.into());
+        return Err(ConversionError::from(ReturnedLengthOutOfBoundsError::new(
+            "wire-encoded headers",
+            buffer.len(),
+            returned_bytes,
+        ))
+        .into());
     }
     buffer.truncate(returned_bytes);
 
     Ok(buffer)
 }
 
-fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32) -> Result<Vec<u16>, QueryError> {
+fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32, value: &'static str) -> Result<Vec<u16>, QueryError> {
     let mut required_bytes = 0_u32;
 
     // SAFETY: a null buffer with zero capacity is the documented sizing query.
     match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
-        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER => {}
+        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
         Err(error) => return Err(error.into()),
         Ok(()) if required_bytes == 0 => return Ok(Vec::new()),
         Ok(()) => {}
@@ -492,7 +544,7 @@ fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32) ->
 
     let units = header_buffer_units(required_bytes)?;
     let mut buffer = vec![0_u16; units];
-    let output = NonNull::new(buffer.as_mut_ptr().cast::<u8>()).ok_or(ConversionError::HeaderBufferTooSmall)?;
+    let output = NonNull::new(buffer.as_mut_ptr().cast::<u8>()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
     let mut returned_bytes = required_bytes;
 
     // SAFETY: output points to a writable buffer of required_bytes and remains
@@ -501,47 +553,75 @@ fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32) ->
 
     let returned_units = header_buffer_units(returned_bytes)?;
     if returned_units > buffer.len() {
-        return Err(ConversionError::HeaderBufferTooSmall.into());
+        return Err(ConversionError::from(ReturnedLengthOutOfBoundsError::new(
+            value,
+            buffer.len() * size_of::<u16>(),
+            dword_to_usize(returned_bytes),
+        ))
+        .into());
     }
     buffer.truncate(returned_units);
 
     if buffer.contains(&0) {
-        return Err(ConversionError::InvalidHeaderUtf16.into());
+        return Err(ConversionError::from(InteriorZeroCodeUnitError::new(value)).into());
     }
 
     Ok(buffer)
+}
+
+fn dword_to_usize(value: u32) -> usize {
+    usize::try_from(value).expect("all supported Windows targets have at least a 32-bit usize")
 }
 
 #[cfg(test)]
 mod tests {
     use std::ffi::c_void;
     use std::fmt::Debug;
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
     use std::time::Duration;
 
     use http::{HeaderMap, HeaderValue, Method, Version};
     use mockall::Sequence;
-    use static_assertions::assert_impl_all;
+    use ohno::ErrorExt as _;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
     use thread_aware::ThreadAware;
 
     use super::{
-        ConversionError, WINHTTP_FLAG_ASYNC, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_OPTION_CONTEXT_VALUE,
-        WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
-        WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_OPTION_HTTP2_KEEPALIVE,
-        WINHTTP_OPTION_HTTP3_KEEPALIVE, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
-        WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION, WinHttpOptions,
-        WinHttpOptionsBuilder, context_bytes, decompression_mask, disable_feature_mask, dword_bytes, dword_millis, header_buffer_units,
-        header_units_without_nul, headers_to_utf16, host_to_utf16, http2_keep_alive_millis, http3_keep_alive_millis, method_to_utf16,
-        parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options, query_protocol_used, query_raw_headers,
-        query_raw_trailers, query_status_code, request_open_flags, security_flags, timeout_millis, validate_request_header_unit_count,
+        ConversionError, ERROR_INSUFFICIENT_BUFFER, ERROR_WINHTTP_HEADER_NOT_FOUND, EmbeddedNulError, HeaderByteLengthIsOddError,
+        InteriorZeroCodeUnitError, InvalidProtocolMaskError, InvalidProtocolVersionError, InvalidUtf16Error, ProtocolOptions, QueryError,
+        RequestHeadersTooLargeError, ReturnedLengthOutOfBoundsError, SECURITY_FLAG_IGNORE_CERT_CN_INVALID,
+        SECURITY_FLAG_IGNORE_CERT_DATE_INVALID, SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE, SECURITY_FLAG_IGNORE_UNKNOWN_CA,
+        UnexpectedByteLengthError, UnsupportedHttpVersionError, WINHTTP_DECOMPRESSION_FLAG_DEFLATE, WINHTTP_DECOMPRESSION_FLAG_GZIP,
+        WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE,
+        WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_FLAG_TRAILERS, WINHTTP_QUERY_FLAG_WIRE_ENCODING,
+        WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION, WinHttpOptions, WinHttpOptionsBuilder,
+        context_bytes, decompression_mask, disable_feature_mask, dword_bytes, dword_millis, header_buffer_units, headers_to_utf16,
+        host_to_utf16, http2_keep_alive_millis, http3_keep_alive_millis, method_to_utf16, parse_header_buffer, parse_protocol_used,
+        path_to_utf16, protocol_options, query_protocol_used, query_raw_headers, query_raw_trailers, query_status_code, request_open_flags,
+        security_flags, timeout_millis, validate_request_header_unit_count,
     };
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
 
-    assert_impl_all!(WinHttpOptions: Send, Sync, Clone, Debug, Default, ThreadAware);
-    assert_impl_all!(WinHttpOptionsBuilder: Send, Sync, Clone, Debug, ThreadAware);
+    assert_impl_all!(WinHttpOptions: Send, Sync, Clone, Debug, Default, ThreadAware, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(WinHttpOptionsBuilder: Send, Sync, Clone, Debug, ThreadAware, UnwindSafe, RefUnwindSafe);
+    // The generated error wrappers retain user-erased source error state.
+    assert_not_impl_any!(ConversionError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(EmbeddedNulError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(HeaderByteLengthIsOddError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(InteriorZeroCodeUnitError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(InvalidProtocolMaskError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(InvalidProtocolVersionError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(InvalidUtf16Error: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(RequestHeadersTooLargeError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(ReturnedLengthOutOfBoundsError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(UnexpectedByteLengthError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(UnsupportedHttpVersionError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(QueryError: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(ProtocolOptions: Send, Sync, Clone, Copy, Debug, Eq, PartialEq, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn default_leaves_resolve_timeout_unlimited() {
@@ -584,14 +664,14 @@ mod tests {
 
     #[test]
     fn utf16_conversions_are_nul_terminated_without_embedded_nuls() {
-        let method = method_to_utf16(&Method::POST).expect("method is valid");
-        let host = host_to_utf16("example.com").expect("host is valid");
-        let path = path_to_utf16("/resource?q=1").expect("path is valid");
-        let query_only_path = path_to_utf16("?q=1").expect("query-only path is valid");
+        let method = method_to_utf16(&Method::POST).unwrap();
+        let host = host_to_utf16("example.com").unwrap();
+        let path = path_to_utf16("/resource?q=1").unwrap();
+        let query_only_path = path_to_utf16("?q=1").unwrap();
         let mut header_map = HeaderMap::new();
         header_map.append("x-duplicate", HeaderValue::from_static("first"));
-        header_map.append("x-duplicate", HeaderValue::from_bytes(&[0x80, 0xff]).expect("obs-text is valid"));
-        let headers = headers_to_utf16(&header_map).expect("headers are valid");
+        header_map.append("x-duplicate", HeaderValue::from_bytes(&[0x80, 0xff]).unwrap());
+        let headers = headers_to_utf16(&header_map).unwrap();
 
         assert_eq!(method.as_slice(), "POST".encode_utf16().collect::<Vec<_>>());
         assert_eq!(host.as_slice(), "example.com".encode_utf16().collect::<Vec<_>>());
@@ -606,7 +686,6 @@ mod tests {
             ]
             .concat()
         );
-        assert_eq!(header_units_without_nul(&headers), headers.as_slice());
         assert_eq!(
             headers.as_slice_with_nul().last().copied(),
             Some(0),
@@ -616,27 +695,24 @@ mod tests {
 
     #[test]
     fn utf16_conversions_reject_embedded_nuls() {
-        assert!(matches!(host_to_utf16("exam\0ple.com"), Err(ConversionError::EmbeddedNul("host"))));
-        assert!(matches!(
-            path_to_utf16("/bad\0path"),
-            Err(ConversionError::EmbeddedNul("request path"))
-        ));
-        assert!(matches!(
-            super::string_to_utf16("x-test: bad\0value\r\n", "request headers"),
-            Err(ConversionError::EmbeddedNul("request headers"))
-        ));
+        let host = host_to_utf16("exam\0ple.com").unwrap_err();
+        assert_eq!(host.find_source::<EmbeddedNulError>().unwrap().field, "host");
+
+        let path = path_to_utf16("/bad\0path").unwrap_err();
+        assert_eq!(path.find_source::<EmbeddedNulError>().unwrap().field, "request path");
+
+        let headers = super::string_to_utf16("x-test: bad\0value\r\n", "request headers").unwrap_err();
+        assert_eq!(headers.find_source::<EmbeddedNulError>().unwrap().field, "request headers");
     }
 
     #[test]
     fn request_header_unit_count_must_fit_the_winhttp_dword_length() {
-        let maximum = usize::try_from(u32::MAX).expect("usize represents every DWORD length");
-        assert_eq!(validate_request_header_unit_count(maximum), Ok(()));
+        let maximum = usize::try_from(u32::MAX).unwrap();
+        validate_request_header_unit_count(maximum).unwrap();
 
         if let Ok(too_large) = usize::try_from(u64::from(u32::MAX) + 1) {
-            assert_eq!(
-                validate_request_header_unit_count(too_large),
-                Err(ConversionError::RequestHeadersTooLarge)
-            );
+            let error = validate_request_header_unit_count(too_large).unwrap_err();
+            assert!(error.find_source::<RequestHeadersTooLargeError>().is_some());
         }
     }
 
@@ -650,36 +726,25 @@ mod tests {
     }
 
     #[test]
-    fn option_masks_are_combined_once() {
-        assert_eq!(WINHTTP_FLAG_ASYNC, 0x1000_0000);
-        assert_eq!(WINHTTP_OPTION_CONTEXT_VALUE, 45);
-        assert_eq!(WINHTTP_OPTION_DECOMPRESSION, 118);
-        assert_eq!(WINHTTP_OPTION_DISABLE_FEATURE, 63);
-        assert_eq!(WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 133);
-        assert_eq!(WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, 145);
-        assert_eq!(WINHTTP_OPTION_HTTP_PROTOCOL_USED, 134);
-        assert_eq!(WINHTTP_OPTION_HTTP2_KEEPALIVE, 164);
-        assert_eq!(WINHTTP_OPTION_HTTP3_KEEPALIVE, 188);
-        assert_eq!(WINHTTP_OPTION_REDIRECT_POLICY, 88);
-        assert_eq!(WINHTTP_OPTION_REDIRECT_POLICY_NEVER, 0);
-        assert_eq!(WINHTTP_OPTION_SECURITY_FLAGS, 31);
-        assert_eq!(WINHTTP_QUERY_FLAG_WIRE_ENCODING, 0x0100_0000);
-        assert_eq!(WINHTTP_QUERY_STATUS_CODE, 19);
-        assert_eq!(disable_feature_mask(), 1 | 4);
-        assert_eq!(decompression_mask(), 1 | 2);
+    fn option_masks_combine_windows_sdk_flags() {
+        assert_eq!(disable_feature_mask(), WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_AUTHENTICATION);
+        assert_eq!(
+            decompression_mask(),
+            WINHTTP_DECOMPRESSION_FLAG_GZIP | WINHTTP_DECOMPRESSION_FLAG_DEFLATE
+        );
         assert_eq!(
             request_open_flags(true, true),
-            WINHTTP_FLAG_SECURE | WINHTTP_FLAG_AUTOMATIC_CHUNKING
+            WINHTTP_FLAG_SECURE.0 | WINHTTP_FLAG_AUTOMATIC_CHUNKING
         );
 
         assert_eq!(security_flags(&WinHttpTlsConfig::default()), 0);
         assert_eq!(
             security_flags(&WinHttpTlsConfig::builder().accept_invalid_certs(true).build()),
-            0x2300
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
         );
         assert_eq!(
             security_flags(&WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build()),
-            0x1000
+            SECURITY_FLAG_IGNORE_CERT_CN_INVALID
         );
         assert_eq!(
             security_flags(
@@ -688,7 +753,10 @@ mod tests {
                     .accept_invalid_hostnames(true)
                     .build()
             ),
-            0x3300
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA
+                | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE
+                | SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+                | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
         );
     }
 
@@ -706,7 +774,7 @@ mod tests {
         ];
 
         for (versions, mask, required) in cases {
-            let options = protocol_options(versions).expect("supported versions");
+            let options = protocol_options(versions).unwrap();
             assert_eq!(options.advanced_mask(), mask);
             assert_eq!(options.required(), required);
         }
@@ -714,25 +782,32 @@ mod tests {
 
     #[test]
     fn protocol_options_reject_legacy_requested_versions() {
-        assert!(matches!(
-            protocol_options(&[Version::HTTP_09]),
-            Err(ConversionError::UnsupportedHttpVersion(Version::HTTP_09))
-        ));
-        assert!(matches!(
-            protocol_options(&[Version::HTTP_10]),
-            Err(ConversionError::UnsupportedHttpVersion(Version::HTTP_10))
-        ));
+        let http09 = protocol_options(&[Version::HTTP_09]).unwrap_err();
+        assert_eq!(
+            http09.find_source::<UnsupportedHttpVersionError>().unwrap().version,
+            Version::HTTP_09
+        );
+
+        let http10 = protocol_options(&[Version::HTTP_10]).unwrap_err();
+        assert_eq!(
+            http10.find_source::<UnsupportedHttpVersionError>().unwrap().version,
+            Version::HTTP_10
+        );
     }
 
     #[test]
     fn negotiated_legacy_protocol_uses_version_query_value() {
-        assert_eq!(parse_protocol_used(0, Some("HTTP/1.0")).expect("valid version"), Version::HTTP_10);
-        assert_eq!(parse_protocol_used(0, Some("HTTP/1.1")).expect("valid version"), Version::HTTP_11);
-        assert!(matches!(
-            parse_protocol_used(0, None),
-            Err(ConversionError::InvalidProtocolVersion(_))
-        ));
-        assert!(matches!(parse_protocol_used(3, None), Err(ConversionError::InvalidProtocolMask(3))));
+        assert_eq!(parse_protocol_used(0, Some("HTTP/1.0")).unwrap(), Version::HTTP_10);
+        assert_eq!(parse_protocol_used(0, Some("HTTP/1.1")).unwrap(), Version::HTTP_11);
+
+        let missing = parse_protocol_used(0, None).unwrap_err();
+        assert_eq!(
+            missing.find_source::<InvalidProtocolVersionError>().unwrap().version,
+            "missing WINHTTP_QUERY_VERSION value"
+        );
+
+        let invalid_mask = parse_protocol_used(3, None).unwrap_err();
+        assert_eq!(invalid_mask.find_source::<InvalidProtocolMaskError>().unwrap().mask, 3);
     }
 
     #[test]
@@ -745,7 +820,7 @@ mod tests {
             .once()
             .in_sequence(&mut sequence)
             .returning(|_, _, buffer, byte_len| {
-                let protocol = buffer.expect("protocol query supplies a DWORD").cast::<u32>();
+                let protocol = buffer.unwrap().cast::<u32>();
                 // SAFETY: the mock receives a writable DWORD buffer from
                 // query_protocol_used and writes exactly one DWORD.
                 unsafe { protocol.as_ptr().write(0) };
@@ -768,7 +843,7 @@ mod tests {
             .once()
             .in_sequence(&mut sequence)
             .returning(move |_, _, buffer, byte_len| {
-                let output = buffer.expect("version query supplies a UTF-16 buffer").cast::<u16>();
+                let output = buffer.unwrap().cast::<u16>();
                 // SAFETY: the mock receives an 18-byte buffer and copies the
                 // eight UTF-16 units of "HTTP/1.0" into it.
                 unsafe {
@@ -780,31 +855,35 @@ mod tests {
                 Ok(())
             });
 
-        let version = query_protocol_used(&Facade::mock(Arc::new(bindings)), raw_handle(3)).expect("legacy protocol query succeeds");
+        let version = query_protocol_used(&Facade::mock(Arc::new(bindings)), raw_handle(3)).unwrap();
 
         assert_eq!(version, Version::HTTP_10);
     }
 
     #[test]
     fn raw_header_primitives_validate_sizes_and_utf16() {
-        assert_eq!(header_buffer_units(10).expect("even length"), 5);
-        assert!(matches!(header_buffer_units(3), Err(ConversionError::HeaderByteLengthIsOdd(3))));
+        assert_eq!(header_buffer_units(10).unwrap(), 5);
+        let odd = header_buffer_units(3).unwrap_err();
+        assert_eq!(odd.find_source::<HeaderByteLengthIsOddError>().unwrap().length, 3);
         assert_eq!(
-            parse_header_buffer(&"a: b\r\n".encode_utf16().collect::<Vec<_>>(), 12).expect("valid header"),
+            parse_header_buffer(&"a: b\r\n".encode_utf16().collect::<Vec<_>>(), 12).unwrap(),
             "a: b\r\n"
         );
-        assert!(matches!(
-            parse_header_buffer(&[0xd800], 2),
-            Err(ConversionError::InvalidHeaderUtf16)
-        ));
-        assert!(matches!(
-            parse_header_buffer(&[u16::from(b'a')], 4),
-            Err(ConversionError::HeaderBufferTooSmall)
-        ));
-        assert!(matches!(
-            parse_header_buffer(&[u16::from(b'a'), 0], 4),
-            Err(ConversionError::InvalidHeaderUtf16)
-        ));
+
+        let invalid_utf16 = parse_header_buffer(&[0xd800], 2).unwrap_err();
+        assert_eq!(invalid_utf16.find_source::<InvalidUtf16Error>().unwrap().value, "header data");
+
+        let too_small = parse_header_buffer(&[u16::from(b'a')], 4).unwrap_err();
+        let source = too_small.find_source::<ReturnedLengthOutOfBoundsError>().unwrap();
+        assert_eq!(source.value, "header UTF-16 data");
+        assert_eq!(source.capacity, 2);
+        assert_eq!(source.returned, 4);
+
+        let embedded_nul = parse_header_buffer(&[u16::from(b'a'), 0], 4).unwrap_err();
+        assert_eq!(
+            embedded_nul.find_source::<InteriorZeroCodeUnitError>().unwrap().value,
+            "header data"
+        );
     }
 
     #[test]
@@ -813,47 +892,85 @@ mod tests {
         bindings
             .expect_query_headers()
             .withf(|_, info_level, buffer, byte_len| {
-                *info_level == (WINHTTP_QUERY_STATUS_CODE | 0x2000_0000) && buffer.is_some() && *byte_len == 4
+                *info_level == (WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER) && buffer.is_some() && *byte_len == 4
             })
             .once()
             .returning(|_, _, buffer, byte_len| {
-                let output = buffer.expect("status query supplies a DWORD").cast::<u32>();
+                let output = buffer.unwrap().cast::<u32>();
                 // SAFETY: query_status_code supplies a writable DWORD buffer.
                 unsafe { output.as_ptr().write(503) };
                 *byte_len = 4;
                 Ok(())
             });
 
-        assert_eq!(
-            query_status_code(&Facade::mock(Arc::new(bindings)), raw_handle(4)).expect("status query succeeds"),
-            503
-        );
+        assert_eq!(query_status_code(&Facade::mock(Arc::new(bindings)), raw_handle(4)).unwrap(), 503);
+    }
+
+    #[test]
+    fn fixed_width_queries_report_the_actual_native_length() {
+        let mut status_bindings = MockBindings::new();
+        status_bindings.expect_query_headers().once().returning(|_, _, _, byte_len| {
+            *byte_len = 2;
+            Ok(())
+        });
+
+        let status = query_status_code(&Facade::mock(Arc::new(status_bindings)), raw_handle(1)).unwrap_err();
+        let status = match status {
+            QueryError::Conversion(error) => error,
+            QueryError::WinHttp(error) => panic!("unexpected WinHTTP error: {error}"),
+        };
+        let source = status.find_source::<UnexpectedByteLengthError>().unwrap();
+        assert_eq!(source.value, "HTTP status code");
+        assert_eq!(source.expected, 4);
+        assert_eq!(source.actual, 2);
+
+        let mut protocol_bindings = MockBindings::new();
+        protocol_bindings.expect_query_option().once().returning(|_, _, _, byte_len| {
+            *byte_len = 8;
+            Ok(())
+        });
+
+        let protocol = query_protocol_used(&Facade::mock(Arc::new(protocol_bindings)), raw_handle(2)).unwrap_err();
+        let protocol = match protocol {
+            QueryError::Conversion(error) => error,
+            QueryError::WinHttp(error) => panic!("unexpected WinHTTP error: {error}"),
+        };
+        let source = protocol.find_source::<UnexpectedByteLengthError>().unwrap();
+        assert_eq!(source.value, "negotiated HTTP protocol");
+        assert_eq!(source.expected, 4);
+        assert_eq!(source.actual, 8);
     }
 
     #[test]
     fn wire_encoded_header_query_uses_byte_lengths_and_preserves_bytes() {
         let raw = b"HTTP/1.1 200 OK\r\nx-obs: \x80\xff\r\n\r\n".to_vec();
-        let required = u32::try_from(raw.len() + 1).expect("test header buffer length fits a DWORD");
-        let returned = u32::try_from(raw.len()).expect("test header length fits a DWORD");
+        let required = u32::try_from(raw.len() + 1).unwrap();
+        let returned = u32::try_from(raw.len()).unwrap();
         let mut sequence = Sequence::new();
         let mut bindings = MockBindings::new();
         bindings
             .expect_query_headers()
-            .withf(move |_, info_level, buffer, byte_len| *info_level == (0x16 | 0x0100_0000) && buffer.is_none() && *byte_len == 0)
+            .withf(move |_, info_level, buffer, byte_len| {
+                *info_level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING) && buffer.is_none() && *byte_len == 0
+            })
             .once()
             .in_sequence(&mut sequence)
             .returning(move |_, _, _, byte_len| {
                 *byte_len = required;
-                Err(WinHttpError::new(122, WinHttpOperation::QueryHeaders))
+                Err(WinHttpError::new(ERROR_INSUFFICIENT_BUFFER.0, WinHttpOperation::QueryHeaders))
             });
         let expected = raw.clone();
         bindings
             .expect_query_headers()
-            .withf(move |_, info_level, buffer, byte_len| *info_level == (0x16 | 0x0100_0000) && buffer.is_some() && *byte_len == required)
+            .withf(move |_, info_level, buffer, byte_len| {
+                *info_level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING)
+                    && buffer.is_some()
+                    && *byte_len == required
+            })
             .once()
             .in_sequence(&mut sequence)
             .returning(move |_, _, buffer, byte_len| {
-                let output = buffer.expect("raw-header query supplies a byte buffer");
+                let output = buffer.unwrap();
                 // SAFETY: the sizing query reserved required bytes, which is
                 // enough for every returned byte and the trailing NUL.
                 unsafe { output.as_ptr().copy_from_nonoverlapping(expected.as_ptr(), expected.len()) };
@@ -865,7 +982,7 @@ mod tests {
                 Ok(())
             });
 
-        let actual = query_raw_headers(&Facade::mock(Arc::new(bindings)), raw_handle(5)).expect("wire header query succeeds");
+        let actual = query_raw_headers(&Facade::mock(Arc::new(bindings)), raw_handle(5)).unwrap();
 
         assert_eq!(actual, raw);
     }
@@ -876,26 +993,28 @@ mod tests {
         trailer_bindings
             .expect_query_headers()
             .withf(|_, info_level, buffer, byte_len| {
-                *info_level == (0x16 | 0x0200_0000 | 0x0100_0000) && buffer.is_none() && *byte_len == 0
+                *info_level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING)
+                    && buffer.is_none()
+                    && *byte_len == 0
             })
             .once()
-            .returning(|_, _, _, _| Err(WinHttpError::new(12150, WinHttpOperation::QueryHeaders)));
-        let trailers =
-            query_raw_trailers(&Facade::mock(Arc::new(trailer_bindings)), raw_handle(1)).expect("an absent trailer block is not an error");
+            .returning(|_, _, _, _| Err(WinHttpError::new(ERROR_WINHTTP_HEADER_NOT_FOUND, WinHttpOperation::QueryHeaders)));
+        let trailers = query_raw_trailers(&Facade::mock(Arc::new(trailer_bindings)), raw_handle(1)).unwrap();
         assert_eq!(trailers, None);
 
         let mut header_bindings = MockBindings::new();
         header_bindings
             .expect_query_headers()
-            .withf(|_, info_level, buffer, byte_len| *info_level == (0x16 | 0x0100_0000) && buffer.is_none() && *byte_len == 0)
+            .withf(|_, info_level, buffer, byte_len| {
+                *info_level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING) && buffer.is_none() && *byte_len == 0
+            })
             .once()
-            .returning(|_, _, _, _| Err(WinHttpError::new(12150, WinHttpOperation::QueryHeaders)));
-        let error = query_raw_headers(&Facade::mock(Arc::new(header_bindings)), raw_handle(2))
-            .expect_err("an absent ordinary header block is an error");
-        assert!(matches!(error, super::QueryError::WinHttp(error) if error.code() == 12150));
+            .returning(|_, _, _, _| Err(WinHttpError::new(ERROR_WINHTTP_HEADER_NOT_FOUND, WinHttpOperation::QueryHeaders)));
+        let error = query_raw_headers(&Facade::mock(Arc::new(header_bindings)), raw_handle(2)).unwrap_err();
+        assert!(matches!(error, QueryError::WinHttp(error) if error.code() == ERROR_WINHTTP_HEADER_NOT_FOUND));
     }
 
     fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).expect("test handle values are nonzero")
+        RawHandle::new(value as *mut c_void).unwrap()
     }
 }
