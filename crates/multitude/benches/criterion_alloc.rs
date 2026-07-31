@@ -3,7 +3,7 @@
 
 //! Criterion wall-clock allocation benchmarks for multitude.
 //!
-//! Mirrors `benches/gungraun_alloc/linux.rs` 1:1. Setup creates fresh inputs,
+//! Paired with `criterion_alloc_cg.rs`. Setup creates fresh inputs,
 //! preallocates outputs, and leaves allocator pages as the last state touched.
 
 #![allow(clippy::missing_panics_doc, reason = "benchmark code")]
@@ -20,8 +20,8 @@ use alloc_common as common;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use multitude::{Arc, Box, Rc};
 
-fn bench_arena_creation(c: &mut Criterion) {
-    let mut group = c.benchmark_group("arena_creation");
+fn bench_arena_lifecycle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("criterion_alloc/arena_lifecycle");
     group.bench_function("multitude_new", |b| b.iter(common::multitude_new));
     group.bench_function("bumpalo_new", |b| b.iter(common::bumpalo_new));
     group.finish();
@@ -43,7 +43,7 @@ macro_rules! arena_collect_bench {
 }
 
 fn bench_alloc_u64(c: &mut Criterion) {
-    let mut group = c.benchmark_group("alloc_u64");
+    let mut group = c.benchmark_group("criterion_alloc/alloc_u64");
 
     group.bench_function("alloc", |b| {
         b.iter_batched(
@@ -142,7 +142,7 @@ macro_rules! arena_words_collect_bench {
 }
 
 fn bench_alloc_str(c: &mut Criterion) {
-    let mut group = c.benchmark_group("alloc_str");
+    let mut group = c.benchmark_group("criterion_alloc/alloc_str");
 
     group.bench_function("alloc_str", |b| {
         b.iter_batched(
@@ -207,7 +207,7 @@ macro_rules! arena_generated_slice_bench {
 }
 
 fn bench_alloc_slice(c: &mut Criterion) {
-    let mut group = c.benchmark_group("alloc_slice");
+    let mut group = c.benchmark_group("criterion_alloc/alloc_slice");
 
     arena_slice_input_bench!(group, "alloc_slice_copy", common::N, common::alloc_slice_copy);
     group.bench_function("bumpalo_alloc_slice_copy", |b| {
@@ -405,7 +405,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
 }
 
 fn bench_string_builder(c: &mut Criterion) {
-    let mut group = c.benchmark_group("string_builder");
+    let mut group = c.benchmark_group("criterion_alloc/string_builder");
 
     group.bench_function("alloc_string", |b| {
         b.iter_batched(
@@ -451,7 +451,7 @@ fn bench_string_builder(c: &mut Criterion) {
 }
 
 fn bench_vec_builder(c: &mut Criterion) {
-    let mut group = c.benchmark_group("vec_builder");
+    let mut group = c.benchmark_group("criterion_alloc/vec_builder");
 
     group.bench_function("alloc_vec", |b| {
         b.iter_batched(
@@ -497,7 +497,7 @@ fn bench_vec_builder(c: &mut Criterion) {
 }
 
 fn bench_allocator_grow(c: &mut Criterion) {
-    let mut group = c.benchmark_group("allocator_grow");
+    let mut group = c.benchmark_group("criterion_alloc/allocator_grow");
 
     group.bench_function("in_place", |b| {
         b.iter_batched(
@@ -534,7 +534,7 @@ fn bench_allocator_grow(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_arena_creation,
+    bench_arena_lifecycle,
     bench_alloc_u64,
     bench_alloc_str,
     bench_alloc_slice,

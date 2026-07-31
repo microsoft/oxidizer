@@ -86,7 +86,7 @@ fn alloc_box_of_maybeuninit_assume_init_drops_inner() {
     assert_eq!(counter.load(Ordering::Relaxed), 1);
 }
 
-/// With per-`Arc` reference counting, `alloc_arc(MaybeUninit::new(x))`
+/// With an allocation-local shared strong count, `alloc_arc(MaybeUninit::new(x))`
 /// followed by `assume_init` works correctly: `Arc::drop` runs the inner
 /// value's destructor eagerly on the last clone without a chunk drop entry.
 #[test]

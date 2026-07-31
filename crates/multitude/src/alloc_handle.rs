@@ -23,9 +23,11 @@ use core::{fmt, ptr};
 /// value's `Drop` never runs. This is sound (no use-after-free), but the value
 /// is simply never finalized.
 ///
-/// Unlike [`crate::Box`], `Alloc` does not support pinning. A forgotten handle
-/// does not retain its backing chunk, so the arena may reclaim or reuse the
-/// slot without running the destructor for the pointee.
+/// Unlike [`crate::Box`], `Alloc` provides no pinning constructor and cannot
+/// safely pin a `!Unpin` pointee. A forgotten handle does not retain its
+/// backing chunk, so the arena may reclaim or reuse the slot without running
+/// the pointee destructor. [`Pin::new`](core::pin::Pin::new) can still wrap `Alloc<T>` when
+/// `T: Unpin`, where pinning imposes no additional guarantee.
 ///
 /// ```compile_fail
 /// use core::pin::Pin;
@@ -66,6 +68,12 @@ pub struct Alloc<'a, T: ?Sized> {
     /// contract that the arena hands each slot out exactly once.
     inner: &'a mut T,
 }
+
+// `Alloc` semantically owns the exclusive borrow. Moving it across an unwind
+// boundary is therefore safe under the same bounds as an owning box; borrowing
+// it mutably still produces `&mut Alloc`, which remains `!UnwindSafe`.
+impl<T: ?Sized + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Alloc<'_, T> {}
+impl<T: ?Sized + core::panic::UnwindSafe> core::panic::UnwindSafe for Alloc<'_, T> {}
 
 impl<'a, T: ?Sized> Alloc<'a, T> {
     /// Wraps an exclusive arena borrow into an owning `Alloc` handle.

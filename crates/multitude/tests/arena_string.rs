@@ -840,8 +840,8 @@ mod arena_box_str {
 
     #[test]
     fn arena_box_str_is_eight_bytes() {
-        // The whole reason `Box<str>` exists rather than `ArenaBox<str>`
-        // (16 bytes via fat pointer): single-pointer compactness.
+        // Unlike an ordinary fat string pointer, the allocation-resident
+        // length keeps this owning handle to one word.
         assert_eq!(size_of::<Box<str>>(), size_of::<usize>());
     }
 

@@ -32,7 +32,7 @@ const fn worst_case_payload<T>() -> usize {
 
 /// Worst-case bytes consumed by a single strong-prefixed value allocation
 /// under policy `S` ([`AtomicStrong`](thin_dst::AtomicStrong) for `Arc`,
-/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): the per-handle
+/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): the shared
 /// strong-count prefix + value bytes + front alignment slack (`S::block_align`).
 /// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
 /// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` is
@@ -687,12 +687,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// reset or teardown. (For an escapable, refcounted owner that can outlive
     /// the arena, use [`Self::alloc_box`] instead.)
     ///
-    /// The chunk that hosts the value is "pinned" — it lives until arena drop
-    /// (other allocations into the same chunk follow normal per-chunk
-    /// reclamation rules and may extend its life past the arena via [`Arc`]
-    /// smart pointers). The value's memory is reclaimed in bulk at
-    /// [`Self::reset`] or arena drop, regardless of when the [`Alloc`] handle
-    /// is dropped.
+    /// The chunk that hosts the value is "pinned" until arena reset or drop.
+    /// Other allocations in the same chunk follow normal per-chunk reclamation
+    /// rules and may extend its life past the arena via escape-capable smart
+    /// pointers. The value's memory is reclaimed in bulk at [`Self::reset`] or
+    /// arena drop, regardless of when the [`Alloc`] handle is dropped.
     ///
     /// # Panics
     ///
@@ -878,7 +877,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Shared fast-path body for the `alloc_arc` / `alloc_rc` families,
     /// parameterized by the [`Strong`](thin_dst::Strong) count policy.
     ///
-    /// Unlike [`Box`], an [`Arc`]/[`Rc`](crate::Rc) reserves a per-handle strong
+    /// Unlike [`Box`], an [`Arc`]/[`Rc`](crate::Rc) reserves a shared strong
     /// reference count in the chunk prefix (initialized to `1`), takes one chunk
     /// refcount for the whole family, and runs `T::drop` eagerly when the strong
     /// count reaches zero.
@@ -997,9 +996,9 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 }
 
-/// writes the value produced by `f` into the reservation. Factored out
-/// of [`Arena::impl_alloc_smart_with`] so the closure-panic path runs
-/// the refcount-release guard.
+/// Writes the value produced by `f` into a `Box`, `Arc`, or `Rc` reservation.
+/// Factored out of the normal and oversized allocation paths so every
+/// closure-panic path runs the chunk-reference release guard.
 #[inline(always)]
 fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(uninit: Uninit<'_, T>, chunk_ref: ChunkRef<A>, f: F) -> NonNull<T> {
     let value = f();

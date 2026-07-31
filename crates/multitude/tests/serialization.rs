@@ -1034,7 +1034,13 @@ fn json_each_error_preserves_display_sources_and_conversions() {
 
     let source = serde_json::from_str::<u64>("not JSON").unwrap_err();
     let json: JsonEachError<CallbackFailure> = JsonError::from(source).into();
-    assert_eq!(json.to_string(), "JSON deserialization failed");
+    let rendered = json.to_string();
+    assert!(rendered.starts_with("JSON deserialization failed"));
+    assert!(rendered.contains("expected ident"));
+    #[cfg(feature = "std")]
+    assert!(rendered.contains("Backtrace:"));
+    #[cfg(not(feature = "std"))]
+    assert!(!rendered.contains("Backtrace:"));
     assert!(std::error::Error::source(&json).is_some());
     assert_eq!(json.into_callback_error(), None);
 }
@@ -1157,13 +1163,21 @@ fn limited_json_errors_classify_resources_and_preserve_json_errors() {
         .unwrap_err();
     assert!(!error.is_limit_exceeded());
     assert!(error.as_json_error().is_syntax());
+    #[cfg(feature = "std")]
     let _ = error.backtrace();
     assert!(error.source().is_some());
-    assert_eq!(error.to_string(), "JSON deserialization failed");
+    let rendered = error.to_string();
+    assert!(rendered.starts_with("JSON deserialization failed"));
+    #[cfg(feature = "std")]
+    assert!(rendered.contains("Backtrace:"));
+    #[cfg(not(feature = "std"))]
+    assert!(!rendered.contains("Backtrace:"));
+    assert!(rendered.contains("expected value"));
     assert!(error.source().unwrap().to_string().contains("expected value"));
 }
 
 #[test]
+#[cfg(feature = "std")]
 #[cfg_attr(miri, ignore)] // std backtrace capture calls readlink, unsupported under Miri isolation
 fn limited_json_error_captures_an_enabled_backtrace() {
     const CHILD: &str = "MULTITUDE_BACKTRACE_TEST_CHILD";

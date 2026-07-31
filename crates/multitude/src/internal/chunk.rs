@@ -5,8 +5,9 @@
 //!
 //! A chunk backs every allocation style: arena-lifetime references (the
 //! [`Alloc`](crate::Alloc) handles, which run their destructor eagerly) and the
-//! escape-capable smart pointers (`Box` / `Arc` / `Rc`, which also drop eagerly and
-//! take a per-handle chunk refcount). Refcounts and cache-list links are atomic
+//! escape-capable smart pointers (`Box` / `Arc` / `Rc`, which also drop eagerly).
+//! Each `Box` or shared `Arc`/`Rc` owner family holds one chunk reference.
+//! Refcounts and cache-list links are atomic
 //! so handles released from any thread can race the arena's own teardown, and
 //! the chunk holds a `Weak` provider back-pointer plus a shared allocator handle
 //! so a smart pointer that outlives the arena can free the chunk itself.
@@ -49,8 +50,8 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     /// Wasted tail recorded when a `ChunkMutator` retires this chunk; released
     /// by [`ChunkProvider::release`].
     ///
-    /// Release/acquire ordering makes the recorded value visible after
-    /// refcount reaches zero.
+    /// The field's release/acquire ordering and the last-reference acquire
+    /// fence both make the recorded value visible before release.
     #[cfg(feature = "stats")]
     wasted_at_retire: AtomicU32,
     /// Bump-payload tail. `[UnsafeCell<u8>]` permits payload writes through
@@ -64,14 +65,15 @@ impl<A: Allocator + Clone> Chunk<A> {
     #[cfg(feature = "stats")]
     #[inline]
     pub(in crate::internal) fn wasted_at_retire(&self) -> u32 {
-        // Acquire pairs with `set_wasted_at_retire`'s Release store; release
-        // may run on a different thread than retire.
+        // Acquire pairs with `set_wasted_at_retire`'s Release store. The
+        // last-reference path also executes an Acquire fence before release.
         self.wasted_at_retire.load(Ordering::Acquire)
     }
 
     /// Stashes wasted-tail bytes for release-time stats subtraction.
     ///
-    /// `Release` pairs with release-time acquire after refcount reaches zero.
+    /// `Release` pairs with the release-time acquire load. The last-reference
+    /// acquire fence on the refcount provides the primary teardown ordering.
     #[cfg(feature = "stats")]
     #[inline]
     fn set_wasted_at_retire(&self, n: u32) {
@@ -225,9 +227,10 @@ impl<A: Allocator + Clone> Chunk<A> {
         &raw const (*chunk.as_ptr()).next
     }
 
-    /// Reads the intrusive `next` link (shared by the retired list and the
-    /// cache freelist; the phases are mutually exclusive). The retired list
-    /// is touched only by the owning thread, so `Relaxed` suffices there.
+    /// Reads the intrusive `next` link using the owning-thread retired-list
+    /// convention. Cache-freelist code accesses the same field through
+    /// [`Self::cache_link`] with ordering that pairs with concurrent pushes;
+    /// it must not use this relaxed helper.
     ///
     /// # Safety
     ///

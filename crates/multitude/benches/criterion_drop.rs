@@ -3,8 +3,9 @@
 
 //! Criterion wall-clock clone and drop benchmarks for multitude.
 //!
-//! Mirrors `benches/gungraun_drop.rs` 1:1: each `drop/<variant>` here
-//! corresponds to a gungraun function `drop_<variant>`.
+//! Paired with `criterion_drop_cg.rs`. Each
+//! `criterion_drop/<group>/<variant>` benchmark corresponds to a Callgrind
+//! function named `<group>_<variant>`.
 //!
 //! Run with: `cargo bench --bench criterion_drop`
 
@@ -34,7 +35,7 @@ fn make_droppy(i: usize) -> DroppyT {
 // drop
 // =========================================================================
 fn bench_drop(c: &mut Criterion) {
-    let mut g = c.benchmark_group("drop");
+    let mut g = c.benchmark_group("criterion_drop/drop");
 
     macro_rules! drop_bench {
         ($name:literal, $setup:expr) => {
@@ -177,10 +178,10 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
 
-    drop_bench!("alloc", {
+    drop_bench!("arena_drop", {
         let arena = Arena::builder().with_capacity(64 * 1024).build();
         for i in 0..N {
-            let _ = arena.alloc(i as u64);
+            let _ = black_box(arena.alloc(black_box(i as u64)));
         }
         arena
     });
@@ -192,7 +193,7 @@ fn bench_drop(c: &mut Criterion) {
 // clone
 // =========================================================================
 fn bench_clone(c: &mut Criterion) {
-    let mut g = c.benchmark_group("clone");
+    let mut g = c.benchmark_group("criterion_drop/clone");
 
     g.bench_function("rc_u64", |b| {
         b.iter_batched(

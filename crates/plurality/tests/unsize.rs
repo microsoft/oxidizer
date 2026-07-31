@@ -36,6 +36,10 @@ trait Shape {
     fn area(&self) -> u32;
 }
 
+trait ThreadSafeValue {
+    fn value(&self) -> u32;
+}
+
 trait Contains<T> {
     fn value(&self) -> &T;
 }
@@ -79,6 +83,12 @@ impl Shape for Square {
     }
 }
 
+impl ThreadSafeValue for Square {
+    fn value(&self) -> u32 {
+        self.0
+    }
+}
+
 struct Rect(u32, u32);
 impl Shape for Rect {
     fn area(&self) -> u32 {
@@ -95,6 +105,13 @@ fn unsize_to_trait_object_dispatches_and_frees() {
     assert_eq!(pool.len(), 1);
     drop(s);
     assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn explicit_auto_trait_object_bounds_are_supported() {
+    let pool = Pool::<Square>::new();
+    let value: Box<dyn ThreadSafeValue + Send> = Box::unsize(pool.alloc_box(Square(4)), coerce!(dyn ThreadSafeValue + Send));
+    assert_eq!(value.value(), 4);
 }
 
 #[test]

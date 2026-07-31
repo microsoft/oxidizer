@@ -13,7 +13,7 @@
 
 use std::thread;
 
-use multitude::{Arc, Arena, Box};
+use multitude::{Arc, Arena, Box, Rc};
 
 // Covariance assertions (compile-only)
 //
@@ -29,11 +29,19 @@ fn _assert_arc_covariant<'a, 'b: 'a>(x: Arc<&'b str>) -> Arc<&'a str> {
     x
 }
 
+fn _assert_rc_covariant<'a, 'b: 'a>(x: Rc<&'b str>) -> Rc<&'a str> {
+    x
+}
+
 fn _assert_box_slice_covariant<'a, 'b: 'a>(x: Box<[&'b str]>) -> Box<[&'a str]> {
     x
 }
 
 fn _assert_arc_slice_covariant<'a, 'b: 'a>(x: Arc<[&'b str]>) -> Arc<[&'a str]> {
+    x
+}
+
+fn _assert_rc_slice_covariant<'a, 'b: 'a>(x: Rc<[&'b str]>) -> Rc<[&'a str]> {
     x
 }
 

@@ -126,6 +126,12 @@ pub struct Pool<T, A: Allocator = Global> {
 // `!Sync`) or at teardown when the pool is quiescent.
 unsafe impl<T: Send, A: Allocator + Send> Send for Pool<T, A> {}
 
+// Pool state transitions leave the pool usable when they unwind. The allocator
+// may also be shared with detached handles, so it must itself be safe through
+// shared references.
+impl<T, A: Allocator + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Pool<T, A> {}
+impl<T, A: Allocator + core::panic::RefUnwindSafe> core::panic::UnwindSafe for Pool<T, A> {}
+
 impl<T, A: Allocator> fmt::Debug for Pool<T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pool")

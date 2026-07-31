@@ -71,19 +71,19 @@ mod linux {
 
     #[library_benchmark]
     #[bench::run(&mut ())]
-    fn lifecycle_serde_json(state: &mut ()) {
+    fn typed_lifecycle_serde_json(state: &mut ()) {
         typed_standard_lifecycle(state);
     }
 
     #[library_benchmark]
     #[bench::run(&mut warm_reset_arena())]
-    fn lifecycle_multitude(arena: &mut Arena) {
+    fn typed_lifecycle_multitude(arena: &mut Arena) {
         typed_multitude_lifecycle(arena);
     }
 
     #[library_benchmark]
     #[bench::run(&mut warm_bump())]
-    fn lifecycle_bumpalo(bump: &mut Bump) {
+    fn typed_lifecycle_bumpalo(bump: &mut Bump) {
         typed_bumpalo_lifecycle(bump);
     }
 
@@ -115,7 +115,7 @@ mod linux {
     );
     library_benchmark_group!(
         name = typed_lifecycle;
-        benchmarks = lifecycle_serde_json, lifecycle_multitude, lifecycle_bumpalo
+        benchmarks = typed_lifecycle_serde_json, typed_lifecycle_multitude, typed_lifecycle_bumpalo
     );
     library_benchmark_group!(
         name = batch_lifecycle;

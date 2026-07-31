@@ -93,8 +93,9 @@ pub struct Arena<A: Allocator + Clone = Global> {
     ///
     /// A single chunk backs every allocation style. Arena-lifetime
     /// allocations (the [`Alloc`](crate::Alloc) handles) drop their values
-    /// eagerly; smart pointers (`Arc`/`Rc`/`Box`) take a per-handle chunk refcount and
-    /// drop eagerly. The two coexist in the same chunk.
+    /// eagerly; each `Box` or shared `Arc`/`Rc` owner family holds one chunk
+    /// reference and drops its value when its final owner goes away. The two
+    /// allocation styles coexist in the same chunk.
     current: CurrentChunk<A>,
 
     /// Non-atomic count of strong references the arena has handed out from
@@ -150,6 +151,12 @@ pub struct Arena<A: Allocator + Clone = Global> {
 
 // Fields make `Arena` sendable when `A: Send + Sync`, but `CurrentChunk` and
 // `RefCell` keep it `!Sync`.
+
+// Arena state transitions leave the arena usable when they unwind. The
+// allocator is shared with escaped handles, so it must itself be safe through
+// shared references.
+impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Arena<A> {}
+impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::UnwindSafe for Arena<A> {}
 
 impl Arena<Global> {
     /// Create an empty [`Global`]-backed arena with default configuration.

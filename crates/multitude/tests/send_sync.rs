@@ -34,6 +34,8 @@ fn assert_not_sync<T: ?Sized>() {
     let _ = <T as AmbiguousIfSync<_>>::probe;
 }
 
+trait ThreadAffineMetadataTarget {}
+
 #[derive(Clone, Default)]
 struct SendOnlyAllocator(Cell<()>);
 
@@ -132,6 +134,14 @@ fn arc_str_is_send_sync() {
 }
 
 #[test]
+fn dyn_metadata_is_send_sync_independently_of_the_target() {
+    assert_not_send::<dyn ThreadAffineMetadataTarget>();
+    assert_not_sync::<dyn ThreadAffineMetadataTarget>();
+    assert_send::<ptr_meta::DynMetadata<dyn ThreadAffineMetadataTarget>>();
+    assert_sync::<ptr_meta::DynMetadata<dyn ThreadAffineMetadataTarget>>();
+}
+
+#[test]
 fn alloc_send_sync_follow_t() {
     use core::cell::Cell;
     // `Alloc<'a, T>` wraps `&'a mut T`, so it inherits the auto traits of
@@ -151,7 +161,7 @@ fn alloc_send_sync_follow_t() {
 
 #[test]
 fn rc_is_not_send_or_sync() {
-    // `Rc<T, A>` uses a *non-atomic*, unaligned per-handle strong count
+    // `Rc<T, A>` uses a *non-atomic*, potentially unaligned shared strong count
     // (read/written with `read_unaligned`/`write_unaligned`), so it must never
     // cross threads. It carries no `unsafe impl Send`/`Sync`, and its
     // `NonNull<u8>` + `PhantomData<(*const T, A)>` fields keep it `!Send` and

@@ -374,8 +374,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     #[cold]
     #[inline(never)]
     unsafe fn advance_cache_floor(&self, new_class: SizeClass) {
-        // Publish the new floor with Release so concurrent pushers'
-        // subsequent Acquire load sees it.
+        // Publish the new floor with Release so concurrent `release` callers'
+        // Acquire load observes it before deciding whether to cache a chunk.
         self.cache_class.store(new_class.raw(), Ordering::Release);
         let new_min_total = new_class.bytes();
         // Detach the freelist; racing pushers target the empty head.
