@@ -251,7 +251,7 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(response.version(), http::Version::HTTP_2);
-        assert!(response.body().is_empty());
+        assert!(!response.body().is_empty());
         assert_eq!(response.headers().get("content-length"), Some(&http::HeaderValue::from_static("0")));
         assert_eq!(
             processor
@@ -261,10 +261,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["fetch.winhttp.request"]
         );
+        assert_eq!(closes.load(Ordering::SeqCst), 0, "the response body owns the request guard");
+        drop(response);
         assert_eq!(
             closes.load(Ordering::SeqCst),
             1,
-            "the request handle closes before context reclamation"
+            "dropping the response body closes the request handle"
         );
 
         let context = std::ptr::with_exposed_provenance_mut(context.load(Ordering::SeqCst));

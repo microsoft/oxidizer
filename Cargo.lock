@@ -1640,6 +1640,7 @@ dependencies = [
  "events_once",
  "fetch",
  "futures",
+ "futures-core",
  "http",
  "http-body",
  "http_extensions",

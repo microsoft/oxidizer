@@ -15,12 +15,14 @@ use fetch::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Htt
 use http::header::{HeaderName, HeaderValue};
 use http::uri::Authority;
 use http::{HeaderMap, StatusCode, Version};
+use http_extensions::HttpBodyOptions;
+use http_extensions::timeout::BodyTimeout;
 use plurality::Pool;
 use widestring::U16CString;
 
 use crate::bindings::Bindings as _;
 use crate::bindings::Facade;
-use crate::body::{RequestBodyPlan, WinHttpBodyWriter, send_body};
+use crate::body::{RequestBodyPlan, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
 use crate::context::{CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
 use crate::error_labels;
@@ -204,6 +206,7 @@ pub(crate) struct RequestDriver<'body, 'contexts> {
     settings: RequestSettings,
     body: &'body mut HttpBody,
     body_plan: RequestBodyPlan,
+    body_options: HttpBodyOptions,
 }
 
 impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
@@ -228,6 +231,11 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             protocol,
             security_flags: if translated.secure { security_flags(tls) } else { 0 },
         };
+        let body_options = request
+            .extensions()
+            .get::<BodyTimeout>()
+            .map(|timeout| HttpBodyOptions::default().timeout(timeout.duration()))
+            .unwrap_or_default();
         let body = request.body_mut();
 
         Ok(Self {
@@ -239,6 +247,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             settings,
             body,
             body_plan,
+            body_options,
         })
     }
 
@@ -280,7 +289,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         }
 
         {
-            let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool);
+            let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool.clone());
             send_body(self.body, &mut writer, body_polled).await?;
         }
 
@@ -305,18 +314,16 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         let headers = parse_response_headers(&raw_headers).map_err(invalid_response)?;
         let version = query_protocol_used(&bindings, guard.raw()).map_err(query_error)?;
 
+        let reader = WinHttpBodyReader::new(guard, bindings, self.global_pool);
+        let body = self.body_builder.body(WinHttpResponseBody::new(reader), &self.body_options);
         let mut response = HttpResponseBuilder::new(&self.body_builder)
             .status(status)
             .version(version)
-            .body(self.body_builder.empty());
+            .body(body);
         *response
             .headers_mut()
             .ok_or_else(|| invalid_response("the HTTP response builder rejected response metadata"))? = headers;
-        let response = response.build().map_err(invalid_response)?;
-
-        drop(guard);
-
-        Ok(response)
+        response.build().map_err(invalid_response)
     }
 }
 
@@ -513,7 +520,7 @@ impl fmt::Display for RequestTranslationError {
 impl std::error::Error for RequestTranslationError {}
 
 #[derive(Debug)]
-enum ResponseHeadersError {
+pub(crate) enum ResponseHeadersError {
     InvalidHeaderName(String),
     InvalidHeaderValue(String),
     InvalidStatusLine,
@@ -546,6 +553,14 @@ fn parse_response_headers(raw: &[u8]) -> Result<HeaderMap, ResponseHeadersError>
         return Err(ResponseHeadersError::InvalidStatusLine);
     }
 
+    parse_header_fields(raw, cursor)
+}
+
+pub(crate) fn parse_response_trailers(raw: &[u8]) -> Result<HeaderMap, ResponseHeadersError> {
+    parse_header_fields(raw, 0)
+}
+
+fn parse_header_fields(raw: &[u8], mut cursor: usize) -> Result<HeaderMap, ResponseHeadersError> {
     let mut headers = HeaderMap::new();
 
     loop {
@@ -613,6 +628,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use std::thread;
+    use std::time::Duration;
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
@@ -622,11 +638,12 @@ mod tests {
     use http::{HeaderMap, Method, Version};
     use http_body::{Frame, SizeHint};
     use http_extensions::HttpBodyOptions;
+    use http_extensions::timeout::BodyTimeout;
     use ohno::Labeled as _;
     use plurality::Pool;
     use recoverable::{Recovery as _, RecoveryInfo};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
-    use tick::Clock;
+    use tick::{Clock, ClockControl};
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
         WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED,
@@ -738,7 +755,7 @@ mod tests {
         assert_eq!(response.version(), Version::HTTP_2);
         assert!(response.body().is_empty());
         assert!(response.extensions().is_empty(), "ConnectionInfo is not attached");
-        assert_eq!(response.headers().get("content-length"), Some(&HeaderValue::from_static("0")));
+        assert!(response.headers().get("content-length").is_none());
         assert_eq!(
             response
                 .headers()
@@ -1468,6 +1485,45 @@ mod tests {
     }
 
     #[test]
+    fn request_body_timeout_reaches_the_response_body_and_closes_a_pending_read() {
+        let mut request = request(Method::GET, "https://example.com/");
+        request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
+        let config = LifecycleConfig {
+            defer_data_available: true,
+            ..LifecycleConfig::default()
+        };
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let memory = GlobalPool::new();
+        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
+        let options = TransportOptions::default();
+        let tls = WinHttpTlsConfig::default();
+        let driver = RequestDriver::new(&mut request, Arc::clone(&session), body_builder, memory, &contexts, &options, &tls)
+            .expect("request setup succeeds");
+        let mut body_polled = false;
+        let response = futures::executor::block_on(driver.execute(&mut body_polled)).expect("response headers succeed");
+
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
+        let error = futures::executor::block_on(response.into_body().into_bytes()).expect_err("the pending body read times out");
+        assert_eq!(error.label(), "body_timeout");
+        assert_eq!(record.data_available_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
+
+        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        closing(context);
+        drop(session);
+
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
+        assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn every_required_request_option_failure_aborts_before_send() {
         let mut options = TransportOptions::default();
         options.supported_http_versions = vec![Version::HTTP_2, Version::HTTP_3];
@@ -1627,6 +1683,7 @@ mod tests {
         completed_writes: Arc<AtomicUsize>,
         defer_write_completion: bool,
         max_write_completion: Option<u32>,
+        defer_data_available: bool,
     }
 
     impl Default for LifecycleConfig {
@@ -1641,6 +1698,7 @@ mod tests {
                 completed_writes: Arc::new(AtomicUsize::new(0)),
                 defer_write_completion: false,
                 max_write_completion: None,
+                defer_data_available: false,
             }
         }
     }
@@ -1663,6 +1721,7 @@ mod tests {
         send_calls: AtomicUsize,
         write_calls: AtomicUsize,
         receive_calls: AtomicUsize,
+        data_available_calls: AtomicUsize,
         installed_context: AtomicUsize,
         send_context: AtomicUsize,
         session_closes: AtomicUsize,
@@ -1686,7 +1745,7 @@ mod tests {
         let result = match RequestDriver::new(
             &mut request,
             Arc::clone(&session),
-            body_builder,
+            body_builder.clone(),
             global_pool,
             &contexts,
             &options,
@@ -1695,6 +1754,11 @@ mod tests {
             Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)),
             Err(error) => Err(error),
         };
+        let result = result.map(|response| {
+            let (parts, body) = response.into_parts();
+            drop(body);
+            fetch::HttpResponse::from_parts(parts, body_builder.empty())
+        });
         drop((request, options, tls));
 
         let context = record.installed_context.load(Ordering::SeqCst);
@@ -1871,6 +1935,37 @@ mod tests {
             Ok(())
         });
 
+        let data_available_config = Arc::clone(&config);
+        let data_available_record = Arc::clone(&record);
+        bindings.expect_query_data_available().returning(move |_| {
+            data_available_record.data_available_calls.fetch_add(1, Ordering::SeqCst);
+            if data_available_config.defer_data_available {
+                return Ok(());
+            }
+
+            let mut available = 0_u32;
+            let context = data_available_record.installed_context.load(Ordering::SeqCst);
+            complete(
+                std::ptr::with_exposed_provenance_mut(context),
+                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                (&raw mut available).cast(),
+                status_info_len::<u32>(),
+            );
+            Ok(())
+        });
+
+        let read_record = Arc::clone(&record);
+        bindings.expect_read_data().returning(move |_, _, _| {
+            let context = read_record.installed_context.load(Ordering::SeqCst);
+            complete(
+                std::ptr::with_exposed_provenance_mut(context),
+                WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+                std::ptr::null_mut(),
+                0,
+            );
+            Ok(())
+        });
+
         let header_config = Arc::clone(&config);
         bindings
             .expect_query_headers()
@@ -1890,6 +1985,9 @@ mod tests {
                         return Err(WinHttpError::new(12152, WinHttpOperation::QueryHeaders));
                     }
                     write_byte_query(&header_config.raw_headers, buffer, byte_len)
+                }
+                level if level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING | 0x0200_0000) => {
+                    Err(WinHttpError::new(12150, WinHttpOperation::QueryHeaders))
                 }
                 WINHTTP_QUERY_VERSION => {
                     let units = header_config.legacy_version.encode_utf16().collect::<Vec<_>>();

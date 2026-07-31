@@ -32,9 +32,10 @@ default-target = "x86_64-pc-windows-msvc"
 
 [target.'cfg(windows)'.dependencies]
 bytesbuf = { workspace = true }
-bytesbuf_io = { workspace = true }
+bytesbuf_io = { workspace = true, features = ["futures-stream"] }
 events_once = { workspace = true }
 fetch = { workspace = true }
+futures-core = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http_extensions = { workspace = true }

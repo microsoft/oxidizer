@@ -739,8 +739,13 @@ translate req (method/uri/headers -> UTF-16)
   -> poll HttpBody frame -> WinHttpWriteData ->async WRITE_COMPLETE  [repeat through end-of-stream]
   -> WinHttpReceiveResponse ->async HEADERS_AVAILABLE
   -> WinHttpQueryHeaders/Option (status, negotiated version, header block)  [sync]
-  -> build HttpResponse { parts, HttpBodyBuilder::empty() } through HttpResponseBuilder
-  -> drop RequestGuard and return Ok(response)
+  -> move RequestGuard into WinHttpBodyReader
+  -> build HttpResponse { parts, lazy body } through HttpResponseBuilder::body
+  -> return Ok(response)
+  -> on body poll: QueryDataAvailable ->async DATA_AVAILABLE
+     -> ReadData ->async READ_COMPLETE  [repeat until zero-length completion]
+  -> query and emit response trailers, if present
+  -> close request; HANDLE_CLOSING later reclaims context and parents
 ```
 
 Header translation is mechanical. Request header names and values are written
@@ -757,7 +762,8 @@ WINHTTP_QUERY_FLAG_WIRE_ENCODING`, so WinHTTP writes wire-encoded bytes directly
 than first converting them to UTF-16. The two-call query treats both the required
 capacity and returned length as byte counts: it allocates exactly the reported byte
 capacity, then truncates to the returned byte length. Parsing operates on `&[u8]` line
-by line: the status line is skipped, names must be ASCII, optional whitespace is
+by line. Response headers require and skip the status line; response trailers use the
+same field parser without a status line. Names must be ASCII, optional whitespace is
 trimmed, opaque `obs-text` value bytes are preserved, and repeated fields are appended
 to the `http::HeaderMap` rather than overwritten. Invalid header names and values are
 rejected. `WINHTTP_QUERY_FLAG_WIRE_ENCODING` and the trailer query flag establish the
@@ -765,12 +771,12 @@ Windows 11 version 21H2 minimum documented in design.md; no runtime compatibilit
 is attempted. The numeric status query and the legacy `WINHTTP_QUERY_VERSION` string
 query retain their existing DWORD and UTF-16 buffers, respectively.
 
-The current response lifecycle constructs the response with `HttpBodyBuilder::empty`
-through `HttpResponseBuilder`, attaches no `ConnectionInfo`, and drops the
-`RequestGuard` after all response metadata has been queried. The builder preserves a
-native `Content-Length` and synthesizes `Content-Length: 0` only when the native
-response omitted it. The context retains the connect handle and session owner until
-the resulting `HANDLE_CLOSING` callback reclaims it.
+The response lifecycle constructs a lazy `WinHttpResponseBody` through
+`HttpBodyBuilder::body`, attaches no `ConnectionInfo`, and moves `RequestGuard` into
+`WinHttpBodyReader` after all response metadata has been queried. No response-body call
+is made before the caller polls the body. EOF, a body error, timeout, or body drop closes
+the request handle. The context retains the connect handle, session owner, and any
+active operation buffer until the resulting `HANDLE_CLOSING` callback reclaims it.
 
 The upload lifecycle polls every outgoing body frame lazily after
 `SENDREQUEST_COMPLETE`. Empty data frames are inert. Each nonempty data frame is
