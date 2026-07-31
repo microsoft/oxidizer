@@ -36,12 +36,7 @@ pub(crate) fn client_builder(versions: &[Version], tls: WinHttpTlsConfig) -> (Ht
     let clock = Clock::new_frozen();
     let global_pool = GlobalPool::new();
     let body_builder = HttpBodyBuilder::new(global_pool.clone(), &clock);
-    let deps = WinHttpDeps::builder()
-        .clock(clock)
-        .global_pool(global_pool)
-        .sink(Sink::noop())
-        .tls(tls)
-        .build();
+    let deps = WinHttpDeps::builder(clock, global_pool, Sink::noop()).tls(tls).build();
     let mut builder = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .connect_timeout(Duration::MAX)

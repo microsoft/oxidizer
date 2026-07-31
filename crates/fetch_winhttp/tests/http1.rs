@@ -210,11 +210,7 @@ fn full_fetch_pipeline_uses_the_winhttp_transport() {
     let server = TestServer::http([ResponsePlan::ok("full pipeline")]);
     let clock = Clock::new_frozen();
     let global_pool = GlobalPool::new();
-    let deps = WinHttpDeps::builder()
-        .clock(clock)
-        .global_pool(global_pool)
-        .sink(Sink::noop())
-        .build();
+    let deps = WinHttpDeps::builder(clock, global_pool, Sink::noop()).build();
     let client = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .supported_http_versions(&[Version::HTTP_11])

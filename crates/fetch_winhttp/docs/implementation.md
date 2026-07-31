@@ -980,11 +980,9 @@ configuration rather than waiting for it to expire.
 pipeline wiring; it delegates to `fetch`'s custom-transport entry point, calling
 `fetch::custom::create_builder("winhttp", "winhttp", factory, Isolation::Isolated, deps)`.
 There is no `new_winhttp`: the timer-capable `Clock`, `GlobalPool`, and `Sink` are
-mandatory environment dependencies and have no runtime-neutral defaults. They are set
-through `WinHttpDeps::builder().clock(...).global_pool(...).sink(...)`; `build()` panics
-with an actionable programming-error message if any mandatory field is absent. TLS and
-WinHTTP-specific user configuration default when omitted. The `create_builder` signature
-this targets is:
+mandatory environment dependencies and have no runtime-neutral defaults. They are passed
+to `WinHttpDeps::builder(clock, global_pool, sink)`. TLS and WinHTTP-specific user
+configuration default when omitted. The `create_builder` signature this targets is:
 
 ```rust,ignore
 pub fn create_builder<F, R, Extras>(

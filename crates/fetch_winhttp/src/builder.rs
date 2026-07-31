@@ -14,9 +14,9 @@ use crate::{WinHttpOptions, WinHttpTlsConfig};
 
 /// Dependencies and configuration for the `WinHTTP` transport.
 ///
-/// Construct this type with [`WinHttpDeps::builder`]. The clock, global memory
-/// pool, and telemetry sink are mandatory environment dependencies. TLS and
-/// WinHTTP-specific transport options use their defaults when omitted.
+/// Construct this type with [`WinHttpDeps::builder`], passing the mandatory
+/// clock, global memory pool, and telemetry sink. TLS and WinHTTP-specific
+/// transport options use their defaults when omitted.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDeps {
@@ -30,11 +30,11 @@ pub struct WinHttpDeps {
 impl WinHttpDeps {
     /// Starts building dependencies for the `WinHTTP` transport.
     #[must_use]
-    pub fn builder() -> WinHttpDepsBuilder {
+    pub fn builder(clock: Clock, global_pool: GlobalPool, sink: Sink) -> WinHttpDepsBuilder {
         WinHttpDepsBuilder {
-            clock: None,
-            global_pool: None,
-            sink: None,
+            clock,
+            global_pool,
+            sink,
             tls: WinHttpTlsConfig::default(),
             options: WinHttpOptions::default(),
         }
@@ -61,35 +61,14 @@ impl WinHttpDeps {
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDepsBuilder {
-    clock: Option<Clock>,
-    global_pool: Option<GlobalPool>,
-    sink: Option<Sink>,
+    clock: Clock,
+    global_pool: GlobalPool,
+    sink: Sink,
     tls: WinHttpTlsConfig,
     options: WinHttpOptions,
 }
 
 impl WinHttpDepsBuilder {
-    /// Sets the clock used for transport deadlines.
-    #[must_use]
-    pub fn clock(mut self, clock: Clock) -> Self {
-        self.clock = Some(clock);
-        self
-    }
-
-    /// Sets the global memory pool used for HTTP body and I/O buffers.
-    #[must_use]
-    pub fn global_pool(mut self, global_pool: GlobalPool) -> Self {
-        self.global_pool = Some(global_pool);
-        self
-    }
-
-    /// Sets the telemetry sink used by the transport.
-    #[must_use]
-    pub fn sink(mut self, sink: Sink) -> Self {
-        self.sink = Some(sink);
-        self
-    }
-
     /// Sets the WinHTTP-specific TLS configuration.
     #[must_use]
     pub fn tls(mut self, tls: WinHttpTlsConfig) -> Self {
@@ -105,23 +84,12 @@ impl WinHttpDepsBuilder {
     }
 
     /// Builds the `WinHTTP` transport dependencies.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `clock`, `global_pool`, or `sink` has not been supplied by
-    /// its corresponding setter.
     #[must_use]
     pub fn build(self) -> WinHttpDeps {
         WinHttpDeps {
-            clock: self
-                .clock
-                .expect("WinHttpDeps::build() requires a caller-supplied tick::Clock; call .clock(...) before .build()"),
-            global_pool: self.global_pool.expect(
-                "WinHttpDeps::build() requires a caller-supplied bytesbuf::mem::GlobalPool; call .global_pool(...) before .build()",
-            ),
-            sink: self
-                .sink
-                .expect("WinHttpDeps::build() requires a caller-supplied observed::Sink; call .sink(...) before .build()"),
+            clock: self.clock,
+            global_pool: self.global_pool,
+            sink: self.sink,
             tls: self.tls,
             options: self.options,
         }
@@ -132,8 +100,7 @@ impl WinHttpDepsBuilder {
 pub trait HttpClientWinHttpExt {
     /// Creates a WinHTTP-backed HTTP client builder.
     ///
-    /// Independently built clients use isolated transport resources. Clones of
-    /// a built client share that client's transport resources.
+    /// Independently built clients do not share connections.
     fn builder_winhttp(deps: impl Into<WinHttpDeps>) -> HttpClientBuilder;
 }
 
@@ -329,31 +296,8 @@ mod tests {
         assert_eq!(closes.load(Ordering::SeqCst), 1);
     }
 
-    #[test]
-    #[should_panic(expected = "WinHttpDeps::build() requires a caller-supplied tick::Clock; call .clock(...) before .build()")]
-    fn missing_clock_has_actionable_panic() {
-        let _ = WinHttpDeps::builder().global_pool(GlobalPool::new()).sink(Sink::noop()).build();
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "WinHttpDeps::build() requires a caller-supplied bytesbuf::mem::GlobalPool; call .global_pool(...) before .build()"
-    )]
-    fn missing_global_pool_has_actionable_panic() {
-        let _ = WinHttpDeps::builder().clock(clock()).sink(Sink::noop()).build();
-    }
-
-    #[test]
-    #[should_panic(expected = "WinHttpDeps::build() requires a caller-supplied observed::Sink; call .sink(...) before .build()")]
-    fn missing_sink_has_actionable_panic() {
-        let _ = WinHttpDeps::builder().clock(clock()).global_pool(GlobalPool::new()).build();
-    }
-
     fn complete_builder() -> WinHttpDepsBuilder {
-        WinHttpDeps::builder()
-            .clock(clock())
-            .global_pool(GlobalPool::new())
-            .sink(Sink::noop())
+        WinHttpDeps::builder(clock(), GlobalPool::new(), Sink::noop())
     }
 
     fn clock() -> Clock {
