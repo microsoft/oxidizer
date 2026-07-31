@@ -7,7 +7,7 @@
 //! code applies to its captured path value.
 
 use syn::visit::Visit as _;
-use syn::{GenericArgument, Lifetime, Path, PathArguments, TraitBound, Type, TypeBareFn};
+use syn::{GenericArgument, Lifetime, Path, PathArguments, TraitBound, Type, TypeFnPtr};
 
 /// The extraction strategy for a field, chosen from its declared type.
 pub(crate) enum FieldKind {
@@ -93,10 +93,10 @@ pub(crate) fn uses_capture_lifetime(ty: &Type) -> bool {
             self.found |= self.shadowed == 0 && i.ident == "p";
         }
 
-        fn visit_type_bare_fn(&mut self, i: &'ast TypeBareFn) {
+        fn visit_type_fn_ptr(&mut self, i: &'ast TypeFnPtr) {
             let shadows = i.lifetimes.as_ref().is_some_and(bound_lifetimes_contain_p);
             self.shadowed += usize::from(shadows);
-            syn::visit::visit_type_bare_fn(self, i);
+            syn::visit::visit_type_fn_ptr(self, i);
             self.shadowed -= usize::from(shadows);
         }
 
