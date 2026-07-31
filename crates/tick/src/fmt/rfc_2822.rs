@@ -123,8 +123,6 @@ impl Rfc2822 {
     /// The largest value that can be represented by `Rfc2822`.
     ///
     /// This represents a Unix system time of `Thu, 30 Dec 9999 22:00:00 GMT`.
-    // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
-    // instant everywhere.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `Rfc2822`.

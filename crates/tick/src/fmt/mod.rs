@@ -9,6 +9,10 @@
 //! - [`Iso8601`]: Parsing and formatting of system time in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format.
 //!   For example, `2024-08-06T21:30:00Z`.
 //!
+//! - [`EcmaScript`]: Parsing and formatting of system time in the
+//!   [ECMAScript Date Time String Format](https://tc39.es/ecma262/#sec-date-time-string-format), the profile produced by
+//!   the ECMAScript `Date.prototype.toISOString` method. For example, `2024-08-06T21:30:00.123Z`.
+//!
 //! - [`Rfc2822`]: Parsing and formatting of system time in [RFC 2822](https://tools.ietf.org/html/rfc2822#section-3.3) format.
 //!   For example, `Tue, 6 Aug 2024 14:30:00 -0000`.
 //!
@@ -49,10 +53,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! How far back [`Iso8601`] and [`Rfc2822`] reach is platform dependent: where [`SystemTime`]
-//! is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier instants are rejected.
-//! It also bounds resolution, counting in 100-nanosecond intervals there, so any conversion
-//! routed through it, including format to format, truncates a finer instant to that grid.
+//! How far back [`EcmaScript`], [`Iso8601`], and [`Rfc2822`] reach is platform dependent:
+//! where [`SystemTime`] is FILETIME based its epoch is `1601-01-01T00:00:00Z`, and earlier
+//! instants are rejected. It also bounds resolution, counting in 100-nanosecond intervals
+//! there, so any conversion routed through it truncates a finer instant to that grid.
 //!
 //! Because the range is enforced up front, converting any of these types back into a
 //! [`SystemTime`] is infallible and cannot panic.
@@ -87,11 +91,15 @@
 //! ## Using format types
 //!
 //! ```
-//! use tick::fmt::{Iso8601, Rfc2822, UnixSeconds};
+//! use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 //!
 //! // ISO 8601
 //! let time: Iso8601 = "2024-08-06T21:30:00Z".parse()?;
 //! assert_eq!(time.to_string(), "2024-08-06T21:30:00Z");
+//!
+//! // ECMAScript (fixed-width, milliseconds)
+//! let time: EcmaScript = "2024-08-06T21:30:00Z".parse()?;
+//! assert_eq!(time.to_string(), "2024-08-06T21:30:00.000Z");
 //!
 //! // RFC 2822
 //! let time: Rfc2822 = "Tue, 06 Aug 2024 14:30:00 GMT".parse()?;
@@ -114,16 +122,21 @@
 //! let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
 //! println!("Time: {}", time.display_iso_8601());
 //! // Output: Time: 1970-01-01T01:00:00Z
+//!
+//! println!("Time: {}", time.display_ecmascript());
+//! // Output: Time: 1970-01-01T01:00:00.000Z
 //! ```
 
 use std::time::SystemTime;
 
 use jiff::Timestamp;
 
+mod ecmascript;
 mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
+pub use ecmascript::EcmaScript;
 pub use iso_8601::Iso8601;
 pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
@@ -188,13 +201,14 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();
 
         assert_eq!(
             json,
-            r#"{"iso":"1970-01-01T02:48:43.456Z","rfc":"Thu, 01 Jan 1970 02:48:43 GMT","unix":10123}"#
+            r#"{"iso":"1970-01-01T02:48:43.456Z","rfc":"Thu, 01 Jan 1970 02:48:43 GMT","unix":10123,"ecma":"1970-01-01T02:48:43.456Z"}"#
         );
     }
 
@@ -206,12 +220,13 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
-        let formatted = format!("iso: {}, unix: {}, rfc: {}", dates.iso, dates.unix, dates.rfc);
+        let formatted = format!("iso: {}, unix: {}, rfc: {}, ecma: {}", dates.iso, dates.unix, dates.rfc, dates.ecma);
         assert_eq!(
             formatted,
-            "iso: 1970-01-01T02:48:43.456Z, unix: 10123, rfc: Thu, 01 Jan 1970 02:48:43 GMT"
+            "iso: 1970-01-01T02:48:43.456Z, unix: 10123, rfc: Thu, 01 Jan 1970 02:48:43 GMT, ecma: 1970-01-01T02:48:43.456Z"
         );
     }
 
@@ -223,6 +238,7 @@ mod tests {
             iso: clock.system_time_as::<Iso8601>(),
             rfc: clock.system_time_as::<Rfc2822>(),
             unix: clock.system_time_as::<UnixSeconds>(),
+            ecma: clock.system_time_as::<EcmaScript>(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();
@@ -235,6 +251,7 @@ mod tests {
         iso: Iso8601,
         rfc: Rfc2822,
         unix: UnixSeconds,
+        ecma: EcmaScript,
     }
 
     #[test]
@@ -243,10 +260,12 @@ mod tests {
         let iso_epoch: SystemTime = Iso8601::UNIX_EPOCH.into();
         let rfc_epoch: SystemTime = Rfc2822::UNIX_EPOCH.into();
         let unix_epoch: SystemTime = UnixSeconds::UNIX_EPOCH.into();
+        let ecma_epoch: SystemTime = EcmaScript::UNIX_EPOCH.into();
 
         assert_eq!(iso_epoch, SystemTime::UNIX_EPOCH, "Iso8601::UNIX_EPOCH should be Unix epoch");
         assert_eq!(rfc_epoch, SystemTime::UNIX_EPOCH, "Rfc2822::UNIX_EPOCH should be Unix epoch");
         assert_eq!(unix_epoch, SystemTime::UNIX_EPOCH, "UnixSeconds::UNIX_EPOCH should be Unix epoch");
+        assert_eq!(ecma_epoch, SystemTime::UNIX_EPOCH, "EcmaScript::UNIX_EPOCH should be Unix epoch");
     }
 
     #[test]
@@ -320,11 +339,15 @@ mod tests {
         // parses can always be converted back, and one that cannot be represented is rejected.
         for input in ["1000-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "1601-01-01T00:00:00Z"] {
             let timestamp: Timestamp = input.parse().unwrap();
-            let parsed = input.parse::<Iso8601>();
+            let parsed_iso = input.parse::<Iso8601>();
+            let parsed_ecma = input.parse::<EcmaScript>();
 
-            match checked_system_time(timestamp) {
-                Some(expected) => assert_eq!(SystemTime::from(parsed.unwrap()), expected, "{input}"),
-                None => assert!(parsed.is_err(), "{input} must be rejected"),
+            if let Some(expected) = checked_system_time(timestamp) {
+                assert_eq!(SystemTime::from(parsed_iso.unwrap()), expected, "{input}");
+                assert_eq!(SystemTime::from(parsed_ecma.unwrap()), expected, "{input}");
+            } else {
+                parsed_iso.expect_err("the instant must be rejected by Iso8601");
+                parsed_ecma.expect_err("the instant must be rejected by EcmaScript");
             }
         }
     }
@@ -333,25 +356,27 @@ mod tests {
     fn formats_do_not_convert_between_each_other() {
         // Each format has a different representable range, so conversions go through
         // `SystemTime` and the fallible step stays visible.
-        static_assertions::assert_not_impl_any!(Iso8601: From<Rfc2822>, From<UnixSeconds>);
-        static_assertions::assert_not_impl_any!(Rfc2822: From<Iso8601>, From<UnixSeconds>);
-        static_assertions::assert_not_impl_any!(UnixSeconds: From<Iso8601>, From<Rfc2822>);
+        static_assertions::assert_not_impl_any!(Iso8601: From<EcmaScript>, From<Rfc2822>, From<UnixSeconds>);
+        static_assertions::assert_not_impl_any!(EcmaScript: From<Iso8601>, From<Rfc2822>, From<UnixSeconds>);
+        static_assertions::assert_not_impl_any!(Rfc2822: From<EcmaScript>, From<Iso8601>, From<UnixSeconds>);
+        static_assertions::assert_not_impl_any!(UnixSeconds: From<EcmaScript>, From<Iso8601>, From<Rfc2822>);
     }
 
     #[test]
-    fn max_values_are_aligned() {
-        // All MAX values denote the same instant, 9999-12-30T22:00:00.999999999Z, the largest
-        // jiff timestamp. `Iso8601` formats at 100-nanosecond resolution, which is why the
-        // expected string below carries seven nines rather than nine.
+    fn max_values_match_each_format_resolution() {
         let iso_max: SystemTime = Iso8601::MAX.into();
         let rfc_max: SystemTime = Rfc2822::MAX.into();
+        let ecma_max: SystemTime = EcmaScript::MAX.into();
         let unix_max: SystemTime = UnixSeconds::MAX.into();
 
         assert_eq!(iso_max, rfc_max, "Iso8601::MAX and Rfc2822::MAX should be equal");
-        assert_eq!(iso_max, unix_max, "Iso8601::MAX and UnixSeconds::MAX should be equal");
+        // A platform may truncate all three values to a coarser SystemTime grid.
+        assert!(unix_max <= ecma_max, "UnixSeconds::MAX must not exceed EcmaScript::MAX");
+        assert!(ecma_max <= iso_max, "EcmaScript::MAX must not exceed Iso8601::MAX");
 
         assert_eq!(Iso8601::MAX.to_string(), "9999-12-30T22:00:00.9999999Z");
         assert_eq!(Rfc2822::MAX.to_string(), "Thu, 30 Dec 9999 22:00:00 GMT");
+        assert_eq!(EcmaScript::MAX.to_string(), "9999-12-30T22:00:00.999Z");
         assert_eq!(UnixSeconds::MAX.to_string(), "253402207200");
     }
 }
