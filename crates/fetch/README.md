@@ -712,7 +712,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNg
  [__link0]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient::post
@@ -721,7 +721,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient::request
  [__link14]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=HttpRequestBuilder
  [__link15]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClientBuilder::base_uri
- [__link16]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=BaseUri
+ [__link16]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=BaseUri
  [__link17]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=HttpRequestBuilder::fetch
  [__link18]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=HttpResponse
  [__link19]: https://docs.rs/fetch/0.14.0/fetch/?search=http::Response
@@ -745,14 +745,14 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link35]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::fetch_text_body
  [__link36]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::fetch_bytes_body
  [__link37]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::fetch_json_body
- [__link38]: https://crates.io/crates/templated_uri/0.3.5
- [__link39]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=Uri
+ [__link38]: https://crates.io/crates/templated_uri/0.3.6
+ [__link39]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=Uri
  [__link4]: https://docs.rs/fetch/0.14.0/fetch/?search=custom::create_builder
  [__link40]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link41]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=Uri
+ [__link41]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=Uri
  [__link42]: https://docs.rs/fetch/0.14.0/fetch/?search=handlers::Logging
- [__link43]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=Uri
- [__link44]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=PathAndQueryTemplate
+ [__link43]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=Uri
+ [__link44]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=PathAndQueryTemplate
  [__link45]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::json
  [__link46]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::fetch_json
  [__link47]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpRequestBuilder::fetch_json_ref
@@ -779,7 +779,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link66]: https://docs.rs/bytes/1.12.1/bytes/?search=BufMut
  [__link67]: https://docs.rs/bytes
  [__link68]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient
- [__link69]: https://docs.rs/templated_uri/0.3.5/templated_uri/?search=Uri
+ [__link69]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=Uri
  [__link7]: https://docs.rs/fetch/0.14.0/fetch/custom/index.html
  [__link70]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=BytesView
  [__link71]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=BytesView

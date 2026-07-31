@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.6] - 2026-07-31
+
+- 🐛 Bug Fixes
+
+  - require `templated_uri_macros` 0.3 to prevent Cargo from unifying macros across incompatible runtime lines
+
 ## [0.3.5] - 2026-07-24
 
 - 🔧 Maintenance

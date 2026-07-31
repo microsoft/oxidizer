@@ -4386,7 +4386,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "criterion",
  "data_privacy",
@@ -4405,7 +4405,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.2.7"
+version = "0.3.0"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -4413,7 +4413,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.2.7"
+version = "0.3.0"
 dependencies = [
  "chumsky",
  "darling",
