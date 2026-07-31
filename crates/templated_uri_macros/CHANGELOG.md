@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-07-31
+
+- ⚠️ Breaking
+
+  - establish a compatibility boundary for macros that generate code against `templated_uri` 0.3
+
+- 🔧 Maintenance
+
+  - require `templated_uri_macros_impl` 0.3
+
 ## [0.2.7] - 2026-07-24
 
 - 🔧 Maintenance
