@@ -128,10 +128,12 @@ fn build_tokio_handler(cx: CustomContext<TokioDeps>) -> fetch_hyper::HyperTransp
 
 /// Materializes the client's [`TlsOptions`] into a concrete [`TlsBackend`].
 ///
-/// When the `rustls` feature is enabled, rustls is wired up with the aws-lc-rs
-/// crypto provider and the platform certificate verifier (the OS trust store),
-/// and rustls becomes the default backend. When only `native-tls` is enabled it
-/// becomes the default backend instead.
+/// When the `rustls` feature is enabled, rustls is wired up with the platform
+/// certificate verifier (the OS trust store) and becomes the default backend.
+/// The crypto provider comes from the `rustls-aws-lc-rs` feature when it is
+/// enabled, and otherwise from the process-wide default installed via
+/// [`rustls::crypto::CryptoProvider::install_default`]. When only `native-tls`
+/// is enabled it becomes the default backend instead.
 fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend {
     let mut builder = TlsBackendBuilder::new();
     if !options.supported_http_versions.is_empty() {
@@ -140,11 +142,10 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
 
     #[cfg(any(feature = "rustls", test))]
     {
-        // aws-lc-rs is the default crypto provider when rustls is enabled.
-        let provider = std::sync::Arc::new(::rustls::crypto::aws_lc_rs::default_provider());
+        let provider = rustls_crypto_provider();
         let verifier = std::sync::Arc::new(
             rustls_platform_verifier::Verifier::new(std::sync::Arc::clone(&provider))
-                .expect("the platform certificate verifier must initialize with the aws-lc-rs crypto provider"),
+                .expect("the platform certificate verifier must initialize with the rustls crypto provider"),
         );
         // `configure_rustls` auto-promotes rustls to the default backend.
         builder = builder.configure_rustls(provider, verifier);
@@ -162,6 +163,26 @@ fn build_tls_backend(options: &TransportOptions, tls: TlsOptions) -> TlsBackend 
     builder
         .build_backend(tls)
         .expect("TLS backend construction must succeed for the configured TlsOptions")
+}
+
+/// Returns the aws-lc-rs crypto provider selected by the `rustls-aws-lc-rs` feature.
+#[cfg(any(feature = "rustls-aws-lc-rs", test))]
+fn rustls_crypto_provider() -> std::sync::Arc<::rustls::crypto::CryptoProvider> {
+    std::sync::Arc::new(::rustls::crypto::aws_lc_rs::default_provider())
+}
+
+/// Returns the process-wide default crypto provider.
+///
+/// `fetch` deliberately does not pick a crypto provider for the `rustls`
+/// feature alone, so applications can supply their own (for example a
+/// FIPS-validated one). Enable the `rustls-aws-lc-rs` (or `tls`) feature to get
+/// aws-lc-rs wired up automatically instead.
+#[cfg(all(feature = "rustls", not(any(feature = "rustls-aws-lc-rs", test))))]
+fn rustls_crypto_provider() -> std::sync::Arc<::rustls::crypto::CryptoProvider> {
+    ::rustls::crypto::CryptoProvider::get_default().cloned().expect(
+        "no rustls crypto provider is installed: enable the `rustls-aws-lc-rs` (or `tls`) feature of `fetch`, \
+             or call `rustls::crypto::CryptoProvider::install_default` before creating the client",
+    )
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ http = { workspace = true }
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 anyspawn_azure = { path = "../anyspawn_azure", features = ["azure-identity"] }
-fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
+fetch = { path = "../fetch", features = ["test-util", "tokio", "tls"] }
 tick = { path = "../tick", features = ["tokio"] }
 
 # external
