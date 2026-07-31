@@ -75,11 +75,12 @@ crate::thread_aware_move!(UnixSeconds);
 impl UnixSeconds {
     /// The largest value that can be represented by `UnixSeconds`.
     ///
-    /// This represents a Unix system time of `253402207200` seconds, which is
-    /// `9999-12-30T22:00:00Z`.
-    // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
-    // instant everywhere.
-    pub const MAX: Self = Self(Duration::new(253_402_207_200, 999_999_999));
+    /// This represents `253402207200`, or `9999-12-30T22:00:00Z`.
+    #[expect(
+        clippy::duration_suboptimal_units,
+        reason = "UnixSeconds represents whole seconds since the Unix epoch, so seconds is the natural unit, matching to_secs() and Display"
+    )]
+    pub const MAX: Self = Self(Duration::from_secs(253_402_207_200));
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///
@@ -125,6 +126,15 @@ impl UnixSeconds {
     pub fn to_secs(self) -> u64 {
         self.0.as_secs()
     }
+
+    /// Drops any sub-second component so the stored value is canonical.
+    ///
+    /// `UnixSeconds` formats and serializes as whole seconds, so retaining only
+    /// whole seconds internally keeps equality, ordering, and hashing in
+    /// agreement with `Display` and serde.
+    fn canonicalize(duration: Duration) -> Self {
+        Self(Duration::from_secs(duration.as_secs()))
+    }
 }
 
 impl FromStr for UnixSeconds {
@@ -154,13 +164,14 @@ impl TryFrom<Duration> for UnixSeconds {
     type Error = Error;
 
     fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        if value > Self::MAX.0 {
+        let canonical = Self::canonicalize(value);
+        if canonical.0 > Self::MAX.0 {
             return Err(Error::out_of_range(
                 "the `duration` is greater than the maximum value that can be represented by `UnixSeconds`",
             ));
         }
 
-        Ok(Self(value))
+        Ok(canonical)
     }
 }
 
@@ -229,11 +240,11 @@ mod tests {
     }
 
     #[test]
-    fn max_duration_is_jiff_duration() {
+    fn max_is_jiff_max_floored_to_whole_seconds() {
         let jiff_max = Timestamp::MAX.duration_since(Timestamp::UNIX_EPOCH).unsigned_abs();
 
-        // equals to 123
-        assert_eq!(UnixSeconds::MAX.0, jiff_max);
+        assert_eq!(UnixSeconds::MAX.0, Duration::from_secs(jiff_max.as_secs()));
+        assert_eq!(UnixSeconds::MAX.to_secs(), 253_402_207_200);
     }
 
     #[test]
@@ -330,15 +341,31 @@ mod tests {
         assert_eq!(system_time, SystemTime::UNIX_EPOCH + Duration::from_secs(9999));
         assert_eq!(UnixSeconds::try_from(system_time).unwrap(), unix_seconds);
 
-        // `SystemTime` resolution is platform defined -- 100 ns where it is FILETIME based --
-        // so only whole seconds are guaranteed to survive at the sub-second maximum.
         let max = UnixSeconds::try_from(SystemTime::from(UnixSeconds::MAX)).unwrap();
-        assert_eq!(max.to_secs(), UnixSeconds::MAX.to_secs());
+        assert_eq!(max, UnixSeconds::MAX);
     }
 
     #[test]
     fn try_from_max_ensure_accepted() {
         let unix_seconds = UnixSeconds::try_from(UnixSeconds::MAX.0).unwrap();
         assert_eq!(unix_seconds, UnixSeconds::MAX);
+    }
+
+    #[test]
+    fn try_from_fractional_jiff_max_floors_to_max() {
+        let fractional_max = Duration::new(253_402_207_200, 999_999_999);
+
+        assert_eq!(UnixSeconds::try_from(fractional_max).unwrap(), UnixSeconds::MAX);
+    }
+
+    #[test]
+    fn sub_second_precision_is_canonical() {
+        // A Duration carrying sub-second precision is floored to whole seconds, so
+        // two instants within the same second compare equal and format identically.
+        let a = UnixSeconds::try_from(Duration::new(9999, 400_000_000)).unwrap();
+        let b = UnixSeconds::try_from(Duration::new(9999, 900_000_000)).unwrap();
+
+        assert_eq!(a, b);
+        assert_eq!(a.to_string(), "9999");
     }
 }

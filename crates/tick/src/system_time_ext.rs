@@ -22,6 +22,32 @@ pub trait SystemTimeExt: sealed::Sealed {
     /// ```
     #[cfg(any(feature = "fmt", test))]
     fn display_iso_8601(&self) -> impl std::fmt::Display;
+
+    /// Formats the [`SystemTime`] in the ECMAScript Date Time String Format.
+    ///
+    /// For years `0000` through `9999` the output has the fixed 24-character shape
+    /// `YYYY-MM-DDTHH:MM:SS.sssZ`, truncated to millisecond precision. See
+    /// [`EcmaScript`][crate::fmt::EcmaScript] for details.
+    ///
+    /// Times outside the supported timestamp range are saturated to the nearest
+    /// boundary. The lower boundary has a negative year and renders in the wider
+    /// ECMAScript expanded-year form rather than the fixed 24-character shape.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::{Duration, SystemTime};
+    ///
+    /// use tick::SystemTimeExt;
+    ///
+    /// let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
+    /// assert_eq!(
+    ///     time.display_ecmascript().to_string(),
+    ///     "1970-01-01T01:00:00.000Z"
+    /// );
+    /// ```
+    #[cfg(any(feature = "fmt", test))]
+    fn display_ecmascript(&self) -> impl std::fmt::Display;
 }
 
 impl SystemTimeExt for SystemTime {
@@ -29,6 +55,11 @@ impl SystemTimeExt for SystemTime {
     fn display_iso_8601(&self) -> impl std::fmt::Display {
         // jiff's Timestamp implements Display that outputs ISO 8601 format
         to_timestamp(*self)
+    }
+
+    #[cfg(any(feature = "fmt", test))]
+    fn display_ecmascript(&self) -> impl std::fmt::Display {
+        crate::fmt::EcmaScript::from_timestamp(to_timestamp(*self))
     }
 }
 
@@ -77,6 +108,38 @@ mod tests {
     fn display_out_of_range() {
         let time = SystemTime::from(Timestamp::MAX) + Duration::from_secs(12345);
         assert_eq!(time.display_iso_8601().to_string(), "9999-12-30T22:00:00.999999999Z");
+    }
+
+    #[test]
+    fn display_ecmascript_ok() {
+        assert_eq!(SystemTime::UNIX_EPOCH.display_ecmascript().to_string(), "1970-01-01T00:00:00.000Z");
+
+        assert_eq!(
+            (SystemTime::UNIX_EPOCH + Duration::from_hours(1)).display_ecmascript().to_string(),
+            "1970-01-01T01:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn display_ecmascript_before_epoch() {
+        let before = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+        assert_eq!(before.display_ecmascript().to_string(), "1969-12-31T23:59:59.000Z");
+    }
+
+    #[test]
+    fn display_ecmascript_saturates_year_10001() {
+        let year_10001 = SystemTime::UNIX_EPOCH + Duration::from_hours(70_398_312);
+        assert_eq!(year_10001.display_ecmascript().to_string(), "9999-12-30T22:00:00.999Z");
+    }
+
+    // On Windows a `SystemTime` cannot represent an instant before the FILETIME
+    // epoch (1601-01-01), so an instant below `Timestamp::MIN` (year -9999) is
+    // unconstructable there and this saturation path is only reachable elsewhere.
+    #[cfg(not(windows))]
+    #[test]
+    fn display_ecmascript_saturates_below_min() {
+        let time = SystemTime::UNIX_EPOCH - Duration::from_secs(400_000_000_000);
+        assert_eq!(time.display_ecmascript().to_string(), "-009999-01-02T01:59:59.000Z");
     }
 
     #[test]

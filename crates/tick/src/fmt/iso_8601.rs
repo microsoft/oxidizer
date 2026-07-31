@@ -102,8 +102,6 @@ impl Iso8601 {
     ///
     /// This represents a Unix system time of `9999-12-30T22:00:00.999999999Z`, which
     /// [`Display`] writes as `9999-12-30T22:00:00.9999999Z` at 100-nanosecond resolution.
-    // NOTE: Kept aligned with the other formats in this module so that MAX denotes the same
-    // instant everywhere.
     pub const MAX: Self = Self(Timestamp::MAX);
 
     /// The Unix epoch represented as `Iso8601`.
