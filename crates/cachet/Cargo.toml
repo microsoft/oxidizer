@@ -52,7 +52,7 @@ telemetry = []
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
-bytesbuf = { workspace = true, optional = true }
+bytesbuf = { workspace = true, features = ["std"], optional = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }

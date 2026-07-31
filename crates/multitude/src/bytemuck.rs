@@ -78,7 +78,8 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater (which exceeds the arena chunk alignment).
+    /// Panics if the backing allocator fails or if `T` requires alignment of
+    /// 32 KiB or greater.
     #[must_use]
     #[inline]
     pub fn alloc<T: Zeroable>(&self) -> crate::Alloc<'a, T> {
@@ -91,8 +92,8 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// # Errors
     ///
-    /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
-    /// >= 64 KiB.
+    /// Returns [`AllocError`] if the backing allocator fails or if `T` requires
+    /// alignment of 32 KiB or greater.
     ///
     /// ```
     /// # #[cfg(feature = "bytemuck")]

@@ -87,95 +87,131 @@ type Group = (&'static str, &'static [Variant]);
 /// `(criterion_variant, None)` if the variant has no gungraun counterpart
 /// (those columns will show "—"). The criterion variant name is the string
 /// passed to `g.bench_function(...)` in `benches/criterion_*.rs`; the
-/// gungraun function name is the `fn` name in `benches/gungraun_*.rs` (its
+/// gungraun function name is the `fn` name in `benches/criterion_*_cg.rs` (its
 /// `library_benchmark` symbol).
 const GROUPS: &[Group] = &[
     (
-        "arena_creation",
-        &[("multitude_new", Some("multitude_new")), ("bumpalo_new", Some("bumpalo_new"))],
-    ),
-    (
-        "alloc_u64",
+        "criterion_alloc/arena_lifecycle",
         &[
-            ("alloc", Some("alloc")),
-            ("bumpalo_alloc", Some("bumpalo_alloc")),
-            ("alloc_with", Some("alloc_with")),
-            ("bumpalo_alloc_with", Some("bumpalo_alloc_with")),
-            ("alloc_box", Some("alloc_box")),
-            ("alloc_box_with", Some("alloc_box_with")),
-            ("alloc_uninit_box", Some("alloc_uninit_box")),
-            ("alloc_zeroed_box", Some("alloc_zeroed_box")),
-            ("alloc_arc", Some("alloc_arc")),
-            ("alloc_arc_with", Some("alloc_arc_with")),
-            ("alloc_uninit_arc", Some("alloc_uninit_arc")),
-            ("alloc_zeroed_arc", Some("alloc_zeroed_arc")),
-            ("alloc_rc", Some("alloc_rc")),
-            ("alloc_rc_with", Some("alloc_rc_with")),
-            ("alloc_uninit_rc", Some("alloc_uninit_rc")),
-            ("alloc_zeroed_rc", Some("alloc_zeroed_rc")),
+            ("multitude_new", Some("arena_lifecycle_multitude_new")),
+            ("bumpalo_new", Some("arena_lifecycle_bumpalo_new")),
         ],
     ),
     (
-        "alloc_str",
+        "criterion_alloc/alloc_u64",
         &[
-            ("alloc_str", Some("alloc_str")),
-            ("bumpalo_alloc_str", Some("bumpalo_alloc_str")),
-            ("alloc_str_box", Some("alloc_str_box")),
-            ("alloc_str_arc", Some("alloc_str_arc")),
-            ("alloc_str_rc", Some("alloc_str_rc")),
+            ("alloc", Some("alloc_u64_alloc")),
+            ("bumpalo_alloc", Some("alloc_u64_bumpalo_alloc")),
+            ("alloc_with", Some("alloc_u64_alloc_with")),
+            ("bumpalo_alloc_with", Some("alloc_u64_bumpalo_alloc_with")),
+            ("alloc_box", Some("alloc_u64_alloc_box")),
+            ("alloc_box_with", Some("alloc_u64_alloc_box_with")),
+            ("alloc_uninit_box", Some("alloc_u64_alloc_uninit_box")),
+            ("alloc_zeroed_box", Some("alloc_u64_alloc_zeroed_box")),
+            ("alloc_arc", Some("alloc_u64_alloc_arc")),
+            ("alloc_arc_with", Some("alloc_u64_alloc_arc_with")),
+            ("alloc_uninit_arc", Some("alloc_u64_alloc_uninit_arc")),
+            ("alloc_zeroed_arc", Some("alloc_u64_alloc_zeroed_arc")),
+            ("alloc_rc", Some("alloc_u64_alloc_rc")),
+            ("alloc_rc_with", Some("alloc_u64_alloc_rc_with")),
+            ("alloc_uninit_rc", Some("alloc_u64_alloc_uninit_rc")),
+            ("alloc_zeroed_rc", Some("alloc_u64_alloc_zeroed_rc")),
         ],
     ),
     (
-        "alloc_slice",
+        "criterion_alloc/alloc_str",
         &[
-            ("alloc_slice_copy", Some("alloc_slice_copy")),
-            ("bumpalo_alloc_slice_copy", Some("bumpalo_alloc_slice_copy")),
-            ("alloc_slice_clone", Some("alloc_slice_clone")),
-            ("bumpalo_alloc_slice_clone", Some("bumpalo_alloc_slice_clone")),
-            ("alloc_slice_fill_with", Some("alloc_slice_fill_with")),
-            ("bumpalo_alloc_slice_fill_with", Some("bumpalo_alloc_slice_fill_with")),
-            ("alloc_slice_fill_iter", Some("alloc_slice_fill_iter")),
-            ("bumpalo_alloc_slice_fill_iter", Some("bumpalo_alloc_slice_fill_iter")),
-            ("alloc_slice_copy_box", Some("alloc_slice_copy_box")),
-            ("alloc_slice_clone_box", Some("alloc_slice_clone_box")),
-            ("alloc_slice_fill_with_box", Some("alloc_slice_fill_with_box")),
-            ("alloc_slice_fill_iter_box", Some("alloc_slice_fill_iter_box")),
-            ("alloc_uninit_slice_box", Some("alloc_uninit_slice_box")),
-            ("alloc_zeroed_slice_box", Some("alloc_zeroed_slice_box")),
-            ("alloc_slice_copy_arc", Some("alloc_slice_copy_arc")),
-            ("alloc_slice_clone_arc", Some("alloc_slice_clone_arc")),
-            ("alloc_slice_fill_with_arc", Some("alloc_slice_fill_with_arc")),
-            ("alloc_slice_fill_iter_arc", Some("alloc_slice_fill_iter_arc")),
-            ("alloc_uninit_slice_arc", Some("alloc_uninit_slice_arc")),
-            ("alloc_zeroed_slice_arc", Some("alloc_zeroed_slice_arc")),
-            ("alloc_slice_copy_rc", Some("alloc_slice_copy_rc")),
-            ("alloc_slice_clone_rc", Some("alloc_slice_clone_rc")),
-            ("alloc_slice_fill_with_rc", Some("alloc_slice_fill_with_rc")),
-            ("alloc_slice_fill_iter_rc", Some("alloc_slice_fill_iter_rc")),
-            ("alloc_uninit_slice_rc", Some("alloc_uninit_slice_rc")),
-            ("alloc_zeroed_slice_rc", Some("alloc_zeroed_slice_rc")),
+            ("alloc_str", Some("alloc_str_alloc_str")),
+            ("bumpalo_alloc_str", Some("alloc_str_bumpalo_alloc_str")),
+            ("alloc_str_box", Some("alloc_str_alloc_str_box")),
+            ("alloc_str_arc", Some("alloc_str_alloc_str_arc")),
+            ("alloc_str_rc", Some("alloc_str_alloc_str_rc")),
         ],
     ),
     (
-        "string_builder",
+        "criterion_alloc/alloc_slice",
         &[
-            ("alloc_string", Some("alloc_string")),
-            ("bumpalo_string_new_in", Some("bumpalo_string_new_in")),
-            ("alloc_string_with_capacity", Some("alloc_string_with_capacity")),
-            ("bumpalo_string_with_capacity_in", Some("bumpalo_string_with_capacity_in")),
+            ("alloc_slice_copy", Some("alloc_slice_alloc_slice_copy")),
+            ("bumpalo_alloc_slice_copy", Some("alloc_slice_bumpalo_alloc_slice_copy")),
+            ("alloc_slice_clone", Some("alloc_slice_alloc_slice_clone")),
+            ("bumpalo_alloc_slice_clone", Some("alloc_slice_bumpalo_alloc_slice_clone")),
+            ("alloc_slice_fill_with", Some("alloc_slice_alloc_slice_fill_with")),
+            (
+                "bumpalo_alloc_slice_fill_with",
+                Some("alloc_slice_bumpalo_alloc_slice_fill_with"),
+            ),
+            ("alloc_slice_fill_iter", Some("alloc_slice_alloc_slice_fill_iter")),
+            (
+                "bumpalo_alloc_slice_fill_iter",
+                Some("alloc_slice_bumpalo_alloc_slice_fill_iter"),
+            ),
+            ("alloc_slice_copy_box", Some("alloc_slice_alloc_slice_copy_box")),
+            ("alloc_slice_clone_box", Some("alloc_slice_alloc_slice_clone_box")),
+            (
+                "alloc_slice_fill_with_box",
+                Some("alloc_slice_alloc_slice_fill_with_box"),
+            ),
+            (
+                "alloc_slice_fill_iter_box",
+                Some("alloc_slice_alloc_slice_fill_iter_box"),
+            ),
+            ("alloc_uninit_slice_box", Some("alloc_slice_alloc_uninit_slice_box")),
+            ("alloc_zeroed_slice_box", Some("alloc_slice_alloc_zeroed_slice_box")),
+            ("alloc_slice_copy_arc", Some("alloc_slice_alloc_slice_copy_arc")),
+            ("alloc_slice_clone_arc", Some("alloc_slice_alloc_slice_clone_arc")),
+            (
+                "alloc_slice_fill_with_arc",
+                Some("alloc_slice_alloc_slice_fill_with_arc"),
+            ),
+            (
+                "alloc_slice_fill_iter_arc",
+                Some("alloc_slice_alloc_slice_fill_iter_arc"),
+            ),
+            ("alloc_uninit_slice_arc", Some("alloc_slice_alloc_uninit_slice_arc")),
+            ("alloc_zeroed_slice_arc", Some("alloc_slice_alloc_zeroed_slice_arc")),
+            ("alloc_slice_copy_rc", Some("alloc_slice_alloc_slice_copy_rc")),
+            ("alloc_slice_clone_rc", Some("alloc_slice_alloc_slice_clone_rc")),
+            (
+                "alloc_slice_fill_with_rc",
+                Some("alloc_slice_alloc_slice_fill_with_rc"),
+            ),
+            (
+                "alloc_slice_fill_iter_rc",
+                Some("alloc_slice_alloc_slice_fill_iter_rc"),
+            ),
+            ("alloc_uninit_slice_rc", Some("alloc_slice_alloc_uninit_slice_rc")),
+            ("alloc_zeroed_slice_rc", Some("alloc_slice_alloc_zeroed_slice_rc")),
         ],
     ),
     (
-        "vec_builder",
+        "criterion_alloc/string_builder",
         &[
-            ("alloc_vec", Some("alloc_vec")),
-            ("bumpalo_vec_new_in", Some("bumpalo_vec_new_in")),
-            ("alloc_vec_with_capacity", Some("alloc_vec_with_capacity")),
-            ("bumpalo_vec_with_capacity_in", Some("bumpalo_vec_with_capacity_in")),
+            ("alloc_string", Some("string_builder_alloc_string")),
+            ("bumpalo_string_new_in", Some("string_builder_bumpalo_string_new_in")),
+            (
+                "alloc_string_with_capacity",
+                Some("string_builder_alloc_string_with_capacity"),
+            ),
+            (
+                "bumpalo_string_with_capacity_in",
+                Some("string_builder_bumpalo_string_with_capacity_in"),
+            ),
         ],
     ),
     (
-        "allocator_grow",
+        "criterion_alloc/vec_builder",
+        &[
+            ("alloc_vec", Some("vec_builder_alloc_vec")),
+            ("bumpalo_vec_new_in", Some("vec_builder_bumpalo_vec_new_in")),
+            ("alloc_vec_with_capacity", Some("vec_builder_alloc_vec_with_capacity")),
+            (
+                "bumpalo_vec_with_capacity_in",
+                Some("vec_builder_bumpalo_vec_with_capacity_in"),
+            ),
+        ],
+    ),
+    (
+        "criterion_alloc/allocator_grow",
         &[
             ("in_place", Some("allocator_grow_in_place")),
             ("zeroed_in_place", Some("allocator_grow_zeroed_in_place")),
@@ -185,29 +221,35 @@ const GROUPS: &[Group] = &[
     // Criterion-only whole-lifecycle comparison (allocate a mixed working set,
     // then release it): `multitude` arena (bulk reset) vs the system allocator.
     // No gungraun counterpart, so the instruction-count columns show "—".
-    ("arena_vs_allocator", &[("arena", None), ("system", None)]),
     (
-        "drop",
+        "criterion_arena_vs_allocator/arena_vs_allocator",
+        &[("arena", None), ("system", None)],
+    ),
+    (
+        "criterion_drop/drop",
         &[
-            ("box_u64", Some("box_u64")),
-            ("rc_u64", Some("rc_u64")),
-            ("arc_u64", Some("arc_u64")),
-            ("box_droppy", Some("box_droppy")),
-            ("rc_droppy", Some("rc_droppy")),
-            ("arc_droppy", Some("arc_droppy")),
-            ("str_box", Some("str_box")),
-            ("str_rc", Some("str_rc")),
-            ("str_arc", Some("str_arc")),
-            ("slice_box_u64", Some("slice_box_u64")),
-            ("slice_rc_u64", Some("slice_rc_u64")),
-            ("slice_arc_u64", Some("slice_arc_u64")),
-            ("slice_box_droppy", Some("slice_box_droppy")),
-            ("slice_rc_droppy", Some("slice_rc_droppy")),
-            ("slice_arc_droppy", Some("slice_arc_droppy")),
-            ("alloc", Some("alloc")),
+            ("box_u64", Some("drop_box_u64")),
+            ("rc_u64", Some("drop_rc_u64")),
+            ("arc_u64", Some("drop_arc_u64")),
+            ("box_droppy", Some("drop_box_droppy")),
+            ("rc_droppy", Some("drop_rc_droppy")),
+            ("arc_droppy", Some("drop_arc_droppy")),
+            ("str_box", Some("drop_str_box")),
+            ("str_rc", Some("drop_str_rc")),
+            ("str_arc", Some("drop_str_arc")),
+            ("slice_box_u64", Some("drop_slice_box_u64")),
+            ("slice_rc_u64", Some("drop_slice_rc_u64")),
+            ("slice_arc_u64", Some("drop_slice_arc_u64")),
+            ("slice_box_droppy", Some("drop_slice_box_droppy")),
+            ("slice_rc_droppy", Some("drop_slice_rc_droppy")),
+            ("slice_arc_droppy", Some("drop_slice_arc_droppy")),
+            ("arena_drop", Some("drop_arena_drop")),
         ],
     ),
-    ("clone", &[("rc_u64", Some("clone_rc_u64")), ("arc_u64", Some("clone_arc_u64"))]),
+    (
+        "criterion_drop/clone",
+        &[("rc_u64", Some("clone_rc_u64")), ("arc_u64", Some("clone_arc_u64"))],
+    ),
 ];
 
 const SERDE_GROUPS: &[Group] = &[
@@ -228,9 +270,9 @@ const SERDE_GROUPS: &[Group] = &[
     (
         "multitude_serde/typed_lifecycle",
         &[
-            ("serde_json", Some("lifecycle_serde_json")),
-            ("multitude", Some("lifecycle_multitude")),
-            ("bumpalo", Some("lifecycle_bumpalo")),
+            ("serde_json", Some("typed_lifecycle_serde_json")),
+            ("multitude", Some("typed_lifecycle_multitude")),
+            ("bumpalo", Some("typed_lifecycle_bumpalo")),
         ],
     ),
     (
@@ -348,9 +390,9 @@ const SERDE_COMPARISONS: &[(&str, &str, &str, &str)] = &[
 ];
 
 const SERDE_LIFECYCLE_COMPARISONS: &[(&str, &str, &str)] = &[
-    ("Standard Serde", "serde_json", "lifecycle_serde_json"),
-    ("Multitude", "multitude", "lifecycle_multitude"),
-    ("Bumpalo (manual seed)", "bumpalo", "lifecycle_bumpalo"),
+    ("Standard Serde", "serde_json", "typed_lifecycle_serde_json"),
+    ("Multitude", "multitude", "typed_lifecycle_multitude"),
+    ("Bumpalo (manual seed)", "bumpalo", "typed_lifecycle_bumpalo"),
 ];
 
 const SERDE_BATCH_LIFECYCLE_COMPARISONS: &[(&str, &str, &str)] = &[
@@ -360,16 +402,32 @@ const SERDE_BATCH_LIFECYCLE_COMPARISONS: &[(&str, &str, &str)] = &[
 ];
 
 const COMPARISONS: &[(&str, &str, &str)] = &[
-    ("alloc_u64", "alloc", "bumpalo_alloc"),
-    ("alloc_str", "alloc_str", "bumpalo_alloc_str"),
-    ("alloc_slice", "alloc_slice_copy", "bumpalo_alloc_slice_copy"),
-    ("alloc_slice", "alloc_slice_clone", "bumpalo_alloc_slice_clone"),
-    ("alloc_slice", "alloc_slice_fill_with", "bumpalo_alloc_slice_fill_with"),
-    ("alloc_slice", "alloc_slice_fill_iter", "bumpalo_alloc_slice_fill_iter"),
-    ("string_builder", "alloc_string", "bumpalo_string_new_in"),
-    ("string_builder", "alloc_string_with_capacity", "bumpalo_string_with_capacity_in"),
-    ("vec_builder", "alloc_vec", "bumpalo_vec_new_in"),
-    ("vec_builder", "alloc_vec_with_capacity", "bumpalo_vec_with_capacity_in"),
+    ("criterion_alloc/alloc_u64", "alloc", "bumpalo_alloc"),
+    ("criterion_alloc/alloc_str", "alloc_str", "bumpalo_alloc_str"),
+    ("criterion_alloc/alloc_slice", "alloc_slice_copy", "bumpalo_alloc_slice_copy"),
+    ("criterion_alloc/alloc_slice", "alloc_slice_clone", "bumpalo_alloc_slice_clone"),
+    (
+        "criterion_alloc/alloc_slice",
+        "alloc_slice_fill_with",
+        "bumpalo_alloc_slice_fill_with",
+    ),
+    (
+        "criterion_alloc/alloc_slice",
+        "alloc_slice_fill_iter",
+        "bumpalo_alloc_slice_fill_iter",
+    ),
+    ("criterion_alloc/string_builder", "alloc_string", "bumpalo_string_new_in"),
+    (
+        "criterion_alloc/string_builder",
+        "alloc_string_with_capacity",
+        "bumpalo_string_with_capacity_in",
+    ),
+    ("criterion_alloc/vec_builder", "alloc_vec", "bumpalo_vec_new_in"),
+    (
+        "criterion_alloc/vec_builder",
+        "alloc_vec_with_capacity",
+        "bumpalo_vec_with_capacity_in",
+    ),
 ];
 
 fn unit_to_ns(unit: &str) -> Option<f64> {
@@ -607,6 +665,10 @@ fn fmt_int_delta(candidate: Option<u64>, baseline: Option<u64>) -> String {
     }
 }
 
+fn subgroup(group: &str) -> &str {
+    group.rsplit_once('/').map_or(group, |(_, subgroup)| subgroup)
+}
+
 fn gung_for(group: &str, variant: &str, g_alloc: &[GungEntry]) -> Option<u64> {
     for (g, vs) in GROUPS {
         if *g != group {
@@ -629,6 +691,9 @@ fn build_report(
     g_serde: &[GungEntry],
     g_record_batch: &[GungEntry],
     serde_repetitions: u32,
+    criterion_samples: u32,
+    criterion_warmup_secs: u32,
+    criterion_measurement_secs: u32,
     cpu: Option<u32>,
 ) -> String {
     let mut out = String::new();
@@ -645,7 +710,7 @@ fn build_report(
          (mimalloc, per-object free).\n",
     );
     out.push_str(
-        "- `cargo bench --bench gungraun_alloc` and `gungraun_drop` — \
+        "- `cargo bench --bench criterion_alloc_cg` and `criterion_drop_cg` — \
          Callgrind instruction-precise counts.\n",
     );
     out.push_str(
@@ -656,7 +721,7 @@ fn build_report(
     out.push_str(
         "- `cargo bench --bench multitude_teardown` and \
          `multitude_teardown_cg` — matched measurements of freeing standard \
-         allocations and resetting local-reference arenas.\n\n",
+         allocations and resetting local-reference arenas.\n",
     );
     out.push_str(
         "- `cargo bench --bench multitude_record_batch` and \
@@ -679,10 +744,11 @@ fn build_report(
          one global top-candidate selection, materializes 32 owned records, and \
          keeps the previous retained generation alive until its replacement is ready.\n",
     );
-    out.push_str(
-        "Criterion median is reported (default 30 samples, 1 s warm-up, \
-         2 s measurement; override with `--samples` / `--measurement-time` / \
-         `--warm-up-time`).  \n",
+    let _ = writeln!(
+        out,
+        "Criterion medians use {criterion_samples} samples, a \
+         {criterion_warmup_secs} s warm-up, and a \
+         {criterion_measurement_secs} s measurement."
     );
     if let Some(cpu) = cpu {
         let _ = writeln!(out, "Benchmark processes were pinned to logical CPU {cpu}.");
@@ -692,12 +758,15 @@ fn build_report(
          warmed process, with direct Multitude/Bumpalo alternatives adjacent \
          to minimize host-load and frequency drift.\n",
     );
-    let repetition_label = if serde_repetitions == 1 { "run" } else { "runs" };
-    let _ = writeln!(
-        out,
-        "Serde and teardown timing is the median of {serde_repetitions} independently warmed \
-         {repetition_label}, with variant order alternated between runs."
-    );
+    if serde_repetitions == 1 {
+        out.push_str("Serde and teardown timing comes from one independently warmed run.\n");
+    } else {
+        let _ = writeln!(
+            out,
+            "Serde and teardown timing is the median of {serde_repetitions} independently warmed \
+             runs, with variant order alternated between runs."
+        );
+    }
     out.push_str(
         "Memory accesses = L1 Hits + LL Hits + RAM Hits \
          (Callgrind D-cache references).  \n",
@@ -708,13 +777,17 @@ fn build_report(
     );
 
     for (group, variants) in GROUPS {
-        let _ = writeln!(out, "## `{group}`\n");
+        let _ = writeln!(out, "## `{}`\n", subgroup(group));
         out.push_str(
             "| Variant | Time (criterion) | Instructions | \
              Branch misses | Mem accesses |\n",
         );
         out.push_str("|---|---:|---:|---:|---:|\n");
-        let src: &[GungEntry] = if matches!(*group, "drop" | "clone") { g_drop } else { g_alloc };
+        let src: &[GungEntry] = if group.starts_with("criterion_drop/") {
+            g_drop
+        } else {
+            g_alloc
+        };
         for (variant, gung_name) in *variants {
             let t = lookup_time(crit, &format!("{group}/{variant}"));
             let instr = gung_name.and_then(|n| gung_metric(src, n, "Instructions"));
@@ -881,7 +954,7 @@ fn build_report(
     out.push_str("|---|---:|---:|---:|---:|\n");
     let lifecycle_group = "multitude_serde/typed_lifecycle";
     let standard_time = lookup_time(crit, &format!("{lifecycle_group}/serde_json"));
-    let standard_instructions = gung_metric(g_serde, "lifecycle_serde_json", "Instructions");
+    let standard_instructions = gung_metric(g_serde, "typed_lifecycle_serde_json", "Instructions");
     for (label, variant, gung_name) in SERDE_LIFECYCLE_COMPARISONS {
         let time = lookup_time(crit, &format!("{lifecycle_group}/{variant}"));
         let instructions = gung_metric(g_serde, gung_name, "Instructions");
@@ -933,7 +1006,9 @@ fn build_report(
          before retaining owned output. Its raw variants compare callback indexing \
          with directly collecting `Vec<&RawValue>`; both must scan every element and \
          parse selected records again. Criterion and Callgrind invoke the same \
-         shared hot-path functions and equivalent prewarmed state.\n\n",
+         shared hot-path functions and equivalent prewarmed state. Comparable \
+         standard and arena decode paths include output destruction and storage \
+         reclamation in every measured iteration.\n\n",
     );
     for (group, variants) in RECORD_BATCH_GROUPS {
         let title = group
@@ -1117,33 +1192,40 @@ fn run(args: &Args) -> Result<(), AppError> {
         true
     };
 
-    let (def_samples, def_meas) = if args.fast { (10, 1) } else { (30, 2) };
-    let samples = args.samples.unwrap_or(def_samples).to_string();
-    let meas = args.measurement_time.unwrap_or(def_meas).to_string();
-    let warmup = args.warm_up_time.unwrap_or(1).to_string();
+    let (default_samples, default_measurement_secs) = if args.fast { (10, 1) } else { (30, 2) };
+    let samples = args.samples.unwrap_or(default_samples);
+    let measurement_secs = args.measurement_time.unwrap_or(default_measurement_secs);
+    let warmup_secs = args.warm_up_time.unwrap_or(1);
+    let samples_arg = samples.to_string();
+    let measurement_arg = measurement_secs.to_string();
+    let warmup_arg = warmup_secs.to_string();
 
     let crit_args = vec![
         "--warm-up-time",
-        warmup.as_str(),
+        warmup_arg.as_str(),
         "--measurement-time",
-        meas.as_str(),
+        measurement_arg.as_str(),
         "--sample-size",
-        samples.as_str(),
+        samples_arg.as_str(),
     ];
 
     let alloc_groups: Vec<Group> = GROUPS
         .iter()
         .copied()
-        .filter(|(group, _)| !matches!(*group, "drop" | "clone" | "arena_vs_allocator"))
+        .filter(|(group, _)| group.starts_with("criterion_alloc/"))
         .collect();
     let crit_alloc_log = run_groups(&crate_dir, "criterion_alloc", &[], &alloc_groups, &crit_args, args.cpu)?;
     let drop_groups: Vec<Group> = GROUPS
         .iter()
         .copied()
-        .filter(|(group, _)| matches!(*group, "drop" | "clone"))
+        .filter(|(group, _)| group.starts_with("criterion_drop/"))
         .collect();
     let crit_drop_log = run_groups(&crate_dir, "criterion_drop", &[], &drop_groups, &crit_args, args.cpu)?;
-    let arena_vs_allocator_groups: Vec<Group> = GROUPS.iter().copied().filter(|(group, _)| *group == "arena_vs_allocator").collect();
+    let arena_vs_allocator_groups: Vec<Group> = GROUPS
+        .iter()
+        .copied()
+        .filter(|(group, _)| group.starts_with("criterion_arena_vs_allocator/"))
+        .collect();
     let crit_ava_log = run_groups(
         &crate_dir,
         "criterion_arena_vs_allocator",
@@ -1180,8 +1262,22 @@ fn run(args: &Args) -> Result<(), AppError> {
     )?;
     let (gung_alloc_log, gung_drop_log, gung_teardown_log, gung_serde_log, gung_record_batch_log) = if run_gungraun {
         (
-            run_bench(&crate_dir, "gungraun_alloc", &[], &[], "gungraun_alloc", args.cpu)?,
-            run_bench(&crate_dir, "gungraun_drop", &[], &[], "gungraun_drop", args.cpu)?,
+            run_bench(
+                &crate_dir,
+                "criterion_alloc_cg",
+                &[],
+                &[],
+                "criterion_alloc_cg",
+                args.cpu,
+            )?,
+            run_bench(
+                &crate_dir,
+                "criterion_drop_cg",
+                &[],
+                &[],
+                "criterion_drop_cg",
+                args.cpu,
+            )?,
             run_bench(&crate_dir, "multitude_teardown_cg", &[], &[], "multitude_teardown_cg", args.cpu)?,
             run_bench(
                 &crate_dir,
@@ -1210,17 +1306,17 @@ fn run(args: &Args) -> Result<(), AppError> {
     // so it is excluded from the alloc-log keys and parsed from its own log.
     let alloc_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| !matches!(*g, "drop" | "clone" | "arena_vs_allocator"))
+        .filter(|(group, _)| group.starts_with("criterion_alloc/"))
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let drop_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| matches!(*g, "drop" | "clone"))
+        .filter(|(group, _)| group.starts_with("criterion_drop/"))
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let ava_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| *g == "arena_vs_allocator")
+        .filter(|(group, _)| group.starts_with("criterion_arena_vs_allocator/"))
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let serde_keys: Vec<(&str, &str)> = SERDE_GROUPS
@@ -1242,8 +1338,8 @@ fn run(args: &Args) -> Result<(), AppError> {
     crit.extend(parse_criterion(&crit_teardown_log, &teardown_keys));
     crit.extend(parse_criterion(&crit_serde_log, &serde_keys));
     crit.extend(parse_criterion(&crit_record_batch_log, &record_batch_keys));
-    let g_alloc = parse_gungraun(&gung_alloc_log, "gungraun_alloc");
-    let g_drop = parse_gungraun(&gung_drop_log, "gungraun_drop");
+    let g_alloc = parse_gungraun(&gung_alloc_log, "criterion_alloc_cg");
+    let g_drop = parse_gungraun(&gung_drop_log, "criterion_drop_cg");
     let g_teardown = parse_gungraun(&gung_teardown_log, "multitude_teardown_cg");
     let g_serde = parse_gungraun(&gung_serde_log, "multitude_serde_cg");
     let g_record_batch = parse_gungraun(&gung_record_batch_log, "multitude_record_batch_cg");
@@ -1256,13 +1352,16 @@ fn run(args: &Args) -> Result<(), AppError> {
         &g_serde,
         &g_record_batch,
         args.serde_repetitions,
+        samples,
+        warmup_secs,
+        measurement_secs,
         args.cpu,
     );
     let out_path = crate_dir.join("docs").join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
 
     println!(
-        "Wrote {} ({} criterion, {} gungraun_alloc, {} gungraun_drop, \
+        "Wrote {} ({} criterion, {} criterion_alloc_cg, {} criterion_drop_cg, \
          {} multitude_teardown_cg, {} multitude_serde_cg, \
          {} multitude_record_batch_cg benches)",
         out_path.display(),

@@ -3,8 +3,18 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(not(test), no_std)]
 
 //! Types for creating and manipulating byte sequences.
+//!
+//! # Crate features
+//!
+//! * The **`std` Cargo feature** *(enabled by default)* enables the global memory pool, standard I/O
+//!   adapters, and metrics. Disable it for `#![no_std]` environments; the crate still requires
+//!   `alloc` and pointer-width atomics.
+//! * **`bytes-compat`** enables interoperability with the `bytes` crate and is available with or
+//!   without `std`.
+//! * **`test-util`** enables memory providers intended for tests and implies `std`.
 //!
 //! <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/docs/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
 //!
@@ -35,10 +45,13 @@
 //! * [`get_byte()`] reads a single byte.
 //! * [`copy_to_slice()`] copies bytes into a provided slice.
 //! * [`copy_to_uninit_slice()`] copies bytes into a provided uninitialized slice.
-//! * [`BytesView`] implements [`std::io::Read`] and [`std::io::BufRead`] directly, since
+//! * With the `std` feature, [`BytesView`] implements [`std::io::Read`] and [`std::io::BufRead`]
+//!   directly, since
 //!   it is already a buffered byte sequence.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let message = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
@@ -55,6 +68,8 @@
 //!     println!("Message received. The sum of all words in the message is {sum}.");
 //! }
 //! # consume_message(message);
+//! # }
+//! # }
 //! ```
 //!
 //! If the helper methods are not sufficient, you can access the byte sequence behind the [`BytesView`]
@@ -69,6 +84,8 @@
 //!   will return a new slice of bytes starting from the new front position of the view.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let mut bytes = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
@@ -86,12 +103,16 @@
 //! }
 //!
 //! println!("Inspected a view over {len} bytes with slice lengths: {slice_lengths:?}");
+//! # }
+//! # }
 //! ```
 //!
 //! To reuse a [`BytesView`], clone it before consuming the contents. This is a cheap
 //! zero-copy operation.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # let memory = bytesbuf::mem::GlobalPool::new();
 //! # let mut bytes = BytesView::copied_from_slice(b"1234123412341234", &memory);
 //! use bytesbuf::BytesView;
@@ -107,6 +128,8 @@
 //!
 //! // Operations on the clone have no effect on the original view.
 //! assert_eq!(bytes.len(), 16);
+//! # }
+//! # }
 //! ```
 //!
 //! # Producing Byte Sequences
@@ -127,12 +150,17 @@
 //!    instance of a shared [`GlobalPool`]. In a typical web application, the global memory pool
 //!    is a service exposed by the application framework. In a different context (e.g. example
 //!    or test code with no framework), you can create your own instance via [`GlobalPool::new()`].
+//!    In a `no_std` environment, applications that already own a specialized memory provider can
+//!    integrate it by implementing [`Memory`]. The crate does not provide a general-purpose
+//!    allocator-backed provider without `std`.
 //!
 //! Once you have a memory provider, you can reserve memory from it by calling
 //! [`Memory::reserve()`] on it. This returns a [`BytesBuf`] with at least the requested
 //! number of bytes of memory capacity.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -141,6 +169,8 @@
 //! let memory = connection.memory();
 //!
 //! let mut buf = memory.reserve(100);
+//! # }
+//! # }
 //! ```
 //!
 //! Now that you have the memory capacity in a [`BytesBuf`], you can fill the memory
@@ -158,6 +188,8 @@
 //! * [`put_bytes()`] appends an existing [`BytesView`].
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -170,6 +202,8 @@
 //! buf.put_u64_be(1234);
 //! buf.put_u64_be(5678);
 //! buf.put_slice(*b"Hello, world!");
+//! # }
+//! # }
 //! ```
 //!
 //! If the helper methods are not sufficient, you can write contents directly into mutable byte slices
@@ -190,6 +224,8 @@
 //! to identify how much unused memory capacity is available.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -207,12 +243,16 @@
 //! // Remember that a memory provider can always provide more memory than requested.
 //! assert!(buf.capacity() >= 100 + 80);
 //! assert!(buf.remaining_capacity() >= 80);
+//! # }
+//! # }
 //! ```
 //!
 //! When you have written your byte sequence into the memory capacity of the [`BytesBuf`], you can consume
 //! the data in the buffer as a [`BytesView`].
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -227,12 +267,16 @@
 //! buf.put_slice(*b"Hello, world!");
 //!
 //! let message = buf.consume_all();
+//! # }
+//! # }
 //! ```
 //!
 //! This can be done piece by piece, and you can continue writing to the [`BytesBuf`]
 //! after consuming some already written bytes.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -251,6 +295,8 @@
 //! buf.put_slice(*b"Hello, world!");
 //!
 //! let final_contents = buf.consume_all();
+//! # }
+//! # }
 //! ```
 //!
 //! If you already have a [`BytesView`] that you want to write into a [`BytesBuf`], call
@@ -258,6 +304,8 @@
 //! that reuses the memory capacity of the view you are appending.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # struct Connection {}
 //! # impl Connection { fn memory(&self) -> impl Memory { bytesbuf::mem::GlobalPool::new() } }
 //! # let connection = Connection {};
@@ -272,6 +320,8 @@
 //! let mut buf = memory.reserve(128);
 //! buf.put_bytes(header);
 //! buf.put_slice(*b"Hello, world!");
+//! # }
+//! # }
 //! ```
 //!
 //! Note that there is no requirement that the memory capacity of the buffer and the
@@ -307,6 +357,8 @@
 //! for full code):
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # #[derive(Debug)]
 //! # struct ConnectionZeroCounter {
 //! #     connection: Connection,
@@ -322,12 +374,16 @@
 //! # #[derive(Debug)] struct Connection;
 //! # impl Connection { fn write(&mut self, mut _message: BytesView) {} }
 //! # impl HasMemory for Connection { fn memory(&self) -> impl MemoryShared { bytesbuf::mem::GlobalPool::new() } }
+//! # }
+//! # }
 //! ```
 //!
 //! Example of returning a memory provider that performs configuration for optimal memory (see
 //! `examples/bb_has_memory_optimizing.rs` for full code):
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # #[derive(Debug)]
 //! # struct UdpConnection {
 //! #     io_context: IoContext,
@@ -373,12 +429,16 @@
 //! # }
 //! # #[derive(Clone, Copy)]
 //! # struct MemoryConfiguration { requires_page_alignment: bool, zero_memory_on_release: bool, requires_registered_memory: bool }
+//! # }
+//! # }
 //! ```
 //!
 //! Example of returning a global memory pool when the type is agnostic toward memory configuration
 //! (see `examples/bb_has_memory_global.rs` for full code):
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! # #[derive(Debug)]
 //! # struct ChecksumCalculator {
 //! #     memory: GlobalPool,
@@ -392,6 +452,8 @@
 //!         self.memory.clone()
 //!     }
 //! }
+//! # }
+//! # }
 //! ```
 //!
 //! It is generally expected that all types work with byte sequences using memory from any provider.
@@ -484,6 +546,8 @@
 //! intended usage.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! use std::sync::OnceLock;
 //!
 //! use bytesbuf::BytesView;
@@ -518,6 +582,8 @@
 //! #     fn accept() -> Self { Connection }
 //! #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
 //! #     fn write(&self, _data: BytesView) {}
+//! # }
+//! # }
 //! # }
 //! ```
 //!
@@ -559,6 +625,10 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/favicon.ico")]
 
+extern crate alloc;
+#[cfg(all(feature = "std", not(test)))]
+extern crate std;
+
 // The root level contains "byte sequence" types, whereas the closely related
 // "memory management" types are shoved away into the `mem` module. This is largely
 // for organizational purposes, to help navigate the API documentation better. Both
@@ -567,6 +637,8 @@ pub mod mem;
 
 mod buf;
 mod buf_put;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod buf_writer;
 #[cfg(any(test, feature = "bytes-compat"))]
 mod bytes_compat;
@@ -577,9 +649,12 @@ mod span_builder;
 mod vec;
 mod view;
 mod view_get;
+#[cfg(feature = "std")]
 mod view_read;
 
 pub use buf::{BytesBuf, BytesBufRemaining, BytesBufVectoredWrite};
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use buf_writer::BytesBufWriter;
 pub use constants::MAX_INLINE_SPANS;
 pub use memory_guard::MemoryGuard;

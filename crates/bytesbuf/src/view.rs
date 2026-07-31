@@ -1,11 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::hash::{Hash, Hasher};
-use std::iter;
-use std::num::NonZero;
-use std::ops::{Bound, RangeBounds};
+use alloc::vec::Vec;
+use core::hash::{Hash, Hasher};
+use core::iter;
+use core::num::NonZero;
+use core::ops::{Bound, RangeBounds};
 
+#[cfg(feature = "std")]
 use nm::{Event, Magnitude};
 use smallvec::SmallVec;
 
@@ -33,6 +35,8 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 /// # Example
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
 /// # let memory = bytesbuf::mem::GlobalPool::new();
 /// use bytesbuf::BytesView;
 ///
@@ -45,6 +49,8 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 /// }
 ///
 /// assert!(view.is_empty());
+/// # }
+/// # }
 /// ```
 ///
 /// [`BytesBuf`]: crate::BytesBuf
@@ -85,6 +91,7 @@ impl BytesView {
         spans_reversed.iter().for_each(|span| assert!(!span.is_empty()));
 
         // We can use this to fine-tune the inline span count once we have real-world data.
+        #[cfg(feature = "std")]
         VIEW_CREATED_SPANS.with(|x| x.observe(spans_reversed.len()));
 
         let len = spans_reversed.iter().fold(0_usize, |acc, span: &Span| {
@@ -114,6 +121,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -125,6 +134,8 @@ impl BytesView {
     ///
     /// assert_eq!(response_line.len(), 15);
     /// assert_eq!(response_line, b"HTTP/1.1 200 OK");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -160,6 +171,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # struct TcpConnection;
     /// # impl TcpConnection {
     /// #     fn memory(&self) -> impl bytesbuf::mem::Memory { bytesbuf::mem::GlobalPool::new() }
@@ -172,6 +185,8 @@ impl BytesView {
     /// let header_key = BytesView::copied_from_slice(CONTENT_TYPE_KEY, &tcp_connection.memory());
     ///
     /// assert_eq!(header_key.len(), 14);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Reusing without copying
@@ -204,6 +219,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -215,6 +232,8 @@ impl BytesView {
     ///
     /// _ = view.get_u16_le();
     /// assert_eq!(view.len(), 2);
+    /// # }
+    /// # }
     /// ```
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
@@ -249,6 +268,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -258,6 +279,8 @@ impl BytesView {
     /// assert_eq!(view.range(7..), b"world!");
     /// assert_eq!(view.range(..5), b"Hello");
     /// assert_eq!(view.range(..), b"Hello, world!");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -496,6 +519,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -510,6 +535,8 @@ impl BytesView {
     /// });
     ///
     /// assert!(view.is_empty());
+    /// # }
+    /// # }
     /// ```
     pub fn consume_all_slices<F>(&mut self, mut f: F)
     where
@@ -532,6 +559,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -550,6 +579,8 @@ impl BytesView {
     /// }
     ///
     /// assert_eq!(ten_bytes, b"0123456789");
+    /// # }
+    /// # }
     /// ```
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
     #[must_use]
@@ -566,6 +597,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// # struct PageAlignedMemory;
     /// use bytesbuf::BytesView;
@@ -581,6 +614,8 @@ impl BytesView {
     ///         data.len()
     ///     );
     /// }
+    /// # }
+    /// # }
     /// ```
     ///
     /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
@@ -596,6 +631,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -604,6 +641,8 @@ impl BytesView {
     /// let bytes = view.to_vec();
     ///
     /// assert_eq!(bytes, b"Hello, world!");
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
@@ -624,6 +663,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// # struct PageAlignedMemory;
     /// use bytesbuf::BytesView;
@@ -635,6 +676,8 @@ impl BytesView {
     ///     .is_some_and(|meta| meta.is::<PageAlignedMemory>());
     ///
     /// println!("First slice is page-aligned: {is_page_aligned}");
+    /// # }
+    /// # }
     /// ```
     ///
     /// See the stand-alone example `bb_optimal_path.rs` in the `bytesbuf` crate for
@@ -656,6 +699,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -674,6 +719,8 @@ impl BytesView {
     /// }
     ///
     /// assert_eq!(ten_bytes, b"0123456789");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -722,6 +769,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -731,6 +780,8 @@ impl BytesView {
     /// greeting.append(name);
     ///
     /// assert_eq!(greeting, b"Hello, world!");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -752,6 +803,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::BytesView;
     ///
@@ -764,6 +817,8 @@ impl BytesView {
     /// assert_eq!(greeting, b"Hello, ");
     /// // New view contains the concatenation.
     /// assert_eq!(message, b"Hello, world!");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -1035,9 +1090,11 @@ impl<'s> Iterator for BytesViewSlices<'s> {
     }
 }
 
+#[cfg(feature = "std")]
 const SPAN_COUNT_BUCKETS: &[Magnitude] = &[0, 1, 2, 4, 8, 16, 32];
 
-thread_local! {
+#[cfg(feature = "std")]
+std::thread_local! {
     static VIEW_CREATED_SPANS: Event = Event::builder()
         .name("bytesbuf_view_created_spans")
         .histogram(SPAN_COUNT_BUCKETS)

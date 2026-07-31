@@ -87,12 +87,14 @@ pub use crate::__multitude_vec as vec;
 pub struct Vec<'a, T, A: Allocator + Clone = Global> {
     buf: ArenaBuf<'a, T>,
     arena: &'a Arena<A>,
-    /// Marker for covariance in `T` and to enforce `!Send`/`!Sync`.
+    /// Preserves covariance in `T` and independently enforces
+    /// `!Send`/`!Sync`.
     _phantom: PhantomData<*const T>,
 }
 
-// `Vec` is `!Send`/`!Sync` because it holds `&Arena<A>` and mutating or drop
-// paths call back into that arena. The reference alone blocks the auto traits.
+// `PhantomData<*const T>` unconditionally makes `Vec` `!Send`/`!Sync`.
+// Its `&Arena<A>` field independently blocks those auto traits because Arena
+// is not Sync; mutation and drop paths call back into that borrowed arena.
 
 // `Vec`'s owning iterator is defined in the `into_iter` module and
 // re-exported above.
@@ -135,10 +137,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // reservation would later overflow and panic on the `expect` below).
         let payload_bytes = mem::size_of::<T>().checked_mul(new_cap).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let refill_hint = if const { buffer_freezable::<T>() } {
-            // Freezable buffers carry the `Arc<[T]>` freeze prefix (the
-            // superset of `Rc`'s, so a freeze into either reuses it); the
-            // refill hint must budget for it so the chunk fits prefix +
-            // payload + alignment slack.
+            // Freezable buffers carry the `Arc<[T]>` freeze prefix, the
+            // superset reused when freezing into Box, Rc, or Arc. The refill
+            // hint must budget for prefix + payload + alignment slack.
             crate::arena::alloc_prefixed::worst_case_strong_slice_payload::<crate::internal::thin_dst::AtomicStrong, T>(new_cap)
         } else {
             payload_bytes

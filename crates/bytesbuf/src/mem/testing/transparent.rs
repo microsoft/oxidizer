@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(test))]
+use alloc::vec::Vec;
 use std::num::NonZero;
 
 use thread_aware::ThreadAware;

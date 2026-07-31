@@ -275,8 +275,7 @@ pub(crate) fn warm_arena() -> Arena {
 
 pub(crate) fn warm_cached_arena(input: &[u8]) -> Arena {
     let mut arena = warm_arena();
-    arena_vec_baseline_hot_path(&arena, input);
-    arena.reset();
+    arena_vec_baseline_hot_path(&mut arena, input);
     arena
 }
 
@@ -291,16 +290,18 @@ pub(crate) fn warm_streaming_arena(input: &[u8]) -> Arena {
 }
 
 pub(crate) fn unescaped_state() -> RecordBatchState {
+    let input = workload_json(false);
     RecordBatchState {
-        arena: warm_arena(),
-        input: workload_json(false),
+        arena: warm_cached_arena(&input),
+        input,
     }
 }
 
 pub(crate) fn escaped_state() -> RecordBatchState {
+    let input = workload_json(true);
     RecordBatchState {
-        arena: warm_arena(),
-        input: workload_json(true),
+        arena: warm_cached_arena(&input),
+        input,
     }
 }
 
@@ -321,10 +322,10 @@ pub(crate) fn reset_recreate_state() -> RecordBatchState {
 }
 
 pub(crate) fn malformed_state() -> RecordBatchState {
-    RecordBatchState {
-        arena: warm_arena(),
-        input: malformed_json(),
-    }
+    let input = malformed_json();
+    let mut arena = warm_arena();
+    malformed_arena_hot_path(&mut arena, &input);
+    RecordBatchState { arena, input }
 }
 
 pub(crate) fn standard_refresh_state() -> StandardRefreshState {
@@ -385,11 +386,12 @@ pub(crate) fn standard_vec_hot_path(input: &[u8]) {
 }
 
 #[inline(never)]
-pub(crate) fn arena_box_slice_hot_path(arena: &Arena, input: &[u8]) {
+pub(crate) fn arena_box_slice_hot_path(arena: &mut Arena, input: &[u8]) {
     let values: ArenaBox<[ArenaRecord]> = arena.deserialize_json(black_box(input)).expect("benchmark JSON is valid");
     let summary = (values.len(), values.first().map_or(0, |record| record.name.len()));
     black_box(summary);
     drop(values);
+    arena.reset();
 }
 
 #[inline(never)]
@@ -401,10 +403,11 @@ pub(crate) fn deserialize_arena_vec(values: &mut multitude::vec::Vec<'_, ArenaRe
 }
 
 #[inline(never)]
-pub(crate) fn arena_vec_baseline_hot_path(arena: &Arena, input: &[u8]) {
+pub(crate) fn arena_vec_baseline_hot_path(arena: &mut Arena, input: &[u8]) {
     let mut values = arena.alloc_vec();
     deserialize_arena_vec(&mut values, input);
     drop(values);
+    arena.reset();
 }
 
 #[inline(never)]
@@ -453,7 +456,7 @@ pub(crate) fn sparse_lazy_standard_hot_path(input: &[u8]) {
 }
 
 #[inline(never)]
-pub(crate) fn sparse_arena_hot_path(arena: &Arena, input: &[u8]) {
+pub(crate) fn sparse_arena_hot_path(arena: &mut Arena, input: &[u8]) {
     let mut values = arena.alloc_vec();
     deserialize_arena_vec(&mut values, input);
     let retained: BTreeMap<u64, (ArenaBox<str>, ArenaBox<str>)> = values
@@ -463,6 +466,7 @@ pub(crate) fn sparse_arena_hot_path(arena: &Arena, input: &[u8]) {
         .collect();
     black_box(&retained);
     drop(retained);
+    arena.reset();
 }
 
 #[inline(never)]
@@ -679,18 +683,20 @@ pub(crate) fn malformed_standard_hot_path(input: &[u8]) {
 }
 
 #[inline(never)]
-pub(crate) fn malformed_arena_hot_path(arena: &Arena, input: &[u8]) {
+pub(crate) fn malformed_arena_hot_path(arena: &mut Arena, input: &[u8]) {
     let result = arena.deserialize_json::<ArenaBox<[ArenaRecord]>, _>(black_box(input));
     assert!(result.is_err(), "malformed benchmark JSON must be rejected");
     let _ = black_box(result);
+    arena.reset();
 }
 
 #[inline(never)]
-pub(crate) fn resource_limited_hot_path(arena: &Arena, input: &[u8]) {
+pub(crate) fn resource_limited_hot_path(arena: &mut Arena, input: &[u8]) {
     let limits = DeserializationLimits::unlimited().with_max_sequence_len(BATCH_RECORDS - 1);
     let result = arena.deserialize_json_with_limits::<ArenaBox<[ArenaRecord]>, _>(black_box(input), limits);
     assert!(result.is_err(), "the batch exceeds the configured sequence limit");
     let _ = black_box(result);
+    arena.reset();
 }
 
 #[cfg(feature = "stats")]

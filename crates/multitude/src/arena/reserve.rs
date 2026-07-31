@@ -60,10 +60,11 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
-    /// Like [`Self::try_reserve_local_slice`] but reserves the `Arc<[T]>`
+    /// Like [`Self::try_reserve_local_slice`] but reserves the shared-owner
     /// freeze prefix (`[strong][pad][len]`) ahead of the payload so the
-    /// resulting buffer can later be frozen into an `Arc<[T]>` / `Box<[T]>`
-    /// in place with no copy (see the [`Vec`](crate::Vec) freeze paths).
+    /// resulting buffer can later be frozen into a `Box<[T]>`, `Rc<[T]>`, or
+    /// `Arc<[T]>` in place with no copy (see the [`Vec`](crate::Vec) freeze
+    /// paths).
     ///
     /// As with the other reference reservations no chunk refcount is taken
     /// here: the chunk is pinned via `mark_reference_handout` and the

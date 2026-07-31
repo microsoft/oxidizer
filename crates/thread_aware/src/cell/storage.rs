@@ -3,6 +3,8 @@
 
 //! Primitives for thread-aware data storage.
 
+#[cfg(not(test))]
+use alloc::vec::Vec;
 use std::marker::PhantomData;
 
 use crate::affinity::Affinity;

@@ -287,8 +287,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         Some(Uninit::new(payload))
     }
 
-    /// Reserve storage for one `Arc<T>`-style value with a leading
-    /// per-`Arc` strong reference count.
+    /// Reserve storage for one shared-owner value with a leading strong
+    /// reference count shared by its `Arc` or `Rc` family.
     ///
     /// Layout: `[strong][pad][metadata][payload]`. Initializes strong count
     /// to 1 and returns the payload pointer.
@@ -373,7 +373,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
 
     /// Reserves a growable-buffer slot carrying the full freeze prefix
     /// (`[strong][pad][len][payload]`, the `Arc<[T]>` layout) so the buffer
-    /// can later be frozen into an `Arc<[T]>` / `Box<[T]>` in place — no copy.
+    /// can later be frozen into a `Box<[T]>`, `Rc<[T]>`, or `Arc<[T]>` in
+    /// place — no copy.
     ///
     /// Writes `strong = 1` and reserves the length slot (left uninitialized;
     /// the final length is written at freeze time). Takes **no** chunk

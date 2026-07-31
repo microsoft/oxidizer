@@ -31,13 +31,14 @@ pub(crate) const fn max_smart_ptr_align() -> usize {
 }
 
 /// Whether a `Vec<T>` (or `String` / `Utf16String`) backing buffer can be
-/// reserved with the `Arc<[T]>` freeze prefix so it freezes into an
-/// `Arc<[T]>` / `Box<[T]>` in place with no copy.
+/// reserved with the shared-owner freeze prefix so it freezes into a
+/// `Box<[T]>`, `Rc<[T]>`, or `Arc<[T]>` in place with no copy.
 ///
 /// ZSTs have no backing buffer, and over-aligned `T` (alignment at or above
 /// the smart-pointer cap) cannot host the prefix while keeping the payload
-/// inside the first [`CHUNK_ALIGN`] bytes. Both fall back to the copying
-/// freeze path. This is a pure `const` predicate so the gate compiles away.
+/// inside the first [`CHUNK_ALIGN`] bytes. ZSTs use the move fallback;
+/// over-aligned values are rejected by the smart-pointer allocation path.
+/// This is a pure `const` predicate so the gate compiles away.
 #[inline]
 #[cfg_attr(test, mutants::skip)] // equivalent mutants: the only types these reclassify (ZSTs / over-aligned) are gated out by `has_freeze_prefix()` or rejected by the smart-pointer alignment cap, so freeze behavior is unchanged
 pub(crate) const fn buffer_freezable<T>() -> bool {

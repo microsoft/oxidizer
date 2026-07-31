@@ -3178,7 +3178,7 @@ mod drop_slice_over_u16_max_succeeds {
     }
 
     // `Arc<[T]>` uninit/zeroed slices have no `u16` element-count cap
-    // under per-`Arc` reference counting (they drop via
+    // with an allocation-local shared strong count (they drop via
     // `drop_in_place::<[T]>`, not a `u16`-counted chunk entry), so a
     // Drop-typed slice longer than `u16::MAX` now allocates successfully.
     #[cfg(not(miri))]

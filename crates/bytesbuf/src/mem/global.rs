@@ -463,7 +463,7 @@ const RESERVATION_SIZE_BUCKETS: &[Magnitude] = &[
     0, 256, 512, 1024, 2048, 4096, 8192, 16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_048_576,
 ];
 
-thread_local! {
+std::thread_local! {
     static BLOCK_RENTED_SIZE: Event = Event::builder()
         .name("bytesbuf_global_pool_block_rented_size")
         .histogram(BLOCK_SIZE_BUCKETS)

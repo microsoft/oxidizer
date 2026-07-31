@@ -6,6 +6,7 @@
 //!
 //! Paired with `multitude_record_batch_cg.rs`, which covers representative
 //! deterministic hot paths under Callgrind.
+//! Comparable standard and arena cases include per-iteration reclamation.
 
 #![allow(dead_code, reason = "wide deserialized records are consumed as whole values")]
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
@@ -54,23 +55,25 @@ fn decode(criterion: &mut Criterion) {
         });
     });
     group.bench_function("arena_box_slice", |bencher| {
-        let arena = warm_arena();
+        let mut arena = warm_arena();
+        arena_box_slice_hot_path(&mut arena, &input);
         bencher.iter_custom(|iters| {
             let _span = box_allocations.measure_thread().iterations(iters);
             let start = Instant::now();
             for _ in 0..iters {
-                arena_box_slice_hot_path(&arena, &input);
+                arena_box_slice_hot_path(&mut arena, &input);
             }
             start.elapsed()
         });
     });
     group.bench_function("arena_vec_baseline", |bencher| {
-        let arena = warm_arena();
+        let mut arena = warm_arena();
+        arena_vec_baseline_hot_path(&mut arena, &input);
         bencher.iter_custom(|iters| {
             let _span = vec_allocations.measure_thread().iterations(iters);
             let start = Instant::now();
             for _ in 0..iters {
-                arena_vec_baseline_hot_path(&arena, &input);
+                arena_vec_baseline_hot_path(&mut arena, &input);
             }
             start.elapsed()
         });
@@ -88,12 +91,14 @@ fn strings(criterion: &mut Criterion) {
     });
     group.bench_function("standard_vec_escaped", |bencher| bencher.iter(|| standard_vec_hot_path(&escaped)));
     group.bench_function("arena_vec_unescaped", |bencher| {
-        let arena = warm_arena();
-        bencher.iter(|| arena_vec_baseline_hot_path(&arena, &unescaped));
+        let mut arena = warm_arena();
+        arena_vec_baseline_hot_path(&mut arena, &unescaped);
+        bencher.iter(|| arena_vec_baseline_hot_path(&mut arena, &unescaped));
     });
     group.bench_function("arena_vec_escaped", |bencher| {
-        let arena = warm_arena();
-        bencher.iter(|| arena_vec_baseline_hot_path(&arena, &escaped));
+        let mut arena = warm_arena();
+        arena_vec_baseline_hot_path(&mut arena, &escaped);
+        bencher.iter(|| arena_vec_baseline_hot_path(&mut arena, &escaped));
     });
     group.finish();
 }
@@ -135,8 +140,9 @@ fn sparse_retention(criterion: &mut Criterion) {
 
     group.bench_function("standard_one_in_eight", |bencher| bencher.iter(|| sparse_standard_hot_path(&input)));
     group.bench_function("arena_one_in_eight", |bencher| {
-        let arena = warm_arena();
-        bencher.iter(|| sparse_arena_hot_path(&arena, &input));
+        let mut arena = warm_arena();
+        sparse_arena_hot_path(&mut arena, &input);
+        bencher.iter(|| sparse_arena_hot_path(&mut arena, &input));
     });
     group.finish();
 }
@@ -163,12 +169,14 @@ fn errors(criterion: &mut Criterion) {
         bencher.iter(|| malformed_standard_hot_path(&malformed));
     });
     group.bench_function("malformed_arena", |bencher| {
-        let arena = warm_arena();
-        bencher.iter(|| malformed_arena_hot_path(&arena, &malformed));
+        let mut arena = warm_arena();
+        malformed_arena_hot_path(&mut arena, &malformed);
+        bencher.iter(|| malformed_arena_hot_path(&mut arena, &malformed));
     });
     group.bench_function("resource_limited_arena", |bencher| {
-        let arena = warm_arena();
-        bencher.iter(|| resource_limited_hot_path(&arena, &valid));
+        let mut arena = warm_arena();
+        resource_limited_hot_path(&mut arena, &valid);
+        bencher.iter(|| resource_limited_hot_path(&mut arena, &valid));
     });
     group.finish();
 }

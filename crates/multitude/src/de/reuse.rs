@@ -42,7 +42,8 @@ impl<A: Allocator + Clone> String<'_, A> {
     /// capacity.
     ///
     /// The string is cleared before reading input. If deserialization fails,
-    /// it remains valid but may contain a partially deserialized value.
+    /// it is cleared again before the error is returned, retaining its
+    /// allocation for another attempt.
     ///
     /// ```
     /// use multitude::Arena;
@@ -162,7 +163,11 @@ impl<'de, A: Allocator + Clone> DeserializeReuse<'de> for String<'_, A> {
         }
 
         self.clear();
-        deserializer.deserialize_str(StringVisitor(self))
+        let result = deserializer.deserialize_str(StringVisitor(self));
+        if result.is_err() {
+            self.clear();
+        }
+        result
     }
 }
 

@@ -1,12 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Helpers for defining and calling [`ThreadAware`] closures.
+//! Helpers for defining and calling [`trait@ThreadAware`] closures.
 
+#[cfg(feature = "std")]
 mod erased;
 
-use std::pin::Pin;
+#[cfg(not(test))]
+use alloc::boxed::Box;
+use core::fmt;
+use core::pin::Pin;
 
+#[cfg(feature = "std")]
 pub(crate) use erased::ErasedClosureOnce;
 
 use crate::ThreadAware;
@@ -15,7 +20,7 @@ use crate::affinity::Affinity;
 /// A boxed, pinned, `Send` future - the return type of async closure calls.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
+/// Marks `FnOnce()`-like closures whose captured values all implement [`trait@ThreadAware`].
 ///
 /// Use [`closure_once`] function to construct these.
 pub trait ThreadAwareFnOnce<T: ?Sized>: ThreadAware {
@@ -23,7 +28,7 @@ pub trait ThreadAwareFnOnce<T: ?Sized>: ThreadAware {
     fn call_once(self) -> T;
 }
 
-/// Marks `Fn()`-like closure whose captured values all implement [`ThreadAware`].
+/// Marks `Fn()`-like closure whose captured values all implement [`trait@ThreadAware`].
 ///
 /// This trait is used to define closures that can be called multiple times, without consuming the closure.
 pub trait ThreadAwareFn<T>: ThreadAware {
@@ -31,7 +36,7 @@ pub trait ThreadAwareFn<T>: ThreadAware {
     fn call(&self) -> T;
 }
 
-/// Marks `FnMut()`-like closure whose captured values all implement [`ThreadAware`].
+/// Marks `FnMut()`-like closure whose captured values all implement [`trait@ThreadAware`].
 ///
 /// This trait is used to define closures that can be called mutably, allowing the closure to modify its internal state.
 pub trait ThreadAwareFnMut<T>: ThreadAware {
@@ -211,7 +216,7 @@ where
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
-/// parameterless closure that ensures that captured data implements [`ThreadAware`].
+/// parameterless closure that ensures that captured data implements [`trait@ThreadAware`].
 pub fn closure<T, D>(data: D, f: fn(&D) -> T) -> Closure<T, D>
 where
     D: ThreadAware,
@@ -223,7 +228,7 @@ where
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
-/// parameterless closure that ensures that captured data implements [`ThreadAware`].
+/// parameterless closure that ensures that captured data implements [`trait@ThreadAware`].
 pub fn closure_mut<T, D>(data: D, f: fn(&mut D) -> T) -> ClosureMut<T, D>
 where
     D: ThreadAware,
@@ -235,7 +240,7 @@ where
 ///
 /// Create a closure-like object by explicitly providing closed-over
 /// value and a function pointer to operate on that value, essentially simulating a
-/// parameterless closure that ensures that captured data implements [`ThreadAware`].
+/// parameterless closure that ensures that captured data implements [`trait@ThreadAware`].
 ///
 /// Usage:
 /// ```rust
@@ -280,8 +285,8 @@ pub struct AsyncClosure<T, D> {
     f: for<'a> fn(&'a D) -> BoxFuture<'a, T>,
 }
 
-impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosure<T, D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T, D: fmt::Debug> fmt::Debug for AsyncClosure<T, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AsyncClosure").field("data", &self.data).finish_non_exhaustive()
     }
 }
@@ -339,8 +344,8 @@ pub struct AsyncClosureOnce<T, D> {
     f: fn(D) -> BoxFuture<'static, T>,
 }
 
-impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosureOnce<T, D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T, D: fmt::Debug> fmt::Debug for AsyncClosureOnce<T, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AsyncClosureOnce").field("data", &self.data).finish_non_exhaustive()
     }
 }
@@ -383,8 +388,8 @@ pub struct AsyncClosureMut<T, D> {
     f: for<'a> fn(&'a mut D) -> BoxFuture<'a, T>,
 }
 
-impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosureMut<T, D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T, D: fmt::Debug> fmt::Debug for AsyncClosureMut<T, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AsyncClosureMut").field("data", &self.data).finish_non_exhaustive()
     }
 }

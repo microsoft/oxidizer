@@ -1,10 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::mem::MaybeUninit;
-use std::num::NonZero;
-use std::ptr::NonNull;
-use std::sync::atomic::{self, AtomicUsize};
+#[cfg(not(test))]
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::mem::{self, MaybeUninit};
+use core::num::NonZero;
+use core::ptr::NonNull;
+use core::sync::atomic::{self, AtomicUsize};
 
 use smallvec::SmallVec;
 
@@ -185,7 +188,7 @@ impl Iterator for VecBlockIterator {
         // We want to take the first `bytes_to_take` bytes, so we split_off at that index
         // and swap - what we split off becomes `remaining`, and what's left is what we return.
         let keep = self.remaining.split_off(bytes_to_take);
-        let take = std::mem::replace(&mut self.remaining, keep);
+        let take = mem::replace(&mut self.remaining, keep);
 
         Some(take)
     }

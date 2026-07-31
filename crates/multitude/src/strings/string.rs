@@ -682,8 +682,9 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Mirrors [`std::string::String::drain`].
     ///
-    /// The drained range is removed immediately; the returned iterator yields
-    /// the removed characters (it is also double-ended).
+    /// The string is truncated to the start of the range immediately. The
+    /// surviving tail is shifted into place when the returned, double-ended
+    /// iterator is dropped; forgetting the iterator prevents that restoration.
     ///
     /// # Panics
     ///
@@ -1080,7 +1081,7 @@ impl<A: Allocator + Clone> PartialEq for String<'_, A> {
     }
 }
 
-impl_arena_string_common!(String, u8);
+impl_arena_string_common!(String, u8, "UTF-8 bytes");
 
 impl<A: Allocator + Clone> Ord for String<'_, A> {
     fn cmp(&self, other: &Self) -> Ordering {

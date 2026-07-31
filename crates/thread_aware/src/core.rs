@@ -22,8 +22,8 @@ use crate::affinity::Affinity;
 ///   approach can be also be achieved by wrapping a value in the
 ///   [`Unaware`](`crate::Unaware`) type.
 /// * Construct a per-affinity value - with this approach, each affinity gets its own
-///   independently-initialized value. The [`Arc::new_with`](`crate::Arc::new_with`)
-///   function facilitates this approach.
+///   independently-initialized value. With the `std` feature, `Arc::new_with`
+///   facilitates this approach.
 /// * Utilize true sharing in a controlled manner - have some data that is actually shared
 ///   between the values on different affinities, but in a controlled manner that minimizes
 ///   the contention for the synchronization primitives necessary. This is a more advanced

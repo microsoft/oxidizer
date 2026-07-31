@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
 use std::{fmt, sync};
 
 use super::clone_fn::ErasedCloneFn;

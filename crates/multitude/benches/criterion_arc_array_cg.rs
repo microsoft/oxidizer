@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise allocation benchmarks for multitude.
+//! Callgrind `Arc<[Arc<[u8]>]>` build benchmarks for multitude.
 //!
-//! Mirrors `benches/criterion_alloc.rs` 1:1: each gungraun function
-//! `<group>_<variant>` corresponds to a criterion benchmark
-//! `<group>/<variant>`.
+//! Paired with `criterion_arc_array.rs`: each function named
+//! `arc_array_<variant>` corresponds to
+//! `criterion_arc_array/arc_array/<variant>`.
 //!
-//! Run with `cargo bench --bench gungraun_alloc` on a Linux host with Valgrind.
+//! Run with `cargo bench --bench criterion_arc_array_cg` on a Linux host with
+//! Valgrind.
 
 #![allow(missing_docs, reason = "Benchmark")]
 #![allow(unused_results, reason = "black_box of bench input is intentional")]
@@ -15,13 +16,14 @@
     clippy::needless_pass_by_value,
     reason = "gungraun bench inputs are passed by value by the framework"
 )]
-#![allow(clippy::ref_as_ptr, reason = "trivial pointer cast in bench plumbing")]
+#![allow(clippy::type_complexity, reason = "benchmark state tuples are inherently complex")]
 #![allow(clippy::too_many_lines, reason = "benchmark file")]
 #![cfg_attr(
     target_os = "linux",
     expect(
         clippy::exit,
         clippy::missing_docs_in_private_items,
+        unused_qualifications,
         reason = "Triggered by Gungraun macro expansion. Upstream tracking issues are pending."
     )
 )]
@@ -32,6 +34,7 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
+#[path = "criterion_arc_array_cg/linux.rs"]
 mod linux;
 
 #[cfg(target_os = "linux")]
@@ -41,5 +44,5 @@ use linux::*;
 gungraun::main!(
     config = gungraun::LibraryBenchmarkConfig::default()
         .tool(gungraun::Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = alloc_group, allocator_grow_group
+    library_benchmark_groups = arc_array
 );

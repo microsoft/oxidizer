@@ -1,9 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
+#[cfg(not(test))]
+use alloc::string::String;
+#[cfg(not(test))]
+use alloc::vec::Vec;
+use core::time::Duration;
+#[cfg(feature = "std")]
 use std::collections::HashMap;
+#[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use crate::affinity::Affinity;
 use crate::core::ThreadAware;
@@ -33,8 +41,10 @@ impl_transfer!(f64);
 impl_transfer!(char);
 
 impl_transfer!(String);
+#[cfg(feature = "std")]
 impl_transfer!(PathBuf);
 impl_transfer!(Duration);
+#[cfg(feature = "std")]
 impl_transfer!(&Path);
 
 impl_transfer!(&'static str);
@@ -132,6 +142,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 // TODO: We should probably support custom hashers as well.
 #[expect(
     clippy::implicit_hasher,
@@ -139,11 +150,11 @@ where
 )]
 impl<K, V> ThreadAware for HashMap<K, V>
 where
-    K: ThreadAware + Eq + std::hash::Hash,
+    K: ThreadAware + Eq + core::hash::Hash,
     V: ThreadAware,
 {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        let old = std::mem::take(self);
+        let old = core::mem::take(self);
         for (mut key, mut value) in old {
             key.relocate(source, destination);
             value.relocate(source, destination);

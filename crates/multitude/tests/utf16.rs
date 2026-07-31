@@ -3152,7 +3152,7 @@ mod from_mutants_extras_utf16_scattered {
     /// An odd-length `u8` (`Arc<str>`)
     /// allocation leaves the shared bump cursor odd, then a `u16`
     /// (`Arc<Utf16Str>`) allocation reserves a block aligned to 4 bytes (so
-    /// the per-`Arc` `AtomicU32` strong prefix is aligned, via
+    /// the allocation's `AtomicU32` strong prefix is aligned, via
     /// `arc_block_align(u16) = max(2, 4)`). The routing sizes the refill /
     /// oversized hint with `worst_case_arc_slice_payload` (strong prefix +
     /// length prefix + payload + front alignment slack), so sweeping `u16`

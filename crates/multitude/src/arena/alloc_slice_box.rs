@@ -24,9 +24,6 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `T::drop` on each element immediately when the smart pointer is
     /// dropped.
     ///
-    /// Available only with the `dst` Cargo feature, which pulls in the
-    /// `ptr_meta` crate to polyfill stable `ptr::metadata`.
-    ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.

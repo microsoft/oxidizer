@@ -30,9 +30,9 @@ pub(crate) struct ArenaBuf<'a, T> {
     ptr: NonNull<T>,
     len: usize,
     cap: usize,
-    /// Whether `ptr` is immediately preceded by an `Arc<[T]>` freeze prefix
-    /// (`[strong][pad][len]`), letting the buffer freeze into an `Arc<[T]>` /
-    /// `Box<[T]>` in place. True for buffers installed by the freezable
+    /// Whether `ptr` is immediately preceded by a shared-owner freeze prefix
+    /// (`[strong][pad][len]`), letting the buffer freeze into a `Box<[T]>`,
+    /// `Rc<[T]>`, or `Arc<[T]>` in place. True for buffers installed by the freezable
     /// reservation path; false for empty buffers and `split_off` tails (whose
     /// base points mid-chunk, with no prefix of their own).
     freeze_prefix: bool,
@@ -46,7 +46,7 @@ impl<T> ArenaBuf<'_, T> {
     ///
     /// `(ptr, len, cap)` must satisfy the type invariants for storage in a
     /// live arena chunk that outlives `'a`. `freeze_prefix` must be true only
-    /// when `ptr` is immediately preceded by a valid `Arc<[T]>` freeze prefix.
+    /// when `ptr` is immediately preceded by a valid shared-owner freeze prefix.
     #[inline]
     pub(crate) const unsafe fn from_raw_parts(ptr: NonNull<T>, len: usize, cap: usize, freeze_prefix: bool) -> Self {
         Self {
@@ -74,8 +74,8 @@ impl<'a, T> ArenaBuf<'a, T> {
         }
     }
 
-    /// Whether this buffer carries the `Arc<[T]>` freeze prefix and can be
-    /// frozen into an `Arc<[T]>` / `Box<[T]>` in place (no copy).
+    /// Whether this buffer carries the shared-owner freeze prefix and can be
+    /// frozen into a `Box<[T]>`, `Rc<[T]>`, or `Arc<[T]>` in place (no copy).
     #[inline]
     pub(crate) const fn has_freeze_prefix(&self) -> bool {
         self.freeze_prefix
@@ -188,7 +188,10 @@ impl<'a, T> ArenaBuf<'a, T> {
     ///
     /// `(new_ptr, new_cap)` must reference a fresh, non-overlapping
     /// reservation of at least `new_cap >= self.len` uninitialized `T`
-    /// slots whose backing storage outlives `'a`.
+    /// slots whose backing storage outlives `'a`. If
+    /// `buffer_freezable::<T>()` is true, the reservation must carry the
+    /// shared-owner freeze prefix; otherwise it must come from the ordinary
+    /// local-slice path.
     #[inline]
     pub(crate) unsafe fn replace_buffer_raw(&mut self, new_ptr: NonNull<T>, new_cap: usize) {
         debug_assert!(new_cap >= self.len, "replace_buffer_raw: new capacity below live length");

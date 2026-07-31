@@ -3,8 +3,8 @@
 
 //! We separate out the mutation functions for ease of maintenance.
 
-use std::borrow::Borrow;
-use std::ptr;
+use core::borrow::Borrow;
+use core::ptr;
 
 use crate::{BytesBuf, BytesView};
 
@@ -52,6 +52,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -61,6 +63,8 @@ impl BytesBuf {
     /// buf.put_slice(*b"world!");
     ///
     /// assert_eq!(buf.consume_all(), b"Hello, world!");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -122,6 +126,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use bytesbuf::BytesView;
     /// use bytesbuf::mem::Memory;
     /// # use bytesbuf::mem::GlobalPool;
@@ -136,6 +142,8 @@ impl BytesBuf {
     /// buf.put_bytes(header); // Zero-copy append
     ///
     /// assert_eq!(buf.consume_all(), b"dataHDR");
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -150,6 +158,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -159,6 +169,8 @@ impl BytesBuf {
     /// buf.put_byte(0xFE);
     ///
     /// assert_eq!(buf.consume_all(), &[0xCA, 0xFE]);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics
@@ -173,6 +185,8 @@ impl BytesBuf {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytesbuf::mem::Memory;
     ///
@@ -188,6 +202,8 @@ impl BytesBuf {
     ///     data.first_slice(),
     ///     b"HDR:\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
     /// );
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Panics

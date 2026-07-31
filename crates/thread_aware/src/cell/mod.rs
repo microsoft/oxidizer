@@ -10,6 +10,8 @@ mod builtin;
 #[cfg(test)]
 mod tests;
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -47,11 +49,11 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// Transferable reference counted type.
 ///
 /// This type works like a per-affinity (per-thread) [`sync::Arc`]. Each affinity gets a unique value that is shared by clones
-/// of the `Arc`, but the [`ThreadAware`] implementation ensures that when moving to another affinity, the resulting
+/// of the `Arc`, but the [`trait@ThreadAware`] implementation ensures that when moving to another affinity, the resulting
 /// `Arc` will point to the value in the destination affinity. See [`new`](`Arc::new`) for information on constructing instances.
 ///
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
-/// example demonstrates this using the counter implemented in the documentation for the [`ThreadAware`] trait.
+/// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.
 ///
 /// ```rust
 /// # use thread_aware::{Arc, ThreadAware, PerCore};
@@ -173,12 +175,12 @@ where
     /// * The provided function must be pure with respect to per-processor isolation (it should not
     ///   leak references into other processors). Any captured state should therefore be provided via
     ///   globally shareable mechanisms or prefer [`new_with`](Self::new_with) if you need to
-    ///   capture data that itself implements [`ThreadAware`].
+    ///   capture data that itself implements [`trait@ThreadAware`].
     ///
     /// When transferring to another affinity which doesn't yet contain a value, the constructor is
     /// called in the destination affinity to create a brand new instance.
     ///
-    /// For example, the counter type we implemented in the documentation for [`ThreadAware`] trait
+    /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
     ///
     /// ```rust
@@ -299,7 +301,7 @@ where
     /// to another processor. The closure behaves like a `ThreadAwareFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
     ///
-    /// This function can be used to create an `Arc` of a type that itself doesn't implement [`ThreadAware`] because
+    /// This function can be used to create an `Arc` of a type that itself doesn't implement [`trait@ThreadAware`] because
     /// we can ensure that each affinity will get its own, independently-initialized value:
     ///
     /// ```rust
@@ -320,8 +322,8 @@ where
     /// let container = Arc::<_, PerCore>::new_with((), |_| MyStruct::new());
     /// ```
     ///
-    /// The constructor can depend on other values that implement [`ThreadAware`] (this example uses the Counter
-    /// defined in [`ThreadAware`] documentation):
+    /// The constructor can depend on other values that implement [`trait@ThreadAware`] (this example uses the Counter
+    /// defined in [`trait@ThreadAware`] documentation):
     ///
     /// ```rust
     /// # use thread_aware::{ThreadAware, Arc, PerCore};
@@ -382,11 +384,11 @@ where
 {
     /// Creates a new `Arc` with the given value.
     ///
-    /// The value must implement [`ThreadAware`] and [`Clone`]. When transferring to another affinity
+    /// The value must implement [`trait@ThreadAware`] and [`Clone`]. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
     /// affinity and transferring it to the new affinity.
     ///
-    /// For example, the counter type we implemented in the documentation for the [`ThreadAware`] trait
+    /// For example, the counter type we implemented in the documentation for the [`trait@ThreadAware`] trait
     /// can be used with new.
     #[cfg(test)]
     pub(crate) fn with_value(value: T) -> Self {
@@ -414,10 +416,10 @@ where
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
     /// affinity and transferring it to the new affinity.
     ///
-    /// This is useful for types that do not implement [`ThreadAware`]. In such cases, the same value
+    /// This is useful for types that do not implement [`trait@ThreadAware`]. In such cases, the same value
     /// is cloned for each affinity without any relocation logic.
     ///
-    /// For example, the counter type we implemented in the documentation for [`ThreadAware`] trait
+    /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with new:
     ///
     /// ```rust

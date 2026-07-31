@@ -3,6 +3,7 @@
 
 //! Building blocks for runtimes and thread-aware hosts.
 
+use alloc::vec::Vec;
 use std::collections::HashMap;
 use std::num::NonZero;
 use std::sync::Mutex;

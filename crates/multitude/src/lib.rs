@@ -31,10 +31,11 @@
 //!
 //! 4. **Drop Support.** Owning handles run value destructors eagerly.
 //!
-//! 5. **Uniformly Thin Smart Pointers.** `multitude`'s escape-capable smart
-//!    pointers — [`Arc<T>`](Arc), [`Rc<T>`](Rc), and [`Box<T>`](Box) — are
-//!    **8 bytes** on 64-bit for *every* `T`, even DSTs like `str` and `[T]`
-//!    (the metadata lives in a chunk prefix). The arena-lifetime
+//! 5. **Compact Smart Pointers.** `multitude`'s escape-capable smart pointers —
+//!    [`Arc<T>`](Arc), [`Rc<T>`](Rc), and [`Box<T>`](Box) — are **8 bytes** on
+//!    64-bit for sized values, `str`, and `[T]`. Slice lengths live in a chunk
+//!    prefix; vtable-metadata pointees, including trait objects and custom DSTs
+//!    with trait-object tails, additionally carry one word. The arena-lifetime
 //!    [`Alloc<T>`](Alloc) handle is a single word for sized `T`; for `str` /
 //!    `[T]` it is a fat reference (pointer + length), which costs nothing extra
 //!    since it never escapes the arena and isn't stored at scale.
@@ -87,26 +88,27 @@
 //! `multitude` offers four ways to allocate a value and own it over time. All
 //! four can coexist in the same arena, dereference to the value, and run
 //! `T::drop` **eagerly**; they differ in whether the handle can outlive the
-//! arena, whether ownership is unique or shared, and what (if any) per-handle
-//! reference count they pay. Each is available for sized `T`, `str`, and `[T]`
-//! (and, behind the `dst` feature, arbitrary DSTs).
+//! arena, whether ownership is unique or shared, and whether the pointee has a
+//! shared strong count. Each is available for sized `T`, `str`, and `[T]`;
+//! behind the `dst` feature, the three smart-pointer forms also support
+//! arbitrary DSTs.
 //!
 //! | | [`Alloc<T>`](Alloc) | [`Box<T>`](Box) | [`Rc<T>`](Rc) | [`Arc<T>`](Arc) |
 //! |---|:---:|:---:|:---:|:---:|
 //! | **Constructor family** | [`alloc`](Arena::alloc) | [`alloc_box`](Arena::alloc_box) | [`alloc_rc`](Arena::alloc_rc) | [`alloc_arc`](Arena::alloc_arc) |
 //! | **Ownership** | unique | unique | shared (`Clone`) | shared (`Clone`) |
-//! | **`&mut T` access** | ✅ | ✅ | ❌ | ❌ |
+//! | **`&mut T` access** | ✅ | ✅ | when uniquely owned | when uniquely owned |
 //! | **Can outlive the arena** | ❌ | ✅ | ✅ | ✅ |
-//! | **Per-handle reference count** | none | none | non-atomic | atomic |
+//! | **Shared strong count** | none | none | non-atomic | atomic |
 //! | **Cross-thread *sharing*** | ❌ | ❌ | ❌ (`!Send`) | ✅ (`T: Send + Sync`) |
-//! | **Width (64-bit)** | 1 word (sized); fat ref for DSTs | 8 bytes | 8 bytes | 8 bytes |
+//! | **Width (64-bit)** | 1 word (sized); fat ref for DSTs | 8 bytes; 16 for vtable metadata | 8 bytes; 16 for vtable metadata | 8 bytes; 16 for vtable metadata |
 //!
 //! The cheapest option is [`Alloc<T>`](Alloc): an owning handle whose lifetime
 //! is tied to the arena — a single word for sized `T` (a fat pointer+length
 //! reference for `str` / `[T]`). It pays no reference count and cannot
 //! outlive the arena, but gives mutable access and runs the destructor when it
-//! is dropped — the fastest way to allocate when the lifetime constraint is
-//! tolerable.
+//! is dropped, making it the lowest-overhead ownership form when the lifetime
+//! constraint is tolerable.
 //!
 //! ```
 //! let arena = multitude::Arena::new();
@@ -122,9 +124,10 @@
 //! ```
 //!
 //! For values that must **outlive the arena**, use one of the three smart
-//! pointers. They behave like the like-named `std` types but are uniformly
-//! **8-byte thin pointers** (even for DSTs) addressing storage inside a chunk,
-//! and they keep that chunk alive until the last handle drops.
+//! pointers. They behave like the like-named `std` types while keeping common
+//! sized, string, and slice handles to **8 bytes**. Trait-object handles carry
+//! an additional vtable word. All three keep their hosting chunk alive until
+//! the last handle drops.
 //!
 //! [`Arc`] is reference-counted and shareable across threads:
 //!
@@ -144,11 +147,12 @@
 //! assert_eq!(7, h.join().unwrap());
 //! ```
 //!
-//! [`Rc`] is the cheaper single-thread sibling of [`Arc`]: its reference count
-//! is non-atomic, so `clone`/`drop` are cheaper and `str` / `[u8]` pack slightly
-//! tighter. Being [`!Send`](Send)/[`!Sync`](Sync), it places **no** `Send`/`Sync`
-//! bound on `T`, so it can share thread-affine values (e.g. `Rc<RefCell<T>>`)
-//! that [`Arc`] cannot.
+//! [`Rc`] is the single-thread sibling of [`Arc`]: its reference count is
+//! non-atomic, avoiding atomic operations and, for low-alignment values such as
+//! `str` / `[u8]`, the atomic count's alignment floor. Being
+//! [`!Send`](Send)/[`!Sync`](Sync), it places **no** `Send`/`Sync` bound on `T`,
+//! so it can share thread-affine values (e.g. `Rc<RefCell<T>>`) that [`Arc`]
+//! cannot.
 //!
 //! ```
 //! use multitude::Rc;
@@ -170,10 +174,11 @@
 //! drop(v); // The vec drop runs here, freeing its heap buffer.
 //! ```
 //!
-//! Although [`Arena`] itself is `!Sync`, it is [`Send`]: an arena — along with
-//! any in-flight [`Alloc`] handles and smart pointers — can be moved between
-//! threads. For cross-thread *sharing* of an individual value, allocate an
-//! [`Arc`] and `.clone()` it across threads.
+//! Although [`Arena`] itself is `!Sync`, it is [`Send`] when its allocator is:
+//! an arena with no outstanding borrows can be moved between threads. Eligible handles can also
+//! be moved independently; an [`Alloc`] remains borrowed from its arena, while
+//! escape-capable smart pointers do not. For cross-thread *sharing* of an
+//! individual value, allocate an [`Arc`] and `.clone()` it across threads.
 //!
 //! # Collections
 //!
@@ -209,19 +214,20 @@
 //!
 //! - [`String::into_boxed_str`](strings::String::into_boxed_str) →
 //!   [`Box<str>`](crate::Box) (**8 bytes**, thin), or `Box::from(string)`.
-//!   The freeze is **O(n)** — it copies the bytes into a compact allocation
-//!   that can outlive the arena. (Like any [`Box`], it is `Send`/`Sync` only
-//!   when the allocator `A` is.)
+//!   The freeze is generally **O(1)** and reuses the existing buffer, with an
+//!   **O(n)** move only when the buffer cannot be frozen in place. (Like any
+//!   [`Box`], it is `Send`/`Sync` only when the allocator `A` is.)
 //! - [`Vec::into_boxed_slice`](vec::Vec::into_boxed_slice) →
 //!   [`Box<[T]>`](crate::Box) (**8 bytes**, thin), or `Box::from(vec)`.
-//!   The freeze is **O(n)** — it moves the elements into a fresh compact
-//!   allocation that can outlive the arena. (Like any [`Box`], it is
-//!   `Send`/`Sync` only when `T` and the allocator `A` are.)
+//!   This is also generally an **O(1)** in-place operation, with an **O(n)**
+//!   element move as the fallback. (Like any [`Box`], it is `Send`/`Sync` only
+//!   when `T` and the allocator `A` are.)
 //! - `Arc::from(vec)` / `Arc::from(string)` → [`Arc<[T]>`](crate::Arc) /
 //!   [`Arc<str>`](crate::Arc), the shared, reference-counted freeze
 //!   (mirroring `std`'s `From<Vec<T>> for Arc<[T]>`).
+//!   `Rc::from(vec)` / `Rc::from(string)` provides the non-atomic equivalent.
 //! - [`Vec::leak`](vec::Vec::leak) → `&mut [T]` (or `&*v.leak()` for `&[T]`)
-//!   borrowed for the arena's lifetime. For `T: !Drop`, this freeze is
+//!   borrowed for the arena's lifetime. When `T` does not need drop, this freeze is
 //!   **O(1) and allocation-free** — the existing buffer is reinterpreted in
 //!   place. Unlike the `Box`/`Arc` freezes, the slice does not outlive the arena.
 //!
@@ -234,12 +240,12 @@
 //!
 //! let arena = Arena::new();
 //!
-//! // Build phase: 32-byte builder, alive briefly.
+//! // Build phase: 40-byte builder on 64-bit targets, alive briefly.
 //! let mut builder = arena.alloc_string();
 //! builder.push_str("hello, ");
 //! builder.push_str("world");
 //!
-//! // Freeze for storage: 8-byte single-pointer smart pointer. O(n) — copies the bytes.
+//! // Freeze for storage: an 8-byte single-pointer smart pointer, normally in place.
 //! let stored: Box<str> = builder.into_boxed_str();
 //! assert_eq!(&*stored, "hello, world");
 //! ```
@@ -289,8 +295,9 @@
 //!
 //!    | UTF-8 | UTF-16 | Sharing | Mutable | Notes |
 //!    |---|---|---|---|---|
-//!    | [`Arc<str>`](crate::Arc) | `Arc<Utf16Str>` | atomic refcount; `Clone`, `Send + Sync` | no | cross-thread sharing |
-//!    | [`Box<str>`](crate::Box) | `Box<Utf16Str>` | unique owner; `Send + Sync` (not `Clone`) | yes | drops eagerly |
+//!    | [`Arc<str>`](crate::Arc) | `Arc<Utf16Str>` | atomic refcount; `Clone`, `Send + Sync` with a compatible allocator | no | cross-thread sharing |
+//!    | [`Rc<str>`](crate::Rc) | `Rc<Utf16Str>` | non-atomic refcount; `Clone`, `!Send + !Sync` | no | single-thread sharing |
+//!    | [`Box<str>`](crate::Box) | `Box<Utf16Str>` | unique owner; `Send + Sync` with a compatible allocator (not `Clone`) | yes | drops eagerly |
 //!
 //!    Like the other arena smart pointers, they keep their owning chunk
 //!    alive via a refcount, so they can outlive the [`Arena`] they came
@@ -298,8 +305,8 @@
 //!
 //! 2. **Builders (mutable, growable).** [`String`](strings::String) and
 //!    [`Utf16String`](strings::Utf16String) are transient growable
-//!    buffers — small structs (32 bytes) carrying a data pointer +
-//!    length + capacity + arena reference. You build them up with
+//!    buffers — 40-byte structs on 64-bit targets carrying a data pointer,
+//!    length, capacity, freeze state, and arena reference. You build them up with
 //!    `push_str` / `push` / [`format!`](strings::format!) /
 //!    [`format_utf16!`](strings::format_utf16!), then **freeze** them
 //!    into one of the smart pointers above:
@@ -309,10 +316,10 @@
 //!    | [`String`](strings::String) | [`into_boxed_str`](strings::String::into_boxed_str) | [`Box<str>`](crate::Box) |
 //!    | [`Utf16String`](strings::Utf16String) | [`into_boxed_utf16_str`](strings::Utf16String::into_boxed_utf16_str) | `Box<Utf16Str>` |
 //!
-//!    The UTF-16 freeze reuses the buffer in place (O(1)) and reclaims any
-//!    unused capacity when it can. The UTF-8 freeze copies the bytes (O(n))
-//!    into a compact allocation, so [`Box<str>`](crate::Box) stays a single,
-//!    `Send`-safe pointer.
+//!    Both freezes generally reuse the buffer in place (O(1)) and reclaim any
+//!    unused capacity when they can. Buffers that cannot freeze in place fall
+//!    back to an O(n) element move. The resulting string smart pointers remain compact,
+//!    single-pointer handles.
 //!
 //! UTF-16 support requires the `utf16` Cargo feature. Strict (validated)
 //! UTF-16 only — lone surrogates are rejected. The UTF-16 types
@@ -407,8 +414,8 @@
 //! # Building DSTs
 //!
 //! With the `dst` Cargo feature enabled, [`Arena`] exposes
-//! [`Arena::alloc_dst_arc`] and
-//! [`Arena::alloc_dst_box`] (and their `try_*` siblings) for
+//! [`Arena::alloc_dst_arc`], [`Arena::alloc_dst_rc`], and
+//! [`Arena::alloc_dst_box`] (along with fallible and pinned variants) for
 //! constructing values whose layout is only known at runtime (custom
 //! DSTs, fat pointers, trait objects).
 //!
@@ -440,9 +447,13 @@
 //! # }
 //! ```
 //!
-//! The same feature also enables eight `Arena::alloc_slice_*_box`
-//! methods that produce `Box<[T]>` directly (mirroring the
-//! existing `_arc` slice methods).
+//! Separately, sized [`Box`], [`Rc`], and [`Arc`] values can be converted with
+//! their `unsize` methods and [`coerce!`]. The `ptr_meta` dependency supplies
+//! targets for `dyn Any` and `dyn Error`, including auto-trait combinations,
+//! without the `dst` feature. Custom traits require `dst` and
+//! `#[multitude::dst::pointee]`; see [`coerce!`] for the exact boundary.
+//! Any resulting vtable-metadata pointee carries an additional handle word,
+//! including a custom DST with a trait-object tail.
 //!
 //! # Crate Features
 //!
@@ -452,7 +463,7 @@
 //! | `stats` | Enables runtime instrumentation counters returned by `Arena::stats`. Disable for the tightest allocation throughput when you don't need observability. |
 //! | `serde` | Adds `Serialize` impls for arena strings and vectors, plus arena-aware deserialization through [`de::DeserializeIn`] and [`Arena::deserialize`]. With `serde + utf16`, also adds serialization for the UTF-16 types (transcoded to UTF-8 on the wire). |
 //! | `serde_json` | Implies `serde` and adds [`Arena::deserialize_json`] convenience methods with trailing-input checks and optional resource limits. |
-//! | `dst` | Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`] / [`Arena::alloc_dst_box`], plus eight `Arena::alloc_slice_*_box` methods. |
+//! | `dst` | Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via the `Arena::alloc_dst_*` families. |
 //! | `utf16` | Adds a parallel UTF-16 string surface (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`](strings::Utf16String), and [`format_utf16!`](strings::format_utf16!)) backed by the [`widestring`](https://crates.io/crates/widestring) crate. Lengths are counted in `u16` elements. |
 //! | `zerocopy` | Provides [`ZerocopyView`](zerocopy::ZerocopyView) for safe zero-initialized allocation of types implementing [`zerocopy::FromZeros`](::zerocopy::FromZeros). Access via [`Arena::zerocopy()`]. |
 //! | `bytemuck` | Provides [`BytemuckView`](bytemuck::BytemuckView) for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`](::bytemuck::Zeroable). Access via [`Arena::bytemuck()`]. |
@@ -476,6 +487,7 @@ mod arena_builder;
 #[cfg(feature = "stats")]
 mod arena_stats;
 mod r#box;
+mod coerce;
 mod cow;
 #[cfg(feature = "serde")]
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
@@ -517,7 +529,10 @@ pub use self::arena_builder::ArenaBuilder;
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
+pub use self::coerce::Coercion;
 pub use self::cow::Cow;
 pub use self::error::AllocError;
 pub use self::from_in::{FromIn, IntoIn};
+#[doc(hidden)]
+pub use self::internal::thin_dst::{HandleMetadata, MetadataPolicy, SmartPointerPointee};
 pub use self::rc::Rc;
