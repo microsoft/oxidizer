@@ -186,7 +186,7 @@ test-docs FILTER="":
 
 # Runs doctests with only default features enabled. Doctests that reference
 # items behind a non-default feature must still compile in this configuration —
-# see AGENTS-feature-gated-doctests.md.
+# see docs/feature-gated-doctests.md.
 [script]
 test-docs-default FILTER="":
     $ErrorActionPreference = "Stop"
