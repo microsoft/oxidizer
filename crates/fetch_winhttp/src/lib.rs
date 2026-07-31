@@ -14,6 +14,20 @@
 //! [`WinHttpTlsConfig`] and [`WinHttpOptions`]. Independently built clients use
 //! isolated transport resources, while cloned clients share their resources.
 //!
+//! ## Platform and transport behavior
+//!
+//! - Windows 11 build 22000 or later is required.
+//! - The transport follows automatic Windows proxy policy and exposes no proxy
+//!   override or direct-connection fallback.
+//! - Generic TLS configuration and generic transport options that `WinHTTP`
+//!   cannot represent, including finite connection limits and connection
+//!   idle/lifetime settings, are accepted but ignored.
+//! - Unknown-length request bodies are supported with HTTP/1.1, HTTP/2, and
+//!   HTTP/3. Request upload completes before response reception begins.
+//! - Response trailers exposed by `WinHTTP` are preserved for HTTP/2 and HTTP/3.
+//!   `WinHTTP` does not expose HTTP/1.1 response trailers. Request trailers are
+//!   rejected.
+//!
 //! Requests are serviced through the operating system's
 //! [WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp)
 //! API.

@@ -60,7 +60,7 @@ pub(crate) trait Bindings: Send + Sync + 'static {
         total_len: u32,
         context: usize,
     ) -> Result<()>;
-    unsafe fn write_data(&self, h: RawHandle, buf: NonNull<u8>, len: u32) -> Result<()>;
+    unsafe fn write_data(&self, h: RawHandle, buf: Option<NonNull<u8>>, len: u32) -> Result<()>;
     fn receive_response(&self, h: RawHandle) -> Result<()>;
     unsafe fn query_headers(&self, h: RawHandle, level: u32, buffer: Option<NonNull<u8>>, len: &mut u32) -> Result<()>;
     unsafe fn query_option(&self, h: RawHandle, option: u32, buffer: Option<NonNull<u8>>, len: &mut u32) -> Result<()>;
@@ -807,16 +807,18 @@ EOF, read error, or body drop.
 
 The bindings facade (§1) makes the transport testable at two levels. Unit tests
 drive the `RequestDriver` against `MockBindings` with synthesized callbacks;
-integration tests exercise the real OS against a localhost server. No test depends
-on Tokio directly.
+integration tests exercise the real OS against a localhost server. Production code
+and mock unit tests do not depend on Tokio; the localhost TLS, HTTP/2, and HTTP/3
+fixtures use Tokio as a dev-only dependency.
 
 **Miri.** The FFI path cannot run under Miri, so the cancellation/leak invariants
-(§4) are asserted on the mock path, which can, plus the real integration tests.
+(§4) are asserted on the mock path.
 The mock path exercises the same allocate/leak/reclaim code as production so that
 "free exactly once on `HANDLE_CLOSING`" is verified where Miri is available;
-integration tests are `#[cfg_attr(miri, ignore)]`. Miri coverage is not a separate
-concern from the test strategy but a property of it: the mock-bindings unit tests
-are written so the ownership-critical paths run and are checked under Miri.
+real integration tests run outside Miri and are `#[cfg_attr(miri, ignore)]`. Miri
+coverage is not a separate concern from the test strategy but a property of it:
+the mock-bindings unit tests are written so the ownership-critical paths run and
+are checked under Miri.
 
 ### 7.1 Unit tests (mock bindings, no network)
 
@@ -892,8 +894,8 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   `WinHttpReceiveResponse` only after the final write; streaming downloads. Mock
   tests assert incremental frame submission and completion ordering, while localhost
   tests assert the final bytes, negotiated protocol, and HTTP/1.1 chunked framing.
-- Request trailer frames fail explicitly; response trailers are preserved over every
-  protocol for which WinHTTP exposes them.
+- Request trailer frames fail explicitly. Response trailers are preserved for HTTP/2
+  and HTTP/3; WinHTTP does not expose them for HTTP/1.1.
 - Real gzip/deflate responses are transparently decoded.
 - Redirects are never followed (`REDIRECT_POLICY_NEVER`, §5/§10.3): a request to a
   localhost endpoint returning a 302 whose `Location` points at a sentinel endpoint
@@ -939,12 +941,10 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   because that would depend on real wall-clock timing and be flaky.
 - Real cancellation: drop an in-flight download future and assert clean teardown
   (no panic, no leak), the integration counterpart to the unit cancellation tests.
-- Leak-freedom soak: a process-wide counter increments on every `RequestContext`
-  allocation and decrements on every reclaim (the same counter the mock path asserts,
-  compiled into the real path behind a test-only feature). A soak test runs a large
-  batch mixing normal completion, timeout cancellation, and mid-flight future drops,
-  then asserts the live-context count returns to its baseline. This catches a missed
-  `HANDLE_CLOSING` free on the real OS path, which Miri cannot see (§7 preamble).
+- Lifecycle soak: a large batch mixes normal completion, pending-body cancellation,
+  and response drops, then performs another request to prove the client remains usable.
+  Exact context allocation/reclaim and `HANDLE_CLOSING` ownership invariants are
+  asserted by mock unit tests under Miri.
 
 The full `fetch` pipeline (retry/breaker/telemetry) is validated by building an
 `HttpClient` via `HttpClient::builder_winhttp(...)` and asserting a real request round-trips,
@@ -1310,12 +1310,11 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
 - `windows` `0.62.2` (added to `[workspace.dependencies]`; oxidizer currently
   vendors only `windows-sys`), features `Win32_Networking_WinHttp` and
   `Win32_Foundation`, target-gated via `[target.'cfg(windows)'.dependencies]`.
-- `fetch`, `http_extensions`, `fetch_options`, `bytesbuf`, `bytesbuf_io` (whose
+- `fetch`, `http_extensions`, `bytesbuf`, `bytesbuf_io` (whose
   `ReadExt::into_futures_stream` feeds the response body, §6.2), `thread_aware`,
-  `tick`, `events_once`, `plurality`,
+  `tick`, `events_once`, `futures-core`, `plurality`, `layered`,
   `ohno`, `recoverable`, `http`, `http-body`, `observed` (telemetry events and
-  metrics),
-  `widestring` (UTF-16), `smallvec`. No `anyspawn`: nothing the transport calls
+  metrics), and `widestring` (UTF-16). No `anyspawn`: nothing the transport calls
   can block (§2.1), so there is no blocking pool and no `Spawner`.
 - `events_once` provides the embedded reusable one-shot event
   ([folo-rs/folo](https://github.com/folo-rs/folo)); placing it in the pinned
@@ -1323,9 +1322,8 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
   locking (§5).
 - `plurality` provides the FFI raw-pointer round-trip (`Box::into_raw`/`from_raw`,
   §4.3).
-- Dev: `mockall`, `static_assertions`, a localhost test server (`wiremock` or a
-  hand-rolled `std::net` server), `quinn` + `h3` (localhost HTTP/3 server),
-  `testing_aids`.
+- Dev: `mockall`, `static_assertions`, Hyper/Tokio/Rustls localhost HTTP/1.1,
+  HTTP/2, and TLS fixtures, plus `quinn` + `h3` for localhost HTTP/3.
 
 No Tokio in non-dev code.
 

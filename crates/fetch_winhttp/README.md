@@ -23,6 +23,20 @@ WinHTTP-specific TLS and timeout configuration is available through
 [`WinHttpTlsConfig`][__link3] and [`WinHttpOptions`][__link4]. Independently built clients use
 isolated transport resources, while cloned clients share their resources.
 
+### Platform and transport behavior
+
+* Windows 11 build 22000 or later is required.
+* The transport follows automatic Windows proxy policy and exposes no proxy
+  override or direct-connection fallback.
+* Generic TLS configuration and generic transport options that `WinHTTP`
+  cannot represent, including finite connection limits and connection
+  idle/lifetime settings, are accepted but ignored.
+* Unknown-length request bodies are supported with HTTP/1.1, HTTP/2, and
+  HTTP/3. Request upload completes before response reception begins.
+* Response trailers exposed by `WinHTTP` are preserved for HTTP/2 and HTTP/3.
+  `WinHTTP` does not expose HTTP/1.1 response trailers. Request trailers are
+  rejected.
+
 Requests are serviced through the operating system’s
 [WinHTTP][__link5]
 API.
@@ -33,7 +47,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbAWeN0s6MLKYb6lBcRXFAM1EbFIwAr7MIvFAbcenYHWQAEZNhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbM79C4GjizPsb4TH8_Sg39b8bRxjoqlDvhzcbDbyAhf7Ym8xhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps

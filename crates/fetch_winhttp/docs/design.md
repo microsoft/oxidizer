@@ -278,7 +278,9 @@ behaves consistently with the rest of `fetch`:
   `WinHttpReceiveResponse` only after the request body reaches end-of-stream. WinHTTP is
   responsible for the protocol-appropriate framing of an unknown total length.
 - **Trailers.** Response trailers exposed by WinHTTP are returned as `HttpBody` trailer
-  frames rather than discarded. WinHTTP has no request-trailer submission API, so an
+  frames rather than discarded. On the supported Windows baseline, WinHTTP exposes
+  response trailers for HTTP/2 and HTTP/3 but not HTTP/1.1, so HTTP/1.1 response
+  trailers are unavailable. WinHTTP has no request-trailer submission API, so an
   outgoing trailer frame fails the request rather than being silently dropped.
 - **Redirects are not followed.** Like `fetch_hyper` (and unlike WinHTTP's own default),
   3xx responses are surfaced to the caller unchanged rather than followed, with no knob
