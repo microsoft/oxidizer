@@ -180,6 +180,7 @@ fn generics_group_usage_adds_bound() {
             let field = fs.unnamed.first_mut().expect("expected one field");
             let original = field.ty.clone();
             field.ty = syn::Type::Group(TypeGroup {
+                attrs: Vec::new(),
                 group_token: token::Group {
                     span: proc_macro2::Span::call_site(),
                 },
