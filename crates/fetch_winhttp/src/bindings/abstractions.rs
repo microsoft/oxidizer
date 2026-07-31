@@ -33,10 +33,11 @@ pub(crate) trait Bindings: Send + Sync + 'static {
 
     /// # Safety
     ///
-    /// `buffer` must remain valid and unchanged until `WRITE_COMPLETE`,
-    /// `REQUEST_ERROR`, or the request handle's final `HANDLE_CLOSING`
-    /// callback terminates the operation.
-    unsafe fn write_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
+    /// A present `buffer` must remain valid and unchanged until
+    /// `WRITE_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
+    /// `HANDLE_CLOSING` callback terminates the operation. An absent buffer is
+    /// valid only for the zero-length write that ends automatic chunking.
+    unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()>;
 
     fn receive_response(&self, request: RawHandle) -> Result<()>;
 

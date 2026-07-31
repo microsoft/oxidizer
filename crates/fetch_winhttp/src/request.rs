@@ -23,8 +23,7 @@ use plurality::Pool;
 use tick::Clock;
 use widestring::U16CString;
 
-use crate::bindings::Bindings as _;
-use crate::bindings::Facade;
+use crate::bindings::{Bindings as _, Facade};
 use crate::body::{RequestBodyPlan, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
 use crate::context::{ColdConnectState, CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
@@ -353,6 +352,9 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             {
                 let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool.clone());
                 send_body(self.body, &mut writer, body_polled).await?;
+                if self.body_plan.automatic_chunking() {
+                    writer.end_automatic_chunking().await?;
+                }
             }
 
             {
@@ -745,12 +747,11 @@ mod tests {
     use std::ffi::c_void;
     use std::pin::Pin;
     use std::ptr::NonNull;
-    use std::slice;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
-    use std::thread;
     use std::time::Duration;
+    use std::{slice, thread};
 
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
@@ -1401,9 +1402,87 @@ mod tests {
                 WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH as usize
             );
             assert_eq!(record.write_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(record.end_write_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(record.end_write_completions.load(Ordering::SeqCst), 1);
             assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
             assert_lifecycle_closed(&record);
         }
+    }
+
+    #[test]
+    fn unknown_length_upload_waits_for_terminal_write_completion_before_receiving_response() {
+        let memory = GlobalPool::new();
+        let clock = Clock::new_frozen();
+        let body_builder = HttpBodyBuilder::new(memory.clone(), &clock);
+        let completed_writes = Arc::new(AtomicUsize::new(0));
+        let body = body_builder.body(
+            ScriptedBody::new([], Arc::clone(&completed_writes), 0, None),
+            &HttpBodyOptions::default(),
+        );
+        let mut request = http::Request::builder()
+            .method(Method::POST)
+            .uri("https://example.com/")
+            .body(body)
+            .expect("test request is valid");
+        let config = LifecycleConfig {
+            completed_writes,
+            defer_write_completion: true,
+            ..LifecycleConfig::default()
+        };
+        let record = Arc::new(LifecycleRecord::default());
+        let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
+        let session = session(facade);
+        let contexts = ContextPool::new(Pool::new());
+        let options = TransportOptions::default();
+        let tls = WinHttpTlsConfig::default();
+        let driver = RequestDriver::new(
+            &mut request,
+            Arc::clone(&session),
+            body_builder,
+            &clock,
+            memory,
+            &contexts,
+            &options,
+            &tls,
+        )
+        .expect("request setup succeeds");
+        let mut body_polled = false;
+        let mut future = Box::pin(driver.execute(&mut body_polled));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(record.end_write_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(record.end_write_completions.load(Ordering::SeqCst), 0);
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+
+        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        let mut written = 0_u32;
+        record.end_write_completions.fetch_add(1, Ordering::SeqCst);
+        complete(
+            context,
+            WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+            (&raw mut written).cast(),
+            status_info_len::<u32>(),
+        );
+
+        let Poll::Ready(response) = future.as_mut().poll(&mut cx) else {
+            panic!("response becomes ready after the terminal write completes");
+        };
+        let response = response.expect("unknown-length upload succeeds");
+        assert_eq!(record.receive_calls.load(Ordering::SeqCst), 1);
+
+        drop(future);
+        drop(response);
+        drop((request, options, tls));
+        assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
+        closing(context);
+        drop(session);
+
+        assert!(body_polled);
+        assert_eq!(contexts.lock().expect("test lock is not poisoned").len(), 0);
+        assert_lifecycle_closed(&record);
     }
 
     #[test]
@@ -1502,6 +1581,36 @@ mod tests {
         assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
         assert_lifecycle_closed(&record);
+    }
+
+    #[test]
+    fn final_unknown_length_write_failures_stop_before_response_reception() {
+        for failure in [LifecycleFailure::EndWriteSync, LifecycleFailure::EndWriteCallback] {
+            let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+            let completed_writes = Arc::new(AtomicUsize::new(0));
+            let body = body_builder.body(
+                ScriptedBody::new([], Arc::clone(&completed_writes), 0, None),
+                &HttpBodyOptions::default(),
+            );
+            let request = http::Request::builder()
+                .method(Method::POST)
+                .uri("https://example.com/")
+                .body(body)
+                .expect("test request is valid");
+            let config = LifecycleConfig {
+                failure: Some(failure),
+                completed_writes,
+                ..LifecycleConfig::default()
+            };
+
+            let (result, record) = run_lifecycle(request, TransportOptions::default(), WinHttpTlsConfig::default(), config);
+            let error = result.expect_err("the final request write failure reaches the caller");
+            assert_eq!(error.label(), "request_winhttp");
+            assert_eq!(record.write_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(record.end_write_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
+            assert_lifecycle_closed(&record);
+        }
     }
 
     #[test]
@@ -1962,6 +2071,8 @@ mod tests {
         SendCallback,
         WriteSync,
         WriteCallback,
+        EndWriteSync,
+        EndWriteCallback,
         ReceiveSync,
         ReceiveCallback,
         QueryStatus,
@@ -2025,6 +2136,8 @@ mod tests {
         connect_calls: AtomicUsize,
         send_calls: AtomicUsize,
         write_calls: AtomicUsize,
+        end_write_calls: AtomicUsize,
+        end_write_completions: AtomicUsize,
         receive_calls: AtomicUsize,
         data_available_calls: AtomicUsize,
         installed_context: AtomicUsize,
@@ -2204,20 +2317,33 @@ mod tests {
         let write_config = Arc::clone(&config);
         let write_record = Arc::clone(&record);
         bindings.expect_write_data().returning(move |_, buffer, len| {
-            write_record.write_calls.fetch_add(1, Ordering::SeqCst);
-            // SAFETY: the active OperationBuffer retains the exact contiguous
-            // span passed to the mock for at least the duration of this call.
-            let bytes = unsafe { slice::from_raw_parts(buffer.as_ptr(), len as usize) }.to_vec();
-            write_record
-                .writes
-                .lock()
-                .expect("record lock is not poisoned")
-                .push(RecordedWrite {
-                    address: buffer.as_ptr().addr(),
-                    bytes,
-                });
+            let ending_chunking = buffer.is_none();
+            if let Some(buffer) = buffer {
+                write_record.write_calls.fetch_add(1, Ordering::SeqCst);
+                // SAFETY: the active OperationBuffer retains the exact
+                // contiguous span passed to the mock for at least the
+                // duration of this call.
+                let bytes = unsafe { slice::from_raw_parts(buffer.as_ptr(), len as usize) }.to_vec();
+                write_record
+                    .writes
+                    .lock()
+                    .expect("record lock is not poisoned")
+                    .push(RecordedWrite {
+                        address: buffer.as_ptr().addr(),
+                        bytes,
+                    });
+            } else {
+                assert_eq!(len, 0, "only the final zero-length write has no buffer");
+                write_record.end_write_calls.fetch_add(1, Ordering::SeqCst);
+            }
 
-            if write_config.failure == Some(LifecycleFailure::WriteSync) {
+            if write_config.failure
+                == Some(if ending_chunking {
+                    LifecycleFailure::EndWriteSync
+                } else {
+                    LifecycleFailure::WriteSync
+                })
+            {
                 return Err(WinHttpError::new(12030, WinHttpOperation::WriteData));
             }
             if write_config.defer_write_completion {
@@ -2225,11 +2351,21 @@ mod tests {
             }
 
             let context = write_record.installed_context.load(Ordering::SeqCst);
-            if write_config.failure == Some(LifecycleFailure::WriteCallback) {
+            if write_config.failure
+                == Some(if ending_chunking {
+                    LifecycleFailure::EndWriteCallback
+                } else {
+                    LifecycleFailure::WriteCallback
+                })
+            {
                 complete_request_error(context, 12030);
             } else {
                 let mut written = write_config.max_write_completion.map_or(len, |maximum| maximum.min(len));
-                write_config.completed_writes.fetch_add(1, Ordering::SeqCst);
+                if ending_chunking {
+                    write_record.end_write_completions.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    write_config.completed_writes.fetch_add(1, Ordering::SeqCst);
+                }
                 complete(
                     std::ptr::with_exposed_provenance_mut(context),
                     WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
@@ -2249,6 +2385,11 @@ mod tests {
                 receive_record.write_calls.load(Ordering::SeqCst),
                 receive_config.completed_writes.load(Ordering::SeqCst),
                 "response reception must not begin before the final write completes"
+            );
+            assert_eq!(
+                receive_record.end_write_calls.load(Ordering::SeqCst),
+                receive_record.end_write_completions.load(Ordering::SeqCst),
+                "response reception must not begin before automatic chunking ends"
             );
             if receive_config.failure == Some(LifecycleFailure::ReceiveSync) {
                 return Err(WinHttpError::new(12002, WinHttpOperation::ReceiveResponse));

@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::fmt;
+use std::future::poll_fn;
+use std::pin::Pin;
+use std::ptr::NonNull;
+
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
 use bytesbuf::{BytesBuf, BytesView};
 use bytesbuf_io::Write;
@@ -8,10 +13,6 @@ use fetch::{HttpBody, HttpError, RecoveryInfo};
 use http::header::CONTENT_LENGTH;
 use http::{HeaderMap, HeaderValue};
 use http_body::Body as _;
-use std::fmt;
-use std::future::poll_fn;
-use std::pin::Pin;
-use std::ptr::NonNull;
 
 use crate::bindings::{Bindings as _, Facade};
 use crate::context::{CompletionResult, OperationBuffer, OperationKind};
@@ -132,6 +133,22 @@ fn write_completion(completion: CompletionResult) -> Result<BytesView, HttpError
     }
 }
 
+fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError> {
+    match completion {
+        CompletionResult::WriteComplete { len: 0, .. } => Ok(()),
+        CompletionResult::WriteComplete { len, .. } => Err(callback_protocol_error(format!(
+            "WinHTTP reported {len} bytes for the final zero-length request write"
+        ))),
+        CompletionResult::Error { error, .. } => Err(error.into_http_error()),
+        CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
+            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
+        ))),
+        unexpected => Err(callback_protocol_error(format!(
+            "WinHTTP returned an unexpected completion for the final request write: {unexpected:?}"
+        ))),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RequestBodyPlanError {
     InvalidContentLength,
@@ -182,7 +199,7 @@ impl<'guard> WinHttpBodyWriter<'guard> {
                         // SAFETY: the exact BytesView and contiguous span
                         // identified by buffer/len are retained in the active
                         // operation until its completion.
-                        unsafe { bindings.write_data(request, buffer, len) }
+                        unsafe { bindings.write_data(request, Some(buffer), len) }
                     },
                 )
                 .map_err(|_active| callback_protocol_error("the write operation slot was already active"))?;
@@ -194,6 +211,27 @@ impl<'guard> WinHttpBodyWriter<'guard> {
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn end_automatic_chunking(&mut self) -> fetch::Result<()> {
+        let bindings = self.bindings.clone();
+        let write = self
+            .guard
+            .submit(
+                OperationKind::Write,
+                OperationBuffer::write(BytesView::new(), 0, 0),
+                move |request, _context| {
+                    // SAFETY: WinHTTP accepts a null buffer only for this
+                    // zero-length operation, which marks end-of-body.
+                    unsafe { bindings.write_data(request, None, 0) }
+                },
+            )
+            .map_err(|_active| callback_protocol_error("the final request write operation slot was already active"))?;
+        let completion = write
+            .await
+            .map_err(|_disconnected| callback_protocol_error("the final request write completion channel disconnected"))?;
+
+        end_chunked_completion(completion)
     }
 }
 
@@ -278,11 +316,10 @@ impl std::error::Error for RequestBodyError {}
 mod tests {
     use bytesbuf::BytesView;
     use bytesbuf::mem::GlobalPool;
+    use http::HeaderValue;
     use ohno::Labeled as _;
 
-    use http::HeaderValue;
-
-    use super::{RequestBodyPlan, RequestBodyPlanError, next_write_len, write_completion};
+    use super::{RequestBodyPlan, RequestBodyPlanError, end_chunked_completion, next_write_len, write_completion};
     use crate::context::CompletionResult;
     use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
 
@@ -399,5 +436,19 @@ mod tests {
 
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("without writing any bytes"));
+
+        end_chunked_completion(CompletionResult::WriteComplete {
+            buffer: BytesView::new(),
+            len: 0,
+        })
+        .expect("the final zero-length write accepts a zero-byte completion");
+
+        let error = end_chunked_completion(CompletionResult::WriteComplete {
+            buffer: BytesView::new(),
+            len: 1,
+        })
+        .expect_err("the final zero-length write rejects a nonzero completion");
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("reported 1 bytes"));
     }
 }

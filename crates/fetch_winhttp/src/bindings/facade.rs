@@ -112,7 +112,7 @@ impl Bindings for Facade {
         }
     }
 
-    unsafe fn write_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()> {
+    unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()> {
         match self {
             Self::Real => {
                 // SAFETY: the caller contract is forwarded unchanged.

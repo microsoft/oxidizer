@@ -132,12 +132,14 @@ impl Bindings for RealBindings {
             .map_err(|error| Self::map_error(&error, WinHttpOperation::SendRequest))
     }
 
-    unsafe fn write_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()> {
-        let buffer = buffer.as_ptr().cast_const().cast();
+    unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()> {
+        debug_assert!(buffer.is_some() || len == 0, "only the final zero-length write may omit its buffer");
+        let buffer = buffer.map(|buffer| buffer.as_ptr().cast_const().cast());
 
         // SAFETY: the caller upholds the asynchronous buffer-lifetime
-        // contract; the asynchronous OUT pointer is intentionally null.
-        unsafe { WinHttpWriteData(request.as_ptr(), Some(buffer), len, null_mut()) }
+        // contract; a null buffer is paired only with zero length, and the
+        // asynchronous OUT pointer is intentionally null.
+        unsafe { WinHttpWriteData(request.as_ptr(), buffer, len, null_mut()) }
             .map_err(|error| Self::map_error(&error, WinHttpOperation::WriteData))
     }
 

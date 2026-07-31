@@ -649,10 +649,11 @@ cancellation completion) and keeps a single body-writing path:
 - **Unknown length** (streaming body): open the request with
   `WINHTTP_FLAG_AUTOMATIC_CHUNKING`, then call `WinHttpSendRequest` with
   `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH` and a `NULL` optional buffer. Each
-  `poll_frame` data chunk is pulled and written sequentially. End-of-body is signaled by
-  proceeding to `WinHttpReceiveResponse` only after all writes complete. WinHTTP supplies
-  the framing appropriate to the negotiated HTTP/1.1, HTTP/2, or HTTP/3 protocol; the
-  transport never has send and receive operations outstanding together.
+  `poll_frame` data chunk is pulled and written sequentially. After the body reaches
+  end-of-stream, a final `WinHttpWriteData` with a `NULL` buffer and zero length is
+  completed before proceeding to `WinHttpReceiveResponse`; this tells WinHTTP to finish
+  its protocol-appropriate HTTP/1.1, HTTP/2, or HTTP/3 framing. The transport never has
+  send and receive operations outstanding together.
 
 `HttpBody` may also yield a trailer frame. WinHTTP has no API for submitting request
 trailers after the body, so the writer returns an `HttpError` when it encounters one; it
@@ -737,6 +738,7 @@ translate req (method/uri/headers -> UTF-16)
   -> set RequestContext pointer as WINHTTP_OPTION_CONTEXT_VALUE
   -> WinHttpSendRequest ->async SENDREQUEST_COMPLETE
   -> poll HttpBody frame -> WinHttpWriteData ->async WRITE_COMPLETE  [repeat through end-of-stream]
+  -> unknown length only: zero-length WinHttpWriteData ->async WRITE_COMPLETE
   -> WinHttpReceiveResponse ->async HEADERS_AVAILABLE
   -> WinHttpQueryHeaders/Option (status, negotiated version, header block)  [sync]
   -> move RequestGuard into WinHttpBodyReader
@@ -887,8 +889,9 @@ elsewhere in `fetch`). These validate the real OS path end to end:
 
 - GET/POST with small and large bodies; response body correctness and size.
 - Unknown-length streaming uploads over HTTP/1.1, HTTP/2, and HTTP/3, followed by
-  `WinHttpReceiveResponse` only after the final write; streaming downloads; assert
-  incremental delivery, not just final bytes.
+  `WinHttpReceiveResponse` only after the final write; streaming downloads. Mock
+  tests assert incremental frame submission and completion ordering, while localhost
+  tests assert the final bytes, negotiated protocol, and HTTP/1.1 chunked framing.
 - Request trailer frames fail explicitly; response trailers are preserved over every
   protocol for which WinHTTP exposes them.
 - Real gzip/deflate responses are transparently decoded.

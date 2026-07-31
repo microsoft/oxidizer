@@ -10,12 +10,11 @@ use layered::Service;
 use observed::Sink;
 use tick::Clock;
 
-use crate::WinHttpTlsConfig;
 use crate::bindings::Facade;
-use crate::error_labels;
 use crate::request::{ContextPool, RequestDriver};
 use crate::session::{SessionInitializationFailure, WinHttpSession};
 use crate::telemetry::Telemetry;
+use crate::{WinHttpTlsConfig, error_labels};
 
 #[derive(Debug)]
 pub(crate) struct WinHttpTransport {
@@ -141,12 +140,15 @@ mod tests {
     use fetch::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder, Recovery, RecoveryInfo};
     use http_extensions::HttpBodyOptions;
     use layered::Service;
-    use observed::Severity;
-    use observed::Sink;
+    use observed::{Severity, Sink};
     use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
     use ohno::Labeled as _;
     use static_assertions::assert_impl_all;
     use tick::{Clock, ClockControl};
+    use windows::Win32::Networking::WinHttp::{
+        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+    };
 
     use super::{ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
     use crate::WinHttpTlsConfig;
@@ -159,10 +161,6 @@ mod tests {
         WINHTTP_QUERY_STATUS_CODE,
     };
     use crate::request::ContextPool;
-    use windows::Win32::Networking::WinHttp::{
-        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-    };
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
