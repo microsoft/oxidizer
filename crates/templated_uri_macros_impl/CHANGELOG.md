@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-07-31
+
+- ⚠️ Breaking
+
+  - establish a compatibility boundary for generated code that targets `templated_uri` 0.3
+
 ## [0.2.7] - 2026-07-24
 
 - 🔧 Maintenance
