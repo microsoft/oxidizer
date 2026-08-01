@@ -91,6 +91,21 @@ impl<T> Contains<T> for GenericValue<T> {
     }
 }
 
+// A handler that borrows its input. The handler owns nothing, so it is `'static`
+// no matter how short-lived the values it is invoked with are.
+#[multitude::dst::pointee]
+trait Handler<T> {
+    fn handle(&self, input: T) -> usize;
+}
+
+struct LengthHandler;
+
+impl<'a> Handler<&'a str> for LengthHandler {
+    fn handle(&self, input: &'a str) -> usize {
+        input.len()
+    }
+}
+
 struct PinnedOwner {
     value: u32,
     drops: StdArc<AtomicUsize>,
@@ -214,6 +229,26 @@ fn generic_trait_object_coercion_dispatches() {
     let arena = Arena::new();
     let value = erase(&arena, 42_u32);
     assert_eq!(*value.value(), 42);
+}
+
+// A trait object's lifetime bound constrains the erased concrete type, not the
+// trait's type arguments. `'a` is universally quantified here, so this compiles
+// only if coercion imposes no `'static` requirement on the type argument.
+fn erase_handler<'a>(arena: &Arena) -> Box<dyn Handler<&'a str>> {
+    fn erase<H: Handler<T> + 'static, T>(arena: &Arena, handler: H) -> Box<dyn Handler<T>> {
+        Box::unsize(arena.alloc_box(handler), coerce!(<T> dyn Handler<T>))
+    }
+
+    erase::<LengthHandler, &'a str>(arena, LengthHandler)
+}
+
+#[test]
+fn generic_trait_object_coercion_accepts_borrowed_type_argument() {
+    let arena = Arena::new();
+    let owned = String::from("borrowed");
+    let handler = erase_handler(&arena);
+
+    assert_eq!(handler.handle(owned.as_str()), 8);
 }
 
 #[test]

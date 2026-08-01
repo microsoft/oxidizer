@@ -76,6 +76,20 @@ impl<T> Contains<T> for GenericValue<T> {
     }
 }
 
+// A handler that borrows its input. The handler owns nothing, so it is `'static`
+// no matter how short-lived the values it is invoked with are.
+trait Handler<T> {
+    fn handle(&self, input: T) -> usize;
+}
+
+struct LengthHandler;
+
+impl<'a> Handler<&'a str> for LengthHandler {
+    fn handle(&self, input: &'a str) -> usize {
+        input.len()
+    }
+}
+
 struct Square(u32);
 impl Shape for Square {
     fn area(&self) -> u32 {
@@ -123,6 +137,26 @@ fn unsize_to_trait_object_with_generic_argument() {
     let pool = Pool::<GenericValue<u32>>::new();
     let value = erase(&pool, 42);
     assert_eq!(*value.value(), 42);
+}
+
+// A trait object's lifetime bound constrains the erased concrete type, not the
+// trait's type arguments. `'a` is universally quantified here, so this compiles
+// only if coercion imposes no `'static` requirement on the type argument.
+fn erase_handler<'a>(pool: &Pool<LengthHandler>) -> Box<dyn Handler<&'a str>> {
+    fn erase<H: Handler<T> + 'static, T>(pool: &Pool<H>, handler: H) -> Box<dyn Handler<T>> {
+        Box::unsize(pool.alloc_box(handler), coerce!(<T> dyn Handler<T>))
+    }
+
+    erase::<LengthHandler, &'a str>(pool, LengthHandler)
+}
+
+#[test]
+fn unsize_to_trait_object_with_borrowed_generic_argument() {
+    let pool = Pool::<LengthHandler>::new();
+    let owned = String::from("borrowed");
+    let handler = erase_handler(&pool);
+
+    assert_eq!(handler.handle(owned.as_str()), 8);
 }
 
 #[test]
