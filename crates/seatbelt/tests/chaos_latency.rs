@@ -40,7 +40,7 @@ where
 #[case::tower(true)]
 #[tokio::test]
 async fn no_latency_when_rate_zero(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -59,7 +59,7 @@ async fn no_latency_when_rate_zero(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn always_latency_when_rate_one(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stopwatch = clock.stopwatch();
@@ -84,7 +84,7 @@ async fn always_latency_when_rate_one(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn latency_with_dynamic_duration(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -114,7 +114,7 @@ async fn latency_with_dynamic_duration(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn no_latency_if_disabled(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -137,7 +137,7 @@ async fn no_latency_if_disabled(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn enable_if_respected(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -164,7 +164,7 @@ async fn enable_if_respected(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn clone_service_works_independently(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
 
     let stack = (
@@ -189,7 +189,7 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn config_applies_rate_and_latency(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let mut config = LatencyConfig::default();
@@ -216,7 +216,7 @@ async fn config_applies_rate_and_latency(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn config_disabled_passes_through(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let mut config = LatencyConfig::default();
@@ -240,7 +240,7 @@ async fn config_disabled_passes_through(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn config_with_max_latency_creates_range(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let mut config = LatencyConfig::default();
@@ -271,7 +271,7 @@ async fn config_with_max_latency_creates_range(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn rate_with_dynamic_rate(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -297,7 +297,7 @@ async fn rate_with_dynamic_rate(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn rate_with_clamps_above_one(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -320,7 +320,7 @@ async fn rate_with_clamps_above_one(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn latency_range_produces_delay_within_bounds(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (
@@ -346,7 +346,7 @@ async fn latency_range_produces_delay_within_bounds(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn inner_service_output_preserved(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let context = ResilienceContext::new(&clock);
 
     let stack = (

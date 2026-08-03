@@ -18,7 +18,7 @@ fn main() {
     let clock = Clock::new_frozen();
 
     // Retrieve the current timestamp.
-    let timestamp = clock.system_time_as::<DateTime<Utc>>();
+    let timestamp = DateTime::<Utc>::from(clock.system_time());
     println!("Current time (UTC): {}", timestamp.format(CHRONO_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo. We need to use

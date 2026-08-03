@@ -46,7 +46,7 @@ mod tests {
     #[tokio::test]
     async fn test_produce_value() {
         // Automatically advance timers for instant, deterministic testing
-        let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock: Clock = ClockControl::new_auto_advancing().to_clock();
         assert_eq!(produce_value(&clock).await, 123);
     }
 }
@@ -151,11 +151,11 @@ the underlying timer storage is duplicated per thread. After activation, each th
 no cross-thread lock contention. A cross-owner relocation remains functional but retains the
 existing timer storage, so it does not establish destination-local state.
 
-[`ClockControl`][__link36] clocks are unaffected by relocation, all clones always share the same
+[`ClockControl`][__link41] clocks are unaffected by relocation, all clones always share the same
 controlled time state regardless of thread, so a single `ClockControl` can drive time for
 the entire test.
 
-See the [`runtime`][__link37] module documentation for setup examples.
+See the [`runtime`][__link42] module documentation for setup examples.
 
 ## Testing
 
@@ -169,7 +169,7 @@ type, which is exposed when the `test-util` feature is enabled.
 
 ### Use `Clock` to retrieve absolute time
 
-The clock provides absolute time as `SystemTime`. See [`Clock`][__link38] documentation for detailed
+The clock provides absolute time as `SystemTime`. See [`Clock`][__link43] documentation for detailed
 information.
 
 ```rust
@@ -188,7 +188,7 @@ assert!(time1 <= time2);
 
 ### Use `Clock` to retrieve relative time
 
-The clock provides relative time via [`Clock::instant`][__link39] and [`Stopwatch`][__link40].
+The clock provides relative time via [`Clock::instant`][__link44] and [`Stopwatch`][__link45].
 
 ```rust
 use std::time::{Duration, Instant};
@@ -243,13 +243,13 @@ timer
 
 This crate provides several optional features that can be enabled in your `Cargo.toml`:
 
-* **`tokio`** - Integration with the [Tokio][__link41] runtime. Enables
-  [`Clock::new_tokio`][__link42] for creating clocks that use Tokio’s time facilities.
-* **`test-util`** - Enables the [`ClockControl`][__link43] type for controlling the passage of time
+* **`tokio`** - Integration with the [Tokio][__link46] runtime. Enables
+  [`Clock::new_tokio`][__link47] for creating clocks that use Tokio’s time facilities.
+* **`test-util`** - Enables the [`ClockControl`][__link48] type for controlling the passage of time
   in tests. This allows you to pause time, advance it manually, or automatically advance
   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
-* **`serde`** - Adds serialization and deserialization support via [serde][__link44].
-* **`fmt`** - Enables the [`fmt`][__link45] module with utilities for formatting `SystemTime` into
+* **`serde`** - Adds serialization and deserialization support via [serde][__link49].
+* **`fmt`** - Enables the [`fmt`][__link50] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
 * **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
   lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer

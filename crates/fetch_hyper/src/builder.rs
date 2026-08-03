@@ -100,9 +100,7 @@ where
 /// let transport: HyperTransport = HyperTransportBuilder::new(
 ///     Execute::new(connect),
 ///     Spawner::new_tokio(),
-///     tick::ClockControl::new()
-///         .auto_advance_timers(true)
-///         .to_clock(),
+///     tick::ClockControl::new_auto_advancing().to_clock(),
 ///     TransportOptions::default(),
 /// )
 /// .build(tls);
@@ -314,9 +312,9 @@ mod tests {
 
     fn make_builder_with(options: TransportOptions) -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
         HyperTransportBuilder::new(
-            FakeConnector::new_success(Bytes::new(), tick::ClockControl::new().auto_advance_timers(true).to_clock()),
+            FakeConnector::new_success(Bytes::new(), tick::ClockControl::new_auto_advancing().to_clock()),
             Spawner::new_tokio(),
-            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+            tick::ClockControl::new_auto_advancing().to_clock(),
             options,
         )
     }
@@ -427,7 +425,7 @@ mod tests {
     async fn build_with_explicit_meter_yields_working_transport() {
         let provider = SdkMeterProvider::builder().build();
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(),
@@ -447,7 +445,7 @@ mod tests {
         // We can't easily inspect hyper's internal flag, but we can at least
         // exercise the build path with HTTP/2-only configuration to confirm
         // it succeeds without panicking.
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let mut options = TransportOptions::default();
         options.supported_http_versions = vec![Version::HTTP_2];
         let _handler = HyperTransportBuilder::new(
@@ -463,7 +461,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn hyper_transport_clones_share_underlying_service() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
@@ -482,7 +480,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn hyper_transport_into_dynamic_service_executes_request() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
@@ -505,7 +503,7 @@ mod tests {
         // is provided, `build` synthesizes one and still produces a working
         // transport.
         let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(),

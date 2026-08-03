@@ -36,6 +36,7 @@ use super::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug)]
+#[must_use = "futures do nothing unless awaited or polled"]
 pub struct Delay {
     // Currently scheduled timer. This value is not initialized before
     // actually calling the `Future::poll` method.
@@ -68,7 +69,7 @@ impl Delay {
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
     /// ```
-    #[must_use]
+    #[must_use = "futures do nothing unless awaited or polled"]
     pub fn new(clock: &Clock, duration: Duration) -> Self {
         Self {
             duration,
@@ -114,7 +115,10 @@ impl Future for Delay {
 
                 Poll::Ready(())
             }
-            Some(_) => Poll::Pending,
+            Some(key) => {
+                this.clock.update_timer_waker(key, cx.waker());
+                Poll::Pending
+            }
         }
     }
 }

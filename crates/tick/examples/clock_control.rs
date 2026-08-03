@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(clippy::unwrap_used, reason = "example code")]
-
 //! This example demonstrates how to use `ClockControl` to control the passage of time.
 
 use std::time::Duration;
@@ -10,8 +8,8 @@ use std::time::Duration;
 use futures::executor::block_on;
 use tick::ClockControl;
 
-fn main() {
-    let control = ClockControl::new().auto_advance_timers(true);
+fn main() -> Result<(), std::time::SystemTimeError> {
+    let control = ClockControl::new_auto_advancing();
     let clock = control.to_clock();
 
     // Retrieve the current time.
@@ -27,7 +25,7 @@ fn main() {
     control.advance(Duration::from_secs(1));
 
     // Verify that time has advanced by 1 second.
-    assert_eq!(clock.system_time().duration_since(later).unwrap(), Duration::from_secs(1));
+    assert_eq!(clock.system_time().duration_since(later)?, Duration::from_secs(1));
 
     // Create a stopwatch.
     let stopwatch = clock.stopwatch();
@@ -43,4 +41,6 @@ fn main() {
     // because `auto_advance_timers` is set to true.
     // The delay finishes immediately.
     block_on(clock.delay(Duration::from_secs(1000)));
+
+    Ok(())
 }

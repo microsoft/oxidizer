@@ -3,10 +3,6 @@
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
-    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
-)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(
@@ -35,12 +31,15 @@
 //!     123
 //! }
 //!
+//! # #[cfg(feature = "tokio")]
 //! #[tokio::main]
 //! async fn main() {
 //!     let clock = Clock::new_tokio();
 //!     let value = produce_value(&clock).await;
 //!     assert_eq!(value, 123);
 //! }
+//! # #[cfg(not(feature = "tokio"))]
+//! # fn main() {}
 //!
 //! #[cfg(test)]
 //! mod tests {
@@ -51,7 +50,7 @@
 //!     #[tokio::test]
 //!     async fn test_produce_value() {
 //!         // Automatically advance timers for instant, deterministic testing
-//!         let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
+//!         let clock: Clock = ClockControl::new_auto_advancing().to_clock();
 //!         assert_eq!(produce_value(&clock).await, 123);
 //!     }
 //! }
@@ -306,6 +305,12 @@
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
 //! contain additional examples of how to use the time primitives.
+//!
+//! [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
+//! [`ClockControl::to_simple_clock`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html#method.to_simple_clock
+//! [`Clock::new_tokio`]: https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio
+//! [`fmt`]: https://docs.rs/tick/latest/tick/fmt/index.html
+//! [`SystemTimeExt`]: https://docs.rs/tick/latest/tick/trait.SystemTimeExt.html
 
 mod clock;
 #[cfg(any(feature = "test-util", test))]
@@ -316,6 +321,7 @@ mod error;
 mod fast_instant;
 
 #[cfg(any(feature = "fmt", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
 pub mod fmt;
 
 mod future_ext;
@@ -323,6 +329,7 @@ mod periodic_timer;
 mod simple_clock;
 mod state;
 mod stopwatch;
+#[cfg(any(feature = "fmt", test))]
 mod system_time_ext;
 mod timers;
 #[cfg(any(feature = "tokio", test))]
@@ -330,16 +337,29 @@ mod tokio;
 
 pub mod runtime;
 pub(crate) mod timeout;
+#[doc(inline)]
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-pub use clock_control::ClockControl;
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+#[doc(inline)]
+pub use clock_control::{ClockControl, ClockControlBuilder};
+#[doc(inline)]
 pub use delay::Delay;
+#[doc(inline)]
 pub use error::{Error, Result};
+#[doc(inline)]
 pub use future_ext::FutureExt;
+#[doc(inline)]
 pub use periodic_timer::PeriodicTimer;
+#[doc(inline)]
 pub use simple_clock::SimpleClock;
+#[doc(inline)]
 pub use stopwatch::Stopwatch;
+#[cfg(any(feature = "fmt", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
+#[doc(inline)]
 pub use system_time_ext::SystemTimeExt;
+#[doc(inline)]
 pub use timeout::Timeout;
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.

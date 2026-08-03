@@ -56,7 +56,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_advances_by_duration() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let timer = ClockTimer::new(clock.clone());
 
         let watch = clock.stopwatch();
@@ -67,7 +67,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_until_advances_to_deadline() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let timer = ClockTimer::new(clock.clone());
         let now = clock.instant();
 
@@ -79,7 +79,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_until_past_deadline_returns_immediately() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let timer = ClockTimer::new(clock.clone());
 
         let watch = clock.stopwatch();

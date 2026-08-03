@@ -79,7 +79,7 @@ static MIN_TIMESTAMP: LazyLock<Timestamp> = LazyLock::new(|| {
 /// // This string is ISO 8601, not RFC 2822, so the parser rejects it as malformed; RFC 2822
 /// // cannot write a year outside `0000` through `9999` at all. The year bound itself is
 /// // enforced on the `TryFrom<SystemTime>` path, where such an instant can arrive.
-/// "-0001-06-15T00:00:00Z".parse::<Rfc2822>().unwrap_err();
+/// assert!("-0001-06-15T00:00:00Z".parse::<Rfc2822>().is_err());
 /// ```
 ///
 /// # Examples

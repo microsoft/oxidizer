@@ -334,7 +334,7 @@ mod tests {
             .f64_histogram("http.client.connection.setup.duration")
             .build();
 
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
         let base = BaseUri::from_static("http://example.com");
         let result = connect_with_timeout(
@@ -361,7 +361,7 @@ mod tests {
             .f64_histogram("http.client.connection.setup.duration")
             .build();
 
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_connect_failure(TestError::new("boom"), clock.clone());
         let base = BaseUri::from_static("http://example.com");
         let err = connect_with_timeout(
@@ -389,7 +389,7 @@ mod tests {
             .f64_histogram("http.client.connection.setup.duration")
             .build();
 
-        let control = tick::ClockControl::new().auto_advance_timers(true);
+        let control = tick::ClockControl::new_auto_advancing();
         let clock = control.to_clock();
         let base = BaseUri::from_static("http://example.com");
         // pending() never resolves, so the timeout always wins.
@@ -411,7 +411,7 @@ mod tests {
 
         use crate::testing::FakeConnector;
 
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
         let provider = SdkMeterProvider::builder().build();
         let meter = provider.meter("test");
@@ -436,7 +436,7 @@ mod tests {
 
         use crate::testing::FakeConnector;
 
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
         let provider = SdkMeterProvider::builder().build();
         let meter = provider.meter("test");
