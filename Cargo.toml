@@ -204,7 +204,7 @@ static_assertions = { version = "1.1.0", default-features = false }
 string-interner = { version = "0.20.0", default-features = false }
 string_cache = { version = "0.10.0", default-features = false }
 symbol_table = { version = "0.5.0", default-features = false }
-syn = { version = "2.0.111", default-features = false }
+syn = { version = "3.0.3", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.6" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.3.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.3.0" }
