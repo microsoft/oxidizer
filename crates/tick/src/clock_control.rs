@@ -124,12 +124,6 @@ pub struct ClockControlBuilder {
     auto_advance_timers: bool,
 }
 
-impl Default for ClockControlBuilder {
-    fn default() -> Self {
-        ClockControl::builder()
-    }
-}
-
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
     ///
@@ -589,7 +583,7 @@ mod tests {
     #[test]
     fn assert_types() {
         static_assertions::assert_impl_all!(ClockControl: Send, Sync, Clone, Default);
-        static_assertions::assert_impl_all!(ClockControlBuilder: Send, Sync, Clone, Default);
+        static_assertions::assert_impl_all!(ClockControlBuilder: Send, Sync, Clone);
     }
 
     #[test]
@@ -604,7 +598,7 @@ mod tests {
 
     #[test]
     fn builder_defaults_ok() {
-        let control = ClockControlBuilder::default().build();
+        let control = ClockControl::builder().build();
 
         assert_eq!(control.with_state(|s| s.auto_advance), Duration::ZERO);
         assert_eq!(control.system_time(), SystemTime::UNIX_EPOCH);
