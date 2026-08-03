@@ -52,7 +52,6 @@ enum TimeKind {
     SystemFast,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     Controlled(crate::ClockControl),
 }
 
@@ -136,7 +135,6 @@ impl SimpleClock {
     /// assert_eq!(instant, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_simple_clock()
@@ -161,7 +159,6 @@ impl SimpleClock {
     /// assert_eq!(clock.system_time(), specific_time);
     /// ```
     #[cfg(any(feature = "test-util", test))]
-    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_simple_clock()
