@@ -27,7 +27,7 @@ pub struct Isolated;
 /// intentionally does **not** implement [`Clone`] or [`ThreadAware`]: there is exactly one
 /// shared timer set advanced by exactly one driver, so cloning or relocation would create
 /// configurations the driver could not advance correctly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Shared;
 
