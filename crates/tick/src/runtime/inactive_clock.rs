@@ -15,7 +15,7 @@ use crate::state::ClockState;
 /// This is the default mode. Clones can be relocated to different threads via
 /// [`ThreadAware::relocate`], producing independent timer storage per core. Suitable for
 /// thread-per-core runtimes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct Isolated;
 
@@ -26,7 +26,7 @@ pub struct Isolated;
 /// intentionally does **not** implement [`Clone`] or [`ThreadAware`]: there is exactly one
 /// shared timer set advanced by exactly one driver, so cloning or relocation would create
 /// configurations the driver could not advance correctly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Shared;
 
