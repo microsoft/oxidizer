@@ -676,7 +676,12 @@ impl State {
                 break;
             }
 
+            let previous_instant = self.instant;
             self.advance_time(advance, TimeFlow::Forward);
+            assert!(
+                self.instant > previous_instant,
+                "positive forward advancement must move the clock instant"
+            );
             self.auto_advance_total = self.auto_advance_total.saturating_add(advance);
             self.timers.advance_timers(self.instant, ready);
         }
