@@ -68,6 +68,7 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf" }
 cachet_memory = { path = "../cachet_memory" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
