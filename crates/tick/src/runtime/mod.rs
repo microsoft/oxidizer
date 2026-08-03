@@ -69,9 +69,6 @@ mod clock_driver;
 mod clock_gone;
 mod inactive_clock;
 
-#[doc(inline)]
 pub use clock_driver::ClockDriver;
-#[doc(inline)]
 pub use clock_gone::ClockGone;
-#[doc(inline)]
 pub use inactive_clock::{InactiveClock, Isolated, Shared};

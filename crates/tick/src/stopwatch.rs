@@ -23,7 +23,7 @@ use crate::SimpleClock;
 /// stopwatch.elapsed()
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Stopwatch {
     clock: SimpleClock,
     start: Instant,
@@ -64,23 +64,6 @@ impl Stopwatch {
     pub fn elapsed(&self) -> Duration {
         self.clock.instant().saturating_duration_since(self.start)
     }
-
-    /// Returns the instant at which this stopwatch started.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tick::SimpleClock;
-    ///
-    /// let clock = SimpleClock::new_system();
-    /// let stopwatch = clock.stopwatch();
-    ///
-    /// assert!(stopwatch.start() <= clock.instant());
-    /// ```
-    #[must_use]
-    pub const fn start(&self) -> Instant {
-        self.start
-    }
 }
 
 #[cfg(test)]
@@ -93,7 +76,7 @@ mod test {
 
     #[test]
     fn assert_types() {
-        static_assertions::assert_impl_all!(Stopwatch: Send, Sync, Clone);
+        static_assertions::assert_impl_all!(Stopwatch: Send, Sync);
     }
 
     #[test]
@@ -132,13 +115,5 @@ mod test {
 
         control.advance(Duration::from_secs(1));
         assert_eq!(watch.elapsed(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn start_returns_initial_instant() {
-        let clock = Clock::new_frozen();
-        let watch = clock.stopwatch();
-
-        assert_eq!(watch.start(), clock.instant());
     }
 }
