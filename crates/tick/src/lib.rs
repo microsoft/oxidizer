@@ -290,7 +290,6 @@ mod delay;
 mod error;
 
 #[cfg(any(feature = "fmt", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
 pub mod fmt;
 
 mod future_ext;
@@ -304,29 +303,17 @@ mod timers;
 
 pub mod runtime;
 pub(crate) mod timeout;
-#[doc(inline)]
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
-#[doc(inline)]
 pub use clock_control::{ClockControl, ClockControlBuilder};
-#[doc(inline)]
 pub use delay::Delay;
-#[doc(inline)]
 pub use error::{Error, Result};
-#[doc(inline)]
 pub use future_ext::FutureExt;
-#[doc(inline)]
 pub use periodic_timer::PeriodicTimer;
-#[doc(inline)]
 pub use simple_clock::SimpleClock;
-#[doc(inline)]
 pub use stopwatch::Stopwatch;
 #[cfg(any(feature = "fmt", test))]
-#[cfg_attr(docsrs, doc(cfg(feature = "fmt")))]
-#[doc(inline)]
 pub use system_time_ext::SystemTimeExt;
-#[doc(inline)]
 pub use timeout::Timeout;
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.

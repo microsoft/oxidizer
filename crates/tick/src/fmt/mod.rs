@@ -136,13 +136,9 @@ mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
-#[doc(inline)]
 pub use ecmascript::EcmaScript;
-#[doc(inline)]
 pub use iso_8601::Iso8601;
-#[doc(inline)]
 pub use rfc_2822::Rfc2822;
-#[doc(inline)]
 pub use unix_seconds::UnixSeconds;
 
 use crate::Error;

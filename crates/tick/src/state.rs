@@ -7,7 +7,7 @@ use std::time::Instant;
 use thread_aware::affinity::Affinity;
 use thread_aware::{PerCore, ThreadAware};
 
-use crate::timers::Timers;
+use crate::timers::{ReadyTimers, Timers};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ClockState {
@@ -123,10 +123,11 @@ impl SynchronizedTimers {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        let mut ready = Vec::new();
+        let mut ready = ReadyTimers::new();
         let next = self.with_timers(|timers| timers.advance_timers(now, &mut ready));
 
-        for waker in ready {
+        // A wake may synchronously re-enter timer code, so invoke it after releasing the lock.
+        for waker in ready.into_values() {
             waker.wake();
         }
 

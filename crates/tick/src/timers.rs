@@ -34,6 +34,8 @@ impl TimerKey {
 /// timer checks, while setting it too high would reduce timer precision.
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
+pub(crate) type ReadyTimers = BTreeMap<TimerKey, Waker>;
+
 /// Management of one-shot timers, inspired by the [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
 ///
 /// The timers managed by this collection are one-shot, meaning they will not fire again after being triggered.
@@ -109,7 +111,7 @@ impl Timers {
     /// In the future, the signature of this method can be easily expanded to return more
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut Vec<Waker>) -> Option<Instant> {
+    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyTimers) -> Option<Instant> {
         self.alive = true;
 
         // Check if there are any timers that are ready to be woken.
@@ -117,14 +119,14 @@ impl Timers {
             Some(entry) => {
                 if entry.key().tick() <= now {
                     // Split timers into ready and pending timers.
-                    let expired = match now.checked_add(Duration::from_nanos(1)) {
+                    let mut expired = match now.checked_add(Duration::from_nanos(1)) {
                         Some(after_now) => {
                             let pending = self.wakers.split_off(&TimerKey::new(after_now, 0));
                             mem::replace(&mut self.wakers, pending)
                         }
                         None => mem::take(&mut self.wakers),
                     };
-                    ready.extend(expired.into_values());
+                    ready.append(&mut expired);
 
                     // Return the next timer to be fired.
                     return self.next_timer();
@@ -248,10 +250,10 @@ mod tests {
     }
 
     fn advance_and_wake(timers: &mut Timers, now: Instant) -> Option<Instant> {
-        let mut ready = Vec::new();
+        let mut ready = ReadyTimers::new();
         let next = timers.advance_timers(now, &mut ready);
 
-        for waker in ready {
+        for waker in ready.into_values() {
             waker.wake();
         }
 

@@ -6,7 +6,7 @@ use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::ClockState;
-use crate::timers::{TimerKey, Timers};
+use crate::timers::{ReadyTimers, TimerKey, Timers};
 use crate::{Clock, thread_aware_move};
 
 /// Controls the passage of time in tests.
@@ -354,12 +354,13 @@ impl ClockControl {
 
     fn with_state_and_wake<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut State, &mut Vec<Waker>) -> R,
+        F: FnOnce(&mut State, &mut ReadyTimers) -> R,
     {
-        let mut ready = Vec::new();
+        let mut ready = ReadyTimers::new();
         let result = self.with_state(|state| f(state, &mut ready));
 
-        for waker in ready {
+        // A wake may synchronously re-enter clock control, so invoke it after releasing the lock.
+        for waker in ready.into_values() {
             waker.wake();
         }
 
@@ -416,7 +417,7 @@ impl ClockControlBuilder {
     #[must_use]
     pub fn build(self) -> ClockControl {
         let mut state = State::default();
-        let mut ready = Vec::new();
+        let mut ready = ReadyTimers::new();
         state.set_time(self.time, &mut ready);
         debug_assert!(ready.is_empty(), "a newly created clock has no timers to wake");
         state.auto_advance = self.auto_advance;
@@ -479,14 +480,14 @@ impl Default for State {
 }
 
 impl State {
-    fn set_time(&mut self, timestamp: SystemTime, ready: &mut Vec<Waker>) {
+    fn set_time(&mut self, timestamp: SystemTime, ready: &mut ReadyTimers) {
         match timestamp.duration_since(self.system_time) {
             Ok(duration) => self.advance(duration, TimeFlow::Forward, ready),
             Err(error) => self.advance(error.duration(), TimeFlow::Backward, ready),
         }
     }
 
-    fn auto_advance(&mut self, duration: Option<Duration>, ready: &mut Vec<Waker>) {
+    fn auto_advance(&mut self, duration: Option<Duration>, ready: &mut ReadyTimers) {
         let auto_advance = self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
         self.auto_advance_total = self.auto_advance_total.saturating_add(auto_advance);
         self.advance(auto_advance, TimeFlow::Forward, ready);
@@ -502,12 +503,12 @@ impl State {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut Vec<Waker>) {
+    fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut ReadyTimers) {
         self.advance_time(duration, flow);
         self.evaluate_timers(ready);
     }
 
-    fn evaluate_timers(&mut self, ready: &mut Vec<Waker>) {
+    fn evaluate_timers(&mut self, ready: &mut ReadyTimers) {
         self.timers.advance_timers(self.instant, ready);
 
         if !self.auto_advance_timers {
@@ -555,13 +556,13 @@ impl State {
         }
     }
 
-    fn now(&mut self, ready: &mut Vec<Waker>) -> SystemTime {
+    fn now(&mut self, ready: &mut ReadyTimers) -> SystemTime {
         let time = self.system_time;
         self.auto_advance(None, ready);
         time
     }
 
-    fn instant_now(&mut self, ready: &mut Vec<Waker>) -> Instant {
+    fn instant_now(&mut self, ready: &mut ReadyTimers) -> Instant {
         let time = self.instant;
         self.auto_advance(None, ready);
         time

@@ -107,7 +107,6 @@ impl InactiveClock<Shared> {
     /// exactly one [`ClockDriver`]. This is the construction mode used by
     /// [`Clock::new_tokio`](https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio).
     #[must_use]
-    #[cfg_attr(docsrs, doc(cfg(feature = "rt-shared")))]
     pub fn new_shared() -> Self {
         Self {
             state: ClockState::new_system_shared(),
