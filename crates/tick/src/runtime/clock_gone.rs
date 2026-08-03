@@ -11,7 +11,7 @@ use std::fmt::{Display, Formatter, Result};
 ///
 /// Runtime integrations should use this error to determine when to stop the timer
 /// advancement loop.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct ClockGone;
 
