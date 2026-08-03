@@ -23,7 +23,7 @@ use crate::SimpleClock;
 /// stopwatch.elapsed()
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Stopwatch {
     clock: SimpleClock,
     start: Instant,
@@ -64,22 +64,5 @@ impl Stopwatch {
     #[must_use]
     pub fn elapsed(&self) -> Duration {
         self.clock.instant().saturating_duration_since(self.start)
-    }
-
-    /// Returns the instant at which this stopwatch started.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tick::SimpleClock;
-    ///
-    /// let clock = SimpleClock::new_system();
-    /// let stopwatch = clock.stopwatch();
-    ///
-    /// assert!(stopwatch.start() <= clock.instant());
-    /// ```
-    #[must_use]
-    pub const fn start(&self) -> Instant {
-        self.start
     }
 }
