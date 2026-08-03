@@ -70,7 +70,7 @@ async fn hedging_disabled_passes_through(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn immediate_mode_all_run_concurrently(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -109,7 +109,7 @@ async fn immediate_mode_all_run_concurrently(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn immediate_mode_returns_first_success(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -141,7 +141,7 @@ async fn immediate_mode_returns_first_success(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn delay_mode_launches_hedging_attempt_after_timeout(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -180,7 +180,7 @@ async fn delay_mode_launches_hedging_attempt_after_timeout(#[case] use_tower: bo
 #[case::tower(true)]
 #[tokio::test]
 async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -218,7 +218,7 @@ async fn dynamic_mode_computes_delay(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn on_execute_callback_invoked(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let execute_calls = Arc::new(AtomicU32::new(0));
     let execute_calls_clone = Arc::clone(&execute_calls);
 
@@ -275,7 +275,7 @@ async fn no_hedging_configured_passes_through(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn all_fail_returns_last_result(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
 
     let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test");
     let stack = (
@@ -298,7 +298,7 @@ async fn all_fail_returns_last_result(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn clone_service_works_independently(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
@@ -333,7 +333,7 @@ async fn clone_service_works_independently(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn enable_if_skips_hedging(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -364,7 +364,7 @@ async fn enable_if_skips_hedging(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn clone_returning_none_skips_hedging(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -406,7 +406,7 @@ async fn clone_returning_none_skips_hedging(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn handle_unavailable_continues_hedging(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -452,7 +452,7 @@ async fn slow_original_accepted_after_hedging_launched(#[case] use_tower: bool) 
     // original finishes first and its result is accepted.
     use tokio::sync::Notify;
 
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -512,7 +512,7 @@ async fn slow_original_accepted_after_hedging_launched(#[case] use_tower: bool) 
 #[case::tower(true)]
 #[tokio::test]
 async fn non_cloneable_input_skips_hedging_and_invokes_on_execute(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
     let execute_calls = Arc::new(AtomicU32::new(0));
@@ -550,7 +550,7 @@ async fn non_cloneable_input_skips_hedging_and_invokes_on_execute(#[case] use_to
 #[case::tower(true)]
 #[tokio::test]
 async fn initial_attempt_is_last_when_no_hedging_attempts(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let observed_is_last = Arc::new(AtomicBool::new(false));
     let observed_clone = Arc::clone(&observed_is_last);
 
@@ -580,7 +580,7 @@ async fn initial_attempt_is_last_when_no_hedging_attempts(#[case] use_tower: boo
 #[case::tower(true)]
 #[tokio::test]
 async fn unavailable_returned_immediately_when_handle_unavailable_is_false(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -621,7 +621,7 @@ async fn unavailable_returned_immediately_when_handle_unavailable_is_false(#[cas
 #[case::tower(true)]
 #[tokio::test]
 async fn launch_hedging_attempt_actually_launches_attempts(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -662,7 +662,7 @@ async fn launch_hedging_attempt_actually_launches_attempts(#[case] use_tower: bo
 #[case::tower(true)]
 #[tokio::test]
 async fn invoke_on_execute_actually_calls_callback(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let execute_calls = Arc::new(AtomicU32::new(0));
     let execute_calls_clone = Arc::clone(&execute_calls);
 

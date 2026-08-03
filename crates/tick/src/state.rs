@@ -123,7 +123,14 @@ impl SynchronizedTimers {
 
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub(crate) fn try_advance_timers(&self, now: Instant) -> Option<Instant> {
-        self.with_timers(|timers| timers.advance_timers(now))
+        let mut ready = Vec::new();
+        let next = self.with_timers(|timers| timers.advance_timers(now, &mut ready));
+
+        for waker in ready {
+            waker.wake();
+        }
+
+        next
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout

@@ -124,7 +124,7 @@ async fn no_recovery_ensure_no_additional_retries(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn retry_recovery_ensure_retries_exhausted(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let counter = Arc::new(AtomicU32::new(0));
     let counter_clone = Arc::clone(&counter);
 
@@ -152,7 +152,7 @@ async fn retry_recovery_ensure_retries_exhausted(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn retry_recovery_ensure_correct_delays(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let delays = Arc::new(Mutex::new(vec![]));
     let delays_clone = Arc::clone(&delays);
 
@@ -191,7 +191,7 @@ async fn retry_recovery_ensure_correct_delays(#[case] use_tower: bool) {
 async fn retry_recovery_ensure_correct_attempts(#[case] use_tower: bool) {
     use seatbelt::Attempt;
 
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let attempts = Arc::new(Mutex::new(vec![]));
     let attempts_clone = Arc::clone(&attempts);
 
@@ -243,7 +243,7 @@ async fn retry_recovery_ensure_correct_attempts(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn restore_input_integration_test(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
     let restore_count = Arc::new(AtomicU32::new(0));
@@ -300,7 +300,7 @@ async fn restore_input_integration_test(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn outage_handling_disabled_no_retries(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
@@ -328,7 +328,7 @@ async fn outage_handling_disabled_no_retries(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn outage_handling_enabled_with_retries(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 
@@ -365,7 +365,7 @@ async fn outage_handling_enabled_with_retries(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn outage_handling_with_recovery_hint(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let delays = Arc::new(Mutex::new(vec![]));
     let delays_clone = Arc::clone(&delays);
 
@@ -400,7 +400,7 @@ async fn outage_handling_with_recovery_hint(#[case] use_tower: bool) {
 #[case::tower(true)]
 #[tokio::test]
 async fn clone_service_works_independently(#[case] use_tower: bool) {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let call_count = Arc::new(AtomicU32::new(0));
     let call_count_clone = Arc::clone(&call_count);
 

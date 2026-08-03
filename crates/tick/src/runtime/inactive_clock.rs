@@ -15,17 +15,18 @@ use crate::state::ClockState;
 /// This is the default mode. Clones can be relocated to different threads via
 /// [`ThreadAware::relocate`], producing independent timer storage per core. Suitable for
 /// thread-per-core runtimes.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Isolated;
 
 /// Marker for an [`InactiveClock`] backed by a single shared timer set.
 ///
-/// Created via [`InactiveClock::new_shared`]. The resulting `InactiveClock<Shared>`
+/// Created via [`InactiveClock::new_shared`](https://docs.rs/tick/latest/tick/runtime/struct.InactiveClock.html#method.new_shared).
+/// The resulting `InactiveClock<Shared>`
 /// intentionally does **not** implement [`Clone`] or [`ThreadAware`]: there is exactly one
 /// shared timer set advanced by exactly one driver, so cloning or relocation would create
 /// configurations the driver could not advance correctly.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Shared;
 
@@ -38,7 +39,8 @@ pub struct Shared;
 ///   relocated across threads, with each thread getting an independent timer set on
 ///   activation.
 /// - [`Shared`]: a single shared timer set advanced by a single driver. Use
-///   [`InactiveClock::new_shared`] to construct one. Does not implement [`Clone`] or
+///   [`InactiveClock::new_shared`](https://docs.rs/tick/latest/tick/runtime/struct.InactiveClock.html#method.new_shared)
+///   to construct one. Does not implement [`Clone`] or
 ///   [`ThreadAware`].
 ///
 /// To begin using the clock, call [`InactiveClock::activate`] to get a working [`Clock`] instance and
@@ -103,8 +105,9 @@ impl InactiveClock<Shared> {
     /// The returned value is intentionally not [`Clone`] and does not implement
     /// [`ThreadAware`]: a `Shared` clock has exactly one timer set that must be advanced by
     /// exactly one [`ClockDriver`]. This is the construction mode used by
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio].
+    /// [`Clock::new_tokio`](https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio).
     #[must_use]
+    #[cfg_attr(docsrs, doc(cfg(feature = "rt-shared")))]
     pub fn new_shared() -> Self {
         Self {
             state: ClockState::new_system_shared(),

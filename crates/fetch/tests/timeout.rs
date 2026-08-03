@@ -15,7 +15,7 @@ use tick::ClockControl;
 #[tokio::test]
 async fn response_timeout() {
     let handler = FakeHandler::never_completes();
-    let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let client = HttpClient::builder_fake(handler, FakeDeps { clock }).minimal_pipeline().build();
 
     let err = client

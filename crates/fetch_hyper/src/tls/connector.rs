@@ -331,7 +331,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_native_tls_propagates_connector_error() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_connect_failure(TestError::new("fail"), clock);
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), connector, RequestFilter::HttpAndHttps, &[Version::HTTP_11]);
@@ -345,7 +345,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_rustls_propagates_connector_error() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_connect_failure(TestError::new("fail-rustls"), clock);
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             rustls_backend(),

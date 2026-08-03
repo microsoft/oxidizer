@@ -42,8 +42,9 @@ use crate::{Clock, thread_aware_move};
 /// ```
 /// # use std::time::Duration;
 /// # use tick::{Clock, ClockControl};
-/// let clock = ClockControl::new()
+/// let clock = ClockControl::builder()
 ///     .auto_advance(Duration::from_secs(1))
+///     .build()
 ///     .to_clock();
 ///
 /// let now = clock.system_time();
@@ -92,6 +93,43 @@ impl std::fmt::Debug for ClockControl {
 
 thread_aware_move!(ClockControl);
 
+/// Configures and creates a [`ClockControl`].
+///
+/// Use [`ClockControl::builder`] when controlled time needs automatic advancement,
+/// an advancement limit, or a non-default initial time.
+///
+/// # Examples
+///
+/// ```
+/// use std::time::{Duration, SystemTime};
+///
+/// use tick::ClockControl;
+///
+/// let control = ClockControl::builder()
+///     .time(SystemTime::UNIX_EPOCH + Duration::from_secs(10))
+///     .auto_advance(Duration::from_secs(1))
+///     .build();
+///
+/// let clock = control.to_clock();
+/// assert_eq!(
+///     clock.system_time(),
+///     SystemTime::UNIX_EPOCH + Duration::from_secs(10)
+/// );
+/// ```
+#[derive(Debug, Clone)]
+pub struct ClockControlBuilder {
+    time: SystemTime,
+    auto_advance: Duration,
+    auto_advance_total_max: Option<Duration>,
+    auto_advance_timers: bool,
+}
+
+impl Default for ClockControlBuilder {
+    fn default() -> Self {
+        ClockControl::builder()
+    }
+}
+
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
     ///
@@ -103,8 +141,9 @@ impl ClockControl {
     ///
     /// use tick::ClockControl;
     ///
-    /// let clock = ClockControl::new()
+    /// let clock = ClockControl::builder()
     ///     .auto_advance(Duration::from_secs(1))
+    ///     .build()
     ///     .to_clock();
     ///
     /// let time1 = clock.system_time();
@@ -116,9 +155,27 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(State::default())),
+        Self::default()
+    }
+
+    /// Creates a builder for a configured `ClockControl`.
+    #[must_use]
+    pub fn builder() -> ClockControlBuilder {
+        ClockControlBuilder {
+            time: SystemTime::UNIX_EPOCH,
+            auto_advance: Duration::ZERO,
+            auto_advance_total_max: None,
+            auto_advance_timers: false,
         }
+    }
+
+    /// Creates a clock control that automatically advances pending timers.
+    ///
+    /// This is a shortcut for
+    /// `ClockControl::builder().auto_advance_timers().build()`.
+    #[must_use]
+    pub fn new_auto_advancing() -> Self {
+        Self::builder().auto_advance_timers().build()
     }
 
     /// Creates a new `ClockControl` instance at the specified time.
@@ -138,9 +195,7 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn new_at(time: impl Into<SystemTime>) -> Self {
-        let this = Self::new();
-        this.set_time(time.into());
-        this
+        Self::builder().time(time).build()
     }
 
     /// Converts this `ClockControl` into a `Clock` instance.
@@ -151,6 +206,8 @@ impl ClockControl {
     /// # Examples
     ///
     /// ```
+    /// use std::time::Duration;
+    ///
     /// use tick::ClockControl;
     ///
     /// let control = ClockControl::new();
@@ -158,7 +215,7 @@ impl ClockControl {
     /// let clock_clone = clock.clone();
     ///
     /// // Advance the clock by 1 second
-    /// control.advance_millis(1_000);
+    /// control.advance(Duration::from_secs(1));
     ///
     /// // Ensure the clock and cloned clock are in sync
     /// assert_eq!(clock.system_time(), clock_clone.system_time());
@@ -197,153 +254,6 @@ impl ClockControl {
         crate::SimpleClock::from_control(self.clone())
     }
 
-    /// Sets the duration by which the clock will auto-advance when accessing the current time.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    ///
-    /// use tick::ClockControl;
-    ///
-    /// let clock = ClockControl::new()
-    ///     .auto_advance(Duration::from_secs(1))
-    ///     .to_clock();
-    ///
-    /// let now = clock.system_time();
-    /// let later = clock.system_time(); // Automatically advances by 1 second
-    ///
-    /// assert_eq!(later.duration_since(now)?, Duration::from_secs(1));
-    ///
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    #[must_use]
-    pub fn auto_advance(self, duration: Duration) -> Self {
-        self.with_state(|v| v.auto_advance = duration);
-        self
-    }
-
-    /// Sets a limit on the total auto-advance duration.
-    ///
-    /// When auto-advance is enabled via [`Self::auto_advance`], this method limits the total
-    /// amount of time that can be auto-advanced. Once the limit is reached, further calls to
-    /// access the current time will no longer auto-advance the clock.
-    ///
-    /// > **Note**: This method only has an effect if [`Self::auto_advance`] has been called
-    /// > previously to set a non-zero auto-advance duration.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    ///
-    /// use tick::{ClockControl, FutureExt};
-    ///
-    /// # async fn auto_advance_limit_example() {
-    /// // Limit the max auto-advance to 500ms. The 700ms delay never completes because
-    /// // the total auto-advance is capped. Instead, the 200ms timeout completes.
-    /// let clock = ClockControl::new()
-    ///     .auto_advance(Duration::from_millis(200))
-    ///     .auto_advance_limit(Duration::from_millis(500))
-    ///     .to_clock();
-    ///
-    /// // Create a long-running future and apply a timeout
-    /// let timeout_error = clock
-    ///     .delay(Duration::from_millis(700))
-    ///     .timeout(&clock, Duration::from_millis(200))
-    ///     .await
-    ///     .unwrap_err();
-    ///
-    /// assert_eq!(timeout_error.to_string(), "future timed out");
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn auto_advance_limit(self, limit: Duration) -> Self {
-        self.with_state(|v| {
-            v.auto_advance_total_max = Some(limit);
-        });
-
-        self
-    }
-
-    /// Configures whether the clock automatically advances to fire pending timers.
-    ///
-    /// When enabled, the clock fast-forwards on its own to fire timers, so timer-based futures
-    /// such as [`Delay`](crate::Delay) complete without any manual clock advancement and without
-    /// waiting for real time to elapse. This is the simplest way to keep time-dependent tests both
-    /// deterministic and fast: awaiting a delay resolves right away in wall-clock terms.
-    ///
-    /// The clock advances both when a timer is scheduled and when the current time is read, jumping
-    /// forward to a timer's deadline before firing it. Simulated time is still consumed, so
-    /// elapsed-time measurements (for example via a [`Stopwatch`](crate::Stopwatch)) reflect each
-    /// delay's configured duration. A delay with no finite deadline
-    /// ([`Duration::MAX`](std::time::Duration::MAX)) never completes.
-    ///
-    /// # Timers do not run concurrently
-    ///
-    /// Timers are fired eagerly, one at a time, as they are scheduled; this option does not
-    /// simulate multiple timers running side by side. Do not rely on concurrent delays completing
-    /// in duration order — a shorter delay scheduled after a longer one may still complete after
-    /// it. When the relative ordering of concurrent timers matters, drive the clock explicitly with
-    /// [`Self::advance`] instead.
-    ///
-    /// > **Note**: When [`Self::auto_advance_limit`] is set, the maximum total auto-advance
-    /// > duration is respected. Once the limit is reached, no further timers will be fired
-    /// > automatically.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    ///
-    /// use tick::ClockControl;
-    ///
-    /// # async fn auto_advance_timers_example() {
-    /// let clock = ClockControl::new().auto_advance_timers(true).to_clock();
-    ///
-    /// let stopwatch = clock.stopwatch();
-    ///
-    /// // Resolves right away in real time — no manual `advance` call is needed.
-    /// clock.delay(Duration::from_secs(30)).await;
-    ///
-    /// // Simulated time still elapses by the delay's duration.
-    /// assert_eq!(stopwatch.elapsed(), Duration::from_secs(30));
-    /// # }
-    /// ```
-    #[must_use]
-    pub fn auto_advance_timers(self, enabled: bool) -> Self {
-        self.with_state(|v| v.auto_advance_timers = enabled);
-        self
-    }
-
-    /// Manually advances the clock by the specified number of milliseconds.
-    ///
-    /// In addition to advancing the current time, this method fires any registered timers
-    /// that are scheduled to expire within the advanced period.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::time::Duration;
-    ///
-    /// use tick::ClockControl;
-    ///
-    /// let control = ClockControl::new();
-    /// let clock = control.to_clock();
-    ///
-    /// let now = clock.system_time();
-    /// control.advance_millis(100);
-    /// assert_eq!(
-    ///     clock.system_time().duration_since(now)?,
-    ///     Duration::from_millis(100)
-    /// );
-    ///
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn advance_millis(&self, millis: u64) {
-        self.advance(Duration::from_millis(millis));
-    }
-
     /// Manually advances the clock by the specified duration.
     ///
     /// In addition to advancing the current time, this method fires any registered timers
@@ -368,8 +278,13 @@ impl ClockControl {
     ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the duration would move the controlled [`SystemTime`] or [`Instant`] outside
+    /// the range supported by the platform.
     pub fn advance(&self, duration: Duration) {
-        self.with_state(|v| v.advance(duration, TimeFlow::Forward));
+        self.with_state_and_wake(|state, ready| state.advance(duration, TimeFlow::Forward, ready));
     }
 
     /// Sets the clock to the specified system time.
@@ -389,38 +304,33 @@ impl ClockControl {
     ///
     /// assert_eq!(clock.system_time(), target);
     /// ```
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "we are handling cases where the timestamp is either in future or past and the resulting duration is always positive"
-    )]
+    ///
+    /// # Panics
+    ///
+    /// Panics if `timestamp` would move the controlled [`SystemTime`] or [`Instant`] outside
+    /// the range supported by the platform.
     pub fn set_time(&self, timestamp: impl Into<SystemTime>) {
-        let now = self.system_time();
-        let timestamp = timestamp.into();
-
-        match timestamp.duration_since(now) {
-            Ok(duration) => {
-                self.with_state(|v| v.advance(duration, TimeFlow::Forward));
-            }
-            Err(_e) => {
-                let duration = now.duration_since(timestamp).expect("the resulting duration must be positive here");
-
-                self.with_state(|v| v.advance(duration, TimeFlow::Backward));
-            }
-        }
+        self.with_state_and_wake(|state, ready| state.set_time(timestamp.into(), ready));
     }
 
     pub(super) fn system_time(&self) -> SystemTime {
-        self.with_state(State::now)
+        self.with_state_and_wake(State::now)
     }
 
     pub(super) fn instant(&self) -> Instant {
-        self.with_state(State::instant_now)
+        self.with_state_and_wake(State::instant_now)
     }
 
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {
-        let key = self.with_state(|s| s.timers.register(when, waker));
-        self.with_state(State::evaluate_timers);
-        key
+        self.with_state_and_wake(|state, ready| {
+            let key = state.timers.register(when, waker);
+            state.evaluate_timers(ready);
+            key
+        })
+    }
+
+    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) {
+        self.with_state(|state| state.timers.update_waker(key, waker));
     }
 
     pub(super) fn unregister_timer(&self, key: TimerKey) {
@@ -439,11 +349,83 @@ impl ClockControl {
     where
         F: FnOnce(&mut State) -> R,
     {
-        f(&mut self.state.lock().expect("acquiring lock must always succeed"))
+        f(&mut self.state.lock().expect("clock control lock poisoned"))
+    }
+
+    fn with_state_and_wake<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut State, &mut Vec<Waker>) -> R,
+    {
+        let mut ready = Vec::new();
+        let result = self.with_state(|state| f(state, &mut ready));
+
+        for waker in ready {
+            waker.wake();
+        }
+
+        result
     }
 
     pub(crate) fn is_unique(&self) -> bool {
         Arc::strong_count(&self.state) == 1
+    }
+}
+
+impl ClockControlBuilder {
+    /// Sets the initial system time.
+    ///
+    /// The default is [`SystemTime::UNIX_EPOCH`].
+    #[must_use]
+    pub fn time(mut self, time: impl Into<SystemTime>) -> Self {
+        self.time = time.into();
+        self
+    }
+
+    /// Sets the duration advanced whenever the current time is read.
+    #[must_use]
+    pub fn auto_advance(mut self, duration: Duration) -> Self {
+        self.auto_advance = duration;
+        self
+    }
+
+    /// Limits the total duration consumed by automatic advancement.
+    ///
+    /// The limit applies to both read-based auto-advance and timer auto-advance.
+    #[must_use]
+    pub fn auto_advance_limit(mut self, limit: Duration) -> Self {
+        self.auto_advance_total_max = Some(limit);
+        self
+    }
+
+    /// Enables automatic advancement to pending timer deadlines.
+    ///
+    /// Timers are fired eagerly, one at a time, as they are scheduled. This does not simulate
+    /// concurrent timers; use [`ClockControl::advance`] when timer ordering matters.
+    #[must_use]
+    pub fn auto_advance_timers(mut self) -> Self {
+        self.auto_advance_timers = true;
+        self
+    }
+
+    /// Builds the configured [`ClockControl`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the initial time is outside the range supported by the platform's
+    /// [`SystemTime`] or [`Instant`].
+    #[must_use]
+    pub fn build(self) -> ClockControl {
+        let mut state = State::default();
+        let mut ready = Vec::new();
+        state.set_time(self.time, &mut ready);
+        debug_assert!(ready.is_empty(), "a newly created clock has no timers to wake");
+        state.auto_advance = self.auto_advance;
+        state.auto_advance_total_max = self.auto_advance_total_max;
+        state.auto_advance_timers = self.auto_advance_timers;
+
+        ClockControl {
+            state: Arc::new(Mutex::new(state)),
+        }
     }
 }
 
@@ -497,10 +479,17 @@ impl Default for State {
 }
 
 impl State {
-    fn auto_advance(&mut self, duration: Option<Duration>) {
+    fn set_time(&mut self, timestamp: SystemTime, ready: &mut Vec<Waker>) {
+        match timestamp.duration_since(self.system_time) {
+            Ok(duration) => self.advance(duration, TimeFlow::Forward, ready),
+            Err(error) => self.advance(error.duration(), TimeFlow::Backward, ready),
+        }
+    }
+
+    fn auto_advance(&mut self, duration: Option<Duration>, ready: &mut Vec<Waker>) {
         let auto_advance = self.get_next_auto_advance_duration(duration.unwrap_or(self.auto_advance));
         self.auto_advance_total = self.auto_advance_total.saturating_add(auto_advance);
-        self.advance(auto_advance, TimeFlow::Forward);
+        self.advance(auto_advance, TimeFlow::Forward, ready);
     }
 
     fn get_next_auto_advance_duration(&self, hint: Duration) -> Duration {
@@ -513,13 +502,13 @@ impl State {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    fn advance(&mut self, duration: Duration, flow: TimeFlow) {
+    fn advance(&mut self, duration: Duration, flow: TimeFlow, ready: &mut Vec<Waker>) {
         self.advance_time(duration, flow);
-        self.evaluate_timers();
+        self.evaluate_timers(ready);
     }
 
-    fn evaluate_timers(&mut self) {
-        self.timers.advance_timers(self.instant);
+    fn evaluate_timers(&mut self, ready: &mut Vec<Waker>) {
+        self.timers.advance_timers(self.instant, ready);
 
         if !self.auto_advance_timers {
             return;
@@ -538,8 +527,9 @@ impl State {
                 break;
             }
 
-            self.advance(advance, TimeFlow::Forward);
+            self.advance_time(advance, TimeFlow::Forward);
             self.auto_advance_total = self.auto_advance_total.saturating_add(advance);
+            self.timers.advance_timers(self.instant, ready);
         }
     }
 
@@ -552,28 +542,23 @@ impl State {
             TimeFlow::Forward => {
                 self.instant = self.instant.checked_add(duration).expect(OUTSIDE_RANGE_MESSAGE);
                 self.system_time = self.system_time.checked_add(duration).expect(OUTSIDE_RANGE_MESSAGE);
-                self.timers.advance_timers(self.instant);
             }
             TimeFlow::Backward => {
                 self.instant = self.instant.checked_sub(duration).expect(OUTSIDE_RANGE_MESSAGE);
                 self.system_time = self.system_time.checked_sub(duration).expect(OUTSIDE_RANGE_MESSAGE);
-
-                // There is no point in advancing/triggering the timers if we are moving back
-                // in time. Timers are only ever fired when time moves forward.
-                // No need to call `self.timers.advance_timers` here.
             }
         }
     }
 
-    fn now(&mut self) -> SystemTime {
+    fn now(&mut self, ready: &mut Vec<Waker>) -> SystemTime {
         let time = self.system_time;
-        self.auto_advance(None);
+        self.auto_advance(None, ready);
         time
     }
 
-    fn instant_now(&mut self) -> Instant {
+    fn instant_now(&mut self, ready: &mut Vec<Waker>) -> Instant {
         let time = self.instant;
-        self.auto_advance(None);
+        self.auto_advance(None, ready);
         time
     }
 }
@@ -590,12 +575,15 @@ static OUTSIDE_RANGE_MESSAGE: &str =
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
     use crate::fmt::UnixSeconds;
 
     #[test]
     fn assert_types() {
-        static_assertions::assert_impl_all!(ClockControl: Send, Sync);
+        static_assertions::assert_impl_all!(ClockControl: Send, Sync, Clone, Default);
+        static_assertions::assert_impl_all!(ClockControlBuilder: Send, Sync, Clone, Default);
     }
 
     #[test]
@@ -611,7 +599,7 @@ mod tests {
     #[test]
     fn auto_advance_ok() {
         let duration = Duration::from_secs(1);
-        let control = ClockControl::new().auto_advance(duration);
+        let control = ClockControl::builder().auto_advance(duration).build();
         let clock = control.to_clock();
 
         assert_eq!(control.with_state(|s| s.auto_advance), duration);
@@ -673,20 +661,6 @@ mod tests {
     }
 
     #[test]
-    fn advance_millis_ok() {
-        // arrange
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let now = clock.system_time();
-
-        // act
-        () = control.advance_millis(123);
-
-        // assert
-        assert_eq!(clock.system_time().duration_since(now).unwrap(), Duration::from_millis(123));
-    }
-
-    #[test]
     fn register_timer_ok() {
         // arrange
         let control = ClockControl::new();
@@ -725,7 +699,7 @@ mod tests {
 
     #[test]
     fn auto_advance_timers() {
-        let control = ClockControl::new().auto_advance_timers(true);
+        let control = ClockControl::new_auto_advancing();
         let clock = control.to_clock();
         let now = clock.system_time();
 
@@ -750,10 +724,27 @@ mod tests {
     }
 
     #[test]
+    fn timer_wakers_run_after_releasing_state_lock() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let lock_was_available = Arc::new(AtomicBool::new(false));
+        let waker = Waker::from(Arc::new(ReentrantWaker {
+            control: control.clone(),
+            lock_was_available: Arc::clone(&lock_was_available),
+        }));
+
+        control.register_timer(clock.instant() + Duration::from_secs(1), waker);
+        control.advance(Duration::from_secs(1));
+
+        assert!(lock_was_available.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn auto_advance_limit() {
-        let control = ClockControl::new()
+        let control = ClockControl::builder()
             .auto_advance(Duration::from_millis(550))
-            .auto_advance_limit(Duration::from_secs(2));
+            .auto_advance_limit(Duration::from_secs(2))
+            .build();
         let clock = control.to_clock();
 
         let anchor = clock.system_time();
@@ -794,7 +785,7 @@ mod tests {
         // Before the fix, this would overflow because:
         // evaluate_timers -> advance_time -> evaluate_timers -> advance_time -> ...
 
-        let control = ClockControl::new().auto_advance_timers(true);
+        let control = ClockControl::new_auto_advancing();
         let clock = control.to_clock();
         let start_instant = clock.instant();
 
@@ -817,7 +808,7 @@ mod tests {
         // iteratively without stack overflow. The loop-based implementation prevents
         // recursion: evaluate_timers -> advance_time -> timers.advance_timers (not evaluate_timers again)
 
-        let control = ClockControl::new().auto_advance_timers(true);
+        let control = ClockControl::new_auto_advancing();
         let clock = control.to_clock();
         let start_instant = clock.instant();
 
@@ -839,7 +830,7 @@ mod tests {
     #[test]
     fn from_clock_control_ok() {
         let control = ClockControl::default();
-        control.advance_millis(12345);
+        control.advance(Duration::from_millis(12345));
 
         let clock_1 = Clock::from(control.clone());
         let clock_2 = Clock::from(&control);
@@ -850,10 +841,11 @@ mod tests {
 
     #[test]
     fn auto_advance_timers_stops_at_limit() {
-        let control = ClockControl::new()
-            .auto_advance_timers(true)
+        let control = ClockControl::builder()
+            .auto_advance_timers()
             .auto_advance(Duration::from_secs(1))
-            .auto_advance_limit(Duration::from_secs(1));
+            .auto_advance_limit(Duration::from_secs(1))
+            .build();
         let clock = control.to_clock();
         let start_instant = clock.instant();
 
@@ -890,5 +882,17 @@ mod tests {
         let control = ClockControl::new_at(system);
 
         insta::assert_debug_snapshot!(control);
+    }
+
+    struct ReentrantWaker {
+        control: ClockControl,
+        lock_was_available: Arc<AtomicBool>,
+    }
+
+    impl std::task::Wake for ReentrantWaker {
+        fn wake(self: Arc<Self>) {
+            self.lock_was_available
+                .store(self.control.state.try_lock().is_ok(), Ordering::Relaxed);
+        }
     }
 }

@@ -25,10 +25,9 @@
 //! because the `SystemTime` can be outside the maximum range of the respective format. The conversion back to `SystemTime` is
 //! always infallible.
 //!
-//! To retrieve the current system time in the respective format, use the [`Clock::system_time_as`][crate::Clock::system_time_as] function
-//! which retrieves current system time and does the automatic conversion to the output format. It panics when the target format cannot
-//! represent the clock's instant, which a controlled clock can produce; use [`Clock::system_time`][crate::Clock::system_time] with the
-//! target type's [`TryFrom`] where that has to be handled.
+//! To retrieve the current system time in the respective format, use
+//! [`Clock::try_system_time_as`][crate::Clock::try_system_time_as]. It retrieves the current
+//! system time and performs the target type's [`TryFrom`] conversion.
 //!
 //! # Representable range
 //!
@@ -48,7 +47,8 @@
 //! assert_eq!(Iso8601::try_from(system_time)?, iso);
 //!
 //! // `UnixSeconds` counts forward from the Unix epoch, so an earlier instant is rejected.
-//! UnixSeconds::try_from(SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(1)).unwrap_err();
+//! let before_epoch = SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(1);
+//! assert!(UnixSeconds::try_from(before_epoch).is_err());
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -81,7 +81,7 @@
 //!
 //! // The fallible step is explicit: `UnixSeconds` cannot express a pre-epoch instant.
 //! let before_epoch: Iso8601 = "1969-12-31T23:59:59Z".parse()?;
-//! UnixSeconds::try_from(SystemTime::from(before_epoch)).unwrap_err();
+//! assert!(UnixSeconds::try_from(SystemTime::from(before_epoch)).is_err());
 //!
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -136,9 +136,13 @@ mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
+#[doc(inline)]
 pub use ecmascript::EcmaScript;
+#[doc(inline)]
 pub use iso_8601::Iso8601;
+#[doc(inline)]
 pub use rfc_2822::Rfc2822;
+#[doc(inline)]
 pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
@@ -198,10 +202,10 @@ mod tests {
         let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_millis(10_123_456));
 
         let dates = Dates {
-            iso: clock.system_time_as::<Iso8601>(),
-            rfc: clock.system_time_as::<Rfc2822>(),
-            unix: clock.system_time_as::<UnixSeconds>(),
-            ecma: clock.system_time_as::<EcmaScript>(),
+            iso: clock.try_system_time_as::<Iso8601>().unwrap(),
+            rfc: clock.try_system_time_as::<Rfc2822>().unwrap(),
+            unix: clock.try_system_time_as::<UnixSeconds>().unwrap(),
+            ecma: clock.try_system_time_as::<EcmaScript>().unwrap(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();
@@ -217,10 +221,10 @@ mod tests {
         let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_millis(10_123_456));
 
         let dates = Dates {
-            iso: clock.system_time_as::<Iso8601>(),
-            rfc: clock.system_time_as::<Rfc2822>(),
-            unix: clock.system_time_as::<UnixSeconds>(),
-            ecma: clock.system_time_as::<EcmaScript>(),
+            iso: clock.try_system_time_as::<Iso8601>().unwrap(),
+            rfc: clock.try_system_time_as::<Rfc2822>().unwrap(),
+            unix: clock.try_system_time_as::<UnixSeconds>().unwrap(),
+            ecma: clock.try_system_time_as::<EcmaScript>().unwrap(),
         };
 
         let formatted = format!("iso: {}, unix: {}, rfc: {}, ecma: {}", dates.iso, dates.unix, dates.rfc, dates.ecma);
@@ -235,10 +239,10 @@ mod tests {
         let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_secs(10123));
 
         let dates = Dates {
-            iso: clock.system_time_as::<Iso8601>(),
-            rfc: clock.system_time_as::<Rfc2822>(),
-            unix: clock.system_time_as::<UnixSeconds>(),
-            ecma: clock.system_time_as::<EcmaScript>(),
+            iso: clock.try_system_time_as::<Iso8601>().unwrap(),
+            rfc: clock.try_system_time_as::<Rfc2822>().unwrap(),
+            unix: clock.try_system_time_as::<UnixSeconds>().unwrap(),
+            ecma: clock.try_system_time_as::<EcmaScript>().unwrap(),
         };
 
         let json = serde_json::to_string(&dates).unwrap();

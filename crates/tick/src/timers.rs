@@ -86,6 +86,17 @@ impl Timers {
         self.wakers.remove(&id);
     }
 
+    /// Replaces the waker for an existing timer when the awaiting task changes.
+    pub(crate) fn update_waker(&mut self, id: TimerKey, waker: &Waker) {
+        let Some(current) = self.wakers.get_mut(&id) else {
+            return;
+        };
+
+        if !current.will_wake(waker) {
+            current.clone_from(waker);
+        }
+    }
+
     /// Returns the instant when the next timer will fire, or `None` if no timers are registered.
     pub(crate) fn next_timer(&self) -> Option<Instant> {
         self.wakers.keys().next().map(TimerKey::tick)
@@ -98,26 +109,22 @@ impl Timers {
     /// In the future, the signature of this method can be easily expanded to return more
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub(crate) fn advance_timers(&mut self, now: Instant) -> Option<Instant> {
+    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut Vec<Waker>) -> Option<Instant> {
         self.alive = true;
-
-        // We are adding 1ns to the instant to ensure that even timers whose deadline is the current
-        // instant are advanced. This is required because of how BTreeMap::split_off works; it does
-        // not include keys that are equal to the split key. Adding 1ns to the value makes this work.
-        let adjusted_now = now.checked_add(Duration::from_nanos(1)).unwrap_or(now);
 
         // Check if there are any timers that are ready to be woken.
         match self.wakers.first_entry() {
             Some(entry) => {
-                if entry.key().tick() <= adjusted_now {
+                if entry.key().tick() <= now {
                     // Split timers into ready and pending timers.
-                    let pending = self.wakers.split_off(&TimerKey::new(adjusted_now, 0));
-                    let ready = mem::replace(&mut self.wakers, pending);
-
-                    // Invoke the wakers for timers that ticked.
-                    for (_, waker) in ready {
-                        waker.wake();
-                    }
+                    let expired = match now.checked_add(Duration::from_nanos(1)) {
+                        Some(after_now) => {
+                            let pending = self.wakers.split_off(&TimerKey::new(after_now, 0));
+                            mem::replace(&mut self.wakers, pending)
+                        }
+                        None => mem::take(&mut self.wakers),
+                    };
+                    ready.extend(expired.into_values());
 
                     // Return the next timer to be fired.
                     return self.next_timer();
@@ -149,7 +156,7 @@ mod tests {
 
         assert_ne!(key1, key2);
 
-        timers.advance_timers(when + Duration::from_secs(1));
+        advance_and_wake(&mut timers, when + Duration::from_secs(1));
         assert_eq!(timers.len(), 0);
     }
 
@@ -164,11 +171,11 @@ mod tests {
         let _id2 = timers.register(timer_second, Waker::noop().clone());
 
         assert_eq!(timers.len(), 2);
-        timers.advance_timers(timer_first + Duration::from_nanos(1));
+        advance_and_wake(&mut timers, timer_first + Duration::from_nanos(1));
         assert_eq!(timers.len(), 1);
 
         assert!(!timers.contains(id1));
-        timers.advance_timers(timer_second + Duration::from_nanos(1));
+        advance_and_wake(&mut timers, timer_second + Duration::from_nanos(1));
         assert_eq!(timers.len(), 0);
     }
 
@@ -221,12 +228,23 @@ mod tests {
     fn advance_timers_ensure_correct_result() {
         let mut timers = Timers::default();
         let now = Instant::now();
-        assert!(timers.advance_timers(now).is_none());
+        assert!(advance_and_wake(&mut timers, now).is_none());
 
         let next = now.checked_add(Duration::from_secs(1)).unwrap();
         let _ = timers.register(next, Waker::noop().clone());
-        assert_eq!(timers.advance_timers(now), Some(next));
+        assert_eq!(advance_and_wake(&mut timers, now), Some(next));
 
-        assert_eq!(timers.advance_timers(next), None);
+        assert_eq!(advance_and_wake(&mut timers, next), None);
+    }
+
+    fn advance_and_wake(timers: &mut Timers, now: Instant) -> Option<Instant> {
+        let mut ready = Vec::new();
+        let next = timers.advance_timers(now, &mut ready);
+
+        for waker in ready {
+            waker.wake();
+        }
+
+        next
     }
 }

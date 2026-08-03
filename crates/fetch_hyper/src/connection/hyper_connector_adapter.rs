@@ -81,7 +81,7 @@ mod tests {
     async fn call_translates_uri_into_base_uri_and_invokes_connector() {
         let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(
             Bytes::from_static(b""),
-            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+            tick::ClockControl::new_auto_advancing().to_clock(),
         ));
         adapter.call(Uri::from_static("https://example.com/")).await.unwrap();
     }
@@ -91,7 +91,7 @@ mod tests {
     async fn call_propagates_invalid_uri_error() {
         let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(
             Bytes::from_static(b""),
-            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+            tick::ClockControl::new_auto_advancing().to_clock(),
         ));
         // A relative URI (no scheme/authority) is not a valid BaseUri.
         adapter

@@ -18,9 +18,9 @@ use crate::thread_aware_move;
 /// - [`Clock`][crate::Clock] implements [`AsRef<SimpleClock>`] and exposes
 ///   [`Clock::simple_clock`][crate::Clock::simple_clock], so a timer-capable clock can be used
 ///   anywhere a `SimpleClock` is expected.
-/// - With the `test-util` feature, [`ClockControl::to_simple_clock`][crate::ClockControl::to_simple_clock]
+/// - With the `test-util` feature, [`ClockControl::to_simple_clock`]
 ///   creates a controlled `SimpleClock` whose time is driven by the same
-///   [`ClockControl`][crate::ClockControl].
+///   [`ClockControl`].
 ///
 /// This makes APIs that only need to read time — such as [`Stopwatch`][crate::Stopwatch] —
 /// seamlessly accept either kind of clock.
@@ -37,6 +37,9 @@ use crate::thread_aware_move;
 ///
 /// assert!(second >= first);
 /// ```
+///
+/// [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
+/// [`ClockControl::to_simple_clock`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html#method.to_simple_clock
 #[derive(Debug, Clone)]
 pub struct SimpleClock(TimeKind);
 
@@ -46,6 +49,7 @@ enum TimeKind {
     System,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     Controlled(crate::ClockControl),
 }
 
@@ -86,6 +90,7 @@ impl SimpleClock {
     /// assert_eq!(instant, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_simple_clock()
@@ -110,6 +115,7 @@ impl SimpleClock {
     /// assert_eq!(clock.system_time(), specific_time);
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_simple_clock()
@@ -146,29 +152,28 @@ impl SimpleClock {
         }
     }
 
-    /// Retrieves the current system time converted to a target type.
+    /// Retrieves the current system time and converts it to `T`.
     ///
-    /// See [`Clock::system_time_as`][crate::Clock::system_time_as] for details.
+    /// # Errors
     ///
-    /// # Panics
+    /// Returns the target type's conversion error when the current [`SystemTime`] is outside
+    /// the target type's representable range.
     ///
-    /// Panics if the current system time cannot be represented by the target type.
-    /// This can happen if the target type supports a narrower range than `SystemTime`, or in tests
-    /// when controlled time is moved outside the target type's supported range.
-    #[expect(
-        clippy::match_wild_err_arm,
-        clippy::panic,
-        reason = "conversion failure indicates the chosen target type cannot represent the current SystemTime (or, in tests, controlled time was moved out of range); panicking keeps this API infallible"
-    )]
-    #[must_use]
-    pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
-        match T::try_from(self.system_time()) {
-            Ok(time) => time,
-            Err(_err) => panic!(
-                "system_time_as::<{}> failed: target type cannot represent the current SystemTime (or controlled time is out of range)",
-                std::any::type_name::<T>()
-            ),
-        }
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::SystemTime;
+    ///
+    /// use tick::SimpleClock;
+    ///
+    /// let clock = SimpleClock::new_system();
+    /// let time = clock.try_system_time_as::<SystemTime>()?;
+    /// assert!(time <= SystemTime::now());
+    ///
+    /// # Ok::<(), std::convert::Infallible>(())
+    /// ```
+    pub fn try_system_time_as<T: TryFrom<SystemTime>>(&self) -> Result<T, T::Error> {
+        T::try_from(self.system_time())
     }
 
     /// Retrieves the current [`Instant`].

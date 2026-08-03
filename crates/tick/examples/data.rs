@@ -23,12 +23,12 @@ async fn main() -> Result<(), ohno::AppError> {
 
     let mut cached_data: CachedData = serde_json::from_str(json)?;
 
-    cached_data.update(String::from("Hello, Rust!"), &clock);
+    cached_data.update(String::from("Hello, Rust!"), &clock)?;
     println!("Last access: {:?}", cached_data.last_access());
 
     clock.delay(Duration::from_secs(1)).await;
 
-    cached_data.update(String::from("Hello again, Rust!"), &clock);
+    cached_data.update(String::from("Hello again, Rust!"), &clock)?;
 
     println!("Last access: {:?}", cached_data.last_access());
 
@@ -56,13 +56,16 @@ impl CachedData {
     const EXPIRATION: Duration = Duration::from_hours(1);
 
     /// Creates a new cached data instance with the current timestamp.
-    #[must_use]
-    pub fn new(id: u32, data: String, clock: &Clock) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current system time cannot be represented as [`UnixSeconds`].
+    pub fn new(id: u32, data: String, clock: &Clock) -> tick::Result<Self> {
+        Ok(Self {
             id,
-            last_access: clock.system_time_as::<UnixSeconds>(),
+            last_access: clock.try_system_time_as::<UnixSeconds>()?,
             data,
-        }
+        })
     }
 
     /// Returns the timestamp when this data was last accessed.
@@ -72,9 +75,14 @@ impl CachedData {
     }
 
     /// Updates the data and sets the last access time to the current timestamp.
-    pub fn update(&mut self, data: String, clock: &Clock) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current system time cannot be represented as [`UnixSeconds`].
+    pub fn update(&mut self, data: String, clock: &Clock) -> tick::Result<()> {
         self.data = data;
-        self.last_access = clock.system_time_as::<UnixSeconds>();
+        self.last_access = clock.try_system_time_as::<UnixSeconds>()?;
+        Ok(())
     }
 
     /// Checks if the cached data has expired based on the expiration duration.

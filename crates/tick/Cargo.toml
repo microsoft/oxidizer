@@ -7,12 +7,13 @@ description = "Provides primitives to interact with and manipulate machine time.
 version = "0.4.0"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
-categories = ["data-structures"]
+categories = ["date-and-time"]
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 homepage = { workspace = true }
+documentation = "https://docs.rs/tick"
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 

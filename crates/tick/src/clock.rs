@@ -43,10 +43,11 @@ use crate::timers::TimerKey;
 /// # Clock construction
 ///
 /// The clock requires a runtime to drive the registered timers. This crate provides built-in support
-/// for Tokio via [`Clock::new_tokio()`] (available with the `tokio` feature). For other async runtimes,
+/// for Tokio via [`Clock::new_tokio`] (available with the `tokio` feature). For other async runtimes,
 /// you can use types in the [`runtime`][crate::runtime] module to drive the clock.
 ///
-/// In tests, the clock can be constructed directly using [`ClockControl`][crate::ClockControl] or via [`Clock::new_frozen`][crate::Clock::new_frozen]
+/// In tests, the clock can be constructed directly using [`ClockControl`] or via
+/// [`Clock::new_frozen`](https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_frozen)
 /// (available with the `test-util` feature) because the passage of time is controlled manually.
 ///
 /// See the [Testing](#testing) section for more information.
@@ -59,7 +60,7 @@ use crate::timers::TimerKey;
 ///
 /// The ability to jump forward in time makes tests faster, more reliable and gives you complete control over the passage of time.
 /// By default, the clock does not allow you to control the passage of time. However, when the `test-util` feature is enabled,
-/// this crate provides a [`ClockControl`][crate::ClockControl] type that can be used to control time.
+/// this crate provides a [`ClockControl`] type that can be used to control time.
 ///
 /// # Cloning and shared state
 ///
@@ -93,10 +94,10 @@ use crate::timers::TimerKey;
 ///
 /// - **`ClockControl` clocks** (`test-util`): Relocation is a no-op. All clones share the same
 ///   controlled time state regardless of which thread they are on. This is intentional, a single
-///   [`ClockControl`][crate::ClockControl] controls time for all clocks derived from it, even
+///   [`ClockControl`] controls time for all clocks derived from it, even
 ///   across threads.
 ///
-/// - **Tokio clocks** (created via [`Clock::new_tokio()`]): Relocation is a no-op. The Tokio clock
+/// - **Tokio clocks** (created via [`Clock::new_tokio`]): Relocation is a no-op. The Tokio clock
 ///   is driven by a single background task that advances a shared set of timers, so all clones
 ///   share the same timer storage regardless of which thread they are on. Per-core relocation
 ///   would create independent timer storage on the destination thread that the background driver
@@ -172,6 +173,9 @@ use crate::timers::TimerKey;
 /// }
 /// # }
 /// ```
+///
+/// [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
+/// [`Clock::new_tokio`]: https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
@@ -210,6 +214,7 @@ impl Clock {
     ///
     /// Panics if called outside of a Tokio runtime context.
     #[cfg(any(feature = "tokio", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
     pub fn new_tokio() -> Self {
@@ -283,6 +288,7 @@ impl Clock {
     /// assert_eq!(instance, clock.instant());
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen() -> Self {
         crate::ClockControl::new().to_clock()
@@ -311,6 +317,7 @@ impl Clock {
     /// assert_eq!(system_time, clock.system_time());
     /// ```
     #[cfg(any(feature = "test-util", test))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
         crate::ClockControl::new_at(time).to_clock()
@@ -339,7 +346,7 @@ impl Clock {
         self.simple_clock().system_time()
     }
 
-    /// Retrieves the current system time converted to a target type.
+    /// Retrieves the current system time and converts it to `T`.
     ///
     /// This is a convenience method that retrieves the current [`SystemTime`] via
     /// [`system_time()`][Self::system_time] and converts it to the specified target type.
@@ -349,26 +356,26 @@ impl Clock {
     /// * `T` - The target type that implements [`TryFrom<SystemTime>`]. Common examples include
     ///   timestamp types from external crates that can be constructed from a [`SystemTime`].
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if the current system time cannot be represented by the target type `T`.
+    /// Returns the target type's conversion error when the current [`SystemTime`] is outside
+    /// the target type's representable range.
     ///
-    /// Callers must choose a target type whose representable range covers the
-    /// [`SystemTime`] values they expect. The conversion can fail in two cases:
+    /// # Examples
     ///
-    /// - **In production**, if `T` has a narrower representable range than [`SystemTime`] and the
-    ///   current system time falls outside it.
-    /// - **In tests** using manual time control (via the `test-util` feature), if controlled time
-    ///   is moved outside the target type's supported range.
+    /// ```
+    /// use std::time::SystemTime;
     ///
-    /// If `T` can represent every [`SystemTime`] value, this conversion never fails and this method
-    /// never panics — the panic above only occurs for target types whose representable range does
-    /// not cover the current time.
+    /// use tick::Clock;
     ///
-    /// Kept consistent with [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as].
-    #[must_use]
-    pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
-        self.simple_clock().system_time_as()
+    /// # fn example(clock: &Clock) -> Result<(), std::convert::Infallible> {
+    /// let time = clock.try_system_time_as::<SystemTime>()?;
+    /// assert_eq!(time, clock.system_time());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn try_system_time_as<T: TryFrom<SystemTime>>(&self) -> Result<T, T::Error> {
+        self.simple_clock().try_system_time_as()
     }
 
     /// Retrieves the current [`Instant`] time.
@@ -425,7 +432,7 @@ impl Clock {
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
     /// ```
-    #[must_use]
+    #[must_use = "futures do nothing unless awaited or polled"]
     pub fn delay(&self, duration: Duration) -> crate::Delay {
         crate::Delay::new(self, duration)
     }
@@ -468,6 +475,14 @@ impl Clock {
             #[cfg(any(feature = "test-util", test))]
             ClockState::ClockControl(control) => control.unregister_timer(key),
             ClockState::System(timers) => timers.with_timers(|t| t.unregister(key)),
+        }
+    }
+
+    pub(super) fn update_timer_waker(&self, key: TimerKey, waker: &Waker) {
+        match self.clock_state() {
+            #[cfg(any(feature = "test-util", test))]
+            ClockState::ClockControl(control) => control.update_timer_waker(key, waker),
+            ClockState::System(timers) => timers.with_timers(|timers| timers.update_waker(key, waker)),
         }
     }
 
@@ -656,8 +671,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "target type cannot represent the current SystemTime")]
-    fn system_time_as_panics_on_conversion_failure() {
+    fn try_system_time_as_returns_conversion_failure() {
         /// A newtype that always fails conversion from `SystemTime`.
         struct AlwaysFailsConversion;
 
@@ -670,7 +684,10 @@ mod tests {
         }
 
         let clock = Clock::new_frozen();
-        let _: AlwaysFailsConversion = clock.system_time_as();
+        assert_eq!(
+            clock.try_system_time_as::<AlwaysFailsConversion>().err(),
+            Some("conversion always fails")
+        );
     }
 
     #[test]

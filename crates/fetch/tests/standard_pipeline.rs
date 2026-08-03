@@ -72,7 +72,7 @@ fn create_per_host_client(calls: Calls) -> HttpClient {
         HttpResponseBuilder::new_fake().status(status).build()
     });
 
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     HttpClient::builder_fake(handler, FakeDeps { clock })
         .standard_pipeline(|pipeline, _| {
             pipeline
@@ -98,7 +98,7 @@ fn create_uniform_client(status: StatusCode, calls: Calls) -> HttpClient {
         HttpResponseBuilder::new_fake().status(status).build()
     });
 
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     HttpClient::builder_fake(handler, FakeDeps { clock })
         .standard_pipeline(|pipeline, _| {
             pipeline
@@ -284,7 +284,7 @@ const HEDGING_DELAY: Duration = Duration::from_millis(100);
 /// Creates a hedging client whose handler returns status codes from the
 /// given iterator in order.
 fn create_hedging_client(calls: Calls, responses: Vec<StatusCode>) -> HttpClient {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let responses = Arc::new(std::sync::Mutex::new(responses.into_iter()));
 
     let handler = FakeHandler::from_fn(move |_req| {
@@ -368,7 +368,7 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
         other => panic!("unexpected host: {other:?}"),
     });
 
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let client = HttpClient::builder_fake(handler, FakeDeps { clock })
         .router(Router::fallback(
             BaseUri::from_static("https://primary.example.com/"),
