@@ -12,11 +12,24 @@ use crate::handle::RawHandle;
 /// Callback ABI accepted by WinHTTP, with `None` clearing the callback.
 pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, usize, u32, *mut c_void, u32)>;
 
-/// Defines the OS boundary used by the transport and its deterministic tests.
+/// Defines the WinHTTP boundary used by production code and deterministic tests.
 ///
 /// Implementations provide only the WinHTTP operations the transport needs.
-/// Callers remain responsible for the handle, context, and asynchronous buffer
-/// lifetime contracts stated on the unsafe methods.
+/// The transport relies on the following cross-method invariants in addition to
+/// the per-method safety contracts:
+///
+/// - The status callback is registered and the fully initialized request context
+///   is installed before the first asynchronous submission.
+/// - Every context borrow is released before submission because WinHTTP may
+///   complete inline and reenter the callback on the submitting thread.
+/// - At most one asynchronous operation is outstanding per request handle.
+/// - Buffers remain retained until the matching completion, request error, or
+///   final handle-closing callback ends the operation.
+/// - RAII handle owners close each successfully created handle exactly once; the
+///   final handle-closing callback is the terminal context-ownership event.
+///
+/// Production bindings preserve native WinHTTP behavior, while mocks must model
+/// these same ordering and lifetime rules for deterministic tests to be sound.
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait Bindings: Send + Sync + 'static {
     fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;

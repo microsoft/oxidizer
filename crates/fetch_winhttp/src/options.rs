@@ -38,10 +38,14 @@ const HTTP3_KEEP_ALIVE_MINIMUM_MS: u32 = 1;
 const UNLIMITED_TIMEOUT: i32 = -1;
 const DWORD_BYTES: u32 = 4;
 
-/// WinHTTP-specific transport options.
+/// Configures native behavior specific to the WinHTTP transport.
 ///
-/// The default configuration leaves the native DNS resolution timeout
-/// unlimited.
+/// The resolve timeout is a native DNS-only deadline because generic `fetch`
+/// options have no separately awaitable name-resolution stage. Generic connect,
+/// response-header, body-idle, and pipeline request timeouts remain responsible
+/// for their broader intervals and are not replaced by this option.
+///
+/// By default the native DNS resolution timeout is unlimited.
 #[derive(Clone, Debug, Default, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpOptions {
@@ -60,7 +64,10 @@ impl WinHttpOptions {
     }
 }
 
-/// Accumulates optional WinHTTP settings before producing [`WinHttpOptions`].
+/// Builds [`WinHttpOptions`] without changing generic request deadlines.
+///
+/// It configures only the native DNS-resolution timer; all other timeout
+/// responsibilities remain with the generic client and request options.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpOptionsBuilder {
@@ -91,7 +98,11 @@ impl WinHttpOptionsBuilder {
     }
 }
 
-/// Collects conversion failures while retaining the precise source condition.
+/// Unifies native value-conversion failures without erasing their causes.
+///
+/// Request construction and synchronous WinHTTP queries use this aggregate so
+/// callers can propagate one error type while tests and diagnostics retain the
+/// precise malformed input or returned-value condition.
 #[ohno::error]
 #[from(
     EmbeddedNulError,
@@ -180,7 +191,11 @@ struct UnsupportedHttpVersionError {
     version: Version,
 }
 
-/// Distinguishes WinHTTP query failures from malformed returned values.
+/// Separates failed native queries from malformed values they return.
+///
+/// Query helpers preserve either the original [`WinHttpError`] or the precise
+/// [`ConversionError`], allowing request processing to report the source without
+/// conflating an operating-system failure with invalid native output.
 #[derive(Debug)]
 pub(crate) enum QueryError {
     Conversion(ConversionError),
@@ -217,7 +232,12 @@ impl From<WinHttpError> for QueryError {
     }
 }
 
-/// Carries the protocol bitmask and whether WinHTTP must forbid HTTP/1.1 fallback.
+/// Translates a supported HTTP version set into WinHTTP request options.
+///
+/// The mask enables HTTP/2 and HTTP/3 because HTTP/1.1 is the WinHTTP baseline.
+/// `required` is set whenever HTTP/1.1 is absent, and must be applied with the
+/// mask so WinHTTP fails negotiation instead of silently downgrading. Unsupported
+/// versions are rejected before this value is constructed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ProtocolOptions {
     advanced_mask: u32,

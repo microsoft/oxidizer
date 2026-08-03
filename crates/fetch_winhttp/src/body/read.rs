@@ -23,7 +23,17 @@ use crate::request::{RequestGuard, parse_response_trailers};
 const PREFERRED_READ_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
-/// Streams one response body while retaining its request until completion.
+/// Pulls one response body lazily from an installed WinHTTP request.
+///
+/// Each caller-driven read first queries available data and then lends one
+/// contiguous writable span from a pooled `BytesBuf` to WinHTTP. The retained
+/// [`RequestGuard`] keeps callback state and handles alive, so dropping the
+/// reader cancels the request without reading ahead. A zero-length
+/// `READ_COMPLETE`, rather than a zero availability query, is authoritative
+/// end-of-stream; trailers are queried only at that point.
+///
+/// EOF, read failure, cancellation, and drop all release the guard so WinHTTP
+/// can deliver final closure and return the request context to its pool.
 pub(crate) struct WinHttpBodyReader {
     guard: Option<RequestGuard>,
     bindings: Facade,
@@ -66,8 +76,7 @@ impl WinHttpBodyReader {
                 .guard_mut()?
                 .submit(OperationKind::DataAvailable, OperationBuffer::none(), move |request, _context| {
                     bindings.query_data_available(request)
-                })
-                .map_err(|_active| callback_protocol_error("the data-available operation slot was already active"))?;
+                });
             let completion = query
                 .await
                 .map_err(|_disconnected| callback_protocol_error("the data-available completion channel disconnected"))?;
@@ -91,18 +100,15 @@ impl WinHttpBodyReader {
         };
 
         let bindings = self.bindings.clone();
-        let read = self
-            .guard_mut()?
-            .submit(
-                OperationKind::Read,
-                OperationBuffer::read(into, address, capacity),
-                move |request, _context| {
-                    // SAFETY: the active operation owns the same BytesBuf and
-                    // contiguous writable tail until completion.
-                    unsafe { bindings.read_data(request, buffer, capacity) }
-                },
-            )
-            .map_err(|_active| callback_protocol_error("the read operation slot was already active"))?;
+        let read = self.guard_mut()?.submit(
+            OperationKind::Read,
+            OperationBuffer::read(into, address, capacity),
+            move |request, _context| {
+                // SAFETY: the active operation owns the same BytesBuf and
+                // contiguous writable tail until completion.
+                unsafe { bindings.read_data(request, buffer, capacity) }
+            },
+        );
         let completion = read
             .await
             .map_err(|_disconnected| callback_protocol_error("the read completion channel disconnected"))?;
@@ -169,7 +175,13 @@ impl Read for WinHttpBodyReader {
     }
 }
 
-/// Adapts the WinHTTP reader to the `http_body` frame protocol.
+/// Preserves WinHTTP data and trailers as `http_body` frames.
+///
+/// A dedicated adapter is required because the generic byte-stream bridge
+/// cannot emit response trailers. It yields data lazily, emits at most one
+/// final trailer frame, and disposes of the reader after completion or error.
+/// The surrounding `HttpBodyBuilder` remains responsible for applying the
+/// configured body idle timeout.
 pub(crate) struct WinHttpResponseBody {
     stream: Option<Pin<Box<ReadAsFuturesStream<WinHttpBodyReader>>>>,
     done: bool,

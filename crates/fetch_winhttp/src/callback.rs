@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::ffi::c_void;
-use std::ptr::NonNull;
+use std::ptr::{NonNull, with_exposed_provenance_mut};
 
 use windows::Win32::Networking::WinHttp::{
     ERROR_WINHTTP_OPERATION_CANCELLED, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
@@ -15,6 +15,20 @@ use windows::Win32::Networking::WinHttp::{
 use crate::context::{ActiveOperation, CompletionResult, OperationBuffer, RequestContext};
 use crate::error::WinHttpError;
 
+/// Implements the WinHTTP status-callback contract for request handles.
+///
+/// The function is registered through `WinHttpSetStatusCallback` and receives
+/// the `WINHTTP_STATUS_CALLBACK` parameters documented by Microsoft. It does no
+/// blocking work: notifications are decoded and handed to the request future or
+/// recorded in request-scoped atomic state.
+///
+/// # Safety
+///
+/// `context`, `status_info`, and `status_info_len` must satisfy the
+/// [`WINHTTP_STATUS_CALLBACK`] contract. A nonzero `context` must be the value
+/// installed by this crate for the request handle.
+///
+/// [`WINHTTP_STATUS_CALLBACK`]: https://learn.microsoft.com/windows/win32/api/winhttp/nc-winhttp-winhttp_status_callback
 pub(crate) unsafe extern "system" fn status_callback(
     _handle: *mut c_void,
     context: usize,
@@ -22,7 +36,7 @@ pub(crate) unsafe extern "system" fn status_callback(
     status_info: *mut c_void,
     status_info_len: u32,
 ) {
-    let context = std::ptr::with_exposed_provenance_mut::<RequestContext>(context);
+    let context = with_exposed_provenance_mut::<RequestContext>(context);
 
     // SAFETY: WinHTTP supplies either the null context value or the exact
     // pointer installed through WINHTTP_OPTION_CONTEXT_VALUE. The registration
@@ -38,7 +52,18 @@ pub(crate) unsafe extern "system" fn status_callback(
 ///
 /// A non-null `context` must be the exact pointer produced by
 /// `plurality::Box::into_raw` for a live [`RequestContext`]. The request callback
-/// protocol must deliver `HANDLE_CLOSING` exactly once and as its final use.
+/// contract guarantees that `HANDLE_CLOSING` is not reentrant with another
+/// notification for the same request and that no later notification follows.
+/// [`WinHttpCloseHandle`] also requires the context binding to remain alive
+/// until that final notification.
+///
+/// Between installation and `HANDLE_CLOSING`, no exclusive reference to the
+/// context may exist. The request task and callbacks access it only through
+/// shared references; mutation is confined to its atomic fields and operation
+/// slot. The final callback is the only code permitted to reconstruct the
+/// owning box and therefore obtains exclusive destruction rights.
+///
+/// [`WinHttpCloseHandle`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpclosehandle
 pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u32, status_info: *mut c_void, status_info_len: u32) {
     let Some(context) = NonNull::new(context) else {
         return;
@@ -51,19 +76,22 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
     match status {
         WINHTTP_CALLBACK_STATUS_SECURE_FAILURE => {
             if let Some(flags) = read_status_info::<u32>(status_info, status_info_len) {
-                // SAFETY: the dispatch contract guarantees the context remains
-                // alive. This method touches only an atomic diagnostic field.
+                // SAFETY: the dispatch contract keeps the allocation live and
+                // forbids exclusive references before HANDLE_CLOSING. This
+                // shared access mutates only atomic state.
                 unsafe { context.as_ref() }.record_secure_failure(flags);
             }
         }
         WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER => {
-            // SAFETY: the dispatch contract guarantees the context remains
-            // alive. This method touches only an atomic attribution field.
+            // SAFETY: the dispatch contract keeps the allocation live and
+            // forbids exclusive references before HANDLE_CLOSING. This shared
+            // access mutates only atomic state.
             unsafe { context.as_ref() }.mark_connecting();
         }
         WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER => {
-            // SAFETY: the dispatch contract guarantees the context remains
-            // alive. This method touches only an atomic attribution field.
+            // SAFETY: the dispatch contract keeps the allocation live and
+            // forbids exclusive references before HANDLE_CLOSING. This shared
+            // access mutates only atomic state.
             unsafe { context.as_ref() }.mark_connected();
         }
         WINHTTP_CALLBACK_STATUS_HANDLE_CREATED => {}
@@ -75,8 +103,9 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
             }
         }
         WINHTTP_CALLBACK_STATUS_REQUEST_ERROR => {
-            // SAFETY: the dispatch contract guarantees the context is valid
-            // for this non-final callback.
+            // SAFETY: the dispatch contract keeps the allocation live and
+            // forbids exclusive references before HANDLE_CLOSING. The
+            // operation slot uses interior mutability with atomic ownership.
             let context_ref = unsafe { context.as_ref() };
             let Some(active) = context_ref.take_any() else {
                 return;
@@ -101,8 +130,9 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
         | WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE
         | WINHTTP_CALLBACK_STATUS_READ_COMPLETE
         | WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE => {
-            // SAFETY: the dispatch contract guarantees the context is valid
-            // for this non-final callback.
+            // SAFETY: the dispatch contract keeps the allocation live and
+            // forbids exclusive references before HANDLE_CLOSING. The
+            // operation slot uses interior mutability with atomic ownership.
             let Some(active) = (unsafe { context.as_ref() }).take_for_status(status) else {
                 return;
             };
@@ -171,8 +201,9 @@ fn read_status_info<T: Copy>(status_info: *mut c_void, status_info_len: u32) -> 
 }
 
 unsafe fn close_context(context: NonNull<RequestContext>) {
-    // SAFETY: HANDLE_CLOSING is documented as the final callback, so no other
-    // callback can access the context after this point.
+    // SAFETY: the dispatch contract requires HANDLE_CLOSING to run only after
+    // all other callbacks finish. No exclusive reference has existed since
+    // installation, so this final shared borrow cannot alias one.
     let context_ref = unsafe { context.as_ref() };
 
     if let Some(ActiveOperation { kind, completion, buffer }) = context_ref.take_any() {

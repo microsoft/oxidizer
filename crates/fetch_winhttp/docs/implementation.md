@@ -98,7 +98,7 @@ and relied on throughout §4 and §6:
   bodies use sequential `write_data` calls.
 - The `RequestContext` must be fully populated and every borrow of it dropped
   **before** the async call is issued, so the completion (possibly reentrant, §2.1)
-  has exclusive access via the context pointer.
+  can use a shared context reference and atomically claim the operation payload.
 - At most one async operation is outstanding per request handle at a time.
 - The status callback must be registered (with the handle-close flag) and the
   context installed before the first async call, and each handle is closed exactly
@@ -209,9 +209,9 @@ not a wait on WinHTTP, so the assurance still holds.
 
 Reentrancy is sound because of one submitting-side rule (§4.5): the driver fully
 populates the `RequestContext` and drops every borrow to it **before** issuing the
-async call. However the completion then arrives, it has exclusive access through the
-leaked pointer, and the `events_once` send is the single release/acquire edge that
-hands buffer ownership back.
+async call. However the completion then arrives, it atomically claims only the
+active operation payload through the shared context pointer, and the `events_once`
+send is the release/acquire edge that hands buffer ownership back.
 
 ## 3. Threading model
 
@@ -415,10 +415,10 @@ handle and session owner move into the context before it is installed so closing
 request cannot invalidate its parents while WinHTTP is still tearing it down.
 
 ```rust,ignore
-// `Idle` between operations; generation-tagged `Active` for one in-flight
-// operation. The atomic state grants access to the payload.
 struct RequestContext {
-    operation: SequentialOperation,
+    // Reused callback handoff storage; OperationFuture owns the request handle
+    // until its receiver endpoint is destroyed.
+    operation: CallbackOperationSlot,
     // Retained until HANDLE_CLOSING drops the context. Microsoft documents that
     // closing a parent invalidates children and pending child operations cannot
     // be relied on to complete correctly.
@@ -426,7 +426,10 @@ struct RequestContext {
     session: std::sync::Arc<WinHttpSession>,
     // Request-scoped, best-effort diagnostics independent of operation state.
     // The REQUEST_ERROR code, not callback order, determines classification.
-    secure_failure_flags: core::sync::atomic::AtomicU64,
+    // Low 32 bits contain flags; bit 32 records that a callback was observed.
+    secure_failure: core::sync::atomic::AtomicU64,
+    // Stores a ColdConnectState discriminant for telemetry attribution.
+    cold_connect: core::sync::atomic::AtomicU8,
 }
 
 struct ActiveOperation {
@@ -446,9 +449,10 @@ enum OperationBuffer {
     Write(bytesbuf::BytesView),
 }
 
-struct SequentialOperation {
-    // Idle, transition, or a generation-tagged active OperationKind.
-    state: core::sync::atomic::AtomicU64,
+struct CallbackOperationSlot {
+    // Idle, claimed, or an active OperationKind discriminant. This publishes
+    // and arbitrates payload ownership; it does not validate API sequencing.
+    state: core::sync::atomic::AtomicU8,
     active: core::cell::UnsafeCell<core::mem::MaybeUninit<ActiveOperation>>,
     // Pinned in RequestContext and reused only after both one-shot endpoints end.
     completion: core::cell::UnsafeCell<events_once::EmbeddedEvent<CompletionResult>>,
@@ -457,14 +461,23 @@ struct SequentialOperation {
 
 The active operation makes the field relationships explicit: it always carries a
 completion sender and at most one borrowed buffer (a handle never has a read and a write
-outstanding at once); the idle state carries neither. The callback returns it to idle by
-atomically claiming the generation-tagged active token and moving out the sender and
-buffer. Competing or late callbacks fail that claim and do nothing. The
-`UnsafeCell` is not a source of unsynchronized mutation: the atomic state grants exactly
-one side access to its initialized contents at a time. Secure-failure flags remain
-available independently of that transition because `SECURE_FAILURE` and
-`REQUEST_ERROR` have no documented relative ordering. Their packed atomic value records
-presence separately from the flags, so even a zero-valued diagnostic is representable.
+outstanding at once); the idle state carries neither. Sequential submission is
+guaranteed by construction: `OperationFuture` mutably borrows `RequestGuard` and
+moves the request handle out of it. Safe code therefore has no request handle
+with which to arm another operation until the current receiver is destroyed and
+completion restores the handle. Forgetting the future leaves the handle leaked
+inside it rather than making the guard reusable. A debug assertion checks that
+invariant when the slot is armed.
+
+The atomic state has a separate production responsibility. It publishes the
+initialized payload to callback threads and lets exactly one of a completion
+callback, a synchronous submission failure, or final handle closure claim and
+move out the sender and buffer. Competing or late callbacks fail that claim and
+do nothing. The `UnsafeCell` is therefore not unsynchronized mutation: the atomic
+tag grants one claimant access to the initialized contents. Secure-failure flags
+remain independent because `SECURE_FAILURE` and `REQUEST_ERROR` have no documented
+relative ordering. Their packed atomic value records presence separately from the
+flags, so even a zero-valued diagnostic is representable.
 
 ### 4.2 dwContext is pointer-sized
 
@@ -542,30 +555,38 @@ the final callback drops the context and parents as described in §4.3.
 ### 4.5 Exclusive access without locks
 
 The buffers and sender in `RequestContext` are shared between the driver and callbacks
-with no application lock. Access is strictly non-overlapping, enforced by an atomic
-ownership state:
+with no application lock. Safe API sequencing and payload ownership have separate
+enforcement mechanisms:
 
-- **The driver arms before issuing the async call.** It claims `Idle`, writes the
-  completion sender and optional buffer, and publishes a generation-tagged active token
-  with a release store. It drops every borrow before calling `Bindings::read_data`
-  (etc.) and holds no `&mut RequestContext` across the submit boundary.
+- **The driver arms before issuing the async call.** The mutable `RequestGuard`
+  borrow held by the returned future prevents direct guard access. More
+  importantly, submission moves the request handle into the future and leaves
+  the guard's handle slot empty. Completion destroys the receiver endpoint
+  before restoring the handle; cancellation destroys the receiver before
+  closing the handle. Even forgetting the future cannot expose a usable guard.
+  The driver writes the completion sender and optional buffer, then publishes
+  the operation kind with a release store. It drops every context borrow before
+  calling `Bindings::read_data` (etc.) and holds no `&mut RequestContext` across
+  the submit boundary.
 - From the submit call until the `events_once` receiver resolves, the driver
-  touches nothing in the context. WinHTTP holds exclusive ownership of the leaked
-  pointer for the operation's duration (§4.2).
+  does not access the operation payload. The context pointer remains shared for
+  request diagnostics and callback dispatch throughout the operation (§4.2).
 - A **completion** - inline on the submitting thread or later on a worker - validates
-  that its status matches the published operation kind and uses compare-exchange to
-  claim that exact generation. Only the winner moves out the sender and buffer and
-  returns the slot to `Idle`; competing error/success notifications and late callbacks
+  that its status matches the published operation kind and uses compare-exchange
+  to claim the payload. Only the winner moves out the sender and buffer and returns
+  the slot to `Idle`; competing error/success notifications and late callbacks
   observe a failed claim and are harmless. This does **not** rely on undocumented
   per-handle callback serialization.
 - The `events_once` send-then-receive is the release/acquire edge that transfers
   buffer ownership back to the driver. Only after the receiver resolves does the
   driver read the returned buffer.
 
-This is exactly the "WinHTTP takes exclusive ownership via a leaked pointer, we
-recover it at the callback" model: the leaked pointer *is* the ownership token,
-and the two sides never hold it at the same time. No lock is needed on the
-sender/buffer fields; the temporal handoff does the work.
+The context pointer itself remains shared: after installation, neither the request
+task nor a non-final callback creates an exclusive reference to `RequestContext`.
+Mutation is restricted to atomic fields and the operation slot's `UnsafeCell`
+payload under its atomic ownership tag. `HANDLE_CLOSING`, documented as the final
+notification with no later callbacks, is the only path that reconstructs and drops
+the owning box.
 
 **The one field that is not covered by the temporal handoff** is
 `secure_failure_flags`, and that is why it is atomic rather than a `Cell`.
@@ -585,20 +606,24 @@ pipeline by `fetch`, body idle timeout is applied by `HttpBodyBuilder`, and only
 explicit DNS-only timeout uses a native WinHTTP timer (§10.4). The
 `RequestDriver` races the connect/send phase against a single
 `tick::Clock::delay(connect_timeout)`, using the clock already threaded in from
-`CustomContext` (no new dependency). Whichever finishes first wins: if the timer
-fires, the driver closes the request handle - which cancels the in-flight connect
-(§4.3) - and returns `HttpError::timeout`; if the connect completes first, the timer
-future is dropped. `tick::Clock` is the sole source of time on this path; the
-transport never calls `std::thread::sleep` or `tokio::time`.
+`CustomContext` (no new dependency). Whichever finishes first wins. If the timer
+fires, the operation future snapshots cold-connect attribution while it still
+owns the live request, then drops its receiver and closes the handle; this
+cancels the in-flight connect (§4.3) without dereferencing the context after an
+inline `HANDLE_CLOSING`. The driver then returns `HttpError::timeout`. If the
+connect completes first, the timer future is dropped. `tick::Clock` is the sole
+source of time on this path; the transport never calls `std::thread::sleep` or
+`tokio::time`.
 
 ## 5. Context and buffer pooling
 
 Each request issues several async steps, so its pinned `RequestContext` embeds one
 reusable `events_once::EmbeddedEvent<CompletionResult>`. This avoids per-step
 allocation without making callback-side endpoint reclamation acquire the internal
-mutex used by `events_once::EventPool`. The sequential-operation state and the
-receiver's mutable borrow of `RequestGuard` ensure the embedded storage is never
-reinitialized while either endpoint remains live.
+mutex used by `events_once::EventPool`. The receiver's mutable borrow of
+`RequestGuard` and ownership of its request handle prevent another operation
+from reinitializing the embedded storage before the current receiver endpoint
+has been destroyed.
 
 - **`plurality::Pool<RequestContext>` behind a `Mutex`.** A request rents one
   `plurality::Box<RequestContext>` at start and holds it for its whole lifetime

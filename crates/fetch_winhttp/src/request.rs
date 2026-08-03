@@ -3,9 +3,9 @@
 
 use std::fmt;
 use std::future::poll_fn;
-use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 use std::pin::Pin;
-use std::ptr::NonNull;
+use std::ptr::{NonNull, with_exposed_provenance_mut};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -25,7 +25,7 @@ use widestring::U16CString;
 
 use crate::bindings::{Bindings as _, Facade};
 use crate::body::{RequestBodyPlan, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
-use crate::context::{ColdConnectState, CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind, RequestContext};
+use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
 use crate::error_labels;
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
@@ -39,10 +39,23 @@ use crate::options::{
 use crate::session::WinHttpSession;
 use crate::tls::WinHttpTlsConfig;
 
-/// Reuses stable request-context allocations across sequential requests.
+/// Provides stable callback-context storage for one transport instance.
+///
+/// Each materialized transport owns a separate pool, so contexts are reused
+/// only by requests that share that transport's WinHTTP session. `Pool` is not
+/// `Sync`, so the mutex permits allocation and callback-driven return from
+/// different threads. The lock is held only while renting or returning an
+/// allocation; no WinHTTP call or user code runs while it is held.
 pub(crate) type ContextPool = Mutex<Pool<RequestContext>>;
 
-/// Owns a new request and context until callback ownership is installed.
+/// Prepares callback ownership for a newly opened request handle.
+///
+/// The request task initially owns both the RAII request handle and the pooled,
+/// pinned context allocation. Successful installation of
+/// `WINHTTP_OPTION_CONTEXT_VALUE` transfers context reclamation to the final
+/// `HANDLE_CLOSING` callback and returns a [`RequestGuard`] that owns only the
+/// request-handle close authority. If installation fails, this type closes the
+/// request and reconstructs the pooled box locally.
 pub(crate) struct RequestSetup {
     request: RequestHandle,
     context: plurality::Box<RequestContext>,
@@ -92,7 +105,11 @@ impl fmt::Debug for RequestSetup {
     }
 }
 
-/// Reclaims an extracted pooled context if installation fails.
+/// Guards the raw context pointer during the installation handoff.
+///
+/// Extracting the pooled box is necessary to obtain the stable pointer WinHTTP
+/// stores. This guard reconstructs that box on every pre-installation exit; it
+/// is explicitly released only after WinHTTP accepts the context value.
 struct RawContextOwner {
     context: Option<NonNull<RequestContext>>,
 }
@@ -121,7 +138,18 @@ impl Drop for RawContextOwner {
 }
 
 #[derive(Debug)]
-/// Retains a request handle and its callback context through final close.
+/// Owns the close authority for one installed WinHTTP request handle.
+///
+/// Dropping the guard closes the request exactly once and thereby initiates
+/// cancellation of any pending operation. It does not own the context
+/// allocation: the final `HANDLE_CLOSING` callback reclaims that allocation and
+/// releases the retained connect and session parents.
+///
+/// Mutable access to this guard is required to submit an operation. The future
+/// then owns the request handle itself, leaving this guard unable to submit
+/// again even if the future is forgotten. Completion restores the handle only
+/// after destroying the receiver endpoint; cancellation destroys the receiver
+/// first and then closes the handle.
 pub(crate) struct RequestGuard {
     request: Option<RequestHandle>,
     context: NonNull<RequestContext>,
@@ -131,7 +159,7 @@ impl RequestGuard {
     pub(crate) fn raw(&self) -> RawHandle {
         self.request
             .as_ref()
-            .expect("RequestGuard retains its request handle until Drop")
+            .expect("an unfinished OperationFuture prevents RequestGuard reuse")
             .raw()
     }
 
@@ -145,8 +173,12 @@ impl RequestGuard {
     }
 
     pub(crate) fn cold_connect_state(&self) -> ColdConnectState {
+        let _request = self
+            .request
+            .as_ref()
+            .expect("an unfinished OperationFuture prevents RequestGuard context access");
         // SAFETY: the guard remains alive, so callback ownership keeps the
-        // installed context valid.
+        // installed context valid while it owns the request handle.
         unsafe { self.context.as_ref() }.cold_connect_state()
     }
 
@@ -155,33 +187,48 @@ impl RequestGuard {
         kind: OperationKind,
         buffer: OperationBuffer,
         submit: impl FnOnce(RawHandle, usize) -> WinHttpResult<()>,
-    ) -> std::result::Result<OperationFuture<'_>, OperationAlreadyActive> {
+    ) -> OperationFuture<'_> {
+        let request = self
+            .request
+            .take()
+            .expect("cancelling or forgetting an OperationFuture prevents RequestGuard reuse");
+        let raw = request.raw();
+
         // SAFETY: the context was installed from stable pooled storage. The
-        // returned future mutably borrows this guard, preventing another
-        // operation or request close until its receiver is dropped.
+        // returned future leaves the request-handle slot empty until its
+        // receiver endpoint has been destroyed.
         let context = unsafe { self.context.as_ref() };
         // SAFETY: the pooled context has a stable address until
         // HANDLE_CLOSING reclaims it.
         let context = unsafe { Pin::new_unchecked(context) };
         // SAFETY: the context remains pinned while both embedded-event
         // endpoints exist, as described above.
-        let (token, receiver) = unsafe { context.arm(kind, buffer) }?;
+        let receiver = unsafe { context.arm(kind, buffer) };
 
-        let submit_result = submit(self.raw(), self.context_value());
+        let submit_result = submit(raw, self.context_value());
 
         if let Err(error) = submit_result {
-            // SAFETY: the context remains valid while the guard is alive. The
-            // token atomically wins only if no inline callback already consumed
-            // the operation, so synchronous failure cannot double-complete it.
-            if let Some(active) = unsafe { self.context.as_ref() }.take_token(token) {
+            // SAFETY: the local request handle keeps the context valid. The
+            // operation kind atomically wins only if no inline callback
+            // already consumed the operation, so synchronous failure cannot
+            // double-complete it. No later operation can begin before this
+            // method returns because the guard's handle slot remains empty.
+            if let Some(active) = unsafe { self.context.as_ref() }.take_kind(kind) {
                 active.completion.send(CompletionResult::error(error, active.buffer));
             }
         }
 
-        Ok(OperationFuture {
-            receiver,
-            _guard: PhantomData,
-        })
+        OperationFuture {
+            receiver: ManuallyDrop::new(receiver),
+            receiver_live: true,
+            request: Some(request),
+            context: self.context_value(),
+            request_slot: &mut self.request,
+        }
+    }
+
+    fn close(&mut self) {
+        drop(self.request.take());
     }
 }
 
@@ -191,28 +238,92 @@ unsafe impl Send for RequestGuard {}
 
 impl Drop for RequestGuard {
     fn drop(&mut self) {
-        drop(self.request.take());
+        self.close();
     }
 }
 
 #[derive(Debug)]
-/// Awaits one completion while borrowing the guard that keeps it valid.
+/// Owns one request handle while awaiting its callback completion.
+///
+/// Moving the request handle into this future is the safe-code proof that one
+/// request has at most one asynchronous operation outstanding. On completion,
+/// the receiver endpoint is destroyed before the handle returns to the guard.
+/// On cancellation, the receiver is destroyed before the owned handle closes,
+/// allowing `HANDLE_CLOSING` to reclaim the embedded event storage safely.
+/// Forgetting the future leaks the handle but leaves the guard unusable.
 pub(crate) struct OperationFuture<'guard> {
-    receiver: RawReceiver<CompletionResult>,
-    _guard: PhantomData<&'guard mut RequestGuard>,
+    receiver: ManuallyDrop<RawReceiver<CompletionResult>>,
+    receiver_live: bool,
+    request: Option<RequestHandle>,
+    context: usize,
+    request_slot: &'guard mut Option<RequestHandle>,
 }
 
 impl Future for OperationFuture<'_> {
     type Output = std::result::Result<CompletionResult, Disconnected>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY: projection does not move the pinned receiver.
-        unsafe { self.map_unchecked_mut(|this| &mut this.receiver) }.poll(cx)
+        // SAFETY: this mutable reference is used only to pin-project the
+        // receiver and update unpinned ownership fields; the receiver is not
+        // moved.
+        let this = unsafe { self.get_unchecked_mut() };
+        assert!(this.receiver_live, "OperationFuture cannot be polled after completion");
+        // SAFETY: the receiver remains in place for the lifetime of this pinned
+        // OperationFuture.
+        let result = unsafe { Pin::new_unchecked(&mut *this.receiver) }.poll(cx);
+        if result.is_ready() {
+            // SAFETY: the receiver is pinned in place and will not be accessed
+            // again after receiver_live is cleared.
+            unsafe {
+                ManuallyDrop::drop(&mut this.receiver);
+            }
+            this.receiver_live = false;
+
+            let request = this.request.take().expect("a completed OperationFuture retains its request handle");
+            debug_assert!(this.request_slot.is_none());
+            *this.request_slot = Some(request);
+        }
+
+        result
+    }
+}
+
+impl OperationFuture<'_> {
+    fn cold_connect_state(&self) -> ColdConnectState {
+        let _request = self
+            .request
+            .as_ref()
+            .expect("cold-connect state is available only while an operation is pending");
+        let context = NonNull::new(with_exposed_provenance_mut::<RequestContext>(self.context))
+            .expect("OperationFuture retains the non-null installed request context");
+        // SAFETY: this future owns the live request handle, so callback
+        // ownership keeps the installed context valid.
+        unsafe { context.as_ref() }.cold_connect_state()
+    }
+}
+
+impl Drop for OperationFuture<'_> {
+    fn drop(&mut self) {
+        if self.receiver_live {
+            // SAFETY: Drop runs exactly once, and receiver_live proves the
+            // manually managed receiver has not already been destroyed.
+            unsafe {
+                ManuallyDrop::drop(&mut self.receiver);
+            }
+            self.receiver_live = false;
+        }
+        // The request field drops after this method. Pending cancellation
+        // therefore disconnects the receiver before closing the native handle.
     }
 }
 
 #[derive(Debug)]
-/// Couples a request error with optional cold-connect attribution.
+/// Carries a request error and its log-only connection attribution.
+///
+/// Cold-connect duration is available only after context installation and only
+/// when connection-establishment callbacks identify the request as using a new
+/// connection. Keeping this metadata outside [`HttpError`] prevents diagnostic
+/// timing from affecting recovery classification or low-cardinality metrics.
 pub(crate) struct RequestFailure {
     error: HttpError,
     cold_connect_duration: Option<Duration>,
@@ -245,7 +356,18 @@ impl RequestFailure {
     }
 }
 
-/// Drives one translated request through the sequential WinHTTP lifecycle.
+/// Drives one request through the complete sequential WinHTTP lifecycle.
+///
+/// The driver translates request metadata before crossing the FFI boundary,
+/// opens connect and request handles, installs callback ownership, races header
+/// submission against the generic connect timeout, uploads the body, receives
+/// response headers, and hands the guard to a lazy body reader. Upload and
+/// response reception are deliberately sequential; no request has simultaneous
+/// send and receive operations.
+///
+/// The borrowed request body remains with the caller until response creation,
+/// which preserves the custom-transport contract for reporting whether a
+/// failed request consumed body data.
 pub(crate) struct RequestDriver<'body, 'contexts> {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
@@ -346,10 +468,10 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             self.connect_timeout,
         )
         .await;
-        if let Err(error) = send_result {
+        if let Err((error, cold_connect_state)) = send_result {
             return Err(RequestFailure::after_context_installation(
                 error,
-                guard.cold_connect_state(),
+                cold_connect_state,
                 connect_watch.elapsed(),
             ));
         }
@@ -366,11 +488,9 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             }
 
             {
-                let receive = guard
-                    .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
-                        bindings.receive_response(request)
-                    })
-                    .map_err(|_active| callback_protocol_error("the receive-response operation slot was already active"))?;
+                let receive = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
+                    bindings.receive_response(request)
+                });
                 let completion = receive
                     .await
                     .map_err(|_disconnected| callback_protocol_error("the headers completion channel disconnected"))?;
@@ -425,41 +545,52 @@ async fn send_request_headers(
     total_length: u32,
     clock: &Clock,
     timeout: Duration,
-) -> fetch::Result<()> {
-    let send = async {
-        let send = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
-                // SAFETY: the installed context is the exact pointer passed as
-                // dwContext, and the UTF-16 header buffer remains alive until
-                // the completion is awaited below.
-                unsafe { bindings.send_request(request, headers, total_length, context) }
-            })
-            .map_err(|_active| callback_protocol_error("the send operation slot was already active"))?;
-        let completion = send
-            .await
-            .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))?;
-        expect_completion(completion, OperationKind::SendRequest)
+) -> Result<(), (HttpError, ColdConnectState)> {
+    let outcome = {
+        let send = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
+            // SAFETY: the installed context is the exact pointer passed as
+            // dwContext, and the UTF-16 header buffer remains alive until
+            // the completion is awaited below.
+            unsafe { bindings.send_request(request, headers, total_length, context) }
+        });
+        let mut send = std::pin::pin!(send);
+        let mut deadline = std::pin::pin!(clock.delay(timeout));
+        let mut deadline_registered = false;
+
+        poll_fn(|cx| {
+            if !deadline_registered {
+                let _ = deadline.as_mut().poll(cx);
+                deadline_registered = true;
+            }
+
+            match send.as_mut().poll(cx) {
+                Poll::Ready(result) => Poll::Ready(Ok(result)),
+                Poll::Pending if deadline.as_mut().poll(cx).is_ready() => Poll::Ready(Err(send.as_ref().get_ref().cold_connect_state())),
+                Poll::Pending => Poll::Pending,
+            }
+        })
+        .await
     };
-    let mut send = std::pin::pin!(send);
-    let mut deadline = std::pin::pin!(clock.delay(timeout));
-    let mut deadline_registered = false;
 
-    poll_fn(|cx| {
-        if !deadline_registered {
-            let _ = deadline.as_mut().poll(cx);
-            deadline_registered = true;
+    match outcome {
+        Ok(completion) => {
+            let cold_connect_state = guard.cold_connect_state();
+            completion
+                .map_err(|_disconnected| callback_protocol_error("the send completion channel disconnected"))
+                .and_then(|completion| expect_completion(completion, OperationKind::SendRequest))
+                .map_err(|error| (error, cold_connect_state))
         }
-
-        match send.as_mut().poll(cx) {
-            Poll::Ready(result) => Poll::Ready(result),
-            Poll::Pending if deadline.as_mut().poll(cx).is_ready() => Poll::Ready(Err(HttpError::timeout(timeout))),
-            Poll::Pending => Poll::Pending,
-        }
-    })
-    .await
+        Err(cold_connect_state) => Err((HttpError::timeout(timeout), cold_connect_state)),
+    }
 }
 
-/// Stores the UTF-16 request components and endpoint metadata WinHTTP needs.
+/// Materializes validated request metadata for the WinHTTP FFI calls.
+///
+/// Translation happens before opening handles so malformed schemes,
+/// authorities, ports, paths, methods, or headers fail without network I/O.
+/// The owned NUL-terminated UTF-16 values keep every pointer stable for the
+/// duration of its synchronous WinHTTP call while preserving repeated and
+/// opaque header values accepted by `http`.
 struct TranslatedRequest {
     method: U16CString,
     host: U16CString,
@@ -539,7 +670,11 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
 }
 
 #[derive(Clone, Copy)]
-/// Collects per-request WinHTTP protocol and certificate validation options.
+/// Collects native options applied to every newly opened request handle.
+///
+/// Protocol requirements and transport-specific TLS relaxations are computed
+/// once during translation, then applied before the context is installed or an
+/// asynchronous operation can begin.
 struct RequestSettings {
     protocol: ProtocolOptions,
     security_flags: u32,
@@ -608,7 +743,11 @@ fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + S
 }
 
 #[derive(Debug)]
-/// Describes request metadata that cannot be translated into WinHTTP inputs.
+/// Identifies request metadata rejected before WinHTTP receives the request.
+///
+/// These failures define the validation boundary between generic `fetch`
+/// requests and the URI, version, and endpoint forms accepted by this
+/// transport. They are mapped to non-recoverable invalid-request errors.
 enum RequestTranslationError {
     EmptyPort,
     HttpDisallowed,
@@ -655,7 +794,12 @@ impl fmt::Display for RequestTranslationError {
 impl std::error::Error for RequestTranslationError {}
 
 #[derive(Debug)]
-/// Describes malformed response header bytes returned by WinHTTP.
+/// Identifies malformed response metadata returned by WinHTTP.
+///
+/// Header parsing preserves repeated values but requires a valid HTTP status
+/// line, CRLF framing, ASCII field names, and `http`-compatible values. These
+/// errors indicate an invalid transport response rather than an HTTP status
+/// failure.
 pub(crate) enum ResponseHeadersError {
     InvalidHeaderName(String),
     InvalidHeaderValue(String),
@@ -757,7 +901,7 @@ fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
 mod tests {
     use std::collections::VecDeque;
     use std::ffi::c_void;
-    use std::panic::{RefUnwindSafe, UnwindSafe};
+    use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -780,6 +924,7 @@ mod tests {
     use recoverable::{Recovery as _, RecoveryInfo};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use tick::{Clock, ClockControl};
+    use widestring::U16CString;
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
         WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED,
@@ -789,7 +934,7 @@ mod tests {
 
     use super::{
         ContextPool, OperationFuture, RawContextOwner, RequestDriver, RequestFailure, RequestGuard, RequestSettings, RequestSetup,
-        RequestTranslationError, ResponseHeadersError, TranslatedRequest,
+        RequestTranslationError, ResponseHeadersError, TranslatedRequest, send_request_headers,
     };
     use crate::WinHttpTlsConfig;
     use crate::bindings::{Facade, MockBindings};
@@ -815,8 +960,10 @@ mod tests {
     assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(RequestGuard: Sync);
     assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
-    // The future mutably borrows a guard and its receiver observes interior state.
-    assert_not_impl_any!(OperationFuture<'static>: UnwindSafe, RefUnwindSafe);
+    // The future mutably borrows the request-handle slot.
+    assert_not_impl_any!(OperationFuture<'static>: UnwindSafe);
+    // Shared observation after an unwind cannot mutate the borrowed slot or receiver.
+    assert_impl_all!(OperationFuture<'static>: RefUnwindSafe);
     assert_not_impl_any!(OperationFuture<'static>: Sync);
     // HttpError contains user-erased error state without unwind-safety bounds.
     assert_not_impl_any!(RequestFailure: UnwindSafe, RefUnwindSafe);
@@ -2628,14 +2775,12 @@ mod tests {
     #[test]
     fn inline_completion_before_submit_returns_is_observed() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
-                assert_eq!(context_value, context.expose_provenance());
-                assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
-                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-                Ok(())
-            })
-            .unwrap();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
+            assert_eq!(context_value, context.expose_provenance());
+            assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
+            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            Ok(())
+        });
 
         assert!(matches!(
             futures::executor::block_on(future).unwrap(),
@@ -2647,15 +2792,13 @@ mod tests {
     #[test]
     fn foreign_thread_completion_wakes_send_future() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard
-            .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, context_value| {
-                thread::spawn(move || {
-                    let context = std::ptr::with_exposed_provenance_mut(context_value);
-                    complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
-                });
-                Ok(())
-            })
-            .unwrap();
+        let future = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, context_value| {
+            thread::spawn(move || {
+                let context = std::ptr::with_exposed_provenance_mut(context_value);
+                complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+            });
+            Ok(())
+        });
 
         assert!(matches!(
             futures::executor::block_on(future).unwrap(),
@@ -2667,11 +2810,9 @@ mod tests {
     #[test]
     fn synchronous_submit_failure_completes_once() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
-                Err(WinHttpError::new(12029, WinHttpOperation::SendRequest))
-            })
-            .unwrap();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
+            Err(WinHttpError::new(12029, WinHttpOperation::SendRequest))
+        });
 
         let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
             panic!("synchronous failure must produce an error completion");
@@ -2686,40 +2827,34 @@ mod tests {
     fn sequential_success_statuses_decode_and_return_buffers() {
         let (mut guard, context, contexts, session, closes) = installed();
 
-        let send = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
-                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-                Ok(())
-            })
-            .unwrap();
+        let send = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
+            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            Ok(())
+        });
         assert!(matches!(
             futures::executor::block_on(send).unwrap(),
             CompletionResult::SendRequestComplete
         ));
 
-        let headers = guard
-            .submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, _| {
-                complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
-                Ok(())
-            })
-            .unwrap();
+        let headers = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, _| {
+            complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+            Ok(())
+        });
         assert!(matches!(
             futures::executor::block_on(headers).unwrap(),
             CompletionResult::HeadersAvailable
         ));
 
         let mut available = 17_u32;
-        let data = guard
-            .submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                    (&raw mut available).cast(),
-                    status_info_len::<u32>(),
-                );
-                Ok(())
-            })
-            .unwrap();
+        let data = guard.submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
+            complete(
+                context,
+                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                (&raw mut available).cast(),
+                status_info_len::<u32>(),
+            );
+            Ok(())
+        });
         assert!(matches!(
             futures::executor::block_on(data).unwrap(),
             CompletionResult::DataAvailable(17)
@@ -2727,37 +2862,33 @@ mod tests {
 
         let mut read_memory = [0_u8; 8];
         let read_address = read_memory.as_mut_ptr().addr();
-        let read = guard
-            .submit(
-                OperationKind::Read,
-                OperationBuffer::read(GlobalPool::new().reserve(8), read_address, 8),
-                |_, _| {
-                    complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, read_memory.as_mut_ptr().cast(), 5);
-                    Ok(())
-                },
-            )
-            .unwrap();
+        let read = guard.submit(
+            OperationKind::Read,
+            OperationBuffer::read(GlobalPool::new().reserve(8), read_address, 8),
+            |_, _| {
+                complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, read_memory.as_mut_ptr().cast(), 5);
+                Ok(())
+            },
+        );
         assert!(matches!(
             futures::executor::block_on(read).unwrap(),
             CompletionResult::ReadComplete { len: 5, .. }
         ));
 
         let mut written = 4_u32;
-        let write = guard
-            .submit(
-                OperationKind::Write,
-                OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
-                |_, _| {
-                    complete(
-                        context,
-                        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
-                        (&raw mut written).cast(),
-                        status_info_len::<u32>(),
-                    );
-                    Ok(())
-                },
-            )
-            .unwrap();
+        let write = guard.submit(
+            OperationKind::Write,
+            OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
+            |_, _| {
+                complete(
+                    context,
+                    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                    (&raw mut written).cast(),
+                    status_info_len::<u32>(),
+                );
+                Ok(())
+            },
+        );
         assert!(matches!(
             futures::executor::block_on(write).unwrap(),
             CompletionResult::WriteComplete { len: 4, .. }
@@ -2777,10 +2908,16 @@ mod tests {
                 OperationBuffer::Write { .. } => OperationKind::Write,
                 OperationBuffer::None => unreachable!("test buffers are read or write"),
             };
-            let future = guard.submit(kind, buffer, |_, _| Ok(())).unwrap();
+            let future = guard.submit(kind, buffer, |_, _| Ok(()));
 
             assert_eq!(contexts.lock().unwrap().len(), 1);
             drop(future);
+            assert!(guard.request.is_none());
+            assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+            let rejected = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                drop(guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(())));
+            }));
+            assert!(rejected.is_err());
             drop(session);
             drop(guard);
 
@@ -2798,12 +2935,102 @@ mod tests {
     }
 
     #[test]
+    fn connect_timeout_snapshots_state_before_inline_handle_closing() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let closes = Arc::new(CloseCounts::default());
+        let mut request_bindings = MockBindings::new();
+        let context_counts = Arc::clone(&closes);
+        request_bindings
+            .expect_set_option()
+            .withf(|handle, option, value| {
+                *handle == raw_handle(REQUEST)
+                    && *option == WINHTTP_OPTION_CONTEXT_VALUE
+                    && value.len() == size_of::<usize>()
+                    && usize::from_ne_bytes(value.try_into().unwrap()) != 0
+            })
+            .once()
+            .returning(move |_, _, value| {
+                context_counts
+                    .context
+                    .store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
+                Ok(())
+            });
+        request_bindings.expect_send_request().once().returning(|_, _, _, _| Ok(()));
+        let request_counts = Arc::clone(&closes);
+        request_bindings
+            .expect_close_handle()
+            .withf(|handle| handle.as_ptr().addr() == REQUEST)
+            .once()
+            .returning(move |_| {
+                request_counts.request.fetch_add(1, Ordering::SeqCst);
+                let context = std::ptr::with_exposed_provenance_mut(request_counts.context.load(Ordering::SeqCst));
+                closing(context);
+                Ok(())
+            });
+        let request_facade = Facade::mock(Arc::new(request_bindings));
+
+        let mut parent_bindings = MockBindings::new();
+        let parent_counts = Arc::clone(&closes);
+        parent_bindings.expect_close_handle().times(2).returning(move |handle| {
+            match handle.as_ptr().addr() {
+                SESSION => &parent_counts.session,
+                CONNECT => &parent_counts.connect,
+                _ => panic!("unexpected parent test handle"),
+            }
+            .fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        let parent_facade = Facade::mock(Arc::new(parent_bindings));
+
+        let contexts = ContextPool::new(Pool::new());
+        let session = session(parent_facade.clone());
+        let mut guard = RequestSetup::new(
+            RequestHandle::new(raw_handle(REQUEST), request_facade.clone()),
+            ConnectHandle::new(raw_handle(CONNECT), parent_facade),
+            Arc::clone(&session),
+            &contexts,
+        )
+        .install()
+        .unwrap();
+        let context = guard.context_ptr();
+        let headers = U16CString::from_str("").unwrap();
+        let mut future = Box::pin(send_request_headers(
+            &mut guard,
+            &request_facade,
+            &headers,
+            0,
+            &clock,
+            Duration::from_secs(1),
+        ));
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(future.as_mut().poll(&mut cx).is_pending());
+        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        control.advance(Duration::from_secs(1));
+        let Poll::Ready(Err((error, state))) = future.as_mut().poll(&mut cx) else {
+            panic!("the connect timeout must win the pending send");
+        };
+        assert_eq!(state, ColdConnectState::Connecting);
+        assert_eq!(error.label(), "response_timeout");
+
+        drop(future);
+        assert!(guard.request.is_none());
+        drop(session);
+        drop(guard);
+
+        assert_eq!(contexts.lock().unwrap().len(), 0);
+        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
+        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
+        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn request_error_classification_uses_error_code_in_both_secure_status_orders() {
         for secure_first in [true, false] {
             let (mut guard, context, contexts, session, closes) = installed();
-            let future = guard
-                .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-                .unwrap();
+            let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
             let mut secure_flags = 0x20_u32;
             let mut async_result = WINHTTP_ASYNC_RESULT {
                 dwResult: 7,
@@ -2851,9 +3078,7 @@ mod tests {
     #[test]
     fn duplicate_and_late_completions_cannot_send_twice() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-            .unwrap();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
 
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
         complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
@@ -2869,9 +3094,7 @@ mod tests {
     #[test]
     fn malformed_status_info_is_not_dereferenced() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard
-            .submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()))
-            .unwrap();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
         let mut bytes = [0_u8; size_of::<WINHTTP_ASYNC_RESULT>() + align_of::<WINHTTP_ASYNC_RESULT>()];
         let offset = (0..align_of::<WINHTTP_ASYNC_RESULT>())
             .find(|offset| !(bytes.as_ptr().addr() + offset).is_multiple_of(align_of::<WINHTTP_ASYNC_RESULT>()))

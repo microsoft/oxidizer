@@ -12,11 +12,17 @@ use crate::bindings::Facade;
 use crate::transport::{TransportInputs, WinHttpTransport};
 use crate::{WinHttpOptions, WinHttpTlsConfig};
 
-/// Dependencies and configuration for the WinHTTP transport.
+/// Supplies the environment and transport extras needed by WinHTTP.
 ///
-/// Construct this type with [`WinHttpDeps::builder`], passing the mandatory
-/// clock, global memory pool, and telemetry sink. TLS and WinHTTP-specific
-/// transport options use their defaults when omitted.
+/// The clock, global memory pool, and telemetry sink are mandatory application
+/// services that the transport cannot create for itself. TLS and
+/// WinHTTP-specific options are transport extras and use strict or unlimited
+/// defaults when omitted.
+///
+/// Internally, `fetch` clones and relocates this configuration before
+/// materializing a transport for each core and connection-pool slot. The global
+/// pool is also retained in the extras because WinHTTP response readers rent
+/// buffers from it independently of the generic response-body builder.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDeps {
@@ -57,7 +63,11 @@ impl WinHttpDeps {
     }
 }
 
-/// Builds [`WinHttpDeps`].
+/// Collects the inputs that become relocatable [`WinHttpDeps`].
+///
+/// The builder keeps mandatory environment services together with optional
+/// WinHTTP configuration without opening a session. Sessions and their
+/// connection pools are created only when the custom transport is materialized.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDepsBuilder {
@@ -96,7 +106,17 @@ impl WinHttpDepsBuilder {
     }
 }
 
-/// Adds WinHTTP construction to [`fetch::HttpClient`].
+/// Adds WinHTTP-backed construction to [`fetch::HttpClient`].
+///
+/// This foreign-type extension trait enters the ordinary `fetch` custom
+/// transport pipeline, so callers can configure the same client layers before
+/// building. WinHTTP owns TLS through Schannel, so generic `fetch`
+/// [`TlsOptions`](fetch::tls::TlsOptions) are ignored; use
+/// [`WinHttpTlsConfig`] in [`WinHttpDeps`] for supported TLS controls.
+///
+/// Each independent client build materializes isolated WinHTTP sessions and
+/// connection pools. Clones of an already built client continue to share that
+/// client's materialized transport resources.
 pub trait HttpClientWinHttpExt {
     /// Creates a WinHTTP-backed HTTP client builder.
     ///

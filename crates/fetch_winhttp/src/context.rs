@@ -20,20 +20,30 @@ use crate::error::{WinHttpError, WinHttpOperation};
 use crate::handle::ConnectHandle;
 use crate::session::WinHttpSession;
 
-const OPERATION_IDLE: u64 = 0;
-const OPERATION_TRANSITION: u64 = 1;
-const OPERATION_KIND_BITS: u32 = 8;
+// No ActiveOperation is initialized in the operation slot.
+const OPERATION_IDLE: u8 = 0;
+// One callback or the submitting thread has claimed the initialized payload.
+const OPERATION_CLAIMED: u8 = 1;
+// The low 32 bits store WinHTTP's secure-failure flags. This bit distinguishes
+// "no callback observed" from a callback that reported a zero flag mask.
 const SECURE_FAILURE_PRESENT: u64 = 1 << u32::BITS;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
-/// Identifies the one asynchronous WinHTTP operation currently in flight.
+/// Tags the callback payload stored for one asynchronous WinHTTP call.
+///
+/// The tag lets a completion callback validate its status before claiming the
+/// sender and retained buffer. It also supplies the operation context used when
+/// a `REQUEST_ERROR` is converted into a [`WinHttpError`].
+///
+/// Values start at 2 because 0 and 1 are reserved for the operation slot's idle
+/// and claimed states; they do not correspond to WinHTTP constants.
 pub(crate) enum OperationKind {
     SendRequest = 2,
-    HeadersAvailable = 3,
-    DataAvailable = 4,
-    Read = 5,
-    Write = 6,
+    HeadersAvailable,
+    DataAvailable,
+    Read,
+    Write,
 }
 
 impl OperationKind {
@@ -72,9 +82,19 @@ impl OperationKind {
 #[derive(Debug)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "borrowed buffers stay inline so arming an operation does not allocate"
+    reason = "boxing is unacceptable on hot paths, so buffers require inline storage"
 )]
-/// Owns any buffer that must remain stable until an operation completes.
+/// Keeps asynchronous I/O storage alive until WinHTTP releases it.
+///
+/// Read and write calls lend raw pointers into these buffers to WinHTTP. Moving
+/// the owning buffer into this enum prevents the request task from freeing or
+/// mutating that storage before a completion callback returns ownership. A read
+/// additionally records the exposed address and capacity so the callback can
+/// reject metadata that would claim initialization outside the lent span. A
+/// write records the exact submitted length while retaining the immutable view.
+///
+/// An operation owns at most one buffer because the request lifecycle never has
+/// more than one asynchronous WinHTTP call outstanding.
 pub(crate) enum OperationBuffer {
     None,
     Read { buffer: BytesBuf, address: usize, capacity: u32 },
@@ -106,16 +126,28 @@ impl OperationBuffer {
 #[derive(Debug)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "completed buffers transfer inline through the embedded event without allocation"
+    reason = "boxing is unacceptable on hot paths, so buffers require inline storage"
 )]
-/// Returns retained operation buffers to the completion consumer.
+/// Retains an I/O buffer when a completion cannot return it directly.
+///
+/// Successful reads and writes return their buffer in the corresponding result
+/// variant. Error-shaped results keep it here only so the buffer is dropped
+/// after WinHTTP has completed or abandoned the operation.
 pub(crate) enum CompletionBuffer {
     Read { _buffer: BytesBuf },
     Write { _buffer: BytesView },
 }
 
 #[derive(Debug)]
-/// Carries a validated WinHTTP callback result to the awaiting request task.
+/// Transfers one decoded callback outcome back to the request task.
+///
+/// The callback constructs this payload only after claiming the operation
+/// slot. Sending it through the embedded event transfers retained buffer
+/// ownership back to the future and wakes the executor without blocking a
+/// WinHTTP callback thread. Length-bearing variants are emitted only after the
+/// callback metadata has been checked against the operation and retained
+/// buffer; malformed metadata is represented separately from an operating
+/// system error.
 pub(crate) enum CompletionResult {
     SendRequestComplete,
     HeadersAvailable,
@@ -156,95 +188,93 @@ impl CompletionResult {
     }
 }
 
-/// Holds the callback-owned state for the currently armed operation.
+/// Bundles the resources transferred from the request task to one callback.
+///
+/// The operation slot publishes this value after it is fully initialized. The
+/// completion callback, synchronous submission-failure path, or final-close
+/// path that atomically claims the slot becomes the sole owner of the event
+/// sender and any buffer lent to WinHTTP. The kind, sender, and buffer therefore
+/// move as one unit and cannot be paired with different operations.
 pub(crate) struct ActiveOperation {
     pub(crate) kind: OperationKind,
     pub(crate) completion: RawSender<CompletionResult>,
     pub(crate) buffer: OperationBuffer,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Uniquely identifies one operation generation and its expected callback kind.
-pub(crate) struct OperationToken(u64);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Indicates that a request attempted to overlap WinHTTP operations.
-pub(crate) struct OperationAlreadyActive;
-
-/// Coordinates exclusive callback ownership of one pinned operation slot.
-struct SequentialOperation {
-    state: AtomicU64,
-    generation: AtomicU64,
+/// Stores the callback handoff payload without allocating per operation.
+///
+/// Sequential submission is guaranteed by the mutable borrow held by
+/// `OperationFuture`; this type does not enforce that API rule in release
+/// builds. Its atomic tag instead publishes the initialized payload to WinHTTP
+/// threads and arbitrates the real race between a completion callback, a
+/// synchronous submission failure, and final handle closure. The operation
+/// future owns the request handle until its receiver endpoint is destroyed, so
+/// cancellation cannot expose a reusable guard while this payload remains live.
+struct CallbackOperationSlot {
+    state: AtomicU8,
     active: UnsafeCell<MaybeUninit<ActiveOperation>>,
     completion: UnsafeCell<EmbeddedEvent<CompletionResult>>,
 }
 
-impl SequentialOperation {
+impl CallbackOperationSlot {
     fn new() -> Self {
         Self {
-            state: AtomicU64::new(OPERATION_IDLE),
-            generation: AtomicU64::new(0),
+            state: AtomicU8::new(OPERATION_IDLE),
             active: UnsafeCell::new(MaybeUninit::uninit()),
             completion: UnsafeCell::new(EmbeddedEvent::new()),
         }
     }
 
-    unsafe fn arm(
-        self: Pin<&Self>,
-        kind: OperationKind,
-        buffer: OperationBuffer,
-    ) -> Result<(OperationToken, RawReceiver<CompletionResult>), OperationAlreadyActive> {
-        self.state
-            .compare_exchange(OPERATION_IDLE, OPERATION_TRANSITION, Ordering::Acquire, Ordering::Relaxed)
-            .map_err(|_current| OperationAlreadyActive)?;
+    unsafe fn arm(self: Pin<&Self>, kind: OperationKind, buffer: OperationBuffer) -> RawReceiver<CompletionResult> {
+        debug_assert_eq!(
+            self.state.load(Ordering::Acquire),
+            OPERATION_IDLE,
+            "OperationFuture's mutable RequestGuard borrow prevents overlapping operations"
+        );
 
         let completion = self.completion.get();
-        // SAFETY: claiming OPERATION_TRANSITION grants exclusive access to the
-        // embedded event storage. The caller guarantees that this operation
-        // remains pinned until both endpoints are gone.
+        // SAFETY: the caller guarantees that no operation is already armed and
+        // that this slot remains pinned until both event endpoints are gone.
         let completion = unsafe { &mut *completion };
         // SAFETY: the operation containing this storage is pinned for the
         // endpoints' full lifetimes.
         let completion = unsafe { Pin::new_unchecked(completion) };
-        // SAFETY: the pinned operation outlives both endpoints, and the state
-        // transition guarantees that the storage is not already in use.
+        // SAFETY: the pinned slot outlives both endpoints, and the caller's
+        // exclusive RequestGuard borrow guarantees the storage is not in use.
         let (completion, receiver) = unsafe { Event::placed(completion) };
 
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-        let token = OperationToken((generation << OPERATION_KIND_BITS) | u64::from(kind as u8));
-
-        // SAFETY: the successful idle-to-transition exchange gives this caller
-        // exclusive access to the uninitialized slot. The value is published by
-        // the release store below only after initialization finishes.
+        // SAFETY: sequential submission gives this caller exclusive access to
+        // the uninitialized slot. The value is published by the release store
+        // below only after initialization finishes.
         unsafe {
             (*self.active.get()).write(ActiveOperation { kind, completion, buffer });
         }
-        self.state.store(token.0, Ordering::Release);
+        self.state.store(kind as u8, Ordering::Release);
 
-        Ok((token, receiver))
+        receiver
     }
 
     fn take_for_status(&self, status: u32) -> Option<ActiveOperation> {
-        let token = self.state.load(Ordering::Acquire);
-        let kind = active_kind(token)?;
+        let tag = self.state.load(Ordering::Acquire);
+        let kind = active_kind(tag)?;
 
         if kind.callback_status() != status {
             return None;
         }
 
-        self.take_token(OperationToken(token))
+        self.take_kind(kind)
     }
 
-    fn take_token(&self, token: OperationToken) -> Option<ActiveOperation> {
+    fn take_kind(&self, kind: OperationKind) -> Option<ActiveOperation> {
         self.state
-            .compare_exchange(token.0, OPERATION_TRANSITION, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(kind as u8, OPERATION_CLAIMED, Ordering::AcqRel, Ordering::Acquire)
             .ok()?;
 
         let active = self.active.get();
-        // SAFETY: the exact published token was atomically claimed above, so
+        // SAFETY: the exact published tag was atomically claimed above, so
         // this callback has exclusive access to the initialized storage.
         let active = unsafe { &*active };
-        // SAFETY: arming initialized the value before publishing the token, and
+        // SAFETY: arming initialized the value before publishing the tag, and
         // the successful claim grants this callback sole ownership.
         let active = unsafe { active.assume_init_read() };
         self.state.store(OPERATION_IDLE, Ordering::Release);
@@ -253,10 +283,9 @@ impl SequentialOperation {
     }
 
     fn take_any(&self) -> Option<ActiveOperation> {
-        let token = self.state.load(Ordering::Acquire);
-        active_kind(token)?;
+        let kind = active_kind(self.state.load(Ordering::Acquire))?;
 
-        self.take_token(OperationToken(token))
+        self.take_kind(kind)
     }
 
     fn is_idle(&self) -> bool {
@@ -264,7 +293,7 @@ impl SequentialOperation {
     }
 }
 
-impl Drop for SequentialOperation {
+impl Drop for CallbackOperationSlot {
     fn drop(&mut self) {
         let state = *self.state.get_mut();
 
@@ -278,37 +307,62 @@ impl Drop for SequentialOperation {
         } else {
             debug_assert_eq!(
                 state, OPERATION_IDLE,
-                "RequestContext dropped while an operation transition was in progress"
+                "HANDLE_CLOSING must not overlap the callback that claimed the operation"
             );
         }
     }
 }
 
-fn active_kind(token: u64) -> Option<OperationKind> {
-    if token <= OPERATION_TRANSITION {
+fn active_kind(state: u8) -> Option<OperationKind> {
+    if state <= OPERATION_CLAIMED {
         return None;
     }
 
-    let kind = u8::try_from(token & u64::from(u8::MAX)).expect("masking to the low eight bits guarantees a u8 value");
-
-    OperationKind::from_discriminant(kind)
+    OperationKind::from_discriminant(state)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
-/// Tracks whether a request observed a newly established connection.
+/// Summarizes connection-establishment notifications for request telemetry.
+///
+/// The callback records these states independently of operation completions so
+/// a later failure can be attributed to a cold connection attempt. The numeric
+/// values are stored directly in `RequestContext::cold_connect`.
+///
+/// `Unobserved` means no connection-establishment callback was seen.
+/// `Connecting` and `Connected` both identify work associated with a newly
+/// established connection and permit elapsed time to be attached to rich error
+/// telemetry. The state does not affect retry classification or metric labels.
 pub(crate) enum ColdConnectState {
     Unobserved = 0,
     Connecting = 1,
     Connected = 2,
 }
 
-/// Stores pinned callback state for the lifetime of a WinHTTP request handle.
+/// Owns callback-visible state and parent handles for one request.
+///
+/// A pooled instance is pinned, installed as the WinHTTP request context, and
+/// reclaimed only by the final `HANDLE_CLOSING` callback. It provides the
+/// callback-to-future operation slot, records request-scoped diagnostics, and
+/// keeps the connect and session handles alive while WinHTTP may still access
+/// their child request.
+///
+/// Installing the pointer transfers reclamation authority from the request
+/// task to WinHTTP. The stable address is required both by the WinHTTP context
+/// value and by the embedded one-shot event storage. Concurrent callbacks use
+/// only shared references: mutable callback state is atomic or protected by the
+/// operation slot's atomic ownership transfer. Final reclamation returns the
+/// allocation to its `plurality` pool after its parent handles are released.
 pub(crate) struct RequestContext {
-    operation: SequentialOperation,
+    // Publishes the current event sender and retained I/O buffer to callbacks.
+    operation: CallbackOperationSlot,
+    // Low 32 bits are WinHTTP secure-failure flags; bit 32 marks their presence.
     secure_failure: AtomicU64,
+    // Stores a ColdConnectState discriminant for later telemetry attribution.
     cold_connect: AtomicU8,
+    // Keeps the request's parent connect handle alive through HANDLE_CLOSING.
     connect: ConnectHandle,
+    // Keeps the owning session and its connection pool alive with the request.
     session: Arc<WinHttpSession>,
     _pinned: PhantomPinned,
 }
@@ -316,7 +370,7 @@ pub(crate) struct RequestContext {
 impl RequestContext {
     pub(crate) fn new(connect: ConnectHandle, session: Arc<WinHttpSession>) -> Self {
         Self {
-            operation: SequentialOperation::new(),
+            operation: CallbackOperationSlot::new(),
             secure_failure: AtomicU64::new(0),
             cold_connect: AtomicU8::new(ColdConnectState::Unobserved as u8),
             connect,
@@ -325,11 +379,7 @@ impl RequestContext {
         }
     }
 
-    pub(crate) unsafe fn arm(
-        self: Pin<&Self>,
-        kind: OperationKind,
-        buffer: OperationBuffer,
-    ) -> Result<(OperationToken, RawReceiver<CompletionResult>), OperationAlreadyActive> {
+    pub(crate) unsafe fn arm(self: Pin<&Self>, kind: OperationKind, buffer: OperationBuffer) -> RawReceiver<CompletionResult> {
         // SAFETY: RequestContext structurally pins its operation field, and the
         // caller guarantees that the context remains pinned through both event
         // endpoints' lifetimes.
@@ -343,8 +393,8 @@ impl RequestContext {
         self.operation.take_for_status(status)
     }
 
-    pub(crate) fn take_token(&self, token: OperationToken) -> Option<ActiveOperation> {
-        self.operation.take_token(token)
+    pub(crate) fn take_kind(&self, kind: OperationKind) -> Option<ActiveOperation> {
+        self.operation.take_kind(kind)
     }
 
     pub(crate) fn take_any(&self) -> Option<ActiveOperation> {
@@ -401,7 +451,7 @@ impl fmt::Debug for RequestContext {
 
 // SAFETY: callbacks may share a RequestContext across WinHTTP threads. All
 // concurrently accessible fields are atomic, and the operation payload is
-// protected by SequentialOperation's atomic ownership transfer. The connect
+// protected by CallbackOperationSlot's atomic ownership transfer. The connect
 // handle and session owner are never exposed or accessed until exclusive final
 // destruction after HANDLE_CLOSING.
 unsafe impl Sync for RequestContext {}
@@ -413,8 +463,8 @@ mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{
-        ActiveOperation, ColdConnectState, CompletionBuffer, CompletionResult, OperationAlreadyActive, OperationBuffer, OperationKind,
-        OperationToken, RequestContext, SequentialOperation,
+        ActiveOperation, CallbackOperationSlot, ColdConnectState, CompletionBuffer, CompletionResult, OperationBuffer, OperationKind,
+        RequestContext,
     };
 
     assert_impl_all!(OperationKind: UnwindSafe, RefUnwindSafe);
@@ -422,11 +472,9 @@ mod tests {
     assert_impl_all!(CompletionBuffer: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(CompletionResult: Send, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(ActiveOperation: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(OperationToken: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(OperationAlreadyActive: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(SequentialOperation: UnwindSafe);
+    assert_impl_all!(CallbackOperationSlot: UnwindSafe);
     // The operation slot uses UnsafeCell for callback-owned state.
-    assert_not_impl_any!(SequentialOperation: RefUnwindSafe);
+    assert_not_impl_any!(CallbackOperationSlot: RefUnwindSafe);
     assert_impl_all!(ColdConnectState: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(RequestContext: Send, Sync, std::fmt::Debug, UnwindSafe);
     // The context contains the operation slot's actual UnsafeCell state.

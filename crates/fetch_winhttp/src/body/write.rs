@@ -21,7 +21,13 @@ use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
 use crate::request::RequestGuard;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Captures the WinHTTP length and chunking mode for one request body.
+/// Selects the WinHTTP framing strategy for one request body.
+///
+/// Known lengths that fit a `DWORD` are passed directly to
+/// `WinHttpSendRequest`. Larger known bodies use the ignore-total sentinel and
+/// require an exact normalized 64-bit `Content-Length` header. Unknown lengths
+/// enable WinHTTP automatic chunking and require a final zero-length write.
+/// Constructing the plan validates duplicate length headers before network I/O.
 pub(crate) struct RequestBodyPlan {
     total_length: u32,
     automatic_chunking: bool,
@@ -151,7 +157,12 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Reports a request body length that cannot be represented safely for WinHTTP.
+/// Identifies request length metadata that cannot define safe upload framing.
+///
+/// The writer must know whether WinHTTP receives an exact `DWORD` total, an
+/// explicit 64-bit length, or an unknown-length stream. Inconsistent or
+/// malformed `Content-Length` values make that choice ambiguous and are
+/// rejected before any body frame is polled.
 pub(crate) enum RequestBodyPlanError {
     InvalidContentLength,
     InvalidLargeContentLength { expected: u64 },
@@ -172,7 +183,15 @@ impl fmt::Display for RequestBodyPlanError {
 impl std::error::Error for RequestBodyPlanError {}
 
 #[derive(Debug)]
-/// Serializes a request body through the request's single operation slot.
+/// Streams request frames through sequential WinHTTP write operations.
+///
+/// Every submitted span remains owned by the callback operation slot until
+/// `WRITE_COMPLETE`, so WinHTTP never observes freed or mutable storage.
+/// Segmented views are written one contiguous span at a time, and spans larger
+/// than `u32::MAX` are split into multiple operations. Unknown-length uploads
+/// finish with the required null-buffer, zero-length write before response
+/// reception begins. Request trailer frames are rejected because WinHTTP has no
+/// corresponding submission API.
 pub(crate) struct WinHttpBodyWriter<'guard> {
     guard: &'guard mut RequestGuard,
     bindings: Facade,
@@ -199,8 +218,7 @@ impl<'guard> WinHttpBodyWriter<'guard> {
                     // identified by buffer/len are retained in the active
                     // operation until its completion.
                     unsafe { bindings.write_data(request, Some(buffer), len) }
-                })
-                .map_err(|_active| callback_protocol_error("the write operation slot was already active"))?;
+                });
             let completion = write
                 .await
                 .map_err(|_disconnected| callback_protocol_error("the write completion channel disconnected"))?;
@@ -213,18 +231,15 @@ impl<'guard> WinHttpBodyWriter<'guard> {
 
     pub(crate) async fn end_automatic_chunking(&mut self) -> fetch::Result<()> {
         let bindings = self.bindings.clone();
-        let write = self
-            .guard
-            .submit(
-                OperationKind::Write,
-                OperationBuffer::write(BytesView::new(), 0),
-                move |request, _context| {
-                    // SAFETY: WinHTTP accepts a null buffer only for this
-                    // zero-length operation, which marks end-of-body.
-                    unsafe { bindings.write_data(request, None, 0) }
-                },
-            )
-            .map_err(|_active| callback_protocol_error("the final request write operation slot was already active"))?;
+        let write = self.guard.submit(
+            OperationKind::Write,
+            OperationBuffer::write(BytesView::new(), 0),
+            move |request, _context| {
+                // SAFETY: WinHTTP accepts a null buffer only for this
+                // zero-length operation, which marks end-of-body.
+                unsafe { bindings.write_data(request, None, 0) }
+            },
+        );
         let completion = write
             .await
             .map_err(|_disconnected| callback_protocol_error("the final request write completion channel disconnected"))?;

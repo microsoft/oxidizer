@@ -17,7 +17,16 @@ use crate::telemetry::Telemetry;
 use crate::{WinHttpTlsConfig, error_labels};
 
 #[derive(Debug)]
-/// Dispatches requests through either a ready or permanently failed session.
+/// Runs one materialized WinHTTP handler for a core and pool slot.
+///
+/// A ready instance owns one WinHTTP session, its OS connection pool, a request
+/// context pool, body-building services, and transport configuration. Request
+/// execution is delegated to a [`RequestDriver`] that owns request-specific
+/// handles and drives the asynchronous WinHTTP operation sequence.
+///
+/// The custom-transport factory cannot return an error, so session setup failure
+/// is retained as a permanent state. Requests in that state return initialization
+/// errors without creating request or connect handles and without issuing I/O.
 pub(crate) struct WinHttpTransport {
     telemetry: Telemetry,
     state: TransportState,
@@ -96,14 +105,23 @@ impl Service<HttpRequest> for WinHttpTransport {
 }
 
 #[derive(Debug)]
-/// Captures whether transport initialization produced a usable session.
+/// Separates an initialized handler from a permanent setup failure.
+///
+/// Initialization happens once when the core and pool-slot handler is
+/// materialized. The state is not retried on later requests, representing failed
+/// session setup within the infallible custom-transport factory contract.
 enum TransportState {
     Ready(Box<ReadyTransport>),
     Failed(FailedTransport),
 }
 
 #[derive(Debug)]
-/// Holds the shared resources used to execute requests on a live session.
+/// Owns resources shared by requests handled by one transport instance.
+///
+/// These resources belong to one materialized core and pool slot: the session
+/// and its native connection pool, response-body services, read-buffer pool,
+/// request-context pool, and finalized options. A [`RequestDriver`] clones or
+/// rents what one request needs and owns its per-request handles and lifecycle.
 struct ReadyTransport {
     session: Arc<WinHttpSession>,
     body_builder: HttpBodyBuilder,
@@ -115,13 +133,21 @@ struct ReadyTransport {
 }
 
 #[derive(Debug)]
-/// Retains an initialization failure so every request reports it consistently.
+/// Retains setup failure without permitting request I/O.
+///
+/// Every request receives a fresh non-recoverable initialization error sourced
+/// from the same failure; no session recovery or native request construction is
+/// attempted by this state.
 struct FailedTransport {
     failure: SessionInitializationFailure,
 }
 
 #[derive(Debug)]
-/// Transfers builder-owned dependencies into a new WinHTTP transport.
+/// Carries finalized factory inputs into one materialized transport.
+///
+/// The inputs are per-instance clones or relocated services, not request state.
+/// [`WinHttpTransport::new`] consumes them to create the session, telemetry, and
+/// resource pools used by that core and pool-slot handler.
 pub(crate) struct TransportInputs {
     pub(crate) body_builder: HttpBodyBuilder,
     pub(crate) clock: Clock,

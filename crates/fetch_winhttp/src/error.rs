@@ -28,7 +28,10 @@ use crate::error_labels;
 pub(crate) type Result<T> = std::result::Result<T, WinHttpError>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Identifies the WinHTTP operation that produced an operating-system error.
+/// Identifies the native operation associated with a WinHTTP failure.
+///
+/// This context makes the preserved source error actionable without affecting
+/// recovery classification, which is determined from the operating-system code.
 pub(crate) enum WinHttpOperation {
     CloseHandle,
     Connect,
@@ -68,7 +71,16 @@ impl fmt::Display for WinHttpOperation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// Preserves a Win32 error code and its WinHTTP operation context.
+/// Retains native failure details until they become a transport error.
+///
+/// Conversion to [`HttpError`] preserves this value as the source while adding a
+/// stable public label and [`RecoveryInfo`] derived from the Win32 error code.
+/// Secure-failure flags are best-effort certificate diagnostics captured from a
+/// separate callback.
+///
+/// WinHTTP does not define the relative order of secure-failure and request-error
+/// callbacks. Classification therefore depends on the request-error code alone;
+/// only secure diagnostics observed in time are attached to the source.
 pub(crate) struct WinHttpError {
     code: u32,
     operation: WinHttpOperation,
@@ -150,7 +162,13 @@ const HRESULT_WIN32_PREFIX: u32 = 0x8007_0000;
 const HRESULT_CODE_MASK: u32 = 0x0000_ffff;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Groups WinHTTP errors by public recovery and telemetry semantics.
+/// Maps native failures to stable labels and recovery guidance.
+///
+/// Each class collapses related Win32 codes into a public error label and the
+/// [`RecoveryInfo`] consumed by retry and breaker layers. Transient connection,
+/// timeout, request, or revocation-check failures may be retryable; deterministic
+/// protocol, cancellation, and certificate failures are not, while unknown codes
+/// retain unknown recovery guidance.
 enum ErrorClass {
     Abandoned,
     Connect,
@@ -183,7 +201,10 @@ impl ErrorClass {
 }
 
 #[derive(Clone, Copy)]
-/// Associates one documented WinHTTP error code with its semantic class.
+/// Associates one documented native code with its transport error semantics.
+///
+/// The table keeps code recognition separate from the label and recovery policy
+/// centralized in [`ErrorClass`].
 struct ErrorMapping {
     code: u32,
     class: ErrorClass,

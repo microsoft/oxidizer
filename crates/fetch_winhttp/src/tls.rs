@@ -3,9 +3,19 @@
 
 use thread_aware::ThreadAware;
 
-/// WinHTTP-specific TLS configuration.
+/// Configures TLS behavior that only the WinHTTP transport can apply.
 ///
-/// Certificate and host-name validation are strict by default.
+/// Generic `fetch` TLS options describe rustls or native-tls objects that cannot
+/// configure requests backed by Schannel in WinHTTP, so this transport-specific
+/// value maps directly to WinHTTP request security flags instead.
+///
+/// Certificate-chain relaxations and host-name relaxation are independent and
+/// both default to strict validation. The former covers an unknown authority,
+/// invalid validity period, or wrong intended usage; the latter covers a host
+/// name mismatch. Other TLS failures remain enforced.
+///
+/// Client certificates, server-certificate inspection, and certificate pinning
+/// are not supported.
 #[derive(Clone, Debug, Default, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpTlsConfig {
@@ -29,7 +39,10 @@ impl WinHttpTlsConfig {
     }
 }
 
-/// Builds [`WinHttpTlsConfig`].
+/// Builds [`WinHttpTlsConfig`] from independent validation controls.
+///
+/// Settings remain strict unless the corresponding relaxation is explicitly
+/// enabled.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpTlsConfigBuilder {

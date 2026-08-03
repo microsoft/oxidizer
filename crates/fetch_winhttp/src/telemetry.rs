@@ -8,7 +8,11 @@ use observed::{Sink, emit, event};
 use crate::session::{SessionInitializationFailure, SessionInitializationOperation};
 
 #[derive(Clone, Debug)]
-/// Emits bounded WinHTTP lifecycle events through the configured sink.
+/// Routes WinHTTP lifecycle signals to bounded metrics and diagnostic logs.
+///
+/// Request attempts and failures increment zero-dimensional counters so metrics
+/// remain low-cardinality. Initialization details and per-request diagnostic
+/// context are carried only by log fields through the configured sink.
 pub(crate) struct Telemetry {
     sink: Sink,
 }
@@ -45,7 +49,10 @@ impl Telemetry {
 
 #[event("fetch.winhttp.session.initialization.failure")]
 #[error("WinHTTP transport initialization failed")]
-/// Records the failed session setup step and operating-system error code.
+/// Describes the session setup operation that prevented materialization.
+///
+/// Its operation and operating-system code are diagnostic log fields; session
+/// initialization failures do not introduce metric dimensions.
 struct InitializationFailure {
     #[dimension(log = "winhttp.operation")]
     #[unredacted]
@@ -61,7 +68,10 @@ struct InitializationFailure {
     desc = "WinHTTP transport request attempts",
     unit = "{request}"
 )]
-/// Counts requests accepted by the WinHTTP transport.
+/// Represents one transport-accepted request for the request counter.
+///
+/// The event deliberately has no fields so every request contributes to one
+/// low-cardinality metric series.
 struct RequestAttempt;
 
 #[event("fetch.winhttp.request.error")]
@@ -71,7 +81,12 @@ struct RequestAttempt;
     desc = "Failed WinHTTP transport request attempts",
     unit = "{error}"
 )]
-/// Records failed requests and optional fresh-connection timing.
+/// Describes one failed request for metrics and diagnostic logs.
+///
+/// Every event increments the same fieldless error counter. When WinHTTP
+/// observed that the request began a fresh physical connection, the event may
+/// also carry that attribution and its connection duration as log-only fields;
+/// those values never become metric dimensions.
 struct RequestError {
     #[dimension(log = "winhttp.connection.fresh")]
     #[if_none(drop)]

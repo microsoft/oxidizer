@@ -42,7 +42,17 @@ const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WI
 pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
 
 #[derive(Debug)]
-/// Owns the configured asynchronous WinHTTP session handle.
+/// Defines the OS connection-pool boundary for one transport instance.
+///
+/// The custom transport factory creates one session for each materialized core
+/// and pool slot. The session configures automatic proxy discovery, native
+/// timeout policy, keep-alive behavior, and the callback inherited by all child
+/// request handles. Disabling WinHTTP global pooling keeps independently built
+/// clients from sharing connections through process-wide OS state.
+///
+/// The owner is shared by requests through `Arc` and retained in each installed
+/// request context until final `HANDLE_CLOSING`, ensuring the session outlives
+/// every callback that depends on it.
 pub(crate) struct WinHttpSession {
     handle: SessionHandle,
 }
@@ -123,7 +133,12 @@ impl WinHttpSession {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// Preserves the exact operation and error that prevented session startup.
+/// Preserves why a transport instance could not initialize its session.
+///
+/// The custom transport factory is infallible, so this value is retained in a
+/// permanently failed transport state. Each request then receives a fresh
+/// `HttpError` derived from the original Win32 failure without opening connect
+/// or request handles.
 pub(crate) struct SessionInitializationFailure {
     operation: SessionInitializationOperation,
     error: WinHttpError,
@@ -144,7 +159,11 @@ impl SessionInitializationFailure {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Identifies a required step in configuring a WinHTTP session.
+/// Identifies the required session setup step that failed.
+///
+/// Every listed step is part of the supported-platform contract; there is no
+/// capability fallback. Recording the step gives the preserved Win32 error
+/// enough context for diagnostics when the failed transport handles requests.
 pub(crate) enum SessionInitializationOperation {
     Open,
     SetTimeouts,
