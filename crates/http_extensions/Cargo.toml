@@ -81,6 +81,7 @@ tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }

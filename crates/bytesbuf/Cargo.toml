@@ -49,6 +49,7 @@ thread_aware = { workspace = true, default-features = false, features = ["derive
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 mutants = { workspace = true }

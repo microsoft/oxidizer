@@ -197,15 +197,25 @@ fn quiet_session() -> Session {
     Session::new().no_stdout().no_file()
 }
 
+fn total_bytes_allocated(session: &Session, operation_name: &str) -> u64 {
+    let missing_operation = format!("operation {operation_name:?} must match a name registered with Session::operation on this session");
+
+    session
+        .to_report()
+        .operations()
+        .find_map(|(name, operation)| (name == operation_name).then(|| operation.total_bytes_allocated()))
+        .expect(&missing_operation)
+}
+
 fn assert_no_system_allocations(session: &Session, name: &str, mut f: impl FnMut()) {
     let operation = session.operation(name);
     {
-        let _span = operation.measure_thread();
+        let _span = operation.measure_thread().iterations(dyn_box_ops::CAP as u64);
         for _ in 0..dyn_box_ops::CAP {
             f();
         }
     }
-    assert_eq!(operation.total_bytes_allocated(), 0, "{name} must reuse pre-warmed storage");
+    assert_eq!(total_bytes_allocated(session, name), 0, "{name} must reuse pre-warmed storage");
 }
 
 #[test]
@@ -236,11 +246,11 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
     dyn_box_ops::setup_std_box(dyn_box_ops::CAP);
     let heap = session.operation("std_dyn_box");
     {
-        let _span = heap.measure_thread();
+        let _span = heap.measure_thread().iterations(1);
         dyn_box_ops::std_box(0);
     }
     assert!(
-        heap.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "std_dyn_box") > 0,
         "std::Box must include its per-operation heap allocation"
     );
 }
@@ -262,13 +272,13 @@ fn first_fill_allocates_then_steady_state_is_zero() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("first_fill");
     {
-        let _span = first.measure_thread();
+        let _span = first.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(pool.alloc_box(i as u64));
         }
     }
     assert!(
-        first.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "first_fill") > 0,
         "the first fill must grow chunk(s) from the system"
     );
     hold.clear();
@@ -276,13 +286,13 @@ fn first_fill_allocates_then_steady_state_is_zero() {
     // Steady state: an identical fill after dropping all handles reuses slots.
     let reused = session.operation("refill");
     {
-        let _span = reused.measure_thread();
+        let _span = reused.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(pool.alloc_box(i as u64));
         }
     }
     assert_eq!(
-        reused.total_bytes_allocated(),
+        total_bytes_allocated(&session, "refill"),
         0,
         "after warm-up, refilling must reuse the pool's chunks rather than reallocate"
     );
@@ -305,7 +315,7 @@ fn steady_state_box_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("box_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_box(i as u64));
@@ -314,7 +324,7 @@ fn steady_state_box_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "box_steady_state"),
         0,
         "steady-state Box fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -337,7 +347,7 @@ fn steady_state_arc_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("arc_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_arc(i as u64));
@@ -346,7 +356,7 @@ fn steady_state_arc_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "arc_steady_state"),
         0,
         "steady-state Arc fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -369,7 +379,7 @@ fn steady_state_rc_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("rc_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_rc(i as u64));
@@ -378,7 +388,7 @@ fn steady_state_rc_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "rc_steady_state"),
         0,
         "steady-state Rc fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -409,7 +419,7 @@ fn steady_state_rolling_churn_does_not_allocate() {
 
     let steady = session.operation("rolling_churn");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for (i, slot) in hold.iter_mut().enumerate() {
                 *slot = None;
@@ -418,7 +428,7 @@ fn steady_state_rolling_churn_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "rolling_churn"),
         0,
         "steady-state rolling churn must reuse the just-freed slot, not allocate from the system"
     );

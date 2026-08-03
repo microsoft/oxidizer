@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "alloc_tracker"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0160148c6badd4fb18605f8373adda8d89a43abcacf9a1b7868aa33643eacdb7"
+checksum = "66dc7d41d01f66319dcf8ff2c80463dfc096ff26d6a25cb142debd2ea11b93f9"
 dependencies = [
  "folo_utils",
  "serde",
@@ -482,6 +482,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
+name = "benchmarking"
+version = "0.1.0"
+dependencies = [
+ "alloc_tracker",
+ "criterion",
+]
+
+[[package]]
 name = "bincode-next"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -652,6 +660,7 @@ name = "bytesbuf"
 version = "0.7.0"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "bytes",
  "criterion",
  "gungraun",
@@ -687,6 +696,7 @@ version = "0.10.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
+ "benchmarking",
  "bytesbuf",
  "cachet_memory",
  "cachet_service",
@@ -1314,11 +1324,10 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "5.4.1"
+version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
- "concurrent-queue",
  "parking",
  "pin-project-lite",
 ]
@@ -1356,6 +1365,7 @@ dependencies = [
  "alloc_tracker",
  "anyspawn",
  "argh",
+ "benchmarking",
  "bytes",
  "bytesbuf",
  "criterion",
@@ -1525,9 +1535,9 @@ checksum = "c9da2799288b7822cb94d4b15fb5f0eef6de0bcb9d26ce99c8512597bb0dda81"
 
 [[package]]
 name = "folo_utils"
-version = "0.1.8"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc135ea093a19d41324dcf04daaf9da2e9c625147e3eb19073e9869580a89db"
+checksum = "9333d94e08221df95e40c29e8a239396501e635f037a840dec43f33efc4bb054"
 dependencies = [
  "serde",
  "serde_json",
@@ -1924,6 +1934,7 @@ name = "http_extensions"
 version = "0.8.0"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "bytes",
  "bytesbuf",
  "criterion",
@@ -2412,6 +2423,7 @@ name = "layered"
 version = "0.3.6"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "criterion",
  "futures",
  "mutants",
@@ -2694,6 +2706,7 @@ dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
  "allocator-api2 0.4.0",
+ "benchmarking",
  "bolero",
  "bumpalo",
  "bytemuck",
@@ -3957,6 +3970,7 @@ name = "seatbelt"
 version = "0.6.1"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "criterion",
  "ctor",
  "fastrand",

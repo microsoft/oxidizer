@@ -126,6 +126,7 @@ rustls-platform-verifier = { workspace = true, optional = true }
 [dev-dependencies]
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
+benchmarking = { path = "../benchmarking" }
 data_privacy = { path = "../data_privacy" }
 fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
 fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
