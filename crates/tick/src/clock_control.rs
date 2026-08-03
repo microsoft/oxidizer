@@ -124,12 +124,6 @@ pub struct ClockControlBuilder {
     auto_advance_timers: bool,
 }
 
-impl Default for ClockControlBuilder {
-    fn default() -> Self {
-        ClockControl::builder()
-    }
-}
-
 impl ClockControl {
     /// Creates a new `ClockControl` instance.
     ///
