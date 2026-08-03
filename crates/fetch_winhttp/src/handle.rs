@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::panic::RefUnwindSafe;
 use std::ptr::NonNull;
 
-use crate::bindings::{Bindings as _, Facade};
+use crate::bindings::{Bindings as _, BindingsFacade};
 
 /// A non-null WinHTTP handle token that Rust treats only as an opaque value.
 ///
@@ -55,11 +55,11 @@ unsafe impl Sync for RawHandle {}
 #[derive(Debug)]
 pub(crate) struct SessionHandle {
     raw: RawHandle,
-    bindings: Facade,
+    bindings: BindingsFacade,
 }
 
 impl SessionHandle {
-    pub(crate) const fn new(raw: RawHandle, bindings: Facade) -> Self {
+    pub(crate) const fn new(raw: RawHandle, bindings: BindingsFacade) -> Self {
         Self { raw, bindings }
     }
 
@@ -67,14 +67,17 @@ impl SessionHandle {
         self.raw
     }
 
-    pub(crate) const fn bindings(&self) -> &Facade {
+    pub(crate) const fn bindings(&self) -> &BindingsFacade {
         &self.bindings
     }
 }
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        let _ = self.bindings.close_handle(self.raw);
+        // SAFETY: this wrapper owns the session's sole close authority. Request
+        // contexts retain the wrapper until every child request is finally
+        // closed, and no API call can use the handle after this Drop.
+        let _ = unsafe { self.bindings.close_handle(self.raw) };
     }
 }
 
@@ -85,12 +88,12 @@ impl Drop for SessionHandle {
 #[derive(Debug)]
 pub(crate) struct ConnectHandle {
     raw: RawHandle,
-    bindings: Facade,
+    bindings: BindingsFacade,
     not_sync: PhantomData<Cell<()>>,
 }
 
 impl ConnectHandle {
-    pub(crate) const fn new(raw: RawHandle, bindings: Facade) -> Self {
+    pub(crate) const fn new(raw: RawHandle, bindings: BindingsFacade) -> Self {
         Self {
             raw,
             bindings,
@@ -105,7 +108,10 @@ impl ConnectHandle {
 
 impl Drop for ConnectHandle {
     fn drop(&mut self) {
-        let _ = self.bindings.close_handle(self.raw);
+        // SAFETY: this wrapper owns the connect handle's sole close authority.
+        // RequestContext retains it through the child request's final callback,
+        // and no API call can use the handle after this Drop.
+        let _ = unsafe { self.bindings.close_handle(self.raw) };
     }
 }
 
@@ -121,12 +127,12 @@ impl RefUnwindSafe for ConnectHandle {}
 #[derive(Debug)]
 pub(crate) struct RequestHandle {
     raw: RawHandle,
-    bindings: Facade,
+    bindings: BindingsFacade,
     not_sync: PhantomData<Cell<()>>,
 }
 
 impl RequestHandle {
-    pub(crate) const fn new(raw: RawHandle, bindings: Facade) -> Self {
+    pub(crate) const fn new(raw: RawHandle, bindings: BindingsFacade) -> Self {
         Self {
             raw,
             bindings,
@@ -138,14 +144,17 @@ impl RequestHandle {
         self.raw
     }
 
-    pub(crate) const fn bindings(&self) -> &Facade {
+    pub(crate) const fn bindings(&self) -> &BindingsFacade {
         &self.bindings
     }
 }
 
 impl Drop for RequestHandle {
     fn drop(&mut self) {
-        let _ = self.bindings.close_handle(self.raw);
+        // SAFETY: this wrapper owns the request handle's sole close authority.
+        // The installed context outlives HANDLE_CLOSING, and dropping this
+        // wrapper prevents every later request operation.
+        let _ = unsafe { self.bindings.close_handle(self.raw) };
     }
 }
 
@@ -163,10 +172,10 @@ mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
 
     // This asserts the test-build enum, including its MockBindings variant.
-    assert_impl_all!(Facade: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(BindingsFacade: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(RawHandle: Send, Sync, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(SessionHandle: Send, Sync, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(ConnectHandle: Send, UnwindSafe, RefUnwindSafe);
@@ -178,7 +187,7 @@ mod tests {
     fn each_wrapper_closes_its_handle_once() {
         let mut bindings = MockBindings::new();
         bindings.expect_close_handle().times(3).returning(|_| Ok(()));
-        let facade = Facade::mock(Arc::new(bindings));
+        let facade = BindingsFacade::mock(Arc::new(bindings));
 
         drop(SessionHandle::new(raw_handle(1), facade.clone()));
         drop(ConnectHandle::new(raw_handle(2), facade.clone()));
@@ -189,12 +198,12 @@ mod tests {
     fn accessors_preserve_handle_and_facade() {
         let mut bindings = MockBindings::new();
         bindings.expect_close_handle().once().returning(|_| Ok(()));
-        let facade = Facade::mock(Arc::new(bindings));
+        let facade = BindingsFacade::mock(Arc::new(bindings));
         let raw = raw_handle(1);
         let session = SessionHandle::new(raw, facade);
 
         assert_eq!(session.raw(), raw);
-        assert!(matches!(session.bindings(), Facade::Mock(_)));
+        assert!(matches!(session.bindings(), BindingsFacade::Mock(_)));
     }
 
     fn raw_handle(value: usize) -> RawHandle {

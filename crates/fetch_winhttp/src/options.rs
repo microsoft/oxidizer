@@ -24,7 +24,7 @@ pub(crate) use windows::Win32::Networking::WinHttp::{
     WINHTTP_QUERY_VERSION,
 };
 
-use crate::bindings::{Bindings as _, Facade};
+use crate::bindings::{Bindings as _, BindingsFacade};
 use crate::error::WinHttpError;
 use crate::handle::RawHandle;
 use crate::tls::WinHttpTlsConfig;
@@ -452,13 +452,14 @@ pub(crate) fn parse_header_buffer(buffer: &[u16], returned_bytes: u32) -> Result
     String::from_utf16(content).map_err(|_invalid_utf16| InvalidUtf16Error::new("header data").into())
 }
 
-pub(crate) fn query_status_code(bindings: &Facade, request: RawHandle) -> Result<u32, QueryError> {
+pub(crate) fn query_status_code(bindings: &BindingsFacade, request: RawHandle) -> Result<u32, QueryError> {
     let mut status_code = 0_u32;
     let mut byte_len = DWORD_BYTES;
     let buffer = NonNull::from(&mut status_code).cast();
 
-    // SAFETY: status_code is a writable DWORD and byte_len describes its exact
-    // capacity for the duration of the synchronous query.
+    // SAFETY: callers query only a live request while its RequestGuard owns the
+    // handle and no asynchronous operation is outstanding. status_code is a
+    // writable DWORD and byte_len describes its exact capacity.
     unsafe {
         bindings.query_headers(
             request,
@@ -475,11 +476,11 @@ pub(crate) fn query_status_code(bindings: &Facade, request: RawHandle) -> Result
     Ok(status_code)
 }
 
-pub(crate) fn query_raw_headers(bindings: &Facade, request: RawHandle) -> Result<Vec<u8>, QueryError> {
+pub(crate) fn query_raw_headers(bindings: &BindingsFacade, request: RawHandle) -> Result<Vec<u8>, QueryError> {
     query_header_bytes(bindings, request, WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_WIRE_ENCODING)
 }
 
-pub(crate) fn query_raw_trailers(bindings: &Facade, request: RawHandle) -> Result<Option<Vec<u8>>, QueryError> {
+pub(crate) fn query_raw_trailers(bindings: &BindingsFacade, request: RawHandle) -> Result<Option<Vec<u8>>, QueryError> {
     match query_header_bytes(
         bindings,
         request,
@@ -490,13 +491,14 @@ pub(crate) fn query_raw_trailers(bindings: &Facade, request: RawHandle) -> Resul
     }
 }
 
-pub(crate) fn query_protocol_used(bindings: &Facade, request: RawHandle) -> Result<Version, QueryError> {
+pub(crate) fn query_protocol_used(bindings: &BindingsFacade, request: RawHandle) -> Result<Version, QueryError> {
     let mut protocol_mask = 0_u32;
     let mut byte_len = DWORD_BYTES;
     let buffer = NonNull::from(&mut protocol_mask).cast();
 
-    // SAFETY: protocol_mask is a writable DWORD and byte_len describes its
-    // exact capacity for the duration of the synchronous query.
+    // SAFETY: callers query only a live request while its RequestGuard owns the
+    // handle and no asynchronous operation is outstanding. protocol_mask is a
+    // writable DWORD and byte_len describes its exact capacity.
     unsafe { bindings.query_option(request, WINHTTP_OPTION_HTTP_PROTOCOL_USED, Some(buffer), &mut byte_len) }?;
 
     if byte_len != DWORD_BYTES {
@@ -511,16 +513,18 @@ pub(crate) fn query_protocol_used(bindings: &Facade, request: RawHandle) -> Resu
     }
 }
 
-fn query_header_string(bindings: &Facade, request: RawHandle, info_level: u32, value: &'static str) -> Result<String, QueryError> {
+fn query_header_string(bindings: &BindingsFacade, request: RawHandle, info_level: u32, value: &'static str) -> Result<String, QueryError> {
     let buffer = query_header_units(bindings, request, info_level, value)?;
 
     String::from_utf16(&buffer).map_err(|_invalid_utf16| QueryError::from(ConversionError::from(InvalidUtf16Error::new(value))))
 }
 
-fn query_header_bytes(bindings: &Facade, request: RawHandle, info_level: u32) -> Result<Vec<u8>, QueryError> {
+fn query_header_bytes(bindings: &BindingsFacade, request: RawHandle, info_level: u32) -> Result<Vec<u8>, QueryError> {
     let mut required_bytes = 0_u32;
 
-    // SAFETY: a null buffer with zero capacity is the documented sizing query.
+    // SAFETY: callers query only a live request while its RequestGuard owns the
+    // handle and no asynchronous operation is outstanding. A null buffer with
+    // zero capacity is the documented sizing query.
     match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
         Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
         Err(error) => return Err(error.into()),
@@ -533,8 +537,9 @@ fn query_header_bytes(bindings: &Facade, request: RawHandle, info_level: u32) ->
     let output = NonNull::new(buffer.as_mut_ptr()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
     let mut returned_bytes = required_bytes;
 
-    // SAFETY: output points to a writable buffer of required_bytes and remains
-    // valid for the duration of the synchronous query.
+    // SAFETY: the request remains live with no asynchronous operation
+    // outstanding. output points to a writable buffer of required_bytes and
+    // remains valid for the duration of this synchronous query.
     unsafe { bindings.query_headers(request, info_level, Some(output), &mut returned_bytes) }?;
 
     let returned_bytes = dword_to_usize(returned_bytes);
@@ -551,10 +556,12 @@ fn query_header_bytes(bindings: &Facade, request: RawHandle, info_level: u32) ->
     Ok(buffer)
 }
 
-fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32, value: &'static str) -> Result<Vec<u16>, QueryError> {
+fn query_header_units(bindings: &BindingsFacade, request: RawHandle, info_level: u32, value: &'static str) -> Result<Vec<u16>, QueryError> {
     let mut required_bytes = 0_u32;
 
-    // SAFETY: a null buffer with zero capacity is the documented sizing query.
+    // SAFETY: callers query only a live request while its RequestGuard owns the
+    // handle and no asynchronous operation is outstanding. A null buffer with
+    // zero capacity is the documented sizing query.
     match unsafe { bindings.query_headers(request, info_level, None, &mut required_bytes) } {
         Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.0 => {}
         Err(error) => return Err(error.into()),
@@ -567,8 +574,9 @@ fn query_header_units(bindings: &Facade, request: RawHandle, info_level: u32, va
     let output = NonNull::new(buffer.as_mut_ptr().cast::<u8>()).expect("Vec::as_mut_ptr is guaranteed to be nonnull");
     let mut returned_bytes = required_bytes;
 
-    // SAFETY: output points to a writable buffer of required_bytes and remains
-    // valid for the duration of the synchronous query.
+    // SAFETY: the request remains live with no asynchronous operation
+    // outstanding. output points to a writable buffer of required_bytes and
+    // remains valid for the duration of this synchronous query.
     unsafe { bindings.query_headers(request, info_level, Some(output), &mut returned_bytes) }?;
 
     let returned_units = header_buffer_units(returned_bytes)?;
@@ -622,7 +630,7 @@ mod tests {
         security_flags, timeout_millis, validate_request_header_unit_count,
     };
     use crate::WinHttpTlsConfig;
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
 
@@ -875,7 +883,7 @@ mod tests {
                 Ok(())
             });
 
-        let version = query_protocol_used(&Facade::mock(Arc::new(bindings)), raw_handle(3)).unwrap();
+        let version = query_protocol_used(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(3)).unwrap();
 
         assert_eq!(version, Version::HTTP_10);
     }
@@ -923,7 +931,10 @@ mod tests {
                 Ok(())
             });
 
-        assert_eq!(query_status_code(&Facade::mock(Arc::new(bindings)), raw_handle(4)).unwrap(), 503);
+        assert_eq!(
+            query_status_code(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(4)).unwrap(),
+            503
+        );
     }
 
     #[test]
@@ -934,7 +945,7 @@ mod tests {
             Ok(())
         });
 
-        let status = query_status_code(&Facade::mock(Arc::new(status_bindings)), raw_handle(1)).unwrap_err();
+        let status = query_status_code(&BindingsFacade::mock(Arc::new(status_bindings)), raw_handle(1)).unwrap_err();
         let status = match status {
             QueryError::Conversion(error) => error,
             QueryError::WinHttp(error) => panic!("unexpected WinHTTP error: {error}"),
@@ -950,7 +961,7 @@ mod tests {
             Ok(())
         });
 
-        let protocol = query_protocol_used(&Facade::mock(Arc::new(protocol_bindings)), raw_handle(2)).unwrap_err();
+        let protocol = query_protocol_used(&BindingsFacade::mock(Arc::new(protocol_bindings)), raw_handle(2)).unwrap_err();
         let protocol = match protocol {
             QueryError::Conversion(error) => error,
             QueryError::WinHttp(error) => panic!("unexpected WinHTTP error: {error}"),
@@ -1002,7 +1013,7 @@ mod tests {
                 Ok(())
             });
 
-        let actual = query_raw_headers(&Facade::mock(Arc::new(bindings)), raw_handle(5)).unwrap();
+        let actual = query_raw_headers(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(5)).unwrap();
 
         assert_eq!(actual, raw);
     }
@@ -1019,7 +1030,7 @@ mod tests {
             })
             .once()
             .returning(|_, _, _, _| Err(WinHttpError::new(ERROR_WINHTTP_HEADER_NOT_FOUND, WinHttpOperation::QueryHeaders)));
-        let trailers = query_raw_trailers(&Facade::mock(Arc::new(trailer_bindings)), raw_handle(1)).unwrap();
+        let trailers = query_raw_trailers(&BindingsFacade::mock(Arc::new(trailer_bindings)), raw_handle(1)).unwrap();
         assert_eq!(trailers, None);
 
         let mut header_bindings = MockBindings::new();
@@ -1030,7 +1041,7 @@ mod tests {
             })
             .once()
             .returning(|_, _, _, _| Err(WinHttpError::new(ERROR_WINHTTP_HEADER_NOT_FOUND, WinHttpOperation::QueryHeaders)));
-        let error = query_raw_headers(&Facade::mock(Arc::new(header_bindings)), raw_handle(2)).unwrap_err();
+        let error = query_raw_headers(&BindingsFacade::mock(Arc::new(header_bindings)), raw_handle(2)).unwrap_err();
         assert!(matches!(error, QueryError::WinHttp(error) if error.code() == ERROR_WINHTTP_HEADER_NOT_FOUND));
     }
 

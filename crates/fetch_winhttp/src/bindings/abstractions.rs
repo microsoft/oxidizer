@@ -15,11 +15,17 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 /// Defines the WinHTTP boundary used by production code and deterministic tests.
 ///
 /// Implementations provide only the WinHTTP operations the transport needs.
-/// The transport relies on the following cross-method invariants in addition to
-/// the per-method safety contracts:
+///
+/// # Safety
+///
+/// Implementations must preserve WinHTTP-compatible handle, callback, and
+/// completion semantics. Callers must preserve these cross-method invariants in
+/// addition to each method's specific requirements:
 ///
 /// - The status callback is registered and the fully initialized request context
 ///   is installed before the first asynchronous submission.
+/// - Every session is opened with `WINHTTP_FLAG_ASYNC`, and all child handles
+///   inherit that asynchronous callback behavior.
 /// - Every context borrow is released before submission because WinHTTP may
 ///   complete inline and reenter the callback on the submitting thread.
 /// - At most one asynchronous operation is outstanding per request handle.
@@ -31,53 +37,112 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 /// Production bindings preserve native WinHTTP behavior, while mocks must model
 /// these same ordering and lifetime rules for deterministic tests to be sound.
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait Bindings: Send + Sync + 'static {
-    fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
-
-    fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
-
-    fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()>;
-
-    fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
-
-    fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
-
-    fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()>;
+pub(crate) unsafe trait Bindings: Send + Sync + 'static {
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `flags`
+    /// must include `WINHTTP_FLAG_ASYNC`. A returned handle must immediately
+    /// acquire one owner that closes it exactly once.
+    unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
 
     /// # Safety
     ///
-    /// The request context must remain valid until the request handle's final
-    /// `HANDLE_CLOSING` callback.
+    /// The caller must satisfy all trait-level safety requirements. `handle`
+    /// must identify a live session that cannot close during this call.
+    unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
+
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `handle`
+    /// must identify a live session. `callback` must be present and remain
+    /// valid for the session lifetime, and `notification_flags` must enable
+    /// every completion, error, diagnostic, and final handle-closing status
+    /// required by the callback protocol. Registration must precede every
+    /// child request that relies on that protocol.
+    unsafe fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()>;
+
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `session`
+    /// must remain live until the returned child handle is closed. A returned
+    /// handle must immediately acquire one owner that closes it exactly once.
+    unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
+
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `connect`
+    /// must remain live until the returned request is finally closed. A
+    /// returned handle must immediately acquire one exactly-once owner.
+    unsafe fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
+
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `handle`
+    /// must remain live, `value` must use the native representation required by
+    /// `option`, and the option must be applied at a valid lifecycle stage.
+    unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()>;
+
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must identify a live request with its operation slot armed for
+    /// `SendRequest`. `context` must be the exact context pointer already
+    /// installed on the request, and that context must remain valid until the
+    /// request handle's final `HANDLE_CLOSING` callback.
     unsafe fn send_request(&self, request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()>;
 
     /// # Safety
     ///
-    /// A present `buffer` must remain valid and unchanged until
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must identify a live request with its operation slot armed for write.
+    /// A present `buffer` must be readable for `len` initialized bytes and
+    /// remain valid and unchanged until
     /// `WRITE_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
     /// `HANDLE_CLOSING` callback terminates the operation. An absent buffer is
     /// valid only for the zero-length write that ends automatic chunking.
     unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()>;
 
-    fn receive_response(&self, request: RawHandle) -> Result<()>;
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must be live, request-body submission must be complete, and its
+    /// operation slot must be armed for response headers.
+    unsafe fn receive_response(&self, request: RawHandle) -> Result<()>;
 
     /// # Safety
     ///
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must be live with no asynchronous operation outstanding.
     /// `buffer` must be writable for `*buffer_len` bytes when present.
     unsafe fn query_headers(&self, request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
 
     /// # Safety
     ///
+    /// The caller must satisfy all trait-level safety requirements. `handle`
+    /// must be live with no asynchronous operation outstanding.
     /// `buffer` must be writable for `*buffer_len` bytes when present.
     unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
 
-    fn query_data_available(&self, request: RawHandle) -> Result<()>;
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must be live with its operation slot armed for data availability.
+    unsafe fn query_data_available(&self, request: RawHandle) -> Result<()>;
 
     /// # Safety
     ///
-    /// `buffer` must remain valid, writable, and untouched until
+    /// The caller must satisfy all trait-level safety requirements. `request`
+    /// must be live with its operation slot armed for reading.
+    /// `buffer` must be writable for `len` bytes and remain valid and untouched
+    /// until
     /// `READ_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
     /// `HANDLE_CLOSING` callback terminates the operation.
     unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
 
-    fn close_handle(&self, handle: RawHandle) -> Result<()>;
+    /// # Safety
+    ///
+    /// The caller must satisfy all trait-level safety requirements and own the
+    /// sole close authority for `handle`. No later API call may use the handle,
+    /// and an installed context must remain valid through `HANDLE_CLOSING`.
+    unsafe fn close_handle(&self, handle: RawHandle) -> Result<()>;
 }

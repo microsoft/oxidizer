@@ -8,7 +8,7 @@ use observed::Sink;
 use thread_aware::ThreadAware;
 use tick::Clock;
 
-use crate::bindings::Facade;
+use crate::bindings::BindingsFacade;
 use crate::transport::{TransportInputs, WinHttpTransport};
 use crate::{WinHttpOptions, WinHttpTlsConfig};
 
@@ -126,11 +126,11 @@ pub trait HttpClientWinHttpExt {
 
 impl HttpClientWinHttpExt for HttpClient {
     fn builder_winhttp(deps: impl Into<WinHttpDeps>) -> HttpClientBuilder {
-        create_builder_with_bindings(deps.into(), Facade::real())
+        create_builder_with_bindings(deps.into(), BindingsFacade::real())
     }
 }
 
-fn create_builder_with_bindings(deps: WinHttpDeps, bindings: Facade) -> HttpClientBuilder {
+fn create_builder_with_bindings(deps: WinHttpDeps, bindings: BindingsFacade) -> HttpClientBuilder {
     create_builder(
         "winhttp",
         "winhttp",
@@ -140,7 +140,7 @@ fn create_builder_with_bindings(deps: WinHttpDeps, bindings: Facade) -> HttpClie
     )
 }
 
-fn create_handler(context: CustomContext<WinHttpDeps>, bindings: Facade) -> WinHttpTransport {
+fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade) -> WinHttpTransport {
     let inputs = TransportInputs {
         body_builder: context.body_builder,
         clock: context.clock,
@@ -183,7 +183,7 @@ mod tests {
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
     use crate::handle::RawHandle;
     use crate::{WinHttpOptions, WinHttpTlsConfig};
 
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn cloned_client_reuses_one_materialized_session() {
-        let (facade, opens, closes) = successful_facade(1);
+        let (facade, opens, closes) = successful_bindings_facade(1);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn separate_builds_materialize_independent_sessions() {
-        let (facade, opens, closes) = successful_facade(2);
+        let (facade, opens, closes) = successful_bindings_facade(2);
         let builder = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn multiple_pool_slots_materialize_independent_sessions() {
-        let (facade, opens, closes) = successful_facade(2);
+        let (facade, opens, closes) = successful_bindings_facade(2);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn relocation_materializes_an_independent_session_for_the_destination_core() {
-        let (facade, opens, closes) = successful_facade(2);
+        let (facade, opens, closes) = successful_bindings_facade(2);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn unsupported_generic_configuration_is_ignored_without_extra_session_options() {
-        let (facade, opens, closes) = successful_facade(1);
+        let (facade, opens, closes) = successful_bindings_facade(1);
         let client = create_builder_with_bindings(complete_builder().build(), facade)
             .insecure_allow_http()
             .minimal_pipeline()
@@ -328,7 +328,7 @@ mod tests {
         ClockControl::new().to_clock()
     }
 
-    fn successful_facade(session_count: usize) -> (Facade, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+    fn successful_bindings_facade(session_count: usize) -> (BindingsFacade, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         let opens = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let mut bindings = MockBindings::new();
@@ -354,7 +354,7 @@ mod tests {
             Ok(())
         });
 
-        (Facade::mock(Arc::new(bindings)), opens, closes)
+        (BindingsFacade::mock(Arc::new(bindings)), opens, closes)
     }
 
     fn raw_handle(value: usize) -> RawHandle {

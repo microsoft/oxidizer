@@ -46,13 +46,13 @@ handle.
 ```rust,ignore
 /// Every WinHTTP OS entry point the transport uses, and nothing else.
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait Bindings: Send + Sync + 'static {
-    fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
-    fn set_timeouts(&self, h: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
-    fn set_status_callback(&self, h: RawHandle, cb: StatusCallback, flags: u32) -> Result<()>;
-    fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
-    fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
-    fn set_option(&self, h: RawHandle, option: u32, value: &[u8]) -> Result<()>;
+pub(crate) unsafe trait Bindings: Send + Sync + 'static {
+    unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
+    unsafe fn set_timeouts(&self, h: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
+    unsafe fn set_status_callback(&self, h: RawHandle, cb: StatusCallback, flags: u32) -> Result<()>;
+    unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
+    unsafe fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
+    unsafe fn set_option(&self, h: RawHandle, option: u32, value: &[u8]) -> Result<()>;
     unsafe fn send_request(
         &self,
         h: RawHandle,
@@ -61,12 +61,12 @@ pub(crate) trait Bindings: Send + Sync + 'static {
         context: usize,
     ) -> Result<()>;
     unsafe fn write_data(&self, h: RawHandle, buf: Option<NonNull<u8>>, len: u32) -> Result<()>;
-    fn receive_response(&self, h: RawHandle) -> Result<()>;
+    unsafe fn receive_response(&self, h: RawHandle) -> Result<()>;
     unsafe fn query_headers(&self, h: RawHandle, level: u32, buffer: Option<NonNull<u8>>, len: &mut u32) -> Result<()>;
     unsafe fn query_option(&self, h: RawHandle, option: u32, buffer: Option<NonNull<u8>>, len: &mut u32) -> Result<()>;
-    fn query_data_available(&self, h: RawHandle) -> Result<()>;
+    unsafe fn query_data_available(&self, h: RawHandle) -> Result<()>;
     unsafe fn read_data(&self, h: RawHandle, buf: NonNull<u8>, len: u32) -> Result<()>;
-    fn close_handle(&self, h: RawHandle) -> Result<()>;
+    unsafe fn close_handle(&self, h: RawHandle) -> Result<()>;
 }
 ```
 
@@ -74,8 +74,8 @@ pub(crate) trait Bindings: Send + Sync + 'static {
   with `// SAFETY:` notes, like `oxidizer_io`'s build-target bindings. Every
   referenced symbol exists in `windows` `0.62.2`. `open` always uses
   `WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY`; proxy mode is not configurable in v1.
-- **Test impl** is `mockall`'s generated `MockBindings`, wrapped in a `Facade`
-  enum (`Real` / `Mock(Arc<MockBindings>)`), matching
+- **Test impl** is `mockall`'s generated `MockBindings`, wrapped in a
+  `BindingsFacade` enum (`Real` / `Mock(Arc<MockBindings>)`), matching
   `oxidizer_io`'s bindings facade.
 - The status callback cannot itself be a trait method (WinHTTP calls a bare
   `extern "system"` fn pointer). Tests therefore synthesize callbacks by invoking
@@ -83,7 +83,7 @@ pub(crate) trait Bindings: Send + Sync + 'static {
   entry point is a plain fn precisely because it needs no captured state: all
   per-request state is reached through the `context` pointer (the `*mut
   RequestContext`, §4.2), and all recording/expectation state lives in the
-  `Arc<MockBindings>` the harness owns via the `Facade`. Nothing is a global
+  `Arc<MockBindings>` the harness owns via the `BindingsFacade`. Nothing is a global
   singleton. See §7.
 
 **Safety contract of the `Bindings` API.** Because callers drive raw OS handles and
@@ -91,18 +91,25 @@ async buffer lifetimes through this trait, a small set of caller-side invariants
 must hold for every impl (production or mock) to be sound. They are stated once here
 and relied on throughout §4 and §6:
 
-- A buffer handed to `write_data`/`read_data` must stay valid and untouched until
+- A buffer handed to `write_data` must contain at least the submitted number of
+  initialized readable bytes. A buffer handed to `read_data` must expose at least
+  the submitted number of writable bytes. Both must stay valid and untouched until
   `WRITE_COMPLETE`/`READ_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
-  `HANDLE_CLOSING` callback terminates that operation (WinHTTP borrows it
+  `HANDLE_CLOSING` callback terminates that operation (WinHTTP borrows them
   asynchronously). `send_request` always passes a null optional buffer; request
   bodies use sequential `write_data` calls.
 - The `RequestContext` must be fully populated and every borrow of it dropped
   **before** the async call is issued, so the completion (possibly reentrant, §2.1)
   can use a shared context reference and atomically claim the operation payload.
+- Every session is opened with `WINHTTP_FLAG_ASYNC`, and every child handle
+  inherits the asynchronous callback behavior required by operations that omit
+  synchronous output pointers.
 - At most one async operation is outstanding per request handle at a time.
-- The status callback must be registered (with the handle-close flag) and the
-  context installed before the first async call, and each handle is closed exactly
-  once (§4.3).
+- The status callback must be registered with every completion, request-error,
+  diagnostic, and final handle-closing notification consumed by the callback
+  protocol. The context must be installed before the first async call, the
+  `send_request` context value must exactly match that installed pointer, and each
+  handle is closed exactly once (§4.3).
 
 ### 1.1 Crate/module layout
 
@@ -126,7 +133,7 @@ crates/fetch_winhttp/
     error_labels.rs      // ErrorLabel constants
     bindings/
       abstractions.rs    // Bindings trait (OS entry-point contract)
-      facade.rs          // Facade enum (Real / Mock dispatch)
+      facade.rs          // BindingsFacade enum (Real / Mock dispatch)
       real.rs            // windows-crate impl (cfg(windows))
       mod.rs             // module wiring only (no type definitions)
   docs/design.md
@@ -445,8 +452,15 @@ struct ActiveOperation {
 
 enum OperationBuffer {
     None,
-    Read(bytesbuf::BytesBuf),
-    Write(bytesbuf::BytesView),
+    Read {
+        buffer: bytesbuf::BytesBuf,
+        address: usize,
+        capacity: u32,
+    },
+    Write {
+        buffer: bytesbuf::BytesView,
+        len: u32,
+    },
 }
 
 struct CallbackOperationSlot {
@@ -662,9 +676,10 @@ request bodies.
 impl bytesbuf_io::Write for WinHttpBodyWriter {
     type Error = HttpError;
     async fn write(&mut self, data: BytesView) -> Result<(), HttpError> {
-        // Stores `data` in RequestContext.write_buffer, issues WinHttpWriteData,
-        // and awaits WRITE_COMPLETE via an events_once step. The BytesView stays
-        // pinned until the callback fires (§4).
+        // Stores `data` and the submitted span length in
+        // OperationBuffer::Write, issues WinHttpWriteData, and awaits
+        // WRITE_COMPLETE via an events_once step. The BytesView remains
+        // retained and unchanged until the callback releases it (§4).
     }
 }
 ```
@@ -717,11 +732,15 @@ impl bytesbuf_io::Read for WinHttpBodyReader {
     type Error = HttpError;
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
         // 1. WinHttpQueryDataAvailable -> DATA_AVAILABLE(n)
-        // 2. move `into` to RequestContext.read_buffer, hand WinHTTP its dst ptr,
-        //    reading min(n, contiguous writable tail length, u32::MAX) bytes
-        // 3. WinHttpReadData -> READ_COMPLETE { buffer, len }
-        // 4. return (len, buffer)   // ownership of the BytesBuf comes back here;
-        //    len == 0 => EOF
+        // 2. choose n, or a 64 KiB speculative read when n == 0, then apply
+        //    the caller's limit and reserve that desired capacity
+        // 3. retain `into`, the exposed tail address, and its submitted
+        //    capacity in OperationBuffer::Read
+        // 4. WinHttpReadData reads min(desired, contiguous writable tail
+        //    length, u32::MAX) bytes
+        // 5. READ_COMPLETE validates the returned pointer/length against that
+        //    address and capacity before returning (len, buffer), which
+        //    transfers BytesBuf ownership back here; len == 0 means EOF
     }
 }
 ```
@@ -730,8 +749,11 @@ EOF is taken from a **zero-length `READ_COMPLETE`**, not from
 `WinHttpQueryDataAvailable` returning 0. Both usually coincide, but WinHTTP's
 documented completion signal is the zero-length read, and reading directly avoids
 depending on `QueryDataAvailable`'s value for correctness. `QueryDataAvailable` is
-still used to right-size the read (so we never issue an oversized `ReadData`), but
-the authoritative "body finished" decision is a `READ_COMPLETE` with `len == 0`.
+used to size ordinary reads. A zero availability result instead uses a speculative
+64 KiB upper bound because WinHTTP can still complete a useful read. This matches
+`GlobalPool`'s largest pooled block; the caller's limit and any existing contiguous
+writable tail may reduce the actual submitted span. The authoritative "body
+finished" decision is a `READ_COMPLETE` with `len == 0`.
 Each `WinHttpReadData` call exposes only one contiguous writable tail span from the
 possibly segmented `BytesBuf`, bounded by that span's length and `u32::MAX`.
 

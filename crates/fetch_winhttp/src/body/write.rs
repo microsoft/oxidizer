@@ -14,7 +14,7 @@ use http::header::CONTENT_LENGTH;
 use http::{HeaderMap, HeaderValue};
 use http_body::Body as _;
 
-use crate::bindings::{Bindings as _, Facade};
+use crate::bindings::{Bindings as _, BindingsFacade};
 use crate::context::{CompletionResult, OperationBuffer, OperationKind};
 use crate::error_labels;
 use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
@@ -27,14 +27,15 @@ use crate::request::RequestGuard;
 /// `WinHttpSendRequest`. Larger known bodies use the ignore-total sentinel and
 /// require an exact normalized 64-bit `Content-Length` header. Unknown lengths
 /// enable WinHTTP automatic chunking and require a final zero-length write.
-/// Constructing the plan validates duplicate length headers before network I/O.
-pub(crate) struct RequestBodyPlan {
+/// Constructing the framing strategy validates duplicate length headers before
+/// network I/O.
+pub(crate) struct RequestBodyFraming {
     total_length: u32,
     automatic_chunking: bool,
 }
 
-impl RequestBodyPlan {
-    pub(crate) fn new(headers: &mut HeaderMap, content_length: Option<u64>) -> Result<Self, RequestBodyPlanError> {
+impl RequestBodyFraming {
+    pub(crate) fn new(headers: &mut HeaderMap, content_length: Option<u64>) -> Result<Self, RequestBodyFramingError> {
         let content_length = match content_length {
             Some(length) => Some(length),
             None => Self::declared_content_length(headers)?,
@@ -62,17 +63,17 @@ impl RequestBodyPlan {
         }
     }
 
-    fn declared_content_length(headers: &mut HeaderMap) -> Result<Option<u64>, RequestBodyPlanError> {
+    fn declared_content_length(headers: &mut HeaderMap) -> Result<Option<u64>, RequestBodyFramingError> {
         let mut values = headers.get_all(CONTENT_LENGTH).iter();
         let Some(first) = values.next() else {
             return Ok(None);
         };
         let Some(length) = parse_content_length(first) else {
-            return Err(RequestBodyPlanError::InvalidContentLength);
+            return Err(RequestBodyFramingError::InvalidContentLength);
         };
 
         if values.any(|value| parse_content_length(value) != Some(length)) {
-            return Err(RequestBodyPlanError::InvalidContentLength);
+            return Err(RequestBodyFramingError::InvalidContentLength);
         }
 
         let value = HeaderValue::from_str(&length.to_string())
@@ -91,13 +92,13 @@ impl RequestBodyPlan {
     }
 }
 
-fn validate_large_content_length(headers: &mut HeaderMap, expected: u64) -> Result<(), RequestBodyPlanError> {
+fn validate_large_content_length(headers: &mut HeaderMap, expected: u64) -> Result<(), RequestBodyFramingError> {
     if headers
         .get_all(CONTENT_LENGTH)
         .iter()
         .any(|value| parse_content_length(value) != Some(expected))
     {
-        return Err(RequestBodyPlanError::InvalidLargeContentLength { expected });
+        return Err(RequestBodyFramingError::InvalidLargeContentLength { expected });
     }
 
     let value = HeaderValue::from_str(&expected.to_string())
@@ -163,12 +164,12 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
 /// explicit 64-bit length, or an unknown-length stream. Inconsistent or
 /// malformed `Content-Length` values make that choice ambiguous and are
 /// rejected before any body frame is polled.
-pub(crate) enum RequestBodyPlanError {
+pub(crate) enum RequestBodyFramingError {
     InvalidContentLength,
     InvalidLargeContentLength { expected: u64 },
 }
 
-impl fmt::Display for RequestBodyPlanError {
+impl fmt::Display for RequestBodyFramingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidContentLength => f.write_str("the request Content-Length header is not one consistent decimal u64 value"),
@@ -180,7 +181,7 @@ impl fmt::Display for RequestBodyPlanError {
     }
 }
 
-impl std::error::Error for RequestBodyPlanError {}
+impl std::error::Error for RequestBodyFramingError {}
 
 #[derive(Debug)]
 /// Streams request frames through sequential WinHTTP write operations.
@@ -194,12 +195,12 @@ impl std::error::Error for RequestBodyPlanError {}
 /// corresponding submission API.
 pub(crate) struct WinHttpBodyWriter<'guard> {
     guard: &'guard mut RequestGuard,
-    bindings: Facade,
+    bindings: BindingsFacade,
     memory: GlobalPool,
 }
 
 impl<'guard> WinHttpBodyWriter<'guard> {
-    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: Facade, memory: GlobalPool) -> Self {
+    pub(crate) const fn new(guard: &'guard mut RequestGuard, bindings: BindingsFacade, memory: GlobalPool) -> Self {
         Self { guard, bindings, memory }
     }
 
@@ -214,9 +215,11 @@ impl<'guard> WinHttpBodyWriter<'guard> {
             let write = self
                 .guard
                 .submit(OperationKind::Write, OperationBuffer::write(data, len), move |request, _context| {
-                    // SAFETY: the exact BytesView and contiguous span
-                    // identified by buffer/len are retained in the active
-                    // operation until its completion.
+                    // SAFETY: submit() armed the write operation and
+                    // transferred the live request handle into its future. The
+                    // exact BytesView and contiguous span identified by
+                    // buffer/len remain in the active operation until
+                    // completion, and no operation overlaps this write.
                     unsafe { bindings.write_data(request, Some(buffer), len) }
                 });
             let completion = write
@@ -235,8 +238,10 @@ impl<'guard> WinHttpBodyWriter<'guard> {
             OperationKind::Write,
             OperationBuffer::write(BytesView::new(), 0),
             move |request, _context| {
-                // SAFETY: WinHTTP accepts a null buffer only for this
-                // zero-length operation, which marks end-of-body.
+                // SAFETY: submit() armed the sole write operation and
+                // transferred the live request handle into its future. WinHTTP
+                // accepts a null buffer only for this zero-length end-of-body
+                // write, whose completion is awaited before response receipt.
                 unsafe { bindings.write_data(request, None, 0) }
             },
         );
@@ -337,27 +342,27 @@ mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{
-        RequestBodyError, RequestBodyPlan, RequestBodyPlanError, WinHttpBodyWriter, end_chunked_completion, next_write_len,
+        RequestBodyError, RequestBodyFraming, RequestBodyFramingError, WinHttpBodyWriter, end_chunked_completion, next_write_len,
         write_completion,
     };
     use crate::context::CompletionResult;
     use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
 
-    assert_impl_all!(RequestBodyPlan: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(RequestBodyPlanError: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestBodyFraming: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(RequestBodyFramingError: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(RequestBodyError: UnwindSafe, RefUnwindSafe);
     // The writer mutably borrows a guard pointing at the callback context's UnsafeCell state.
     assert_not_impl_any!(WinHttpBodyWriter<'static>: UnwindSafe, RefUnwindSafe);
 
     #[test]
-    fn request_body_plan_maps_known_and_unknown_lengths() {
+    fn request_body_framing_maps_known_and_unknown_lengths() {
         let mut headers = http::HeaderMap::new();
-        let small = RequestBodyPlan::new(&mut headers, Some(42)).unwrap();
+        let small = RequestBodyFraming::new(&mut headers, Some(42)).unwrap();
         assert_eq!(small.total_length(), 42);
         assert!(!small.automatic_chunking());
 
         let large_length = u64::from(u32::MAX) + 1;
-        let large = RequestBodyPlan::new(&mut headers, Some(large_length)).unwrap();
+        let large = RequestBodyFraming::new(&mut headers, Some(large_length)).unwrap();
         assert_eq!(large.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(!large.automatic_chunking());
         assert_eq!(
@@ -366,7 +371,7 @@ mod tests {
         );
 
         headers.remove(http::header::CONTENT_LENGTH);
-        let unknown = RequestBodyPlan::new(&mut headers, None).unwrap();
+        let unknown = RequestBodyFraming::new(&mut headers, None).unwrap();
         assert_eq!(unknown.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(unknown.automatic_chunking());
     }
@@ -378,7 +383,7 @@ mod tests {
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("04294967296"));
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("4294967296"));
 
-        RequestBodyPlan::new(&mut headers, Some(expected)).unwrap();
+        RequestBodyFraming::new(&mut headers, Some(expected)).unwrap();
 
         assert_eq!(
             headers.get_all(http::header::CONTENT_LENGTH).iter().collect::<Vec<_>>(),
@@ -390,8 +395,8 @@ mod tests {
             headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(invalid).unwrap());
 
             assert_eq!(
-                RequestBodyPlan::new(&mut headers, Some(expected)),
-                Err(RequestBodyPlanError::InvalidLargeContentLength { expected })
+                RequestBodyFraming::new(&mut headers, Some(expected)),
+                Err(RequestBodyFramingError::InvalidLargeContentLength { expected })
             );
         }
     }
@@ -401,16 +406,16 @@ mod tests {
         let mut headers = http::HeaderMap::new();
         headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("10"));
 
-        let plan = RequestBodyPlan::new(&mut headers, None).unwrap();
-        assert_eq!(plan.total_length(), 10);
-        assert!(!plan.automatic_chunking());
+        let framing = RequestBodyFraming::new(&mut headers, None).unwrap();
+        assert_eq!(framing.total_length(), 10);
+        assert!(!framing.automatic_chunking());
 
         for invalid in ["invalid", "18446744073709551616"] {
             let mut headers = http::HeaderMap::new();
             headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(invalid).unwrap());
             assert_eq!(
-                RequestBodyPlan::new(&mut headers, None),
-                Err(RequestBodyPlanError::InvalidContentLength)
+                RequestBodyFraming::new(&mut headers, None),
+                Err(RequestBodyFramingError::InvalidContentLength)
             );
         }
 
@@ -418,8 +423,8 @@ mod tests {
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("10"));
         headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("11"));
         assert_eq!(
-            RequestBodyPlan::new(&mut headers, None),
-            Err(RequestBodyPlanError::InvalidContentLength)
+            RequestBodyFraming::new(&mut headers, None),
+            Err(RequestBodyFramingError::InvalidContentLength)
         );
     }
 

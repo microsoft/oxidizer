@@ -8,4 +8,4 @@ mod real;
 #[cfg(test)]
 pub(crate) use abstractions::MockBindings;
 pub(crate) use abstractions::{Bindings, StatusCallback};
-pub(crate) use facade::Facade;
+pub(crate) use facade::BindingsFacade;

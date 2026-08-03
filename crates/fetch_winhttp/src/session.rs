@@ -15,7 +15,7 @@ use windows::Win32::Networking::WinHttp::{
 };
 
 use crate::WinHttpOptions;
-use crate::bindings::{Bindings as _, Facade};
+use crate::bindings::{Bindings as _, BindingsFacade};
 use crate::callback::status_callback;
 use crate::error::WinHttpError;
 use crate::handle::SessionHandle;
@@ -59,56 +59,80 @@ pub(crate) struct WinHttpSession {
 
 impl WinHttpSession {
     pub(crate) fn new(
-        bindings: Facade,
+        bindings: BindingsFacade,
         options: &WinHttpOptions,
         keep_alive: &ConnectionKeepAlive,
     ) -> Result<Self, SessionInitializationFailure> {
         let user_agent = U16CString::from_str(USER_AGENT).expect("the static WinHTTP user agent contains no NUL characters");
-        let raw = bindings
-            .open(&user_agent, WINHTTP_FLAG_ASYNC)
+        // SAFETY: no WinHTTP handles exist yet. WINHTTP_FLAG_ASYNC establishes
+        // the callback-based behavior required by every child handle. A
+        // successful handle is immediately transferred to SessionHandle for
+        // exactly-once closure.
+        let raw = unsafe { bindings.open(&user_agent, WINHTTP_FLAG_ASYNC) }
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Open, error))?;
         let handle = SessionHandle::new(raw, bindings);
 
-        handle
-            .bindings()
-            .set_timeouts(
+        // SAFETY: the owned session is live, has no children, and this call
+        // uses the exact native timeout representations.
+        unsafe {
+            handle.bindings().set_timeouts(
                 handle.raw(),
                 timeout_millis(options.resolve_timeout()),
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
             )
-            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetTimeouts, error))?;
-        handle
-            .bindings()
-            .set_option(handle.raw(), WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, &TRUE_BYTES)
-            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::DisableGlobalPooling, error))?;
-        handle
-            .bindings()
-            .set_option(handle.raw(), WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, &TRUE_BYTES)
-            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
-        if let Some(interval) = Self::keep_alive_interval(keep_alive) {
+        }
+        .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetTimeouts, error))?;
+        // SAFETY: the owned session is live and has no children. TRUE_BYTES is
+        // the required native BOOL representation for this session option.
+        unsafe {
             handle
                 .bindings()
-                .set_option(
+                .set_option(handle.raw(), WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, &TRUE_BYTES)
+        }
+        .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::DisableGlobalPooling, error))?;
+        // SAFETY: the owned session is live and has no children. TRUE_BYTES is
+        // the required native BOOL representation for this session option.
+        unsafe {
+            handle
+                .bindings()
+                .set_option(handle.raw(), WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, &TRUE_BYTES)
+        }
+        .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
+        if let Some(interval) = Self::keep_alive_interval(keep_alive) {
+            // SAFETY: the owned session is live and has no children. The byte
+            // array is the exact DWORD representation required by this option.
+            unsafe {
+                handle.bindings().set_option(
                     handle.raw(),
                     WINHTTP_OPTION_HTTP2_KEEPALIVE,
                     &dword_bytes(http2_keep_alive_millis(interval)),
                 )
-                .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http2KeepAlive, error))?;
-            handle
-                .bindings()
-                .set_option(
+            }
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http2KeepAlive, error))?;
+            // SAFETY: the owned session is live and has no children. The byte
+            // array is the exact DWORD representation required by this option.
+            unsafe {
+                handle.bindings().set_option(
                     handle.raw(),
                     WINHTTP_OPTION_HTTP3_KEEPALIVE,
                     &dword_bytes(http3_keep_alive_millis(interval)),
                 )
-                .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http3KeepAlive, error))?;
+            }
+            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http3KeepAlive, error))?;
         }
-        handle
-            .bindings()
-            .set_status_callback(handle.raw(), Some(status_callback), SESSION_NOTIFICATION_FLAGS)
-            .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
+        // SAFETY: the owned session is live and still has no children. The
+        // callback has the WinHTTP ABI and remains static for the session
+        // lifetime. SESSION_NOTIFICATION_FLAGS includes every completion,
+        // request error, diagnostic, and final handle-closing status consumed
+        // by the callback protocol, and registration precedes every request.
+        unsafe {
+            handle
+                .bindings()
+                .set_status_callback(handle.raw(), Some(status_callback), SESSION_NOTIFICATION_FLAGS)
+        }
+        .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
 
         Ok(Self { handle })
     }
@@ -224,7 +248,7 @@ mod tests {
         USER_AGENT, WinHttpSession,
     };
     use crate::WinHttpOptions;
-    use crate::bindings::{Facade, MockBindings, StatusCallback};
+    use crate::bindings::{BindingsFacade, MockBindings, StatusCallback};
     use crate::callback::status_callback;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
@@ -253,7 +277,7 @@ mod tests {
         let options = WinHttpOptions::builder().resolve_timeout(Duration::from_micros(1_500)).build();
         let keep_alive = active_keep_alive();
 
-        let session = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &options, &keep_alive).unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options, &keep_alive).unwrap();
 
         assert_eq!(session.handle().raw(), raw_handle());
         drop(session);
@@ -264,7 +288,7 @@ mod tests {
         let bindings = configured_bindings(None, UNLIMITED_TIMEOUT, false);
 
         let session = WinHttpSession::new(
-            Facade::mock(Arc::new(bindings)),
+            BindingsFacade::mock(Arc::new(bindings)),
             &WinHttpOptions::default(),
             &ConnectionKeepAlive::Disabled,
         )
@@ -329,7 +353,12 @@ mod tests {
 
     fn assert_failure(point: FailurePoint) {
         let bindings = configured_bindings(Some(point), UNLIMITED_TIMEOUT, true);
-        let error = WinHttpSession::new(Facade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &active_keep_alive()).unwrap_err();
+        let error = WinHttpSession::new(
+            BindingsFacade::mock(Arc::new(bindings)),
+            &WinHttpOptions::default(),
+            &active_keep_alive(),
+        )
+        .unwrap_err();
 
         assert_eq!(error.code(), error_code(point));
         assert_eq!(error.operation(), initialization_operation(point));

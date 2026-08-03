@@ -23,8 +23,8 @@ use plurality::Pool;
 use tick::Clock;
 use widestring::U16CString;
 
-use crate::bindings::{Bindings as _, Facade};
-use crate::body::{RequestBodyPlan, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
+use crate::bindings::{Bindings as _, BindingsFacade};
+use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
 use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind, RequestContext};
 use crate::error::Result as WinHttpResult;
 use crate::error_labels;
@@ -78,10 +78,15 @@ impl RequestSetup {
         let context_value = context.as_ptr().expose_provenance();
         let option_value = context_bytes(context_value);
 
-        if let Err(error) = request
-            .bindings()
-            .set_option(request.raw(), WINHTTP_OPTION_CONTEXT_VALUE, &option_value)
-        {
+        // SAFETY: the request is live and has not submitted an asynchronous
+        // operation. option_value is the exact pointer-sized context
+        // representation, and raw_owner keeps the initialized context alive
+        // until WinHTTP accepts ownership.
+        if let Err(error) = unsafe {
+            request
+                .bindings()
+                .set_option(request.raw(), WINHTTP_OPTION_CONTEXT_VALUE, &option_value)
+        } {
             drop(request);
             drop(raw_owner);
             return Err(error);
@@ -378,7 +383,7 @@ pub(crate) struct RequestDriver<'body, 'contexts> {
     request: TranslatedRequest,
     settings: RequestSettings,
     body: &'body mut HttpBody,
-    body_plan: RequestBodyPlan,
+    body_framing: RequestBodyFraming,
     body_options: HttpBodyOptions,
 }
 
@@ -402,7 +407,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         }
 
         let mut headers = request.headers().clone();
-        let body_plan = RequestBodyPlan::new(&mut headers, request.body().content_length()).map_err(invalid_request)?;
+        let body_framing = RequestBodyFraming::new(&mut headers, request.body().content_length()).map_err(invalid_request)?;
         let translated = TranslatedRequest::new(request, &headers, &options.request_filter)?;
         let protocol = protocol_options(&options.supported_http_versions).map_err(invalid_request)?;
         let settings = RequestSettings {
@@ -426,27 +431,31 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             request: translated,
             settings,
             body,
-            body_plan,
+            body_framing,
             body_options,
         })
     }
 
     pub(crate) async fn execute(self, body_polled: &mut bool) -> Result<HttpResponse, RequestFailure> {
         let bindings = self.session.handle().bindings().clone();
-        let connect = bindings
-            .connect(self.session.handle().raw(), &self.request.host, self.request.port)
+        // SAFETY: the Arc-owned session is live and outlives the returned
+        // connect handle, which is immediately placed under RAII ownership.
+        let connect = unsafe { bindings.connect(self.session.handle().raw(), &self.request.host, self.request.port) }
             .map_err(crate::error::WinHttpError::into_http_error)
             .map_err(RequestFailure::without_attribution)?;
         let connect = ConnectHandle::new(connect, bindings.clone());
-        let request = bindings
-            .open_request(
+        // SAFETY: connect is live and later moves into RequestContext to
+        // outlive the returned request, which immediately acquires one owner.
+        let request = unsafe {
+            bindings.open_request(
                 connect.raw(),
                 &self.request.method,
                 &self.request.path,
-                request_open_flags(self.request.secure, self.body_plan.automatic_chunking()),
+                request_open_flags(self.request.secure, self.body_framing.automatic_chunking()),
             )
-            .map_err(crate::error::WinHttpError::into_http_error)
-            .map_err(RequestFailure::without_attribution)?;
+        }
+        .map_err(crate::error::WinHttpError::into_http_error)
+        .map_err(RequestFailure::without_attribution)?;
         let request = RequestHandle::new(request, bindings.clone());
 
         apply_request_settings(&request, self.settings)
@@ -463,7 +472,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             &mut guard,
             &bindings,
             &self.request.headers,
-            self.body_plan.total_length(),
+            self.body_framing.total_length(),
             &self.clock,
             self.connect_timeout,
         )
@@ -482,14 +491,17 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             {
                 let mut writer = WinHttpBodyWriter::new(&mut guard, bindings.clone(), self.global_pool.clone());
                 send_body(self.body, &mut writer, body_polled).await?;
-                if self.body_plan.automatic_chunking() {
+                if self.body_framing.automatic_chunking() {
                     writer.end_automatic_chunking().await?;
                 }
             }
 
             {
                 let receive = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |request, _context| {
-                    bindings.receive_response(request)
+                    // SAFETY: the request body is fully submitted, submit()
+                    // armed the headers operation and transferred the live
+                    // request handle into its future, and no operation overlaps.
+                    unsafe { bindings.receive_response(request) }
                 });
                 let completion = receive
                     .await
@@ -540,7 +552,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
 
 async fn send_request_headers(
     guard: &mut RequestGuard,
-    bindings: &Facade,
+    bindings: &BindingsFacade,
     headers: &U16CString,
     total_length: u32,
     clock: &Clock,
@@ -548,9 +560,11 @@ async fn send_request_headers(
 ) -> Result<(), (HttpError, ColdConnectState)> {
     let outcome = {
         let send = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |request, context| {
-            // SAFETY: the installed context is the exact pointer passed as
-            // dwContext, and the UTF-16 header buffer remains alive until
-            // the completion is awaited below.
+            // SAFETY: submit() armed the send operation and transferred the
+            // live request handle into its future, so no operation overlaps.
+            // The installed context is the exact dwContext pointer and remains
+            // alive through HANDLE_CLOSING; headers remains alive until this
+            // completion is observed.
             unsafe { bindings.send_request(request, headers, total_length, context) }
         });
         let mut send = std::pin::pin!(send);
@@ -705,8 +719,11 @@ fn apply_request_settings(request: &RequestHandle, settings: RequestSettings) ->
     Ok(())
 }
 
-fn set_dword(bindings: &Facade, request: RawHandle, option: u32, value: u32) -> WinHttpResult<()> {
-    bindings.set_option(request, option, &dword_bytes(value))
+fn set_dword(bindings: &BindingsFacade, request: RawHandle, option: u32, value: u32) -> WinHttpResult<()> {
+    // SAFETY: apply_request_settings calls this only for a live, exclusively
+    // owned request before context installation or asynchronous submission.
+    // dword_bytes supplies the exact native representation for every option.
+    unsafe { bindings.set_option(request, option, &dword_bytes(value)) }
 }
 
 fn expect_completion(completion: CompletionResult, expected: OperationKind) -> fetch::Result<()> {
@@ -937,7 +954,7 @@ mod tests {
         RequestTranslationError, ResponseHeadersError, TranslatedRequest, send_request_headers,
     };
     use crate::WinHttpTlsConfig;
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
     use crate::callback::dispatch_completion;
     use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
@@ -2336,7 +2353,7 @@ mod tests {
         clippy::too_many_lines,
         reason = "the lifecycle mock keeps one complete WinHTTP script visible in one place"
     )]
-    fn lifecycle_bindings(config: Arc<LifecycleConfig>, record: Arc<LifecycleRecord>) -> Facade {
+    fn lifecycle_bindings(config: Arc<LifecycleConfig>, record: Arc<LifecycleRecord>) -> BindingsFacade {
         let mut bindings = MockBindings::new();
 
         let connect_config = Arc::clone(&config);
@@ -2622,7 +2639,7 @@ mod tests {
 
         drop((config, record));
 
-        Facade::mock(Arc::new(bindings))
+        BindingsFacade::mock(Arc::new(bindings))
     }
 
     fn write_utf16_query(units: &[u16], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
@@ -2968,7 +2985,7 @@ mod tests {
                 closing(context);
                 Ok(())
             });
-        let request_facade = Facade::mock(Arc::new(request_bindings));
+        let request_facade = BindingsFacade::mock(Arc::new(request_bindings));
 
         let mut parent_bindings = MockBindings::new();
         let parent_counts = Arc::clone(&closes);
@@ -2981,7 +2998,7 @@ mod tests {
             .fetch_add(1, Ordering::SeqCst);
             Ok(())
         });
-        let parent_facade = Facade::mock(Arc::new(parent_bindings));
+        let parent_facade = BindingsFacade::mock(Arc::new(parent_bindings));
 
         let contexts = ContextPool::new(Pool::new());
         let session = session(parent_facade.clone());
@@ -3221,11 +3238,11 @@ mod tests {
         complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
     }
 
-    fn session(facade: Facade) -> Arc<WinHttpSession> {
+    fn session(facade: BindingsFacade) -> Arc<WinHttpSession> {
         Arc::new(WinHttpSession::from_handle(SessionHandle::new(raw_handle(SESSION), facade)))
     }
 
-    fn bindings(fail_context_option: bool) -> (Facade, Arc<CloseCounts>) {
+    fn bindings(fail_context_option: bool) -> (BindingsFacade, Arc<CloseCounts>) {
         let closes = Arc::new(CloseCounts::default());
         let mut bindings = MockBindings::new();
         let context_counts = Arc::clone(&closes);
@@ -3260,7 +3277,7 @@ mod tests {
             Ok(())
         });
 
-        (Facade::mock(Arc::new(bindings)), closes)
+        (BindingsFacade::mock(Arc::new(bindings)), closes)
     }
 
     #[derive(Default)]

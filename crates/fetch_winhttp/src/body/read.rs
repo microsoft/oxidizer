@@ -14,16 +14,21 @@ use futures_core::Stream as _;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
 
-use crate::bindings::{Bindings as _, Facade};
+use crate::bindings::{Bindings as _, BindingsFacade};
 use crate::context::{CompletionResult, OperationBuffer, OperationKind};
 use crate::error_labels;
 use crate::options::query_raw_trailers;
 use crate::request::{RequestGuard, parse_response_trailers};
 
+// When WinHTTP reports zero available bytes, it can still complete a useful
+// read. GlobalPool's largest pooled block is 64 KiB, so use that pool-aligned
+// upper bound for this speculative read. The caller's limit and any existing
+// writable tail can reduce the span actually submitted. Revisit this value if
+// the pool's size classes or measured throughput-to-memory trade-off changes.
 const PREFERRED_READ_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
-/// Pulls one response body lazily from an installed WinHTTP request.
+/// Pulls one response body lazily from an ongoing WinHTTP request.
 ///
 /// Each caller-driven read first queries available data and then lends one
 /// contiguous writable span from a pooled `BytesBuf` to WinHTTP. The retained
@@ -36,14 +41,14 @@ const PREFERRED_READ_SIZE: usize = 64 * 1024;
 /// can deliver final closure and return the request context to its pool.
 pub(crate) struct WinHttpBodyReader {
     guard: Option<RequestGuard>,
-    bindings: Facade,
+    bindings: BindingsFacade,
     memory: GlobalPool,
     trailers: Option<HeaderMap>,
     eof: bool,
 }
 
 impl WinHttpBodyReader {
-    pub(crate) const fn new(guard: RequestGuard, bindings: Facade, memory: GlobalPool) -> Self {
+    pub(crate) const fn new(guard: RequestGuard, bindings: BindingsFacade, memory: GlobalPool) -> Self {
         Self {
             guard: Some(guard),
             bindings,
@@ -75,7 +80,11 @@ impl WinHttpBodyReader {
             let query = self
                 .guard_mut()?
                 .submit(OperationKind::DataAvailable, OperationBuffer::none(), move |request, _context| {
-                    bindings.query_data_available(request)
+                    // SAFETY: submit() armed the data-available operation and
+                    // transferred the live request handle into its future. The
+                    // installed callback context remains valid and no operation
+                    // overlaps this query.
+                    unsafe { bindings.query_data_available(request) }
                 });
             let completion = query
                 .await
@@ -104,8 +113,10 @@ impl WinHttpBodyReader {
             OperationKind::Read,
             OperationBuffer::read(into, address, capacity),
             move |request, _context| {
-                // SAFETY: the active operation owns the same BytesBuf and
-                // contiguous writable tail until completion.
+                // SAFETY: submit() armed the read operation and transferred the
+                // live request handle into its future. The active operation
+                // owns the same BytesBuf and contiguous writable tail until
+                // completion, and no operation overlaps this read.
                 unsafe { bindings.read_data(request, buffer, capacity) }
             },
         );
@@ -321,7 +332,7 @@ mod tests {
     };
 
     use super::{PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, next_read_capacity};
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
     use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
@@ -824,7 +835,7 @@ mod tests {
             Ok(())
         });
 
-        let facade = Facade::mock(Arc::new(bindings));
+        let facade = BindingsFacade::mock(Arc::new(bindings));
         let session = Arc::new(WinHttpSession::from_handle(SessionHandle::new(raw_handle(SESSION), facade.clone())));
         let contexts = ContextPool::new(Pool::new());
         let guard = RequestSetup::new(

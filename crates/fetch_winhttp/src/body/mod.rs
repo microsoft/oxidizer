@@ -5,4 +5,4 @@ mod read;
 mod write;
 
 pub(crate) use read::{WinHttpBodyReader, WinHttpResponseBody};
-pub(crate) use write::{RequestBodyPlan, WinHttpBodyWriter, send_body};
+pub(crate) use write::{RequestBodyFraming, WinHttpBodyWriter, send_body};

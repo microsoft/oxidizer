@@ -55,8 +55,10 @@ impl RealBindings {
     }
 }
 
-impl Bindings for RealBindings {
-    fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle> {
+// SAFETY: Every method is a direct WinHTTP call that preserves the native
+// handle, callback, buffer, and completion semantics required by Bindings.
+unsafe impl Bindings for RealBindings {
+    unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle> {
         // SAFETY: all string pointers are NUL-terminated for the duration of
         // the call; proxy and bypass are intentionally null.
         let handle = unsafe {
@@ -72,7 +74,7 @@ impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::Open)
     }
 
-    fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()> {
+    unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()> {
         // SAFETY: the typed handle is non-null and the timeout values use the
         // exact WinHttpSetTimeouts ABI types.
         unsafe { WinHttpSetTimeouts(handle.as_ptr(), resolve, connect, send, receive) }
@@ -83,7 +85,7 @@ impl Bindings for RealBindings {
         clippy::fn_to_numeric_cast_any,
         reason = "the WinHTTP failure sentinel is the function-pointer bit pattern usize::MAX"
     )]
-    fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()> {
+    unsafe fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()> {
         // SAFETY: the typed handle is non-null, the callback has the required
         // system ABI, and the reserved parameter is zero as required.
         let previous = unsafe { WinHttpSetStatusCallback(handle.as_ptr(), callback, notification_flags, 0) };
@@ -91,7 +93,7 @@ impl Bindings for RealBindings {
         Self::callback_result(previous.map(|callback| callback as usize), WinHttpOperation::SetStatusCallback)
     }
 
-    fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle> {
+    unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle> {
         // SAFETY: the session is non-null and host is NUL-terminated for the
         // duration of the call; the reserved value is zero.
         let handle = unsafe { WinHttpConnect(session.as_ptr(), PCWSTR(host.as_ptr()), port, 0) };
@@ -99,7 +101,7 @@ impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::Connect)
     }
 
-    fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle> {
+    unsafe fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle> {
         // SAFETY: the handle is non-null, method and path are NUL-terminated,
         // optional strings are null, and the accept-type list is null.
         let handle = unsafe {
@@ -117,7 +119,7 @@ impl Bindings for RealBindings {
         Self::handle_result(handle, WinHttpOperation::OpenRequest)
     }
 
-    fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()> {
+    unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()> {
         // SAFETY: the handle is non-null and the byte slice remains valid for
         // the synchronous option-setting call.
         unsafe { WinHttpSetOption(Some(handle.as_const_ptr()), option, Some(value)) }
@@ -144,7 +146,7 @@ impl Bindings for RealBindings {
             .map_err(|error| Self::map_error(&error, WinHttpOperation::WriteData))
     }
 
-    fn receive_response(&self, request: RawHandle) -> Result<()> {
+    unsafe fn receive_response(&self, request: RawHandle) -> Result<()> {
         // SAFETY: the request handle is non-null and the reserved pointer is
         // required to be null.
         unsafe { WinHttpReceiveResponse(request.as_ptr(), null_mut()) }
@@ -168,7 +170,7 @@ impl Bindings for RealBindings {
             .map_err(|error| Self::map_error(&error, WinHttpOperation::QueryOption))
     }
 
-    fn query_data_available(&self, request: RawHandle) -> Result<()> {
+    unsafe fn query_data_available(&self, request: RawHandle) -> Result<()> {
         // SAFETY: the request handle is non-null; asynchronous sessions must
         // use a null OUT pointer and receive the value through the callback.
         unsafe { WinHttpQueryDataAvailable(request.as_ptr(), null_mut()) }
@@ -182,7 +184,7 @@ impl Bindings for RealBindings {
             .map_err(|error| Self::map_error(&error, WinHttpOperation::ReadData))
     }
 
-    fn close_handle(&self, handle: RawHandle) -> Result<()> {
+    unsafe fn close_handle(&self, handle: RawHandle) -> Result<()> {
         // SAFETY: the typed handle is non-null and ownership ensures this
         // close operation is issued at most once.
         unsafe { WinHttpCloseHandle(handle.as_ptr()) }.map_err(|error| Self::map_error(&error, WinHttpOperation::CloseHandle))

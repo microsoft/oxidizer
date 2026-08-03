@@ -10,7 +10,7 @@ use layered::Service;
 use observed::Sink;
 use tick::Clock;
 
-use crate::bindings::Facade;
+use crate::bindings::BindingsFacade;
 use crate::request::{ContextPool, RequestDriver};
 use crate::session::{SessionInitializationFailure, WinHttpSession};
 use crate::telemetry::Telemetry;
@@ -33,7 +33,7 @@ pub(crate) struct WinHttpTransport {
 }
 
 impl WinHttpTransport {
-    pub(crate) fn new(inputs: TransportInputs, bindings: Facade) -> Self {
+    pub(crate) fn new(inputs: TransportInputs, bindings: BindingsFacade) -> Self {
         let telemetry = Telemetry::new(inputs.sink);
         let state = match WinHttpSession::new(bindings, &inputs.session_options, &inputs.options.connection_keep_alive) {
             Ok(session) => TransportState::Ready(Box::new(ReadyTransport {
@@ -184,7 +184,7 @@ mod tests {
 
     use super::{FailedTransport, ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
     use crate::WinHttpTlsConfig;
-    use crate::bindings::{Facade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings};
     use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
@@ -213,7 +213,7 @@ mod tests {
             .expect_open()
             .times(1)
             .returning(|_, _| Err(WinHttpError::new(12029, WinHttpOperation::Open)));
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
 
         for uri in ["https://first.example/", "https://second.example/"] {
             let mut error = futures::executor::block_on(transport.execute(request(uri))).unwrap_err();
@@ -247,7 +247,7 @@ mod tests {
         let mut bindings = successful_bindings();
         bindings.expect_connect().never();
         bindings.expect_open_request().never();
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
 
         let mut input = request("http://example.com/");
         *input.version_mut() = http::Version::HTTP_2;
@@ -283,7 +283,7 @@ mod tests {
         let context = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = successful_request_bindings(Arc::clone(&context), Arc::clone(&closes));
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
 
         let response = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap();
 
@@ -324,7 +324,7 @@ mod tests {
         let context = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Body, 0);
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
         let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
         let body_error = HttpError::unavailable("upload stream failed").with_request(request("https://unrelated.example/attached-by-body"));
         let body = body_builder.stream(
@@ -364,7 +364,7 @@ mod tests {
         let context = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Send, 0);
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
         let memory = GlobalPool::new();
         let body_builder = HttpBodyBuilder::new(memory.clone(), &clock());
         let body = body_builder.stream(
@@ -413,7 +413,7 @@ mod tests {
         let context = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = upload_failure_bindings(&context, Arc::clone(&closes), UploadFailure::Write, 10);
-        let transport = WinHttpTransport::new(inputs(sink), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
         let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock());
         let mut input = http::Request::builder()
             .method(http::Method::POST)
@@ -458,7 +458,10 @@ mod tests {
         let context = Arc::new(AtomicUsize::new(0));
         let closes = Arc::new(AtomicUsize::new(0));
         let bindings = cold_connect_failure_bindings(&context, Arc::clone(&closes), control.clone());
-        let transport = WinHttpTransport::new(inputs_with_clock(sink, control.to_clock()), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(
+            inputs_with_clock(sink, control.to_clock()),
+            BindingsFacade::mock(Arc::new(bindings)),
+        );
 
         let mut error = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap_err();
 
@@ -500,15 +503,15 @@ mod tests {
             .expect_open()
             .times(1)
             .returning(|_, _| Err(WinHttpError::new(12029, WinHttpOperation::Open)));
-        let transport = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(bindings)));
+        let transport = WinHttpTransport::new(inputs(Sink::noop()), BindingsFacade::mock(Arc::new(bindings)));
 
         assert_send(transport.execute(request("https://example.com/")));
     }
 
     #[test]
     fn ready_transports_own_distinct_context_pools() {
-        let first = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(successful_bindings())));
-        let second = WinHttpTransport::new(inputs(Sink::noop()), Facade::mock(Arc::new(successful_bindings())));
+        let first = WinHttpTransport::new(inputs(Sink::noop()), BindingsFacade::mock(Arc::new(successful_bindings())));
+        let second = WinHttpTransport::new(inputs(Sink::noop()), BindingsFacade::mock(Arc::new(successful_bindings())));
 
         match (&first.state, &second.state) {
             (TransportState::Ready(first), TransportState::Ready(second)) => {
