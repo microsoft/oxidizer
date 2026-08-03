@@ -55,8 +55,10 @@ enum MaybeBacktrace {
 
 impl MaybeBacktrace {
     fn capture() -> Self {
-        let backtrace = Backtrace::capture();
+        Self::from_backtrace(Backtrace::capture())
+    }
 
+    fn from_backtrace(backtrace: Backtrace) -> Self {
         match backtrace.status() {
             BacktraceStatus::Captured => Self::Captured(Box::new(backtrace)),
             _ => Self::Disabled,
@@ -233,6 +235,8 @@ mod tests {
         let error = Error::out_of_range("test");
 
         assert!(matches!(error.kind(), ErrorKind::OutOfRange(_)));
+        assert!(error.is_out_of_range());
+        assert!(!error.is_timeout());
         assert_eq!(error.to_string(), "test");
         assert!(error.source().is_none());
     }
