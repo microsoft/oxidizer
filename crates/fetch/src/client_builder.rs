@@ -17,7 +17,7 @@ use crate::client::HttpClientPipeline;
 use crate::constants::DEFAULT_HTTP_CLIENT_NAME;
 use crate::custom::{Isolation, Transport};
 use crate::handlers::{Dispatch, DispatchMode};
-use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
+use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter, SocketOptions};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
 use crate::telemetry::Metering;
@@ -415,6 +415,36 @@ impl HttpClientBuilder {
         self
     }
 
+    /// Configures socket-level tuning for outbound `TCP` connections.
+    ///
+    /// These settings control the kernel socket underneath each connection: whether the
+    /// Nagle algorithm is disabled and how large the send and receive buffers are. Every
+    /// option defaults to "leave the operating system default in place", so this only
+    /// changes behavior for the knobs you set explicitly.
+    ///
+    /// Honored by the bundled Tokio connector. A custom connector supplied through
+    /// [`builder_custom`](crate::HttpClient::builder_custom) must apply these itself.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use fetch::HttpClient;
+    /// # use fetch::options::SocketOptions;
+    /// # fn configure_builder(mut builder: fetch::HttpClientBuilder) {
+    /// let client = builder
+    ///     .socket_options(
+    ///         SocketOptions::default()
+    ///             .no_delay(true)
+    ///             .send_buffer_size(256 * 1024),
+    ///     )
+    ///     .build();
+    /// # }
+    /// ```
+    pub fn socket_options(mut self, options: SocketOptions) -> Self {
+        self.options.transport.socket = options;
+        self
+    }
+
     /// Sets the redaction engine for the client.
     ///
     /// The [`RedactionEngine`] is used to redact sensitive information from requests and responses.
@@ -502,7 +532,7 @@ mod tests {
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
 
     use crate::fake::FakeDeps;
-    use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
+    use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options, SocketOptions};
     use crate::{HttpClient, HttpClientBuilder};
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
@@ -602,6 +632,25 @@ mod tests {
         assert_eq!(builder.options.transport.http_2.initial_max_send_streams, Some(100));
 
         assert!(builder.options.transport.http_2.adaptive_window);
+        assert_eq!(builder.options.transport.http_2.initial_stream_window_size, None);
+
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+            .http2_options(Http2Options::default().initial_stream_window_size(1024 * 1024));
+        assert_eq!(builder.options.transport.http_2.initial_stream_window_size, Some(1_048_576));
+    }
+
+    #[test]
+    fn test_socket_options_configuration() {
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).socket_options(
+            SocketOptions::default()
+                .no_delay(true)
+                .receive_buffer_size(64 * 1024)
+                .send_buffer_size(32 * 1024),
+        );
+
+        assert_eq!(builder.options.transport.socket.no_delay, Some(true));
+        assert_eq!(builder.options.transport.socket.receive_buffer_size, Some(65_536));
+        assert_eq!(builder.options.transport.socket.send_buffer_size, Some(32_768));
     }
 
     #[test]

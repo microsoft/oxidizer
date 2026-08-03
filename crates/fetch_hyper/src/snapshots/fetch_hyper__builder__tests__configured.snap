@@ -23,6 +23,20 @@ fetch_hyper::builder::HyperTransportBuilder<fetch_hyper::testing::FakeConnector,
         http_2: Http2Options {
             initial_max_send_streams: None,
             adaptive_window: false,
+            initial_stream_window_size: Some(
+                1048576,
+            ),
+        },
+        socket: SocketOptions {
+            no_delay: Some(
+                true,
+            ),
+            receive_buffer_size: Some(
+                65536,
+            ),
+            send_buffer_size: Some(
+                32768,
+            ),
         },
         extra: {},
     },

@@ -10,7 +10,7 @@
 
 use anyspawn::Spawner;
 use fetch_hyper::HyperTransportBuilder;
-use fetch_options::TransportOptions;
+use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
 use http_extensions::Result;
 use hyper_util::rt::TokioIo;
@@ -102,8 +102,10 @@ impl HttpClient {
 /// Named pipes / Unix-domain sockets are intentionally not supported; the
 /// connector opens a TCP stream to the request authority and hands the wrapped
 /// stream to hyper. TLS, when required, is layered on top by the transport.
-#[derive(Clone)]
-struct TokioConnector;
+#[derive(Clone, Copy, Debug)]
+struct TokioConnector {
+    socket: SocketOptions,
+}
 
 impl layered::Service<BaseUri> for TokioConnector {
     type Out = Result<TokioIo<::tokio::net::TcpStream>>;
@@ -111,15 +113,108 @@ impl layered::Service<BaseUri> for TokioConnector {
     async fn execute(&self, input: BaseUri) -> Self::Out {
         let host = input.authority().host();
         let port = input.try_effective_port()?;
-        let stream = ::tokio::net::TcpStream::connect((host, port)).await?;
+        let stream = connect_tcp(host, port, &self.socket).await?;
         Ok(TokioIo::new(stream))
     }
 }
 
+/// Opens a TCP connection to `host:port` with the configured socket options applied.
+///
+/// When no pre-connect tuning is requested this takes the cheap path and lets `tokio`
+/// resolve and connect in one step; otherwise the address is resolved up front so the
+/// buffer sizes can be set on the unconnected socket.
+///
+/// The overall connect budget is not enforced here: [`ClientConnector`][fetch_hyper] wraps
+/// this whole future in `connect_timeout`, so resolution and every connect attempt already
+/// share one deadline.
+///
+/// # Errors
+///
+/// Returns an error when host name resolution fails, when no resolved address accepts the
+/// connection, or when the kernel rejects one of the requested socket options.
+async fn connect_tcp(host: &str, port: u16, options: &SocketOptions) -> Result<::tokio::net::TcpStream> {
+    let stream = if options.requires_pre_connect_setup() {
+        connect_tuned(host, port, options).await?
+    } else {
+        let stream = ::tokio::net::TcpStream::connect((host, port)).await?;
+
+        // On the fast path there is no unconnected socket to configure, so `no_delay` is
+        // applied here. The tuned path already set it before connecting.
+        if let Some(no_delay) = options.no_delay {
+            stream.set_nodelay(no_delay)?;
+        }
+
+        stream
+    };
+
+    Ok(stream)
+}
+
+/// Resolves `host:port` and connects with the pre-connect socket options applied.
+///
+/// Addresses are tried in resolution order, mirroring [`tokio::net::TcpStream::connect`];
+/// the error from the last attempt is surfaced when every address fails.
+///
+/// # Errors
+///
+/// Returns the resolution error when the host cannot be resolved, otherwise the error from
+/// the final connect attempt.
+#[cfg_attr(test, mutants::skip)] // the empty-resolution fallback is unreachable in practice
+async fn connect_tuned(host: &str, port: u16, options: &SocketOptions) -> Result<::tokio::net::TcpStream> {
+    let mut last_error = None;
+
+    for address in ::tokio::net::lookup_host((host, port)).await? {
+        match connect_to_address(address, options).await {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    // A successful resolution always yields at least one address, so this fallback should be
+    // unreachable. It mirrors the kind and wording `TcpStream::connect` uses for the same
+    // condition so that both paths classify identically for retry policies.
+    Err(last_error
+        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "could not resolve to any address"))
+        .into())
+}
+
+/// Connects to a single resolved address, applying the socket options before connecting.
+///
+/// Buffer sizes have to be set while the socket is still unconnected for `TCP` window
+/// scaling to pick them up during the handshake. `no_delay` is set here too so the very
+/// first writes after the handshake are already un-Nagled.
+///
+/// # Errors
+///
+/// Returns an error when the socket cannot be created, when the kernel rejects one of the
+/// requested options, or when the connection attempt fails.
+async fn connect_to_address(address: std::net::SocketAddr, options: &SocketOptions) -> std::io::Result<::tokio::net::TcpStream> {
+    let socket = if address.is_ipv4() {
+        ::tokio::net::TcpSocket::new_v4()?
+    } else {
+        ::tokio::net::TcpSocket::new_v6()?
+    };
+
+    if let Some(size) = options.receive_buffer_size {
+        socket.set_recv_buffer_size(size)?;
+    }
+
+    if let Some(size) = options.send_buffer_size {
+        socket.set_send_buffer_size(size)?;
+    }
+
+    if let Some(no_delay) = options.no_delay {
+        socket.set_nodelay(no_delay)?;
+    }
+
+    socket.connect(address).await
+}
+
 fn build_tokio_handler(cx: CustomContext<TokioDeps>) -> fetch_hyper::HyperTransport {
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
+    let connector = TokioConnector { socket: cx.options.socket };
 
-    HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), cx.clock, cx.options)
+    HyperTransportBuilder::new(connector, Spawner::new_tokio(), cx.clock, cx.options)
         .body_builder(cx.body_builder)
         .pool_index(cx.pool_index)
         .meter(cx.meter)
@@ -248,5 +343,81 @@ mod tests {
 
         // Must not panic: the empty list has to be skipped, not forwarded.
         let _backend = super::build_tls_backend(&options, TlsOptions::default());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connect_tcp_uses_fast_path_without_pre_connect_options() {
+        use fetch_options::SocketOptions;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Default options request no tuning at all, so the single-step connect path is used
+        // and the operating system defaults are left untouched.
+        let options = SocketOptions::default();
+        assert!(!options.requires_pre_connect_setup());
+
+        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
+        assert_eq!(stream.peer_addr().unwrap().port(), port);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connect_tcp_applies_no_delay() {
+        use fetch_options::SocketOptions;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // `no_delay` is applied to the connected stream, so it is observable on the result.
+        let stream = super::connect_tcp("127.0.0.1", port, &SocketOptions::default().no_delay(true))
+            .await
+            .unwrap();
+        assert!(stream.nodelay().unwrap());
+
+        let stream = super::connect_tcp("127.0.0.1", port, &SocketOptions::default().no_delay(false))
+            .await
+            .unwrap();
+        assert!(!stream.nodelay().unwrap());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connect_tcp_applies_buffer_sizes_before_connecting() {
+        use fetch_options::SocketOptions;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Buffer sizes force the resolve-then-connect path. The kernel is free to clamp or
+        // scale the requested sizes, so only the successful connect is asserted here.
+        let options = SocketOptions::default().receive_buffer_size(64 * 1024).send_buffer_size(64 * 1024);
+        assert!(options.requires_pre_connect_setup());
+
+        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
+        assert_eq!(stream.peer_addr().unwrap().port(), port);
+
+        // `no_delay` must also be honored on the tuned path, where it is set pre-connect.
+        let options = options.no_delay(true);
+        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
+        assert!(stream.nodelay().unwrap());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connect_tcp_surfaces_error_when_no_address_connects() {
+        use fetch_options::SocketOptions;
+
+        // Binding then dropping the listener yields a port nothing is listening on, so every
+        // resolved address fails and the last error has to be surfaced rather than swallowed.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let options = SocketOptions::default().send_buffer_size(64 * 1024);
+        let error = super::connect_tcp("127.0.0.1", port, &options).await.unwrap_err();
+
+        assert!(!error.to_string().is_empty(), "the connect failure must carry a message");
     }
 }

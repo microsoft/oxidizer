@@ -8,7 +8,8 @@
 //! Configuration options for HTTP client transport behavior.
 //!
 //! This crate provides types for configuring various aspects of HTTP connections,
-//! including connection keep-alive behavior, connection pooling, and HTTP version support.
+//! including connection keep-alive behavior, connection pooling, HTTP version support,
+//! HTTP/2 flow control, and socket-level tuning.
 //!
 //! # Example
 //!
@@ -39,13 +40,15 @@ mod connection_keep_alive;
 mod http2;
 mod pooling;
 mod request_filter;
+mod socket;
 mod transport;
 
 pub use connection_info::ConnectionInfo;
 pub use connection_keep_alive::ConnectionKeepAlive;
-pub use http2::Http2Options;
+pub use http2::{Http2Options, MAX_HTTP2_WINDOW_SIZE};
 pub use pooling::{ConnectionIdleTimeout, ConnectionLifetime, ConnectionPoolOptions, PoolIndex, PoolSelection};
 pub use request_filter::RequestFilter;
+pub use socket::{MAX_SOCKET_BUFFER_SIZE, MIN_SOCKET_BUFFER_SIZE, SocketOptions};
 pub use transport::TransportOptions;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);

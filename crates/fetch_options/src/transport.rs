@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use http::{Extensions, Version};
 
-use crate::{ConnectionKeepAlive, ConnectionPoolOptions, DEFAULT_CONNECT_TIMEOUT, Http2Options, RequestFilter};
+use crate::{ConnectionKeepAlive, ConnectionPoolOptions, DEFAULT_CONNECT_TIMEOUT, Http2Options, RequestFilter, SocketOptions};
 
 /// Public, transport-relevant subset of an HTTP client's configuration.
 ///
@@ -34,6 +34,11 @@ pub struct TransportOptions {
     pub connection_pool: ConnectionPoolOptions,
     /// HTTP/2-specific tuning knobs.
     pub http_2: Http2Options,
+    /// Socket-level tuning applied to each outbound `TCP` connection.
+    ///
+    /// Honored by the connectors bundled with `fetch`. A custom connector supplied to a
+    /// transport is responsible for applying these settings itself.
+    pub socket: SocketOptions,
     /// Extra extensions to be applied to the underlying transport.
     pub extra: Extensions,
 }
@@ -47,6 +52,7 @@ impl Default for TransportOptions {
             supported_http_versions: vec![Version::HTTP_11, Version::HTTP_2],
             connection_pool: ConnectionPoolOptions::default(),
             http_2: Http2Options::default(),
+            socket: SocketOptions::default(),
             extra: Extensions::default(),
         }
     }

@@ -247,8 +247,12 @@ fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPool
 
 #[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
+    // Order matters: hyper's `http2_adaptive_window(true)` resets the stream window to the
+    // spec default, so the explicit size has to be applied first for adaptive tuning to win
+    // when both are configured. That precedence is documented on `initial_stream_window_size`.
     hyper_builder
         .http2_initial_max_send_streams(http_2.initial_max_send_streams)
+        .http2_initial_stream_window_size(http_2.initial_stream_window_size)
         .http2_adaptive_window(http_2.adaptive_window);
 }
 
@@ -328,6 +332,11 @@ mod tests {
         options.supported_http_versions = vec![Version::HTTP_2];
         options.connect_timeout = Duration::from_secs(7);
         options.connection_pool.connection_lifetime = ConnectionLifetime::fixed(Duration::from_mins(1));
+        options.http_2 = fetch_options::Http2Options::default().initial_stream_window_size(1024 * 1024);
+        options.socket = fetch_options::SocketOptions::default()
+            .no_delay(true)
+            .receive_buffer_size(64 * 1024)
+            .send_buffer_size(32 * 1024);
         let configured = make_builder_with(options).pool_index(PoolIndex::new(42));
         insta::assert_debug_snapshot!("configured", configured);
     }

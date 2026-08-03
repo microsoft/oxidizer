@@ -11,7 +11,7 @@
 use data_privacy::RedactionEngine;
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
-    RequestFilter, TransportOptions,
+    RequestFilter, SocketOptions, TransportOptions,
 };
 pub use http_extensions::HttpBodyOptions;
 use http_extensions::routing::Router;
