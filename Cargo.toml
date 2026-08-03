@@ -84,7 +84,7 @@ chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
-darling = { version = "0.23.0", default-features = false }
+darling = { version = "0.24.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.4" }
 data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
