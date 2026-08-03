@@ -30,12 +30,10 @@ anvil-external-types: anvil-external-types-validate-prereqs
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     # Build pkg-name -> manifest-path map, restricted to library crates.
     $libPkgs = @{}
-    $libNamesById = @{}
     $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     foreach ($p in $meta.packages) {
         if ($p.targets | Where-Object { $_.kind -contains 'lib' }) {
             $libPkgs[$p.name] = $p.manifest_path
-            $libNamesById[$p.id] = $p.name
         }
     }
     # Decide which packages to check.
@@ -45,7 +43,10 @@ anvil-external-types: anvil-external-types-validate-prereqs
     } else {
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                $name = $libNamesById[$pkg[$i + 1]]
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name
+                # this manifest-path map keys on.
+                $name = ($pkg[$i + 1] -split '@', 2)[0]
                 if ($libPkgs.ContainsKey($name)) { $packages += $name }
                 $i++
             }

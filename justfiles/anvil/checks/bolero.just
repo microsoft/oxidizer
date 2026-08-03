@@ -41,17 +41,14 @@ anvil-bolero: anvil-bolero-validate-prereqs
         exit 0
     }
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
-    $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $namesById = @{}
-    foreach ($p in $meta.packages) { $namesById[$p.id] = $p.name }
-    # cargo-bolero resolves over workspace members only, so convert the
-    # canonical package IDs from impact analysis back to bare names.
+    # Impact emits version-qualified specs (name@version); strip the
+    # @version qualifier -- cargo-bolero resolves over workspace members
+    # only, so bare names suffice and avoid any spec-parsing surprises.
     $bareArgs = [System.Collections.Generic.List[string]]::new()
     for ($i = 0; $i -lt $pkg.Count; $i++) {
         if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
             $bareArgs.Add('--package')
-            $bareArgs.Add($namesById[$pkg[$i + 1]])
+            $bareArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
             $i++
             continue
         }

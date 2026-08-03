@@ -63,12 +63,10 @@ anvil-semver-check: anvil-semver-check-validate-prereqs
     # we got here via impact-scoping (cloud workflows) or full-workspace
     # fallback (local).
     $libPkgs = @{}
-    $libNamesById = @{}
     $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     foreach ($p in $meta.packages) {
         if ($p.targets | Where-Object { $_.kind -contains 'lib' }) {
             $libPkgs[$p.name] = $p
-            $libNamesById[$p.id] = $p.name
         }
     }
     if ($pkg -contains '--workspace') {
@@ -77,7 +75,9 @@ anvil-semver-check: anvil-semver-check-validate-prereqs
         $packages = @()
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                $name = $libNamesById[$pkg[$i + 1]]
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name.
+                $name = ($pkg[$i + 1] -split '@', 2)[0]
                 if ($libPkgs[$name]) { $packages += $name }
                 $i++
             }

@@ -52,10 +52,10 @@
 #                                    (which would only catch $null and
 #                                    splat an empty arg cargo rejects).
 #   * "--package A@v --package B@v"  - emitted by the cloud-workflow impact step
-#                                    when the tier has members. Composite
-#                                    actions resolve these portable specs to
-#                                    local source-qualified package IDs before
-#                                    invoking the check recipes.
+#                                    when the tier has members. Packages are
+#                                    version-qualified cargo specs so they
+#                                    resolve uniquely even when a like-named
+#                                    crate is also a transitive dependency.
 #   * "--skip"                    - emitted by the cloud-workflow impact step when
 #                                    the tier is empty (recipe exits 0)
 #
@@ -105,7 +105,7 @@
 # Prints ONLY the resolved ref to stdout so callers can capture it:
 #   pwsh : $base = (& {{just_executable()}} _anvil-base-ref)
 #   bash : base="$(just _anvil-base-ref)"
-[script("pwsh", "-NoProfile")]
+[script("pwsh")]
 _anvil-base-ref:
     $ErrorActionPreference = 'Stop'
     if ($env:BASE_REF) {
@@ -145,9 +145,11 @@ _anvil-base-ref:
 #
 # Output (stdout, exactly one line so callers can capture it):
 #   * "--package name@version --package name2@version2 ..." when the
-#     tier has members. These portable specs cross runner boundaries;
-#     `_anvil-impact-resolve` converts them to source-qualified local
-#     package IDs before check recipes pass them to Cargo.
+#     tier has members. Each package is a version-qualified cargo spec:
+#     the version (read from `cargo metadata --no-deps`, i.e. workspace
+#     members only) disambiguates a workspace member from a like-named
+#     transitive dependency pulled in at a different version, which a
+#     bare `-p name` cannot do ("multiple packages named name").
 #   * "--skip" when the tier is empty (recipes treat this as a no-op).
 # Diagnostics (dropped unknown names) go to STDERR so they never
 # pollute the captured value.
@@ -162,7 +164,7 @@ _anvil-base-ref:
 # Usage:
 #   bash : val="$(just _anvil-impact-format affected "$impact_json")"
 #   pwsh : $val = (& {{just_executable()}} _anvil-impact-format affected $impactJson)
-[script("pwsh", "-NoProfile")]
+[script("pwsh")]
 _anvil-impact-format tier impactJson:
     $ErrorActionPreference = 'Stop'
     $tier = '{{tier}}'
@@ -222,35 +224,3 @@ _anvil-impact-format tier impactJson:
     } else {
         Write-Output ($specs -join ' ')
     }
-
-# Convert portable impact output to package IDs valid in this checkout.
-[script("pwsh", "-NoProfile")]
-_anvil-impact-resolve packages:
-    $ErrorActionPreference = 'Stop'
-    $packages = '{{packages}}'
-    if (-not $packages -or $packages -eq '--skip') {
-        Write-Output $packages
-        exit 0
-    }
-    $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $idsByPortableSpec = @{}
-    foreach ($p in $meta.packages) {
-        $idsByPortableSpec["$($p.name)@$($p.version)"] = $p.id
-    }
-    $tokens = @(-split $packages)
-    $resolved = [System.Collections.Generic.List[string]]::new()
-    for ($i = 0; $i -lt $tokens.Count; $i++) {
-        if ($tokens[$i] -ne '--package' -or ($i + 1) -ge $tokens.Count) {
-            Write-Error "anvil impact: invalid package arguments '$packages'"
-            exit 1
-        }
-        $portableSpec = $tokens[++$i]
-        if (-not $idsByPortableSpec.ContainsKey($portableSpec)) {
-            Write-Error "anvil impact: package '$portableSpec' is not a workspace member"
-            exit 1
-        }
-        $resolved.Add('--package')
-        $resolved.Add($idsByPortableSpec[$portableSpec])
-    }
-    Write-Output ($resolved -join ' ')

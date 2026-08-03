@@ -49,18 +49,17 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
     $pkg = @(if ($env:ANVIL_INCLUDE_MODIFIED) { -split $env:ANVIL_INCLUDE_MODIFIED } else { '--workspace' })
     $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     $byName = @{}
-    $namesById = @{}
-    foreach ($p in $meta.packages) {
-        $byName[$p.name] = $p
-        $namesById[$p.id] = $p.name
-    }
+    foreach ($p in $meta.packages) { $byName[$p.name] = $p }
     $candidates = if ($pkg -contains '--workspace') {
         @($meta.packages | ForEach-Object { $_.name })
     } else {
         $names = @()
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                $names += $namesById[$pkg[$i + 1]]; $i++
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name
+                # this metadata lookup keys on.
+                $names += ($pkg[$i + 1] -split '@', 2)[0]; $i++
             }
         }
         $names

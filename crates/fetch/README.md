@@ -712,7 +712,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMYJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMIJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNg
  [__link0]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient::post
@@ -775,8 +775,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link62]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=BytesView
  [__link63]: https://docs.rs/bytes
  [__link64]: https://docs.rs/bytesbuf/0.7.0/bytesbuf/?search=BytesView
- [__link65]: https://docs.rs/bytes/1.12.1/bytes/?search=Buf
- [__link66]: https://docs.rs/bytes/1.12.1/bytes/?search=BufMut
+ [__link65]: https://docs.rs/bytes/1.12.0/bytes/?search=Buf
+ [__link66]: https://docs.rs/bytes/1.12.0/bytes/?search=BufMut
  [__link67]: https://docs.rs/bytes
  [__link68]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient
  [__link69]: https://docs.rs/templated_uri/0.3.6/templated_uri/?search=Uri
