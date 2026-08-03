@@ -20,7 +20,7 @@ fn main() -> Result<(), ohno::AppError> {
     let clock = Clock::new_frozen();
 
     // Retrieve the current time as `jiff::Timestamp`.
-    let timestamp = clock.system_time_as::<Timestamp>();
+    let timestamp = clock.try_system_time_as::<Timestamp>()?;
     println!("Current time (UTC): {}", timestamp.strftime(JIFF_DISPLAY_FORMAT));
 
     // Convert the timestamp to date time in Asia/Tokyo.

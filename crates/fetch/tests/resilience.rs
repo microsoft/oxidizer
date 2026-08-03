@@ -65,7 +65,7 @@ async fn retry_defaults_restore_requests() {
         let index = req.extensions().get::<Attempt>().copied().unwrap().index();
         HttpError::unavailable(format!("unavailable-{index}")).with_request(req)
     });
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     let client = HttpClient::builder_fake(handler, FakeDeps { clock })
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpRetry::layer("dummy", context.resilience_context())
@@ -101,7 +101,7 @@ async fn retry_defaults_non_cloneable_body() {
 }
 
 fn create_retry_client(status: StatusCode) -> HttpClient {
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     HttpClient::builder_fake(status, FakeDeps { clock })
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpRetry::layer("dummy", context.resilience_context())
@@ -166,7 +166,7 @@ async fn breaker_rejected_request_error_attaches_request() {
 
 fn create_breaker_client(status: StatusCode) -> HttpClient {
     let handler = FakeHandler::from(HttpResponseBuilder::new_fake().status(status).build().unwrap());
-    let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+    let clock = ClockControl::new_auto_advancing().to_clock();
     HttpClient::builder_fake(handler, FakeDeps { clock })
         .custom_pipeline(move |dispatch, context| {
             let layer = HttpBreaker::layer("test", context.resilience_context())

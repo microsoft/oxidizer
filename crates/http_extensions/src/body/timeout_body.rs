@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn stream_body_times_out_when_pending() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // A body that never yields data.
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn body_timeout_chains_with_buffer_limit() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(HttpBodyOptions::default().buffer_limit(1024));
 
         assert_eq!(builder.options, HttpBodyOptions::default().buffer_limit(1024));
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn poll_frame_times_out_when_pending_with_short_timeout() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
 
         // A body that never yields data with a very short timeout.
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn poll_frame_returns_error_after_timeout() {
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let timeout = Duration::from_millis(50);
 
         let mut timeout_body = super::TimeoutBody::new(PendingBody, timeout, &clock);

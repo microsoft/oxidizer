@@ -78,6 +78,7 @@ use crate::timers::TIMER_RESOLUTION;
 /// # }
 /// ```
 #[derive(Debug)]
+#[must_use = "streams do nothing unless polled"]
 pub struct PeriodicTimer {
     period: Duration,
     clock: Clock,
@@ -91,7 +92,7 @@ impl PeriodicTimer {
     ///
     /// > **Note**: The minimum precision of the timer is 1ms. If a smaller period is specified,
     /// > it will be adjusted to 1ms.
-    #[must_use]
+    #[must_use = "streams do nothing unless polled"]
     pub fn new(clock: &Clock, period: Duration) -> Self {
         let period = period.max(TIMER_RESOLUTION);
 
@@ -142,7 +143,10 @@ impl Stream for PeriodicTimer {
                 Poll::Ready(Some(()))
             }
             // Timer is registered and will fire later in the future.
-            Some(_) => Poll::Pending,
+            Some(key) => {
+                this.clock.update_timer_waker(key, cx.waker());
+                Poll::Pending
+            }
 
             // Timer is not registered yet; let's register it.
             // The registration is lazy, occurring when someone polls the future. This means

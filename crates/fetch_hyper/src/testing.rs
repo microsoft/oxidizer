@@ -374,7 +374,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fake_connector_serves_canned_response() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         let handler = HyperTransportBuilder::new(
@@ -396,7 +396,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fake_connector_propagates_connect_failure() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.connect_timeout = Duration::from_secs(5);
@@ -427,7 +427,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn https_only_filter_rejects_http_request() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(),

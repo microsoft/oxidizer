@@ -1,35 +1,37 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::io::ErrorKind;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
 
-use crate::Error;
+use crate::{Delay, Error};
 
 pin_project! {
     /// A future that races between an inner future and a deadline.
     ///
     /// - If the inner future completes before the deadline, the future's output is returned.
     /// - If the deadline is reached before the inner future completes, an error is returned.
+    ///
+    /// Values are created by [`FutureExt::timeout`](crate::FutureExt::timeout).
     #[derive(Debug)]
-    pub struct Timeout<F, D> {
+    #[must_use = "futures do nothing unless awaited or polled"]
+    pub struct Timeout<F> {
         #[pin]
         future: F,
         #[pin]
-        deadline: D,
+        deadline: Delay,
     }
 }
 
-impl<F, D> Timeout<F, D> {
-    pub(super) const fn new(future: F, deadline: D) -> Self {
+impl<F> Timeout<F> {
+    pub(super) const fn new(future: F, deadline: Delay) -> Self {
         Self { future, deadline }
     }
 }
 
-impl<F: Future, D: Future> Future for Timeout<F, D> {
+impl<F: Future> Future for Timeout<F> {
     type Output = Result<F::Output, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -38,10 +40,7 @@ impl<F: Future, D: Future> Future for Timeout<F, D> {
         match this.future.poll(cx) {
             Poll::Ready(v) => Poll::Ready(Ok(v)),
             Poll::Pending => match this.deadline.poll(cx) {
-                Poll::Ready(_) => {
-                    let io_err = std::io::Error::new(ErrorKind::TimedOut, "future timed out");
-                    Poll::Ready(Err(Error::other(io_err)))
-                }
+                Poll::Ready(()) => Poll::Ready(Err(Error::timeout())),
                 Poll::Pending => Poll::Pending,
             },
         }

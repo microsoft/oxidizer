@@ -172,7 +172,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn fake_builder_custom_clock() {
-        let clock = tick::ClockControl::new().auto_advance(Duration::from_secs(2)).to_clock();
+        let clock = tick::ClockControl::builder()
+            .auto_advance(Duration::from_secs(2))
+            .build()
+            .to_clock();
 
         let _client = HttpClient::builder_fake(FakeHandler::never_completes(), &clock)
             .custom_pipeline(|root, ctx| {

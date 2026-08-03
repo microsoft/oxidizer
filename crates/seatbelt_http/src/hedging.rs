@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn hedging_recovers_with_safe_methods() {
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
         let service = (
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn hedging_fails_with_unsafe_methods() {
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
         let service = (
@@ -182,7 +182,7 @@ mod tests {
         // reflects the routing decision produced by a custom `Router`. The
         // first attempt uses the original target, while hedged attempts must
         // be re-routed through the router before being dispatched.
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
         let captured_uris: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
