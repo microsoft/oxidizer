@@ -55,8 +55,10 @@ enum MaybeBacktrace {
 
 impl MaybeBacktrace {
     fn capture() -> Self {
-        let backtrace = Backtrace::capture();
+        Self::from_backtrace(Backtrace::capture())
+    }
 
+    fn from_backtrace(backtrace: Backtrace) -> Self {
         match backtrace.status() {
             BacktraceStatus::Captured => Self::Captured(Box::new(backtrace)),
             _ => Self::Disabled,
@@ -239,6 +241,8 @@ mod tests {
         let error = Error::out_of_range("test");
 
         assert!(matches!(error.kind(), ErrorKind::OutOfRange(_)));
+        assert!(error.is_out_of_range());
+        assert!(!error.is_timeout());
         assert_eq!(error.to_string(), "test");
         assert!(error.source().is_none());
     }
@@ -270,8 +274,29 @@ mod tests {
         let error = Error::timeout();
 
         assert!(error.is_timeout());
+        assert!(!error.is_out_of_range());
         assert_eq!(error.to_string(), "future timed out");
         assert!(error.source().is_none());
+    }
+
+    #[test]
+    fn captured_backtrace_is_available() {
+        let error = Error {
+            kind: ErrorKind::Timeout,
+            backtrace: MaybeBacktrace::from_backtrace(Backtrace::force_capture()),
+        };
+
+        assert!(error.backtrace().is_some());
+    }
+
+    #[test]
+    fn disabled_backtrace_is_unavailable() {
+        let error = Error {
+            kind: ErrorKind::Timeout,
+            backtrace: MaybeBacktrace::from_backtrace(Backtrace::disabled()),
+        };
+
+        assert!(error.backtrace().is_none());
     }
 
     #[test]

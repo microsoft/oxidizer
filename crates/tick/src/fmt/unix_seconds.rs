@@ -76,7 +76,7 @@ impl UnixSeconds {
     /// The largest value that can be represented by `UnixSeconds`.
     ///
     /// This represents `253402207200`, or `9999-12-30T22:00:00Z`.
-    pub const MAX: Self = Self(Duration::from_secs(253_402_207_200));
+    pub const MAX: Self = Self(Duration::from_hours(70_389_502));
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///

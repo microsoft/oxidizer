@@ -237,6 +237,16 @@ mod tests {
         assert_eq!(advance_and_wake(&mut timers, next), None);
     }
 
+    #[test]
+    fn advance_timers_at_maximum_instant() {
+        let mut timers = Timers::default();
+        let maximum = maximum_instant_after(Instant::now());
+        let _ = timers.register(maximum, Waker::noop().clone());
+
+        assert!(advance_and_wake(&mut timers, maximum).is_none());
+        assert_eq!(timers.len(), 0);
+    }
+
     fn advance_and_wake(timers: &mut Timers, now: Instant) -> Option<Instant> {
         let mut ready = Vec::new();
         let next = timers.advance_timers(now, &mut ready);
@@ -246,5 +256,36 @@ mod tests {
         }
 
         next
+    }
+
+    fn maximum_instant_after(anchor: Instant) -> Instant {
+        let mut lower = 0;
+        let mut upper = Duration::MAX.as_nanos();
+
+        while lower < upper {
+            let middle = lower + (upper - lower).div_ceil(2);
+            if anchor.checked_add(duration_from_nanos(middle)).is_some() {
+                lower = middle;
+            } else {
+                upper = middle - 1;
+            }
+        }
+
+        anchor
+            .checked_add(duration_from_nanos(lower))
+            .expect("binary search only retains durations that can be added to the anchor")
+    }
+
+    fn duration_from_nanos(nanos: u128) -> Duration {
+        const NANOS_PER_SECOND: u128 = 1_000_000_000;
+
+        Duration::new(
+            (nanos / NANOS_PER_SECOND)
+                .try_into()
+                .expect("Duration::MAX bounds the seconds component to u64"),
+            (nanos % NANOS_PER_SECOND)
+                .try_into()
+                .expect("the nanoseconds remainder is always less than one billion"),
+        )
     }
 }

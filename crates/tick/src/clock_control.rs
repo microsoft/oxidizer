@@ -527,7 +527,12 @@ impl State {
                 break;
             }
 
+            let previous_instant = self.instant;
             self.advance_time(advance, TimeFlow::Forward);
+            assert!(
+                self.instant > previous_instant,
+                "positive forward advancement must move the clock instant"
+            );
             self.auto_advance_total = self.auto_advance_total.saturating_add(advance);
             self.timers.advance_timers(self.instant, ready);
         }
@@ -592,6 +597,14 @@ mod tests {
         let control = ClockControl::new();
 
         // act & assert
+        assert_eq!(control.with_state(|s| s.auto_advance), Duration::ZERO);
+        assert_eq!(control.system_time(), SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn builder_defaults_ok() {
+        let control = ClockControlBuilder::default().build();
+
         assert_eq!(control.with_state(|s| s.auto_advance), Duration::ZERO);
         assert_eq!(control.system_time(), SystemTime::UNIX_EPOCH);
     }
