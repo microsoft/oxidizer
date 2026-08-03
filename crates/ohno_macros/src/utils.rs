@@ -41,6 +41,14 @@ macro_rules! bail {
 // Re-export the macro for use in other modules
 pub(crate) use bail;
 
+/// Marker `#[ohno::error]` puts on the `OhnoCore` field it injects, as `#[error(generated)]`
+///
+/// A user is free to declare an `OhnoCore` field themselves, and that field is theirs to
+/// reference; the marker is what tells the two apart.
+pub(crate) fn generated_error_field_marker() -> syn::Ident {
+    syn::Ident::new("generated", proc_macro2::Span::call_site())
+}
+
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields
 #[cfg_attr(test, mutants::skip)] // mutation testing leads to an infinite loop here...
 pub(crate) fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident {

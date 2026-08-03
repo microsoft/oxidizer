@@ -104,6 +104,32 @@ The template string supports field interpolation using `{field_name}` syntax. Th
 error (if any) is automatically shown as “Caused by:” in the error chain. If the inner error
 has no source, only the custom message is displayed.
 
+Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
+
+### Format Arguments
+
+Anything that is not a plain field reference is passed as a positional argument, exactly like
+with `format!`:
+
+```rust
+use std::path::PathBuf;
+
+#[ohno::error]
+#[display("failed to read config: {}", path.display())]
+pub struct ConfigError {
+    pub path: PathBuf,
+}
+```
+
+Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
+name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+
+| Argument | Accepted |
+| --- | --- |
+| `path.display()` | yes |
+| `self.path.display()` | no, the `self.` prefix is implicit |
+| `.path.display()` | no, not a valid expression |
+
 ## Automatic Constructors
 
 By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:

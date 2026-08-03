@@ -4,7 +4,7 @@
 use syn::{Data, DeriveInput, Fields, Result, Type, TypePath};
 
 use crate::derive_error::types::ErrorFieldRef;
-use crate::utils::bail;
+use crate::utils::{bail, generated_error_field_marker};
 
 const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoCore field detected. Either mark a field with `#[error]` or include a field of type OhnoCore";
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
@@ -83,6 +83,16 @@ fn find_explicit_error_field_unnamed(fields: &syn::FieldsUnnamed) -> Option<usiz
         .enumerate()
         .find(|(_, field)| has_error_attribute(field))
         .map(|(index, _)| index)
+}
+
+/// Check if a field is the `OhnoCore` field injected by `#[ohno::error]`
+pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        attr.path().is_ident("error")
+            && attr
+                .parse_args::<syn::Ident>()
+                .is_ok_and(|marker| marker == generated_error_field_marker())
+    })
 }
 
 /// Check if a field has the `#[error]` attribute

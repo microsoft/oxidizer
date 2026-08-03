@@ -17,6 +17,7 @@ const FROM_INVALID_FORM: &str = "from attribute must be in the form #[from(Type1
 #[derive(Debug)]
 pub(crate) struct DisplayAttribute {
     pub template: String,
+    pub template_span: proc_macro2::Span,
     pub args: Vec<syn::Expr>,
 }
 
@@ -59,6 +60,7 @@ fn parse_display_tokens(tokens: &proc_macro2::TokenStream) -> Result<DisplayAttr
 
             Ok(DisplayAttribute {
                 template: template_str.value(),
+                template_span: template_str.span(),
                 args,
             })
         },
