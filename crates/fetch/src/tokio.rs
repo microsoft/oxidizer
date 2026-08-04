@@ -12,13 +12,18 @@ use anyspawn::Spawner;
 use fetch_hyper::HyperTransportBuilder;
 use fetch_options::{SocketOptions, TransportOptions};
 use fetch_tls::{TlsBackend, TlsBackendBuilder};
-use http_extensions::Result;
+use http::uri::Scheme;
+use http_extensions::{HttpError, Result};
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioIo;
+use seatbelt::RecoveryInfo;
 use templated_uri::BaseUri;
 use thread_aware::ThreadAware;
 use tick::Clock;
+use tower_service::Service as _;
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};
+use crate::error_labels::LABEL_SCHEME_NOT_ALLOWED;
 use crate::handlers::TransportHandler;
 use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
@@ -102,117 +107,130 @@ impl HttpClient {
 /// Named pipes / Unix-domain sockets are intentionally not supported; the
 /// connector opens a TCP stream to the request authority and hands the wrapped
 /// stream to hyper. TLS, when required, is layered on top by the transport.
-#[derive(Clone, Copy, Debug)]
+///
+/// The actual dialing is delegated to hyper's own [`HttpConnector`], which already
+/// implements name resolution, Happy Eyeballs (RFC 8305) IPv4/IPv6 racing, and
+/// pre-connect application of the socket buffer sizes. This type only translates
+/// [`BaseUri`] into an [`http::Uri`] and [`SocketOptions`] into hyper's setters.
+///
+/// Applying the socket options is best-effort: hyper logs a warning and proceeds when the
+/// kernel rejects a requested value, so a connection is never failed over a tuning knob.
+///
+/// Keepalive, local-address binding, `SO_REUSEADDR` and `TCP_USER_TIMEOUT` are also exposed by
+/// [`HttpConnector`] but are deliberately left at its defaults, because [`SocketOptions`] does
+/// not model them yet.
+#[derive(Clone, Debug)]
 struct TokioConnector {
-    socket: SocketOptions,
+    connector: HttpConnector,
+}
+
+impl TokioConnector {
+    /// Builds a connector that applies `options` to every connection it opens.
+    fn new(options: SocketOptions) -> Self {
+        let mut connector = HttpConnector::new();
+
+        // TLS is layered on top of this connector by the transport, so `https` targets reach
+        // us with their original scheme and `enforce_http(true)` would reject every one of
+        // them. The scheme is instead checked explicitly in `execute`.
+        connector.enforce_http(false);
+
+        // hyper takes a plain `bool` here. `None` means "use the operating system default",
+        // and that default is Nagle enabled on every supported platform, which is exactly
+        // what `false` requests.
+        connector.set_nodelay(options.no_delay.unwrap_or(false));
+
+        // The effective accessors are used rather than the public fields because the fields
+        // can be assigned directly, bypassing the range clamping.
+        connector.set_send_buffer_size(options.effective_send_buffer_size().map(to_usize));
+        connector.set_recv_buffer_size(options.effective_receive_buffer_size().map(to_usize));
+
+        // The connect budget is deliberately left unset: `ClientConnector` wraps this
+        // whole future in `connect_timeout`, so resolution and every connect attempt
+        // already share one deadline.
+
+        Self { connector }
+    }
 }
 
 impl layered::Service<BaseUri> for TokioConnector {
     type Out = Result<TokioIo<::tokio::net::TcpStream>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
-        let host = input.authority().host();
+        // `RequestFilter::HttpAndHttps` admits any scheme, and `enforce_http(false)` disables
+        // hyper's own check, so this is the only guard stopping a `ftp://` target from being
+        // dialed and then spoken HTTP to.
+        let scheme = input.origin().scheme();
+        if scheme != &Scheme::HTTP && scheme != &Scheme::HTTPS {
+            return Err(HttpError::other(
+                "the connector only supports the http and https schemes",
+                RecoveryInfo::never(),
+                LABEL_SCHEME_NOT_ALLOWED,
+            ));
+        }
+
+        // hyper derives the port from the scheme when the authority omits it. Resolving the
+        // port here instead keeps `templated_uri`'s behavior as the single source of truth.
         let port = input.try_effective_port()?;
-        let stream = connect_tcp(host, port, &self.socket).await?;
-        Ok(TokioIo::new(stream))
+        let uri = http::Uri::from(input.with_port(port));
+
+        // `HttpConnector` is a `tower` service, so it needs `&mut self`. Cloning is cheap:
+        // the configuration sits behind an `Arc` and the resolver is stateless.
+        let mut connector = self.connector.clone();
+
+        std::future::poll_fn(|cx| connector.poll_ready(cx))
+            .await
+            .map_err(map_connect_error)?;
+
+        connector.call(uri).await.map_err(map_connect_error)
     }
 }
 
-/// Opens a TCP connection to `host:port` with the configured socket options applied.
+/// Widens a socket buffer size for hyper's `usize`-typed setters.
 ///
-/// When no pre-connect tuning is requested this takes the cheap path and lets `tokio`
-/// resolve and connect in one step; otherwise the address is resolved up front so the
-/// buffer sizes can be set on the unconnected socket.
-///
-/// The overall connect budget is not enforced here: [`ClientConnector`][fetch_hyper] wraps
-/// this whole future in `connect_timeout`, so resolution and every connect attempt already
-/// share one deadline.
-///
-/// # Errors
-///
-/// Returns an error when host name resolution fails, when no resolved address accepts the
-/// connection, or when the kernel rejects one of the requested socket options.
-async fn connect_tcp(host: &str, port: u16, options: &SocketOptions) -> Result<::tokio::net::TcpStream> {
-    let stream = if options.requires_pre_connect_setup() {
-        connect_tuned(host, port, options).await?
-    } else {
-        let stream = ::tokio::net::TcpStream::connect((host, port)).await?;
+/// Sizes are clamped to [`MAX_SOCKET_BUFFER_SIZE`][fetch_options::MAX_SOCKET_BUFFER_SIZE] by the
+/// caller, so the saturating fallback is unreachable on any target with a pointer at least 32
+/// bits wide.
+#[inline]
+fn to_usize(size: u32) -> usize {
+    usize::try_from(size).unwrap_or(usize::MAX)
+}
 
-        // On the fast path there is no unconnected socket to configure, so `no_delay` is
-        // applied here. The tuned path already set it before connecting.
-        if let Some(no_delay) = options.no_delay {
-            stream.set_nodelay(no_delay)?;
+/// Converts a connector failure into an [`HttpError`].
+///
+/// hyper's connect error carries only a static summary message, so the underlying
+/// [`std::io::Error`] is recovered from the source chain first. That keeps the error label and
+/// the retry classification identical to a directly propagated I/O failure, which the transport
+/// relies on to decide whether a connection attempt may be retried.
+///
+/// This is generic rather than taking hyper's error type because that type is not publicly
+/// nameable; it is only ever instantiated with it.
+fn map_connect_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> HttpError {
+    let kind = io_error_kind(&error);
+    std::io::Error::new(kind, error).into()
+}
+
+/// Finds the [`std::io::ErrorKind`] of the first [`std::io::Error`] in `error`'s source chain.
+///
+/// Falls back to [`std::io::ErrorKind::Other`], which [`RecoveryInfo`] classifies as never
+/// recoverable. Every hyper connect error without an I/O cause reports a malformed target
+/// (missing scheme, missing host), which is permanent, so suppressing retries is the correct
+/// classification rather than merely the safe one.
+fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::ErrorKind {
+    loop {
+        if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+            return io_error.kind();
         }
 
-        stream
-    };
-
-    Ok(stream)
-}
-
-/// Resolves `host:port` and connects with the pre-connect socket options applied.
-///
-/// Addresses are tried in resolution order, mirroring [`tokio::net::TcpStream::connect`];
-/// the error from the last attempt is surfaced when every address fails.
-///
-/// # Errors
-///
-/// Returns the resolution error when the host cannot be resolved, otherwise the error from
-/// the final connect attempt.
-#[cfg_attr(test, mutants::skip)] // the empty-resolution fallback is unreachable in practice
-async fn connect_tuned(host: &str, port: u16, options: &SocketOptions) -> Result<::tokio::net::TcpStream> {
-    let mut last_error = None;
-
-    for address in ::tokio::net::lookup_host((host, port)).await? {
-        match connect_to_address(address, options).await {
-            Ok(stream) => return Ok(stream),
-            Err(error) => last_error = Some(error),
+        match error.source() {
+            Some(source) => error = source,
+            None => return std::io::ErrorKind::Other,
         }
     }
-
-    // A successful resolution always yields at least one address, so this fallback should be
-    // unreachable. It mirrors the kind and wording `TcpStream::connect` uses for the same
-    // condition so that both paths classify identically for retry policies.
-    Err(last_error
-        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "could not resolve to any address"))
-        .into())
-}
-
-/// Connects to a single resolved address, applying the socket options before connecting.
-///
-/// Buffer sizes have to be set while the socket is still unconnected for `TCP` window
-/// scaling to pick them up during the handshake. `no_delay` is set here too so the very
-/// first writes after the handshake are already un-Nagled.
-///
-/// # Errors
-///
-/// Returns an error when the socket cannot be created, when the kernel rejects one of the
-/// requested options, or when the connection attempt fails.
-async fn connect_to_address(address: std::net::SocketAddr, options: &SocketOptions) -> std::io::Result<::tokio::net::TcpStream> {
-    let socket = if address.is_ipv4() {
-        ::tokio::net::TcpSocket::new_v4()?
-    } else {
-        ::tokio::net::TcpSocket::new_v6()?
-    };
-
-    if let Some(size) = options.receive_buffer_size {
-        socket.set_recv_buffer_size(size)?;
-    }
-
-    if let Some(size) = options.send_buffer_size {
-        socket.set_send_buffer_size(size)?;
-    }
-
-    if let Some(no_delay) = options.no_delay {
-        socket.set_nodelay(no_delay)?;
-    }
-
-    socket.connect(address).await
 }
 
 fn build_tokio_handler(cx: CustomContext<TokioDeps>) -> fetch_hyper::HyperTransport {
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
-    let connector = TokioConnector { socket: cx.options.socket };
+    let connector = TokioConnector::new(cx.options.socket);
 
     HyperTransportBuilder::new(connector, Spawner::new_tokio(), cx.clock, cx.options)
         .body_builder(cx.body_builder)
@@ -345,79 +363,191 @@ mod tests {
         let _backend = super::build_tls_backend(&options, TlsOptions::default());
     }
 
+    /// Dials `127.0.0.1:port` over `http` through a [`TokioConnector`] configured with `options`.
+    async fn connect_with(options: fetch_options::SocketOptions, port: u16) -> http_extensions::Result<tokio::net::TcpStream> {
+        connect_to(options, &format!("http://127.0.0.1:{port}")).await
+    }
+
+    /// Dials `uri` through a [`TokioConnector`] configured with `options`.
+    async fn connect_to(options: fetch_options::SocketOptions, uri: &str) -> http_extensions::Result<tokio::net::TcpStream> {
+        use layered::Service as _;
+
+        let base_uri = templated_uri::BaseUri::try_from(uri).unwrap();
+
+        super::TokioConnector::new(options)
+            .execute(base_uri)
+            .await
+            .map(hyper_util::rt::TokioIo::into_inner)
+    }
+
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connect_tcp_uses_fast_path_without_pre_connect_options() {
+    async fn connector_connects_with_default_options() {
         use fetch_options::SocketOptions;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        // Default options request no tuning at all, so the single-step connect path is used
-        // and the operating system defaults are left untouched.
-        let options = SocketOptions::default();
-        assert!(!options.requires_pre_connect_setup());
-
-        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
+        // Default options request no tuning at all, so the operating system defaults apply.
+        let stream = connect_with(SocketOptions::default(), port).await.unwrap();
         assert_eq!(stream.peer_addr().unwrap().port(), port);
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connect_tcp_applies_no_delay() {
+    async fn connector_applies_no_delay() {
         use fetch_options::SocketOptions;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
         // `no_delay` is applied to the connected stream, so it is observable on the result.
-        let stream = super::connect_tcp("127.0.0.1", port, &SocketOptions::default().no_delay(true))
-            .await
-            .unwrap();
+        let stream = connect_with(SocketOptions::default().no_delay(true), port).await.unwrap();
         assert!(stream.nodelay().unwrap());
 
-        let stream = super::connect_tcp("127.0.0.1", port, &SocketOptions::default().no_delay(false))
-            .await
-            .unwrap();
+        let stream = connect_with(SocketOptions::default().no_delay(false), port).await.unwrap();
+        assert!(!stream.nodelay().unwrap());
+
+        // `None` leaves the operating system default in place, which keeps Nagle enabled.
+        let stream = connect_with(SocketOptions::default(), port).await.unwrap();
         assert!(!stream.nodelay().unwrap());
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connect_tcp_applies_buffer_sizes_before_connecting() {
+    async fn connector_connects_with_all_options_set() {
         use fetch_options::SocketOptions;
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
-        // Buffer sizes force the resolve-then-connect path. The kernel is free to clamp or
-        // scale the requested sizes, so only the successful connect is asserted here.
-        let options = SocketOptions::default().receive_buffer_size(64 * 1024).send_buffer_size(64 * 1024);
-        assert!(options.requires_pre_connect_setup());
+        // The kernel is free to clamp or scale the requested buffer sizes, and hyper only warns
+        // when it rejects one outright, so the sizes are not observable on the result. What is
+        // asserted is that requesting them does not prevent the connection from being made.
+        let options = SocketOptions::default()
+            .receive_buffer_size(64 * 1024)
+            .send_buffer_size(64 * 1024)
+            .no_delay(true);
 
-        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
+        let stream = connect_with(options, port).await.unwrap();
         assert_eq!(stream.peer_addr().unwrap().port(), port);
-
-        // `no_delay` must also be honored on the tuned path, where it is set pre-connect.
-        let options = options.no_delay(true);
-        let stream = super::connect_tcp("127.0.0.1", port, &options).await.unwrap();
         assert!(stream.nodelay().unwrap());
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connect_tcp_surfaces_error_when_no_address_connects() {
+    async fn connector_clamps_directly_assigned_buffer_sizes() {
         use fetch_options::SocketOptions;
 
-        // Binding then dropping the listener yields a port nothing is listening on, so every
-        // resolved address fails and the last error has to be surfaced rather than swallowed.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // The fields are public, so a caller can bypass the builder's clamping. Zero in
+        // particular must not reach the kernel: on Windows it disables send buffering outright.
+        let mut options = SocketOptions::default();
+        options.send_buffer_size = Some(0);
+        options.receive_buffer_size = Some(0);
+
+        let stream = connect_with(options, port).await.unwrap();
+        assert_eq!(stream.peer_addr().unwrap().port(), port);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connector_accepts_https_targets() {
+        use fetch_options::SocketOptions;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // TLS is layered on top of this connector by the transport, so `https` targets arrive
+        // with their original scheme and must still be dialed as plain TCP. This is the only
+        // reason `enforce_http(false)` is set; flipping it back would break every HTTPS request.
+        let stream = connect_to(SocketOptions::default(), &format!("https://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+
+        assert_eq!(stream.peer_addr().unwrap().port(), port);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connector_rejects_non_http_schemes() {
+        use ohno::Labeled as _;
+        use seatbelt::{Recovery as _, RecoveryKind};
+
+        // `RequestFilter::HttpAndHttps` admits any scheme and `enforce_http(false)` disables
+        // hyper's own check, so without the explicit guard an `ftp://` target would be dialed
+        // and then spoken HTTP to. The port is given explicitly so that the request is rejected
+        // by the scheme guard rather than incidentally by the missing-default-port check.
+        let error = connect_to(fetch_options::SocketOptions::default(), "ftp://127.0.0.1:21")
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.label().as_str(), "scheme_not_allowed");
+        assert_eq!(error.recovery().kind(), RecoveryKind::Never);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn connector_surfaces_connect_failure_as_recoverable_io_error() {
+        use seatbelt::{Recovery as _, RecoveryInfo};
+
+        // Binding then dropping the listener yields a port nothing is listening on, so the
+        // connect fails. The port could in principle be re-bound by another process before the
+        // connect, but the window is a few microseconds inside one test.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        let options = SocketOptions::default().send_buffer_size(64 * 1024);
-        let error = super::connect_tcp("127.0.0.1", port, &options).await.unwrap_err();
+        let error = connect_with(fetch_options::SocketOptions::default().send_buffer_size(64 * 1024), port)
+            .await
+            .unwrap_err();
 
-        assert!(!error.to_string().is_empty(), "the connect failure must carry a message");
+        // hyper's own `Display` is only a static summary, so the operating system detail has to
+        // survive in the source chain for the message to be diagnosable at all.
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the underlying I/O cause must be preserved, got: {error}"
+        );
+        assert_eq!(
+            error.recovery().kind(),
+            RecoveryInfo::from(std::io::ErrorKind::ConnectionRefused).kind(),
+            "the refused connection must keep the recovery classification of a plain I/O error"
+        );
+    }
+
+    /// An error that is not itself an [`std::io::Error`] but wraps one, mirroring the shape of
+    /// hyper's connect error.
+    #[derive(Debug)]
+    struct WrappingError(std::io::Error);
+
+    impl std::fmt::Display for WrappingError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("tcp connect error")
+        }
+    }
+
+    impl std::error::Error for WrappingError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn io_error_kind_walks_the_source_chain() {
+        // hyper's connect error is not an `io::Error` and only carries a static message, so the
+        // kind has to be recovered from its source rather than from the outermost error.
+        let wrapped = WrappingError(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"));
+        assert_eq!(super::io_error_kind(&wrapped), std::io::ErrorKind::TimedOut);
+
+        // An error that is itself an I/O error is matched without walking any further.
+        let direct = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        assert_eq!(super::io_error_kind(&direct), std::io::ErrorKind::ConnectionRefused);
+
+        // An error chain without any I/O error falls back to the conservative default.
+        let opaque = http::Uri::try_from("::not a uri::").unwrap_err();
+        assert_eq!(super::io_error_kind(&opaque), std::io::ErrorKind::Other);
     }
 }

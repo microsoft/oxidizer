@@ -1392,6 +1392,7 @@ dependencies = [
  "thread_aware",
  "tick",
  "tokio",
+ "tower-service",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

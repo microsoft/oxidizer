@@ -7,9 +7,9 @@
 //! applies to every connection it opens. It covers the Nagle algorithm ([`no_delay`][SocketOptions::no_delay])
 //! and the kernel send/receive buffer sizes.
 //!
-//! Every option defaults to `None`, meaning "leave the operating system default in place".
-//! Only explicitly configured values are applied, so adding this struct never changes
-//! the behavior of an existing client.
+//! Every option defaults to `None`, meaning "use the operating system default". Values left
+//! as `None` resolve to that default rather than to a value of this crate's choosing, so
+//! adding this struct never changes the observable behavior of an existing client.
 //!
 //! These settings are honored by the connectors bundled with `fetch`. A custom connector
 //! is responsible for applying them itself.
@@ -61,19 +61,28 @@ pub struct SocketOptions {
     /// Whether the Nagle algorithm is disabled (`TCP_NODELAY`).
     ///
     /// `Some(true)` sends small writes immediately at the cost of extra packets.
-    /// `None` keeps the operating system default.
+    /// `None` keeps the operating system default, which enables Nagle on every platform
+    /// `fetch` supports and is therefore equivalent to `Some(false)` in practice.
     pub no_delay: Option<bool>,
     /// Size of the kernel receive buffer (`SO_RCVBUF`), in bytes.
     ///
     /// `None` keeps the operating system default. Values are clamped into
     /// <code>[MIN_SOCKET_BUFFER_SIZE]..=[MAX_SOCKET_BUFFER_SIZE]</code> when set. The kernel may
     /// clamp or scale the request further, so the effective size can still differ.
+    ///
+    /// Assigning to this field directly bypasses the clamping; read it back through
+    /// [`effective_receive_buffer_size`][Self::effective_receive_buffer_size] to get a value that
+    /// is safe to hand to the kernel.
     pub receive_buffer_size: Option<u32>,
     /// Size of the kernel send buffer (`SO_SNDBUF`), in bytes.
     ///
     /// `None` keeps the operating system default. Values are clamped into
     /// <code>[MIN_SOCKET_BUFFER_SIZE]..=[MAX_SOCKET_BUFFER_SIZE]</code> when set. The kernel may
     /// clamp or scale the request further, so the effective size can still differ.
+    ///
+    /// Assigning to this field directly bypasses the clamping; read it back through
+    /// [`effective_send_buffer_size`][Self::effective_send_buffer_size] to get a value that is
+    /// safe to hand to the kernel.
     pub send_buffer_size: Option<u32>,
 }
 
@@ -148,37 +157,64 @@ impl SocketOptions {
         self
     }
 
-    /// Reports whether any setting must be applied before the socket connects.
+    /// Returns the receive buffer size to hand to the kernel, clamped into the accepted range.
     ///
-    /// Buffer sizes must be set on an unconnected socket to affect `TCP` window scaling,
-    /// whereas [`no_delay`][Self::no_delay] can be applied to an already connected stream.
-    /// Connectors use this to skip the more expensive unconnected-socket path when no
-    /// pre-connect tuning was requested; it is public so third-party connectors can reuse
-    /// the same fast/slow-path split.
+    /// The builder methods already clamp, but the field is public and may have been assigned
+    /// directly, so connectors must read the size back through this method rather than using
+    /// [`receive_buffer_size`][Self::receive_buffer_size] verbatim.
     ///
     /// # Examples
     ///
     /// ```
-    /// use fetch_options::SocketOptions;
+    /// use fetch_options::{MIN_SOCKET_BUFFER_SIZE, SocketOptions};
     ///
-    /// assert!(
-    ///     !SocketOptions::default()
-    ///         .no_delay(true)
-    ///         .requires_pre_connect_setup()
-    /// );
-    /// assert!(
-    ///     SocketOptions::default()
-    ///         .send_buffer_size(65_536)
-    ///         .requires_pre_connect_setup()
+    /// let mut options = SocketOptions::default();
+    /// assert_eq!(options.effective_receive_buffer_size(), None);
+    ///
+    /// // A directly assigned value bypasses the builder, so it is clamped on read instead.
+    /// options.receive_buffer_size = Some(0);
+    /// assert_eq!(
+    ///     options.effective_receive_buffer_size(),
+    ///     Some(MIN_SOCKET_BUFFER_SIZE)
     /// );
     /// ```
     #[must_use]
-    pub fn requires_pre_connect_setup(&self) -> bool {
-        self.receive_buffer_size.is_some() || self.send_buffer_size.is_some()
+    #[inline]
+    pub fn effective_receive_buffer_size(&self) -> Option<u32> {
+        self.receive_buffer_size.map(clamp_buffer_size)
+    }
+
+    /// Returns the send buffer size to hand to the kernel, clamped into the accepted range.
+    ///
+    /// The builder methods already clamp, but the field is public and may have been assigned
+    /// directly, so connectors must read the size back through this method rather than using
+    /// [`send_buffer_size`][Self::send_buffer_size] verbatim. This matters most for zero, which
+    /// disables send buffering outright on Windows instead of selecting the default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fetch_options::{MIN_SOCKET_BUFFER_SIZE, SocketOptions};
+    ///
+    /// let mut options = SocketOptions::default();
+    /// assert_eq!(options.effective_send_buffer_size(), None);
+    ///
+    /// // A directly assigned value bypasses the builder, so it is clamped on read instead.
+    /// options.send_buffer_size = Some(0);
+    /// assert_eq!(
+    ///     options.effective_send_buffer_size(),
+    ///     Some(MIN_SOCKET_BUFFER_SIZE)
+    /// );
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn effective_send_buffer_size(&self) -> Option<u32> {
+        self.send_buffer_size.map(clamp_buffer_size)
     }
 }
 
 /// Clamps a requested buffer size into the accepted range.
+#[inline]
 fn clamp_buffer_size(size: u32) -> u32 {
     size.clamp(MIN_SOCKET_BUFFER_SIZE, MAX_SOCKET_BUFFER_SIZE)
 }
@@ -250,10 +286,20 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn pre_connect_setup_only_needed_for_buffer_sizes() {
-        assert!(!SocketOptions::default().requires_pre_connect_setup());
-        assert!(!SocketOptions::default().no_delay(false).requires_pre_connect_setup());
-        assert!(SocketOptions::default().receive_buffer_size(1).requires_pre_connect_setup());
-        assert!(SocketOptions::default().send_buffer_size(1).requires_pre_connect_setup());
+    fn effective_sizes_clamp_directly_assigned_values() {
+        // The fields are public, so the builder's clamping can be bypassed. Reading the sizes
+        // back through the effective accessors must still keep them out of the kernel's way.
+        let options = SocketOptions {
+            send_buffer_size: Some(0),
+            receive_buffer_size: Some(u32::MAX),
+            ..Default::default()
+        };
+
+        assert_eq!(options.effective_send_buffer_size(), Some(MIN_SOCKET_BUFFER_SIZE));
+        assert_eq!(options.effective_receive_buffer_size(), Some(MAX_SOCKET_BUFFER_SIZE));
+
+        // An unset size stays unset rather than being clamped into the range.
+        assert_eq!(SocketOptions::default().effective_send_buffer_size(), None);
+        assert_eq!(SocketOptions::default().effective_receive_buffer_size(), None);
     }
 }
