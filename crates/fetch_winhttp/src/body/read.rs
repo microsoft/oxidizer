@@ -31,7 +31,10 @@ const PREFERRED_READ_SIZE: usize = 64 * 1024;
 /// Pulls one response body lazily from an ongoing WinHTTP request.
 ///
 /// Each caller-driven read first queries available data and then lends one
-/// contiguous writable span from a pooled `BytesBuf` to WinHTTP. The retained
+/// contiguous writable span from a pooled `BytesBuf` to WinHTTP. Capacity is
+/// reserved only after that query, so the rented pool block matches the bytes
+/// actually readable instead of a fixed maximum; a trickling peer therefore
+/// cannot amplify a small response into many large rented blocks. The retained
 /// [`RequestGuard`] keeps callback state and handles alive, so dropping the
 /// reader cancels the request without reading ahead. A zero-length
 /// `READ_COMPLETE`, rather than a zero availability query, is authoritative
@@ -181,8 +184,17 @@ impl Read for WinHttpBodyReader {
     }
 
     async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
-        let into = self.reserve(PREFERRED_READ_SIZE);
-        self.read_into(PREFERRED_READ_SIZE, into).await.map(|(_read, into)| into)
+        // No capacity is reserved here on purpose. `GlobalPool` picks its block
+        // size class from the requested size, so reserving `PREFERRED_READ_SIZE`
+        // before `WinHttpQueryDataAvailable` reports availability would rent a
+        // 64 KiB block for every frame, however small. Each returned frame keeps
+        // its block rented for as long as the consumer holds the view, so a peer
+        // that trickles data would amplify a small response into many full
+        // blocks - the hazard documented under `Read::read_any`'s "Security"
+        // heading and contrary to implementation.md section 6.2. `read_once`
+        // reserves after the availability query instead, so the block size
+        // class matches the bytes that are actually readable.
+        self.read_into(PREFERRED_READ_SIZE, BytesBuf::new()).await.map(|(_read, into)| into)
     }
 }
 
@@ -504,9 +516,31 @@ mod tests {
         let data = futures::executor::block_on(harness.reader.read_any()).unwrap();
 
         assert_eq!(data.peek(), b"z");
-        let requested = harness.record.requested.lock().unwrap()[0];
-        assert!(requested > 0);
-        assert!(requested <= u32::try_from(PREFERRED_READ_SIZE).unwrap());
+        // A zero availability result carries no size information, so the
+        // speculative read still reserves the full pool-aligned upper bound.
+        assert_eq!(
+            harness.record.requested.lock().unwrap()[0],
+            u32::try_from(PREFERRED_READ_SIZE).unwrap()
+        );
+        assert!(data.capacity() >= PREFERRED_READ_SIZE);
+        harness.finish();
+    }
+
+    #[test]
+    fn a_small_availability_rents_a_proportionally_small_block() {
+        let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
+
+        let data = futures::executor::block_on(harness.reader.read_any()).unwrap();
+
+        assert_eq!(data.peek(), b"abc");
+        assert_eq!(harness.record.requested.lock().unwrap()[0], 3);
+        // GlobalPool picks its block size class from the requested size, so a
+        // three-byte availability must not rent a 64 KiB block that stays
+        // rented for as long as the consumer holds the frame.
+        assert!(
+            data.capacity() < PREFERRED_READ_SIZE,
+            "the reservation must follow the queried availability, not the speculative upper bound"
+        );
         harness.finish();
     }
 

@@ -3,7 +3,7 @@
 
 use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -145,7 +145,6 @@ struct State {
     next_response: AtomicUsize,
     requests: Mutex<Vec<(usize, RecordedRequest)>>,
     connections: AtomicUsize,
-    stopping: AtomicBool,
 }
 
 pub(crate) struct TestServer {
@@ -183,7 +182,6 @@ impl TestServer {
             next_response: AtomicUsize::new(0),
             requests: Mutex::new(Vec::new()),
             connections: AtomicUsize::new(0),
-            stopping: AtomicBool::new(false),
         });
         let (shutdown, shutdown_rx) = oneshot::channel();
         let server_state = Arc::clone(&state);
@@ -228,7 +226,6 @@ impl TestServer {
     }
 
     fn stop(&mut self) {
-        self.state.stopping.store(true, Ordering::SeqCst);
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }

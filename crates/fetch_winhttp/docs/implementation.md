@@ -78,9 +78,9 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
   `BindingsFacade` enum (`Real` / `Mock(Arc<MockBindings>)`), matching
   `oxidizer_io`'s bindings facade.
 - The status callback cannot itself be a trait method (WinHTTP calls a bare
-  `extern "system"` fn pointer). Tests therefore synthesize callbacks by invoking
-  the crate-internal `dispatch_completion(context, status, info)` directly. That
-  entry point is a plain fn precisely because it needs no captured state: all
+  `extern "system"` fn pointer). Tests therefore synthesize callbacks by invoking the
+  crate-internal `dispatch_completion(context, status, status_info, status_info_len)`
+  directly. That entry point is a plain fn precisely because it needs no captured state: all
   per-request state is reached through the `context` pointer (the `*mut
   RequestContext`, §4.2), and all recording/expectation state lives in the
   `Arc<MockBindings>` the harness owns via the `BindingsFacade`. Nothing is a global
@@ -126,8 +126,10 @@ crates/fetch_winhttp/
     body/
       read.rs            // bytesbuf_io::Read over WinHttpReadData (response)
       write.rs           // bytesbuf_io::Write over WinHttpWriteData (request)
+      mod.rs             // module wiring only (no type definitions)
     tls.rs               // WinHttpTlsConfig -> security flags
     options.rs           // protocol/decompression option mapping
+    telemetry.rs         // observed::Sink metrics and log events (§12)
     handle.rs            // RAII handle wrappers (Send/Sync assertions)
     error.rs             // Win32 -> HttpError mapping
     error_labels.rs      // ErrorLabel constants
@@ -241,10 +243,13 @@ there is no third "blocking pool" tier - no request-path call can block.
 WinHTTP does not run a bespoke thread pool; it posts async completions to the
 process-global Win32 thread pool, from which a worker dispatches our callback. There
 is no per-request or per-handle thread affinity: successive completions for one
-request can land on different workers, and we do **not** assume WinHTTP serializes
-callbacks per handle. Soundness rests only on "exactly one completion per async
-operation" plus "one operation outstanding per handle" (§4.5), with the single
-status-vs-completion race closed by an atomic (§4.5).
+request can land on different workers, so no callback may assume it runs on the
+thread that submitted the operation or on the same worker as the previous completion.
+Soundness rests on three documented properties: "exactly one completion per async
+operation", "one operation outstanding per handle", and "`HANDLE_CLOSING` is the final
+notification for a handle and does not overlap another callback for that handle"
+(§4.5). The remaining completion-versus-synchronous-failure race is closed by an
+atomic (§4.5).
 
 Two consequences shape the design: all per-request callback state must be reachable
 from the context pointer alone and safe to touch from any thread (§4.1, with `Send`
@@ -329,7 +334,11 @@ For each async step the `RequestDriver` (§4.4) places an `events_once` event in
 the pinned request context, stores its sender in the active-operation slot, issues
 the async call through `Bindings`, and awaits the receiver. The receiver mutably
 borrows the `RequestGuard`, so another operation cannot reuse the embedded storage
-until both endpoints are gone. When WinHTTP later invokes the callback trampoline,
+until the event has reached its terminal state: either the value was received or
+the receiver was destroyed after the sender disconnected. The sender may still be
+returning from its send at that point, because `events_once` permits the storage
+to be reused once the value has been delivered. When WinHTTP later invokes the
+callback trampoline,
 the trampoline reconstructs the `RequestContext` from the context value, takes the
 stored sender, builds a `CompletionResult`, and sends it. The executor wakes and
 the driver advances to the next state.
@@ -468,7 +477,10 @@ struct CallbackOperationSlot {
     // and arbitrates payload ownership; it does not validate API sequencing.
     state: core::sync::atomic::AtomicU8,
     active: core::cell::UnsafeCell<core::mem::MaybeUninit<ActiveOperation>>,
-    // Pinned in RequestContext and reused only after both one-shot endpoints end.
+    // Pinned in RequestContext and reused only after the previous event reached
+    // its terminal state: value received, or receiver destroyed after the sender
+    // disconnected. events_once permits reuse from that point, so the previous
+    // sender may still be returning from its send.
     completion: core::cell::UnsafeCell<events_once::EmbeddedEvent<CompletionResult>>,
 }
 ```
@@ -589,8 +601,17 @@ enforcement mechanisms:
   that its status matches the published operation kind and uses compare-exchange
   to claim the payload. Only the winner moves out the sender and buffer and returns
   the slot to `Idle`; competing error/success notifications and late callbacks
-  observe a failed claim and are harmless. This does **not** rely on undocumented
-  per-handle callback serialization.
+  observe a failed claim and are harmless.
+- **`HANDLE_CLOSING` must not overlap another callback for the same handle.** The
+  atomic tag deliberately does not cover final reclamation: the claim is not atomic
+  with the read-out of the payload, and the claimed `events_once` sender points into
+  the `EmbeddedEvent` stored inline in the context, so a claimant still touches
+  context memory after the tag returns to `Idle`. `HANDLE_CLOSING` frees exactly that
+  memory. WinHTTP documents `HANDLE_CLOSING` as the last notification a handle
+  receives, and the design relies on that rather than on a spin-wait, which would not
+  make the sender's later use of context memory safe anyway. The slot's destructor
+  debug-asserts that it never observes a claim in progress, and its release path
+  leaves a claimed payload untouched instead of risking a second destructor run.
 - The `events_once` send-then-receive is the release/acquire edge that transfers
   buffer ownership back to the driver. Only after the receiver resolves does the
   driver read the returned buffer.
@@ -719,9 +740,36 @@ every call receives exactly one contiguous span, further bounded by `u32::MAX`; 
 writer advances through all spans without pairing an aggregate length with only the first
 span's pointer.
 
-No independent `Content-Length` mismatch state machine is added. Declared-length or
-framing failures reported by WinHTTP are propagated through the ordinary request error
-path.
+No independent `Content-Length` mismatch state machine runs during the upload itself;
+framing metadata is instead reconciled once, up front, by `RequestBodyFraming::new`
+(`body/write.rs`). `RequestDriver::new` calls it during request translation - before the
+connect and request handles are opened and before any network I/O - passing the caller's
+header map and the length the body reports for itself. It both selects the strategy above
+and normalizes the headers that `TranslatedRequest` then serializes, so exactly one
+framing directive reaches the wire. Each rejection below is generated locally as an
+`HttpError` labeled `invalid_request` with `RecoveryInfo::never()`; none of them
+originates in WinHTTP:
+
+- A caller-supplied `Transfer-Encoding` fails with `UnsupportedTransferEncoding` in every
+  framing mode. WinHTTP performs all request framing itself, so an already-encoded body
+  would be encoded a second time, and forwarding the header would put a second framing
+  directive next to WinHTTP's own - a combination RFC 9112 resolves in favor of
+  `Transfer-Encoding`, and the classic request-smuggling primitive.
+- When the body reports no length of its own, `Content-Length` supplies it. A value that
+  is empty, non-decimal, or overflows `u64`, and duplicate values that disagree with each
+  other, leave the declared length ambiguous and fail with `InvalidContentLength`.
+- For **every** known length, not only lengths above `u32::MAX`, each present
+  `Content-Length` value must equal the true body length. A disagreement fails with
+  `MismatchedContentLength` below the `DWORD` boundary and `InvalidLargeContentLength`
+  above it, the latter naming the exact 64-bit length required. Values that survive are
+  collapsed into one canonical decimal header, so duplicates and non-canonical spellings
+  such as `007` never reach the wire.
+- When the caller supplied no `Content-Length` and the length fits a `DWORD`, none is
+  inserted: `WinHttpSendRequest` emits the header from `dwTotalLength`. Above `u32::MAX`
+  the header is the only framing source, so it is inserted.
+
+Declared-length or framing failures that WinHTTP detects later - after this
+reconciliation, on the wire - are propagated through the ordinary request error path.
 
 ### 6.2 Incoming response body <- `bytesbuf_io::Read`, then an `http_body::Body`
 
@@ -757,8 +805,20 @@ finished" decision is a `READ_COMPLETE` with `len == 0`.
 Each `WinHttpReadData` call exposes only one contiguous writable tail span from the
 possibly segmented `BytesBuf`, bounded by that span's length and `u32::MAX`.
 
-`WinHttpBodyReader` implements both methods required by `bytesbuf_io::Read`:
-`read_at_most_into` and `read_more_into`. Its data path can use
+**Capacity is reserved only after the availability query.** The reader queries
+availability first and calls `BytesBuf::reserve` only once the reported figure is known,
+so `GlobalPool` picks a size class proportional to the bytes that are actually readable.
+The ordering matters because a rented pool block stays rented for as long as the consumer
+holds a view cut from it: reserving a fixed `PREFERRED_READ_SIZE` up front would pin a
+whole 64 KiB block for every emitted frame regardless of its payload, so a body delivered
+in small chunks would amplify retained memory by up to the ratio of block size to chunk
+size. Only the speculative zero-availability path reserves the full
+`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block - because a zero
+availability figure carries no size information. `read_any` reserves nothing of its own
+and inherits the same availability-proportional reservation.
+
+`WinHttpBodyReader` implements all three `bytesbuf_io::Read` methods:
+`read_at_most_into`, `read_more_into`, and `read_any`. Its data path can use
 `ReadExt::into_futures_stream`, whose boxed in-flight read future is `Send`.
 After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
@@ -775,7 +835,9 @@ let body = builder.body(body, &per_request_body_options);
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
-there is no unbounded buffering. The request's body idle timeout
+there is no unbounded buffering; retained pool memory additionally tracks the delivered
+payload, because each frame's block is sized from the reported availability rather than
+from a fixed maximum. The request's body idle timeout
 (`http_extensions::BodyTimeout`) is copied into `per_request_body_options`.
 `HttpBodyBuilder::body` merges it with the client's response-body defaults and applies
 the Rust-side idle-timeout wrapper (§10.4). Native WinHTTP receive timers remain
@@ -830,8 +892,9 @@ trimmed, opaque `obs-text` value bytes are preserved, and repeated fields are ap
 to the `http::HeaderMap` rather than overwritten. Invalid header names and values are
 rejected. `WINHTTP_QUERY_FLAG_WIRE_ENCODING` and the trailer query flag establish the
 Windows 11 version 21H2 minimum documented in design.md; no runtime compatibility path
-is attempted. The numeric status query and the legacy `WINHTTP_QUERY_VERSION` string
-query retain their existing DWORD and UTF-16 buffers, respectively.
+is attempted. Only the raw header and trailer blocks are queried as wire-encoded bytes:
+the numeric status query uses a `DWORD` buffer and the legacy `WINHTTP_QUERY_VERSION`
+string query a UTF-16 buffer.
 
 The response lifecycle constructs a lazy `WinHttpResponseBody` through
 `HttpBodyBuilder::body`, attaches no `ConnectionInfo`, and moves `RequestGuard` into
@@ -882,10 +945,14 @@ are checked under Miri.
 
 ### 7.1 Unit tests (mock bindings, no network)
 
-A `TestHarness` builds the transport over `MockBindings` and exposes
-`complete(op, result)` to fire the callback the real trampoline would fire. This
-deterministically interleaves completions and injects cancellations and
-out-of-order callbacks.
+Each module's unit tests build the code under test over `MockBindings` with a local
+harness: `request.rs` scripts a whole request through `lifecycle_bindings`/`run_lifecycle`
+plus a `LifecycleRecord` of the calls the driver made, and `body/read.rs` scripts
+availability and read steps behind its own reader harness. Callbacks are fired by calling
+`dispatch_completion` with the installed context pointer, which is exactly what the real
+trampoline does, so completions can be interleaved deterministically - inline on the
+submitting thread, from another thread, or after cancellation - and out-of-order or late
+notifications can be injected.
 
 ### 7.2 How each key factor is tested
 
@@ -897,7 +964,7 @@ after the table.
 | Factor | Key assertions | Notable adverse / edge case |
 |--------|----------------|-----------------------------|
 | Threading (§3) | completions fired from a foreign OS thread reach the awaiting future; `static_assertions` for `execute`'s future `Send`, handles `Send`+`!Sync`, handler `Send + Sync`, and instance-owned pools | all setup calls run inline on the caller's thread |
-| Error handling (design.md §7) | table-driven Win32/`WINHTTP_*` code -> `ErrorLabel` + `RecoveryInfo`; `GetLastError` mapping on a failing synchronous call | a 4xx/5xx response is `Ok`, not `Err` |
+| Error handling (design.md §7) | table-driven Win32/`WINHTTP_*` code -> `ErrorLabel` + `RecoveryInfo`, including an unrecognized code mapping to `request_winhttp` with unknown recovery; `GetLastError` mapping on a failing synchronous call | a 4xx/5xx response is `Ok`, not `Err` |
 | Protocol negotiation (design.md §3) | protocol-flag bitmask + `HTTP_PROTOCOL_REQUIRED` per `supported_http_versions` (empty -> `fetch` default; h2/h3-only -> required); response `Version` from the queried negotiated protocol | unmappable requested version (`HTTP/1.0`, `HTTP/0.9`) rejected as `invalid_request` |
 | TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`, each flag setting only its own `SECURITY_FLAGS` bit (the two are independent, not coupled); WinHTTP secure error code -> `tls` label, with deterministic validation failures non-retryable and revocation-server unavailability retryable; `SECURE_FAILURE` flags are optional diagnostics | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
@@ -940,14 +1007,26 @@ after the table.
   pointers/lengths and buffer pinning, a `BytesView` larger than `u32::MAX` split
   into `u32`-sized writes, and a known body length above `u32::MAX` using
   `WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH` plus an explicit `Content-Length` (§6.1).
+  Framing reconciliation is asserted directly on `RequestBodyFraming`: agreeing
+  duplicates collapse to one canonical value, a disagreeing, malformed or overflowing
+  `Content-Length` fails, a known length that fits a `DWORD` and carries no header keeps
+  none, and a caller-supplied `Transfer-Encoding` is rejected in every framing mode.
   Exercise request-trailer rejection and response-trailer parsing/emission through the
   public `HttpBody` surface.
 
 ### 7.3 Integration tests (real WinHTTP, localhost)
 
-Gated behind `#[cfg(windows)]` and `#[cfg_attr(miri, ignore)]`, against a
-localhost server (a small `std::net`-based server, or `wiremock` as used
-elsewhere in `fetch`). These validate the real OS path end to end:
+Gated behind `#[cfg(windows)]` and `#[cfg_attr(miri, ignore)]`, against the two localhost
+fixtures in `tests/common/`. `TestServer` (`server.rs`) serves plaintext or TLS traffic
+over an ephemeral TCP port on the loopback address using `hyper` plus `hyper-util`'s
+protocol-detecting connection builder, so one instance answers both HTTP/1.1 and HTTP/2;
+its TLS mode wraps that with `tokio-rustls` and an `rcgen` self-signed certificate whose
+names each test chooses. `Http3Server` (`http3_server.rs`) serves HTTP/3 over an ephemeral
+UDP port with `quinn` plus `h3` and its own self-signed certificate advertising the `h3`
+ALPN protocol. Both fixtures run a Tokio runtime on a dedicated thread, script their
+responses up front, and record every received request together with a connection counter,
+which is what the isolation and reuse assertions below read. These validate the real OS
+path end to end:
 
 - GET/POST with small and large bodies; response body correctness and size.
 - Unknown-length streaming uploads over HTTP/1.1, HTTP/2, and HTTP/3, followed by
@@ -984,14 +1063,12 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   never reused by the other, proving each slot lands in its own session/pool even though
   the transport ignores the `PoolIndex` *value* (§8). Optionally pair with a mock-bindings
   assertion that `WinHttpOpen` runs once per slot (§3.2).
-- HTTP/1.1 vs HTTP/2 negotiation against a server that supports both (wiremock and
-  hyper-based localhost servers cover h1 and h2); assert the reported response
-  `Version`.
-- HTTP/3: wiremock and hyper localhost servers do not speak HTTP/3, so h3 is
-  tested against a localhost QUIC server stood up with the `quinn` + `h3` crates
-  (dev-dependencies) using a self-signed cert and `accept_invalid_certs`. Assert
-  the negotiated `Version` is HTTP/3, and separately assert the "h3 required but
-  QUIC unreachable" path yields the expected failure (`0x2EFE`/`0x2EFD`).
+- HTTP/1.1 vs HTTP/2 negotiation against `TestServer`, whose connection builder accepts
+  both; assert the reported response `Version`.
+- HTTP/3: `TestServer` speaks no HTTP/3, so h3 is tested against `Http3Server` using its
+  self-signed certificate and `accept_invalid_certs`. Assert the negotiated `Version` is
+  HTTP/3, and separately assert the "h3 required but QUIC unreachable" path yields the
+  expected failure (`0x2EFE`/`0x2EFD`).
 - Connection reuse: two sequential requests to the same authority reuse the
   connection (observable via server-side connection counting).
 - Timeout configuration is validated only structurally (unit, §7.4). Integration
@@ -1093,7 +1170,18 @@ option without an old-Windows capability-probing or degradation path. Because th
 custom-transport factory is infallible, a session that cannot be opened or configured
 produces a permanently failed handler. Every request to that handler returns a fresh
 initialization `HttpError` without opening request/connect handles or issuing network
-I/O.
+I/O, which is the contract design.md §7 states.
+
+Error construction follows one shape for native failures: a Win32/`WINHTTP_*` code becomes
+`HttpError::other(WinHttpError { code, operation, secure_failure_flags }, recovery,
+label)`, where `error.rs` derives the label and `RecoveryInfo` from the code alone.
+`WinHttpError` is `pub(crate)` and is not on the `allowed_external_types` allowlist, so a
+caller can neither name nor downcast to it; the code reaches callers only through the
+source error's `Display` output, exactly as design.md §7 promises. Two families do not
+wrap a `WinHttpError` directly: the initialization failure above wraps a
+`SessionInitializationFailure` that names the failed setup step and keeps its
+`WinHttpError` as its own source, and locally rejected requests (§6.1, §10.1) wrap the
+translation or framing error that describes what the caller must change.
 
 ## 9. Connection management internals
 
@@ -1262,7 +1350,7 @@ The behaviors in design.md §5 are configured through these options.
   stores `Set-Cookie` nor auto-attaches `Cookie`) and
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_AUTHENTICATION` (WinHTTP
   does not intercept 401/407 or attach credentials).
-- **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2) maps to
+- **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2.1) maps to
   session-scoped `WINHTTP_OPTION_HTTP2_KEEPALIVE` /
   `WINHTTP_OPTION_HTTP3_KEEPALIVE` settings applied during transport
   materialization, before any connect or request handle is created. They make
@@ -1270,12 +1358,16 @@ The behaviors in design.md §5 are configured through these options.
   configured interval, keeping pooled connections warm past the server's
   idle-close. Failure to apply either required session option leaves the
   materialized transport in its initialization-failure state. `Disabled` leaves
-  the options unset. `interval` sets the option value; HTTP/2 values below
-  WinHTTP's documented 5000 ms minimum round up to 5000 ms, while HTTP/3 values
-  round and clamp to the finite DWORD range starting at 1 ms. The fit is
-  imperfect and is documented rather than diagnosed at runtime: WinHTTP PINGs idle
-  pooled connections and has no separate "active-only" mode (so
-  `ActiveConnections` and `ActiveAndIdleConnections` behave alike), it exposes a single
+  the options unset. `interval` sets the option value, rounded up to whole
+  milliseconds and clamped to the finite `DWORD` range. HTTP/2 values below WinHTTP's
+  documented 5000 ms minimum are raised to 5000 ms. HTTP/3 has no documented minimum;
+  values there are raised to a transport-chosen 1 ms floor. That floor exists only so a
+  zero-length interval never reaches an option whose zero value WinHTTP leaves undefined:
+  "keep-alive disabled" is a plausible reading of zero, and it would invert a caller that
+  explicitly asked for probes. The fit is imperfect and is documented rather than
+  diagnosed at runtime: WinHTTP PINGs idle pooled connections and has no separate
+  "active-only" mode (so `ActiveConnections` and `ActiveAndIdleConnections` behave
+  alike), it exposes a single
   interval and manages the probe-response timeout itself (so the `timeout` field is not
   separately honorable), and HTTP/1.1 has no application-level PING (so keep-alive there
   is plain TCP connection reuse, always on unless `WINHTTP_DISABLE_KEEP_ALIVE`, §9.3).
@@ -1361,27 +1453,51 @@ different remediations. This attribution is attached only to the log event; it i
 **not** promoted to a metric label, to keep connection-establishment noise out of the
 metric cardinality.
 
-## 13. Dependencies
+## 13. Crate dependencies
 
-Planned crate dependencies (all `default-features = false`, per workspace policy):
+Dependencies are inherited from `[workspace.dependencies]` with default features off, per
+workspace policy; the crate opts into only the features it needs. Same-workspace
+dev-dependencies are the exception: `testing_aids`, `observed_testing`, and `tick` with
+the `test-util` feature are declared by path, carrying neither a version nor workspace
+inheritance. The release tooling resolves publishing order from that form, so converting
+them to workspace inheritance breaks publishing-order resolution. Both the runtime and
+the development dependencies are target-gated under `cfg(windows)`, so a non-Windows
+build pulls in neither the `windows` crate nor the fixtures.
 
-- `windows` `0.62.2` (added to `[workspace.dependencies]`; oxidizer currently
-  vendors only `windows-sys`), features `Win32_Networking_WinHttp` and
-  `Win32_Foundation`, target-gated via `[target.'cfg(windows)'.dependencies]`.
-- `fetch`, `http_extensions`, `bytesbuf`, `bytesbuf_io` (whose
-  `ReadExt::into_futures_stream` feeds the response body, §6.2), `thread_aware`,
-  `tick`, `events_once`, `futures-core`, `plurality`, `layered`,
-  `ohno`, `recoverable`, `http`, `http-body`, `observed` (telemetry events and
-  metrics), and `widestring` (UTF-16). No `anyspawn`: nothing the transport calls
-  can block (§2.1), so there is no blocking pool and no `Spawner`.
+Runtime:
+
+- `windows` with the `Win32_Foundation`, `Win32_Networking_WinHttp`, and
+  `Win32_Networking_WinSock` features. Winsock contributes the socket error codes the
+  error map recognizes next to the `WINHTTP_*` ones.
+- `fetch` and `http_extensions` for the transport contract and `HttpError`, `http` and
+  `http-body` for message and body types, and `layered` for the `Service` the handler
+  implements.
+- `bytesbuf` and `bytesbuf_io` with the `futures-stream` feature, whose
+  `ReadExt::into_futures_stream` feeds the response body (§6.2).
 - `events_once` provides the embedded reusable one-shot event
   ([folo-rs/folo](https://github.com/folo-rs/folo)); placing it in the pinned
   request context avoids both per-operation allocation and callback-side pool
   locking (§5).
-- `plurality` provides the FFI raw-pointer round-trip (`Box::into_raw`/`from_raw`,
-  §4.3).
-- Dev: `mockall`, `static_assertions`, Hyper/Tokio/Rustls localhost HTTP/1.1,
-  HTTP/2, and TLS fixtures, plus `quinn` + `h3` for localhost HTTP/3.
+- `plurality` provides the pooled request context and its FFI raw-pointer round-trip
+  (`Box::into_raw`/`from_raw`, §4.3).
+- `ohno` and `recoverable` for error labels and recovery classification, `observed` for
+  telemetry events and metrics, `thread_aware` with `derive` for per-core relocation of
+  the configuration, `tick` for the clock, `futures-core` for the response-body stream,
+  and `widestring` for UTF-16 conversion.
+
+There is no `anyspawn`: nothing the transport calls can block (§2.1), so there is no
+blocking pool and no `Spawner`.
+
+Development:
+
+- `mockall` for `MockBindings` (§1) and `static_assertions` for the marker-trait
+  assertions (§7.2).
+- `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `rustls`, `rustls-pki-types`, and
+  `rcgen` for the TCP/TLS localhost fixture; `quinn`, `h3`, and `h3-quinn` for the
+  HTTP/3 fixture (§7.3).
+- `bytes`, `http-body-util`, and `futures` for constructing and draining bodies in
+  tests, `observed_testing` for telemetry assertions, `testing_aids` with `ctor` for
+  tracing initialization, and `tick` again with `test-util` for the mock clock.
 
 No Tokio in non-dev code.
 

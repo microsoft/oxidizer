@@ -16,7 +16,24 @@ use crate::error::Result;
 use crate::handle::RawHandle;
 
 #[derive(Clone)]
-/// Selects the production bindings or the test double behind one interface.
+/// Dispatches every WinHTTP call to the production bindings or to a test double.
+///
+/// This is the crate's operating-system abstraction: session, request, and body
+/// logic reach WinHTTP only through this type, which is what lets the transport
+/// be exercised with no network, no real handle, and no real OS behavior
+/// (implementation.md, "The bindings facade").
+///
+/// Each RAII handle wrapper (`SessionHandle`, `ConnectHandle`, `RequestHandle`)
+/// embeds one by value so it can close its handle on drop, so a value is cloned
+/// for every handle a request constructs. Both variants stay cheap to clone for
+/// that reason: `Real` carries no state and `Mock` clones a single `Arc`. The
+/// `Mock` variant is compiled only under `cfg(test)`, so production builds
+/// dispatch through a single-variant enum.
+///
+/// Dispatch forwards arguments, callback registration, and handle lifecycle
+/// unchanged, so the [`Bindings`] contract, including its safety requirements,
+/// applies identically whichever variant is installed, and callers never need
+/// to know which one that is.
 pub(crate) enum BindingsFacade {
     Real,
     #[cfg(test)]

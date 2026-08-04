@@ -235,12 +235,9 @@ mod tests {
     use mockall::Sequence;
     use static_assertions::assert_impl_all;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE,
-        WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE, WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE, WINHTTP_CALLBACK_FLAG_READ_COMPLETE,
-        WINHTTP_CALLBACK_FLAG_REQUEST_ERROR, WINHTTP_CALLBACK_FLAG_SECURE_FAILURE, WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE,
-        WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS,
-        WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
+        WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+        WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+        WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
     };
 
     use super::{
@@ -250,6 +247,7 @@ mod tests {
     use crate::WinHttpOptions;
     use crate::bindings::{BindingsFacade, MockBindings, StatusCallback};
     use crate::callback::status_callback;
+    use crate::context::OperationKind;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
     use crate::options::{WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE, dword_bytes, timeout_millis};
@@ -297,23 +295,68 @@ mod tests {
         drop(session);
     }
 
-    #[test]
-    fn notification_mask_contains_every_required_status() {
-        let expected = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
-            | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
-            | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
-            | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
-            | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
-            | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR
-            | WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE
-            | WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE
-            | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE
-            | WINHTTP_CALLBACK_STATUS_HANDLE_CREATED
-            | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING
-            | WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER
-            | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
+    /// Diagnostic, error, and handle statuses `callback::dispatch_completion`
+    /// acts on outside the awaited-operation completions.
+    ///
+    /// Hand-maintained: the dispatch `match` in `callback.rs` names this
+    /// constant as a required co-edit, because a status dispatched there but
+    /// missing here would be silently uncovered by this test.
+    const DISPATCHED_STATUSES: [(&str, u32); 6] = [
+        ("REQUEST_ERROR", WINHTTP_CALLBACK_STATUS_REQUEST_ERROR),
+        ("SECURE_FAILURE", WINHTTP_CALLBACK_STATUS_SECURE_FAILURE),
+        ("CONNECTING_TO_SERVER", WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER),
+        ("CONNECTED_TO_SERVER", WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER),
+        ("HANDLE_CREATED", WINHTTP_CALLBACK_STATUS_HANDLE_CREATED),
+        ("HANDLE_CLOSING", WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING),
+    ];
 
-        assert_eq!(SESSION_NOTIFICATION_FLAGS, expected);
+    /// Asserts that `SESSION_NOTIFICATION_FLAGS` enables every notification the
+    /// callback protocol consumes.
+    ///
+    /// Awaited operation completions come from `OperationKind::ALL`, so the
+    /// enumeration itself supplies that half of the coverage; the remaining
+    /// statuses come from `DISPATCHED_STATUSES`.
+    #[test]
+    fn notification_mask_enables_every_dispatched_status() {
+        for kind in OperationKind::ALL {
+            assert_status_enabled(&format!("{kind:?}"), awaited_status(kind));
+        }
+
+        for (name, status) in DISPATCHED_STATUSES {
+            assert_status_enabled(name, status);
+        }
+    }
+
+    /// Asserts that the registered mask lets WinHTTP deliver `status`.
+    ///
+    /// Every `WINHTTP_CALLBACK_STATUS_*` value is a distinct single bit and each
+    /// `WINHTTP_CALLBACK_FLAG_*` notification flag is the union of the status
+    /// bits it enables, so a status value doubles as its own mask bit.
+    /// Ref: <https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpsetstatuscallback>
+    fn assert_status_enabled(name: &str, status: u32) {
+        assert_eq!(
+            SESSION_NOTIFICATION_FLAGS & status,
+            status,
+            "SESSION_NOTIFICATION_FLAGS does not enable {name}, which the callback protocol consumes. \
+             WinHTTP would never deliver that notification, and because nothing else wakes an operation \
+             future and every native timeout is unlimited, the affected request would wait forever \
+             instead of failing."
+        );
+    }
+
+    /// Reports the callback status that completes `kind`.
+    ///
+    /// The match is exhaustive on purpose: a new `OperationKind` variant stops
+    /// this test compiling until its completion status is stated here, and
+    /// `OperationKind::ALL` then feeds it into the mask assertion.
+    fn awaited_status(kind: OperationKind) -> u32 {
+        match kind {
+            OperationKind::SendRequest
+            | OperationKind::HeadersAvailable
+            | OperationKind::DataAvailable
+            | OperationKind::Read
+            | OperationKind::Write => kind.callback_status(),
+        }
     }
 
     #[test]

@@ -47,6 +47,32 @@ pub(crate) enum OperationKind {
 }
 
 impl OperationKind {
+    /// Every variant, in declaration order.
+    ///
+    /// Tables derived from this enumeration - such as the notification-mask
+    /// coverage test in `session.rs` - iterate this constant instead of
+    /// repeating the variant list, so one edit keeps them honest.
+    ///
+    /// What the const check below enforces: the listed variants occupy the
+    /// contiguous discriminant range starting at `SendRequest`, each exactly
+    /// once, and no further discriminant decodes through `from_discriminant`.
+    /// A variant inserted anywhere but the end, removed, reordered, or
+    /// duplicated therefore fails to compile.
+    ///
+    /// What it cannot enforce: stable Rust cannot count an enumeration's
+    /// variants, so a variant appended after `Write` and wired up nowhere else
+    /// would leave this list stale. In practice such a variant cannot function
+    /// without an arm in `from_discriminant` - without one, `active_kind`
+    /// never decodes its slot tag and no callback ever claims its payload -
+    /// and adding that arm does fail the check below.
+    pub(crate) const ALL: [Self; 5] = [
+        Self::SendRequest,
+        Self::HeadersAvailable,
+        Self::DataAvailable,
+        Self::Read,
+        Self::Write,
+    ];
+
     pub(crate) const fn callback_status(self) -> u32 {
         match self {
             Self::SendRequest => WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
@@ -78,6 +104,27 @@ impl OperationKind {
         }
     }
 }
+
+// Keeps `OperationKind::ALL` in sync with the enumeration; see its comment for
+// the exact reach and limits of this check. Evaluated eagerly because free
+// const items are always const-evaluated.
+const _: () = {
+    let first = OperationKind::SendRequest as u8;
+    let mut index = 0_u8;
+
+    while (index as usize) < OperationKind::ALL.len() {
+        assert!(
+            OperationKind::ALL[index as usize] as u8 == first + index,
+            "OperationKind::ALL must list every variant exactly once, in declaration order"
+        );
+        index += 1;
+    }
+
+    assert!(
+        OperationKind::from_discriminant(first + index).is_none(),
+        "OperationKind::ALL is missing a variant that from_discriminant decodes"
+    );
+};
 
 #[derive(Debug)]
 #[expect(
@@ -203,13 +250,41 @@ pub(crate) struct ActiveOperation {
 
 /// Stores the callback handoff payload without allocating per operation.
 ///
-/// Sequential submission is guaranteed by the mutable borrow held by
-/// `OperationFuture`; this type does not enforce that API rule in release
-/// builds. Its atomic tag instead publishes the initialized payload to WinHTTP
-/// threads and arbitrates the real race between a completion callback, a
-/// synchronous submission failure, and final handle closure. The operation
-/// future owns the request handle until its receiver endpoint is destroyed, so
-/// cancellation cannot expose a reusable guard while this payload remains live.
+/// The slot lives inside the pinned [`RequestContext`] and is reused across the
+/// request's sequence of operations: send, each request write, receive, then
+/// each response read. It holds the completion sender and any buffer lent to
+/// `WinHTTP` for the operation that is currently outstanding, together with the
+/// one-shot event whose storage backs that sender.
+///
+/// Three distinct mechanisms make this sharing between the request task and
+/// `WinHTTP` callback threads sound, and each covers a different hazard.
+///
+/// **Sequential submission is guaranteed by construction, not by this type.**
+/// Arming requires the exclusive `RequestGuard` borrow held by
+/// `OperationFuture`, and submission moves the request handle out of the guard
+/// into that future. Safe code therefore holds no request handle with which to
+/// arm a second operation until the future's receiver endpoint is destroyed and
+/// the handle returns to the guard. Forgetting the future leaks the handle
+/// inside it rather than making the guard reusable. This type only
+/// debug-asserts the resulting invariant when arming.
+///
+/// **The atomic tag publishes the payload and resolves one claim race.** The
+/// release store of the operation kind makes the fully initialized payload
+/// visible to callback threads, and the compare-exchange in the claim path lets
+/// exactly one of the completion callback, the synchronous submission-failure
+/// path, and the final-close path move the sender and buffer out. Competing and
+/// late claimants observe a failed exchange and do nothing. The tag arbitrates
+/// nothing beyond which claimant takes the payload.
+///
+/// **Correctness additionally requires that `WinHTTP` never delivers
+/// `HANDLE_CLOSING` concurrently with another callback for the same request
+/// handle.** The tag cannot cover that case and does not try to: claiming the
+/// payload is not atomic with reading it out, and the claimed `RawSender`
+/// refers to the [`EmbeddedEvent`] stored inline in the context, so the sender
+/// still touches context memory after the tag returns to idle. Both the
+/// read-out and the send therefore operate on storage that `HANDLE_CLOSING`
+/// reclaims, and only genuine non-overlap of the final notification with other
+/// callbacks keeps them from racing reclamation.
 struct CallbackOperationSlot {
     state: AtomicU8,
     active: UnsafeCell<MaybeUninit<ActiveOperation>>,
@@ -225,6 +300,35 @@ impl CallbackOperationSlot {
         }
     }
 
+    /// Publishes the payload for one asynchronous `WinHTTP` call and returns
+    /// the receiver endpoint that the request task awaits.
+    ///
+    /// # Safety
+    ///
+    /// The slot must be idle: no operation may be armed and no claimant may
+    /// still hold a payload taken from it. The caller must hold the exclusive
+    /// `RequestGuard` borrow that establishes both, because it is the borrow
+    /// that keeps a second submission from overwriting live payload and event
+    /// storage.
+    ///
+    /// The event armed by a previous call must have reached its terminal
+    /// state, because arming reuses the event storage in place: either its
+    /// value was received (the `OperationFuture` polled to `Ready`) or its
+    /// receiver was destroyed after the sender had already disconnected. The
+    /// previous `RawSender` may still be unwinding on a callback thread.
+    /// `events_once` ends an event's lifetime at delivery rather than at
+    /// endpoint destruction: `EmbeddedEvent` documents that one container may
+    /// back multiple events with non-overlapping lifetimes, and the crate's
+    /// own pooled events recycle their storage from the receiving poll while
+    /// the sender is still returning from `send()`. Demanding that the sender
+    /// object itself be gone would be impossible to meet here, because the
+    /// callback thread wakes the request task from inside `RawSender::send()`,
+    /// so the woken task can receive the value and re-arm before that call
+    /// returns.
+    ///
+    /// The slot must also remain pinned at a stable address until both
+    /// endpoints of the returned event are destroyed, since the sender handed
+    /// to `WinHTTP` points into the event stored inline here.
     unsafe fn arm(self: Pin<&Self>, kind: OperationKind, buffer: OperationBuffer) -> RawReceiver<CompletionResult> {
         debug_assert_eq!(
             self.state.load(Ordering::Acquire),
@@ -240,7 +344,9 @@ impl CallbackOperationSlot {
         // endpoints' full lifetimes.
         let completion = unsafe { Pin::new_unchecked(completion) };
         // SAFETY: the pinned slot outlives both endpoints, and the caller's
-        // exclusive RequestGuard borrow guarantees the storage is not in use.
+        // exclusive RequestGuard borrow guarantees that any previous event
+        // reached its terminal state, after which events_once no longer
+        // touches this storage.
         let (completion, receiver) = unsafe { Event::placed(completion) };
 
         // SAFETY: sequential submission gives this caller exclusive access to
@@ -270,6 +376,16 @@ impl CallbackOperationSlot {
             .compare_exchange(kind as u8, OPERATION_CLAIMED, Ordering::AcqRel, Ordering::Acquire)
             .ok()?;
 
+        // The claim and the read-out below are deliberately not one atomic
+        // step: the tag stays CLAIMED while the payload moves out and only then
+        // returns to idle. Nothing can reclaim the storage inside that window.
+        // A competing claimant loses the compare-exchange above. Only closing
+        // the request handle can free this storage, by way of the final
+        // HANDLE_CLOSING notification, and that close cannot be under way here:
+        // a callback claiming the payload runs on a handle whose HANDLE_CLOSING
+        // WinHTTP does not deliver concurrently with another callback, and the
+        // request task claiming a synchronously failed submission still holds
+        // the open request handle it took out of the guard.
         let active = self.active.get();
         // SAFETY: the exact published tag was atomically claimed above, so
         // this callback has exclusive access to the initialized storage.
@@ -304,12 +420,35 @@ impl Drop for CallbackOperationSlot {
             unsafe {
                 self.active.get_mut().assume_init_drop();
             }
-        } else {
-            debug_assert_eq!(
-                state, OPERATION_IDLE,
-                "HANDLE_CLOSING must not overlap the callback that claimed the operation"
-            );
+
+            return;
         }
+
+        debug_assert_eq!(
+            state, OPERATION_IDLE,
+            "HANDLE_CLOSING must not overlap the callback that claimed the operation"
+        );
+
+        // A claimed tag cannot be observed here. This slot is destroyed only
+        // when the context allocation is reclaimed, and that happens either
+        // before the context value is installed, when callbacks for the request
+        // handle carry a null context and dispatch ignores them, or on the final
+        // HANDLE_CLOSING notification, which WinHTTP does not deliver while
+        // another callback for the same request handle is executing. A claim
+        // therefore always completes, restoring the idle tag, before this
+        // destructor can run.
+        //
+        // If that platform guarantee were violated, the payload would be inside
+        // the claimant's read-out window, where this thread cannot tell whether
+        // the value has already been moved out. Falling through and leaving the
+        // payload untouched does not make that state supported and merely
+        // leaky: the claimant would be reading storage that this destruction is
+        // already reclaiming, which is undefined behavior no matter what this
+        // destructor does. Doing nothing only avoids compounding that fault
+        // with a second run of the sender's and any retained I/O buffer's
+        // destructors on a value another thread already owns. The price is that
+        // the completion sender is never destroyed and the buffer's memory
+        // blocks never return to the bytesbuf pool.
     }
 }
 
@@ -379,13 +518,47 @@ impl RequestContext {
         }
     }
 
+    /// Arms the operation slot for one asynchronous `WinHTTP` call and returns
+    /// the receiver endpoint that the request task awaits.
+    ///
+    /// # Safety
+    ///
+    /// The context's operation slot must be idle: no operation may be armed
+    /// and no claimant may still hold a payload taken from it. The caller must
+    /// hold the exclusive `RequestGuard` borrow that establishes both, because
+    /// it is the borrow that keeps a second submission from overwriting live
+    /// payload and event storage.
+    ///
+    /// The event armed by a previous call must have reached its terminal
+    /// state, because arming reuses the event storage in place: either its
+    /// value was received (the `OperationFuture` polled to `Ready`) or its
+    /// receiver was destroyed after the sender had already disconnected. The
+    /// previous `RawSender` may still be unwinding on a callback thread.
+    /// `events_once` ends an event's lifetime at delivery rather than at
+    /// endpoint destruction: `EmbeddedEvent` documents that one container may
+    /// back multiple events with non-overlapping lifetimes, and the crate's
+    /// own pooled events recycle their storage from the receiving poll while
+    /// the sender is still returning from `send()`. Demanding that the sender
+    /// object itself be gone would be impossible to meet here, because the
+    /// callback thread wakes the request task from inside `RawSender::send()`,
+    /// so the woken task can receive the value and re-arm before that call
+    /// returns.
+    ///
+    /// The context must also remain pinned at a stable address until both
+    /// endpoints of the returned event are destroyed; for an installed context
+    /// that means until the final `HANDLE_CLOSING` notification reclaims the
+    /// allocation.
     pub(crate) unsafe fn arm(self: Pin<&Self>, kind: OperationKind, buffer: OperationBuffer) -> RawReceiver<CompletionResult> {
         // SAFETY: RequestContext structurally pins its operation field, and the
         // caller guarantees that the context remains pinned through both event
         // endpoints' lifetimes.
         let operation = unsafe { self.map_unchecked(|context| &context.operation) };
 
-        // SAFETY: forwarded from this method's caller.
+        // SAFETY: this method's documented contract states the slot's own
+        // requirements verbatim - an idle slot whose previous event reached its
+        // terminal state, held under the caller's exclusive RequestGuard
+        // borrow, in pinned storage that outlives both new endpoints - so
+        // satisfying it satisfies the slot's contract.
         unsafe { operation.arm(kind, buffer) }
     }
 

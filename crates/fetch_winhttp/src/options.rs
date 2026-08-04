@@ -29,9 +29,24 @@ use crate::error::WinHttpError;
 use crate::handle::RawHandle;
 use crate::tls::WinHttpTlsConfig;
 
-// WinHTTP documents a 5000 ms minimum for HTTP/2 and a 1 ms minimum for
-// HTTP/3: https://learn.microsoft.com/windows/win32/winhttp/option-flags
+/// Smallest HTTP/2 keep-alive interval WinHTTP accepts.
+///
+/// The `WINHTTP_OPTION_HTTP2_KEEPALIVE` entry states that callers cannot set a
+/// timeout value less than 5000 milliseconds, so shorter caller intervals are
+/// raised to this value instead of being rejected by the option call.
+/// Ref: <https://learn.microsoft.com/windows/win32/winhttp/option-flags>
 const HTTP2_KEEP_ALIVE_MINIMUM_MS: u32 = 5_000;
+/// Smallest HTTP/3 keep-alive interval this transport forwards to WinHTTP.
+///
+/// This floor is chosen by the transport, not imposed by the operating system:
+/// the `WINHTTP_OPTION_HTTP3_KEEPALIVE` entry documents no minimum. Its purpose
+/// is to keep a zero out of the option value. `dword_millis` maps
+/// `Duration::ZERO` to `0`, and WinHTTP does not define what a zero timeout
+/// means for this option; "keep-alive disabled" is a plausible reading, which
+/// would invert a caller that explicitly asked for keep-alive probes. One
+/// millisecond is the smallest value whose meaning is unambiguous, and every
+/// nonzero caller interval already rounds up to at least that.
+/// Ref: <https://learn.microsoft.com/windows/win32/winhttp/option-flags>
 const HTTP3_KEEP_ALIVE_MINIMUM_MS: u32 = 1;
 // WinHttpSetTimeouts uses -1 for an unlimited timeout:
 // https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpsettimeouts

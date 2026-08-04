@@ -9,6 +9,11 @@
 
 //! HTTP/1.1 localhost integration tests for the WinHTTP transport.
 
+// The standard pipeline exercised here emits `tracing` events through `fetch`'s logging
+// handler, and integration binaries link the library with `cfg(test)` false, so no crate-root
+// initialization runs. Install it directly. See docs/tracing-tests.md.
+testing_aids::init_tracing!();
+
 mod common;
 
 use std::future::Future as _;
@@ -22,7 +27,7 @@ use fetch::options::{ConnectionPoolOptions, PoolSelection};
 use fetch::{HttpClient, HttpError};
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps, WinHttpTlsConfig};
 use futures::TryStreamExt as _;
-use http::header::{CONTENT_ENCODING, COOKIE, LOCATION, SET_COOKIE, WWW_AUTHENTICATE};
+use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, COOKIE, LOCATION, SET_COOKIE, TRANSFER_ENCODING, WWW_AUTHENTICATE};
 use http::{HeaderMap, HeaderValue, StatusCode, Version};
 use http_body::Frame;
 use http_body_util::StreamBody;
@@ -96,6 +101,94 @@ fn unknown_length_upload_is_streamed_before_the_response() {
         Some("chunked")
     );
     assert!(!snapshot.requests[0].headers.contains_key("content-length"));
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
+    // Eleven bytes, comfortably below the `DWORD` boundary, so the transport takes the
+    // `dwTotalLength` framing path rather than the ignore-total sentinel path.
+    const BODY: &str = "framed body";
+
+    let server = TestServer::http([ResponsePlan::ok("declared length received")]);
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+
+    // Below the `DWORD` boundary the transport keeps an agreeing caller-supplied
+    // `Content-Length` header *and* passes the same length as `dwTotalLength` to
+    // `WinHttpSendRequest`, because MSDN requires the application to specify the length in the
+    // call whenever the declared length is below 2^32. Two framing inputs describe one body, yet
+    // the crate promises that exactly one framing directive reaches the wire
+    // (implementation.md section 6.1). Only a server-side observation can confirm that, because
+    // `WinHTTP` - not this crate - decides what it finally writes when both are supplied.
+    //
+    // The header is supplied in a non-canonical form so it cannot be confused with the one
+    // `HttpRequestBuilder::build` auto-populates from the body length: only a caller-supplied
+    // header can arrive at the transport as `0011`, and only a length that survived
+    // reconciliation and `WinHTTP` framing can leave as `11`.
+    let response = futures::executor::block_on(
+        test_client
+            .client
+            .post(server.url("/declared-length"))
+            .header(CONTENT_LENGTH, HeaderValue::from_static("0011"))
+            .text(BODY)
+            .fetch_text_body(),
+    )
+    .unwrap();
+
+    assert_eq!(response, "declared length received");
+
+    let snapshot = server.finish();
+    assert_eq!(snapshot.requests.len(), 1);
+    let request = &snapshot.requests[0];
+    assert_eq!(request.body, Bytes::from_static(BODY.as_bytes()));
+    // `hyper` accepts repeated identical `Content-Length` values silently, so looking the header
+    // up singly would not notice a second copy travelling next to the caller's. Count every
+    // received value instead.
+    assert_eq!(
+        request.headers.get_all(CONTENT_LENGTH).iter().count(),
+        1,
+        "expected exactly one Content-Length on the wire, received {:?}",
+        request.headers.get_all(CONTENT_LENGTH).iter().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        request.headers.get(CONTENT_LENGTH).unwrap().to_str().unwrap(),
+        BODY.len().to_string()
+    );
+    // The other framing directive must be absent: a length and a transfer coding together are
+    // the two-directive shape RFC 9112 section 6.1 resolves in favor of the coding.
+    assert!(!request.headers.contains_key(TRANSFER_ENCODING));
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn a_disagreeing_caller_supplied_content_length_never_reaches_the_wire() {
+    // Deliberately shorter than the body rather than longer. A caller length that exceeds the
+    // body would leave the server waiting for bytes that never arrive, so a regression in the
+    // reconciliation would turn this test into an indefinite hang instead of a failure. A
+    // shorter length can only ever produce a prompt error.
+    const DECLARED: &str = "4";
+    const BODY: &str = "framed body";
+
+    let server = TestServer::http([ResponsePlan::ok("must not be reached")]);
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+
+    let error = futures::executor::block_on(
+        test_client
+            .client
+            .post(server.url("/disagreeing-length"))
+            .header(CONTENT_LENGTH, HeaderValue::from_static(DECLARED))
+            .text(BODY)
+            .fetch(),
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("Content-Length header must equal the exact request body length (11)"),
+        "unexpected error: {error}"
+    );
+    assert!(server.finish().requests.is_empty());
 }
 
 #[cfg_attr(miri, ignore)]
@@ -200,6 +293,18 @@ fn full_fetch_pipeline_uses_the_winhttp_transport() {
     let client = HttpClient::builder_winhttp(deps)
         .insecure_allow_http()
         .supported_http_versions(&[Version::HTTP_11])
+        // The standard pipeline's retry layer awaits `Clock::delay` for its backoff between
+        // attempts. This test drives a frozen clock, which never advances on its own and which no
+        // test logic advances, so a single retried attempt would block forever: the two
+        // `HttpTimeout` layers and the transport's connect deadline all run on that same frozen
+        // clock, and `WinHTTP`'s native timers are deliberately unlimited (see
+        // crates/fetch_winhttp/docs/design.md, "Timeouts and time"). A transient localhost failure
+        // would therefore turn a test failure into an indefinite hang instead of an assertion.
+        // Capping the retry budget at zero leaves every standard layer in the stack - including
+        // the retry layer and its recovery classification - while making it structurally
+        // impossible for a backoff delay to be awaited, because the retry loop breaks on the first
+        // attempt.
+        .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(0)))
         .build();
 
     let response = futures::executor::block_on(client.get(server.url("/full-pipeline")).fetch_text_body()).unwrap();

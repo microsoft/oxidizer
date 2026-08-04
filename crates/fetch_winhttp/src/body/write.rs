@@ -10,7 +10,7 @@ use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
 use bytesbuf::{BytesBuf, BytesView};
 use bytesbuf_io::Write;
 use fetch::{HttpBody, HttpError, RecoveryInfo};
-use http::header::CONTENT_LENGTH;
+use http::header::{CONTENT_LENGTH, TRANSFER_ENCODING};
 use http::{HeaderMap, HeaderValue};
 use http_body::Body as _;
 
@@ -21,14 +21,20 @@ use crate::options::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
 use crate::request::RequestGuard;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Selects the WinHTTP framing strategy for one request body.
+/// Selects the `WinHTTP` framing strategy for one request body.
 ///
 /// Known lengths that fit a `DWORD` are passed directly to
 /// `WinHttpSendRequest`. Larger known bodies use the ignore-total sentinel and
 /// require an exact normalized 64-bit `Content-Length` header. Unknown lengths
-/// enable WinHTTP automatic chunking and require a final zero-length write.
-/// Constructing the framing strategy validates duplicate length headers before
-/// network I/O.
+/// enable `WinHTTP` automatic chunking and require a final zero-length write
+/// (implementation.md section 6.1).
+///
+/// Constructing the framing strategy is also the single point where the
+/// caller's framing metadata is reconciled with the framing `WinHTTP` will
+/// actually perform, before any handle is opened: every `Content-Length` header
+/// must agree with the true body length and is collapsed into one canonical
+/// decimal value, and a caller-supplied `Transfer-Encoding` is rejected. This
+/// keeps exactly one framing directive on the wire.
 pub(crate) struct RequestBodyFraming {
     total_length: u32,
     automatic_chunking: bool,
@@ -36,6 +42,21 @@ pub(crate) struct RequestBodyFraming {
 
 impl RequestBodyFraming {
     pub(crate) fn new(headers: &mut HeaderMap, content_length: Option<u64>) -> Result<Self, RequestBodyFramingError> {
+        // WinHTTP always performs the request framing itself: it derives the
+        // wire `Content-Length` from `dwTotalLength`, or chunks the body when
+        // automatic chunking is enabled (implementation.md section 6.1). A
+        // caller-supplied transfer coding can therefore never be honored - the
+        // caller's already-encoded bytes would be encoded a second time - and
+        // forwarding the header would put a second framing directive next to
+        // WinHTTP's own, which RFC 9112 section 6.1 resolves in favor of
+        // `Transfer-Encoding` and which is the classic request smuggling
+        // primitive. Rejecting rather than stripping follows design.md
+        // section 5, which fails requests carrying body metadata the transport
+        // cannot honor instead of silently dropping it.
+        if headers.contains_key(TRANSFER_ENCODING) {
+            return Err(RequestBodyFramingError::UnsupportedTransferEncoding);
+        }
+
         let content_length = match content_length {
             Some(length) => Some(length),
             None => Self::declared_content_length(headers)?,
@@ -44,9 +65,29 @@ impl RequestBodyFraming {
         match content_length {
             Some(length) => {
                 let total_length = match u32::try_from(length) {
-                    Ok(length) => length,
+                    Ok(total_length) => {
+                        // `dwTotalLength` is authoritative here, so a
+                        // disagreeing caller header would travel next to a
+                        // contradicting WinHTTP-generated length.
+                        reconcile_content_length(
+                            headers,
+                            length,
+                            RequestBodyFramingError::MismatchedContentLength { expected: length },
+                        )?;
+                        total_length
+                    }
                     Err(_too_large) => {
-                        validate_large_content_length(headers, length)?;
+                        reconcile_content_length(
+                            headers,
+                            length,
+                            RequestBodyFramingError::InvalidLargeContentLength { expected: length },
+                        )?;
+                        // `dwTotalLength` cannot represent this length, so the
+                        // header is the only framing source and must be present
+                        // even when the caller supplied none.
+                        if !headers.contains_key(CONTENT_LENGTH) {
+                            headers.insert(CONTENT_LENGTH, canonical_content_length(length));
+                        }
                         WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH
                     }
                 };
@@ -63,7 +104,14 @@ impl RequestBodyFraming {
         }
     }
 
-    fn declared_content_length(headers: &mut HeaderMap) -> Result<Option<u64>, RequestBodyFramingError> {
+    /// Reads the body length declared by a `Content-Length` header.
+    ///
+    /// This is the fallback for bodies that cannot report their own length.
+    /// Duplicate headers must all decode to the same value; otherwise the
+    /// declared length is ambiguous and no framing strategy can be chosen.
+    /// Normalization is left to [`reconcile_content_length`], which runs for
+    /// every known length regardless of where that length came from.
+    fn declared_content_length(headers: &HeaderMap) -> Result<Option<u64>, RequestBodyFramingError> {
         let mut values = headers.get_all(CONTENT_LENGTH).iter();
         let Some(first) = values.next() else {
             return Ok(None);
@@ -75,10 +123,6 @@ impl RequestBodyFraming {
         if values.any(|value| parse_content_length(value) != Some(length)) {
             return Err(RequestBodyFramingError::InvalidContentLength);
         }
-
-        let value = HeaderValue::from_str(&length.to_string())
-            .expect("a decimal u64 contains only ASCII digits and is always a valid HTTP header value");
-        headers.insert(CONTENT_LENGTH, value);
 
         Ok(Some(length))
     }
@@ -92,20 +136,41 @@ impl RequestBodyFraming {
     }
 }
 
-fn validate_large_content_length(headers: &mut HeaderMap, expected: u64) -> Result<(), RequestBodyFramingError> {
+/// Reconciles caller-supplied `Content-Length` headers with the body length.
+///
+/// Any header value that disagrees with `expected` fails the request with
+/// `mismatch`, because the caller would otherwise put a framing directive on
+/// the wire that contradicts what WinHTTP sends.
+///
+/// A header that survives is rewritten as one canonical decimal value, so a set
+/// of duplicate or non-canonical values (`007`, repeated values) collapses into
+/// the single length WinHTTP is told to send. A caller that supplied no header
+/// is left without one, because `WinHttpSendRequest` emits the header from
+/// `dwTotalLength` in that case.
+fn reconcile_content_length(
+    headers: &mut HeaderMap,
+    expected: u64,
+    mismatch: RequestBodyFramingError,
+) -> Result<(), RequestBodyFramingError> {
+    if !headers.contains_key(CONTENT_LENGTH) {
+        return Ok(());
+    }
+
     if headers
         .get_all(CONTENT_LENGTH)
         .iter()
         .any(|value| parse_content_length(value) != Some(expected))
     {
-        return Err(RequestBodyFramingError::InvalidLargeContentLength { expected });
+        return Err(mismatch);
     }
 
-    let value = HeaderValue::from_str(&expected.to_string())
-        .expect("a decimal u64 contains only ASCII digits and is always a valid HTTP header value");
-    headers.insert(CONTENT_LENGTH, value);
+    headers.insert(CONTENT_LENGTH, canonical_content_length(expected));
 
     Ok(())
+}
+
+fn canonical_content_length(length: u64) -> HeaderValue {
+    HeaderValue::from_str(&length.to_string()).expect("a decimal u64 contains only ASCII digits and is always a valid HTTP header value")
 }
 
 fn parse_content_length(value: &HeaderValue) -> Option<u64> {
@@ -158,25 +223,36 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Identifies request length metadata that cannot define safe upload framing.
+/// Identifies request framing metadata that cannot define safe upload framing.
 ///
-/// The writer must know whether WinHTTP receives an exact `DWORD` total, an
-/// explicit 64-bit length, or an unknown-length stream. Inconsistent or
-/// malformed `Content-Length` values make that choice ambiguous and are
-/// rejected before any body frame is polled.
+/// The writer must know whether `WinHTTP` receives an exact `DWORD` total, an
+/// explicit 64-bit length, or an unknown-length stream. Inconsistent, malformed
+/// or untruthful `Content-Length` values make that choice ambiguous, and a
+/// caller-supplied `Transfer-Encoding` contradicts the framing `WinHTTP`
+/// performs. Both are rejected before any handle is opened, so a request never
+/// reaches the wire carrying two framing directives.
 pub(crate) enum RequestBodyFramingError {
     InvalidContentLength,
+    MismatchedContentLength { expected: u64 },
     InvalidLargeContentLength { expected: u64 },
+    UnsupportedTransferEncoding,
 }
 
 impl fmt::Display for RequestBodyFramingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidContentLength => f.write_str("the request Content-Length header is not one consistent decimal u64 value"),
+            Self::MismatchedContentLength { expected } => write!(
+                f,
+                "the request Content-Length header must equal the exact request body length ({expected}) or be omitted"
+            ),
             Self::InvalidLargeContentLength { expected } => write!(
                 f,
                 "a request body larger than u32::MAX requires Content-Length to equal its exact 64-bit length ({expected})"
             ),
+            Self::UnsupportedTransferEncoding => {
+                f.write_str("WinHTTP frames the request body itself, so a request Transfer-Encoding header must be removed")
+            }
         }
     }
 }
@@ -374,6 +450,68 @@ mod tests {
         let unknown = RequestBodyFraming::new(&mut headers, None).unwrap();
         assert_eq!(unknown.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
         assert!(unknown.automatic_chunking());
+    }
+
+    #[test]
+    fn known_length_reconciles_the_caller_supplied_content_length() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("005"));
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("5"));
+
+        let framing = RequestBodyFraming::new(&mut headers, Some(5)).unwrap();
+
+        assert_eq!(framing.total_length(), 5);
+        assert!(!framing.automatic_chunking());
+        assert_eq!(
+            headers.get_all(http::header::CONTENT_LENGTH).iter().collect::<Vec<_>>(),
+            [&HeaderValue::from_static("5")]
+        );
+
+        for disagreeing in ["99", "4", "not-a-number", "18446744073709551616"] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(disagreeing).unwrap());
+
+            assert_eq!(
+                RequestBodyFraming::new(&mut headers, Some(5)),
+                Err(RequestBodyFramingError::MismatchedContentLength { expected: 5 })
+            );
+        }
+
+        let mut headers = http::HeaderMap::new();
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("5"));
+        headers.append(http::header::CONTENT_LENGTH, HeaderValue::from_static("6"));
+        assert_eq!(
+            RequestBodyFraming::new(&mut headers, Some(5)),
+            Err(RequestBodyFramingError::MismatchedContentLength { expected: 5 })
+        );
+    }
+
+    #[test]
+    fn a_known_length_body_without_a_header_stays_without_one() {
+        let mut headers = http::HeaderMap::new();
+
+        let framing = RequestBodyFraming::new(&mut headers, Some(5)).unwrap();
+
+        assert_eq!(framing.total_length(), 5);
+        assert!(!headers.contains_key(http::header::CONTENT_LENGTH));
+    }
+
+    #[test]
+    fn a_caller_supplied_transfer_encoding_is_rejected_before_a_framing_mode_is_selected() {
+        // The rejection is the first statement in `RequestBodyFraming::new`, so today all three
+        // content lengths below take an identical path and no framing mode is ever computed -
+        // that is exactly what this test asserts. The parameterization is retained as a guard:
+        // if a future refactor moves the check into a per-mode branch of the length match, the
+        // unknown-length and above-`DWORD` cases would stop rejecting and this test would fail.
+        for content_length in [None, Some(5), Some(u64::from(u32::MAX) + 1)] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+
+            assert_eq!(
+                RequestBodyFraming::new(&mut headers, content_length),
+                Err(RequestBodyFramingError::UnsupportedTransferEncoding)
+            );
+        }
     }
 
     #[test]

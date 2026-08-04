@@ -26,13 +26,17 @@ not share connections.
 ### Platform and transport behavior
 
 * Windows 11 build 22000 or later is required.
-* The transport currently follows automatic Windows proxy policy and exposes
-  no proxy override or direct-connection fallback. Future requirements may
-  add explicit control.
+* Proxy selection follows automatic Windows proxy policy, including
+  automatic discovery and proxy auto-configuration scripts; no proxy
+  override or direct-connection fallback is exposed.
 * Generic TLS configuration and generic transport options that WinHTTP
   cannot represent, including finite connection limits and connection
   idle/lifetime settings, are accepted but ignored.
 * The request body is fully sent before response reception begins.
+* Gzip and deflate response bodies are decoded transparently, and the
+  `Content-Encoding` and `Content-Length` headers describing the encoded
+  form are removed. There is no opt-out. Brotli and zstd responses are
+  delivered still encoded, with their headers intact.
 * Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
   HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
   Request trailers are rejected.
@@ -47,7 +51,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbFAlMEAP_PzAbrtP28mvN9d8bxez0WHnr64UbsZYFavsTLu9hZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8dzONfRfsA8bdr7i6jmiOSQbPMIphqOLSV0b_AcD-byL4nZhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps

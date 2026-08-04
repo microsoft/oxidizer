@@ -132,7 +132,7 @@ approximate, and some ignored:
 | `connection_lifetime = Unlimited` (default) | Honored. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
-| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored with a minimum of 5 seconds for HTTP/2 and 1 millisecond for HTTP/3. The generic `timeout` is ignored; HTTP/1.1 has no equivalent behavior. |
+| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored, raised to a minimum of 5 seconds for HTTP/2 and 1 millisecond for HTTP/3. The generic `timeout` is ignored; HTTP/1.1 has no equivalent behavior. |
 | `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | Behaves like `ActiveConnections`; Windows does not distinguish the two modes. |
 | `Http2Options::initial_max_send_streams` | Ignored; Windows owns HTTP/2 stream concurrency. |
 | `Http2Options::adaptive_window` | Ignored; Windows owns HTTP/2 flow control. |
@@ -143,6 +143,8 @@ approximate, and some ignored:
 | preconfigured rustls/native-tls backend | Ignored; those backend objects cannot configure WinHTTP. |
 | rustls crypto provider or certificate verifier | Ignored; Schannel owns cryptography and certificate verification. |
 | rustls client-certificate resolver | Ignored; client certificates are out of scope (§4.1). |
+
+(The option mapping and the reasoning behind each floor are implementation.md §10.3.)
 
 `ConnectionInfo` (age, `is_expired`, poisoning) that `fetch_hyper` attaches to
 responses cannot be reproduced: WinHTTP hides individual connections, so per
@@ -243,6 +245,23 @@ behaves consistently with the rest of `fetch`:
   but WinHTTP does not expose them; response trailers are therefore available only for
   HTTP/2 and HTTP/3. Outgoing trailer frames are unsupported and fail the request rather
   than being silently dropped.
+- **Caller-supplied request framing headers.** A `Content-Length` supplied by the caller
+  must be a single well-formed value - repeated fields must agree with each other - and
+  must equal the actual length of the request body. A violation fails the request locally,
+  before anything is sent; a `Content-Length` that survives is transmitted in normalized
+  decimal form. A `Transfer-Encoding` supplied by the caller is rejected, because the
+  transport performs request framing itself.
+- **Divergence from `fetch_hyper`: a caller-supplied `Transfer-Encoding` is rejected
+  rather than honored.** `fetch_hyper` honors `Transfer-Encoding: chunked` on a body of
+  unknown length and sends the request; this transport fails such a request instead,
+  whatever the length of the body, before anything reaches the network, with an
+  `invalid_request` error (§7). The callers this affects are the ones that forward an
+  inbound request's headers verbatim - proxy and gateway style code - because a
+  forwarded request commonly carries `Transfer-Encoding: chunked` together with a body
+  of unknown length, so identical caller code succeeds on `fetch_hyper` and fails here.
+  Removing the header from the forwarded set makes the request acceptable and does not
+  change how the body is framed on the wire, since the transport derives the framing from
+  the body itself.
 - **Redirects are not followed.** Like `fetch_hyper` (and unlike WinHTTP's own default),
   3xx responses are surfaced to the caller unchanged rather than followed, with no knob
   to re-enable automatic redirects.
@@ -295,11 +314,12 @@ transport's; the transport only reports the timeout.
 (`http_extensions`) carries a source error, an `ohno::ErrorLabel`, and a
 `recoverable::RecoveryInfo`, mirroring `fetch_hyper`:
 
-- **Error surface.** Failures preserve the WinHTTP error code in the source error.
-  Secure failures may additionally attach a bitmask of certificate problems as
-  best-effort diagnostics.
-- **Mapping.** A Win32/`WINHTTP_*` code is turned into
-  `HttpError::other(WinHttpError { code, .. }, recovery, label)`.
+- **Error surface.** A failure returns an `HttpError` carrying an `ohno::ErrorLabel`, a
+  `recoverable::RecoveryInfo` classification, and a source error whose message states the
+  originating Win32/`WINHTTP_*` code. Secure failures may additionally state a bitmask of
+  certificate problems as best-effort diagnostics. The numeric code is diagnostic only: it
+  is not programmatically accessible, so callers branch on the label and the recovery
+  classification, never on a code.
 - **Labels** (mirroring `fetch`'s own error labels):
 
   | Condition | `ErrorLabel` |
@@ -309,6 +329,12 @@ transport's; the transport only reports the timeout.
   | `ERROR_WINHTTP_SECURE_FAILURE` | `tls` |
   | `ERROR_WINHTTP_OPERATION_CANCELLED` | `abandoned` |
   | send/receive/protocol failures | `request_winhttp` |
+  | a request rejected locally before it is sent: an unusable HTTP version (§3), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
+  | the WinHTTP session could not be opened | `winhttp_initialization` |
+
+- **Permanently failed initialization.** A transport that cannot open its WinHTTP session
+  latches that failure instead of retrying it. Every request it subsequently serves returns
+  a fresh `winhttp_initialization` error without performing network I/O.
 
 ### 7.1 Recoverability rationale
 
@@ -316,8 +342,9 @@ transport's; the transport only reports the timeout.
 transport. The division is not arbitrary; the rule is: an error is retryable iff
 retrying the identical request (on a fresh connection) could plausibly succeed
 without the caller changing anything. Idempotency and retry budgets are
-`seatbelt`'s concern, not ours; we only classify whether the failure is transient
-transport noise or a deterministic condition.
+`seatbelt`'s concern, not ours; we classify only whether the failure is transient
+transport noise, a deterministic condition, or a code we do not recognize well enough
+to say.
 
 - **Retryable** (transient transport/connection faults): connection reset or
   closed mid-flight, `NAME_NOT_RESOLVED` (DNS can be flaky), `CANNOT_CONNECT`
@@ -331,6 +358,10 @@ transport noise or a deterministic condition.
   `OPERATION_CANCELLED` (the caller initiated teardown; retrying would contradict
   intent). Malformed-response/protocol violations that indicate a stable server
   or configuration problem are also non-retryable.
+- **Unknown** (everything else): the recognized codes are a documented subset of the
+  many codes WinHTTP can return, so an unrecognized code is the ordinary case rather
+  than an exception. Such a failure carries unknown recovery guidance instead of being
+  asserted retryable or never, leaving the decision to the policy layers above.
 
 HTTP status codes (4xx/5xx) never enter this mapping: they are successful
 transport outcomes carrying an error status, surfaced as `Ok(HttpResponse)`, and

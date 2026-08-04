@@ -18,7 +18,19 @@ use crate::error::{Result, WinHttpError, WinHttpOperation};
 use crate::handle::RawHandle;
 
 #[derive(Clone, Copy, Debug, Default)]
-/// Calls the operating system's WinHTTP API through the binding abstraction.
+/// Discharges the [`Bindings`] contract against the live WinHTTP API.
+///
+/// This is the only place in the crate where a WinHTTP entry point is called.
+/// Every method is a one-to-one wrapper that adds nothing beyond null-handle
+/// detection, Win32 error capture, and the argument conventions an asynchronous
+/// session requires, such as the null output pointers that force completions
+/// through the status callback (implementation.md, "The bindings facade").
+/// Concentrating the calls here means the caller-side invariants documented on
+/// [`Bindings`] are the complete set of obligations the transport must uphold
+/// for its use of the operating system to be sound.
+///
+/// The type is a zero-sized unit struct, so any call site that needs production
+/// behavior can materialize one without owning, borrowing, or threading state.
 pub(super) struct RealBindings;
 
 impl RealBindings {

@@ -73,6 +73,13 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
         clippy::match_same_arms,
         reason = "HANDLE_CREATED is decoded explicitly while unsupported statuses are ignored"
     )]
+    // Required co-edit: every status this match acts on must also appear in
+    // `DISPATCHED_STATUSES` (session.rs) or, for awaited operation completions,
+    // in `OperationKind::ALL` (context.rs). Those lists drive the test that
+    // proves `SESSION_NOTIFICATION_FLAGS` lets `WinHTTP` deliver the
+    // notification at all; a status dispatched here but absent from them is
+    // untested, and if its flag is missing from the mask the affected request
+    // waits forever rather than failing.
     match status {
         WINHTTP_CALLBACK_STATUS_SECURE_FAILURE => {
             if let Some(flags) = read_status_info::<u32>(status_info, status_info_len) {
@@ -96,8 +103,10 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
         }
         WINHTTP_CALLBACK_STATUS_HANDLE_CREATED => {}
         WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING => {
-            // SAFETY: HANDLE_CLOSING is the final callback and therefore has
-            // exclusive reclamation authority over the pooled box.
+            // SAFETY: this dispatch contract guarantees that HANDLE_CLOSING is
+            // the final, exactly-once notification for the handle and that it
+            // does not overlap another callback for it, which is exactly what
+            // close_context requires to reclaim the pooled box.
             unsafe {
                 close_context(context);
             }
@@ -200,6 +209,17 @@ fn read_status_info<T: Copy>(status_info: *mut c_void, status_info_len: u32) -> 
     Some(unsafe { status_info.cast::<T>().read() })
 }
 
+/// Fails any still-armed operation and reclaims the request context.
+///
+/// # Safety
+///
+/// `context` must be the exact pointer produced by `plurality::Box::into_raw`
+/// for this context and installed as the request handle's context value. The
+/// caller must be the final, exactly-once `HANDLE_CLOSING` notification for
+/// that handle, and no other callback for the handle may be executing
+/// concurrently: this function claims any armed operation and then drops the
+/// storage holding both the operation payload and the embedded completion
+/// event, so an overlapping callback would race that reclamation.
 unsafe fn close_context(context: NonNull<RequestContext>) {
     // SAFETY: the dispatch contract requires HANDLE_CLOSING to run only after
     // all other callbacks finish. No exclusive reference has existed since

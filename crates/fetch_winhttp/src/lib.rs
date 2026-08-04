@@ -17,13 +17,17 @@
 //! ## Platform and transport behavior
 //!
 //! - Windows 11 build 22000 or later is required.
-//! - The transport currently follows automatic Windows proxy policy and exposes
-//!   no proxy override or direct-connection fallback. Future requirements may
-//!   add explicit control.
+//! - Proxy selection follows automatic Windows proxy policy, including
+//!   automatic discovery and proxy auto-configuration scripts; no proxy
+//!   override or direct-connection fallback is exposed.
 //! - Generic TLS configuration and generic transport options that WinHTTP
 //!   cannot represent, including finite connection limits and connection
 //!   idle/lifetime settings, are accepted but ignored.
 //! - The request body is fully sent before response reception begins.
+//! - Gzip and deflate response bodies are decoded transparently, and the
+//!   `Content-Encoding` and `Content-Length` headers describing the encoded
+//!   form are removed. There is no opt-out. Brotli and zstd responses are
+//!   delivered still encoded, with their headers intact.
 //! - Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
 //!   HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
 //!   Request trailers are rejected.

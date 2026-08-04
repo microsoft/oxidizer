@@ -129,6 +129,11 @@ async fn run_server(endpoint: Endpoint, state: Arc<State>, mut shutdown: oneshot
     }
 
     endpoint.close(VarInt::from_u32(0), b"test shutdown");
+    // Abort the in-flight connection tasks rather than waiting for them to observe the endpoint
+    // closure. A task blocked in `h3` request handling would otherwise wedge the join loop, and
+    // this loop runs on the shutdown path of `Http3Server::finish`/`Drop`, so a wedged task would
+    // hang the test binary with no diagnostic instead of failing an assertion.
+    connections.abort_all();
     while connections.join_next().await.is_some() {}
     endpoint.wait_idle().await;
 }

@@ -206,8 +206,13 @@ impl RequestGuard {
         // SAFETY: the pooled context has a stable address until
         // HANDLE_CLOSING reclaims it.
         let context = unsafe { Pin::new_unchecked(context) };
-        // SAFETY: the context remains pinned while both embedded-event
-        // endpoints exist, as described above.
+        // SAFETY: the context remains pinned until HANDLE_CLOSING reclaims it,
+        // which outlives both endpoints of the event armed here. The slot is
+        // idle: taking the request handle above proves no earlier submission is
+        // outstanding, because the handle only returns to the guard once the
+        // previous OperationFuture's receiver is destroyed, and destroying that
+        // receiver is exactly what drives the previous event to its terminal
+        // state.
         let receiver = unsafe { context.arm(kind, buffer) };
 
         let submit_result = submit(raw, self.context_value());

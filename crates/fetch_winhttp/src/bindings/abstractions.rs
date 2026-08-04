@@ -29,8 +29,9 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 /// - Every context borrow is released before submission because WinHTTP may
 ///   complete inline and reenter the callback on the submitting thread.
 /// - At most one asynchronous operation is outstanding per request handle.
-/// - Buffers remain retained until the matching completion, request error, or
-///   final handle-closing callback ends the operation.
+/// - Buffers remain retained until the matching completion, request error,
+///   final handle-closing callback, or failing submitting call ends the
+///   operation.
 /// - RAII handle owners close each successfully created handle exactly once; the
 ///   final handle-closing callback is the terminal context-ownership event.
 ///
@@ -96,10 +97,18 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// The caller must satisfy all trait-level safety requirements. `request`
     /// must identify a live request with its operation slot armed for write.
     /// A present `buffer` must be readable for `len` initialized bytes and
-    /// remain valid and unchanged until
-    /// `WRITE_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
-    /// `HANDLE_CLOSING` callback terminates the operation. An absent buffer is
-    /// valid only for the zero-length write that ends automatic chunking.
+    /// remain valid and unchanged until `WRITE_COMPLETE`, `REQUEST_ERROR`, the
+    /// request handle's final `HANDLE_CLOSING` callback, or a failing return
+    /// from this call terminates the operation. An absent buffer is valid only
+    /// for the zero-length write that ends automatic chunking.
+    ///
+    /// A failing return obliges the implementation to have started no write and
+    /// to retain no reference to `buffer`, because the caller reclaims the
+    /// buffer immediately and no completion callback follows.
+    /// [`WinHttpWriteData`] satisfies this by initiating no operation when it
+    /// reports failure.
+    ///
+    /// [`WinHttpWriteData`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpwritedata
     unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()>;
 
     /// # Safety
@@ -134,9 +143,17 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// The caller must satisfy all trait-level safety requirements. `request`
     /// must be live with its operation slot armed for reading.
     /// `buffer` must be writable for `len` bytes and remain valid and untouched
-    /// until
-    /// `READ_COMPLETE`, `REQUEST_ERROR`, or the request handle's final
-    /// `HANDLE_CLOSING` callback terminates the operation.
+    /// until `READ_COMPLETE`, `REQUEST_ERROR`, the request handle's final
+    /// `HANDLE_CLOSING` callback, or a failing return from this call terminates
+    /// the operation.
+    ///
+    /// A failing return obliges the implementation to have started no read and
+    /// to retain no reference to `buffer`, because the caller reclaims the
+    /// buffer immediately and no completion callback follows.
+    /// [`WinHttpReadData`] satisfies this by initiating no operation when it
+    /// reports failure.
+    ///
+    /// [`WinHttpReadData`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpreaddata
     unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
 
     /// # Safety
