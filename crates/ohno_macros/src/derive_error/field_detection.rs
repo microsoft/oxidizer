@@ -10,6 +10,9 @@ use crate::utils::{bail, generated_error_field_marker};
 const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoCore field detected. Either mark a field with `#[error]` or include a field of type OhnoCore";
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
 const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
+const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore";
+const GENERATED_MARKER_TYPE: &str =
+    "`#[error(generated)]` marks the OhnoCore field injected by `#[ohno::error]`, so it cannot appear on a field of another type";
 
 /// Validate every `#[error]` attribute in the struct
 ///
@@ -23,12 +26,27 @@ pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
         return Ok(());
     };
 
+    let mut marked = 0;
     for field in &data_struct.fields {
         for attr in field.attrs.iter().filter(|attr| attr.path().is_ident("error")) {
             match &attr.meta {
-                Meta::Path(_) => {}
-                Meta::List(list) if is_generated_marker(list) => {}
+                // The marker the user writes. Its field may hold an alias or a re-export of
+                // `OhnoCore`, which cannot be recognized by name, so the type is not checked
+                Meta::Path(_) => marked += 1,
+                Meta::List(list) if is_generated_marker(list) => {
+                    // This marker is only ever written by `#[ohno::error]`, onto a field it
+                    // declares itself, so its type is known exactly
+                    if !is_inner_error_type(&field.ty) {
+                        bail!(field.ty.span(), GENERATED_MARKER_TYPE);
+                    }
+                }
                 other => bail!(other.span(), ERROR_ATTRIBUTE_ARGUMENTS),
+            }
+
+            // Marking a second field leaves the choice of error field to declaration order, so it
+            // is reported rather than resolved silently
+            if marked > 1 {
+                bail!(attr.span(), MULTIPLE_MARKED_FIELDS);
             }
         }
     }
@@ -272,6 +290,46 @@ mod tests {
             let message = validate_error_attributes(&input).unwrap_err().to_string();
             assert_eq!(message, ERROR_ATTRIBUTE_ARGUMENTS);
         }
+    }
+
+    #[test]
+    fn test_error_attribute_rejects_a_second_marked_field() {
+        // Which field wins would otherwise come down to declaration order
+        for input in [
+            parse_quote! { struct TestError { #[error] first: OhnoCore, #[error] second: OhnoCore } },
+            parse_quote! { struct TestError(#[error] OhnoCore, #[error] OhnoCore); },
+        ] {
+            let input: DeriveInput = input;
+            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            assert_eq!(message, MULTIPLE_MARKED_FIELDS);
+        }
+
+        // The field `#[ohno::error]` injects is not a competing marker, so a struct that already
+        // marks its own core field still resolves to the user's choice
+        let injected_alongside: DeriveInput = parse_quote! {
+            struct TestError { #[error] inner: OhnoCore, #[error(generated)] ohno_core: OhnoCore }
+        };
+        validate_error_attributes(&injected_alongside).unwrap();
+        assert_eq!(find_error_field(&injected_alongside).unwrap().to_string(), "inner");
+    }
+
+    #[test]
+    fn test_generated_marker_is_rejected_on_another_type() {
+        // The marker is only ever written onto a field the macro declares itself, so a field of
+        // another type carrying it cannot have come from `#[ohno::error]`
+        for input in [
+            parse_quote! { struct TestError { #[error(generated)] hidden: String, inner: OhnoCore } },
+            parse_quote! { struct TestError(#[error(generated)] String, OhnoCore); },
+        ] {
+            let input: DeriveInput = input;
+            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            assert_eq!(message, GENERATED_MARKER_TYPE);
+        }
+
+        // An alias or re-export is spelled differently but is still the core type, so the bare
+        // marker stays type-agnostic
+        let aliased: DeriveInput = parse_quote! { struct TestError(String, #[error] MyCore); };
+        validate_error_attributes(&aliased).unwrap();
     }
 
     #[test]
