@@ -47,13 +47,19 @@ mod body;
 mod builder;
 mod callback;
 mod context;
+mod convert;
 mod error;
 mod error_labels;
 mod handle;
+mod operation;
 mod options;
+mod query;
 mod request;
+mod response_headers;
 mod session;
 mod telemetry;
+#[cfg(test)]
+mod testing;
 mod tls;
 mod transport;
 

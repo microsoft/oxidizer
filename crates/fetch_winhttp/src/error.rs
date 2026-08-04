@@ -23,6 +23,7 @@ use windows::Win32::Networking::WinHttp::{
 use windows::Win32::Networking::WinSock::{WSAECONNABORTED, WSAECONNREFUSED, WSAECONNRESET, WSAESHUTDOWN, WSAETIMEDOUT};
 
 use crate::error_labels;
+use crate::query::QueryError;
 
 /// Result type for direct WinHTTP binding operations.
 pub(crate) type Result<T> = std::result::Result<T, WinHttpError>;
@@ -262,6 +263,56 @@ fn classify(code: u32) -> ErrorClass {
         .map_or(ErrorClass::RequestUnknown, |mapping| mapping.class)
 }
 
+/// Reports a request this transport rejects locally, before `WinHTTP` sees it.
+///
+/// This is the `invalid_request` row of the error-surface table in design.md
+/// section 7: an unusable HTTP version, an unusable target, or request body
+/// framing the transport cannot honor. Nothing reaches the network, and the
+/// same request would be rejected identically on every attempt, so design.md
+/// section 7.1 classifies it as deterministic rather than unknown.
+pub(crate) fn invalid_request(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    HttpError::other(error, RecoveryInfo::never(), error_labels::INVALID_REQUEST)
+}
+
+/// Reports response metadata `WinHTTP` returned that the transport cannot use.
+///
+/// This is the `request_winhttp` row of design.md section 7 applied to a
+/// native call that itself succeeded but produced unusable output: an
+/// out-of-range status code, a malformed header or trailer block, or a value
+/// conversion failure. Such output reflects a stable server or configuration
+/// problem, which design.md section 7.1 lists as non-retryable.
+pub(crate) fn invalid_response(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    HttpError::other(error, RecoveryInfo::never(), error_labels::REQUEST_WINHTTP)
+}
+
+/// Reports a callback sequence that contradicts the `WinHTTP` asynchronous
+/// model.
+///
+/// Unexpected or undecodable completions, and a completion channel that
+/// disconnects without delivering a result, mean the observed sequence
+/// violates the documented model (implementation.md section 2). The caller
+/// cannot distinguish this from any other unusable transport response, so it
+/// carries exactly the [`invalid_response`] contract. The separate name keeps
+/// call sites explicit about which condition they detected and gives the two
+/// categories one place to diverge should that ever be warranted.
+pub(crate) fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
+    invalid_response(error)
+}
+
+/// Routes a synchronous query failure into the matching error category.
+///
+/// [`QueryError`] keeps an operating-system failure separate from malformed
+/// data returned by a call that succeeded, because design.md section 7 gives
+/// the two different labels and recovery classifications: the former is
+/// classified from its Win32 code and may be retryable, while the latter is
+/// always a non-recoverable `request_winhttp` invalid response.
+pub(crate) fn query_error(error: QueryError) -> HttpError {
+    match error {
+        QueryError::WinHttp(error) => error.into_http_error(),
+        QueryError::Conversion(error) => invalid_response(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
@@ -311,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_every_documented_error() {
+    fn every_mapping_reaches_the_http_error_through_its_class() {
         for mapping in ERROR_MAPPINGS {
             let error = WinHttpError::new(mapping.code, WinHttpOperation::SendRequest).into_http_error();
 

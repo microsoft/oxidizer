@@ -1,7 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Maps caller-facing TLS relaxations onto native `WinHTTP` security flags.
+//!
+//! `fetch`'s generic TLS options describe rustls or native-tls objects that
+//! cannot configure a Schannel-backed `WinHTTP` request, so this transport
+//! exposes its own configuration type instead (design.md section 4,
+//! design.md section 1.2). [`WinHttpTlsConfig`] is the caller-facing half and
+//! [`security_flags`] is the native half: it produces the
+//! `WINHTTP_OPTION_SECURITY_FLAGS` mask that [`crate::request`] applies to a
+//! request handle before sending (implementation.md section 10.2).
+//!
+//! Both halves live together because the flag mask is the entire meaning of
+//! the configuration - a relaxation that maps to no flag would silently do
+//! nothing, and keeping the mapping next to the documentation that promises
+//! each option makes the blast radius of that option easy to review.
+
 use thread_aware::ThreadAware;
+use windows::Win32::Networking::WinHttp::{
+    SECURITY_FLAG_IGNORE_CERT_CN_INVALID, SECURITY_FLAG_IGNORE_CERT_DATE_INVALID, SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE,
+    SECURITY_FLAG_IGNORE_UNKNOWN_CA,
+};
 
 /// Configures TLS behavior that only the WinHTTP transport can apply.
 ///
@@ -81,6 +100,19 @@ impl WinHttpTlsConfigBuilder {
     }
 }
 
+pub(crate) fn security_flags(config: &WinHttpTlsConfig) -> u32 {
+    let mut flags = 0;
+
+    if config.accepts_invalid_certs() {
+        flags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID;
+    }
+    if config.accepts_invalid_hostnames() {
+        flags |= SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+    }
+
+    flags
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -89,7 +121,10 @@ mod tests {
     use static_assertions::assert_impl_all;
     use thread_aware::ThreadAware;
 
-    use super::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};
+    use super::{
+        SECURITY_FLAG_IGNORE_CERT_CN_INVALID, SECURITY_FLAG_IGNORE_CERT_DATE_INVALID, SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE,
+        SECURITY_FLAG_IGNORE_UNKNOWN_CA, WinHttpTlsConfig, WinHttpTlsConfigBuilder, security_flags,
+    };
 
     assert_impl_all!(WinHttpTlsConfig: Send, Sync, Clone, Debug, Default, ThreadAware, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(WinHttpTlsConfigBuilder: Send, Sync, Clone, Debug, ThreadAware, UnwindSafe, RefUnwindSafe);
@@ -111,5 +146,30 @@ mod tests {
         let invalid_hostnames = WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build();
         assert!(!invalid_hostnames.accepts_invalid_certs());
         assert!(invalid_hostnames.accepts_invalid_hostnames());
+    }
+
+    #[test]
+    fn security_flags_combine_windows_sdk_flags() {
+        assert_eq!(security_flags(&WinHttpTlsConfig::default()), 0);
+        assert_eq!(
+            security_flags(&WinHttpTlsConfig::builder().accept_invalid_certs(true).build()),
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+        );
+        assert_eq!(
+            security_flags(&WinHttpTlsConfig::builder().accept_invalid_hostnames(true).build()),
+            SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+        );
+        assert_eq!(
+            security_flags(
+                &WinHttpTlsConfig::builder()
+                    .accept_invalid_certs(true)
+                    .accept_invalid_hostnames(true)
+                    .build()
+            ),
+            SECURITY_FLAG_IGNORE_UNKNOWN_CA
+                | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE
+                | SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+                | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+        );
     }
 }

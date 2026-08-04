@@ -1,331 +1,55 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt;
+//! Drives one HTTP request through the sequential `WinHTTP` lifecycle.
+//!
+//! This module owns the end-to-end request state machine described in
+//! implementation.md section 4.4 and section 6.3: translating request metadata
+//! before any handle exists, opening the connect and request handles, applying
+//! the native request options, racing header submission against the generic
+//! connect timeout (implementation.md section 4.6), uploading the body, and
+//! receiving response metadata.
+//!
+//! The mechanics it builds on live elsewhere: [`crate::operation`] owns the
+//! callback-ownership handoff and the per-request operation slot,
+//! [`crate::response_headers`] parses the raw header block, and
+//! [`crate::error`] binds each failure category to its label and recovery
+//! classification.
+
 use std::future::poll_fn;
-use std::mem::ManuallyDrop;
-use std::pin::Pin;
-use std::ptr::{NonNull, with_exposed_provenance_mut};
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use bytesbuf::mem::GlobalPool;
-use events_once::{Disconnected, RawReceiver};
 use fetch::options::{RequestFilter, TransportOptions};
-use fetch::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder, RecoveryInfo};
-use http::header::{HeaderName, HeaderValue};
+use fetch::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, HttpResponseBuilder};
 use http::uri::Authority;
 use http::{HeaderMap, StatusCode, Version};
 use http_extensions::HttpBodyOptions;
 use http_extensions::timeout::BodyTimeout;
-use plurality::Pool;
 use tick::Clock;
 use widestring::U16CString;
 
-use crate::bindings::{Bindings as _, BindingsFacade};
-use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
-use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind, RequestContext};
-use crate::error::Result as WinHttpResult;
-use crate::error_labels;
-use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
-use crate::options::{
-    ProtocolOptions, QueryError, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE,
-    WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY,
-    WINHTTP_OPTION_REDIRECT_POLICY_NEVER, WINHTTP_OPTION_SECURITY_FLAGS, context_bytes, decompression_mask, disable_feature_mask,
-    dword_bytes, headers_to_utf16, host_to_utf16, method_to_utf16, path_to_utf16, protocol_options, query_protocol_used, query_raw_headers,
-    query_status_code, request_open_flags, security_flags,
+use crate::bindings::{
+    Bindings as _, BindingsFacade, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+    WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_REDIRECT_POLICY_NEVER,
+    WINHTTP_OPTION_SECURITY_FLAGS,
 };
+use crate::body::{RequestBodyFraming, WinHttpBodyReader, WinHttpBodyWriter, WinHttpResponseBody, send_body};
+use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
+use crate::convert::{
+    decompression_mask, disable_feature_mask, dword_bytes, headers_to_utf16, host_to_utf16, method_to_utf16, path_to_utf16,
+    protocol_options, request_open_flags,
+};
+use crate::error::{Result as WinHttpResult, callback_protocol_error, invalid_request, invalid_response, query_error};
+use crate::handle::{ConnectHandle, RawHandle, RequestHandle};
+use crate::operation::{ContextInstallation, ContextPool, RequestGuard};
+use crate::options::ProtocolOptions;
+use crate::query::{query_protocol_used, query_raw_headers, query_status_code};
+use crate::response_headers::parse_response_headers;
 use crate::session::WinHttpSession;
-use crate::tls::WinHttpTlsConfig;
-
-/// Provides stable callback-context storage for one transport instance.
-///
-/// Each materialized transport owns a separate pool, so contexts are reused
-/// only by requests that share that transport's WinHTTP session. `Pool` is not
-/// `Sync`, so the mutex permits allocation and callback-driven return from
-/// different threads. The lock is held only while renting or returning an
-/// allocation; no WinHTTP call or user code runs while it is held.
-pub(crate) type ContextPool = Mutex<Pool<RequestContext>>;
-
-/// Prepares callback ownership for a newly opened request handle.
-///
-/// The request task initially owns both the RAII request handle and the pooled,
-/// pinned context allocation. Successful installation of
-/// `WINHTTP_OPTION_CONTEXT_VALUE` transfers context reclamation to the final
-/// `HANDLE_CLOSING` callback and returns a [`RequestGuard`] that owns only the
-/// request-handle close authority. If installation fails, this type closes the
-/// request and reconstructs the pooled box locally.
-pub(crate) struct RequestSetup {
-    request: RequestHandle,
-    context: plurality::Box<RequestContext>,
-}
-
-impl RequestSetup {
-    pub(crate) fn new(request: RequestHandle, connect: ConnectHandle, session: Arc<WinHttpSession>, contexts: &ContextPool) -> Self {
-        let context = contexts
-            .lock()
-            .expect("the request-context pool lock cannot be poisoned because no user code runs while it is held")
-            .alloc_box(RequestContext::new(connect, session));
-
-        Self { request, context }
-    }
-
-    pub(crate) fn install(self) -> WinHttpResult<RequestGuard> {
-        let Self { request, context } = self;
-        let context = plurality::Box::into_raw(context);
-        let mut raw_owner = RawContextOwner::new(context);
-        let context_value = context.as_ptr().expose_provenance();
-        let option_value = context_bytes(context_value);
-
-        // SAFETY: the request is live and has not submitted an asynchronous
-        // operation. option_value is the exact pointer-sized context
-        // representation, and raw_owner keeps the initialized context alive
-        // until WinHTTP accepts ownership.
-        if let Err(error) = unsafe {
-            request
-                .bindings()
-                .set_option(request.raw(), WINHTTP_OPTION_CONTEXT_VALUE, &option_value)
-        } {
-            drop(request);
-            drop(raw_owner);
-            return Err(error);
-        }
-
-        raw_owner.release();
-
-        Ok(RequestGuard {
-            request: Some(request),
-            context,
-        })
-    }
-}
-
-impl fmt::Debug for RequestSetup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RequestSetup")
-            .field("request", &self.request)
-            .field("context", &self.context)
-            .finish()
-    }
-}
-
-/// Guards the raw context pointer during the installation handoff.
-///
-/// Extracting the pooled box is necessary to obtain the stable pointer WinHTTP
-/// stores. This guard reconstructs that box on every pre-installation exit; it
-/// is explicitly released only after WinHTTP accepts the context value.
-struct RawContextOwner {
-    context: Option<NonNull<RequestContext>>,
-}
-
-impl RawContextOwner {
-    const fn new(context: NonNull<RequestContext>) -> Self {
-        Self { context: Some(context) }
-    }
-
-    fn release(&mut self) {
-        self.context = None;
-    }
-}
-
-impl Drop for RawContextOwner {
-    fn drop(&mut self) {
-        let Some(context) = self.context.take() else {
-            return;
-        };
-
-        // SAFETY: this guard uniquely owns the exact pointer returned by
-        // plurality::Box::into_raw and reconstructs it only on installation
-        // failure, before WinHTTP takes callback ownership.
-        drop(unsafe { plurality::Box::<RequestContext>::from_raw(context) });
-    }
-}
-
-#[derive(Debug)]
-/// Owns the close authority for one installed WinHTTP request handle.
-///
-/// Dropping the guard closes the request exactly once and thereby initiates
-/// cancellation of any pending operation. It does not own the context
-/// allocation: the final `HANDLE_CLOSING` callback reclaims that allocation and
-/// releases the retained connect and session parents.
-///
-/// Mutable access to this guard is required to submit an operation. The future
-/// then owns the request handle itself, leaving this guard unable to submit
-/// again even if the future is forgotten. Completion restores the handle only
-/// after destroying the receiver endpoint; cancellation destroys the receiver
-/// first and then closes the handle.
-pub(crate) struct RequestGuard {
-    request: Option<RequestHandle>,
-    context: NonNull<RequestContext>,
-}
-
-impl RequestGuard {
-    pub(crate) fn raw(&self) -> RawHandle {
-        self.request
-            .as_ref()
-            .expect("an unfinished OperationFuture prevents RequestGuard reuse")
-            .raw()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn context_ptr(&self) -> *mut RequestContext {
-        self.context.as_ptr()
-    }
-
-    pub(crate) fn context_value(&self) -> usize {
-        self.context.as_ptr().expose_provenance()
-    }
-
-    pub(crate) fn cold_connect_state(&self) -> ColdConnectState {
-        let _request = self
-            .request
-            .as_ref()
-            .expect("an unfinished OperationFuture prevents RequestGuard context access");
-        // SAFETY: the guard remains alive, so callback ownership keeps the
-        // installed context valid while it owns the request handle.
-        unsafe { self.context.as_ref() }.cold_connect_state()
-    }
-
-    pub(crate) fn submit(
-        &mut self,
-        kind: OperationKind,
-        buffer: OperationBuffer,
-        submit: impl FnOnce(RawHandle, usize) -> WinHttpResult<()>,
-    ) -> OperationFuture<'_> {
-        let request = self
-            .request
-            .take()
-            .expect("cancelling or forgetting an OperationFuture prevents RequestGuard reuse");
-        let raw = request.raw();
-
-        // SAFETY: the context was installed from stable pooled storage. The
-        // returned future leaves the request-handle slot empty until its
-        // receiver endpoint has been destroyed.
-        let context = unsafe { self.context.as_ref() };
-        // SAFETY: the pooled context has a stable address until
-        // HANDLE_CLOSING reclaims it.
-        let context = unsafe { Pin::new_unchecked(context) };
-        // SAFETY: the context remains pinned until HANDLE_CLOSING reclaims it,
-        // which outlives both endpoints of the event armed here. The slot is
-        // idle: taking the request handle above proves no earlier submission is
-        // outstanding, because the handle only returns to the guard once the
-        // previous OperationFuture's receiver is destroyed, and destroying that
-        // receiver is exactly what drives the previous event to its terminal
-        // state.
-        let receiver = unsafe { context.arm(kind, buffer) };
-
-        let submit_result = submit(raw, self.context_value());
-
-        if let Err(error) = submit_result {
-            // SAFETY: the local request handle keeps the context valid. The
-            // operation kind atomically wins only if no inline callback
-            // already consumed the operation, so synchronous failure cannot
-            // double-complete it. No later operation can begin before this
-            // method returns because the guard's handle slot remains empty.
-            if let Some(active) = unsafe { self.context.as_ref() }.take_kind(kind) {
-                active.completion.send(CompletionResult::error(error, active.buffer));
-            }
-        }
-
-        OperationFuture {
-            receiver: ManuallyDrop::new(receiver),
-            receiver_live: true,
-            request: Some(request),
-            context: self.context_value(),
-            request_slot: &mut self.request,
-        }
-    }
-
-    fn close(&mut self) {
-        drop(self.request.take());
-    }
-}
-
-// SAFETY: moving the guard transfers the sole request-handle close authority.
-// The context pointer remains valid independently through HANDLE_CLOSING.
-unsafe impl Send for RequestGuard {}
-
-impl Drop for RequestGuard {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
-
-#[derive(Debug)]
-/// Owns one request handle while awaiting its callback completion.
-///
-/// Moving the request handle into this future is the safe-code proof that one
-/// request has at most one asynchronous operation outstanding. On completion,
-/// the receiver endpoint is destroyed before the handle returns to the guard.
-/// On cancellation, the receiver is destroyed before the owned handle closes,
-/// allowing `HANDLE_CLOSING` to reclaim the embedded event storage safely.
-/// Forgetting the future leaks the handle but leaves the guard unusable.
-pub(crate) struct OperationFuture<'guard> {
-    receiver: ManuallyDrop<RawReceiver<CompletionResult>>,
-    receiver_live: bool,
-    request: Option<RequestHandle>,
-    context: usize,
-    request_slot: &'guard mut Option<RequestHandle>,
-}
-
-impl Future for OperationFuture<'_> {
-    type Output = std::result::Result<CompletionResult, Disconnected>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY: this mutable reference is used only to pin-project the
-        // receiver and update unpinned ownership fields; the receiver is not
-        // moved.
-        let this = unsafe { self.get_unchecked_mut() };
-        assert!(this.receiver_live, "OperationFuture cannot be polled after completion");
-        // SAFETY: the receiver remains in place for the lifetime of this pinned
-        // OperationFuture.
-        let result = unsafe { Pin::new_unchecked(&mut *this.receiver) }.poll(cx);
-        if result.is_ready() {
-            // SAFETY: the receiver is pinned in place and will not be accessed
-            // again after receiver_live is cleared.
-            unsafe {
-                ManuallyDrop::drop(&mut this.receiver);
-            }
-            this.receiver_live = false;
-
-            let request = this.request.take().expect("a completed OperationFuture retains its request handle");
-            debug_assert!(this.request_slot.is_none());
-            *this.request_slot = Some(request);
-        }
-
-        result
-    }
-}
-
-impl OperationFuture<'_> {
-    fn cold_connect_state(&self) -> ColdConnectState {
-        let _request = self
-            .request
-            .as_ref()
-            .expect("cold-connect state is available only while an operation is pending");
-        let context = NonNull::new(with_exposed_provenance_mut::<RequestContext>(self.context))
-            .expect("OperationFuture retains the non-null installed request context");
-        // SAFETY: this future owns the live request handle, so callback
-        // ownership keeps the installed context valid.
-        unsafe { context.as_ref() }.cold_connect_state()
-    }
-}
-
-impl Drop for OperationFuture<'_> {
-    fn drop(&mut self) {
-        if self.receiver_live {
-            // SAFETY: Drop runs exactly once, and receiver_live proves the
-            // manually managed receiver has not already been destroyed.
-            unsafe {
-                ManuallyDrop::drop(&mut self.receiver);
-            }
-            self.receiver_live = false;
-        }
-        // The request field drops after this method. Pending cancellation
-        // therefore disconnects the receiver before closing the native handle.
-    }
-}
+use crate::tls::{WinHttpTlsConfig, security_flags};
 
 #[derive(Debug)]
 /// Carries a request error and its log-only connection attribution.
@@ -408,7 +132,9 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
         tls: &WinHttpTlsConfig,
     ) -> fetch::Result<Self> {
         if matches!(request.version(), Version::HTTP_09 | Version::HTTP_10) {
-            return Err(invalid_request(RequestTranslationError::LegacyVersion(request.version())));
+            return Err(invalid_request(RequestTranslationError::from(UnsendableRequestVersionError::new(
+                request.version(),
+            ))));
         }
 
         let mut headers = request.headers().clone();
@@ -467,7 +193,7 @@ impl<'body, 'contexts> RequestDriver<'body, 'contexts> {
             .map_err(crate::error::WinHttpError::into_http_error)
             .map_err(RequestFailure::without_attribution)?;
 
-        let mut guard = RequestSetup::new(request, connect, Arc::clone(&self.session), self.contexts)
+        let mut guard = ContextInstallation::new(request, connect, Arc::clone(&self.session), self.contexts)
             .install()
             .map_err(crate::error::WinHttpError::into_http_error)
             .map_err(RequestFailure::without_attribution)?;
@@ -624,28 +350,36 @@ impl TranslatedRequest {
         let uri = request.uri();
         let scheme = uri
             .scheme_str()
-            .ok_or_else(|| invalid_request(RequestTranslationError::MissingScheme))?;
+            .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingSchemeError::new())))?;
         let secure = match scheme {
             "https" => true,
             "http" if matches!(filter, RequestFilter::HttpAndHttps) => false,
-            "http" => return Err(invalid_request(RequestTranslationError::HttpDisallowed)),
-            scheme => return Err(invalid_request(RequestTranslationError::UnsupportedScheme(scheme.to_owned()))),
+            "http" => {
+                return Err(invalid_request(RequestTranslationError::from(PlainHttpDisallowedError::new())));
+            }
+            scheme => {
+                return Err(invalid_request(RequestTranslationError::from(UnsupportedSchemeError::new(
+                    scheme.to_owned(),
+                ))));
+            }
         };
         let authority = uri
             .authority()
-            .ok_or_else(|| invalid_request(RequestTranslationError::MissingAuthority))?;
+            .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingAuthorityError::new())))?;
         if authority.as_str().contains('@') {
-            return Err(invalid_request(RequestTranslationError::UserInfo));
+            return Err(invalid_request(RequestTranslationError::from(UserInfoInAuthorityError::new())));
         }
         let host = uri
             .host()
             .filter(|host| !host.is_empty())
-            .ok_or_else(|| invalid_request(RequestTranslationError::MissingHost))?;
+            .ok_or_else(|| invalid_request(RequestTranslationError::from(MissingHostError::new())))?;
         let port = authority_port(authority, host, if secure { 443 } else { 80 }).map_err(invalid_request)?;
         let path = uri.path_and_query().map_or("/", |path| path.as_str());
         let path = if path.is_empty() { "/" } else { path };
         if !(path.starts_with('/') || path.starts_with('?')) {
-            return Err(invalid_request(RequestTranslationError::InvalidPath(path.to_owned())));
+            return Err(invalid_request(RequestTranslationError::from(InvalidPathError::new(
+                path.to_owned(),
+            ))));
         }
 
         Ok(Self {
@@ -663,26 +397,26 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
     let suffix = authority
         .as_str()
         .strip_prefix(host)
-        .ok_or_else(|| RequestTranslationError::InvalidAuthority(authority.as_str().to_owned()))?;
+        .ok_or_else(|| InvalidAuthorityError::new(authority.as_str().to_owned()))?;
     if suffix.is_empty() {
         return Ok(default);
     }
 
     let explicit = suffix
         .strip_prefix(':')
-        .ok_or_else(|| RequestTranslationError::InvalidAuthority(authority.as_str().to_owned()))?;
+        .ok_or_else(|| InvalidAuthorityError::new(authority.as_str().to_owned()))?;
     if explicit.is_empty() {
-        return Err(RequestTranslationError::EmptyPort);
+        return Err(EmptyPortError::new().into());
     }
     if !explicit.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(RequestTranslationError::NonNumericPort(explicit.to_owned()));
+        return Err(NonNumericPortError::new(explicit.to_owned()).into());
     }
 
     let port = explicit
         .parse::<u16>()
-        .map_err(|_out_of_range| RequestTranslationError::OutOfRangePort(explicit.to_owned()))?;
+        .map_err(|_out_of_range| OutOfRangePortError::new(explicit.to_owned()))?;
     if port == 0 {
-        return Err(RequestTranslationError::ZeroPort);
+        return Err(ZeroPortError::new().into());
     }
 
     Ok(port)
@@ -694,6 +428,10 @@ fn authority_port(authority: &Authority, host: &str, default: u16) -> Result<u16
 /// Protocol requirements and transport-specific TLS relaxations are computed
 /// once during translation, then applied before the context is installed or an
 /// asynchronous operation can begin.
+///
+/// This is a plain value bag of native option values and nothing more; it is
+/// distinct from [`ContextInstallation`], which performs the one-way
+/// callback-ownership handoff at a later stage of the same request.
 struct RequestSettings {
     protocol: ProtocolOptions,
     security_flags: u32,
@@ -745,185 +483,124 @@ fn expect_completion(completion: CompletionResult, expected: OperationKind) -> f
     }
 }
 
-fn query_error(error: QueryError) -> HttpError {
-    match error {
-        QueryError::WinHttp(error) => error.into_http_error(),
-        QueryError::Conversion(error) => invalid_response(error),
-    }
-}
-
-fn invalid_request(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
-    HttpError::other(error, RecoveryInfo::never(), error_labels::INVALID_REQUEST)
-}
-
-fn invalid_response(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
-    HttpError::other(error, RecoveryInfo::never(), error_labels::REQUEST_WINHTTP)
-}
-
-fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
-    invalid_response(error)
-}
-
-#[derive(Debug)]
-/// Identifies request metadata rejected before WinHTTP receives the request.
+/// Identifies request metadata rejected before `WinHTTP` receives the request.
 ///
 /// These failures define the validation boundary between generic `fetch`
 /// requests and the URI, version, and endpoint forms accepted by this
-/// transport. They are mapped to non-recoverable invalid-request errors.
-enum RequestTranslationError {
-    EmptyPort,
-    HttpDisallowed,
-    InvalidAuthority(String),
-    InvalidPath(String),
-    LegacyVersion(Version),
-    MissingAuthority,
-    MissingHost,
-    MissingScheme,
-    NonNumericPort(String),
-    OutOfRangePort(String),
-    UnsupportedScheme(String),
-    UserInfo,
-    ZeroPort,
-}
-
-impl fmt::Display for RequestTranslationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyPort => f.write_str("the request URI has an empty explicit port; omit the colon or provide a port from 1 to 65535"),
-            Self::HttpDisallowed => f.write_str("plain HTTP requests are disabled for this client"),
-            Self::InvalidAuthority(authority) => write!(f, "the request URI has a malformed authority: '{authority}'"),
-            Self::InvalidPath(path) => write!(f, "the request URI path must start with '/': {path}"),
-            Self::LegacyVersion(version) => write!(f, "WinHTTP does not support requested HTTP version {version:?}"),
-            Self::MissingAuthority => f.write_str("the request URI has no authority"),
-            Self::MissingHost => f.write_str("the request URI has no host"),
-            Self::MissingScheme => f.write_str("the request URI has no scheme"),
-            Self::NonNumericPort(port) => {
-                write!(
-                    f,
-                    "the request URI explicit port '{port}' is not decimal; provide a port from 1 to 65535"
-                )
-            }
-            Self::OutOfRangePort(port) => {
-                write!(f, "the request URI explicit port '{port}' is outside the valid range 1 to 65535")
-            }
-            Self::UnsupportedScheme(scheme) => write!(f, "the request URI uses unsupported scheme '{scheme}'"),
-            Self::UserInfo => f.write_str("the request URI authority contains unsupported user information"),
-            Self::ZeroPort => f.write_str("the request URI explicit port is zero; provide a port from 1 to 65535"),
-        }
-    }
-}
-
-impl std::error::Error for RequestTranslationError {}
-
-#[derive(Debug)]
-/// Identifies malformed response metadata returned by WinHTTP.
+/// transport. They are mapped to non-recoverable invalid-request errors
+/// (design.md section 7).
 ///
-/// Header parsing preserves repeated values but requires a valid HTTP status
-/// line, CRLF framing, ASCII field names, and `http`-compatible values. These
-/// errors indicate an invalid transport response rather than an HTTP status
-/// failure.
-pub(crate) enum ResponseHeadersError {
-    InvalidHeaderName(String),
-    InvalidHeaderValue(String),
-    InvalidStatusLine,
-    MissingHeaderTerminator,
-    MissingNameValueSeparator,
-    NonAsciiHeaderName(u8),
-    TrailingData,
+/// Each condition is a separate `ohno` source type rolled up here through a
+/// generated `From` implementation, matching the crate-wide convention for
+/// conversion failures (implementation.md section 1.1).
+#[ohno::error]
+#[from(
+    EmptyPortError,
+    InvalidAuthorityError,
+    InvalidPathError,
+    MissingAuthorityError,
+    MissingHostError,
+    MissingSchemeError,
+    NonNumericPortError,
+    OutOfRangePortError,
+    PlainHttpDisallowedError,
+    UnsendableRequestVersionError,
+    UnsupportedSchemeError,
+    UserInfoInAuthorityError,
+    ZeroPortError
+)]
+#[display("the request cannot be translated into a WinHTTP request")]
+struct RequestTranslationError;
+
+/// Reports a request URI authority whose colon is not followed by a port.
+#[ohno::error]
+#[display("the request URI has an empty explicit port; omit the colon or provide a port from 1 to 65535")]
+struct EmptyPortError;
+
+/// Reports a request URI authority that does not decompose into host and port.
+#[ohno::error]
+#[display("the request URI has a malformed authority: '{authority}'")]
+struct InvalidAuthorityError {
+    authority: String,
 }
 
-impl fmt::Display for ResponseHeadersError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidHeaderName(error) => write!(f, "WinHTTP returned an invalid response header name: {error}"),
-            Self::InvalidHeaderValue(error) => write!(f, "WinHTTP returned an invalid response header value: {error}"),
-            Self::InvalidStatusLine => f.write_str("WinHTTP returned a malformed response status line"),
-            Self::MissingHeaderTerminator => f.write_str("WinHTTP returned a response header block without a terminating empty line"),
-            Self::MissingNameValueSeparator => f.write_str("WinHTTP returned a response header without a ':' separator"),
-            Self::NonAsciiHeaderName(byte) => write!(f, "WinHTTP returned a non-ASCII response header name byte: 0x{byte:02x}"),
-            Self::TrailingData => f.write_str("WinHTTP returned data after the response header terminator"),
-        }
-    }
+/// Reports a request URI path that WinHTTP cannot use as a target.
+#[ohno::error]
+#[display("the request URI path must start with '/': {path}")]
+struct InvalidPathError {
+    path: String,
 }
 
-impl std::error::Error for ResponseHeadersError {}
+/// Reports a request URI with no authority to connect to.
+#[ohno::error]
+#[display("the request URI has no authority")]
+struct MissingAuthorityError;
 
-fn parse_response_headers(raw: &[u8]) -> Result<HeaderMap, ResponseHeadersError> {
-    let mut cursor = 0;
-    let status_line = take_crlf_line(raw, &mut cursor).ok_or(ResponseHeadersError::InvalidStatusLine)?;
-    if !status_line.starts_with(b"HTTP/") {
-        return Err(ResponseHeadersError::InvalidStatusLine);
-    }
+/// Reports a request URI whose authority carries no host.
+#[ohno::error]
+#[display("the request URI has no host")]
+struct MissingHostError;
 
-    parse_header_fields(raw, cursor)
+/// Reports a request URI with no scheme to select transport security from.
+#[ohno::error]
+#[display("the request URI has no scheme")]
+struct MissingSchemeError;
+
+/// Reports a request URI explicit port that is not decimal digits.
+#[ohno::error]
+#[display("the request URI explicit port '{port}' is not decimal; provide a port from 1 to 65535")]
+struct NonNumericPortError {
+    port: String,
 }
 
-pub(crate) fn parse_response_trailers(raw: &[u8]) -> Result<HeaderMap, ResponseHeadersError> {
-    parse_header_fields(raw, 0)
+/// Reports a request URI explicit port above the 16-bit port range.
+#[ohno::error]
+#[display("the request URI explicit port '{port}' is outside the valid range 1 to 65535")]
+struct OutOfRangePortError {
+    port: String,
 }
 
-fn parse_header_fields(raw: &[u8], mut cursor: usize) -> Result<HeaderMap, ResponseHeadersError> {
-    let mut headers = HeaderMap::new();
+/// Reports a plain-HTTP request rejected by the client's request filter.
+#[ohno::error]
+#[display("plain HTTP requests are disabled for this client")]
+struct PlainHttpDisallowedError;
 
-    loop {
-        let line = take_crlf_line(raw, &mut cursor).ok_or(ResponseHeadersError::MissingHeaderTerminator)?;
-        if line.is_empty() {
-            if cursor != raw.len() {
-                return Err(ResponseHeadersError::TrailingData);
-            }
-            return Ok(headers);
-        }
-
-        let separator = line
-            .iter()
-            .position(|byte| *byte == b':')
-            .filter(|separator| *separator != 0)
-            .ok_or(ResponseHeadersError::MissingNameValueSeparator)?;
-        let name = header_name(&line[..separator])?;
-        let value = header_value(&line[separator + 1..])?;
-        headers.append(name, value);
-    }
+/// Reports a request message whose own HTTP version cannot be sent.
+///
+/// This names the request message's version field rather than the configured
+/// version set, because the two are independently fixable: this one is
+/// corrected on the `HttpRequest`, whereas an unusable
+/// `TransportOptions::supported_http_versions` entry is reported by
+/// `options.rs` and is corrected on the client. An operator has to be able to
+/// tell the two apart from the message alone.
+#[ohno::error]
+#[display("the request message asks for HTTP version {version:?}, which WinHTTP cannot send")]
+struct UnsendableRequestVersionError {
+    version: Version,
 }
 
-fn take_crlf_line<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
-    let remaining = raw.get(*cursor..)?;
-    let end = remaining.windows(2).position(|pair| pair == b"\r\n")?;
-    let start = *cursor;
-    *cursor += end + 2;
-
-    raw.get(start..start + end)
+/// Reports a request URI scheme this transport does not serve.
+#[ohno::error]
+#[display("the request URI uses unsupported scheme '{scheme}'")]
+struct UnsupportedSchemeError {
+    scheme: String,
 }
 
-fn header_name(bytes: &[u8]) -> Result<HeaderName, ResponseHeadersError> {
-    if let Some(byte) = bytes.iter().copied().find(|byte| !byte.is_ascii()) {
-        return Err(ResponseHeadersError::NonAsciiHeaderName(byte));
-    }
+/// Reports request URI user information, which WinHTTP cannot forward.
+#[ohno::error]
+#[display("the request URI authority contains unsupported user information")]
+struct UserInfoInAuthorityError;
 
-    HeaderName::from_bytes(bytes).map_err(|error| ResponseHeadersError::InvalidHeaderName(error.to_string()))
-}
-
-fn header_value(bytes: &[u8]) -> Result<HeaderValue, ResponseHeadersError> {
-    let bytes = trim_optional_whitespace(bytes);
-
-    HeaderValue::from_bytes(bytes).map_err(|error| ResponseHeadersError::InvalidHeaderValue(error.to_string()))
-}
-
-fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
-    while bytes.first().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
-        bytes = &bytes[1..];
-    }
-    while bytes.last().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
-        bytes = &bytes[..bytes.len() - 1];
-    }
-
-    bytes
-}
+/// Reports a request URI explicit port of zero, which cannot be connected to.
+#[ohno::error]
+#[display("the request URI explicit port is zero; provide a port from 1 to 65535")]
+struct ZeroPortError;
 
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
     use std::ffi::c_void;
-    use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
+    use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -949,52 +626,38 @@ mod tests {
     use widestring::U16CString;
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED,
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
     use super::{
-        ContextPool, OperationFuture, RawContextOwner, RequestDriver, RequestFailure, RequestGuard, RequestSettings, RequestSetup,
-        RequestTranslationError, ResponseHeadersError, TranslatedRequest, send_request_headers,
+        RequestDriver, RequestFailure, RequestSettings, RequestTranslationError, TranslatedRequest, UnsendableRequestVersionError,
+        send_request_headers,
     };
     use crate::WinHttpTlsConfig;
-    use crate::bindings::{BindingsFacade, MockBindings};
-    use crate::callback::dispatch_completion;
-    use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
-    use crate::error::{WinHttpError, WinHttpOperation};
-    use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
-    use crate::options::{
-        WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH, WINHTTP_OPTION_CONTEXT_VALUE,
-        WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+    use crate::bindings::{
+        BindingsFacade, MockBindings, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH,
+        WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_DECOMPRESSION, WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
         WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
+    use crate::callback::dispatch_completion;
+    use crate::context::ColdConnectState;
+    use crate::error::{WinHttpError, WinHttpOperation};
+    use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
+    use crate::operation::{ContextInstallation, ContextPool};
     use crate::session::WinHttpSession;
 
-    assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(RequestSetup: Send, std::fmt::Debug, UnwindSafe);
-    assert_impl_all!(RequestGuard: Send, std::fmt::Debug);
-    // The setup owns the context, whose actual UnsafeCell state prevents safe shared observation.
-    assert_not_impl_any!(RequestSetup: RefUnwindSafe);
-    // These pointer owners refer to the callback context's actual UnsafeCell state.
-    assert_not_impl_any!(RawContextOwner: UnwindSafe, RefUnwindSafe);
-    assert_not_impl_any!(RequestGuard: UnwindSafe, RefUnwindSafe);
-    assert_not_impl_any!(RequestGuard: Sync);
-    assert_impl_all!(OperationFuture<'static>: Send, std::fmt::Debug);
-    // The future mutably borrows the request-handle slot.
-    assert_not_impl_any!(OperationFuture<'static>: UnwindSafe);
-    // Shared observation after an unwind cannot mutate the borrowed slot or receiver.
-    assert_impl_all!(OperationFuture<'static>: RefUnwindSafe);
-    assert_not_impl_any!(OperationFuture<'static>: Sync);
     // HttpError contains user-erased error state without unwind-safety bounds.
     assert_not_impl_any!(RequestFailure: UnwindSafe, RefUnwindSafe);
     // The driver holds a mutable body borrow whose erased implementation may expose partial mutation.
     assert_not_impl_any!(RequestDriver<'static, 'static>: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(TranslatedRequest: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(RequestSettings: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(RequestTranslationError: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(ResponseHeadersError: UnwindSafe, RefUnwindSafe);
+    // Every `ohno` error owns a boxed source without unwind-safety bounds.
+    assert_not_impl_any!(RequestTranslationError: UnwindSafe, RefUnwindSafe);
+    assert_not_impl_any!(UnsendableRequestVersionError: UnwindSafe, RefUnwindSafe);
 
     const SESSION: usize = 1;
     const CONNECT: usize = 2;
@@ -1056,7 +719,7 @@ mod tests {
         let mut request = request(Method::GET, "https://example.com/resource?q=1");
         request.headers_mut().append("x-request", HeaderValue::from_static("first"));
         request.headers_mut().append("x-request", HeaderValue::from_static("second"));
-        let expected_headers = crate::options::headers_to_utf16(request.headers()).unwrap().as_slice().to_vec();
+        let expected_headers = crate::convert::headers_to_utf16(request.headers()).unwrap().as_slice().to_vec();
         let config = LifecycleConfig {
             status: 404,
             raw_headers: raw_headers(&[
@@ -1398,6 +1061,8 @@ mod tests {
 
     #[test]
     fn legacy_requested_versions_are_invalid_requests() {
+        // The configured version set and the request message's own version are
+        // two independently fixable conditions, so each names its own source.
         for version in [Version::HTTP_09, Version::HTTP_10] {
             let mut options = TransportOptions::default();
             options.supported_http_versions = vec![version];
@@ -1410,7 +1075,10 @@ mod tests {
 
             let error = result.unwrap_err();
             assert_eq!(error.label(), "invalid_request");
-            assert!(error.to_string().contains("does not support requested HTTP version"));
+            assert!(
+                error.to_string().contains("WinHTTP does not support requested HTTP version"),
+                "{error}"
+            );
             assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
         }
 
@@ -1422,7 +1090,14 @@ mod tests {
             WinHttpTlsConfig::default(),
             LifecycleConfig::default(),
         );
-        assert_eq!(result.unwrap_err().label(), "invalid_request");
+        let error = result.unwrap_err();
+        assert_eq!(error.label(), "invalid_request");
+        assert!(
+            error
+                .to_string()
+                .contains("the request message asks for HTTP version HTTP/1.0, which WinHTTP cannot send"),
+            "{error}"
+        );
         assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
     }
 
@@ -2175,33 +1850,26 @@ mod tests {
         );
         assert_lifecycle_closed(&record);
 
-        for (raw_headers, message) in [
-            (b"HTTP/1.1 200 OK\r\nmissing-colon\r\n\r\n".to_vec(), "without a ':' separator"),
-            (
-                [b"HTTP/1.1 200 OK\r\n".as_slice(), &[0x80], b": value\r\n\r\n"].concat(),
-                "non-ASCII response header name",
-            ),
-            (
-                b"HTTP/1.1 200 OK\r\nx-invalid: contains\nnewline\r\n\r\n".to_vec(),
-                "invalid response header value",
-            ),
-        ] {
-            let malformed = LifecycleConfig {
-                raw_headers,
-                ..LifecycleConfig::default()
-            };
-            let (result, record) = run_lifecycle(
-                request(Method::GET, "https://example.com/"),
-                TransportOptions::default(),
-                WinHttpTlsConfig::default(),
-                malformed,
-            );
-            let error = result.unwrap_err();
-            assert_eq!(error.label(), "request_winhttp");
-            assert_eq!(error.recovery(), RecoveryInfo::never());
-            assert!(error.to_string().contains(message), "{error}");
-            assert_lifecycle_closed(&record);
-        }
+        // The parser's own rules are covered directly in `response_headers`,
+        // which needs no handle, no callback, and no lifecycle. What only a
+        // lifecycle can show is that a parser rejection reaches the caller as a
+        // non-recoverable `request_winhttp` failure with every handle closed,
+        // so exactly one malformed block is driven end to end here.
+        let malformed = LifecycleConfig {
+            raw_headers: b"HTTP/1.1 200 OK\r\nmissing-colon\r\n\r\n".to_vec(),
+            ..LifecycleConfig::default()
+        };
+        let (result, record) = run_lifecycle(
+            request(Method::GET, "https://example.com/"),
+            TransportOptions::default(),
+            WinHttpTlsConfig::default(),
+            malformed,
+        );
+        let error = result.unwrap_err();
+        assert_eq!(error.label(), "request_winhttp");
+        assert_eq!(error.recovery(), RecoveryInfo::never());
+        assert!(error.to_string().contains("without a ':' separator"), "{error}");
+        assert_lifecycle_closed(&record);
 
         let malformed_protocol = LifecycleConfig {
             protocol: 3,
@@ -2740,223 +2408,6 @@ mod tests {
     }
 
     #[test]
-    fn context_option_failure_returns_context_and_closes_each_handle_once() {
-        let (facade, closes) = bindings(true);
-        let contexts = ContextPool::new(Pool::new());
-        let session = session(facade.clone());
-        let setup = RequestSetup::new(
-            RequestHandle::new(raw_handle(REQUEST), facade.clone()),
-            ConnectHandle::new(raw_handle(CONNECT), facade),
-            Arc::clone(&session),
-            &contexts,
-        );
-
-        assert_eq!(contexts.lock().unwrap().len(), 1);
-        let error = setup.install().unwrap_err();
-
-        assert_eq!(error.code(), 12019);
-        assert_eq!(contexts.lock().unwrap().len(), 0);
-        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 0);
-
-        drop(session);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn installed_context_is_reclaimed_only_by_handle_closing() {
-        let (facade, closes) = bindings(false);
-        let contexts = ContextPool::new(Pool::new());
-        let session = session(facade.clone());
-        let guard = RequestSetup::new(
-            RequestHandle::new(raw_handle(REQUEST), facade.clone()),
-            ConnectHandle::new(raw_handle(CONNECT), facade),
-            Arc::clone(&session),
-            &contexts,
-        )
-        .install()
-        .unwrap();
-        let context = guard.context_ptr();
-
-        drop(session);
-        drop(guard);
-
-        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 0);
-        assert_eq!(contexts.lock().unwrap().len(), 1);
-
-        closing(context);
-
-        assert_eq!(contexts.lock().unwrap().len(), 0);
-        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn inline_completion_before_submit_returns_is_observed() {
-        let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
-            assert_eq!(context_value, context.expose_provenance());
-            assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
-            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-            Ok(())
-        });
-
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn foreign_thread_completion_wakes_send_future() {
-        let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, context_value| {
-            thread::spawn(move || {
-                let context = std::ptr::with_exposed_provenance_mut(context_value);
-                complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
-            });
-            Ok(())
-        });
-
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::HeadersAvailable
-        ));
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn synchronous_submit_failure_completes_once() {
-        let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
-            Err(WinHttpError::new(12029, WinHttpOperation::SendRequest))
-        });
-
-        let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
-            panic!("synchronous failure must produce an error completion");
-        };
-        assert_eq!(error.code(), 12029);
-        assert!(buffer.is_none());
-        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn sequential_success_statuses_decode_and_return_buffers() {
-        let (mut guard, context, contexts, session, closes) = installed();
-
-        let send = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
-            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-            Ok(())
-        });
-        assert!(matches!(
-            futures::executor::block_on(send).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
-
-        let headers = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, _| {
-            complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
-            Ok(())
-        });
-        assert!(matches!(
-            futures::executor::block_on(headers).unwrap(),
-            CompletionResult::HeadersAvailable
-        ));
-
-        let mut available = 17_u32;
-        let data = guard.submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
-            complete(
-                context,
-                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                (&raw mut available).cast(),
-                status_info_len::<u32>(),
-            );
-            Ok(())
-        });
-        assert!(matches!(
-            futures::executor::block_on(data).unwrap(),
-            CompletionResult::DataAvailable(17)
-        ));
-
-        let mut read_memory = [0_u8; 8];
-        let read_address = read_memory.as_mut_ptr().addr();
-        let read = guard.submit(
-            OperationKind::Read,
-            OperationBuffer::read(GlobalPool::new().reserve(8), read_address, 8),
-            |_, _| {
-                complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, read_memory.as_mut_ptr().cast(), 5);
-                Ok(())
-            },
-        );
-        assert!(matches!(
-            futures::executor::block_on(read).unwrap(),
-            CompletionResult::ReadComplete { len: 5, .. }
-        ));
-
-        let mut written = 4_u32;
-        let write = guard.submit(
-            OperationKind::Write,
-            OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
-            |_, _| {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
-                    (&raw mut written).cast(),
-                    status_info_len::<u32>(),
-                );
-                Ok(())
-            },
-        );
-        assert!(matches!(
-            futures::executor::block_on(write).unwrap(),
-            CompletionResult::WriteComplete { len: 4, .. }
-        ));
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn cancellation_retains_read_and_write_operations_until_handle_closing() {
-        for buffer in [
-            OperationBuffer::read(GlobalPool::new().reserve(8), NonNull::<u8>::dangling().as_ptr().addr(), 8),
-            OperationBuffer::write(BytesView::copied_from_slice(b"outstanding", &GlobalPool::new()), 11),
-        ] {
-            let (mut guard, context, contexts, session, closes) = installed();
-            let kind = match buffer {
-                OperationBuffer::Read { .. } => OperationKind::Read,
-                OperationBuffer::Write { .. } => OperationKind::Write,
-                OperationBuffer::None => unreachable!("test buffers are read or write"),
-            };
-            let future = guard.submit(kind, buffer, |_, _| Ok(()));
-
-            assert_eq!(contexts.lock().unwrap().len(), 1);
-            drop(future);
-            assert!(guard.request.is_none());
-            assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-            let rejected = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                drop(guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(())));
-            }));
-            assert!(rejected.is_err());
-            drop(session);
-            drop(guard);
-
-            assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-            assert_eq!(closes.connect.load(Ordering::SeqCst), 0);
-            assert_eq!(closes.session.load(Ordering::SeqCst), 0);
-            assert_eq!(contexts.lock().unwrap().len(), 1);
-
-            closing(context);
-
-            assert_eq!(contexts.lock().unwrap().len(), 0);
-            assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
-            assert_eq!(closes.session.load(Ordering::SeqCst), 1);
-        }
-    }
-
-    #[test]
     fn connect_timeout_snapshots_state_before_inline_handle_closing() {
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -3007,7 +2458,7 @@ mod tests {
 
         let contexts = ContextPool::new(Pool::new());
         let session = session(parent_facade.clone());
-        let mut guard = RequestSetup::new(
+        let mut guard = ContextInstallation::new(
             RequestHandle::new(raw_handle(REQUEST), request_facade.clone()),
             ConnectHandle::new(raw_handle(CONNECT), parent_facade),
             Arc::clone(&session),
@@ -3038,188 +2489,9 @@ mod tests {
         assert_eq!(error.label(), "response_timeout");
 
         drop(future);
-        assert!(guard.request.is_none());
+        assert!(guard.request_handle_taken());
         drop(session);
         drop(guard);
-
-        assert_eq!(contexts.lock().unwrap().len(), 0);
-        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn request_error_classification_uses_error_code_in_both_secure_status_orders() {
-        for secure_first in [true, false] {
-            let (mut guard, context, contexts, session, closes) = installed();
-            let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
-            let mut secure_flags = 0x20_u32;
-            let mut async_result = WINHTTP_ASYNC_RESULT {
-                dwResult: 7,
-                dwError: 12175,
-            };
-
-            if secure_first {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
-                    (&raw mut secure_flags).cast(),
-                    status_info_len::<u32>(),
-                );
-            }
-            complete(
-                context,
-                WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-                (&raw mut async_result).cast(),
-                status_info_len::<WINHTTP_ASYNC_RESULT>(),
-            );
-
-            let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
-                panic!("request error must produce an error completion");
-            };
-            assert_eq!(error.code(), 12175);
-            assert!(buffer.is_none());
-            assert_eq!(error.secure_failure_flags(), secure_first.then_some(0x20));
-
-            if !secure_first {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
-                    (&raw mut secure_flags).cast(),
-                    status_info_len::<u32>(),
-                );
-                // SAFETY: the guard is still alive, so callback ownership keeps
-                // the installed context valid.
-                assert_eq!(unsafe { &*context }.secure_failure_flags(), Some(0x20));
-            }
-
-            finish(guard, context, &contexts, session, &closes);
-        }
-    }
-
-    #[test]
-    fn duplicate_and_late_completions_cannot_send_twice() {
-        let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
-
-        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
-        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn malformed_status_info_is_not_dereferenced() {
-        let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
-        let mut bytes = [0_u8; size_of::<WINHTTP_ASYNC_RESULT>() + align_of::<WINHTTP_ASYNC_RESULT>()];
-        let offset = (0..align_of::<WINHTTP_ASYNC_RESULT>())
-            .find(|offset| !(bytes.as_ptr().addr() + offset).is_multiple_of(align_of::<WINHTTP_ASYNC_RESULT>()))
-            .unwrap();
-        // SAFETY: offset is less than the type alignment, and the byte array has
-        // that much padding beyond the status structure's required length.
-        let unaligned = unsafe { bytes.as_mut_ptr().add(offset) }.cast();
-
-        complete(
-            context,
-            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-            unaligned,
-            status_info_len::<WINHTTP_ASYNC_RESULT>(),
-        );
-
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::InvalidStatusInfo {
-                status: WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-                ..
-            }
-        ));
-
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn connect_attribution_is_bounded_and_handle_created_is_inert() {
-        let (guard, context, contexts, session, closes) = installed();
-
-        complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
-        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Unobserved);
-
-        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
-        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connecting);
-
-        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
-        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connected);
-
-        finish(guard, context, &contexts, session, &closes);
-    }
-
-    #[test]
-    fn installed_context_outlives_its_pool_handle() {
-        let (facade, closes) = bindings(false);
-        let contexts = ContextPool::new(Pool::new());
-        let session = session(facade.clone());
-        let guard = RequestSetup::new(
-            RequestHandle::new(raw_handle(REQUEST), facade.clone()),
-            ConnectHandle::new(raw_handle(CONNECT), facade),
-            Arc::clone(&session),
-            &contexts,
-        )
-        .install()
-        .unwrap();
-        let context = guard.context_ptr();
-
-        drop(contexts);
-
-        drop(session);
-        drop(guard);
-        closing(context);
-        assert_eq!(closes.request.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
-        assert_eq!(closes.session.load(Ordering::SeqCst), 1);
-    }
-
-    fn installed() -> (
-        RequestGuard,
-        *mut crate::context::RequestContext,
-        ContextPool,
-        Arc<WinHttpSession>,
-        Arc<CloseCounts>,
-    ) {
-        let (facade, closes) = bindings(false);
-        let contexts = ContextPool::new(Pool::new());
-        let session = session(facade.clone());
-        let guard = RequestSetup::new(
-            RequestHandle::new(raw_handle(REQUEST), facade.clone()),
-            ConnectHandle::new(raw_handle(CONNECT), facade),
-            Arc::clone(&session),
-            &contexts,
-        )
-        .install()
-        .unwrap();
-        let context = guard.context_ptr();
-
-        (guard, context, contexts, session, closes)
-    }
-
-    fn finish(
-        guard: RequestGuard,
-        context: *mut crate::context::RequestContext,
-        contexts: &ContextPool,
-        session: Arc<WinHttpSession>,
-        closes: &CloseCounts,
-    ) {
-        drop(session);
-        drop(guard);
-        closing(context);
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
@@ -3245,44 +2517,6 @@ mod tests {
 
     fn session(facade: BindingsFacade) -> Arc<WinHttpSession> {
         Arc::new(WinHttpSession::from_handle(SessionHandle::new(raw_handle(SESSION), facade)))
-    }
-
-    fn bindings(fail_context_option: bool) -> (BindingsFacade, Arc<CloseCounts>) {
-        let closes = Arc::new(CloseCounts::default());
-        let mut bindings = MockBindings::new();
-        let context_counts = Arc::clone(&closes);
-        bindings
-            .expect_set_option()
-            .withf(|handle, option, value| {
-                *handle == raw_handle(REQUEST)
-                    && *option == WINHTTP_OPTION_CONTEXT_VALUE
-                    && value.len() == size_of::<usize>()
-                    && usize::from_ne_bytes(value.try_into().unwrap()) != 0
-            })
-            .once()
-            .returning(move |_, _, value| {
-                context_counts
-                    .context
-                    .store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
-                if fail_context_option {
-                    Err(WinHttpError::new(12019, WinHttpOperation::SetOption))
-                } else {
-                    Ok(())
-                }
-            });
-        let close_counts = Arc::clone(&closes);
-        bindings.expect_close_handle().times(3).returning(move |handle| {
-            match handle.as_ptr().addr() {
-                SESSION => &close_counts.session,
-                CONNECT => &close_counts.connect,
-                REQUEST => &close_counts.request,
-                _ => panic!("unexpected test handle"),
-            }
-            .fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        });
-
-        (BindingsFacade::mock(Arc::new(bindings)), closes)
     }
 
     #[derive(Default)]

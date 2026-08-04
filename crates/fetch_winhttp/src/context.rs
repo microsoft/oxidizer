@@ -634,11 +634,16 @@ mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
     use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use windows::Win32::Networking::WinHttp::{
+        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+        WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+    };
 
     use super::{
         ActiveOperation, CallbackOperationSlot, ColdConnectState, CompletionBuffer, CompletionResult, OperationBuffer, OperationKind,
         RequestContext,
     };
+    use crate::testing::{complete, finish, installed, status_info_len};
 
     assert_impl_all!(OperationKind: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(OperationBuffer: UnwindSafe, RefUnwindSafe);
@@ -652,4 +657,72 @@ mod tests {
     assert_impl_all!(RequestContext: Send, Sync, std::fmt::Debug, UnwindSafe);
     // The context contains the operation slot's actual UnsafeCell state.
     assert_not_impl_any!(RequestContext: RefUnwindSafe);
+
+    #[test]
+    fn request_error_classification_uses_error_code_in_both_secure_status_orders() {
+        for secure_first in [true, false] {
+            let (mut guard, context, contexts, session, closes) = installed();
+            let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+            let mut secure_flags = 0x20_u32;
+            let mut async_result = WINHTTP_ASYNC_RESULT {
+                dwResult: 7,
+                dwError: 12175,
+            };
+
+            if secure_first {
+                complete(
+                    context,
+                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+                    (&raw mut secure_flags).cast(),
+                    status_info_len::<u32>(),
+                );
+            }
+            complete(
+                context,
+                WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+                (&raw mut async_result).cast(),
+                status_info_len::<WINHTTP_ASYNC_RESULT>(),
+            );
+
+            let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
+                panic!("request error must produce an error completion");
+            };
+            assert_eq!(error.code(), 12175);
+            assert!(buffer.is_none());
+            assert_eq!(error.secure_failure_flags(), secure_first.then_some(0x20));
+
+            if !secure_first {
+                complete(
+                    context,
+                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+                    (&raw mut secure_flags).cast(),
+                    status_info_len::<u32>(),
+                );
+                // SAFETY: the guard is still alive, so callback ownership keeps
+                // the installed context valid.
+                assert_eq!(unsafe { &*context }.secure_failure_flags(), Some(0x20));
+            }
+
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
+    fn connect_attribution_is_bounded_and_handle_created_is_inert() {
+        let (guard, context, contexts, session, closes) = installed();
+
+        complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, std::ptr::null_mut(), 0);
+        // SAFETY: the guard is alive and therefore the context is valid.
+        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Unobserved);
+
+        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        // SAFETY: the guard is alive and therefore the context is valid.
+        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connecting);
+
+        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, std::ptr::null_mut(), 0);
+        // SAFETY: the guard is alive and therefore the context is valid.
+        assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connected);
+
+        finish(guard, context, &contexts, session, &closes);
+    }
 }

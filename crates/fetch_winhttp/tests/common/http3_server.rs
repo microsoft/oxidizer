@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use bytes::{Buf as _, Bytes, BytesMut};
+use bytes::{Buf as _, BytesMut};
 use h3_quinn::Connection;
-use http::{HeaderMap, HeaderValue, Response, Version};
+use http::header::CONTENT_LENGTH;
+use http::{HeaderValue, Response, StatusCode, Version};
 use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint, Incoming, ServerConfig, VarInt};
 use rcgen::{CertifiedKey, generate_simple_self_signed};
@@ -16,16 +17,26 @@ use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 
-use super::server::{RecordedRequest, ServerSnapshot};
+use super::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
 
 #[derive(Debug)]
 struct State {
-    responses: Vec<Bytes>,
+    responses: Vec<ResponsePlan>,
     next_response: AtomicUsize,
     requests: Mutex<Vec<RecordedRequest>>,
     connections: AtomicUsize,
 }
 
+/// Scripted HTTP/3 origin server, the QUIC counterpart of `server.rs`.
+///
+/// Serves the same [`ResponsePlan`] vocabulary and produces the same [`ServerSnapshot`], so an
+/// HTTP/3 test can script an error status, a response header, a multi-frame body or trailers the
+/// way a TCP test does.
+///
+/// Unlike `server.rs`, requests are served strictly sequentially per QUIC connection, so a
+/// stalling plan parks that connection for the remainder of the fixture's life. A test that needs
+/// a stalled HTTP/3 response followed by a further request would hang rather than fail; giving
+/// each accepted stream its own task is a prerequisite for that scenario.
 pub(crate) struct Http3Server {
     address: SocketAddr,
     state: Arc<State>,
@@ -34,7 +45,7 @@ pub(crate) struct Http3Server {
 }
 
 impl Http3Server {
-    pub(crate) fn start(responses: impl IntoIterator<Item = Bytes>) -> Self {
+    pub(crate) fn start(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
         let state = Arc::new(State {
             responses: responses.into_iter().collect(),
             next_response: AtomicUsize::new(0),
@@ -176,22 +187,44 @@ async fn serve_connection(incoming: Incoming, state: Arc<State>) {
             body: body.freeze(),
             trailers,
         });
-        let response_body = state.responses.get(index).cloned().unwrap_or_default();
-        let response = Response::builder()
-            .status(200)
-            .header("content-length", response_body.len())
-            .body(())
-            .unwrap();
+        let plan = state
+            .responses
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| ResponsePlan::status(StatusCode::INTERNAL_SERVER_ERROR));
+        let body_length = plan.body_length();
+        let ResponsePlan {
+            status,
+            mut headers,
+            frames,
+            stall_after_frames,
+        } = plan;
+        // `h3` writes exactly the header list it is handed, unlike `hyper`, which derives the
+        // framing header for a body of known length. A stalling plan deliberately leaves the body
+        // length undeclared: declaring it would tell the client the body is already complete,
+        // which is the opposite of what a stall is scripted to observe.
+        if !stall_after_frames && !headers.contains_key(CONTENT_LENGTH) {
+            headers.insert(CONTENT_LENGTH, HeaderValue::from(body_length));
+        }
+        let mut response = Response::new(());
+        *response.status_mut() = status;
+        *response.headers_mut() = headers;
         if stream.send_response(response).await.is_err() {
             return;
         }
-        if stream.send_data(response_body).await.is_err() {
-            return;
+        for frame in frames {
+            let sent = match frame {
+                ResponseFrame::Data(data) => stream.send_data(data).await,
+                ResponseFrame::Trailers(trailers) => stream.send_trailers(trailers).await,
+            };
+            if sent.is_err() {
+                return;
+            }
         }
-        let mut trailers = HeaderMap::new();
-        trailers.insert("x-trailer", HeaderValue::from_static("value"));
-        if stream.send_trailers(trailers).await.is_err() {
-            return;
+        if stall_after_frames {
+            // Never resolves. The connection task is aborted on fixture shutdown, so this holds
+            // the response open without any timer or wall-clock deadline.
+            std::future::pending::<()>().await;
         }
         if stream.finish().await.is_err() {
             return;

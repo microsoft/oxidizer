@@ -9,16 +9,17 @@ use std::task::{Context, Poll};
 use bytesbuf::BytesBuf;
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
 use bytesbuf_io::{Read, ReadAsFuturesStream, ReadExt as _};
-use fetch::{HttpError, RecoveryInfo};
+use fetch::HttpError;
 use futures_core::Stream as _;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
 
 use crate::bindings::{Bindings as _, BindingsFacade};
 use crate::context::{CompletionResult, OperationBuffer, OperationKind};
-use crate::error_labels;
-use crate::options::query_raw_trailers;
-use crate::request::{RequestGuard, parse_response_trailers};
+use crate::error::{callback_protocol_error, invalid_response, query_error};
+use crate::operation::RequestGuard;
+use crate::query::query_raw_trailers;
+use crate::response_headers::parse_response_trailers;
 
 // When WinHTTP reports zero available bytes, it can still complete a useful
 // read. GlobalPool's largest pooled block is 64 KiB, so use that pool-aligned
@@ -302,21 +303,6 @@ fn next_read_capacity(tail_len: usize, desired: usize) -> u32 {
     u32::try_from(tail_len.min(desired).min(u32::MAX as usize)).expect("the read capacity is bounded by u32::MAX")
 }
 
-fn query_error(error: crate::options::QueryError) -> HttpError {
-    match error {
-        crate::options::QueryError::WinHttp(error) => error.into_http_error(),
-        crate::options::QueryError::Conversion(error) => invalid_response(error),
-    }
-}
-
-fn invalid_response(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
-    HttpError::other(error, RecoveryInfo::never(), error_labels::REQUEST_WINHTTP)
-}
-
-fn callback_protocol_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
-    invalid_response(error)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -344,13 +330,12 @@ mod tests {
     };
 
     use super::{PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, next_read_capacity};
-    use crate::bindings::{BindingsFacade, MockBindings};
+    use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
     use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
-    use crate::options::WINHTTP_OPTION_CONTEXT_VALUE;
-    use crate::request::{ContextPool, RequestSetup};
+    use crate::operation::{ContextInstallation, ContextPool};
     use crate::session::WinHttpSession;
 
     const SESSION: usize = 101;
@@ -872,7 +857,7 @@ mod tests {
         let facade = BindingsFacade::mock(Arc::new(bindings));
         let session = Arc::new(WinHttpSession::from_handle(SessionHandle::new(raw_handle(SESSION), facade.clone())));
         let contexts = ContextPool::new(Pool::new());
-        let guard = RequestSetup::new(
+        let guard = ContextInstallation::new(
             RequestHandle::new(raw_handle(REQUEST), facade.clone()),
             ConnectHandle::new(raw_handle(CONNECT), facade.clone()),
             Arc::clone(&session),

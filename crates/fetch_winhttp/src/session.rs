@@ -15,17 +15,13 @@ use windows::Win32::Networking::WinHttp::{
 };
 
 use crate::WinHttpOptions;
-use crate::bindings::{Bindings as _, BindingsFacade};
+use crate::bindings::{Bindings as _, BindingsFacade, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE};
 use crate::callback::status_callback;
+use crate::convert::{UNLIMITED_TIMEOUT, dword_bytes, http2_keep_alive_millis, http3_keep_alive_millis, timeout_millis};
 use crate::error::WinHttpError;
 use crate::handle::SessionHandle;
-use crate::options::{
-    WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE, dword_bytes, http2_keep_alive_millis,
-    http3_keep_alive_millis, timeout_millis,
-};
 
 const USER_AGENT: &str = "fetch_winhttp";
-const UNLIMITED_TIMEOUT: i32 = -1;
 const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 
 const ALL_COMPLETIONS: u32 = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
@@ -245,12 +241,14 @@ mod tests {
         USER_AGENT, WinHttpSession,
     };
     use crate::WinHttpOptions;
-    use crate::bindings::{BindingsFacade, MockBindings, StatusCallback};
+    use crate::bindings::{
+        BindingsFacade, MockBindings, StatusCallback, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE,
+    };
     use crate::callback::status_callback;
     use crate::context::OperationKind;
+    use crate::convert::{dword_bytes, timeout_millis};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
-    use crate::options::{WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE, dword_bytes, timeout_millis};
 
     assert_impl_all!(WinHttpSession: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(

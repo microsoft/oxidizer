@@ -246,10 +246,13 @@ mod tests {
     use std::ptr::null_mut;
 
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
     };
 
     use super::{dispatch_completion, status_callback};
+    use crate::context::{CompletionResult, OperationBuffer, OperationKind};
+    use crate::testing::{complete, finish, installed, status_info_len};
 
     #[test]
     fn null_context_callbacks_do_nothing() {
@@ -268,5 +271,51 @@ mod tests {
                 status_callback(null_mut(), 0, status, std::ptr::dangling_mut::<c_void>(), u32::MAX);
             }
         }
+    }
+
+    #[test]
+    fn duplicate_and_late_completions_cannot_send_twice() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+
+        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+        assert!(matches!(
+            futures::executor::block_on(future).unwrap(),
+            CompletionResult::SendRequestComplete
+        ));
+        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+
+        finish(guard, context, &contexts, session, &closes);
+    }
+
+    #[test]
+    fn malformed_status_info_is_not_dereferenced() {
+        let (mut guard, context, contexts, session, closes) = installed();
+        let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
+        let mut bytes = [0_u8; size_of::<WINHTTP_ASYNC_RESULT>() + align_of::<WINHTTP_ASYNC_RESULT>()];
+        let offset = (0..align_of::<WINHTTP_ASYNC_RESULT>())
+            .find(|offset| !(bytes.as_ptr().addr() + offset).is_multiple_of(align_of::<WINHTTP_ASYNC_RESULT>()))
+            .unwrap();
+        // SAFETY: offset is less than the type alignment, and the byte array has
+        // that much padding beyond the status structure's required length.
+        let unaligned = unsafe { bytes.as_mut_ptr().add(offset) }.cast();
+
+        complete(
+            context,
+            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+            unaligned,
+            status_info_len::<WINHTTP_ASYNC_RESULT>(),
+        );
+
+        assert!(matches!(
+            futures::executor::block_on(future).unwrap(),
+            CompletionResult::InvalidStatusInfo {
+                status: WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+                ..
+            }
+        ));
+
+        finish(guard, context, &contexts, session, &closes);
     }
 }

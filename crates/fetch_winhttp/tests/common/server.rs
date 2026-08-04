@@ -9,7 +9,7 @@ use std::thread::{self, JoinHandle};
 
 use bytes::Bytes;
 use futures::StreamExt as _;
-use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
+use http::{Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt as _, Full, StreamBody};
@@ -26,111 +26,40 @@ use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
+use super::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+
 type ResponseBody = UnsyncBoxBody<Bytes, Infallible>;
 
-#[derive(Clone, Debug)]
-enum ResponseFrame {
-    Data(Bytes),
-    Trailers(HeaderMap),
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ResponsePlan {
-    status: StatusCode,
-    headers: HeaderMap,
-    frames: Vec<ResponseFrame>,
-    stall_after_frames: bool,
-}
-
-impl ResponsePlan {
-    pub(crate) fn ok(body: impl Into<Bytes>) -> Self {
-        Self {
-            status: StatusCode::OK,
-            headers: HeaderMap::new(),
-            frames: vec![ResponseFrame::Data(body.into())],
-            stall_after_frames: false,
-        }
-    }
-
-    pub(crate) fn status(status: StatusCode) -> Self {
-        Self {
-            status,
-            headers: HeaderMap::new(),
-            frames: vec![ResponseFrame::Data(Bytes::new())],
-            stall_after_frames: false,
-        }
-    }
-
-    pub(crate) fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
-        self.headers.append(name, value);
-        self
-    }
-
-    pub(crate) fn chunks(chunks: impl IntoIterator<Item = Bytes>) -> Self {
-        Self {
-            status: StatusCode::OK,
-            headers: HeaderMap::new(),
-            frames: chunks.into_iter().map(ResponseFrame::Data).collect(),
-            stall_after_frames: false,
-        }
-    }
-
-    pub(crate) fn trailers(mut self, trailers: HeaderMap) -> Self {
-        self.frames.push(ResponseFrame::Trailers(trailers));
-        self
-    }
-
-    pub(crate) fn stall_after_frames(mut self) -> Self {
-        self.stall_after_frames = true;
-        self
-    }
-
-    fn into_response(self) -> Response<ResponseBody> {
-        let Self {
-            status,
-            headers,
-            frames,
-            stall_after_frames,
-        } = self;
-        let body = if !stall_after_frames && let [ResponseFrame::Data(data)] = frames.as_slice() {
-            Full::new(data.clone()).boxed_unsync()
-        } else {
-            let frames = frames
-                .into_iter()
-                .map(|frame| {
-                    Ok(match frame {
-                        ResponseFrame::Data(data) => Frame::data(data),
-                        ResponseFrame::Trailers(trailers) => Frame::trailers(trailers),
-                    })
+/// Translates a scripted plan into the body shape `hyper` serves.
+fn into_response(plan: ResponsePlan) -> Response<ResponseBody> {
+    let ResponsePlan {
+        status,
+        headers,
+        frames,
+        stall_after_frames,
+    } = plan;
+    let body = if !stall_after_frames && let [ResponseFrame::Data(data)] = frames.as_slice() {
+        Full::new(data.clone()).boxed_unsync()
+    } else {
+        let frames = frames
+            .into_iter()
+            .map(|frame| {
+                Ok(match frame {
+                    ResponseFrame::Data(data) => Frame::data(data),
+                    ResponseFrame::Trailers(trailers) => Frame::trailers(trailers),
                 })
-                .collect::<Vec<Result<Frame<Bytes>, Infallible>>>();
-            if stall_after_frames {
-                StreamBody::new(futures::stream::iter(frames).chain(futures::stream::pending())).boxed_unsync()
-            } else {
-                StreamBody::new(futures::stream::iter(frames)).boxed_unsync()
-            }
-        };
-        let mut response = Response::new(body);
-        *response.status_mut() = status;
-        *response.headers_mut() = headers;
-        response
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct RecordedRequest {
-    pub(crate) method: Method,
-    pub(crate) uri: Uri,
-    pub(crate) version: Version,
-    pub(crate) headers: HeaderMap,
-    pub(crate) body: Bytes,
-    pub(crate) trailers: Option<HeaderMap>,
-}
-
-#[derive(Debug)]
-pub(crate) struct ServerSnapshot {
-    pub(crate) requests: Vec<RecordedRequest>,
-    pub(crate) connections: usize,
+            })
+            .collect::<Vec<Result<Frame<Bytes>, Infallible>>>();
+        if stall_after_frames {
+            StreamBody::new(futures::stream::iter(frames).chain(futures::stream::pending())).boxed_unsync()
+        } else {
+            StreamBody::new(futures::stream::iter(frames)).boxed_unsync()
+        }
+    };
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    *response.headers_mut() = headers;
+    response
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -299,7 +228,7 @@ async fn handle_request(request: Request<Incoming>, state: Arc<State>) -> Result
             }
         }
         Err(_) => {
-            return Ok(ResponsePlan::status(StatusCode::BAD_REQUEST).into_response());
+            return Ok(into_response(ResponsePlan::status(StatusCode::BAD_REQUEST)));
         }
     };
     state.requests.lock().unwrap().push((index, recorded));
@@ -309,5 +238,5 @@ async fn handle_request(request: Request<Incoming>, state: Arc<State>) -> Result
         .get(index)
         .cloned()
         .unwrap_or_else(|| ResponsePlan::status(StatusCode::INTERNAL_SERVER_ERROR));
-    Ok(response.into_response())
+    Ok(into_response(response))
 }

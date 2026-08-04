@@ -11,7 +11,8 @@ use observed::Sink;
 use tick::Clock;
 
 use crate::bindings::BindingsFacade;
-use crate::request::{ContextPool, RequestDriver};
+use crate::operation::ContextPool;
+use crate::request::RequestDriver;
 use crate::session::{SessionInitializationFailure, WinHttpSession};
 use crate::telemetry::Telemetry;
 use crate::{WinHttpTlsConfig, error_labels};
@@ -184,15 +185,14 @@ mod tests {
 
     use super::{FailedTransport, ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
     use crate::WinHttpTlsConfig;
-    use crate::bindings::{BindingsFacade, MockBindings};
+    use crate::bindings::{
+        BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
+    };
     use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
-    use crate::options::{
-        WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_FLAG_WIRE_ENCODING,
-        WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
-    };
-    use crate::request::ContextPool;
+    use crate::operation::ContextPool;
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);

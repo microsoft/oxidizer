@@ -3,22 +3,28 @@
 
 #![expect(
     dead_code,
-    reason = "each integration-test binary compiles this shared module independently and sees helpers used only by sibling binaries"
+    reason = "each integration-test binary compiles this shared module independently and sees helpers used only by sibling binaries; every item here is exercised by at least one binary"
 )]
 #![allow(unused_imports, reason = "shared integration-test helpers are used by different test binaries")]
 
 mod http3_server;
+mod recording;
 mod server;
 
+use std::future::poll_fn;
+use std::io::Read as _;
+use std::pin::Pin;
 use std::time::Duration;
 
 use bytesbuf::mem::GlobalPool;
 use fetch::{HttpBodyBuilder, HttpClient, HttpClientBuilder};
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps, WinHttpTlsConfig};
-use http::Version;
+use http::{HeaderMap, Version};
+use http_body::Body as _;
 pub(crate) use http3_server::Http3Server;
 use observed::Sink;
-pub(crate) use server::{ResponsePlan, TestServer};
+pub(crate) use recording::ResponsePlan;
+pub(crate) use server::TestServer;
 use tick::Clock;
 
 pub(crate) struct TestClient {
@@ -49,4 +55,25 @@ pub(crate) fn client_builder(versions: &[Version], tls: WinHttpTlsConfig) -> (Ht
     }
 
     (builder, body_builder)
+}
+
+/// Drains a response body frame by frame, separating the data from the trailer section.
+///
+/// `HttpBody::into_bytes` and `into_text` discard trailers, so any test that asserts on a trailer
+/// section has to poll the frames itself.
+pub(crate) async fn collect_frames(mut body: fetch::HttpBody) -> (Vec<u8>, Option<HeaderMap>) {
+    let mut data = Vec::new();
+    let mut trailers = None;
+
+    while let Some(frame) = poll_fn(|context| Pin::new(&mut body).poll_frame(context)).await {
+        let frame = frame.unwrap();
+        match frame.into_data() {
+            Ok(mut bytes) => {
+                bytes.read_to_end(&mut data).unwrap();
+            }
+            Err(frame) => trailers = Some(frame.into_trailers().unwrap()),
+        }
+    }
+
+    (data, trailers)
 }
