@@ -9,7 +9,7 @@ use crate::derive_error::attributes::DisplayAttribute;
 use crate::derive_error::field_detection::is_generated_error_field;
 use crate::utils::bail;
 
-const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so the `self.` prefix must be omitted: write `path.display()` instead of `self.path.display()`";
+const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix";
 
 /// Parse display template to support field references like `{field_name}`
 /// or format!-style with separate arguments
@@ -84,7 +84,7 @@ fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc
 fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
     match root_of_expr(expr) {
         // `self.path` would expand to `&self.self.path`
-        Expr::Path(path) if path.path.is_ident("self") => bail!(expr.span(), SELF_SCOPED_ARGS),
+        Expr::Path(path) if path.path.is_ident("self") => bail!(path.span(), SELF_SCOPED_ARGS),
         Expr::Path(path) => match path.path.get_ident() {
             Some(ident) => validate_field_exists(&ident.to_string(), input, ident.span()),
             None => Ok(()),
@@ -162,10 +162,11 @@ fn describe_referenceable_fields(input: &DeriveInput) -> String {
     format!("available fields: {names}")
 }
 
-/// Collect the names of the fields the user declared
+/// Collect the names a display template may reference, by name or by tuple index
 ///
-/// The `OhnoCore` field injected by `#[ohno::error]` is left out, as the user never wrote it and
-/// would not recognize it in a diagnostic. A core field the user declared themselves is kept.
+/// The `OhnoCore` field injected by `#[ohno::error]` is left out, as the user never wrote it:
+/// referencing it would print the error's own chain, and naming it in a diagnostic would point at
+/// a field absent from their source. A core field the user declared themselves is kept.
 fn referenceable_field_names(input: &DeriveInput) -> Vec<String> {
     let Data::Struct(data_struct) = &input.data else {
         return Vec::new();
@@ -198,20 +199,9 @@ fn generate_display_expression(result: &str, format_args: &[proc_macro2::TokenSt
     }
 }
 
-/// Check if a field exists in the struct, by name for named fields and by index for tuple structs
+/// Check if a field can be referenced from a display template, by name or by tuple index
 pub(crate) fn field_exists(field_name: &str, input: &DeriveInput) -> bool {
-    let Data::Struct(data_struct) = &input.data else {
-        return false;
-    };
-
-    match &data_struct.fields {
-        Fields::Named(fields) => fields
-            .named
-            .iter()
-            .any(|field| field.ident.as_ref().is_some_and(|ident| ident == field_name)),
-        Fields::Unnamed(fields) => field_name.parse::<usize>().is_ok_and(|index| index < fields.unnamed.len()),
-        Fields::Unit => false,
-    }
+    referenceable_field_names(input).iter().any(|name| name == field_name)
 }
 
 #[cfg(test)]
@@ -474,6 +464,32 @@ mod tests {
         // The injected OhnoCore is the second field, so only index 0 is offered
         let message = parse_err("bad path: {5}", vec![], &input);
         assert_eq!(message, "unknown field `5` in `#[display(...)]`, available fields: `0`");
+    }
+
+    #[test]
+    fn test_index_of_the_generated_error_field_is_not_referenceable() {
+        // Index 1 is in range but holds the injected OhnoCore, whose Display prints the error's
+        // own chain; referencing it is a mistake rather than a way to reach the core
+        let input: DeriveInput = parse_quote! { struct TestError(PathBuf, #[error(generated)] OhnoCore); };
+
+        for message in [
+            parse_err("bad path: {1}", vec![], &input),
+            parse_err("bad path: {}", vec![parse_quote! { 1 }], &input),
+        ] {
+            assert_eq!(message, "unknown field `1` in `#[display(...)]`, available fields: `0`");
+        }
+    }
+
+    #[test]
+    fn test_name_of_the_generated_error_field_is_not_referenceable() {
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+
+        for message in [
+            parse_err("bad path: {ohno_core}", vec![], &input),
+            parse_err("bad path: {}", vec![parse_quote! { ohno_core }], &input),
+        ] {
+            assert_eq!(message, "unknown field `ohno_core` in `#[display(...)]`, available fields: `path`");
+        }
     }
 
     #[test]

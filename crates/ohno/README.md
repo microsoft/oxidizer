@@ -108,8 +108,8 @@ Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so o
 
 ### Format Arguments
 
-Anything that is not a plain field reference is passed as a positional argument, exactly like
-with `format!`:
+Anything that is not a plain field reference is passed as a positional argument, with
+`format!`'s placeholder and argument-counting semantics:
 
 ```rust
 use std::path::PathBuf;
