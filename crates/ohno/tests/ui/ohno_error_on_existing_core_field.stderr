@@ -1,0 +1,11 @@
+error: `#[ohno::error]` adds the OhnoCore field itself, so no field can be marked with `#[error]`. Use `#[derive(ohno::Error)]` to place the field yourself
+  --> tests/ui/ohno_error_on_existing_core_field.rs:11:5
+   |
+11 |     #[error]
+   |     ^^^^^^^^
+
+error: `#[ohno::error]` adds the OhnoCore field itself, so the struct cannot declare one. Use `#[derive(ohno::Error)]` to place the field yourself
+  --> tests/ui/ohno_error_on_existing_core_field.rs:18:12
+   |
+18 |     inner: ohno::OhnoCore,
+   |            ^^^^^^^^^^^^^^

@@ -5,6 +5,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input, parse_quote};
 
+use crate::derive_error::is_inner_error_type;
 use crate::utils::{generate_unique_field_name, generated_error_field_marker};
 
 /// Attribute macro version of `error_type` that can handle documentation comments.
@@ -61,12 +62,14 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
 }
 
 const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself, so no field can be marked with `#[error]`. Use `#[derive(ohno::Error)]` to place the field yourself";
+const ALREADY_DECLARED: &str = "`#[ohno::error]` adds the OhnoCore field itself, so the struct cannot declare one. Use `#[derive(ohno::Error)]` to place the field yourself";
 
-/// Reject a struct that already marks its own error field
+/// Reject a struct that already carries its own error field
 ///
-/// `#[ohno::error]` adds the `OhnoCore` field itself, so a struct that marks one would end up
-/// holding two, with the choice between them left to declaration order. Placing the field by hand
-/// is what `#[derive(ohno::Error)]` is for.
+/// `#[ohno::error]` adds the `OhnoCore` field itself, so a struct that marks or declares one would
+/// end up holding two, with the field the implementations are generated from settled by
+/// declaration order and the other left unused. Placing the field by hand is what
+/// `#[derive(ohno::Error)]` is for.
 fn reject_existing_error_field(input: &DeriveInput) -> syn::Result<()> {
     let Data::Struct(data_struct) = &input.data else {
         return Ok(());
@@ -75,6 +78,10 @@ fn reject_existing_error_field(input: &DeriveInput) -> syn::Result<()> {
     for field in &data_struct.fields {
         if let Some(attr) = field.attrs.iter().find(|attr| attr.path().is_ident("error")) {
             return Err(syn::Error::new_spanned(attr, ALREADY_MARKED));
+        }
+
+        if is_inner_error_type(&field.ty) {
+            return Err(syn::Error::new_spanned(&field.ty, ALREADY_DECLARED));
         }
     }
 
@@ -143,19 +150,33 @@ mod tests {
 
     #[test]
     fn test_reject_existing_error_field() {
-        // The attribute adds the core field itself, so marking one would leave the struct holding
-        // two with the choice between them settled by declaration order
-        for input in [
-            parse_quote! { struct TestError { path: String, #[error] inner: ohno::OhnoCore } },
-            parse_quote! { struct TestError(String, #[error] ohno::OhnoCore); },
+        // The attribute adds the core field itself, so a struct carrying one would end up holding
+        // two, with the unused one settled by declaration order
+        for (input, expected) in [
+            (
+                parse_quote! { struct TestError { path: String, #[error] inner: ohno::OhnoCore } },
+                crate::error_type_attr::ALREADY_MARKED,
+            ),
+            (
+                parse_quote! { struct TestError(String, #[error] ohno::OhnoCore); },
+                crate::error_type_attr::ALREADY_MARKED,
+            ),
+            (
+                parse_quote! { struct TestError { path: String, inner: ohno::OhnoCore } },
+                crate::error_type_attr::ALREADY_DECLARED,
+            ),
+            (
+                parse_quote! { struct TestError(String, OhnoCore); },
+                crate::error_type_attr::ALREADY_DECLARED,
+            ),
         ] {
             let input: DeriveInput = input;
             let err = crate::error_type_attr::reject_existing_error_field(&input).unwrap_err();
-            assert_eq!(err.to_string(), crate::error_type_attr::ALREADY_MARKED);
+            assert_eq!(err.to_string(), expected);
         }
 
-        // A struct that marks nothing is what the attribute expects, and an input that cannot
-        // carry fields has nothing to reject
+        // A struct that carries no core field is what the attribute expects, and an input that
+        // cannot carry fields has nothing to reject
         for input in [
             parse_quote! { struct TestError { path: String } },
             parse_quote! { struct TestError; },
