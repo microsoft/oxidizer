@@ -15,14 +15,14 @@ use crate::transform::{Codec, CodecContext, DecodeOutcome};
 /// A byte-to-byte [`Codec`] stage that authenticates values with a [`ValueProtector`],
 /// binding the storage key (carried by the [`CodecContext`]) as associated data.
 ///
-/// Chained after serialization (see [`ChainedCodec`](crate::transform::codec)) so it
-/// protects the serialized bytes; each backing tier is authenticated independently on
-/// read. Being the stage that actually performs the authentication, it *owns* the
-/// protection telemetry: an [`AuthenticationFailed`](Rejection::AuthenticationFailed)
-/// rejection records `cache.unprotect_failed`, while a
-/// [`Malformed`](Rejection::Malformed) one is a silent miss. Both surface to the general
-/// codec pipeline as a plain [`DecodeOutcome::SoftFailure`], so no crypto category leaks
-/// into the shared decode vocabulary.
+/// Chained after serialization so it protects the serialized bytes; each backing tier is
+/// authenticated independently on read. Being the stage that performs the authentication,
+/// it *owns* the protection telemetry: an
+/// [`AuthenticationFailed`](Rejection::AuthenticationFailed) rejection records
+/// `cache.unprotect_failed`, while a [`Malformed`](Rejection::Malformed) one is a silent
+/// miss. Both surface to the general codec pipeline as a plain
+/// [`DecodeOutcome::SoftFailure`], so no crypto category leaks into the shared decode
+/// vocabulary.
 pub(crate) struct ProtectorCodec {
     protector: Arc<dyn ValueProtector>,
     telemetry: CacheTelemetry,

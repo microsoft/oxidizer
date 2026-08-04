@@ -11,13 +11,12 @@
 //! tier, call `.serialize()` again — each `.serialize()` is its own boundary applying to
 //! the single `.fallback()` that follows.
 //!
-//! `.serialize()` is sugar over [`transform`](super::transform): it produces the same
-//! [`TransformTierBuilder`] (hence the same `TransformAdapter` leaf) as `.transform()`,
-//! preset with postcard codecs and a key-context that binds the storage key — so a
-//! protector added via [`protect_with`](SerializeBuilder::protect_with) can authenticate
-//! each value against its key. Every byte leaf is wrapped independently, so a corrupt or
-//! tampered value in one tier decodes to a miss there and the fallback chain falls
-//! through rather than shadowing a good copy.
+//! `.serialize()` is sugar over [`transform`](super::transform): it presets the postcard
+//! codecs and a key-context that binds the storage key, so a protector added via
+//! [`protect_with`](SerializeBuilder::protect_with) can authenticate each value against
+//! its key. Like `.transform()`, it wraps each byte tier independently, so a corrupt or
+//! tampered value decodes to a miss there rather than shadowing a good copy in a later
+//! tier.
 
 use std::fmt::Debug;
 use std::hash::Hash;
