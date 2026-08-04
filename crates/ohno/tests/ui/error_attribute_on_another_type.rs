@@ -1,13 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `#[error(generated)]` is written by `#[ohno::error]` onto the `OhnoCore` field it injects, so
-//! the macro knows that field's type exactly and rejects the marker on any other type.
+//! `#[error]` marks the field holding the `OhnoCore`, so a field of another type carrying it is
+//! reported against the field itself.
 //!
-//! The bare `#[error]` marker is deliberately not type-checked, because the field may hold an
-//! alias or a re-export of `OhnoCore` that cannot be recognized by name. Marking a field that is
-//! genuinely not a core type therefore still fails, but against the generated implementations
-//! rather than against the attribute — the second case below pins that weaker diagnostic.
+//! Without this the mistake surfaced only through the implementations generated from that field,
+//! as a series of errors about methods the user never called, spanned at the derive rather than
+//! at anything they wrote.
 
 #[derive(ohno::Error)]
 pub struct GeneratedMarkerOnAnotherType {

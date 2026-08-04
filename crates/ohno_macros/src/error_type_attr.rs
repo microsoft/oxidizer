@@ -49,12 +49,36 @@ pub(crate) fn error(_args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
+    if let Err(err) = reject_existing_error_field(input) {
+        return err.to_compile_error();
+    }
     if let Err(err) = add_ohno_core_field(input) {
         return err.to_compile_error();
     }
     add_fiasko_error_derive(input);
 
     quote! { #input }
+}
+
+const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself, so no field can be marked with `#[error]`. Use `#[derive(ohno::Error)]` to place the field yourself";
+
+/// Reject a struct that already marks its own error field
+///
+/// `#[ohno::error]` adds the `OhnoCore` field itself, so a struct that marks one would end up
+/// holding two, with the choice between them left to declaration order. Placing the field by hand
+/// is what `#[derive(ohno::Error)]` is for.
+fn reject_existing_error_field(input: &DeriveInput) -> syn::Result<()> {
+    let Data::Struct(data_struct) = &input.data else {
+        return Ok(());
+    };
+
+    for field in &data_struct.fields {
+        if let Some(attr) = field.attrs.iter().find(|attr| attr.path().is_ident("error")) {
+            return Err(syn::Error::new_spanned(attr, ALREADY_MARKED));
+        }
+    }
+
+    Ok(())
 }
 
 fn add_fiasko_error_derive(input: &mut DeriveInput) {
@@ -116,6 +140,42 @@ mod tests {
     use quote::ToTokens;
 
     use super::*;
+
+    #[test]
+    fn test_reject_existing_error_field() {
+        // The attribute adds the core field itself, so marking one would leave the struct holding
+        // two with the choice between them settled by declaration order
+        for input in [
+            parse_quote! { struct TestError { path: String, #[error] inner: ohno::OhnoCore } },
+            parse_quote! { struct TestError(String, #[error] ohno::OhnoCore); },
+        ] {
+            let input: DeriveInput = input;
+            let err = crate::error_type_attr::reject_existing_error_field(&input).unwrap_err();
+            assert_eq!(err.to_string(), crate::error_type_attr::ALREADY_MARKED);
+        }
+
+        // A struct that marks nothing is what the attribute expects, and an input that cannot
+        // carry fields has nothing to reject
+        for input in [
+            parse_quote! { struct TestError { path: String } },
+            parse_quote! { struct TestError; },
+            parse_quote! { enum TestError { A } },
+        ] {
+            let input: DeriveInput = input;
+            crate::error_type_attr::reject_existing_error_field(&input).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_error_impl_reports_an_already_marked_field() {
+        let mut input: DeriveInput = parse_quote! {
+            struct TestError { #[error] inner: ohno::OhnoCore }
+        };
+
+        let expansion = crate::error_type_attr::error_impl(&mut input).to_string();
+        assert!(expansion.contains("compile_error"), "expansion should be a compile error");
+        assert!(expansion.contains("adds the OhnoCore field itself"), "got: {expansion}");
+    }
 
     #[test]
     fn test_add_fiasko_error_derive_effect() {

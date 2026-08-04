@@ -67,6 +67,9 @@ The `#[ohno::error]` attribute macro is a convenience wrapper that automatically
 field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 without manually managing the error infrastructure.
 
+Because the attribute adds that field itself, the struct must not declare one of its own, nor
+mark a field with `#[error]`. Use `#[derive(Error)]` directly to place the field by hand.
+
 ```rust
 // Simple error without extra fields
 #[ohno::error]
@@ -318,7 +321,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQba8vrHpGJp1QbdGZanmEBAhIbX7yt575IaYMbYVPXLlNqZgJhZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbOtMahB4N40QbVyEMAffI-fIb2Ccb8A1kG4IbpEpqw6ns-aNhZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

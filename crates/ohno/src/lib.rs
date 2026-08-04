@@ -62,6 +62,9 @@
 //! field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 //! without manually managing the error infrastructure.
 //!
+//! Because the attribute adds that field itself, the struct must not declare one of its own, nor
+//! mark a field with `#[error]`. Use `#[derive(Error)]` directly to place the field by hand.
+//!
 //! ```rust
 //! // Simple error without extra fields
 //! #[ohno::error]

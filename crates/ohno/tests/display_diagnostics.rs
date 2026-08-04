@@ -25,9 +25,12 @@ fn display_diagnostics() {
     // `#[error]` takes no arguments, so an unrecognized one is reported rather than ignored.
     t.compile_fail("tests/ui/error_attribute_arguments.rs");
 
-    // Only one field can hold the OhnoCore, and the generated marker only ever appears on one.
+    // Only one field can hold the OhnoCore, and the marker belongs on that field alone.
     t.compile_fail("tests/ui/error_attribute_on_several_fields.rs");
     t.compile_fail("tests/ui/error_attribute_on_another_type.rs");
+
+    // `#[ohno::error]` adds the OhnoCore field itself, so the struct must not mark one.
+    t.compile_fail("tests/ui/ohno_error_on_marked_field.rs");
 
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.

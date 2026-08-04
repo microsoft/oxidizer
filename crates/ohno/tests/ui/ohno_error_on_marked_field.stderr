@@ -1,0 +1,5 @@
+error: `#[ohno::error]` adds the OhnoCore field itself, so no field can be marked with `#[error]`. Use `#[derive(ohno::Error)]` to place the field yourself
+  --> tests/ui/ohno_error_on_marked_field.rs:10:5
+   |
+10 |     #[error]
+   |     ^^^^^^^^
