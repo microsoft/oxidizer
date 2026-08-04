@@ -73,44 +73,35 @@ pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &De
 /// Convert expression to appropriate field access
 ///
 /// Positional arguments are implicitly scoped to `self`, so the expression is prefixed with
-/// `&self.`. Its root is validated first: otherwise a mis-scoped or misspelled argument is only
-/// caught later by `rustc`, which reports it against the expanded struct and leaks the
-/// macro-injected `OhnoCore` field into the diagnostic.
+/// `&self.`. Both the root and the resulting expansion are checked first: otherwise a mis-scoped,
+/// misspelled or unsupported argument is only caught later by `rustc`, which reports it against
+/// generated code the user cannot see and leaks the macro-injected `OhnoCore` field into the
+/// diagnostic.
 fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     validate_arg_root(expr, input)?;
-    Ok(quote! { &self.#expr })
+
+    // Whether an argument can carry the prefix at all is decided by parsing the expansion, rather
+    // than by enumerating the expression forms that may follow a dot
+    let expanded = quote! { &self.#expr };
+    if syn::parse2::<Expr>(expanded.clone()).is_err() {
+        bail!(expr.span(), UNSUPPORTED_ROOT);
+    }
+
+    Ok(expanded)
 }
 
 /// Validate the field access a positional argument is rooted in
-///
-/// The argument is expanded as `&self.#expr`, so its root must be something that can legally
-/// follow a dot: a field, a method call on `self`, or a tuple index. Any other root is rejected
-/// here, because it would otherwise reach `rustc` as a parse error against generated code the
-/// user cannot see.
 fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
     match root_of_expr(expr) {
         // `self.path` would expand to `&self.self.path`
         Expr::Path(path) if path.path.is_ident("self") => bail!(path.span(), SELF_SCOPED_ARGS),
-        // A field, or the receiver of a method call on one
         Expr::Path(path) => match path.path.get_ident() {
             Some(ident) => validate_field_exists(&ident.to_string(), input, ident.span()),
-            None => bail!(path.span(), UNSUPPORTED_ROOT),
+            None => Ok(()),
         },
-        // A method called on `self`, such as `describe()`
-        Expr::Call(call) => validate_call_root(call),
-        // Tuple field access such as `0`, or nested access such as `0.1`
         Expr::Lit(literal) => validate_literal_root(literal, input),
-        other => bail!(other.span(), UNSUPPORTED_ROOT),
-    }
-}
-
-/// Validate the callee of a call the argument is rooted in
-fn validate_call_root(call: &syn::ExprCall) -> Result<()> {
-    // `describe()` expands to `&self.describe()`, but a qualified callee such as
-    // `Self::describe()` cannot follow the dot
-    match &*call.func {
-        Expr::Path(path) if path.path.get_ident().is_some() => Ok(()),
-        other => bail!(other.span(), UNSUPPORTED_ROOT),
+        // Any other root names no field, so there is nothing to check here
+        _ => Ok(()),
     }
 }
 
@@ -122,18 +113,28 @@ fn validate_literal_root(literal: &syn::ExprLit, input: &DeriveInput) -> Result<
         // field of `self`, the rest reaches into the field's own type
         syn::Lit::Float(index) => match index.base10_digits().split_once('.') {
             Some((outer, _)) => validate_field_exists(outer, input, index.span()),
-            None => bail!(index.span(), UNSUPPORTED_ROOT),
+            None => Ok(()),
         },
-        other => bail!(other.span(), UNSUPPORTED_ROOT),
+        _ => Ok(()),
     }
 }
 
 /// Walk an expression down to the term the whole expression is rooted in
+///
+/// The argument is expanded as `&self.#expr`, so `self.` lands immediately before this term.
+/// Every form here keeps the root in leftmost position, which is what makes the expansion
+/// parse: `count * 2` becomes `&self.count * 2`, and `t.0.message()` becomes
+/// `&self.t.0.message()`.
 fn root_of_expr(expr: &Expr) -> &Expr {
     match expr {
         Expr::Field(inner) => root_of_expr(&inner.base),
         Expr::MethodCall(inner) => root_of_expr(&inner.receiver),
         Expr::Index(inner) => root_of_expr(&inner.expr),
+        Expr::Binary(inner) => root_of_expr(&inner.left),
+        Expr::Cast(inner) => root_of_expr(&inner.expr),
+        Expr::Await(inner) => root_of_expr(&inner.base),
+        Expr::Try(inner) => root_of_expr(&inner.expr),
+        Expr::Range(inner) => inner.start.as_ref().map_or(expr, |start| root_of_expr(start)),
         _ => expr,
     }
 }
@@ -543,6 +544,28 @@ mod tests {
         // Index 1 is the injected OhnoCore, so it is caught here rather than by rustc
         let message = parse_err("bad: {}", vec![parse_quote! { 1.0 }], &input);
         assert_eq!(message, "unknown field `1` in `#[display(...)]`, available fields: `0`");
+    }
+
+    #[test]
+    fn test_argument_root_is_found_through_leftmost_position() {
+        // `self.` lands before the leftmost term, so these all keep the root a field of `self`
+        let input: DeriveInput = parse_quote! { struct TestError { count: u32, #[error(generated)] ohno_core: OhnoCore } };
+
+        let result = parse("total: {}", vec![parse_quote! { count * 2 }], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("total: {}", &self.count * 2)) };
+        assert_eq!(result.to_string(), expected.to_string());
+
+        // The root is still validated through those forms
+        for arg in [
+            parse_quote! { cnt * 2 },
+            parse_quote! { cnt as u64 },
+            parse_quote! { cnt..8 },
+            parse_quote! { cnt.await },
+            parse_quote! { cnt? },
+        ] {
+            let message = parse_err("total: {}", vec![arg], &input);
+            assert_eq!(message, "unknown field `cnt` in `#[display(...)]`, available fields: `count`");
+        }
     }
 
     #[test]
