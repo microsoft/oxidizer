@@ -501,4 +501,24 @@ mod tests {
         let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.describe())) };
         assert_eq!(result.to_string(), expected.to_string());
     }
+
+    #[test]
+    fn test_positional_argument_rooted_in_a_qualified_path_is_left_alone() {
+        // A multi-segment path names an associated item rather than a field of `self`
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+
+        let result = parse("bad path: {}", vec![parse_quote! { Self::LABEL.len() }], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.Self::LABEL.len())) };
+        assert_eq!(result.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_positional_argument_rooted_in_a_non_integer_literal_is_left_alone() {
+        // Only an integer literal can name a tuple field; other literals are plain values
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+
+        let result = parse("bad path: {}", vec![parse_quote! { "prefix".len() }], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self."prefix".len())) };
+        assert_eq!(result.to_string(), expected.to_string());
+    }
 }

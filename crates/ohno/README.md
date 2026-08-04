@@ -109,7 +109,7 @@ Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so o
 ### Format Arguments
 
 Anything that is not a plain field reference is passed as a positional argument, with
-`format!`'s placeholder and argument-counting semantics:
+`format!`’s placeholder and argument-counting semantics:
 
 ```rust
 use std::path::PathBuf;
@@ -124,11 +124,11 @@ pub struct ConfigError {
 Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
 name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
 
-| Argument | Accepted |
-| --- | --- |
-| `path.display()` | yes |
-| `self.path.display()` | no, the `self.` prefix is implicit |
-| `.path.display()` | no, not a valid expression |
+|Argument|Accepted|
+|--------|--------|
+|`path.display()`|yes|
+|`self.path.display()`|no, the `self.` prefix is implicit|
+|`.path.display()`|no, not a valid expression|
 
 ## Automatic Constructors
 
@@ -318,7 +318,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbrCd9xja6IUYbReuvcH7u-4wbH1ETqam4eFAbE9V6cT1GHJphZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQba8vrHpGJp1QbdGZanmEBAhIbX7yt575IaYMbYVPXLlNqZgJhZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
