@@ -41,6 +41,33 @@ macro_rules! bail {
 // Re-export the macro for use in other modules
 pub(crate) use bail;
 
+/// Bail macro for early return with `Error::new_spanned`
+///
+/// Prefer this over `bail!` whenever the diagnostic points at more than a single token. A span
+/// taken from a multi-token node covers the whole node only where `Span::join` is available, and
+/// collapses to the node's first token elsewhere, so the same diagnostic renders differently
+/// between toolchains. `Error::new_spanned` carries the start and end tokens explicitly and
+/// renders the full range either way.
+///
+/// Usage:
+/// - `bail_spanned!(tokens, "message")`
+/// - `bail_spanned!(tokens, "format string {}", value)`
+macro_rules! bail_spanned {
+    ($tokens:expr, $msg:literal) => {
+        return Err(syn::Error::new_spanned($tokens, format!($msg)))
+    };
+
+    ($tokens:expr, $msg:ident) => {
+        return Err(syn::Error::new_spanned($tokens, $msg))
+    };
+
+    ($tokens:expr, $fmt:literal, $($arg:tt)*) => {
+        return Err(syn::Error::new_spanned($tokens, format!($fmt, $($arg)*)))
+    };
+}
+
+pub(crate) use bail_spanned;
+
 /// Marker `#[ohno::error]` puts on the `OhnoCore` field it injects, as `#[error(generated)]`
 ///
 /// A user is free to declare an `OhnoCore` field themselves, and that field is theirs to

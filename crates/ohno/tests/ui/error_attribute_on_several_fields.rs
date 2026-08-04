@@ -15,4 +15,12 @@ pub struct TwoMarkedFields {
 #[derive(ohno::Error)]
 pub struct TwoMarkedTupleFields(#[error] ohno::OhnoCore, #[error] ohno::OhnoCore);
 
+// One field marked twice is still one field.
+#[derive(ohno::Error)]
+pub struct DuplicateMarker {
+    #[error]
+    #[error]
+    inner: ohno::OhnoCore,
+}
+
 fn main() {}

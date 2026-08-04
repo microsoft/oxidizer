@@ -2,12 +2,11 @@
 // Licensed under the MIT License.
 
 use quote::quote;
-use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Expr, Fields, Ident, Index, Member, Result};
 
 use crate::derive_error::attributes::DisplayAttribute;
 use crate::derive_error::field_detection::is_generated_error_field;
-use crate::utils::bail;
+use crate::utils::{bail, bail_spanned};
 
 const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix";
 const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
@@ -84,7 +83,7 @@ fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc
     // than by enumerating the expression forms that may follow a dot
     let expanded = quote! { &self.#expr };
     if syn::parse2::<Expr>(expanded.clone()).is_err() {
-        bail!(expr.span(), UNSUPPORTED_ROOT);
+        bail_spanned!(expr, UNSUPPORTED_ROOT);
     }
 
     Ok(expanded)
@@ -94,7 +93,7 @@ fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc
 fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
     match root_of_expr(expr) {
         // `self.path` would expand to `&self.self.path`
-        Expr::Path(path) if path.path.is_ident("self") => bail!(path.span(), SELF_SCOPED_ARGS),
+        Expr::Path(path) if path.path.is_ident("self") => bail_spanned!(path, SELF_SCOPED_ARGS),
         Expr::Path(path) => match path.path.get_ident() {
             Some(ident) => validate_field_exists(&ident.to_string(), input, ident.span()),
             None => Ok(()),

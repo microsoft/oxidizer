@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, Meta, Result, Type, TypePath};
 
 use crate::derive_error::types::ErrorFieldRef;
-use crate::utils::{bail, generated_error_field_marker};
+use crate::utils::{bail, bail_spanned, generated_error_field_marker};
 
 const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoCore field detected. Either mark a field with `#[error]` or include a field of type OhnoCore";
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
 const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
 const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore";
+const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
 const MARKED_FIELD_TYPE: &str = "`#[error]` marks the field holding the OhnoCore, so it cannot appear on a field of another type. Refer to the type by its own name if it is reached through an alias or a rename";
 
 /// Validate every `#[error]` attribute in the struct
@@ -29,23 +29,32 @@ pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
 
     let mut marked = 0;
     for field in &data_struct.fields {
-        for attr in field.attrs.iter().filter(|attr| attr.path().is_ident("error")) {
-            match &attr.meta {
-                Meta::Path(_) => {}
-                Meta::List(list) if is_generated_marker(list) => {}
-                other => bail!(other.span(), ERROR_ATTRIBUTE_ARGUMENTS),
-            }
+        let mut markers = field.attrs.iter().filter(|attr| attr.path().is_ident("error"));
 
-            if !is_inner_error_type(&field.ty) {
-                bail!(field.ty.span(), MARKED_FIELD_TYPE);
-            }
+        let Some(attr) = markers.next() else {
+            continue;
+        };
 
-            // Marking a second field leaves the choice of error field to declaration order, so it
-            // is reported rather than resolved silently
-            marked += 1;
-            if marked > 1 {
-                bail!(attr.span(), MULTIPLE_MARKED_FIELDS);
-            }
+        // A field carrying the marker twice says nothing a single one does not
+        if let Some(duplicate) = markers.next() {
+            bail_spanned!(duplicate, DUPLICATE_MARKER);
+        }
+
+        match &attr.meta {
+            Meta::Path(_) => {}
+            Meta::List(list) if is_generated_marker(list) => {}
+            other => bail_spanned!(other, ERROR_ATTRIBUTE_ARGUMENTS),
+        }
+
+        if !is_inner_error_type(&field.ty) {
+            bail_spanned!(&field.ty, MARKED_FIELD_TYPE);
+        }
+
+        // Marking a second field leaves the choice of error field to declaration order, so it is
+        // reported rather than resolved silently
+        marked += 1;
+        if marked > 1 {
+            bail_spanned!(attr, MULTIPLE_MARKED_FIELDS);
         }
     }
 
@@ -301,6 +310,20 @@ mod tests {
             let input: DeriveInput = input;
             let message = validate_error_attributes(&input).unwrap_err().to_string();
             assert_eq!(message, MULTIPLE_MARKED_FIELDS);
+        }
+    }
+
+    #[test]
+    fn test_error_attribute_rejects_a_duplicate_marker_on_one_field() {
+        // One field marked twice is one field, so it is reported as the duplicate it is rather
+        // than as a second marked field
+        for input in [
+            parse_quote! { struct TestError { #[error] #[error] inner: OhnoCore } },
+            parse_quote! { struct TestError(#[error] #[error] OhnoCore); },
+        ] {
+            let input: DeriveInput = input;
+            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            assert_eq!(message, DUPLICATE_MARKER);
         }
     }
 

@@ -2,10 +2,10 @@ error: `#[error]` takes no arguments
   --> tests/ui/error_attribute_arguments.rs:10:7
    |
 10 |     #[error(nonsense)]
-   |       ^^^^^
+   |       ^^^^^^^^^^^^^^^
 
 error: `#[error]` takes no arguments
   --> tests/ui/error_attribute_arguments.rs:17:7
    |
 17 |     #[error = "nonsense"]
-   |       ^^^^^
+   |       ^^^^^^^^^^^^^^^^^^
