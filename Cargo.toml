@@ -53,7 +53,7 @@ include = [
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
-alloc_tracker = { version = "0.6.0", default-features = false }
+alloc_tracker = { version = "0.7.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 
@@ -84,7 +84,7 @@ chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
-darling = { version = "0.23.0", default-features = false }
+darling = { version = "0.24.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.4" }
 data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
@@ -164,7 +164,7 @@ pin-project-lite = { version = "0.2.13", default-features = false }
 plurality = { path = "crates/plurality", default-features = false, version = "0.2.0" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 pretty_assertions = { version = "1.4.1", default-features = false }
-prettyplease = { version = "0.2.37", default-features = false }
+prettyplease = { version = "0.3.0", default-features = false }
 proc-macro-crate = { version = "3.5.0", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
 prost = { version = "0.14.4", default-features = false }
@@ -204,7 +204,7 @@ static_assertions = { version = "1.1.0", default-features = false }
 string-interner = { version = "0.20.0", default-features = false }
 string_cache = { version = "0.10.0", default-features = false }
 symbol_table = { version = "0.5.0", default-features = false }
-syn = { version = "2.0.111", default-features = false }
+syn = { version = "3.0.2", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.6" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.3.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.3.0" }

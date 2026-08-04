@@ -8,9 +8,9 @@
 #![allow(missing_docs, reason = "Benchmark code")]
 
 use std::hint::black_box;
-use std::time::Instant;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample_async;
 use cachet::{Cache, CacheEntry};
 use cachet_tier::{DynamicCache, MockCache};
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -41,12 +41,8 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(static_get_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
-                let start = Instant::now();
-                for _ in 0..iters {
-                    let _ = black_box(cache.get(black_box(&key)).await);
-                }
-                start.elapsed()
+                let _span = op.measure_thread().iterations(iters);
+                time_sample_async(iters, |_| cache.get(black_box(&key))).await
             })
         });
     });
@@ -65,12 +61,8 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(dynamic_get_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
-                let start = Instant::now();
-                for _ in 0..iters {
-                    let _ = black_box(cache.get(black_box(&key)).await);
-                }
-                start.elapsed()
+                let _span = op.measure_thread().iterations(iters);
+                time_sample_async(iters, |_| cache.get(black_box(&key))).await
             })
         });
     });
@@ -86,12 +78,11 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(static_insert_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
-                let start = Instant::now();
-                for i in 0..iters {
-                    let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
-                }
-                start.elapsed()
+                let _span = op.measure_thread().iterations(iters);
+                time_sample_async(iters, |iteration| {
+                    cache.insert(format!("key_{iteration}"), CacheEntry::new(format!("value_{iteration}")))
+                })
+                .await
             })
         });
     });
@@ -109,12 +100,11 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(dynamic_insert_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
-                let start = Instant::now();
-                for i in 0..iters {
-                    let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
-                }
-                start.elapsed()
+                let _span = op.measure_thread().iterations(iters);
+                time_sample_async(iters, |iteration| {
+                    cache.insert(format!("key_{iteration}"), CacheEntry::new(format!("value_{iteration}")))
+                })
+                .await
             })
         });
     });
