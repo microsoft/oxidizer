@@ -33,6 +33,19 @@ not share connections.
   cannot represent, including finite connection limits and connection
   idle/lifetime settings, are accepted but ignored.
 * The request body is fully sent before response reception begins.
+* A request carrying a `Transfer-Encoding` header is rejected before
+  anything is sent, because this transport performs request framing itself
+  and cannot honor a caller-supplied transfer coding. Removing the header
+  does not change how the body is framed on the wire.
+* A `Content-Length` header must state the exact length of the request
+  body. Repeated values must agree with each other, and a value that
+  disagrees with the body fails the request before anything is sent. A
+  header that survives is sent in normalized decimal form.
+* Redirects are not followed, no cookie store is kept, and authentication
+  challenges are not answered automatically. A redirect response is
+  returned to the caller as an ordinary response, and `Set-Cookie`,
+  `Cookie`, and challenge headers pass through as plain data for the caller
+  to act on. None of these can be re-enabled.
 * Gzip and deflate response bodies are decoded transparently, and the
   `Content-Encoding` and `Content-Length` headers describing the encoded
   form are removed. There is no opt-out. Brotli and zstd responses are
@@ -51,7 +64,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb8dzONfRfsA8bdr7i6jmiOSQbPMIphqOLSV0b_AcD-byL4nZhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbXaYAIpOPLUgbhfFZ1CyqU8QbtbsapsnsRUUb9AKYCi8lTNBhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps

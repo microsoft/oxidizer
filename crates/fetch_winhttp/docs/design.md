@@ -2,7 +2,7 @@
 
 This document describes the user-visible behavior and design tenets of the
 `fetch_winhttp` crate. The implementation strategy - threading, FFI ownership,
-pooling, body-streaming mechanics, and the test plan - is documented separately
+pooling, body-streaming mechanics, and the testing strategy - is documented separately
 in [implementation.md](implementation.md).
 
 ## 1. Purpose and scope
@@ -84,7 +84,7 @@ pub trait HttpClientWinHttpExt {
 }
 ```
 
-`WinHttpTlsConfig` (§4) and `WinHttpOptions` (§3, §5, §6) follow the same
+`WinHttpTlsConfig` (§4) and `WinHttpOptions` (§6) follow the same
 builder + `#[non_exhaustive]` pattern.
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
@@ -98,7 +98,7 @@ configuration models, so trying to configure TLS uniformly at the transport-abst
 `fetch` level is over-abstraction on `fetch`'s part; see the fetch API stabilization
 feedback (../../fetch/docs/stabilization.md).
 
-## Platform support
+### 1.3 Platform support
 
 The transport requires Windows 11 version 21H2 (build 22000) or later. Earlier
 Windows releases are not supported.
@@ -192,6 +192,22 @@ Negotiation, including ALPN, is performed by the OS during the TLS handshake; th
 transport does not negotiate manually. The version actually negotiated is reported on the
 returned `HttpResponse`, so telemetry reflects what was negotiated rather than what was
 requested. (How the version set is expressed to WinHTTP is implementation.md §10.1.)
+
+### 3.1 The version on the request message
+
+The version field of an `HttpRequest` does not select the wire version. Only the
+configured version set above, plus negotiation, does:
+
+- A request message whose version is `HTTP/0.9` or `HTTP/1.0` is rejected with an
+  `invalid_request` error (§7) before anything is sent, because the transport cannot
+  send those versions on the wire.
+- Any other version on the request message is ignored. In particular, a request marked
+  `HTTP/2` is not forced onto HTTP/2 and is not rejected when the configured version set
+  excludes HTTP/2; it is sent over whatever the configured set and negotiation produce.
+
+The version set and the request message's version are reported as separate conditions, so
+an operator can tell from the error which of the two needs correcting: the version set is
+fixed on the client, the message version on the request.
 
 ## 4. TLS
 
@@ -315,11 +331,27 @@ transport's; the transport only reports the timeout.
 `recoverable::RecoveryInfo`, mirroring `fetch_hyper`:
 
 - **Error surface.** A failure returns an `HttpError` carrying an `ohno::ErrorLabel`, a
-  `recoverable::RecoveryInfo` classification, and a source error whose message states the
-  originating Win32/`WINHTTP_*` code. Secure failures may additionally state a bitmask of
-  certificate problems as best-effort diagnostics. The numeric code is diagnostic only: it
-  is not programmatically accessible, so callers branch on the label and the recovery
+  `recoverable::RecoveryInfo` classification, and a source error describing the failure.
+- **Which errors state a Win32 code.** A failure that originates from a WinHTTP call -
+  every `connect`, `timeout`, `tls`, `abandoned` and `winhttp_initialization` failure, and
+  the `request_winhttp` failures reported by a WinHTTP call itself - carries a source error
+  whose message states
+  the originating Win32/`WINHTTP_*` code. Secure failures may additionally state a bitmask
+  of certificate problems as best-effort diagnostics. The numeric code is diagnostic only:
+  it is not programmatically accessible, so callers branch on the label and the recovery
   classification, never on a code.
+
+  Three families state no code, because no WinHTTP call produced them:
+  - a request rejected locally before any WinHTTP call, whose message states what the
+    caller must change (`invalid_request`);
+  - response metadata that a successful WinHTTP call returned but that cannot be parsed
+    or represented, whose message describes the malformed value (`request_winhttp`);
+  - an error raised by the caller's own request body stream, which is surfaced exactly as
+    the caller's body produced it, with its own label and classification.
+
+  The transport's connect deadline (§6.2) likewise carries no code: it states the elapsed
+  interval and is labeled `response_timeout`, the same expiry that a `ResponseTimeout`
+  reports (§6.1).
 - **Labels** (mirroring `fetch`'s own error labels):
 
   | Condition | `ErrorLabel` |
@@ -328,9 +360,10 @@ transport's; the transport only reports the timeout.
   | `ERROR_WINHTTP_TIMEOUT` | `timeout` |
   | `ERROR_WINHTTP_SECURE_FAILURE` | `tls` |
   | `ERROR_WINHTTP_OPERATION_CANCELLED` | `abandoned` |
-  | send/receive/protocol failures | `request_winhttp` |
-  | a request rejected locally before it is sent: an unusable HTTP version (§3), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
+  | send/receive/protocol failures, and response metadata the transport cannot use | `request_winhttp` |
+  | a request rejected locally before it is sent: an unusable HTTP version (§3, §3.1), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
   | the WinHTTP session could not be opened | `winhttp_initialization` |
+  | the connect deadline expired (§6.2) | `response_timeout` |
 
 - **Permanently failed initialization.** A transport that cannot open its WinHTTP session
   latches that failure instead of retrying it. Every request it subsequently serves returns
@@ -368,6 +401,44 @@ transport outcomes carrying an error status, surfaced as `Ok(HttpResponse)`, and
 any retry policy on them lives in `seatbelt` above the transport. Automatic
 decompression handled by WinHTTP never surfaces as a transport error; only genuine
 wire/OS failures do.
+
+## 8. Telemetry
+
+The transport reports through the `observed::Sink` supplied in `WinHttpDeps` (§1.1).
+The event, counter, and field names below are a stable surface that dashboards and
+alerts bind to; they are part of the contract, not incidental diagnostics.
+
+| Event | Signal | Emitted when |
+|-------|--------|--------------|
+| `fetch.winhttp.session.initialization.failure` | log (error) | A transport instance cannot open or configure its WinHTTP session and becomes permanently failed (§7). |
+| `fetch.winhttp.request` | metric | The transport accepts a request, before any of it is processed. |
+| `fetch.winhttp.request.error` | log (error) + metric | A request returns `Err`. Requests that fail while the caller reads the response body are not counted, because the response was already returned successfully. |
+
+Counters:
+
+| Counter | Unit | Dimensions |
+|---------|------|------------|
+| `fetch.winhttp.request.count` | `{request}` | none |
+| `fetch.winhttp.request.error.count` | `{error}` | none |
+
+Both counters are deliberately zero-dimensional. No per-request, per-connection, or
+per-endpoint attribute is ever attached to a metric, so metric cardinality does not grow
+with traffic, and the error counter divided by the request counter is a whole-transport
+failure rate.
+
+Log fields carry the higher-cardinality context instead, and appear on log records only:
+
+| Event | Field | Value |
+|-------|-------|-------|
+| `fetch.winhttp.session.initialization.failure` | `winhttp.operation` | An identifier naming which step of session setup failed. The identifiers name internal setup steps and are diagnostic only; the set of them is not contractual. |
+| `fetch.winhttp.session.initialization.failure` | `winhttp.error_code` | The Win32/`WINHTTP_*` code that step returned. |
+| `fetch.winhttp.request.error` | `winhttp.connection.fresh` | Present and `true` only when the failed request established a new physical connection rather than reusing a pooled one. Absent otherwise. |
+| `fetch.winhttp.request.error` | `winhttp.connect.duration` | Seconds spent establishing that new connection. Present under the same condition as `winhttp.connection.fresh`. |
+
+Cold-connect attribution distinguishes "the server or pool is unhealthy" from
+"establishing new connections is slow or failing", which have different remediations. It
+stays log-only because connection-establishment state is per-request context, and
+promoting it to a metric dimension would multiply the series count for no aggregate value.
 
 [`RequestHandler`]: https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions
 [WinHTTP]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
