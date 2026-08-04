@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 
 use crate::Error;
@@ -46,8 +47,10 @@ where
 
 /// A one-directional encoder that converts values from type `From` to type `To`.
 ///
-/// Used for key encoding in the transform builder pipeline, where
-/// only the forward direction is needed.
+/// This is the **key** side of the pipeline: keys are only ever encoded — never decoded
+/// back, since every operation re-encodes the key it already has — and must encode
+/// deterministically so lookups stay stable. A key takes no [`CodecContext`] because it
+/// *is* the context. Contrast [`Codec`], the bidirectional, context-bound **value** side.
 pub trait Encoder<From, To>: Send + Sync {
     /// Encodes a value from type `From` to type `To`.
     ///
@@ -55,6 +58,49 @@ pub trait Encoder<From, To>: Send + Sync {
     ///
     /// Returns an error if the encoding fails.
     fn encode(&self, value: &From) -> Result<To, Error>;
+}
+
+/// Per-operation metadata threaded through [`Codec`] calls.
+///
+/// Currently just the storage key, which an authenticated codec binds as associated data
+/// so a value can't be relocated to another key. It is a struct precisely so more
+/// per-operation fields can be added later without changing how codecs receive it — a
+/// codec always takes `&CodecContext<'_>`, and a context *producer* sets only the fields
+/// it cares about. The key is a [`Cow`] so a producer can hand over either a borrowed
+/// slice (the common single-span case) or a gathered buffer (a multi-span key) while
+/// still yielding one self-contained context value.
+#[derive(Debug, Clone)]
+pub struct CodecContext<'a> {
+    key: Cow<'a, [u8]>,
+}
+
+impl<'a> CodecContext<'a> {
+    /// Creates a context bound to `key`.
+    #[must_use]
+    pub fn new(key: &'a [u8]) -> Self {
+        Self { key: Cow::Borrowed(key) }
+    }
+
+    /// Creates a context with no key, for codecs that do not bind one (e.g. serialization
+    /// or a plain type mapping).
+    #[must_use]
+    pub fn keyless() -> CodecContext<'static> {
+        CodecContext { key: Cow::Borrowed(&[]) }
+    }
+
+    /// Creates a context bound to a possibly-owned key, for callers that must gather a
+    /// multi-span key into a contiguous buffer before binding it.
+    #[cfg(any(feature = "serialize", test))]
+    #[must_use]
+    pub(crate) fn from_key(key: Cow<'a, [u8]>) -> Self {
+        Self { key }
+    }
+
+    /// The storage key this value is bound to, or an empty slice when none was supplied.
+    #[must_use]
+    pub fn key(&self) -> &[u8] {
+        &self.key
+    }
 }
 
 /// The result of a decode operation.
@@ -65,29 +111,42 @@ pub trait Encoder<From, To>: Send + Sync {
 pub enum DecodeOutcome<T> {
     /// The value was successfully decoded.
     Value(T),
-    /// The stored data is undecodable and should be treated as a cache miss.
-    ///
-    /// The string describes the reason (e.g., "version mismatch", "empty payload").
-    SoftFailure(&'static str),
+    /// The stored data is undecodable and should be treated as a cache miss (as opposed
+    /// to a hard [`Error`], which propagates). Why it was undecodable is not part of the
+    /// general codec vocabulary — a codec that needs to react to a specific cause (e.g.
+    /// an authentication failure) categorizes it internally before returning this.
+    SoftFailure,
 }
 
 /// A bidirectional codec that converts between types `A` and `B`.
 ///
-/// Extends [`Encoder<A, B>`] with a `decode` method for the reverse direction.
-/// Used for value encoding and decoding in the transform builder pipeline.
-pub trait Codec<A, B>: Encoder<A, B> {
-    /// Decodes a value from type `B` back to type `A`.
+/// A codec is a stage in the value pipeline: it converts a value to its stored form
+/// ([`encode`](Self::encode)) and back ([`decode`](Self::decode)), given a
+/// [`CodecContext`]. Serialization ignores the context; an authenticated (protection)
+/// codec binds the context's key so a value cannot be relocated to a different key.
+///
+/// Unlike [`Encoder`], a codec is *not* used for keys — it always receives the context,
+/// which already carries the key.
+pub trait Codec<A, B>: Send + Sync {
+    /// Encodes `value` into its stored representation, given `ctx`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the encoding fails.
+    fn encode(&self, ctx: &CodecContext<'_>, value: &A) -> Result<B, Error>;
+
+    /// Decodes a value from type `B` back to type `A`, given `ctx`.
     ///
     /// # Returns
     ///
     /// - `Ok(DecodeOutcome::Value(v))` on success
-    /// - `Ok(DecodeOutcome::SoftFailure(reason))` if the stored data is undecodable
+    /// - `Ok(DecodeOutcome::SoftFailure)` if the stored data is undecodable
     ///   and should be treated as a cache miss
     ///
     /// # Errors
     ///
     /// Returns `Err` for hard failures that should propagate to the caller.
-    fn decode(&self, value: B) -> Result<DecodeOutcome<A>, Error>;
+    fn decode(&self, ctx: &CodecContext<'_>, value: B) -> Result<DecodeOutcome<A>, Error>;
 }
 
 type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
@@ -155,14 +214,12 @@ impl<A, B> TransformCodec<A, B> {
     }
 }
 
-impl<A, B> Encoder<A, B> for TransformCodec<A, B> {
-    fn encode(&self, value: &A) -> Result<B, Error> {
+impl<A, B> Codec<A, B> for TransformCodec<A, B> {
+    fn encode(&self, _ctx: &CodecContext<'_>, value: &A) -> Result<B, Error> {
         (self.encode_fn)(value)
     }
-}
 
-impl<A, B> Codec<A, B> for TransformCodec<A, B> {
-    fn decode(&self, value: B) -> Result<DecodeOutcome<A>, Error> {
+    fn decode(&self, _ctx: &CodecContext<'_>, value: B) -> Result<DecodeOutcome<A>, Error> {
         (self.decode_fn)(value)
     }
 }
@@ -173,5 +230,57 @@ impl<A, B> Debug for TransformCodec<A, B> {
             .field("A", &std::any::type_name::<A>())
             .field("B", &std::any::type_name::<B>())
             .finish()
+    }
+}
+
+/// A codec formed by running one codec through another: `A <-> M <-> B`.
+///
+/// On encode, `first` runs then `second`; on decode the order reverses, and a
+/// [`SoftFailure`](DecodeOutcome::SoftFailure) from either stage propagates as a miss.
+/// Used to layer an authenticated-protection stage over a serialization stage while
+/// presenting a single `Codec<A, B>` to the tier.
+#[cfg(feature = "encrypt")]
+pub(crate) struct ChainedCodec<A, M, B> {
+    first: Box<dyn Codec<A, M>>,
+    second: Box<dyn Codec<M, B>>,
+}
+
+#[cfg(feature = "encrypt")]
+impl<A, M, B> ChainedCodec<A, M, B> {
+    pub(crate) fn new(first: Box<dyn Codec<A, M>>, second: Box<dyn Codec<M, B>>) -> Self {
+        Self { first, second }
+    }
+}
+
+#[cfg(feature = "encrypt")]
+impl<A, M, B> Codec<A, B> for ChainedCodec<A, M, B>
+where
+    A: Send + Sync,
+    M: Send + Sync,
+    B: Send + Sync,
+{
+    fn encode(&self, ctx: &CodecContext<'_>, value: &A) -> Result<B, Error> {
+        let middle = self.first.encode(ctx, value)?;
+        self.second.encode(ctx, &middle)
+    }
+
+    fn decode(&self, ctx: &CodecContext<'_>, value: B) -> Result<DecodeOutcome<A>, Error> {
+        match self.second.decode(ctx, value)? {
+            DecodeOutcome::Value(middle) => self.first.decode(ctx, middle),
+            DecodeOutcome::SoftFailure => Ok(DecodeOutcome::SoftFailure),
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codec_context_exposes_bound_and_keyless_keys() {
+        let bound = CodecContext::new(b"storage-key");
+        assert_eq!(bound.key(), b"storage-key");
+        assert!(CodecContext::keyless().key().is_empty());
     }
 }

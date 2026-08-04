@@ -14,7 +14,7 @@
 testing_aids::init_tracing!();
 
 use bytesbuf::BytesView;
-use cachet::{Cache, CacheEntry, CacheOp, CacheTier, MockCache, MockValueProtector};
+use cachet::{Cache, CacheEntry, CacheOp, CacheTier, MockCache, MockValueProtector, ValueProtector};
 use tick::Clock;
 
 /// Returns the serialized (version byte + postcard) form of a value, matching
@@ -191,14 +191,15 @@ fn encrypted_transform_builder_debug() {
         .storage(MockCache::<String, String>::new())
         .serialize()
         .protect_with(MockValueProtector::new());
-    assert!(format!("{builder:?}").contains("ProtectedTransformBuilder"));
+    assert!(format!("{builder:?}").contains("SerializeBuilder"));
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn encrypt_chained_post_transform_fallbacks() {
-    // Chain two post-transform fallback tiers after `.protect_with()`, exercising the
-    // second `.fallback()` that folds the existing post tier into a FallbackBuilder.
+    // Chain two byte-speaking fallback tiers, each with its own `.serialize()`
+    // boundary; the value must round-trip through the composed hierarchy and each tier
+    // stores ciphertext.
     let l1 = MockCache::<String, String>::new();
     let l2 = MockCache::<BytesView, BytesView>::new();
     let l3 = MockCache::<BytesView, BytesView>::new();
@@ -207,6 +208,8 @@ async fn encrypt_chained_post_transform_fallbacks() {
         .serialize()
         .protect_with(MockValueProtector::new())
         .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .serialize()
+        .protect_with(MockValueProtector::new())
         .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
         .build();
 
@@ -247,6 +250,8 @@ async fn tampered_first_post_tier_falls_through_to_valid_second() {
         .serialize()
         .protect_with(MockValueProtector::new())
         .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .serialize()
+        .protect_with(MockValueProtector::new())
         .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
         .build();
 
@@ -287,9 +292,13 @@ async fn unprotect_failure_emits_structured_event_correlated_with_get() {
         .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
         .build();
 
-    // Plant a malformed blob under the serialized key directly in the untrusted post
-    // tier, so a read falls past L1, finds it, and fails to unprotect.
-    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+    // Plant a well-formed blob protected under a DIFFERENT key directly in the untrusted
+    // post tier. A read falls past L1, finds it, and fails authentication (the bound key
+    // doesn't match) — the security-relevant case that must emit the event.
+    let planted = MockValueProtector::new()
+        .protect(&serialized("wrong-key"), &BytesView::from(serialized("v")))
+        .expect("crafting the blob should succeed");
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(planted))
         .await
         .expect("planting the blob should succeed");
 
@@ -317,5 +326,42 @@ async fn unprotect_failure_emits_structured_event_correlated_with_get() {
     assert_eq!(
         get_op.request_id, unprotect.request_id,
         "unprotect_failed must correlate with the get that observed it"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn malformed_protected_blob_is_a_silent_miss() {
+    use cachet::RecordingEventHandler;
+    use cachet::telemetry::attributes::EVENT_UNPROTECT_FAILED;
+
+    // A structurally invalid blob (too short to be an envelope) is a benign Malformed
+    // reject, NOT an authentication failure: it reads as a miss but must not raise the
+    // security-relevant cache.unprotect_failed event (no crying wolf on format drift).
+    let handler = RecordingEventHandler::new();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .event_handler(handler.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+        .await
+        .expect("planting the blob should succeed");
+
+    assert!(
+        cache.get("k").await.expect("get should succeed").is_none(),
+        "a malformed value must read as a miss"
+    );
+    assert!(
+        handler
+            .tier_events()
+            .into_iter()
+            .all(|event| event.outcome != EVENT_UNPROTECT_FAILED),
+        "a malformed (non-authentication) failure must not emit cache.unprotect_failed"
     );
 }

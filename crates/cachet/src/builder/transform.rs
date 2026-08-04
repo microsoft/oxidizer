@@ -1,7 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Transform builder for applying type-conversion boundaries in the cache pipeline.
+//! Builder for a type-conversion boundary that applies to the *next* fallback tier.
+//!
+//! `.transform()` returns a [`TransformBuilder`] — a *pending* boundary holding the
+//! pre-transform tier and the codecs. Like [`serialize`](super::serialize), it is
+//! deliberately **not** buildable on its own: the transform materializes only when you
+//! add a storage tier with [`fallback`](TransformBuilder::fallback), which wraps exactly
+//! that tier in a [`TransformAdapter`] and hands back an ordinary [`FallbackBuilder`]. To
+//! transform another tier, call `.transform()` again — each `.transform()` is its own
+//! boundary applying to the single `.fallback()` that follows.
+//!
+//! Wrapping each tier independently keeps decoding *below* every fallback junction: an
+//! undecodable value in one tier decodes to a miss there, so the fallback chain falls
+//! through to the next tier rather than shadowing a good copy. (A single adapter over a
+//! chain of tiers would decode *above* the junctions, turning a present-but-undecodable
+//! blob into a hard miss and hiding a valid copy in a later tier.)
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -15,19 +29,17 @@ use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::telemetry::CacheTelemetry;
-use crate::transform::TransformAdapter;
-use crate::{CacheTier, Codec, Encoder};
+use crate::transform::{MakeContext, TransformAdapter, keyless_context};
+use crate::{Cache, CacheTier, Codec, Encoder};
 
-/// Builder that introduces a type-conversion boundary in the cache pipeline.
+/// A pending type-conversion boundary, produced by [`transform`](CacheBuilder::transform).
 ///
-/// - `Pre`: the pre-transform builder (`CacheTierBuilder<K, V>`)
-/// - `Post`: the post-transform builder (`CacheTierBuilder<KT, VT>`), starts as `()`
-///
-/// At build time, both sides are built into tiers, the post-transform tier is wrapped
-/// in a `TransformAdapter`, and combined with the pre-transform tier via fallback.
-pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
+/// Holds the pre-transform tier plus the codecs that convert FROM the user types
+/// (`K, V`) TO the storage types (`KT, VT`). Add a storage tier speaking `KT, VT` with
+/// [`fallback`](Self::fallback) to materialize the boundary; a `TransformBuilder` on its
+/// own is not buildable.
+pub struct TransformBuilder<K, V, KT, VT, Pre> {
     pub(super) pre: Pre,
-    pub(super) post: Post,
     pub(super) key_encoder: Box<dyn Encoder<K, KT>>,
     pub(super) value_codec: Box<dyn Codec<V, VT>>,
     pub(super) clock: Clock,
@@ -36,11 +48,10 @@ pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
     pub(super) _phantom: PhantomData<(K, V, KT, VT)>,
 }
 
-impl<K, V, KT, VT, Pre: Debug, Post: Debug> Debug for TransformBuilder<K, V, KT, VT, Pre, Post> {
+impl<K, V, KT, VT, Pre: Debug> Debug for TransformBuilder<K, V, KT, VT, Pre> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TransformBuilder")
             .field("pre", &self.pre)
-            .field("post", &self.post)
             .field("K", &std::any::type_name::<K>())
             .field("KT", &std::any::type_name::<KT>())
             .field("V", &std::any::type_name::<V>())
@@ -49,7 +60,26 @@ impl<K, V, KT, VT, Pre: Debug, Post: Debug> Debug for TransformBuilder<K, V, KT,
     }
 }
 
-// ── .transform() on CacheBuilder ──
+fn new_transform_builder<K, V, KT, VT, Pre>(
+    pre: Pre,
+    key_encoder: impl Encoder<K, KT> + 'static,
+    value_codec: impl Codec<V, VT> + 'static,
+    clock: Clock,
+    telemetry: CacheTelemetry,
+    stampede_protection: bool,
+) -> TransformBuilder<K, V, KT, VT, Pre> {
+    TransformBuilder {
+        pre,
+        key_encoder: Box::new(key_encoder),
+        value_codec: Box::new(value_codec),
+        clock,
+        telemetry,
+        stampede_protection,
+        _phantom: PhantomData,
+    }
+}
+
+// ── .transform() entry points ──
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where
@@ -57,13 +87,15 @@ where
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    /// Applies a generic type transform boundary.
+    /// Begins a type-conversion boundary for the next fallback tier.
     ///
     /// The codecs convert FROM user types TO storage types:
     /// - `key_encoder`: `K -> KT` (one-directional)
     /// - `value_codec`: `V <-> VT` (bidirectional)
     ///
-    /// Subsequent `.fallback()` tiers must work with `KT, VT`.
+    /// Add a storage tier speaking `KT, VT` with
+    /// [`fallback`](TransformBuilder::fallback). The transform applies to that one tier;
+    /// to transform another, call `.transform()` again.
     #[must_use]
     pub fn transform<KT, VT>(
         self,
@@ -76,21 +108,10 @@ where
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
-        let stampede_protection = self.stampede_protection;
-        TransformBuilder {
-            pre: self,
-            post: (),
-            key_encoder: Box::new(key_encoder),
-            value_codec: Box::new(value_codec),
-            clock,
-            telemetry,
-            stampede_protection,
-            _phantom: PhantomData,
-        }
+        let stampede = self.stampede_protection;
+        new_transform_builder(self, key_encoder, value_codec, clock, telemetry, stampede)
     }
 }
-
-// ── .transform() on FallbackBuilder ──
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
@@ -99,7 +120,10 @@ where
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {
-    /// Applies a generic type transform boundary on a fallback builder.
+    /// Begins a type-conversion boundary applying to the next fallback tier.
+    ///
+    /// See [`CacheBuilder::transform`] for the semantics; here the pre-transform tier is
+    /// the fallback hierarchy built so far.
     #[must_use]
     pub fn transform<KT, VT>(
         self,
@@ -112,38 +136,38 @@ where
     {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
-        let stampede_protection = self.stampede_protection;
-        TransformBuilder {
-            pre: self,
-            post: (),
-            key_encoder: Box::new(key_encoder),
-            value_codec: Box::new(value_codec),
-            clock,
-            telemetry,
-            stampede_protection,
-            _phantom: PhantomData,
-        }
+        let stampede = self.stampede_protection;
+        new_transform_builder(self, key_encoder, value_codec, clock, telemetry, stampede)
     }
 }
 
-// ── .fallback() on TransformBuilder ──
+// ── .fallback() — materializes the boundary as one wrapped tier ──
 
-impl<K, V, KT, VT, Pre> TransformBuilder<K, V, KT, VT, Pre, ()>
-where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-{
-    /// Sets the first post-transform storage tier (speaks `KT, VT`).
-    pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FB>
-    where
-        FB: CacheTierBuilder<KT, VT>,
-    {
-        TransformBuilder {
-            pre: self.pre,
-            post: fallback,
+impl<K, V, KT, VT, Pre> TransformBuilder<K, V, KT, VT, Pre> {
+    /// Adds the storage tier this boundary transforms (speaks `KT, VT`), returning an
+    /// ordinary [`FallbackBuilder`] with the pre-transform tier as primary and the
+    /// adapted tier as fallback.
+    ///
+    /// The transform applies to this one tier only. To transform another tier, call
+    /// `.transform()` again on the returned builder.
+    #[must_use]
+    pub fn fallback<FB>(self, fallback: FB) -> FallbackBuilder<K, V, Pre, TransformTierBuilder<K, V, KT, VT, FB>> {
+        let wrapped = TransformTierBuilder {
+            inner: fallback,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
+            make_context: keyless_context(),
+            clock: self.clock.clone(),
+            telemetry: self.telemetry.clone(),
+            stampede_protection: self.stampede_protection,
+            _phantom: PhantomData,
+        };
+        FallbackBuilder {
+            name: None,
+            primary_builder: self.pre,
+            fallback_builder: wrapped,
             clock: self.clock,
+            refresh: None,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
             _phantom: PhantomData,
@@ -151,116 +175,99 @@ where
     }
 }
 
-impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
-where
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-    Post: CacheTierBuilder<KT, VT>,
-{
-    /// Adds another post-transform fallback tier (speaks `KT, VT`).
-    pub fn fallback<FB>(self, fallback: FB) -> TransformBuilder<K, V, KT, VT, Pre, FallbackBuilder<KT, VT, Post, FB>>
-    where
-        FB: CacheTierBuilder<KT, VT>,
-    {
-        let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone();
-        let stampede_protection = self.stampede_protection;
+/// A per-leaf builder that wraps one storage tier in a [`TransformAdapter`].
+///
+/// Produced by [`TransformBuilder::fallback`] (and, with `BytesView` storage types, by
+/// [`SerializeBuilder::fallback`](super::serialize::SerializeBuilder::fallback)); it
+/// carries the codecs plus the key-context function and, at build time, decorates its
+/// inner tier so each backing store is converted independently — keeping decoding below
+/// every fallback junction.
+pub struct TransformTierBuilder<K, V, KT, VT, Inner> {
+    pub(super) inner: Inner,
+    pub(super) key_encoder: Box<dyn Encoder<K, KT>>,
+    pub(super) value_codec: Box<dyn Codec<V, VT>>,
+    pub(super) make_context: MakeContext<KT>,
+    pub(super) clock: Clock,
+    pub(super) telemetry: CacheTelemetry,
+    pub(super) stampede_protection: bool,
+    pub(super) _phantom: PhantomData<(K, V, KT, VT)>,
+}
 
-        let post_chain = FallbackBuilder {
-            name: None,
-            primary_builder: self.post,
-            fallback_builder: fallback,
-            clock: clock.clone(),
-            refresh: None,
-            telemetry: telemetry.clone(),
-            stampede_protection,
-            _phantom: PhantomData,
-        };
-
-        TransformBuilder {
-            pre: self.pre,
-            post: post_chain,
-            key_encoder: self.key_encoder,
-            value_codec: self.value_codec,
-            clock,
-            telemetry,
-            stampede_protection,
-            _phantom: PhantomData,
-        }
+impl<K, V, KT, VT, Inner: Debug> Debug for TransformTierBuilder<K, V, KT, VT, Inner> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransformTierBuilder")
+            .field("inner", &self.inner)
+            .field("K", &std::any::type_name::<K>())
+            .field("KT", &std::any::type_name::<KT>())
+            .field("V", &std::any::type_name::<V>())
+            .field("VT", &std::any::type_name::<VT>())
+            .finish_non_exhaustive()
     }
 }
 
-// ── Sealed + CacheTierBuilder ──
+impl<K, V, KT, VT, Inner> Sealed for TransformTierBuilder<K, V, KT, VT, Inner> {}
 
-impl<K, V, KT, VT, Pre, Post> Sealed for TransformBuilder<K, V, KT, VT, Pre, Post>
+impl<K, V, KT, VT, Inner> CacheTierBuilder<K, V> for TransformTierBuilder<K, V, KT, VT, Inner>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     KT: Clone + Hash + Eq + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
+    Inner: CacheTierBuilder<KT, VT>,
 {
 }
 
-impl<K, V, KT, VT, Pre, Post> CacheTierBuilder<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
+impl<K, V, KT, VT, Inner> Buildable<K, V> for TransformTierBuilder<K, V, KT, VT, Inner>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
     KT: Clone + Hash + Eq + Send + Sync + 'static,
     VT: Clone + Send + Sync + 'static,
+    Inner: Buildable<KT, VT>,
 {
-}
+    type TierOutput = TransformAdapter<K, KT, V, VT, Inner::TierOutput>;
 
-// ── .build() ──
-
-#[expect(private_bounds, reason = "Buildable is an internal trait")]
-impl<K, V, KT, VT, Pre, Post> TransformBuilder<K, V, KT, VT, Pre, Post>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-    Pre: Buildable<K, V>,
-    Post: Buildable<KT, VT>,
-{
-    /// Builds the full cache hierarchy with the transform boundary.
-    pub fn build(self) -> crate::Cache<K, V> {
-        <Self as Buildable<K, V>>::build(self)
-    }
-}
-
-// ── Buildable ──
-
-impl<K, V, KT, VT, Pre, Post> Buildable<K, V> for TransformBuilder<K, V, KT, VT, Pre, Post>
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Clone + Send + Sync + 'static,
-    KT: Clone + Hash + Eq + Send + Sync + 'static,
-    VT: Clone + Send + Sync + 'static,
-    Pre: Buildable<K, V>,
-    Post: Buildable<KT, VT>,
-{
-    type TierOutput = DynamicCache<K, V>;
-
-    fn build(self) -> crate::Cache<K, V> {
+    // A `TransformTierBuilder` is only ever composed as the fallback tier of a
+    // `FallbackBuilder`, which drives it through `build_tier`; `build` is required by the
+    // trait but never reached, so it is excluded from coverage.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn build(self) -> Cache<K, V> {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
-        let tier = self.build_tier(clock.clone(), telemetry.clone(), false);
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry.clone(), false));
 
-        crate::Cache::new(type_name::<Self::TierOutput>(None), tier, clock, telemetry, stampede_protection)
+        Cache::new(type_name::<Self::TierOutput>(None), tier, clock, telemetry, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
-        // Build pre-transform tier
-        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone(), fallback);
+        let inner = self.inner.build_tier(clock, telemetry, fallback);
+        TransformAdapter::from_boxed(inner, self.key_encoder, self.value_codec, self.make_context)
+    }
+}
 
-        // Build post-transform tier, wrap in TransformAdapter
-        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone(), true);
-        let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use cachet_tier::MockCache;
 
-        // Combine: pre is primary, adapted is fallback
-        let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);
+    use super::*;
+    use crate::transform::{TransformCodec, TransformEncoder, infallible, infallible_owned};
 
-        DynamicCache::new(fallback)
+    #[test]
+    fn transform_tier_builder_debug() {
+        let builder = Cache::builder::<i32, i32>(Clock::new_frozen())
+            .storage(MockCache::<i32, i32>::new())
+            .transform(
+                TransformEncoder::infallible(|k: &i32| k.to_string()),
+                TransformCodec::new(
+                    infallible(|v: &i32| v.to_string()),
+                    infallible_owned(|v: String| v.parse::<i32>().unwrap_or_default()),
+                ),
+            )
+            .fallback(Cache::builder::<String, String>(Clock::new_frozen()).storage(MockCache::<String, String>::new()));
+
+        let debug = format!("{:?}", builder.fallback_builder);
+        assert!(debug.contains("TransformTierBuilder"), "debug output was: {debug}");
     }
 }

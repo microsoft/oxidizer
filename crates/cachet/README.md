@@ -274,7 +274,7 @@ crate to use it.
 
 ```rust
 use bytesbuf::BytesView;
-use cachet::{DecodeOutcome, Error, ValueProtector};
+use cachet::{Error, Rejection, Unprotected, ValueProtector};
 use symcrypt::cipher::BlockCipherType;
 use symcrypt::gcm::GcmExpandedKey;
 
@@ -313,10 +313,11 @@ impl ValueProtector for Aes256GcmProtector {
         Ok(result.into())
     }
 
-    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<Unprotected, Error> {
         let bytes = protected.to_vec();
         if bytes.len() < NONCE_SIZE + TAG_SIZE {
-            return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+            // Not even a well-formed envelope — a benign structural reject.
+            return Ok(Unprotected::Rejected(Rejection::Malformed));
         }
         let (nonce, rest) = bytes.split_at(NONCE_SIZE);
         let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
@@ -324,9 +325,10 @@ impl ValueProtector for Aes256GcmProtector {
 
         let mut buffer = body.to_vec();
         match self.key.decrypt_in_place(nonce, context, &mut buffer, tag) {
-            // Any authentication failure is a soft failure: the entry reads as a miss.
-            Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
-            Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+            // Authenticated: recovered. A tag failure (tampering, wrong key,
+            // relocation) reads as an authentication failure.
+            Ok(()) => Ok(Unprotected::Recovered(buffer.into())),
+            Err(_) => Ok(Unprotected::Rejected(Rejection::AuthenticationFailed)),
         }
     }
 }
@@ -390,7 +392,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbftDsvfJXijIbUVbjrz6DbKwb0unPSpK0CfEbOnrfy0X4GXVhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbEu82gxmuwisbbRVw3TEnX4YbwFMVyLfb6D0btdKyrvo5pT5hZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC45LjCCbWNhY2hldF9tZW1vcnllMC41LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.9.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

@@ -272,13 +272,15 @@ async fn transform_on_fallback_builder() {
     assert_eq!(*result.value(), 10);
 }
 
-// -- Chained post-transform fallback --
+// -- Per-tier transform fallbacks --
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn chained_post_transform_fallback() {
+async fn per_tier_transform_fallbacks() {
     let clock = Clock::new_frozen();
 
+    // Each byte-speaking tier gets its own `.transform()` boundary, so decoding stays
+    // below every fallback junction.
     let cache = Cache::builder::<i32, i32>(clock.clone())
         .memory()
         .ttl(Duration::from_mins(1))
@@ -287,6 +289,10 @@ async fn chained_post_transform_fallback() {
             TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
         )
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(MockCache::new()))
+        .transform(
+            TransformEncoder::infallible(|k: &i32| k.to_string()),
+            TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
+        )
         .fallback(Cache::builder::<String, String>(clock).storage(MockCache::new()))
         .build();
 

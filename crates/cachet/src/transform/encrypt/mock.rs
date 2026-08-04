@@ -5,17 +5,19 @@
 
 use bytesbuf::BytesView;
 
-use super::ValueProtector;
+use super::{Rejection, Unprotected, ValueProtector};
 use crate::Error;
-use crate::transform::DecodeOutcome;
 
 /// Length of the mock protector's nonce prefix, in bytes.
 const MOCK_NONCE_SIZE: usize = 12;
 
+/// Width of the little-endian context-length field stored after the nonce.
+const CONTEXT_LEN_SIZE: usize = size_of::<u64>();
+
 /// A deterministic, crypto-free [`ValueProtector`] for tests.
 ///
-/// Available with the `test-util` feature. Use it to exercise a
-/// [`protect_with`](crate::TransformBuilder::protect_with) pipeline — round-trips, key
+/// Available with the `test-util` feature. Use it to exercise an
+/// [`protect_with`](crate::SerializeBuilder::protect_with) pipeline — round-trips, key
 /// binding, and unprotect failures — without a real cryptographic library or a source
 /// of entropy, keeping tests fast and reproducible.
 ///
@@ -23,11 +25,13 @@ const MOCK_NONCE_SIZE: usize = 12;
 /// nonce comes from a monotonic counter (so repeated `protect` calls of identical input
 /// still differ, yet stay reproducible), and `masked_body` is the plaintext combined
 /// with a nonce-derived keystream via XOR. It binds the `context`:
-/// [`unprotect`](ValueProtector::unprotect) returns [`DecodeOutcome::SoftFailure`]
-/// unless the caller's `context` matches the stored one *exactly* — same length and
-/// bytes — so a value cannot be recovered under a different key, including one that is a
-/// prefix or extension of the original. Truncated or corrupt input soft-fails too,
-/// mirroring the [`ValueProtector`] security contract.
+/// [`unprotect`](ValueProtector::unprotect) returns
+/// [`Rejected(AuthenticationFailed)`](Unprotected::Rejected) unless the caller's
+/// `context` matches the stored one *exactly* — same length and bytes — so a value
+/// cannot be recovered under a different key, including one that is a prefix or extension
+/// of the original. Structurally invalid (truncated) input returns
+/// [`Rejected(Malformed)`](Unprotected::Rejected), mirroring the [`ValueProtector`]
+/// security contract.
 ///
 /// # Security
 ///
@@ -64,6 +68,13 @@ impl MockValueProtector {
         Self::default()
     }
 
+    /// Returns the next monotonic nonce, so repeated `protect` calls of identical input
+    /// still differ yet stay reproducible.
+    fn next_nonce(&self) -> [u8; MOCK_NONCE_SIZE] {
+        use std::sync::atomic::Ordering;
+        Self::nonce_bytes(self.counter.fetch_add(1, Ordering::Relaxed))
+    }
+
     /// Derives a deterministic nonce from the counter bytes (repeated to fill).
     #[cfg_attr(test, mutants::skip)] // Test-only mock: no contract on the exact keystream, only that it is deterministic and reversible (verified by round-trip tests).
     fn nonce_bytes(counter: u32) -> [u8; MOCK_NONCE_SIZE] {
@@ -82,54 +93,64 @@ impl MockValueProtector {
 
 impl ValueProtector for MockValueProtector {
     fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
-        use std::sync::atomic::Ordering;
-
-        let nonce = Self::nonce_bytes(self.counter.fetch_add(1, Ordering::Relaxed));
-        let mut out = Vec::with_capacity(MOCK_NONCE_SIZE + 8 + context.len() + plaintext.len());
+        // Stored layout: nonce || context_len (u64 LE) || context || masked_body.
+        let nonce = self.next_nonce();
+        let mut out = Vec::with_capacity(MOCK_NONCE_SIZE + CONTEXT_LEN_SIZE + context.len() + plaintext.len());
         out.extend_from_slice(&nonce);
         out.extend_from_slice(&(context.len() as u64).to_le_bytes());
         out.extend_from_slice(context);
+
         let body_start = out.len();
         for (slice, _) in plaintext.slices() {
             out.extend_from_slice(slice);
         }
         Self::mask(&nonce, &mut out[body_start..]);
+
         Ok(BytesView::from(out))
     }
 
-    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<Unprotected, Error> {
+        // Peel the stored layout apart segment by segment:
+        //   nonce || context_len (u64 LE) || context || masked_body.
+        // Structural problems (a blob that isn't a valid envelope) are `Malformed`;
+        // a well-formed envelope whose bound context doesn't match is `AuthenticationFailed`.
         let bytes = protected.to_vec();
-        let Some(nonce) = bytes.get(..MOCK_NONCE_SIZE) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated nonce"));
+
+        let Some((nonce, rest)) = bytes.split_at_checked(MOCK_NONCE_SIZE) else {
+            return Ok(Unprotected::Rejected(Rejection::Malformed)); // truncated nonce
         };
-        let nonce: [u8; MOCK_NONCE_SIZE] = nonce
-            .try_into()
-            .expect("nonce slice is MOCK_NONCE_SIZE bytes, guarded by get(..MOCK_NONCE_SIZE) above");
-        let rest = &bytes[MOCK_NONCE_SIZE..];
-        let Some(len_bytes) = rest.get(..8) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated length"));
+        let Some((len_bytes, rest)) = rest.split_at_checked(CONTEXT_LEN_SIZE) else {
+            return Ok(Unprotected::Rejected(Rejection::Malformed)); // truncated length
         };
-        let stored_len = u64::from_le_bytes(len_bytes.try_into().expect("8 bytes, guarded by get(..8) above"));
-        // The stored context length must match the caller's exactly, so a context that
-        // is a prefix (or extension) of the stored key is rejected outright rather than
-        // partially matched. Compared in u64 space to avoid any usize conversion.
+
+        // The stored context length must match the caller's exactly, so a context that is
+        // a prefix (or extension) of the stored key is rejected rather than partially
+        // matched. Compared in u64 space to avoid any usize truncation.
+        let stored_len = u64::from_le_bytes(
+            len_bytes
+                .try_into()
+                .expect("CONTEXT_LEN_SIZE bytes, guarded by split_at_checked above"),
+        );
         if stored_len != context.len() as u64 {
-            return Ok(DecodeOutcome::SoftFailure("mock: context length mismatch"));
+            return Ok(Unprotected::Rejected(Rejection::AuthenticationFailed)); // context length mismatch
         }
-        let after_len = &rest[8..];
-        let Some(stored_context) = after_len.get(..context.len()) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated context"));
+
+        let Some((stored_context, masked_body)) = rest.split_at_checked(context.len()) else {
+            return Ok(Unprotected::Rejected(Rejection::Malformed)); // truncated context
         };
         if stored_context != context {
-            return Ok(DecodeOutcome::SoftFailure("mock: context mismatch"));
+            return Ok(Unprotected::Rejected(Rejection::AuthenticationFailed)); // context mismatch
         }
-        let mut body = after_len[context.len()..].to_vec();
+
+        let nonce: [u8; MOCK_NONCE_SIZE] = nonce.try_into().expect("MOCK_NONCE_SIZE bytes, guarded by split_at_checked above");
+        let mut body = masked_body.to_vec();
         Self::mask(&nonce, &mut body);
-        Ok(DecodeOutcome::Value(BytesView::from(body)))
+        Ok(Unprotected::Recovered(BytesView::from(body)))
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -138,27 +159,36 @@ mod tests {
     }
 
     #[test]
-    fn mock_protector_soft_fails_on_malformed_or_mismatched_input() {
+    fn mock_protector_categorizes_malformed_mismatched_and_valid_input() {
         let p = MockValueProtector::new();
-        let soft = |bytes: Vec<u8>| matches!(p.unprotect(b"context", &BytesView::from(bytes)), Ok(DecodeOutcome::SoftFailure(_)));
+        let kind = |bytes: Vec<u8>| match p.unprotect(b"context", &BytesView::from(bytes)) {
+            Ok(Unprotected::Recovered(_)) => None,
+            Ok(Unprotected::Rejected(k)) => Some(k),
+            Err(e) => panic!("unexpected error: {e}"),
+        };
 
-        // Too short to hold the nonce prefix.
-        assert!(soft(vec![0u8; 4]), "truncated nonce must soft-fail");
-        // Nonce present, but no room for the 8-byte length field.
-        assert!(soft(vec![0u8; MOCK_NONCE_SIZE]), "truncated length must soft-fail");
-        // Length field declares a 7-byte context, but fewer context bytes follow.
+        // Structurally invalid blobs are Malformed (benign): too short to hold the nonce
+        // prefix, or the 8-byte length field, or the declared context.
+        assert_eq!(kind(vec![0u8; 4]), Some(Rejection::Malformed), "truncated nonce");
+        assert_eq!(kind(vec![0u8; MOCK_NONCE_SIZE]), Some(Rejection::Malformed), "truncated length");
         let mut truncated_ctx = vec![0u8; MOCK_NONCE_SIZE];
         truncated_ctx.extend_from_slice(&7u64.to_le_bytes());
         truncated_ctx.extend_from_slice(b"abc");
-        assert!(soft(truncated_ctx), "truncated context must soft-fail");
-        // A key of which the read context is a strict prefix must NOT match (relocation).
+        assert_eq!(kind(truncated_ctx), Some(Rejection::Malformed), "truncated context");
+
+        // Well-formed envelopes whose bound context doesn't match are AuthenticationFailed:
+        // a strict-prefix (length-mismatched) context, or a same-length different context.
         let extended = p.protect(b"context-long", &view(b"value")).expect("protect should succeed");
-        assert!(soft(extended.to_vec()), "prefix/length-mismatched context must soft-fail");
-        // A blob protected under a different (same-length) context must not match.
+        assert_eq!(
+            kind(extended.to_vec()),
+            Some(Rejection::AuthenticationFailed),
+            "prefix/length-mismatched context"
+        );
         let other = p.protect(b"kontext", &view(b"value")).expect("protect should succeed");
-        assert!(soft(other.to_vec()), "context mismatch must soft-fail");
-        // A well-formed round-trip under the expected context must NOT soft-fail.
+        assert_eq!(kind(other.to_vec()), Some(Rejection::AuthenticationFailed), "context mismatch");
+
+        // A well-formed round-trip under the expected context recovers.
         let valid = p.protect(b"context", &view(b"value")).expect("protect should succeed");
-        assert!(!soft(valid.to_vec()), "a valid round-trip must recover, not soft-fail");
+        assert_eq!(kind(valid.to_vec()), None, "a valid round-trip must recover");
     }
 }

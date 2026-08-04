@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::transform::DecodeOutcome;
-use crate::{Codec, Encoder, Error};
+use crate::{Codec, CodecContext, Encoder, Error};
 
 const FORMAT_VERSION: u8 = 1;
 
@@ -63,31 +63,30 @@ impl PostcardCodec {
     }
 }
 
-impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardCodec {
-    fn encode(&self, value: &T) -> Result<BytesView, Error> {
+impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for PostcardCodec {
+    /// Encodes a value to its stored byte representation. The [`CodecContext`] is unused —
+    /// serialization does not bind a key.
+    fn encode(&self, _ctx: &CodecContext<'_>, value: &T) -> Result<BytesView, Error> {
         encode(value, &self.pool)
     }
-}
 
-impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for PostcardCodec {
     /// Decodes a stored value back to the original type.
     ///
-    /// Returns `DecodeOutcome::Value(v)` on success, or
-    /// `DecodeOutcome::SoftFailure(reason)` if the stored data is undecodable
-    /// and should be treated as a cache miss.
-    fn decode(&self, value: BytesView) -> Result<DecodeOutcome<T>, Error> {
+    /// Returns `DecodeOutcome::Value(v)` on success, or `DecodeOutcome::SoftFailure` if
+    /// the stored data is undecodable and should be treated as a cache miss.
+    fn decode(&self, _ctx: &CodecContext<'_>, value: BytesView) -> Result<DecodeOutcome<T>, Error> {
         let bytes = to_contiguous(&value);
         let Some((version, payload)) = bytes.split_first() else {
-            return Ok(DecodeOutcome::SoftFailure("empty payload"));
+            return Ok(DecodeOutcome::SoftFailure); // empty payload
         };
 
         if *version != FORMAT_VERSION {
-            return Ok(DecodeOutcome::SoftFailure("format version mismatch"));
+            return Ok(DecodeOutcome::SoftFailure); // format version mismatch
         }
 
         match postcard::from_bytes(payload) {
             Ok(value) => Ok(DecodeOutcome::Value(value)),
-            Err(_) => Ok(DecodeOutcome::SoftFailure("deserialization failed")),
+            Err(_) => Ok(DecodeOutcome::SoftFailure), // deserialization failed
         }
     }
 }
@@ -101,7 +100,7 @@ fn encode<T: Serialize + Send + Sync>(value: &T, pool: &GlobalPool) -> Result<By
 
 /// Returns a contiguous byte slice from a [`BytesView`]. Zero-copy for single-span
 /// views (the common case), collects into a Vec only for multi-span views.
-fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
+pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     let first = view.first_slice();
     if first.len() == view.len() {
         Cow::Borrowed(first)
@@ -137,8 +136,8 @@ mod tests {
     fn decode_empty_payload_returns_soft_failure() {
         let codec = PostcardCodec::new(GlobalPool::new());
         let empty = BytesView::from(Vec::<u8>::new());
-        let result: Result<DecodeOutcome<String>, Error> = codec.decode(empty);
-        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("empty payload")));
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(&CodecContext::keyless(), empty);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure));
     }
 
     #[test]
@@ -147,8 +146,8 @@ mod tests {
         let mut data = vec![0xFF];
         data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
         let view = BytesView::from(data);
-        let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
-        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("format version mismatch")));
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(&CodecContext::keyless(), view);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure));
     }
 
     #[test]
@@ -156,16 +155,16 @@ mod tests {
         let codec = PostcardCodec::new(GlobalPool::new());
         let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
         let view = BytesView::from(data);
-        let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
-        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("deserialization failed")));
+        let result: Result<DecodeOutcome<String>, Error> = codec.decode(&CodecContext::keyless(), view);
+        assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure));
     }
 
     #[test]
     fn encode_decode_roundtrip() {
         let codec = PostcardCodec::new(GlobalPool::new());
         let original = "hello, world!".to_string();
-        let encoded = codec.encode(&original).expect("encode should succeed");
-        let outcome: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
+        let encoded = codec.encode(&CodecContext::keyless(), &original).expect("encode should succeed");
+        let outcome: DecodeOutcome<String> = codec.decode(&CodecContext::keyless(), encoded).expect("decode should succeed");
         assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
     }
 
@@ -185,7 +184,7 @@ mod tests {
     fn decode_multi_span_view() {
         let codec = PostcardCodec::new(GlobalPool::new());
         let original = "multi-span test".to_string();
-        let encoded = codec.encode(&original).expect("encode should succeed");
+        let encoded = codec.encode(&CodecContext::keyless(), &original).expect("encode should succeed");
 
         let bytes = to_contiguous(&encoded);
         let mid = bytes.len() / 2;
@@ -195,7 +194,7 @@ mod tests {
 
         assert_ne!(first_half.first_slice().len(), first_half.len(), "should be multi-span");
 
-        let outcome: DecodeOutcome<String> = codec.decode(first_half).expect("decode should succeed");
+        let outcome: DecodeOutcome<String> = codec.decode(&CodecContext::keyless(), first_half).expect("decode should succeed");
         assert!(matches!(outcome, DecodeOutcome::Value(ref v) if v == &original));
     }
 }

@@ -275,7 +275,7 @@
 //!
 //! ```ignore
 //! use bytesbuf::BytesView;
-//! use cachet::{DecodeOutcome, Error, ValueProtector};
+//! use cachet::{Error, Rejection, Unprotected, ValueProtector};
 //! use symcrypt::cipher::BlockCipherType;
 //! use symcrypt::gcm::GcmExpandedKey;
 //!
@@ -314,10 +314,11 @@
 //!         Ok(result.into())
 //!     }
 //!
-//!     fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+//!     fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<Unprotected, Error> {
 //!         let bytes = protected.to_vec();
 //!         if bytes.len() < NONCE_SIZE + TAG_SIZE {
-//!             return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+//!             // Not even a well-formed envelope — a benign structural reject.
+//!             return Ok(Unprotected::Rejected(Rejection::Malformed));
 //!         }
 //!         let (nonce, rest) = bytes.split_at(NONCE_SIZE);
 //!         let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
@@ -325,9 +326,10 @@
 //!
 //!         let mut buffer = body.to_vec();
 //!         match self.key.decrypt_in_place(nonce, context, &mut buffer, tag) {
-//!             // Any authentication failure is a soft failure: the entry reads as a miss.
-//!             Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
-//!             Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+//!             // Authenticated: recovered. A tag failure (tampering, wrong key,
+//!             // relocation) reads as an authentication failure.
+//!             Ok(()) => Ok(Unprotected::Recovered(buffer.into())),
+//!             Err(_) => Ok(Unprotected::Rejected(Rejection::AuthenticationFailed)),
 //!         }
 //!     }
 //! }
@@ -398,11 +400,11 @@ pub mod telemetry;
 mod transform;
 mod wrapper;
 
+#[cfg(any(feature = "serialize", test))]
+#[doc(inline)]
+pub use builder::SerializeBuilder;
 #[doc(inline)]
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
-#[cfg(feature = "encrypt")]
-#[doc(inline)]
-pub use builder::{ProtectedTransformBuilder, ProtectingTierBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
 #[cfg(any(feature = "memory", test))]
@@ -430,11 +432,11 @@ pub use telemetry::handler::{RecordedOperationEvent, RecordedTierEvent, Recordin
 #[cfg(all(feature = "encrypt", any(feature = "test-util", test)))]
 #[doc(inline)]
 pub use transform::MockValueProtector;
+#[doc(inline)]
+pub use transform::{Codec, CodecContext, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
 #[cfg(feature = "encrypt")]
 #[doc(inline)]
-pub use transform::ValueProtector;
-#[doc(inline)]
-pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
+pub use transform::{Rejection, Unprotected, ValueProtector};
 
 // Installs a silent, always-interested global `tracing` subscriber before any
 // unit test in this crate runs. This keeps `tracing` emission paths executing

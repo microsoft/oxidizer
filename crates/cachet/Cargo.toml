@@ -48,7 +48,7 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
-encrypt = ["dep:bytesbuf"]
+encrypt = ["serialize", "dep:bytesbuf"]
 telemetry = []
 
 [dependencies]

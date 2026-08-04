@@ -42,11 +42,13 @@ mod encrypt;
 pub(crate) mod testing;
 mod tier;
 
-pub use codec::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
+#[cfg(feature = "encrypt")]
+pub(crate) use codec::ChainedCodec;
+pub use codec::{Codec, CodecContext, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
 #[cfg(all(feature = "encrypt", any(feature = "test-util", test)))]
 pub use encrypt::MockValueProtector;
 #[cfg(feature = "encrypt")]
-pub(crate) use encrypt::ProtectedTier;
+pub(crate) use encrypt::ProtectorCodec;
 #[cfg(feature = "encrypt")]
-pub use encrypt::ValueProtector;
-pub(crate) use tier::TransformAdapter;
+pub use encrypt::{Rejection, Unprotected, ValueProtector};
+pub(crate) use tier::{MakeContext, TransformAdapter, keyless_context};

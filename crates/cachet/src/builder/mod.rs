@@ -17,8 +17,8 @@ mod serialize;
 mod transform;
 
 pub use cache::CacheBuilder;
-#[cfg(feature = "encrypt")]
-pub use encrypt::{ProtectedTransformBuilder, ProtectingTierBuilder};
 pub use fallback::FallbackBuilder;
 pub use sealed::CacheTierBuilder;
+#[cfg(any(feature = "serialize", test))]
+pub use serialize::SerializeBuilder;
 pub use transform::TransformBuilder;

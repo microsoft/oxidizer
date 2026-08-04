@@ -375,15 +375,15 @@ impl CacheTelemetry {
     /// Records that a stored value failed authentication and could not be
     /// recovered, so it was treated as a cache miss.
     ///
-    /// Fires from a `ProtectedTier` on the `get` path, so the thread-local
-    /// request ID is set and correlates the failure with the operation that
-    /// observed it. Signals a corrupt, truncated, wrong-key, tampered, or
-    /// relocated value. The protected tier always sits on the post-transform
-    /// (fallback) side of the hierarchy, so the event is tagged
-    /// `fallback = true` to match the tier's other events. Like other validation
-    /// outcomes (e.g. `insert_rejected`), it is not a timed operation and so omits
-    /// `cache.duration_ns`.
-    #[cfg(feature = "encrypt")]
+    /// Fires from the `ProtectorCodec` on the `get` path when a value fails its
+    /// authentication check (`Rejection::AuthenticationFailed`), so the thread-local
+    /// request ID is set and correlates the failure with the operation that observed it.
+    /// Signals a corrupt, truncated, wrong-key, tampered, or relocated value. A protected
+    /// tier always sits on the post-transform (fallback) side of the hierarchy, so the
+    /// event is tagged `fallback = true` to match the tier's other events. Like other
+    /// validation outcomes (e.g. `insert_rejected`), it is not a timed operation and so
+    /// omits `cache.duration_ns`.
+    #[cfg(any(feature = "encrypt", test))]
     pub(crate) fn record_unprotect_failure(&self, cache_name: CacheName) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
@@ -516,6 +516,19 @@ mod tests {
                 .await;
         });
         capture.assert_contains("DEBUG");
+
+        #[cfg(feature = "encrypt")]
+        {
+            let capture = Capture::new();
+            let _guard = tracing::subscriber::set_default(subscriber(&capture));
+            let request_id = next_request_id();
+            futures::executor::block_on(async {
+                async { telemetry.record_unprotect_failure("cache") }
+                    .with_request_id(request_id)
+                    .await;
+            });
+            capture.assert_contains("WARN");
+        }
     }
 
     #[test]
