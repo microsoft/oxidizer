@@ -1,13 +1,45 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{Data, DeriveInput, Fields, Result, Type, TypePath};
+use syn::spanned::Spanned;
+use syn::{Data, DeriveInput, Fields, Meta, Result, Type, TypePath};
 
 use crate::derive_error::types::ErrorFieldRef;
 use crate::utils::{bail, generated_error_field_marker};
 
 const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoCore field detected. Either mark a field with `#[error]` or include a field of type OhnoCore";
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
+const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
+
+/// Validate every `#[error]` attribute in the struct
+///
+/// The attribute marks the field holding the `OhnoCore` and takes no arguments. Its sole argument
+/// form, `#[error(generated)]`, is written by `#[ohno::error]` onto the field it injects, and
+/// tells the rest of the macro that the field is not part of the surface the user wrote.
+/// Anything else is rejected rather than ignored, so a marker that does not say what it means
+/// cannot silently pass for one that does.
+pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
+    let Data::Struct(data_struct) = &input.data else {
+        return Ok(());
+    };
+
+    for field in &data_struct.fields {
+        for attr in field.attrs.iter().filter(|attr| attr.path().is_ident("error")) {
+            match &attr.meta {
+                Meta::Path(_) => {}
+                Meta::List(list) if is_generated_marker(list) => {}
+                other => bail!(other.span(), ERROR_ATTRIBUTE_ARGUMENTS),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Check whether an `#[error(...)]` argument list is the generated-field marker
+fn is_generated_marker(list: &syn::MetaList) -> bool {
+    syn::parse2::<syn::Ident>(list.tokens.clone()).is_ok_and(|marker| marker == generated_error_field_marker())
+}
 
 /// Find the field marked with `#[error]` or auto-detect `OhnoCore` field
 pub(crate) fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
@@ -87,11 +119,9 @@ fn find_explicit_error_field_unnamed(fields: &syn::FieldsUnnamed) -> Option<usiz
 
 /// Check if a field is the `OhnoCore` field injected by `#[ohno::error]`
 pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| {
-        attr.path().is_ident("error")
-            && attr
-                .parse_args::<syn::Ident>()
-                .is_ok_and(|marker| marker == generated_error_field_marker())
+    field.attrs.iter().any(|attr| match &attr.meta {
+        Meta::List(list) => list.path.is_ident("error") && is_generated_marker(list),
+        _ => false,
     })
 }
 
@@ -200,6 +230,48 @@ mod tests {
                 .to_string()
                 .contains("No field marked with `#[error]` found and no OhnoCore field detected")
         );
+    }
+
+    #[test]
+    fn test_error_attribute_accepts_its_two_forms() {
+        // The bare marker the user writes, and the one `#[ohno::error]` writes onto the field it
+        // injects
+        let named: DeriveInput = parse_quote! {
+            struct TestError { path: String, #[error] inner: OhnoCore }
+        };
+        validate_error_attributes(&named).unwrap();
+
+        let generated: DeriveInput = parse_quote! {
+            struct TestError { path: String, #[error(generated)] ohno_core: OhnoCore }
+        };
+        validate_error_attributes(&generated).unwrap();
+
+        let tuple: DeriveInput = parse_quote! { struct TestError(String, #[error(generated)] OhnoCore); };
+        validate_error_attributes(&tuple).unwrap();
+
+        // Nothing to validate on an input that cannot carry the attribute
+        let enum_input: DeriveInput = parse_quote! { enum TestError { A, B } };
+        validate_error_attributes(&enum_input).unwrap();
+    }
+
+    #[test]
+    fn test_error_attribute_rejects_unrecognized_arguments() {
+        // A marker that does not say what it means must not pass for one that does: an argument
+        // list resembling the generated marker would otherwise be silently ignored, leaving the
+        // injected field indistinguishable from a field the user declared
+        for input in [
+            parse_quote! { struct TestError { #[error(generatd)] inner: OhnoCore } },
+            parse_quote! { struct TestError { #[error(generated, extra)] inner: OhnoCore } },
+            parse_quote! { struct TestError { #[error(generated = true)] inner: OhnoCore } },
+            parse_quote! { struct TestError { #[error("generated")] inner: OhnoCore } },
+            parse_quote! { struct TestError { #[error()] inner: OhnoCore } },
+            parse_quote! { struct TestError { #[error = "x"] inner: OhnoCore } },
+            parse_quote! { struct TestError(String, #[error(nonsense)] OhnoCore); },
+        ] {
+            let input: DeriveInput = input;
+            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            assert_eq!(message, ERROR_ATTRIBUTE_ARGUMENTS);
+        }
     }
 
     #[test]

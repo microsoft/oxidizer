@@ -22,6 +22,9 @@ fn display_diagnostics() {
     // to code that does not parse.
     t.compile_fail("tests/ui/display_unsupported_argument_root.rs");
 
+    // `#[error]` takes no arguments, so an unrecognized one is reported rather than ignored.
+    t.compile_fail("tests/ui/error_attribute_arguments.rs");
+
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
     t.compile_fail("tests/ui/display_tuple_index_reaching_injected_core.rs");
