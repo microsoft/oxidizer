@@ -600,6 +600,70 @@ fn explicit_enum(arena: &Arena, variant: &str, value: EnumValue) -> Value {
     }
 }
 
+#[test]
+fn ignored_fields_discard_every_explicit_enum_shape_without_replay() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Known {
+        known: bool,
+    }
+
+    let arena = Arena::new();
+    let value = Value::Map(map(
+        &arena,
+        vec![
+            Entry {
+                key: Value::String(string(&arena, "known")),
+                value: Value::Bool(true),
+            },
+            Entry {
+                key: Value::String(string(&arena, "unit")),
+                value: explicit_enum(&arena, "Unit", EnumValue::Unit),
+            },
+            Entry {
+                key: Value::String(string(&arena, "newtype")),
+                value: explicit_enum(&arena, "New", EnumValue::Newtype(boxed(&arena, Value::Number(Number::I32(1))))),
+            },
+            Entry {
+                key: Value::String(string(&arena, "tuple")),
+                value: explicit_enum(
+                    &arena,
+                    "Tuple",
+                    EnumValue::Tuple(array(&arena, vec![Value::Number(Number::I32(2)), Value::Bool(true)])),
+                ),
+            },
+            Entry {
+                key: Value::String(string(&arena, "struct")),
+                value: explicit_enum(
+                    &arena,
+                    "Struct",
+                    EnumValue::Struct(map(
+                        &arena,
+                        vec![Entry {
+                            key: Value::String(string(&arena, "x")),
+                            value: Value::Number(Number::I32(3)),
+                        }],
+                    )),
+                ),
+            },
+            Entry {
+                key: Value::String(string(&arena, "nested")),
+                value: Value::Sequence(array(
+                    &arena,
+                    vec![Value::Map(map(
+                        &arena,
+                        vec![Entry {
+                            key: Value::String(string(&arena, "enum")),
+                            value: explicit_enum(&arena, "Tuple", EnumValue::Tuple(array(&arena, vec![]))),
+                        }],
+                    ))],
+                )),
+            },
+        ],
+    ));
+
+    assert_eq!(Known::deserialize(&value).unwrap(), Known { known: true });
+}
+
 fn external_enum(arena: &Arena, variant: &str, value: Value) -> Value {
     Value::Map(map(
         arena,

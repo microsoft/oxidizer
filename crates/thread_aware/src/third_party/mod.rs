@@ -24,7 +24,7 @@
 //!
 //! See this crate's `Cargo.toml` for the exact versions used.
 
-/// Generates a no-op [`ThreadAware`](crate::ThreadAware) impl for each listed type.
+/// Generates a no-op [`trait@ThreadAware`] impl for each listed type.
 ///
 /// The bodies of the implementations are empty because the listed types are
 /// inert value types: they hold no thread-local state, perform no I/O, and

@@ -196,6 +196,7 @@ fn run_loom(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
         PACKAGE,
         "--test",
         "loom",
+        "--all-features",
         "--locked",
         "--",
         "--test-threads=1",

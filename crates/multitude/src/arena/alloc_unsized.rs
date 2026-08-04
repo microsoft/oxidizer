@@ -3,33 +3,26 @@
 
 //! DST (unsized) value allocation API on [`Arena`].
 //!
-//! Implements `alloc_dst_arc`, `alloc_dst_box` and their `try_*`
-//! variants under the `dst` Cargo feature. The pointer-metadata is
-//! stored verbatim in the chunk prefix (immediately before the
-//! payload), so supported DSTs are those whose metadata is either
-//! zero-sized (sized `T`) or `usize`-sized (slice DSTs and trait
-//! objects). `Arc` runs `T`'s destructor eagerly on the last clone via
-//! `drop_in_place::<T>`; `Box` does so in its own `Drop`. Neither
-//! family caps the metadata width for `T: Drop`: both drop via
-//! `drop_in_place` on a full-width fat pointer, so a `Drop` trait
-//! object or a slice longer than `u16::MAX` is accepted by both.
+//! Implements the `alloc_dst_arc`, `alloc_dst_rc`, and `alloc_dst_box`
+//! families under the `dst` Cargo feature. Slice lengths are stored in the
+//! chunk prefix, while trait-object vtable pointers are stored in each
+//! smart-pointer handle. `Arc` and `Rc` run `T`'s destructor eagerly on the
+//! last clone via `drop_in_place::<T>`; `Box` does so in its own `Drop`.
 
 use core::alloc::Layout;
-use core::mem;
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
 
 use allocator_api2::alloc::Allocator;
-use ptr_meta::Pointee;
 
 use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
-use crate::AllocError;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong, strong_prefix_bytes_for};
 use crate::rc::Rc;
+use crate::{AllocError, SmartPointerPointee};
 
 /// Maximum `layout.align()` accepted by smart-pointer allocations.
 /// Mirrors the constant of the same name in [`alloc_value`](super::alloc_value):
@@ -49,8 +42,11 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails or if `layout.align()` is
-    /// at least 32 KiB.
+    /// Panics if the backing allocator fails, if `layout.align()` is at least
+    /// 32 KiB, or if `init` panics.
+    ///
+    /// If `init` panics after initializing resources, this function does not
+    /// run destructors for those partially initialized contents.
     ///
     /// # Safety
     ///
@@ -58,11 +54,12 @@ impl<A: Allocator + Clone> Arena<A> {
     ///   constructed DST value (e.g., for `[U]` of length `n`,
     ///   `Layout::array::<U>(n).unwrap()`). Passing a smaller layout
     ///   would cause `init` to write past the reservation.
-    /// - `init` must initialize all bytes covered by `layout` to a valid `T`.
-    /// - `metadata` must be valid for the value just written.
-    /// - `T::Metadata` must be either zero-sized (sized `T`) or
-    ///   `usize`-sized (slice DSTs `[U]` and trait objects `dyn Trait`,
-    ///   whose metadata is a slice length or vtable pointer).
+    /// - If `init` returns normally, it must have fully initialized a valid `T`
+    ///   at the supplied pointer. Padding bytes need not be initialized.
+    /// - `metadata` must describe that value and agree with `layout`.
+    /// - `T::Metadata` must use one of Multitude's supported policies: `()` for
+    ///   sized values, `usize` for slice-like DSTs, or
+    ///   [`ptr_meta::DynMetadata`] for trait-object DSTs.
     ///
     /// # Example
     ///
@@ -85,7 +82,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
+    pub unsafe fn alloc_dst_arc<T: ?Sized + Send + Sync + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -107,7 +104,9 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Allocator panics propagate.
+    /// Panics from the allocator or `init` propagate. If `init` panics after
+    /// initializing resources, this function does not run destructors for
+    /// those partially initialized contents.
     ///
     /// # Safety
     ///
@@ -136,7 +135,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
+    pub unsafe fn try_alloc_dst_arc<T: ?Sized + Send + Sync + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -185,7 +184,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn alloc_dst_box<T: ?Sized + Pointee>(&self, layout: Layout, metadata: T::Metadata, init: impl FnOnce(*mut T)) -> Box<T, A> {
+    pub unsafe fn alloc_dst_box<T: ?Sized + SmartPointerPointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Box<T, A> {
         // SAFETY: forwarded.
         unsafe { self.impl_alloc_dst_box::<T>(layout, metadata, init) }.expect_alloc()
     }
@@ -198,7 +202,9 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Allocator panics propagate.
+    /// Panics from the allocator or `init` propagate. If `init` panics after
+    /// initializing resources, this function does not run destructors for
+    /// those partially initialized contents.
     ///
     /// # Safety
     ///
@@ -227,7 +233,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_box<T: ?Sized + Pointee>(
+    pub unsafe fn try_alloc_dst_box<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -244,7 +250,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails or if `layout.align()` is at least 32 KiB.
+    /// See [`Self::alloc_dst_arc`].
     ///
     /// # Safety
     ///
@@ -271,7 +277,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn alloc_dst_rc<T: ?Sized + Pointee>(&self, layout: Layout, metadata: T::Metadata, init: impl FnOnce(*mut T)) -> Rc<T, A> {
+    pub unsafe fn alloc_dst_rc<T: ?Sized + SmartPointerPointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Rc<T, A> {
         // SAFETY: forwarded.
         unsafe { self.impl_alloc_dst_rc::<T>(layout, metadata, init) }.expect_alloc()
     }
@@ -282,6 +293,12 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `layout.align()` is at least 32 KiB.
+    ///
+    /// # Panics
+    ///
+    /// Panics from the allocator or `init` propagate. If `init` panics after
+    /// initializing resources, this function does not run destructors for
+    /// those partially initialized contents.
     ///
     /// # Safety
     ///
@@ -310,7 +327,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_rc<T: ?Sized + Pointee>(
+    pub unsafe fn try_alloc_dst_rc<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -329,7 +346,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
     #[inline]
-    unsafe fn impl_alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
+    unsafe fn impl_alloc_dst_arc<T: ?Sized + Send + Sync + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -350,7 +367,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Same contract as [`Self::alloc_dst_rc`].
     #[inline]
-    unsafe fn impl_alloc_dst_rc<T: ?Sized + Pointee>(
+    unsafe fn impl_alloc_dst_rc<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -363,7 +380,7 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Shared implementation for `alloc_dst_box` / `try_alloc_dst_box`.
-    /// Like `impl_alloc_dst_arc` but without the per-`Arc` strong-count
+    /// Like `impl_alloc_dst_arc` but without the shared strong-count
     /// prefix: [`Box::drop`] runs `drop_in_place::<T>` on the value
     /// pointer (which natively handles `?Sized`).
     ///
@@ -371,7 +388,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Same contract as [`Self::alloc_dst_box`].
     #[inline]
-    unsafe fn impl_alloc_dst_box<T: ?Sized + Pointee>(
+    unsafe fn impl_alloc_dst_box<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -380,7 +397,7 @@ impl<A: Allocator + Clone> Arena<A> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
-        let meta_bytes = mem::size_of::<T::Metadata>();
+        let meta_bytes = T::ALLOCATION_METADATA_BYTES;
         // Payload starts at the lowest layout-aligned offset >=
         // meta_bytes. For sized T (meta_bytes = 0) payload starts at 0.
         let payload_offset = if meta_bytes == 0 { 0 } else { meta_bytes.max(layout.align()) };
@@ -401,7 +418,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 // SAFETY: `payload_nn` references initialized `T`; the
                 // hosting chunk holds the new `Box`'s +1.
-                return Ok(unsafe { Box::from_raw(payload_nn) });
+                return Ok(unsafe { Box::from_raw_with_metadata(payload_nn, metadata) });
             }
             if self.is_oversized(refill_hint) {
                 let init = init.take().expect("init taken twice");
@@ -418,17 +435,18 @@ impl<A: Allocator + Clone> Arena<A> {
                     let _ = chunk_ref.forget();
                     // SAFETY: `payload_nn` references the now-initialized `T`;
                     // the oversized chunk holds the new `Box`'s `+1` (forgotten
-                    // above), so `Box::from_raw` adopts sole ownership.
-                    unsafe { Box::from_raw(payload_nn) }
+                    // above), so `Box::from_raw_with_metadata` adopts sole
+                    // ownership.
+                    unsafe { Box::from_raw_with_metadata(payload_nn, metadata) }
                 });
             }
             self.refill(refill_hint)?;
         }
     }
 
-    /// Reserve a strong-prefixed `Arc`/`Rc` `T` slot in the current chunk
-    /// (per-handle strong count + `T::Metadata` prefix + payload), run `init`
-    /// on a typed fat pointer, and adopt the result into `S`'s smart pointer.
+    /// Reserve a strong-prefixed `Arc`/`Rc` `T` slot in the current chunk,
+    /// including any allocation-resident metadata, run `init` on a typed fat
+    /// pointer, and adopt the result into `S`'s smart pointer.
     /// The smart pointer's `Drop` runs `drop_in_place::<T>` (which natively
     /// handles `?Sized`) on the last reference.
     ///
@@ -436,7 +454,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
     #[inline]
-    unsafe fn impl_alloc_dst_smart<S: Strong, T: ?Sized + Pointee>(
+    unsafe fn impl_alloc_dst_smart<S: Strong, T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -446,10 +464,9 @@ impl<A: Allocator + Clone> Arena<A> {
         // contract on `layout` / `metadata` / `init`.
         let thin = unsafe { self.alloc_dst_smart_raw::<S, T>(layout, metadata, init) }?;
         // SAFETY: `alloc_dst_smart_raw` returns a thin pointer to a
-        // fully-initialized `T` whose chunk prefix carries `T::Metadata` and a
-        // strong count of 1, and whose hosting chunk it took a `+1` on; the
-        // pointer lies in the chunk's first tile. That is `S::adopt`'s contract.
-        Ok(unsafe { S::adopt::<T, A>(thin) })
+        // fully-initialized `T` with a strong count of 1, and whose hosting
+        // chunk it took a `+1` on. The supplied metadata describes that value.
+        Ok(unsafe { S::adopt_with_metadata::<T, A>(thin, metadata) })
     }
 
     /// Raw DST smart allocation returning the thin payload pointer (before
@@ -460,7 +477,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
     #[inline]
-    unsafe fn alloc_dst_smart_raw<S: Strong, T: ?Sized + Pointee>(
+    unsafe fn alloc_dst_smart_raw<S: Strong, T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -469,7 +486,7 @@ impl<A: Allocator + Clone> Arena<A> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
             return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
-        let meta_bytes = mem::size_of::<T::Metadata>();
+        let meta_bytes = T::ALLOCATION_METADATA_BYTES;
         let value_align = layout.align().max(1);
         // Keep the payload pointer inside the reservation for ZSTs.
         let payload_bytes = layout.size().max(1);
@@ -514,9 +531,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// and never moves until the last `Arc` clone is dropped.
     ///
     /// Typical use: pinning an `Arc<[T]>` whose slice contents must
-    /// stay at a fixed address (e.g. for `Pin`-projecting code).
-    /// Trait objects whose metadata is a vtable pointer are **not**
-    /// supported (see [`Self::try_alloc_dst_arc`]'s safety contract).
+    /// stay at a fixed address (e.g. for `Pin`-projecting code). Trait objects
+    /// are also supported; their vtable is carried in the returned handle.
     ///
     /// # Panics
     ///
@@ -548,7 +564,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
-    pub unsafe fn alloc_dst_arc_pin<T: ?Sized + Send + Sync + Pointee>(
+    pub unsafe fn alloc_dst_arc_pin<T: ?Sized + Send + Sync + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -595,7 +611,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_arc_pin<T: ?Sized + Send + Sync + Pointee>(
+    pub unsafe fn try_alloc_dst_arc_pin<T: ?Sized + Send + Sync + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -643,7 +659,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
-    pub unsafe fn alloc_dst_rc_pin<T: ?Sized + Pointee>(
+    pub unsafe fn alloc_dst_rc_pin<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -690,7 +706,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_rc_pin<T: ?Sized + Pointee>(
+    pub unsafe fn try_alloc_dst_rc_pin<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -706,9 +722,10 @@ impl<A: Allocator + Clone> Arena<A> {
         })
     }
 
-    /// `Pin` variant of [`Self::alloc_dst_box`]. Trait objects are
-    /// **not** supported (see [`Self::try_alloc_dst_arc`]'s safety
-    /// contract); use the slice or sized variants.
+    /// `Pin` variant of [`Self::alloc_dst_box`].
+    ///
+    /// Trait objects are supported; their vtable is carried in the returned
+    /// handle.
     ///
     /// # Panics
     ///
@@ -740,7 +757,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
-    pub unsafe fn alloc_dst_box_pin<T: ?Sized + Pointee>(
+    pub unsafe fn alloc_dst_box_pin<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -786,7 +803,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # }
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
-    pub unsafe fn try_alloc_dst_box_pin<T: ?Sized + Pointee>(
+    pub unsafe fn try_alloc_dst_box_pin<T: ?Sized + SmartPointerPointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -802,8 +819,8 @@ impl<A: Allocator + Clone> Arena<A> {
 
 /// Worst-case byte budget for a single strong-prefixed DST allocation under
 /// policy `S` ([`AtomicStrong`](thin_dst::AtomicStrong) for `Arc`,
-/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): per-handle strong count +
-/// `T::Metadata` prefix + payload + front alignment slack (`S::block_align`).
+/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): shared strong count +
+/// allocation metadata + payload + front alignment slack (`S::block_align`).
 /// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
 /// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` DST
 /// is not strong-prefixed — it uses the separate `impl_alloc_dst_box` path.)
@@ -826,7 +843,7 @@ fn worst_case_strong_dst<S: Strong>(payload_bytes: usize, value_align: usize, me
 /// - `init` must initialize a valid `T` through the fat pointer it
 ///   receives.
 #[inline(always)]
-unsafe fn write_dst_meta_and_init<T: ?Sized + Pointee>(
+unsafe fn write_dst_meta_and_init<T: ?Sized + SmartPointerPointee>(
     value_ptr: NonNull<u8>,
     meta_bytes: usize,
     metadata: T::Metadata,
@@ -860,7 +877,7 @@ unsafe fn write_dst_meta_and_init<T: ?Sized + Pointee>(
 ///   DST or `0` for sized `T`.
 /// - `init` must initialize a valid `T` through the fat pointer.
 #[inline(always)]
-unsafe fn write_dst_prefix_and_init<T: ?Sized + Pointee>(
+unsafe fn write_dst_prefix_and_init<T: ?Sized + SmartPointerPointee>(
     base: NonNull<u8>,
     payload_offset: usize,
     meta_bytes: usize,

@@ -47,7 +47,7 @@ dst = ["ptr_meta/derive"]
 utf16 = ["dep:widestring"]
 bytes = ["dep:bytes"]
 bytemuck = ["dep:bytemuck", "dst"]
-bytesbuf = ["dep:bytesbuf", "std"]
+bytesbuf = ["dep:bytesbuf", "std", "bytesbuf/std"]
 zerocopy = ["dep:zerocopy", "dst"]
 hashbrown = ["dep:hashbrown"]
 # Marker feature selecting the loom model-checking test target via its
@@ -78,8 +78,9 @@ zerocopy = { workspace = true, optional = true }
 loom = { workspace = true }
 
 [dev-dependencies]
-alloc_tracker = "0.6"
+alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
+benchmarking = { path = "../benchmarking" }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
 # because bolero-libfuzzer 0.13.0 references `bolero_engine::any::run`
@@ -152,19 +153,19 @@ harness = false
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
 # cfg-gated, so it is unconditional here.
 [[bench]]
-name = "gungraun_alloc"
+name = "criterion_alloc_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_drop"
+name = "criterion_drop_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_arc_array"
+name = "criterion_arc_array_cg"
 harness = false
 
 [[bench]]
-name = "gungraun_rc_array"
+name = "criterion_rc_array_cg"
 harness = false
 
 [[example]]

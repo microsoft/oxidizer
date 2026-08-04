@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use crate::BytesBuf;
 
@@ -22,8 +22,7 @@ pub trait Memory: Debug {
     ///
     /// The memory provider may provide more memory than requested.
     ///
-    /// The memory reservation request will always be fulfilled, obtaining more memory from the
-    /// operating system if necessary.
+    /// If this method returns, the buffer has at least `min_bytes` bytes of capacity.
     ///
     /// # Zero-sized reservations
     ///
@@ -32,7 +31,7 @@ pub trait Memory: Debug {
     ///
     /// # Panics
     ///
-    /// May panic if the operating system runs out of memory.
+    /// Implementations may panic or abort if the requested capacity cannot be obtained.
     #[must_use]
     fn reserve(&self, min_bytes: usize) -> BytesBuf;
 }

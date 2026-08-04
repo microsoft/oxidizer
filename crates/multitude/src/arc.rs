@@ -13,13 +13,13 @@ use core::ptr::{self, NonNull};
 use core::sync::atomic::{Ordering, fence};
 
 use allocator_api2::alloc::{Allocator, Global};
-use ptr_meta::Pointee;
 
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::refcount_overflow_abort;
 use crate::internal::thin_dst;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
+use crate::{Coercion, HandleMetadata, SmartPointerPointee};
 
 /// Strong-count saturation threshold.
 const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
@@ -97,41 +97,56 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// let h = thread::spawn(move || *b);
 /// assert_eq!(*a, h.join().unwrap());
 /// ```
-pub struct Arc<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
-    /// **Thin** pointer to the first byte of the contained value, which
-    /// lives in a 64K-aligned [`Chunk`](crate::internal::chunk::Chunk)'s
-    /// payload. The chunk header is recovered by masking, and `T`'s
-    /// pointer metadata (if any — `()` for `T: Sized`, `usize` for
-    /// slice DSTs / `str`, vtable for trait objects) is stored in the
-    /// `size_of::<T::Metadata>()` bytes immediately preceding the
-    /// payload (read with [`core::ptr::read_unaligned`]).
-    ///
-    /// This makes `Arc<T>` 8 bytes uniformly, even for DST `T`.
+pub struct Arc<
+    T: ?Sized + SmartPointerPointee,
+    A: Allocator + Clone = Global,
+    M: HandleMetadata<T> = <T as SmartPointerPointee>::StoredMetadata,
+> {
+    /// Pointer to the first byte of the contained value. The chunk header is
+    /// recovered by masking. Slice and string lengths live immediately before
+    /// the payload; trait-object vtable pointers live in `metadata`.
     ptr: NonNull<u8>,
+    /// Per-handle metadata. This is zero-sized for sized values, slices, and
+    /// strings; trait-object handles carry their vtable here.
+    metadata: M,
     /// Variance + dropck marker. Send/Sync are gated by explicit
     /// unsafe impls below.
     _phantom: PhantomData<(*const T, A)>,
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
+// Both the pointee and allocator may be observed through other owners after an
+// unwind, so shared-reference unwind safety is required for both traits.
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::RefUnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::RefUnwindSafe,
+> core::panic::RefUnwindSafe for Arc<T, A, M>
+{
+}
+impl<
+    T: ?Sized + SmartPointerPointee + core::panic::RefUnwindSafe,
+    A: Allocator + Clone + core::panic::RefUnwindSafe,
+    M: HandleMetadata<T> + core::panic::RefUnwindSafe,
+> core::panic::UnwindSafe for Arc<T, A, M>
+{
+}
+
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone> Arc<T, A> {
     /// Builds an `Arc` from a thin payload pointer.
     ///
-    /// For DST `T`, the metadata is recovered on demand from the chunk
-    /// prefix at `thin - size_of::<T::Metadata>()` via `as_fat_ptr`; the
-    /// caller must have already written it there at allocation time.
-    /// For `T: Sized`, the prefix is zero-sized and no metadata is
-    /// stored.
+    /// Allocation-resident metadata must already be initialized. Trait-object
+    /// metadata must instead be supplied through [`Self::from_raw_with_metadata`].
     ///
     /// # Safety
     ///
     /// - `thin` must reference the payload of a fully-initialized `T`
     ///   whose storage was bump-allocated from a [`Chunk<A>`] via
-    ///   the strong-prefixed `Arc` allocator path: a per-`Arc`
-    ///   [`AtomicU32`](core::sync::atomic::AtomicU32) strong count must
+    ///   the strong-prefixed `Arc` allocator path: an
+    ///   [`AtomicU32`](core::sync::atomic::AtomicU32) strong count shared by
+    ///   the allocation's owner family must
     ///   already be initialized in the chunk prefix (see
     ///   [`thin_dst::strong_ref`](crate::internal::thin_dst::strong_ref)),
-    ///   and for DST `T` the prefix must also carry the matching
-    ///   `T::Metadata`.
+    ///   and any allocation-resident metadata must match `T`.
     /// - The caller must have just acquired a +1 refcount on that chunk
     ///   for the new `Arc` family, and the strong count must account for
     ///   this handle; the returned `Arc` owns that strong reference and
@@ -144,6 +159,23 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
     pub(crate) unsafe fn from_raw(thin: NonNull<u8>) -> Self {
         Self {
             ptr: thin,
+            metadata: T::metadata_from_allocation(thin),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Builds an `Arc` with explicitly supplied pointer metadata.
+    ///
+    /// # Safety
+    ///
+    /// `thin` and `metadata` must describe the same initialized `T`, and the
+    /// allocation must carry the strong-count and chunk references required by
+    /// [`Self::from_raw`].
+    #[inline]
+    pub(crate) unsafe fn from_raw_with_metadata(thin: NonNull<u8>, metadata: T::Metadata) -> Self {
+        Self {
+            ptr: thin,
+            metadata: T::store_metadata(metadata),
             _phantom: PhantomData,
         }
     }
@@ -215,6 +247,49 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
 }
 
 impl_thin_smart_ptr_common!(Arc);
+
+impl<T, A: Allocator + Clone> Arc<T, A> {
+    /// Converts this owner into a trait-object owner in place.
+    ///
+    /// The value is neither moved nor reallocated. See [`coerce!`](crate::coerce!)
+    /// for the supported trait-object targets.
+    ///
+    /// Existing sized and erased clones continue sharing the same strong
+    /// count. Each erased clone carries its own trait-object vtable.
+    #[must_use]
+    pub fn unsize<U, F>(this: Self, coercion: Coercion<T, U, F>) -> Arc<U, A>
+    where
+        U: ?Sized + SmartPointerPointee + ptr_meta::Pointee<Metadata = ptr_meta::DynMetadata<U>>,
+        F: FnOnce(*const T) -> *const U,
+    {
+        let metadata = crate::coerce::unsize_metadata(this.ptr, coercion);
+        let payload = this.ptr;
+        mem::forget(this);
+        // SAFETY: the coercion produced the vtable for the initialized value at
+        // `payload`; the consumed handle's strong and chunk references transfer to
+        // the returned handle.
+        unsafe { Arc::from_raw_with_metadata(payload, metadata) }
+    }
+
+    /// Converts this pinned owner into a pinned trait-object owner.
+    ///
+    /// The value is neither moved nor exposed. See [`coerce!`](crate::coerce!)
+    /// for the supported trait-object targets.
+    #[must_use]
+    pub fn unsize_pin<U, F>(this: Pin<Self>, coercion: Coercion<T, U, F>) -> Pin<Arc<U, A>>
+    where
+        U: ?Sized + SmartPointerPointee + ptr_meta::Pointee<Metadata = ptr_meta::DynMetadata<U>>,
+        F: FnOnce(*const T) -> *const U,
+    {
+        // SAFETY: the ordinary owner exists only inside this method. `unsize`
+        // changes pointer metadata without moving the allocation, and the
+        // resulting owner is re-pinned before it can escape.
+        unsafe {
+            let owner = Pin::into_inner_unchecked(this);
+            Arc::pin_fresh(Self::unsize(owner, coercion))
+        }
+    }
+}
 
 impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     /// Convert an initialized `MaybeUninit<T>` handle into a `T` handle.
@@ -306,7 +381,7 @@ fn strong_overflow_abort() -> ! {
     refcount_overflow_abort()
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Arc<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone, M: HandleMetadata<T>> Clone for Arc<T, A, M> {
     #[inline]
     fn clone(&self) -> Self {
         let value_align = mem::align_of_val::<T>(&**self);
@@ -322,12 +397,13 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Arc<T, A> {
         }
         Self {
             ptr: self.ptr,
+            metadata: self.metadata,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Arc<T, A> {
+impl<T: ?Sized + SmartPointerPointee, A: Allocator + Clone, M: HandleMetadata<T>> Drop for Arc<T, A, M> {
     #[inline]
     fn drop(&mut self) {
         let value_align = mem::align_of_val::<T>(&**self);
@@ -360,9 +436,9 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Arc<T, A> {
 
 // SAFETY: same cross-thread invariants as `std::sync::Arc`; the backing
 // chunk refcount is atomic and sharing is gated on `T` and `A`.
-unsafe impl<T: ?Sized + Pointee + Sync + Send, A: Allocator + Clone + Send + Sync> Send for Arc<T, A> {}
+unsafe impl<T: ?Sized + SmartPointerPointee + Sync + Send, A: Allocator + Clone + Send + Sync, M: HandleMetadata<T>> Send for Arc<T, A, M> {}
 // SAFETY: same invariants as the `Send` impl.
-unsafe impl<T: ?Sized + Pointee + Sync + Send, A: Allocator + Clone + Send + Sync> Sync for Arc<T, A> {}
+unsafe impl<T: ?Sized + SmartPointerPointee + Sync + Send, A: Allocator + Clone + Send + Sync, M: HandleMetadata<T>> Sync for Arc<T, A, M> {}
 
 impl<'a, T, A: Allocator + Clone> From<Vec<'a, T, A>> for Arc<[T], A>
 where
@@ -370,7 +446,9 @@ where
     A: Send + Sync,
 {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable
-    /// [`Arc<[T], A>`](crate::Arc). Mirrors `std`'s `From<Vec<T>> for Arc<[T]>`.
+    /// [`Arc<[T], A>`](crate::Arc). This parallels `std`'s
+    /// `From<Vec<T>> for Arc<[T]>`, while retaining Multitude's `Send + Sync`
+    /// construction bounds on `T` and `A`.
     ///
     /// Generally **O(1)** (reuses the existing storage with no copy), except in
     /// rare edge cases where it falls back to an **O(n)** element move.

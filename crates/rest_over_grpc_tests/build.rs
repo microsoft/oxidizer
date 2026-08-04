@@ -15,16 +15,12 @@ use http_path_template::{Grammar, PathTemplate};
 use rest_over_grpc::build::{DescriptorOptions, Generator, HttpRule, OpenApiInfo, ServiceDefinition, compile_fds, generate_router};
 use routerama::HttpMethod;
 
-// The large benchmark route table (`ROUTES`), shared with the benchmark.
 include!("bench_routes.rs");
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for build scripts"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set for build scripts"));
 
-    // The large benchmark router (`bench_router.rs`) lowered from the shared route
-    // table, so `benches/grs_router_vs_matchit.rs` can compare the generated static
-    // router against a `matchit` router built from the same routes.
     let mut rules = Vec::new();
     for (rpc, method, pattern) in ROUTES {
         let http = http_method(method).expect("known HTTP method in the benchmark route table");
@@ -34,9 +30,6 @@ fn main() {
     let bench_router = generate_router(rules);
     fs::write(out_dir.join("bench_router.rs"), bench_router.to_string()).expect("writing the benchmark router succeeds");
 
-    // A small router exercising tricky routing cases (literal vs wildcard
-    // backtracking, custom verbs, nested field paths, `**` capture, prefix
-    // overlap) so the runtime behavior of the generated trie is tested.
     let coverage_table: &[(&str, &str, &str)] = &[
         ("SystemConfig", "GET", "/v1/system/config"),
         ("TenantSettings", "GET", "/v1/{tenant}/settings"),
@@ -57,10 +50,7 @@ fn main() {
     let coverage_router = generate_router(coverage_rules);
     fs::write(out_dir.join("coverage_router.rs"), coverage_router.to_string()).expect("writing the coverage router succeeds");
 
-    // The two service fixtures, generated end to end into separate OUT_DIR
-    // subdirectories (each pipeline emits a top-level `transcoder.rest.rs`, so
-    // they must not share a directory). These mirror the `rest_over_grpc_examples`
-    // crate but are generated here so this crate stays independent of it.
+    // Each pipeline emits `transcoder.rest.rs`, so their output directories must differ.
     let proto_dir = manifest.join("proto");
     build_tonic_bridge(&proto_dir, &out_dir.join("tonic_bridge"));
     build_custom(&proto_dir, &out_dir.join("custom"));

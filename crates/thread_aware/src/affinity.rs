@@ -5,6 +5,9 @@
 
 #![allow(clippy::allow_attributes, reason = "Needed for conditional compilation")]
 
+#[cfg(not(test))]
+use alloc::vec::Vec;
+
 /// A `Affinity` represents a specific binding to a processor and memory region.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Affinity {

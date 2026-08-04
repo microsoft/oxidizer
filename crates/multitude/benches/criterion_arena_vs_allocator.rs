@@ -83,7 +83,7 @@ fn bench_arena_vs_allocator(c: &mut Criterion) {
     let words: Vec<String> = (0..N).map(|i| format!("item-{i:08}")).collect();
     let payload = [0xAB_u8; SLICE_LEN];
 
-    let mut g = c.benchmark_group("arena_vs_allocator");
+    let mut g = c.benchmark_group("criterion_arena_vs_allocator/arena_vs_allocator");
 
     g.bench_function("arena", |b| {
         let mut arena = Arena::new();

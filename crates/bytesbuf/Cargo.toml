@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -32,24 +32,28 @@ allowed_external_types = [
 all-features = true
 
 [features]
-default = []
+default = ["std"]
+# Enables the global memory pool, standard I/O adapters, and metrics. Disable for `#![no_std]`
+# environments; the crate still requires `alloc`.
+std = ["dep:nm", "dep:plurality", "thread_aware/std", "bytes?/std"]
 # Interoperability with the `bytes` crate.
 bytes-compat = ["dep:bytes"]
-test-util = []
+test-util = ["std"]
 
 [dependencies]
-bytes = { workspace = true, features = ["std"], optional = true }
-new_zealand = { workspace = true }
-nm = { workspace = true }
-plurality = { workspace = true }
+bytes = { workspace = true, optional = true }
+nm = { workspace = true, optional = true }
+plurality = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
-thread_aware = { workspace = true, features = ["derive"] }
+thread_aware = { workspace = true, default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 mutants = { workspace = true }
+new_zealand = { workspace = true }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
@@ -75,6 +79,7 @@ required-features = ["test-util"]
 [[bench]]
 name = "global_pool"
 harness = false
+required-features = ["std"]
 
 [[bench]]
 name = "view"
@@ -94,6 +99,7 @@ required-features = ["test-util"]
 [[bench]]
 name = "global_pool_cg"
 harness = false
+required-features = ["std"]
 
 [[example]]
 name = "bb_has_memory_forwarding"

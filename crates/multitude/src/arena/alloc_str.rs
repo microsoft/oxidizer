@@ -2,9 +2,10 @@
 // Licensed under the MIT License.
 //! `&str` allocation API on [`Arena`].
 //!
-//! `Box<str, A>` and `Arc<str, A>` share a single length-prefixed
-//! chunk layout (`[usize len][utf8 bytes]`, prefix unaligned — see
-//! [`super::alloc_prefixed`]); both are thin 8-byte smart pointers.
+//! `Box<str, A>`, `Rc<str, A>`, and `Arc<str, A>` use a length-prefixed
+//! payload (`[usize len][utf8 bytes]`, prefix unaligned — see
+//! [`super::alloc_prefixed`]) and have thin 8-byte handles on 64-bit targets.
+//! `Rc` and `Arc` additionally place a shared strong count before the length.
 
 use core::ptr::NonNull;
 

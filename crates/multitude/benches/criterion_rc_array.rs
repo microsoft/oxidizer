@@ -2,7 +2,8 @@
 // Licensed under the MIT License.
 
 //! Builds an `Rc<[Rc<[u8]>]>` of `PROPERTIES` binary blobs two ways and
-//! compares them: `std::rc::Rc` (global allocator) vs `multitude::Rc`
+//! compares them: `std::rc::Rc` (global allocator) vs `multitude::Rc`.
+//! Setup and result teardown are excluded, so every case measures build cost.
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![allow(clippy::missing_panics_doc, reason = "benchmark code")]
 #![allow(unused_results, reason = "benchmark code")]
@@ -12,7 +13,7 @@
 use std::hint::black_box;
 use std::rc::Rc as StdRc;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use multitude::{Arena, Rc as ArenaRc};
 
 // ---------------------------------------------------------------------------
@@ -58,44 +59,55 @@ fn global_properties(payload: &[u8]) -> Vec<StdRc<[u8]>> {
     (0..PROPERTIES).map(|_| StdRc::<[u8]>::from(payload)).collect()
 }
 
+fn warm_arena() -> Arena {
+    let arena = Arena::builder().with_capacity(128 * 1024).build();
+    let _ = arena.alloc(0_u64);
+    let _ = arena.alloc_rc(0_u64);
+    arena
+}
+
 // ---------------------------------------------------------------------------
-// Criterion timing + per-iteration allocation tracking
+// Criterion timing
 // ---------------------------------------------------------------------------
 
 fn bench_rc_array(c: &mut Criterion) {
     let payload = vec![0xABu8; PROPERTY_SIZE];
 
-    let mut group = c.benchmark_group("rc_array");
+    let mut group = c.benchmark_group("criterion_rc_array/rc_array");
 
     group.bench_function("global", |b| {
-        b.iter(|| {
-            black_box(build_global(black_box(&payload)));
-        });
+        b.iter_batched(|| (), |()| black_box(build_global(black_box(&payload))), BatchSize::SmallInput);
     });
 
-    let arena = Arena::new();
-    black_box(build_arena(&arena, &payload));
-
     group.bench_function("arena", |b| {
-        b.iter(|| {
-            black_box(build_arena(&arena, black_box(&payload)));
-        });
+        b.iter_batched(
+            warm_arena,
+            |arena| {
+                let result = black_box(build_arena(&arena, black_box(&payload)));
+                (result, arena)
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     let global_props = global_properties(&payload);
     group.bench_function("global_from_slice", |b| {
-        b.iter(|| {
-            black_box(build_global_from_slice(black_box(&global_props)));
-        });
+        b.iter_batched(
+            || (),
+            |()| black_box(build_global_from_slice(black_box(&global_props))),
+            BatchSize::SmallInput,
+        );
     });
 
-    let work_arena = Arena::new();
-    black_box(build_arena_from_slice(&work_arena, &global_props));
-
     group.bench_function("arena_from_slice", |b| {
-        b.iter(|| {
-            black_box(build_arena_from_slice(&work_arena, black_box(&global_props)));
-        });
+        b.iter_batched(
+            warm_arena,
+            |arena| {
+                let result = black_box(build_arena_from_slice(&arena, black_box(&global_props)));
+                (result, arena)
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();

@@ -24,7 +24,7 @@ use http::header;
 use http::{HeaderMap, HeaderValue};
 use serde::Serialize;
 
-use crate::context::append_headers;
+use crate::context::{append_headers, strip_uncontrolled_response_headers};
 use crate::handling::Status;
 use crate::stream::{Stream, StreamEncoding, encode_frames, encode_frames_response};
 use crate::transcode::ResponseBodyKind;
@@ -77,9 +77,8 @@ pub type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send
 /// # fn main() {
 /// # {
 /// use futures_util::stream;
-/// use rest_over_grpc::codegen_helpers::StreamEncoding;
 /// use rest_over_grpc::handling::Status;
-/// use rest_over_grpc::transcoding::StreamingResponse;
+/// use rest_over_grpc::transcoding::{StreamEncoding, StreamingResponse};
 /// use serde::Serialize;
 ///
 /// #[derive(Serialize)]
@@ -127,9 +126,8 @@ impl StreamingResponse {
     /// # fn main() {
     /// # {
     /// use futures_util::stream;
-    /// use rest_over_grpc::codegen_helpers::StreamEncoding;
     /// use rest_over_grpc::handling::Status;
-    /// use rest_over_grpc::transcoding::StreamingResponse;
+    /// use rest_over_grpc::transcoding::{StreamEncoding, StreamingResponse};
     /// use serde::Serialize;
     ///
     /// #[derive(Serialize)]
@@ -189,6 +187,7 @@ impl StreamingResponse {
     /// set by the time the handler returns its stream.
     pub fn merge_headers(&mut self, headers: HeaderMap) {
         append_headers(&mut self.headers, headers);
+        strip_uncontrolled_response_headers(&mut self.headers);
     }
 
     /// Consumes the response, returning its stream of encoded body frames.
@@ -276,6 +275,7 @@ impl std::error::Error for StreamingError {}
 /// values.
 #[cfg(any(feature = "serving", feature = "axum"))]
 pub(crate) fn apply_stream_headers(dst: &mut HeaderMap, content_type: HeaderValue, mut headers: HeaderMap) {
+    strip_uncontrolled_response_headers(&mut headers);
     headers.remove(header::CONTENT_TYPE);
     append_headers(dst, headers);
     let _ = dst.insert(header::CONTENT_TYPE, content_type);
@@ -309,7 +309,6 @@ mod tests {
         let mut custom = http::HeaderMap::new();
         custom.append(http::header::SET_COOKIE, http::HeaderValue::from_static("a=1"));
         custom.append(http::header::SET_COOKIE, http::HeaderValue::from_static("b=2"));
-        // A custom `content-type` must be dropped in favour of the negotiated one.
         let _ = custom.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/plain"));
 
         let mut dst = http::HeaderMap::new();
@@ -317,7 +316,6 @@ mod tests {
 
         assert_eq!(dst.get_all(http::header::CONTENT_TYPE).iter().count(), 1);
         assert_eq!(dst[http::header::CONTENT_TYPE], "application/json");
-        // Repeated custom values are preserved.
         assert_eq!(dst.get_all(http::header::SET_COOKIE).iter().count(), 2);
     }
 }

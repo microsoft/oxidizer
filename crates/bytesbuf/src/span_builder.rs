@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use core::mem::MaybeUninit;
+use core::num::NonZero;
+use core::ptr::NonNull;
 use core::slice;
-use std::mem::MaybeUninit;
-use std::num::NonZero;
-use std::ptr::NonNull;
 
 use crate::Span;
 use crate::mem::{BlockRef, BlockSize};

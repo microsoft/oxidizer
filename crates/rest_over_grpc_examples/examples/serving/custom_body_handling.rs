@@ -37,31 +37,21 @@ struct TooLarge;
 async fn handle(library: &Transcoder<InMemoryLibrary>, request: Request<Full<Bytes>>) -> Response<Vec<u8>> {
     let (parts, body) = request.into_parts();
 
-    // Reject the wrong content type up front (`415`), rather than letting it
-    // surface later as an opaque JSON parse error: the generated `transcode`
-    // decodes the body as JSON without checking `Content-Type`.
     let expects_body = matches!(parts.method, Method::POST | Method::PUT | Method::PATCH);
     if expects_body && !is_json(parts.headers.get(CONTENT_TYPE)) {
         return json(StatusCode::UNSUPPORTED_MEDIA_TYPE, br#"{"error":"expected application/json"}"#);
     }
 
-    // Read the body under a size cap, returning a custom `413` body. The
-    // built-in `RestService::with_max_body_bytes` cap returns a generic `413`;
-    // owning the read lets us shape the response.
     let bytes = match read_capped(body, MAX_BODY).await {
         Ok(bytes) => bytes,
         Err(TooLarge) => return json(StatusCode::PAYLOAD_TOO_LARGE, br#"{"error":"payload too large"}"#),
     };
 
-    // Hand the finished bytes and request headers to the generated transcoder —
-    // the neutral contract. Every route this example exercises is unary, so the
-    // response is always buffered.
     let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
     let TranscodeResponse::Unary(response) = library.transcode(parts.method.as_str(), target, parts.headers, &bytes).await else {
         return json(StatusCode::INTERNAL_SERVER_ERROR, br#"{"error":"unexpected streaming response"}"#);
     };
 
-    // Build our own wire response, adding a header the adapters can't attach.
     Response::builder()
         .status(response.status())
         .header(CONTENT_TYPE, response.content_type().clone())
@@ -102,7 +92,6 @@ fn json(status: StatusCode, body: &[u8]) -> Response<Vec<u8>> {
 async fn main() {
     let library = Transcoder::new(InMemoryLibrary);
 
-    // (label, method, target, content-type, body)
     let requests = [
         ("read", Method::GET, "/v1/shelves/history", None, Vec::new()),
         (

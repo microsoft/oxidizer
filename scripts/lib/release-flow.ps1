@@ -339,6 +339,8 @@ function Update-EntryForRequiredChangeType {
 #     Source                    = 'user'|'cascade'
 #     AutoUpgraded              = $true|$false   # user-source entry strengthened by cascade
 #     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
+#     IsProcMacroOnly           = $true|$false   # cargo metadata target classification
+#     RequiresManualSemverReview = $true|$false  # proc-macro API cannot be checked automatically
 #     CascadeReasons            = [List<{Target,Breaking}>]                  # one per (target → dep) edge
 #     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
@@ -361,26 +363,30 @@ function Update-EntryForRequiredChangeType {
 #          set PinHonoredAgainstCascade=$true); otherwise honour the pin and
 #          bump only the change-type tag.
 #        - or create a new cascade-source entry.
+#      Ordinary library dependents use their own cargo-semver-checks result,
+#      floored at patch. Proc-macro-only dependents use a provisional patch floor
+#      and are explicitly classified in the interactive review.
 #      Cascade reasons are recorded per (target → dep) edge with dedup by
 #      target name (re-encountering an edge for an already-strengthened target
 #      overwrites the prior reason in place).
 #
 # Note: cascade is one-level. The set of dependents reachable from a user
-# target is the transitive published dependents BFS; each dependent's
-# cascade-applied change type is derived from cargo-semver-checks analysing the
-# dependent's OWN current working-tree public API vs its previous version-bump
-# commit
-# (floored at 'patch' — it must re-release to pick up the new dependency
-# version even when its own API is unchanged). This replaces the former
-# allowed_external_types exposure heuristic.
+# target is the transitive published dependents BFS. For an ordinary library,
+# the dependent's cascade-applied change type is derived from cargo-semver-checks
+# analysing its OWN current working-tree public API vs its previous version-bump
+# commit, floored at patch because it must re-release to pick up the dependency
+# version. A proc-macro-only dependent starts at that mechanical patch floor and
+# is then classified by the user in the standard review dialog. This replaces
+# the former allowed_external_types exposure heuristic.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
         # Classifier scriptblock: (folder, cargoName) -> 'breaking'|'non-breaking'|
-        # 'patch'|'none'. Decides each crate's minimum change type from its real
-        # API diff (cargo-semver-checks) vs its previous version-bump commit. Production
-        # passes $script:DefaultSemverClassifier (which calls
+        # 'patch'|'none' for ordinary libraries. Decides each crate's minimum
+        # change type from its real API diff (cargo-semver-checks) vs its previous
+        # version-bump commit. Proc-macro-only packages bypass it and enter manual
+        # review. Production passes $script:DefaultSemverClassifier (which calls
         # Get-CrateRequiredChangeType); the default here is a no-op ('none') so
         # callers that only exercise version/pin/BFS math need not supply one.
         [Parameter(Mandatory = $false)][scriptblock]$GetRequiredChangeType = { param($folder, $cargoName) 'none' },
@@ -443,6 +449,8 @@ function Resolve-ReleaseSet {
             Source                   = 'user'
             AutoUpgraded             = $false
             PinHonoredAgainstCascade = $false
+            IsProcMacroOnly          = [bool]$pkg.IsProcMacroOnly
+            RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
             CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
             RawToken                 = $req.RawToken
         }
@@ -463,14 +471,21 @@ function Resolve-ReleaseSet {
         foreach ($depFolder in $reachable) {
             $depPkg  = $baselineByFolder[$depFolder]
 
-            # The dependent's change type is decided by cargo-semver-checks
-            # analysing ITS OWN current working-tree API (which already reflects
-            # the target's in-progress changes, including re-exported types) vs
-            # its previous version-bump commit — floored at 'patch' because it must be
-            # re-released to pick up the new dependency version even when its own
-            # public API is unchanged. This replaces the old
-            # allowed_external_types exposure heuristic.
-            $dependentChangeType = Get-StrongerChangeType 'patch' (& $GetRequiredChangeType $depPkg.Folder $depPkg.Name)
+            # Ordinary library dependents are classified from their own API diff
+            # and floored at patch because they must re-release to pick up the new
+            # dependency version. cargo-semver-checks deliberately has no
+            # proc-macro-only API surface, so those dependents keep the mechanical
+            # patch floor until the interactive manual-review queue asks the user
+            # to inspect their diff and choose the final change type.
+            if ($depPkg.IsProcMacroOnly) {
+                $dependentChangeType = 'patch'
+            } else {
+                $classifiedChangeType = & $GetRequiredChangeType $depPkg.Folder $depPkg.Name
+                if ($classifiedChangeType -eq 'manual') {
+                    throw "Internal error: '$($depPkg.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+                }
+                $dependentChangeType = Get-StrongerChangeType 'patch' $classifiedChangeType
+            }
 
             $depBreakingForReason = Test-IsBreakingChange -oldVersion $depPkg.Version -ChangeType $dependentChangeType
             $cascadeReason = [pscustomobject]@{
@@ -512,6 +527,8 @@ function Resolve-ReleaseSet {
                     Source                   = 'cascade'
                     AutoUpgraded             = $false
                     PinHonoredAgainstCascade = $false
+                    IsProcMacroOnly          = [bool]$depPkg.IsProcMacroOnly
+                    RequiresManualSemverReview = [bool]$depPkg.IsProcMacroOnly
                     CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
                     RawToken                 = $null
                 }
@@ -529,13 +546,161 @@ function Resolve-ReleaseSet {
     # when the real API diff demands a stronger change type.
     foreach ($folder in $userFolders) {
         $entry    = $resolved[$folder]
+        if ($entry.IsProcMacroOnly) { continue }
         $required = & $GetRequiredChangeType $entry.Folder $entry.Name
+        if ($required -eq 'manual') {
+            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+        }
         if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
         Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
             -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
     }
 
     return @($resolved.Values)
+}
+
+# Builds the mandatory manual-review queue for:
+#   * every proc-macro-only package already present in the release set, and
+#   * direct published consumers of a manually reviewed breaking entry.
+#
+# The second category advances one dependency edge at a time. A consumer is not
+# allowed to propagate the review farther until its own standard dialog has
+# completed and its final planned increment is breaking. Keeping or selecting a
+# non-breaking/patch level stops the review chain at that package. All transitive
+# published dependents are still present in the normal cascade release set and
+# retain their cargo-semver-checks classification.
+function Get-ManualSemverReviewFindings {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
+        [Parameter(Mandatory = $false)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$ReviewedManualSemver
+    )
+
+    $byFolder = @{}
+    foreach ($pkg in $WorkspaceBaseline) { $byFolder[$pkg.Folder] = $pkg }
+
+    if ($null -eq $ReviewedManualSemver) {
+        $ReviewedManualSemver = [System.Collections.Generic.HashSet[string]]::new()
+    }
+
+    $findingsByFolder = [ordered]@{}
+    foreach ($entry in @($ResolvedReleaseSet.Values | Sort-Object -Property Folder)) {
+        if (-not $entry.IsProcMacroOnly) { continue }
+        $pkg = $byFolder[$entry.Folder]
+        if ($null -eq $pkg) { continue }
+
+        $changedFileCount = 0
+        if ($null -ne $ModifiedSnapshot -and $ModifiedSnapshot.ContainsKey($entry.Folder)) {
+            $changedFileCount = $ModifiedSnapshot[$entry.Folder]
+        }
+
+        $findingsByFolder[$entry.Folder] = [pscustomobject]@{
+            Folder                     = $entry.Folder
+            PackageName                = $entry.Name
+            CurrentVersion             = $entry.CurrentVersion
+            InReleaseSet               = $true
+            ChangedFileCount           = $changedFileCount
+            DependencyChains           = @()
+            WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $entry.Folder
+            RequiresManualSemverReview = $true
+            ManualSemverReviewKind      = 'proc-macro'
+            ManualSemverReviewSources   = @()
+        }
+    }
+
+    foreach ($sourceFolder in @($ReviewedManualSemver | Sort-Object)) {
+        if (-not $ResolvedReleaseSet.ContainsKey($sourceFolder)) { continue }
+        $sourceEntry = $ResolvedReleaseSet[$sourceFolder]
+        # -Force can intentionally keep an explicit version pin below the
+        # required severity while upgrading only EffectiveChangeType for cascade
+        # bookkeeping. Manual review propagation follows the version that will
+        # actually be written, matching CI, not that stronger internal tag.
+        $plannedChangeType = Get-ChangeTypeFromVersions `
+            -oldVersion $sourceEntry.CurrentVersion `
+            -newVersion $sourceEntry.EffectiveTargetVersion
+        if (-not (Test-IsBreakingChange -oldVersion $sourceEntry.CurrentVersion -ChangeType $plannedChangeType)) {
+            continue
+        }
+
+        $sourcePkg = $byFolder[$sourceFolder]
+        if ($null -eq $sourcePkg) { continue }
+        $sourceCargoName = $sourcePkg.Name.Replace('-', '_')
+
+        $directDependents = Get-DirectPublishedDependentsFromBaseline `
+            -Baseline $WorkspaceBaseline `
+            -TargetCargoName $sourceCargoName
+
+        foreach ($dependentFolder in $directDependents) {
+            if (-not $ResolvedReleaseSet.ContainsKey($dependentFolder)) {
+                throw "Internal error: direct published dependent '$dependentFolder' of manually reviewed breaking package '$sourceFolder' is missing from the resolved release set."
+            }
+
+            if ($findingsByFolder.Contains($dependentFolder)) {
+                $existingSources = @($findingsByFolder[$dependentFolder].ManualSemverReviewSources)
+                $findingsByFolder[$dependentFolder].ManualSemverReviewSources = @(
+                    $existingSources + $sourceEntry.Name | Sort-Object -Unique
+                )
+                continue
+            }
+
+            $dependentEntry = $ResolvedReleaseSet[$dependentFolder]
+            $dependentPkg = $byFolder[$dependentFolder]
+            $changedFileCount = 0
+            if ($null -ne $ModifiedSnapshot -and $ModifiedSnapshot.ContainsKey($dependentFolder)) {
+                $changedFileCount = $ModifiedSnapshot[$dependentFolder]
+            }
+
+            $findingsByFolder[$dependentFolder] = [pscustomobject]@{
+                Folder                     = $dependentEntry.Folder
+                PackageName                = $dependentEntry.Name
+                CurrentVersion             = $dependentEntry.CurrentVersion
+                InReleaseSet               = $true
+                ChangedFileCount           = $changedFileCount
+                DependencyChains           = @()
+                WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $dependentFolder
+                RequiresManualSemverReview = $true
+                ManualSemverReviewKind      = 'proc-macro-dependent'
+                ManualSemverReviewSources   = @($sourceEntry.Name)
+            }
+        }
+    }
+
+    return @($findingsByFolder.Values)
+}
+
+# Persists completed manual-review provenance on final resolved entries so the
+# release-plan display records both proc-macro classification and every
+# downstream review performed because a direct dependency remained breaking.
+function Set-ManualSemverReviewAnnotations {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$ReviewedManualSemver,
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
+    )
+
+    $findings = Get-ManualSemverReviewFindings `
+        -ResolvedReleaseSet $ResolvedReleaseSet `
+        -WorkspaceBaseline $WorkspaceBaseline `
+        -ModifiedSnapshot $ModifiedSnapshot `
+        -ReviewedManualSemver $ReviewedManualSemver
+    $findingByFolder = @{}
+    foreach ($finding in $findings) { $findingByFolder[$finding.Folder] = $finding }
+
+    foreach ($entry in $ResolvedReleaseSet.Values) {
+        $completed = $ReviewedManualSemver.Contains($entry.Folder)
+        $kind = $null
+        $sources = @()
+        if ($completed -and $findingByFolder.ContainsKey($entry.Folder)) {
+            $kind = $findingByFolder[$entry.Folder].ManualSemverReviewKind
+            $sources = @($findingByFolder[$entry.Folder].ManualSemverReviewSources)
+        }
+
+        $entry | Add-Member -NotePropertyName ManualSemverReviewCompleted -NotePropertyValue $completed -Force
+        $entry | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue $kind -Force
+        $entry | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue $sources -Force
+    }
 }
 
 # Repo root for the default classifier, set by Invoke-ReleasePackagesMain before
@@ -1092,6 +1257,11 @@ function Format-PackageMenu {
     }
     $hasChanges = $changeCount -gt 0
 
+    $inReleaseSet = $false
+    if ($null -ne $Finding.PSObject.Properties['InReleaseSet']) {
+        $inReleaseSet = [bool]$Finding.InReleaseSet
+    }
+
     $headerLine = if ($hasChanges) {
         "Detected package with unreleased modifications: $folder$queueSuffix"
     } else {
@@ -1128,7 +1298,11 @@ function Format-PackageMenu {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
-    [void]$sb.AppendLine('  2. No material changes - release only if required by cascade logic')
+    if ($inReleaseSet) {
+        [void]$sb.AppendLine('  2. Keep the release level already in the plan')
+    } else {
+        [void]$sb.AppendLine('  2. No material changes - release only if another package requires it')
+    }
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     if (-not $hideNonBreaking) {
         [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
@@ -1463,7 +1637,9 @@ function Invoke-WorkspaceCheck {
 # state (a working list of parse-tokens, a $declined hashset of NON-release-set
 # folders the user said "no" to, and a $reviewedCascadeAsIs hashset of
 # release-set cascade-source folders the user explicitly said "this cascade
-# change type is fine, don't elevate"). On each loop:
+# change type is fine, don't elevate"). A separate $reviewedManualSemver set
+# records proc-macro-only packages whose standard decision dialog has completed.
+# On each loop:
 #
 #   1. Re-resolve the release set from the current $userTokens via
 #      Resolve-ReleaseSet (cheap — operates on the immutable workspace
@@ -1498,13 +1674,14 @@ function Invoke-WorkspaceCheck {
 #
 # Returns: hashtable (folder -> resolved entry) representing the final plan.
 #
-# Termination: each iteration must change state (adds to $userTokens via
-# accept, OR to $declined / $reviewedCascadeAsIs via ignore). Verified by a
-# state-signature comparison at the top of each iteration — if two consecutive
-# iterations produce the same signature we throw a "no progress" diagnostic
-# rather than infinite-loop. A soft runaway cap (10 * published-package count)
-# bounds total prompts as a defence-in-depth safety net; the real bound is
-# one prompt per published package (the first time it surfaces).
+# Termination: each iteration must change state (adds to or updates $userTokens
+# via accept, OR adds to $declined / $reviewedCascadeAsIs /
+# $reviewedManualSemver via ignore). Verified by a state-signature comparison at
+# the top of each iteration — if two consecutive iterations produce the same
+# signature we throw a "no progress" diagnostic rather than infinite-loop. A
+# soft runaway cap (10 * published-package count) bounds total prompts as a
+# defence-in-depth safety net; the real bound is one prompt per published
+# package (the first time it surfaces).
 function Invoke-PlanReview {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -1531,6 +1708,11 @@ function Invoke-PlanReview {
     # applied level, don't elevate". Entries are never removed: the decision
     # stands even if cascade strengthens the level on a later iteration.
     $reviewedCascadeAsIs = [System.Collections.Generic.HashSet[string]]::new()
+    # Proc-macro-only packages cannot be classified by cargo-semver-checks.
+    # Every such package that enters the plan is shown in the standard review
+    # dialog exactly once, including user-source entries and unchanged thin
+    # proc-macro crates pulled in by an implementation-crate release.
+    $reviewedManualSemver = [System.Collections.Generic.HashSet[string]]::new()
 
     # Runaway cap is a defence-in-depth safety net; the real termination
     # guarantee comes from the state-signature progress check below. Each
@@ -1551,10 +1733,11 @@ function Invoke-PlanReview {
     try {
         for ($iter = 0; $iter -lt $runawayCap; $iter++) {
             # State signature: every iteration must mutate at least one of
-            # {userTokens, declined, reviewedCascadeAsIs}. The current control
-            # flow guarantees this — accept appends to userTokens; ignore adds
-            # to declined or reviewedCascadeAsIs; the switch's default arm
-            # throws on any unrecognised action; an empty queue early-returns.
+            # {userTokens, declined, reviewedCascadeAsIs, reviewedManualSemver}.
+            # The current control flow guarantees this — accept appends to or
+            # updates userTokens; ignore adds to one of the review sets; the
+            # switch's default arm throws on any unrecognised action; an empty
+            # queue early-returns.
             # The signature check is therefore unreachable in normal
             # operation, but kept as defense-in-depth so a future change that
             # introduces a state-leak path (e.g. a new `continue`-without-
@@ -1563,7 +1746,8 @@ function Invoke-PlanReview {
             $tokenSig    = (@($userTokens.ToArray()) | ForEach-Object { $_.RawToken }) -join '|'
             $declinedSig = (@($declined) | Sort-Object) -join ','
             $reviewedSig = (@($reviewedCascadeAsIs) | Sort-Object) -join ','
-            $signature   = "tokens=[$tokenSig];declined=[$declinedSig];reviewed=[$reviewedSig]"
+            $manualSig   = (@($reviewedManualSemver) | Sort-Object) -join ','
+            $signature   = "tokens=[$tokenSig];declined=[$declinedSig];reviewed=[$reviewedSig];manual=[$manualSig]"
             if ($iter -gt 0 -and $signature -eq $previousSignature) {
                 throw "Plan review made no progress on iteration $iter (state signature unchanged). This indicates a logic bug; please report. Signature: $signature"
             }
@@ -1585,42 +1769,79 @@ function Invoke-PlanReview {
 
             # Handoff: a previously-declined or previously-reviewed-as-is folder
             # may now have a different cascade story (cascade pulled it into the
-            # release set, or strengthened its level). Decisions are final, so we
-            # do NOT re-prompt — the user's earlier "ignore" stands and the
-            # cascade-applied level is silently accepted. Show-ReleasePlan's
-            # output records the cascade reasons for transparency.
+            # release set, or strengthened its level). Ordinary decisions are
+            # final, but they cannot suppress a later mandatory proc-macro-chain
+            # review. Show-ReleasePlan records the cascade reasons.
 
             Write-Host ''
             Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
 
             if ($Mode -eq 'all-changed') {
-                $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot -IncludeAllModifiedAsRoots)
+                $modifiedFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot -IncludeAllModifiedAsRoots)
             } else {
-                $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot)
+                $modifiedFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot)
+            }
+
+            # Manual SemVer findings take precedence over ordinary
+            # modification/elevation findings for the same folder. The queue
+            # includes unchanged proc-macro release-set members and advances to
+            # direct published consumers one breaking reviewed edge at a time.
+            $findingsByFolder = [ordered]@{}
+            $manualFindings = @(Get-ManualSemverReviewFindings `
+                -ResolvedReleaseSet $resolvedHash `
+                -WorkspaceBaseline $WorkspaceBaseline `
+                -ModifiedSnapshot $ModifiedSnapshot `
+                -ReviewedManualSemver $reviewedManualSemver)
+            foreach ($finding in @($manualFindings) + @($modifiedFindings)) {
+                if (-not $findingsByFolder.Contains($finding.Folder)) {
+                    $findingsByFolder[$finding.Folder] = $finding
+                }
             }
 
             $queue = @(
-                $allFindings | Where-Object {
-                    -not $declined.Contains($_.Folder) -and
-                    -not $reviewedCascadeAsIs.Contains($_.Folder)
+                $findingsByFolder.Values | Where-Object {
+                    if ($_.RequiresManualSemverReview) {
+                        # A prior ordinary "skip" or "keep cascade level"
+                        # decision did not evaluate the opaque proc-macro
+                        # contract. Only a completed manual review may suppress
+                        # this finding. Choosing "No material changes" in the
+                        # manual dialog counts as a completed review.
+                        return -not $reviewedManualSemver.Contains($_.Folder)
+                    }
+                    return -not $declined.Contains($_.Folder) -and
+                        -not $reviewedCascadeAsIs.Contains($_.Folder)
                 }
             )
 
             if ($queue.Count -eq 0) {
                 Write-Host ''
                 Write-Host '✅ No further unreleased modifications detected; release plan finalised.' -ForegroundColor Green
+                Set-ManualSemverReviewAnnotations `
+                    -ResolvedReleaseSet $resolvedHash `
+                    -WorkspaceBaseline $WorkspaceBaseline `
+                    -ReviewedManualSemver $reviewedManualSemver `
+                    -ModifiedSnapshot $ModifiedSnapshot
                 return $resolvedHash
             }
 
             $next      = $queue[0]
             $remaining = $queue.Count - 1
             $decision  = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
+            $isManualSemverReview = [bool]$next.RequiresManualSemverReview
+            if ($isManualSemverReview) {
+                # Every answer completes the manual review. "No material
+                # changes" means no release now, but a later cascade may still
+                # add the package at the patch floor without asking again.
+                [void]$reviewedManualSemver.Add($next.Folder)
+            }
 
             if ($decision.Action -eq 'ignore') {
                 if ($next.InReleaseSet) {
-                    $cascadeLevel = $resolvedHash[$next.Folder].EffectiveChangeType
-                    Write-Host "  Keeping '$($next.Folder)' at its cascade-applied $cascadeLevel level; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
-                    [void]$reviewedCascadeAsIs.Add($next.Folder)
+                    $plannedLevel = $resolvedHash[$next.Folder].EffectiveChangeType
+                    Write-Host "  Keeping '$($next.Folder)' at its currently planned $plannedLevel release level." -ForegroundColor DarkGray
+                    if (-not $isManualSemverReview) {
+                        [void]$reviewedCascadeAsIs.Add($next.Folder)
+                    }
                 } else {
                     Write-Host "  Skipping '$($next.Folder)'; cascade may still pull it into the release plan on a later iteration." -ForegroundColor DarkGray
                     [void]$declined.Add($next.Folder)
@@ -1633,11 +1854,9 @@ function Invoke-PlanReview {
             # change-spec vocabulary ('breaking'/'nonbreaking'/'patch').
             #
             # For both new and elevation cases we craft the parsed-token object
-            # directly rather than going through Parse-ReleaseTokens. That's
-            # safe because Resolve-ReleaseSet's duplicate-folder check only
-            # fires against other user-source tokens — and the only re-surfaced
-            # findings are cascade-source entries (user-source members are never
-            # re-surfaced, per Get-UnreleasedModifiedDependencies's predicate).
+            # directly rather than going through Parse-ReleaseTokens. A finding
+            # can also re-surface a user-source entry; replace its provisional
+            # token below instead of adding a duplicate.
             $changeSpec = switch ($decision.Action) {
                 'breaking'     { 'breaking' }
                 'non-breaking' { 'nonbreaking' }
@@ -1645,12 +1864,35 @@ function Invoke-PlanReview {
                 default        { throw "Internal error: Get-PackageReleaseDecision returned unexpected action '$($decision.Action)'." }
             }
             $newToken = "$($next.Folder)@$changeSpec"
-            $userTokens.Add(([pscustomobject]@{
+            $newTokenEntry = [pscustomobject]@{
                 Name                   = $next.Folder
                 RequestedChangeType    = $decision.Action
                 RequestedTargetVersion = $null
                 RawToken               = $newToken
-            }))
+            }
+
+            $existingEntry = $resolvedHash[$next.Folder]
+            if ($null -ne $existingEntry -and $existingEntry.Source -eq 'user') {
+                # The package was already a user-source token (targeted mode).
+                # Replace that provisional decision instead of appending a
+                # duplicate token that Resolve-ReleaseSet would reject.
+                $folderNorm = $next.Folder.Replace('-', '_')
+                $cargoNorm  = $existingEntry.Name.Replace('-', '_')
+                $tokenIndex = -1
+                for ($i = 0; $i -lt $userTokens.Count; $i++) {
+                    $tokenNorm = $userTokens[$i].Name.Replace('-', '_')
+                    if ($tokenNorm -eq $folderNorm -or $tokenNorm -eq $cargoNorm) {
+                        $tokenIndex = $i
+                        break
+                    }
+                }
+                if ($tokenIndex -lt 0) {
+                    throw "Internal error: could not locate the user token for reviewed package '$($next.Folder)'."
+                }
+                $userTokens[$tokenIndex] = $newTokenEntry
+            } else {
+                $userTokens.Add($newTokenEntry)
+            }
         }
 
         Write-Warning "Plan review reached its runaway-cap of $runawayCap iterations; aborting further prompts. This is a defence-in-depth safety net — the state-signature check above should have caught any logic loop earlier; if you see this, please report."
@@ -1665,6 +1907,11 @@ function Invoke-PlanReview {
             $resolvedHash = @{}
             foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
         }
+        Set-ManualSemverReviewAnnotations `
+            -ResolvedReleaseSet $resolvedHash `
+            -WorkspaceBaseline $WorkspaceBaseline `
+            -ReviewedManualSemver $reviewedManualSemver `
+            -ModifiedSnapshot $ModifiedSnapshot
         return $resolvedHash
     } finally {
         foreach ($p in $script:TempPackageDiffPaths) {
@@ -1910,6 +2157,12 @@ function Show-ReleasePlan {
         }
         $color = if ($entry.PinHonoredAgainstCascade) { 'Yellow' } else { 'Green' }
         Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [$tag]" -ForegroundColor $color
+        if ($entry.IsProcMacroOnly) {
+            Write-Host '      SemVer classification: manual proc-macro review (cargo-semver-checks not run)' -ForegroundColor Yellow
+        } elseif ($entry.ManualSemverReviewCompleted) {
+            $sources = @($entry.ManualSemverReviewSources) -join ', '
+            Write-Host "      SemVer classification: cargo-semver-checks plus manual review of breaking proc-macro dependency chain ($sources)" -ForegroundColor Yellow
+        }
         if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
             $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
             $reasonLabel = if ($entry.PinHonoredAgainstCascade) { 'cascade required upgrade from' } else { 'strengthened by cascade from' }
@@ -1919,6 +2172,12 @@ function Show-ReleasePlan {
 
     foreach ($entry in $cascadeEntries) {
         Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [cascade ($($entry.EffectiveChangeType))]" -ForegroundColor DarkCyan
+        if ($entry.IsProcMacroOnly) {
+            Write-Host '      SemVer classification: manual proc-macro review (cargo-semver-checks not run)' -ForegroundColor Yellow
+        } elseif ($entry.ManualSemverReviewCompleted) {
+            $sources = @($entry.ManualSemverReviewSources) -join ', '
+            Write-Host "      SemVer classification: cargo-semver-checks plus manual review of breaking proc-macro dependency chain ($sources)" -ForegroundColor Yellow
+        }
         $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
         Write-Host "      cascaded from: $names" -ForegroundColor DarkGray
     }

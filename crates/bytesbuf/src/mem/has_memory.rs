@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use crate::mem::MemoryShared;
 

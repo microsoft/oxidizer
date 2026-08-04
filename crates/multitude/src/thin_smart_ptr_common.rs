@@ -5,10 +5,9 @@
 //! smart-pointer types ([`Arc`](crate::Arc), [`Rc`](crate::Rc), and
 //! [`Box`](crate::Box)).
 //!
-//! All three share an identical layout (`NonNull<u8>` thin pointer +
-//! `PhantomData<(*const T, A)>`), an identical metadata-recovery
-//! helper ([`as_fat_ptr`](crate::internal::thin_dst::as_fat)), and
-//! identical forwarding trait impls (`Deref`, `AsRef`, `Borrow`,
+//! All three share a payload pointer, conditional per-handle metadata, a common
+//! metadata-recovery helper ([`as_fat_ptr`](crate::internal::thin_dst::as_fat)),
+//! and identical forwarding trait impls (`Deref`, `AsRef`, `Borrow`,
 //! `Debug`, `Display`, ordering, hashing, `Pointer`, and `Unpin`).
 //! The macro below emits all of that for a given
 //! struct name; per-file blocks supply the items that legitimately
@@ -16,21 +15,22 @@
 //! accessors and pin conversion for `Box`, iterator forwarding for `Box`,
 //! etc.).
 
-/// Emit shared inherent methods + read-only trait impls for a thin
-/// smart pointer of layout `{ ptr: NonNull<u8>, _phantom }`.
+/// Emit shared inherent methods and read-only trait impls.
 macro_rules! impl_thin_smart_ptr_common {
     ($Ty:ident) => {
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> $Ty<T, A> {
-            /// Reconstructs the (possibly fat) `NonNull<T>` from the thin
-            /// storage by reading `T`'s metadata from the chunk prefix.
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            $Ty<T, A, M>
+        {
+            /// Reconstructs the (possibly fat) `NonNull<T>` from allocation-
+            /// resident and handle-resident metadata.
             ///
             /// Zero-cost for `T: Sized` (metadata is `()`, no memory access).
             #[inline]
             fn as_fat_ptr(&self) -> core::ptr::NonNull<T> {
-                // SAFETY: chunk allocator wrote `T::Metadata` at
-                // `self.ptr - size_of::<T::Metadata>()`; the chunk is
-                // kept alive by `self`'s ownership/refcount.
-                unsafe { $crate::internal::thin_dst::as_fat::<T>(self.ptr) }
+                // SAFETY: the allocation and this handle jointly retain the
+                // metadata for the live value, and the handle keeps its chunk
+                // alive.
+                unsafe { $crate::internal::thin_dst::as_fat::<T, M>(self.ptr, self.metadata) }
             }
 
             /// Returns a raw pointer to the value (fat if `T: ?Sized` is a DST).
@@ -51,7 +51,9 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::ops::Deref for $Ty<T, A> {
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::ops::Deref for $Ty<T, A, M>
+        {
             type Target = T;
             #[inline]
             fn deref(&self) -> &T {
@@ -62,21 +64,26 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> AsRef<T> for $Ty<T, A> {
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> AsRef<T>
+            for $Ty<T, A, M>
+        {
             #[inline]
             fn as_ref(&self) -> &T {
                 self
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::borrow::Borrow<T> for $Ty<T, A> {
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::borrow::Borrow<T> for $Ty<T, A, M>
+        {
             #[inline]
             fn borrow(&self) -> &T {
                 self
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::fmt::Debug for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::fmt::Debug for $Ty<T, A, M>
         where
             T: core::fmt::Debug,
         {
@@ -86,7 +93,8 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::fmt::Display for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::fmt::Display for $Ty<T, A, M>
         where
             T: core::fmt::Display,
         {
@@ -96,7 +104,8 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> PartialEq for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> PartialEq
+            for $Ty<T, A, M>
         where
             T: PartialEq,
         {
@@ -106,9 +115,15 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> Eq for $Ty<T, A> where T: Eq {}
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> Eq
+            for $Ty<T, A, M>
+        where
+            T: Eq,
+        {
+        }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> PartialOrd for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> PartialOrd
+            for $Ty<T, A, M>
         where
             T: PartialOrd,
         {
@@ -118,7 +133,8 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> Ord for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> Ord
+            for $Ty<T, A, M>
         where
             T: Ord,
         {
@@ -128,7 +144,8 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::hash::Hash for $Ty<T, A>
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::hash::Hash for $Ty<T, A, M>
         where
             T: core::hash::Hash,
         {
@@ -138,14 +155,19 @@ macro_rules! impl_thin_smart_ptr_common {
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> core::fmt::Pointer for $Ty<T, A> {
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>>
+            core::fmt::Pointer for $Ty<T, A, M>
+        {
             #[inline]
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 core::fmt::Pointer::fmt(&self.ptr.as_ptr(), f)
             }
         }
 
-        impl<T: ?Sized + ptr_meta::Pointee, A: allocator_api2::alloc::Allocator + Clone> Unpin for $Ty<T, A> {}
+        impl<T: ?Sized + $crate::SmartPointerPointee, A: allocator_api2::alloc::Allocator + Clone, M: $crate::HandleMetadata<T>> Unpin
+            for $Ty<T, A, M>
+        {
+        }
     };
 }
 

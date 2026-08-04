@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(not(test))]
+use alloc::boxed::Box;
+
 use thread_aware::ThreadAware;
 
 use crate::mem::{Memory, MemoryShared};
@@ -32,8 +35,7 @@ impl OpaqueMemory {
     ///
     /// The memory provider may provide more memory than requested.
     ///
-    /// The memory reservation request will always be fulfilled, obtaining more memory from the
-    /// operating system if necessary.
+    /// If this method returns, the buffer has at least `min_bytes` bytes of capacity.
     ///
     /// # Zero-sized reservations
     ///
@@ -42,7 +44,7 @@ impl OpaqueMemory {
     ///
     /// # Panics
     ///
-    /// May panic if the operating system runs out of memory.
+    /// The wrapped provider may panic or abort if the requested capacity cannot be obtained.
     ///
     /// [1]: crate::BytesBuf
     #[must_use]
@@ -67,7 +69,7 @@ impl Memory for OpaqueMemory {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{self, AtomicUsize};

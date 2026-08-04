@@ -1103,8 +1103,9 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// This is the UTF-16 analog of
     /// [`String::drain`](crate::strings::String::drain).
     ///
-    /// The drained range is removed immediately; the returned iterator yields
-    /// the removed characters (it is also double-ended).
+    /// The string is truncated to the start of the range immediately. The
+    /// surviving tail is shifted into place when the returned, double-ended
+    /// iterator is dropped; forgetting the iterator prevents that restoration.
     ///
     /// # Panics
     ///
@@ -1328,7 +1329,7 @@ impl<A: Allocator + Clone> PartialEq for Utf16String<'_, A> {
     }
 }
 
-impl_arena_string_common!(Utf16String, u16);
+impl_arena_string_common!(Utf16String, u16, "UTF-16 code units (`u16` elements)");
 
 impl<A: Allocator + Clone> Ord for Utf16String<'_, A> {
     fn cmp(&self, other: &Self) -> Ordering {

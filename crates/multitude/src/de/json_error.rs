@@ -18,9 +18,9 @@ enum JsonErrorKind {
 /// rejection from malformed or incompatible JSON. The underlying
 /// [`serde_json::Error`] remains available through
 /// [`as_json_error`](Self::as_json_error) and [`Error::source`].
-/// [`Display`](fmt::Display) reports only the high-level classification so
-/// error reporters can render the source chain and backtrace without
-/// duplicating them.
+/// [`Display`](fmt::Display) reports the classification, captured backtrace
+/// when `std` is enabled, and underlying JSON error. Limit violations also
+/// name the resource and configured limit.
 ///
 /// ```
 /// use multitude::Arena;
@@ -95,7 +95,7 @@ impl From<serde_json::Error> for JsonError {
 impl fmt::Display for JsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
-            JsonErrorKind::Json => f.write_str("JSON deserialization failed"),
+            JsonErrorKind::Json => f.write_str("JSON deserialization failed")?,
             JsonErrorKind::LimitExceeded(details) => {
                 let resource = match details.resource() {
                     DeserializationResource::Depth => "nesting depth",
@@ -106,9 +106,12 @@ impl fmt::Display for JsonError {
                 };
                 f.write_str("JSON deserialization exceeded the ")?;
                 f.write_str(resource)?;
-                write!(f, " limit of {}", details.limit())
+                write!(f, " limit of {}", details.limit())?;
             }
         }
+        #[cfg(feature = "std")]
+        write!(f, "\n\nBacktrace:\n{}", self.backtrace)?;
+        write!(f, "\n\nCaused by:\n{}", self.source)
     }
 }
 

@@ -52,6 +52,11 @@ unsafe impl<T: ?Sized + Send + Sync, A: Allocator + Send + Sync> Send for Arc<T,
 // SAFETY: as above.
 unsafe impl<T: ?Sized + Send + Sync, A: Allocator + Send + Sync> Sync for Arc<T, A> {}
 
+// Both the pointee and allocator may be observed through other owners after an
+// unwind, so shared-reference unwind safety is required for both traits.
+impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Arc<T, A> {}
+impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::UnwindSafe for Arc<T, A> {}
+
 impl<T, A: Allocator> Arc<T, A> {
     #[inline]
     pub(crate) fn from_slot(slot: NonNull<SlotCell<T>>) -> Self {

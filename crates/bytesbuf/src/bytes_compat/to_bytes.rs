@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use bytes::{Bytes, BytesMut};
+#[cfg(feature = "std")]
 use nm::Event;
 
 use crate::BytesView;
@@ -12,6 +13,8 @@ impl BytesView {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// # let memory = bytesbuf::mem::GlobalPool::new();
     /// use bytes::Buf;
     /// use bytesbuf::BytesView;
@@ -24,6 +27,8 @@ impl BytesView {
     /// assert_eq!(bytes.get_u16(), 0x1234);
     /// assert_eq!(bytes.get_u16(), 0x5678);
     /// assert!(!bytes.has_remaining());
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Performance
@@ -49,11 +54,13 @@ impl BytesView {
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn to_bytes(&self) -> Bytes {
         if self.spans_reversed.is_empty() {
+            #[cfg(feature = "std")]
             TO_BYTES_SHARED.with(|x| x.observe(0));
 
             Bytes::new()
         } else if self.spans_reversed.len() == 1 {
             // We are a single-span view, which can always be zero-copy represented.
+            #[cfg(feature = "std")]
             TO_BYTES_SHARED.with(|x| x.observe(self.len()));
 
             Bytes::from_owner(self.spans_reversed.first().expect("we verified there is one span").clone())
@@ -67,6 +74,7 @@ impl BytesView {
 
             debug_assert_eq!(self.len(), bytes.len());
 
+            #[cfg(feature = "std")]
             TO_BYTES_COPIED.with(|x| x.observe(self.len()));
 
             bytes.freeze()
@@ -80,7 +88,8 @@ impl From<BytesView> for Bytes {
     }
 }
 
-thread_local! {
+#[cfg(feature = "std")]
+std::thread_local! {
     static TO_BYTES_SHARED: Event = Event::builder()
         .name("bytesbuf_view_to_bytes_shared")
         .build();

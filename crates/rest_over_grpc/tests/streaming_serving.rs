@@ -11,10 +11,9 @@
 
 use futures_util::stream;
 use http_body_util::{BodyExt as _, Full};
-use rest_over_grpc::codegen_helpers::StreamEncoding;
 use rest_over_grpc::handling::Status;
 use rest_over_grpc::serving::{RestService, serve_http_fn};
-use rest_over_grpc::transcoding::{HttpResponse, StreamingResponse, TranscodeResponse};
+use rest_over_grpc::transcoding::{HttpResponse, StreamEncoding, StreamingResponse, TranscodeResponse};
 use serde::Serialize;
 use tower_service::Service as _;
 
@@ -82,7 +81,6 @@ async fn serve_http_fn_applies_response_headers_and_content_type() {
     .await;
 
     assert_eq!(response.headers()["x-trace"], "abc");
-    // `Content-Type` stays authoritative from the encoding.
     assert_eq!(response.headers()[http::header::CONTENT_TYPE], "application/json");
     let body = response.into_body().collect().await.expect("body collects").to_bytes();
     assert_eq!(body.as_ref(), b"[{\"n\":7}]");
@@ -109,8 +107,7 @@ async fn serve_http_fn_terminates_body_on_mid_stream_error() {
     })
     .await;
 
-    // The status line is already `200` before the error is observed, so the
-    // failure can only surface as a truncated (error-terminated) body.
+    // The committed status cannot reflect a later stream error.
     assert_eq!(response.status(), http::StatusCode::OK);
     let collected = response.into_body().collect().await;
     assert!(collected.is_err(), "a mid-stream error terminates the body");
@@ -141,8 +138,6 @@ async fn rest_service_serves_frames_via_layered() {
 async fn serve_http_wires_a_streaming_transcode_impl() {
     use rest_over_grpc::serving::serve_http;
 
-    // The bare `serve_http` free function (not the `_fn` closure form and not the
-    // service wrapper) delegates to the uncapped read path.
     let response = serve_http(request("application/json"), &TickStream).await;
     let body = response.into_body().collect().await.expect("body collects").to_bytes();
     assert_eq!(body.as_ref(), b"[{\"n\":9}]");

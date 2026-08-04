@@ -30,6 +30,7 @@ pub struct Binding {
     pattern: String,
     body: RequestBody,
     response_body: ResponseBody,
+    response_body_default: Option<String>,
 }
 
 impl Binding {
@@ -48,6 +49,7 @@ impl Binding {
             pattern: template.to_string(),
             body: RequestBody::None,
             response_body: ResponseBody::Whole,
+            response_body_default: None,
         }
     }
 
@@ -65,6 +67,20 @@ impl Binding {
         self
     }
 
+    /// Records the proto3-JSON literal to emit when the selected `response_body`
+    /// field holds its default value (computed from the response descriptor).
+    #[must_use]
+    pub(crate) fn with_response_body_default(mut self, default: Option<String>) -> Self {
+        self.response_body_default = default;
+        self
+    }
+
+    /// The proto3-JSON default literal for this binding's `response_body` field,
+    /// if one was recorded.
+    pub(crate) fn response_body_default(&self) -> Option<&str> {
+        self.response_body_default.as_deref()
+    }
+
     /// The HTTP method this binding matches.
     #[must_use]
     pub fn method(&self) -> &HttpMethod {
@@ -75,9 +91,7 @@ impl Binding {
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn template(&self) -> PathTemplate<'_> {
-        // PathTemplate borrows its input, so the owned pattern is parsed on
-        // access. The affix grammar is deliberately used here as a superset of
-        // the constructor's grammar so rendered affixes recover as Segment::Affix.
+        // Parse with affix support so rendered affixes round-trip.
         PathTemplate::parse(&self.pattern, Grammar::default().with_segment_affixes())
             .expect("pattern was validated when the Binding was created")
     }

@@ -78,7 +78,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 64 KiB.
     /// Use [`Self::try_alloc_slice_copy`] for a fallible variant.
     ///
     /// # Example
@@ -99,7 +99,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
-    /// is at least 32 KiB.
+    /// is at least 64 KiB.
     ///
     /// # Example
     ///
@@ -122,7 +122,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 64 KiB.
     /// Use [`Self::try_alloc_slice_fill_with`] for a fallible variant.
     ///
     /// If `f` panics, already-initialized elements are dropped (drop guard) and the
@@ -146,7 +146,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
-    /// is at least 32 KiB.
+    /// is at least 64 KiB.
     ///
     /// # Panics
     ///
@@ -172,7 +172,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 64 KiB.
     /// Use [`Self::try_alloc_slice_clone`] for a fallible variant.
     ///
     /// May panic if `T::clone` panics; already-cloned elements are dropped before the
@@ -196,7 +196,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
-    /// is at least 32 KiB.
+    /// is at least 64 KiB.
     ///
     /// # Panics
     ///
@@ -224,7 +224,7 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 64 KiB.
     /// Use [`Self::try_alloc_slice_fill_iter`] for a fallible variant.
     ///
     /// May also panic if the iterator yields fewer elements than its
@@ -252,7 +252,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
-    /// is at least 32 KiB.
+    /// is at least 64 KiB.
     ///
     /// # Panics
     ///

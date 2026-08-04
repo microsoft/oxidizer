@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::ops::{Bound, Deref, RangeBounds};
-use std::ptr::NonNull;
-use std::{fmt, slice};
+use alloc::format;
+use core::ops::{Bound, Deref, RangeBounds};
+use core::ptr::NonNull;
+use core::{fmt, slice};
 
 use crate::mem::{BlockRef, BlockSize};
 

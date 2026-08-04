@@ -56,8 +56,6 @@ struct DirectLibrary;
 
 impl pb::Library for DirectLibrary {
     async fn get_shelf(&self, request: GetShelfRequest, cx: &mut Context) -> Result<Shelf, Status> {
-        // A miss returns `NOT_FOUND` (→ HTTP 404) carrying a structured detail, so
-        // the client gets a machine-readable error, not just a status line.
         if request.shelf == "missing" {
             return Err(Status::not_found("no such shelf").with_detail(serde_json::json!({
                 "@type": "type.googleapis.com/google.rpc.ResourceInfo",
@@ -66,9 +64,6 @@ impl pb::Library for DirectLibrary {
             })));
         }
 
-        // Echo a caller-supplied trace id back on the response, and set a cache
-        // validator — request-side metadata in, response-side metadata out. The
-        // transcoder folds these into the HTTP response headers.
         if let Some(trace) = cx.request_headers().get("x-trace-id").cloned() {
             _ = cx.response_headers_mut().insert(HeaderName::from_static("x-trace-id"), trace);
         }
@@ -81,10 +76,8 @@ impl pb::Library for DirectLibrary {
     }
 
     async fn create_shelf(&self, request: CreateShelfRequest, cx: &mut Context) -> Result<Shelf, Status> {
-        // The `{shelf}` request field is mapped from the JSON body (`body: "shelf"`).
         let mut created = request.shelf.ok_or_else(|| Status::invalid_argument("shelf is required"))?;
         "shelves/created".clone_into(&mut created.name);
-        // Point the client at the freshly created resource.
         _ = cx.insert_response_header(HeaderName::from_static("location"), HeaderValue::from_static("/v1/shelves/created"));
         Ok(created)
     }
@@ -96,8 +89,6 @@ impl pb::Library for DirectLibrary {
     }
 
     async fn list_shelves_by_genre(&self, request: ListShelvesByGenreRequest, _cx: &mut Context) -> Result<ListShelvesResponse, Status> {
-        // The `{genre}` enum path variable arrives as its `i32` value, decoded from
-        // either the value name (`SCIENCE`) or its number (`2`).
         let theme = match request.genre() {
             Genre::History => "history",
             Genre::Science => "science",
@@ -107,8 +98,6 @@ impl pb::Library for DirectLibrary {
     }
 
     async fn stream_shelves(&self, request: ListShelvesRequest, _cx: &mut Context) -> Result<ResponseStream<Shelf>, Status> {
-        // A server-streaming handler returns a `'static` stream of `Result<Reply,
-        // Status>`; the transcoder frames each item onto the wire as it is yielded.
         let shelves: Vec<Result<Shelf, Status>> = catalog(&request.filter).into_iter().map(Ok).collect();
         Ok(Box::pin(futures::stream::iter(shelves)))
     }
@@ -129,8 +118,6 @@ fn catalog(filter: &str) -> Vec<Shelf> {
 fn main() {
     let library = Transcoder::new(DirectLibrary);
 
-    // A unary read carrying a trace id: the response echoes it back and adds an
-    // `ETag`, both set by the handler through `Context`.
     let mut headers = HeaderMap::new();
     _ = headers.insert("x-trace-id", HeaderValue::from_static("trace-42"));
     report_unary(
@@ -138,19 +125,16 @@ fn main() {
         block_on(library.transcode("GET", "/v1/shelves/history", headers, b"")),
     );
 
-    // A miss: `NOT_FOUND` with a structured `details` entry.
     report_unary(
         "GET /v1/shelves/missing",
         block_on(library.transcode("GET", "/v1/shelves/missing", HeaderMap::new(), b"")),
     );
 
-    // A create: the handler sets a `Location` header for the new resource.
     report_unary(
         "POST /v1/shelves",
         block_on(library.transcode("POST", "/v1/shelves", HeaderMap::new(), br#"{"theme":"mystery"}"#)),
     );
 
-    // A server-streaming read: the handler's stream reaches the wire frame by frame.
     report_streaming(
         "GET /v1/shelves:stream",
         block_on(library.transcode("GET", "/v1/shelves:stream", HeaderMap::new(), b"")),

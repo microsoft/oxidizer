@@ -4,7 +4,7 @@
 [package]
 name = "fetch_hyper"
 description = "Hyper-based HTTP transport utilities for fetch."
-version = "0.4.6"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["oxidizer", "hyper", "fetch", "http", "tls"]
 categories = ["network-programming"]
@@ -58,7 +58,7 @@ native-tls = [
 [dependencies]
 # internal
 anyspawn = { workspace = true }
-bytesbuf = { workspace = true }
+bytesbuf = { workspace = true, features = ["std"] }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
 http_extensions = { workspace = true }

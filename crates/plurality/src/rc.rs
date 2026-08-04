@@ -45,6 +45,11 @@ pub struct Rc<T: ?Sized, A: Allocator = Global> {
     _not_send_sync: PhantomData<alloc::rc::Rc<()>>,
 }
 
+// Both the pointee and allocator may be observed through other owners after an
+// unwind, so shared-reference unwind safety is required for both traits.
+impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for Rc<T, A> {}
+impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwindSafe> core::panic::UnwindSafe for Rc<T, A> {}
+
 // The `alloc::rc::Rc` marker makes `Rc` unconditionally `!Send + !Sync`, which
 // permits non-atomic refcount access while occupied. The same field is atomic
 // storage because free slots use it as a cross-thread free-list link.

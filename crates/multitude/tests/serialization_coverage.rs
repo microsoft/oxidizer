@@ -63,6 +63,27 @@ impl<'de> Deserializer<'de> for ByteBufDeserializer {
     }
 }
 
+struct LateFailingStrDeserializer;
+
+impl<'de> Deserializer<'de> for LateFailingStrDeserializer {
+    type Error = ValueError;
+
+    fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+        Err(serde::de::Error::custom("late string failure"))
+    }
+
+    fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        let _ = visitor.visit_str::<ValueError>("replacement")?;
+        Err(serde::de::Error::custom("late string failure"))
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map struct
+        enum identifier ignored_any
+    }
+}
+
 #[test]
 fn primitive_and_option_adapters_cover_all_scalar_families() {
     let arena = Arena::new();
@@ -269,6 +290,19 @@ fn reusable_deserialization_covers_callbacks_hints_errors_and_allocation_failure
             .deserialize_reusing(SeqDeserializer::<_, ValueError>::new([1_u64].into_iter()))
             .is_err()
     );
+}
+
+#[test]
+fn reusable_string_is_empty_after_deserializer_fails_after_visiting_value() {
+    let arena = Arena::new();
+    let mut text = arena.alloc_string_with_capacity(32);
+    text.push_str("existing allocation");
+    let pointer = text.as_ptr();
+
+    let error = text.deserialize_reusing(LateFailingStrDeserializer).unwrap_err();
+    assert_eq!(error.to_string(), "late string failure");
+    assert!(text.is_empty());
+    assert_eq!(text.as_ptr(), pointer);
 }
 
 #[test]

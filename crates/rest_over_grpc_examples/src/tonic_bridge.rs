@@ -32,9 +32,7 @@ pub mod library {
     include!(concat!(env!("OUT_DIR"), "/tonic_bridge/library.rest.rs"));
 }
 
-// The generated top-level `Transcoder` refers to the service by its proto
-// package path (`library::Library`), so it is `include!`d at the enclosing scope
-// where `library` is a sibling module.
+// Generated paths expect the proto package as a sibling module.
 #[allow(
     clippy::all,
     clippy::pedantic,
@@ -70,8 +68,6 @@ pub struct LibraryService;
 impl library_server::Library for LibraryService {
     async fn get_shelf(&self, request: tonic::Request<GetShelfRequest>) -> Result<tonic::Response<Shelf>, tonic::Status> {
         let request = request.into_inner();
-        // A failable handler so examples can contrast a handler-returned status
-        // with a routing miss.
         if request.shelf == "missing" {
             return Err(tonic::Status::not_found("no such shelf"));
         }
@@ -102,8 +98,6 @@ impl library_server::Library for LibraryService {
         &self,
         request: tonic::Request<ListShelvesByGenreRequest>,
     ) -> Result<tonic::Response<ListShelvesResponse>, tonic::Status> {
-        // The enum path variable arrives as its `i32` value, decoded from either
-        // the value name (`SCIENCE`) or its number (`2`).
         let theme = match request.into_inner().genre() {
             Genre::History => "history",
             Genre::Science => "science",

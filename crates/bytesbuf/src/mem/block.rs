@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::mem::MaybeUninit;
-use std::num::NonZero;
-use std::ptr::NonNull;
+use core::mem::MaybeUninit;
+use core::num::NonZero;
+use core::ptr::NonNull;
 
 use crate::SpanBuilder;
 use crate::mem::BlockRef;

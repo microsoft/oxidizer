@@ -11,10 +11,10 @@ use crate::arena::alloc_value::acquire_chunk_ref;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
 
-/// Maximum `layout.align()` accepted by `Allocator::allocate`: the
-/// returned pointer must lie strictly inside the first `CHUNK_ALIGN`
-/// bytes of its chunk so the header-recovery mask used by
-/// `deallocate` can recover the chunk pointer.
+/// Exclusive upper bound on `layout.align()` accepted by
+/// `Allocator::allocate`. Alignments at or above this value are rejected: the
+/// returned pointer must lie strictly inside the first `CHUNK_ALIGN` bytes of
+/// its chunk so the header-recovery mask can recover the chunk pointer.
 const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 /// `&Arena<A>` is the allocator handle: cheap to copy and backed by
@@ -88,8 +88,9 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
 
     unsafe fn grow(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         // The most recent allocation in the current chunk can grow by simply
-        // advancing the bump cursor. Keep the same alignment requirement so
-        // the original pointer is guaranteed to satisfy `new_layout`.
+        // advancing the bump cursor. A stricter new alignment could invalidate
+        // the existing pointer; a looser one is skipped conservatively to keep
+        // this fast path simple.
         if new_layout.align() == old_layout.align()
             && self.try_grow_local_in_place(ptr.as_ptr() as usize, old_layout.size(), new_layout.size())
         {

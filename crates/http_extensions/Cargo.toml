@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.7.0"
+version = "0.8.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -64,7 +64,7 @@ test-util = ["tick/test-util"]
 
 [dependencies]
 bytes = { workspace = true }
-bytesbuf = { workspace = true, features = ["bytes-compat"] }
+bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -76,11 +76,12 @@ recoverable = { workspace = true }
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
-thread_aware = { workspace = true, features = ["derive"] }
+thread_aware = { workspace = true, features = ["derive", "std"] }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }

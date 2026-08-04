@@ -3,8 +3,10 @@
 
 //! Length-prefixed allocation for thin smart pointers.
 //!
-//! Layout: `[unaligned usize length][T payload]`, with
-//! `align_of::<T>() <= align_of::<usize>()`.
+//! `Box` allocations use `[unaligned usize length][T payload]`. `Arc` and `Rc`
+//! place their shared strong count before that:
+//! `[strong count][padding][unaligned usize length][T payload]`. All variants
+//! require `align_of::<T>() <= align_of::<usize>()`.
 
 use core::mem;
 use core::ptr::{self, NonNull};
@@ -194,7 +196,7 @@ impl<A: Allocator + Clone> Arena<A> {
 /// Worst-case byte budget for a strong-prefixed smart-pointer slice/prefixed
 /// payload of `len` elements, parameterized by the strong-count policy `S`
 /// ([`AtomicStrong`](thin_dst::AtomicStrong) for [`Arc`](crate::Arc),
-/// [`LocalStrong`](thin_dst::LocalStrong) for [`Rc`](crate::Rc)): per-handle
+/// [`LocalStrong`](thin_dst::LocalStrong) for [`Rc`](crate::Rc)): shared
 /// strong count + slice-length prefix + payload + front alignment slack
 /// (`S::block_align`). Shared by the `Arc`/`Rc` `[T]`, `str`, and `Utf16Str`
 /// allocation paths (and the growable-buffer freeze prefix, which budgets for

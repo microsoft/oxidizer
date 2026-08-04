@@ -10,6 +10,7 @@
 )]
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http_extensions::{HttpBodyBuilder, HttpResponseBuilder};
 use serde::{Deserialize, Serialize};
@@ -24,17 +25,19 @@ fn bodies_benchmarks(c: &mut Criterion) {
 
     let operation = session.operation("empty_body");
     group.bench_function("empty_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            let _response = HttpResponseBuilder::new(&body_builder).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).build().unwrap())
         });
     });
 
     let operation = session.operation("text_body");
     group.bench_function("text_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            let _response = HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(iters, || {
+                HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap()
+            })
         });
     });
 
@@ -45,9 +48,9 @@ fn bodies_benchmarks(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_owned");
     group.bench_function("json_body_owned", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            let _response = HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())
         });
     });
 
@@ -58,9 +61,9 @@ fn bodies_benchmarks(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_borrowed");
     group.bench_function("json_body_borrowed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            let _response = HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(iters, || HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())
         });
     });
 

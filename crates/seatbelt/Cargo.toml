@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.6.0"
+version = "0.6.1"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -66,13 +66,14 @@ layered = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"], optional = true }
-thread_aware = { workspace = true }
+thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 ctor = { workspace = true }
 fastrand = { workspace = true }
