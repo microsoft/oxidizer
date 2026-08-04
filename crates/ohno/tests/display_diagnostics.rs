@@ -16,8 +16,7 @@ fn display_diagnostics() {
     t.compile_fail("tests/ui/display_self_prefixed_argument.rs");
 
     // An unknown field is reported by the macro, listing the fields the user declared.
-    t.compile_fail("tests/ui/display_unknown_named_placeholder.rs");
-    t.compile_fail("tests/ui/display_unknown_positional_root.rs");
+    t.compile_fail("tests/ui/display_unknown_field.rs");
 
     // A root that cannot legally follow `self.` is reported by the macro, rather than expanding
     // to code that does not parse.

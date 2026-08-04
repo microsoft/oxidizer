@@ -1,5 +1,0 @@
-error: unknown field `pth` in `#[display(...)]`, available fields: `path`, `code`
-  --> tests/ui/display_unknown_positional_root.rs:10:27
-   |
-10 | #[display("bad path: {}", pth.display())]
-   |                           ^^^

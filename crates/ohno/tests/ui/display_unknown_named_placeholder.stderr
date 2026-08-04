@@ -1,5 +1,0 @@
-error: unknown field `pth` in `#[display(...)]`, available fields: `path`, `code`
-  --> tests/ui/display_unknown_named_placeholder.rs:10:11
-   |
-10 | #[display("bad path: {pth}")]
-   |           ^^^^^^^^^^^^^^^^^
