@@ -10,6 +10,7 @@ use crate::derive_error::field_detection::is_generated_error_field;
 use crate::utils::bail;
 
 const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix";
+const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
 
 /// Parse display template to support field references like `{field_name}`
 /// or format!-style with separate arguments
@@ -81,21 +82,49 @@ fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc
 }
 
 /// Validate the field access a positional argument is rooted in
+///
+/// The argument is expanded as `&self.#expr`, so its root must be something that can legally
+/// follow a dot: a field, a method call on `self`, or a tuple index. Any other root is rejected
+/// here, because it would otherwise reach `rustc` as a parse error against generated code the
+/// user cannot see.
 fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
     match root_of_expr(expr) {
         // `self.path` would expand to `&self.self.path`
         Expr::Path(path) if path.path.is_ident("self") => bail!(path.span(), SELF_SCOPED_ARGS),
+        // A field, or the receiver of a method call on one
         Expr::Path(path) => match path.path.get_ident() {
             Some(ident) => validate_field_exists(&ident.to_string(), input, ident.span()),
-            None => Ok(()),
+            None => bail!(path.span(), UNSUPPORTED_ROOT),
         },
-        // Tuple field access such as `0` in `#[display("{}", 0)]`
-        Expr::Lit(literal) => match &literal.lit {
-            syn::Lit::Int(index) => validate_field_exists(index.base10_digits(), input, index.span()),
-            _ => Ok(()),
+        // A method called on `self`, such as `describe()`
+        Expr::Call(call) => validate_call_root(call),
+        // Tuple field access such as `0`, or nested access such as `0.1`
+        Expr::Lit(literal) => validate_literal_root(literal, input),
+        other => bail!(other.span(), UNSUPPORTED_ROOT),
+    }
+}
+
+/// Validate the callee of a call the argument is rooted in
+fn validate_call_root(call: &syn::ExprCall) -> Result<()> {
+    // `describe()` expands to `&self.describe()`, but a qualified callee such as
+    // `Self::describe()` cannot follow the dot
+    match &*call.func {
+        Expr::Path(path) if path.path.get_ident().is_some() => Ok(()),
+        other => bail!(other.span(), UNSUPPORTED_ROOT),
+    }
+}
+
+/// Validate the tuple index a literal-rooted argument refers to
+fn validate_literal_root(literal: &syn::ExprLit, input: &DeriveInput) -> Result<()> {
+    match &literal.lit {
+        syn::Lit::Int(index) => validate_field_exists(index.base10_digits(), input, index.span()),
+        // Nested tuple access such as `0.1` lexes as a float; only its leading component names a
+        // field of `self`, the rest reaches into the field's own type
+        syn::Lit::Float(index) => match index.base10_digits().split_once('.') {
+            Some((outer, _)) => validate_field_exists(outer, input, index.span()),
+            None => bail!(index.span(), UNSUPPORTED_ROOT),
         },
-        // Anything else is not a field access
-        _ => Ok(()),
+        other => bail!(other.span(), UNSUPPORTED_ROOT),
     }
 }
 
@@ -493,32 +522,47 @@ mod tests {
     }
 
     #[test]
-    fn test_positional_argument_that_is_not_a_field_access_is_left_alone() {
+    fn test_positional_argument_rooted_in_a_method_call_on_self_is_left_alone() {
         let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
 
-        // A method call on `self` is not a field access, so it is not validated here
+        // A method call on `self` is not a field access, so there is no field to validate
         let result = parse("bad path: {}", vec![parse_quote! { describe() }], &input);
         let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.describe())) };
         assert_eq!(result.to_string(), expected.to_string());
     }
 
     #[test]
-    fn test_positional_argument_rooted_in_a_qualified_path_is_left_alone() {
-        // A multi-segment path names an associated item rather than a field of `self`
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+    fn test_nested_tuple_index_is_validated_against_its_leading_component() {
+        // `0.1` lexes as a float, but names field 0 of `self` and field 1 of its type
+        let input: DeriveInput = parse_quote! { struct TestError(Inner, #[error(generated)] OhnoCore); };
 
-        let result = parse("bad path: {}", vec![parse_quote! { Self::LABEL.len() }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.Self::LABEL.len())) };
+        let result = parse("bad: {}", vec![parse_quote! { 0.1 }], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("bad: {}", &self.0.1)) };
         assert_eq!(result.to_string(), expected.to_string());
+
+        // Index 1 is the injected OhnoCore, so it is caught here rather than by rustc
+        let message = parse_err("bad: {}", vec![parse_quote! { 1.0 }], &input);
+        assert_eq!(message, "unknown field `1` in `#[display(...)]`, available fields: `0`");
     }
 
     #[test]
-    fn test_positional_argument_rooted_in_a_non_integer_literal_is_left_alone() {
-        // Only an integer literal can name a tuple field; other literals are plain values
+    fn test_argument_rooted_in_something_that_cannot_follow_self_is_rejected() {
+        // Each of these would otherwise expand to code that does not parse, such as
+        // `&self.Self::LABEL.len()`, and be reported by rustc against generated code
         let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
 
-        let result = parse("bad path: {}", vec![parse_quote! { "prefix".len() }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self."prefix".len())) };
-        assert_eq!(result.to_string(), expected.to_string());
+        for arg in [
+            parse_quote! { Self::LABEL.len() },
+            parse_quote! { std::env::consts::OS.len() },
+            parse_quote! { Self::describe() },
+            parse_quote! { "prefix".len() },
+            parse_quote! { 'c'.len_utf8() },
+            parse_quote! { 1e3 },
+            parse_quote! { format!("x").len() },
+            parse_quote! { (path).display() },
+        ] {
+            let message = parse_err("bad path: {}", vec![arg], &input);
+            assert_eq!(message, UNSUPPORTED_ROOT);
+        }
     }
 }

@@ -19,6 +19,10 @@ fn display_diagnostics() {
     t.compile_fail("tests/ui/display_unknown_named_placeholder.rs");
     t.compile_fail("tests/ui/display_unknown_positional_root.rs");
 
+    // A root that cannot legally follow `self.` is reported by the macro, rather than expanding
+    // to code that does not parse.
+    t.compile_fail("tests/ui/display_unsupported_argument_root.rs");
+
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
     t.compile_fail("tests/ui/display_tuple_index_reaching_injected_core.rs");
