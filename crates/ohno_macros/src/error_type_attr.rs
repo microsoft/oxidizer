@@ -60,7 +60,7 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
     quote! { #input }
 }
 
-const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no other field can be marked with `#[error]`. Use `#[derive(ohno::Error)]` to place the field yourself";
+const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core yourself";
 
 /// Reject a struct that marks a field with `#[error]`
 ///
@@ -203,7 +203,7 @@ mod tests {
 
         let expansion = crate::error_type_attr::error_impl(&mut input).to_string();
         assert!(expansion.contains("compile_error"), "expansion should be a compile error");
-        assert!(expansion.contains("no other field can be marked"), "got: {expansion}");
+        assert!(expansion.contains("no field may be marked"), "got: {expansion}");
     }
 
     #[test]

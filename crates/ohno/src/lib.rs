@@ -63,9 +63,13 @@
 //! without manually managing the error infrastructure.
 //!
 //! The attribute always adds that field and always generates the error representation from it, so
-//! no other field may be marked with `#[error]`. Use `#[derive(Error)]` directly to place the field
-//! by hand. A field of type `OhnoCore` may still be declared: it stays an ordinary field, and is
-//! yours to reference like any other.
+//! no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use
+//! `#[derive(Error)]` directly to place the core by hand.
+//!
+//! A field of type `OhnoCore` may still be declared, and is then treated as data rather than as the
+//! error: it is passed to the generated constructors like any other field, appears in the generated
+//! `Debug`, and can be referenced from a `#[display(...)]` template — but it is never read for
+//! `source()`, the backtrace, or enrichment, which all come from the injected field.
 //!
 //! ```rust
 //! // Simple error without extra fields
