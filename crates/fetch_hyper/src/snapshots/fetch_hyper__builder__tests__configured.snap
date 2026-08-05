@@ -27,17 +27,6 @@ fetch_hyper::builder::HyperTransportBuilder<fetch_hyper::testing::FakeConnector,
                 1048576,
             ),
         },
-        socket: SocketOptions {
-            no_delay: Some(
-                true,
-            ),
-            receive_buffer_size: Some(
-                65536,
-            ),
-            send_buffer_size: Some(
-                32768,
-            ),
-        },
         extra: {},
     },
     pool_index: PoolIndex(

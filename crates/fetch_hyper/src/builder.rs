@@ -333,10 +333,6 @@ mod tests {
         options.connect_timeout = Duration::from_secs(7);
         options.connection_pool.connection_lifetime = ConnectionLifetime::fixed(Duration::from_mins(1));
         options.http_2 = fetch_options::Http2Options::default().initial_stream_window_size(1024 * 1024);
-        options.socket = fetch_options::SocketOptions::default()
-            .no_delay(true)
-            .receive_buffer_size(64 * 1024)
-            .send_buffer_size(32 * 1024);
         let configured = make_builder_with(options).pool_index(PoolIndex::new(42));
         insta::assert_debug_snapshot!("configured", configured);
     }

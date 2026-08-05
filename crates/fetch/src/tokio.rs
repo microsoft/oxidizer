@@ -3,8 +3,9 @@
 
 //! Tokio-runtime entry points for [`HttpClient`].
 //!
-//! This module groups the Tokio runtime dependencies ([`TokioDeps`]) and the
-//! factory methods that produce HTTP clients backed by the Tokio runtime and the
+//! This module groups the Tokio runtime dependencies ([`TokioDeps`]), the transport-specific
+//! tuning knobs ([`TokioTransportOptions`]), and the factory methods that produce HTTP clients
+//! backed by the Tokio runtime and the
 //! [`fetch_hyper`] transport. They are gated behind the `tokio` feature combined with a
 //! TLS backend (`rustls` and/or `native-tls`).
 
@@ -58,15 +59,96 @@ impl TokioDeps {
     }
 }
 
+/// Tuning knobs specific to the Tokio transport.
+///
+/// These settings are deliberately *not* part of
+/// [`TransportOptions`][fetch_options::TransportOptions], because they describe how this
+/// transport dials `TCP` sockets rather than a policy every transport can honor. A transport
+/// that does not own its sockets (`WinHTTP`, for instance) has no way to apply them, so
+/// accepting them on the shared, transport-agnostic surface would silently ignore them.
+///
+/// Pass an instance to [`HttpClient::builder_tokio_with_options`] to apply it.
+///
+/// # Examples
+///
+/// ```
+/// use fetch::options::SocketOptions;
+/// use fetch::tokio::TokioTransportOptions;
+///
+/// let options = TokioTransportOptions::default().socket(
+///     SocketOptions::default()
+///         .no_delay(true)
+///         .send_buffer_size(256 * 1024),
+/// );
+/// ```
+// `Copy` is deliberately not derived: this type exists to grow, and the first knob that is
+// not a plain scalar would force its removal. `Http2Options` and `ConnectionPoolOptions` are
+// `Clone`-only for the same reason.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TokioTransportOptions {
+    /// Socket-level tuning applied to every outbound `TCP` connection.
+    pub socket: SocketOptions,
+}
+
+impl TokioTransportOptions {
+    /// Sets the socket-level tuning applied to every outbound `TCP` connection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fetch::options::SocketOptions;
+    /// use fetch::tokio::TokioTransportOptions;
+    ///
+    /// let options = TokioTransportOptions::default().socket(SocketOptions::default().no_delay(true));
+    /// assert_eq!(options.socket.no_delay, Some(true));
+    /// ```
+    #[must_use]
+    pub fn socket(mut self, socket: SocketOptions) -> Self {
+        self.socket = socket;
+        self
+    }
+}
+
 impl HttpClient {
     /// Creates a new HTTP client builder for the Tokio runtime.
     ///
     /// This factory method provides a builder specifically configured for Tokio.
     /// Use this when working with Tokio-based applications.
     ///
+    /// Transport-specific tuning is left at its defaults; use
+    /// [`builder_tokio_with_options`][Self::builder_tokio_with_options] to supply
+    /// [`TokioTransportOptions`].
+    ///
     /// Available only when compiled with the `tokio` feature and a TLS backend
     /// (`rustls` and/or `native-tls`).
     pub fn builder_tokio(deps: impl Into<TokioDeps>) -> HttpClientBuilder {
+        Self::builder_tokio_with_options(deps, TokioTransportOptions::default())
+    }
+
+    /// Creates a new HTTP client builder for the Tokio runtime with transport-specific tuning.
+    ///
+    /// Identical to [`builder_tokio`][Self::builder_tokio], except that `options` carries the
+    /// knobs only this transport can honor. Everything expressible on every transport stays on
+    /// [`HttpClientBuilder`].
+    ///
+    /// Available only when compiled with the `tokio` feature and a TLS backend
+    /// (`rustls` and/or `native-tls`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fetch::HttpClient;
+    /// # use fetch::options::SocketOptions;
+    /// # use fetch::tokio::{TokioDeps, TokioTransportOptions};
+    /// # fn build() -> fetch::HttpClientBuilder {
+    /// HttpClient::builder_tokio_with_options(
+    ///     TokioDeps::default(),
+    ///     TokioTransportOptions::default().socket(SocketOptions::default().no_delay(true)),
+    /// )
+    /// # }
+    /// ```
+    pub fn builder_tokio_with_options(deps: impl Into<TokioDeps>, options: TokioTransportOptions) -> HttpClientBuilder {
         let deps = deps.into();
         let clock = deps.clock.clone();
         let global_pool = deps.global_pool.clone();
@@ -78,7 +160,7 @@ impl HttpClient {
         Self::builder_custom_internal(
             crate::constants::TOKIO_RUNTIME_NAME,
             crate::constants::HYPER_TRANSPORT_NAME,
-            |cx| TransportHandler(build_tokio_handler(cx).into()),
+            tokio_transport_factory(options),
             Isolation::Shared,
             CustomDeps {
                 clock,
@@ -124,9 +206,23 @@ struct TokioConnector {
     connector: HttpConnector,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Records the options handed to the most recent [`TokioConnector`] built on this thread.
+    ///
+    /// `HttpConnector` exposes no way to read its configuration back, and the connector is
+    /// buried inside the transport once built, so this is the only way to assert that the
+    /// options given to [`HttpClient::builder_tokio_with_options`] actually reach the
+    /// connector instead of being silently dropped.
+    static LAST_SOCKET_OPTIONS: std::cell::Cell<Option<SocketOptions>> = const { std::cell::Cell::new(None) };
+}
+
 impl TokioConnector {
     /// Builds a connector that applies `options` to every connection it opens.
     fn new(options: SocketOptions) -> Self {
+        #[cfg(test)]
+        LAST_SOCKET_OPTIONS.set(Some(options));
+
         let mut connector = HttpConnector::new();
 
         // TLS is layered on top of this connector by the transport, so `https` targets reach
@@ -228,9 +324,21 @@ fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::Erro
     }
 }
 
-fn build_tokio_handler(cx: CustomContext<TokioDeps>) -> fetch_hyper::HyperTransport {
+/// Builds the per-pool-slot transport factory for the Tokio transport.
+///
+/// `options` is captured by value and shared by reference with every handler the client
+/// builds, so each pool slot on every core sees the configuration the caller supplied rather
+/// than a default. Extracted from [`HttpClient::builder_tokio_with_options`] so that
+/// propagation is testable without standing up a full client.
+fn tokio_transport_factory(
+    options: TokioTransportOptions,
+) -> impl Fn(CustomContext<TokioDeps>) -> TransportHandler + Send + Sync + 'static {
+    move |cx| TransportHandler(build_tokio_handler(cx, &options).into())
+}
+
+fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOptions) -> fetch_hyper::HyperTransport {
     let tls_backend = build_tls_backend(&cx.options, cx.tls);
-    let connector = TokioConnector::new(cx.options.socket);
+    let connector = TokioConnector::new(options.socket);
 
     HyperTransportBuilder::new(connector, Spawner::new_tokio(), cx.clock, cx.options)
         .body_builder(cx.body_builder)
@@ -301,6 +409,79 @@ mod tests {
         if let Pipeline::Minimal(dispatch) = client.pipeline() {
             assert!(matches!(dispatch.mode, crate::handlers::DispatchMode::Single(_)));
         }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn builder_tokio_with_options_propagates_options_to_every_pool_slot() {
+        use opentelemetry::metrics::MeterProvider as _;
+        use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+        use crate::custom::CustomContext;
+        use crate::options::{ClientOptions, PoolIndex};
+        use crate::tls::TlsOptions;
+
+        // This is the invariant the relocation introduces: the socket knobs no longer ride on
+        // the shared `TransportOptions`, so they reach the connector only if the transport
+        // factory carries them. `HttpConnector` cannot be read back, so `TokioConnector::new`
+        // records what it was handed and this asserts on that.
+        let clock = Clock::new_tokio();
+        let deps = TokioDeps::with_clock(&clock);
+        let expected = fetch_options::SocketOptions::default().no_delay(true).send_buffer_size(64 * 1024);
+        let factory = super::tokio_transport_factory(super::TokioTransportOptions::default().socket(expected));
+
+        let provider = SdkMeterProvider::builder().build();
+        let client_options = ClientOptions::default();
+
+        // Two slots, as a multi-pool client would build: the factory must not consume its
+        // configuration on first use.
+        for slot in [0, 1] {
+            super::LAST_SOCKET_OPTIONS.set(None);
+
+            let cx = CustomContext {
+                body_builder: crate::custom::create_body_builder(&deps.global_pool, &clock, &client_options),
+                clock: clock.clone(),
+                pool_index: PoolIndex::new(slot),
+                extras: deps.clone(),
+                options: client_options.transport.clone(),
+                tls: TlsOptions::default(),
+                meter: provider.meter("test"),
+            };
+
+            let _handler = factory(cx);
+
+            assert_eq!(
+                super::LAST_SOCKET_OPTIONS.get(),
+                Some(expected),
+                "slot {slot} did not receive the configured socket options"
+            );
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn tokio_transport_options_default() {
+        insta::assert_debug_snapshot!(super::TokioTransportOptions::default());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn configure_tokio_transport_options() {
+        let options = super::TokioTransportOptions::default().socket(fetch_options::SocketOptions::default().no_delay(true));
+
+        assert_eq!(options.socket.no_delay, Some(true));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn assert_tokio_transport_options_type() {
+        static_assertions::assert_impl_all!(
+            super::TokioTransportOptions: Send,
+            Sync,
+            Clone,
+            std::fmt::Debug,
+            Default
+        );
     }
 
     #[cfg_attr(miri, ignore)]

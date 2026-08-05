@@ -11,16 +11,18 @@
 //! as `None` resolve to that default rather than to a value of this crate's choosing, so
 //! adding this struct never changes the observable behavior of an existing client.
 //!
-//! These settings are honored by the connectors bundled with `fetch`. A custom connector
-//! is responsible for applying them itself.
+//! These settings are applied by transports that dial their own `TCP` sockets. They are
+//! deliberately not part of [`TransportOptions`][crate::TransportOptions]: a transport that
+//! does not own its sockets cannot honor them, and silently ignoring a tuning request is
+//! worse than not offering it. The bundled Tokio transport accepts them through
+//! `fetch::tokio::TokioTransportOptions`.
 //!
 //! # Example
 //!
 //! ```
-//! use fetch_options::{SocketOptions, TransportOptions};
+//! use fetch_options::SocketOptions;
 //!
-//! let mut options = TransportOptions::default();
-//! options.socket = SocketOptions::default()
+//! let options = SocketOptions::default()
 //!     .no_delay(true)
 //!     .send_buffer_size(256 * 1024);
 //! ```
@@ -34,9 +36,9 @@
 //!
 //! # Relationship to other modules
 //!
-//! [`SocketOptions`] is reachable through [`TransportOptions::socket`][crate::TransportOptions::socket],
-//! alongside [`Http2Options`][crate::Http2Options] which tunes the protocol layer running on
-//! top of these sockets.
+//! [`SocketOptions`] is consumed by a transport's connector rather than by
+//! [`TransportOptions`][crate::TransportOptions]. It tunes the socket underneath a connection,
+//! while [`Http2Options`][crate::Http2Options] tunes the protocol layer running on top of it.
 
 /// Smallest accepted socket buffer size, in bytes.
 ///
@@ -55,6 +57,14 @@ pub const MAX_SOCKET_BUFFER_SIZE: u32 = 64 * 1024 * 1024;
 /// Socket-level settings applied to outbound `TCP` connections.
 ///
 /// Each field is `None` by default, which leaves the operating system default untouched.
+///
+/// These settings are honored only by transports that dial their own `TCP` sockets, which is
+/// why they are deliberately not part of [`TransportOptions`][crate::TransportOptions]: a
+/// transport that does not own its sockets cannot apply them, and silently ignoring a tuning
+/// request is worse than not offering it. The bundled Tokio transport accepts them through
+/// `fetch::tokio::TokioTransportOptions`.
+// The reference above is intentionally not an intra-doc link: `fetch` depends on this crate,
+// so linking the other way round would invert the dependency direction.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SocketOptions {

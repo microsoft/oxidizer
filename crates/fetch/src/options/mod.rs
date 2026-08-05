@@ -7,11 +7,16 @@
 //! and re-exported here. `ClientOptions` bundles those transport options
 //! together with the response-body, routing, redaction, and TLS configuration
 //! owned by the `fetch` request pipeline.
+//!
+//! [`SocketOptions`] is the exception: it is re-exported here for convenience, but it is not
+//! part of [`TransportOptions`] and has no [`HttpClientBuilder`](crate::HttpClientBuilder)
+//! setter, because only a transport that dials its own sockets can honor it. Supply it through
+//! [`fetch::tokio::TokioTransportOptions`](crate::tokio::TokioTransportOptions) instead.
 
 use data_privacy::RedactionEngine;
 pub use fetch_options::{
-    ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
-    RequestFilter, SocketOptions, TransportOptions,
+    ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, MAX_SOCKET_BUFFER_SIZE,
+    MIN_SOCKET_BUFFER_SIZE, PoolIndex, PoolSelection, RequestFilter, SocketOptions, TransportOptions,
 };
 pub use http_extensions::HttpBodyOptions;
 use http_extensions::routing::Router;

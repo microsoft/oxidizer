@@ -25,10 +25,5 @@ TransportOptions {
         adaptive_window: false,
         initial_stream_window_size: None,
     },
-    socket: SocketOptions {
-        no_delay: None,
-        receive_buffer_size: None,
-        send_buffer_size: None,
-    },
     extra: {},
 }

@@ -1,0 +1,11 @@
+---
+source: crates/fetch/src/tokio.rs
+expression: "super::TokioTransportOptions::default()"
+---
+TokioTransportOptions {
+    socket: SocketOptions {
+        no_delay: None,
+        receive_buffer_size: None,
+        send_buffer_size: None,
+    },
+}

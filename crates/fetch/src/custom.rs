@@ -116,6 +116,12 @@ pub struct CustomContext<Extras = ()> {
 /// thread-aware dependencies through to `factory` without resorting to globals.
 /// Leave it defaulted to `()` when no extras are needed.
 ///
+/// Transport-specific tuning is the transport's own concern: options that only some
+/// transports can honor (socket buffer sizes, protocol-specific windows) do not belong on
+/// [`TransportOptions`], because a transport that cannot apply them would silently ignore
+/// them. Accept them in the transport's own options type instead, the way
+/// [`TokioTransportOptions`](crate::tokio::TokioTransportOptions) does.
+///
 /// Because the handler is the transport stage, the caller is responsible for TLS:
 /// if `https://` URIs are expected, the handler must negotiate TLS itself.
 /// Otherwise pair the builder with [`HttpClientBuilder::insecure_allow_http`] and
