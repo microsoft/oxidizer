@@ -148,8 +148,8 @@ fn field_member(field_name: &str) -> Member {
 
 /// Build the identifier naming a field, keeping raw identifiers raw
 ///
-/// Field names reach this point as text, taken from the display template or from the list of
-/// referenceable names, and a field declared as `r#type` is spelled with its prefix in both.
+/// Field names reach this point as text, taken from the display template or from the list of names
+/// the diagnostics offer, and a field declared as `r#type` is spelled with its prefix in both.
 /// `Ident::new` rejects that spelling and panics, which would turn an ordinary error in a user's
 /// template into a macro crash.
 fn field_ident(field_name: &str) -> Ident {
