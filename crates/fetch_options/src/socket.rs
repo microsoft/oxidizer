@@ -252,6 +252,14 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
+    fn buffer_size_bounds_have_their_documented_values() {
+        // Pinned as literals rather than as expressions: every other test refers to these
+        // bounds symbolically, so only a literal comparison can detect a change to them.
+        assert_eq!(MIN_SOCKET_BUFFER_SIZE, 4_096);
+        assert_eq!(MAX_SOCKET_BUFFER_SIZE, 67_108_864);
+    }
+
+    #[test]
     fn buffer_sizes_are_clamped_into_the_accepted_range() {
         // Zero must never reach the kernel: on Windows it disables send buffering outright.
         let too_small = SocketOptions::default().receive_buffer_size(0).send_buffer_size(1);

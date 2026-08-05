@@ -460,6 +460,15 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
+    fn to_usize_widens_without_altering_the_value() {
+        assert_eq!(super::to_usize(0), 0);
+        assert_eq!(super::to_usize(1), 1);
+        assert_eq!(super::to_usize(fetch_options::MAX_SOCKET_BUFFER_SIZE), 67_108_864);
+        assert_eq!(super::to_usize(u32::MAX), 4_294_967_295);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
     fn tokio_transport_options_default() {
         insta::assert_debug_snapshot!(super::TokioTransportOptions::default());
     }
