@@ -25,7 +25,9 @@ mod utils;
 ///
 /// Supports the following attributes:
 /// - `#[error]` - Mark the field containing the `OhnoCore`. Exactly one field may be marked, and
-///   its type must be `OhnoCore`, referred to by that name
+///   its type must name `OhnoCore` in its final path segment, so `OhnoCore`, `ohno::OhnoCore` and
+///   `crate::OhnoCore` are all accepted. A type alias or a rename is not, since the macro reads the
+///   spelling rather than resolving the type
 /// - `#[display("...")]` - Custom display message with field interpolation. Positional
 ///   arguments are implicitly scoped to `self`, so fields are referenced by their bare name
 ///   (`path.display()`, not `self.path.display()`)

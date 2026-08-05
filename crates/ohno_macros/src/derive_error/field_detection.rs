@@ -354,6 +354,25 @@ mod tests {
     }
 
     #[test]
+    fn test_generated_marker_is_recognized_by_both_its_path_and_its_argument() {
+        // The marker is `#[error(generated)]` and nothing else: an argument list under another
+        // attribute, or another argument under `#[error]`, names a field the user wrote and must
+        // stay visible to the display template
+        let generated: syn::Field = parse_quote! { #[error(generated)] ohno_core: OhnoCore };
+        assert!(is_generated_error_field(&generated));
+
+        for field in [
+            parse_quote! { #[error(nonsense)] inner: OhnoCore },
+            parse_quote! { #[display(generated)] inner: OhnoCore },
+            parse_quote! { #[error] inner: OhnoCore },
+            parse_quote! { inner: OhnoCore },
+        ] {
+            let field: syn::Field = field;
+            assert!(!is_generated_error_field(&field));
+        }
+    }
+
+    #[test]
     fn test_find_error_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, #[error] OhnoCore); };
         let field = find_error_field(&input).unwrap();

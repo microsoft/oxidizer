@@ -49,8 +49,14 @@ pub(crate) use bail;
 /// between toolchains. `Error::new_spanned` carries the start and end tokens explicitly and
 /// renders the full range either way.
 ///
+/// As in `bail!`, a literal message is a format string, so implicit captures such as `{name}`
+/// interpolate and a literal brace has to be escaped. A message that is mostly braces, such as one
+/// quoting `#[display("{}")]`, is better declared as a `&'static str` const and passed by name,
+/// which is handed to `syn` unchanged.
+///
 /// Usage:
 /// - `bail_spanned!(tokens, "message")`
+/// - `bail_spanned!(tokens, MESSAGE_CONST)`
 /// - `bail_spanned!(tokens, "format string {}", value)`
 macro_rules! bail_spanned {
     ($tokens:expr, $msg:literal) => {
