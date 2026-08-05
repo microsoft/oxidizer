@@ -29,8 +29,9 @@ fn display_diagnostics() {
     t.compile_fail("tests/ui/error_attribute_on_several_fields.rs");
     t.compile_fail("tests/ui/error_attribute_on_another_type.rs");
 
-    // `#[ohno::error]` adds the OhnoCore field itself, so the struct must not carry one.
-    t.compile_fail("tests/ui/ohno_error_on_existing_core_field.rs");
+    // `#[ohno::error]` generates the error representation from the field it injects, so no other
+    // field may be marked.
+    t.compile_fail("tests/ui/ohno_error_marked_field.rs");
 
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
