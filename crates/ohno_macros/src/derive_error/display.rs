@@ -141,9 +141,22 @@ fn root_of_expr(expr: &Expr) -> &Expr {
 /// Build the member used to access a field by name or by tuple index
 fn field_member(field_name: &str) -> Member {
     field_name.parse::<usize>().map_or_else(
-        |_| Member::Named(Ident::new(field_name, proc_macro2::Span::call_site())),
+        |_| Member::Named(field_ident(field_name)),
         |index| Member::Unnamed(Index::from(index)),
     )
+}
+
+/// Build the identifier naming a field, keeping raw identifiers raw
+///
+/// Field names reach this point as text, taken from the display template or from the list of
+/// referenceable names, and a field declared as `r#type` is spelled with its prefix in both.
+/// `Ident::new` rejects that spelling and panics, which would turn an ordinary error in a user's
+/// template into a macro crash.
+fn field_ident(field_name: &str) -> Ident {
+    let span = proc_macro2::Span::call_site();
+    field_name
+        .strip_prefix("r#")
+        .map_or_else(|| Ident::new(field_name, span), |bare| Ident::new_raw(bare, span))
 }
 
 /// Extract field name from template between braces, handling format specifiers
@@ -274,6 +287,30 @@ mod tests {
         let result = parse("Error with path: {path}", vec![], &input);
         let expected = quote! { std::borrow::Cow::from(format!("Error with path: {}", &self.path)) };
         assert_eq!(result.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_parse_display_template_raw_identifier_field() {
+        // A raw identifier reaches the template as `r#type`, which `Ident::new` rejects. Building
+        // the member from that spelling used to panic, turning a user's template into a crash
+        let input: DeriveInput = parse_quote! {
+            struct TestError {
+                r#type: String,
+                #[error]
+                inner: OhnoCore,
+            }
+        };
+
+        let result = parse("kind: {r#type}", vec![], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("kind: {}", &self.r#type)) };
+        assert_eq!(result.to_string(), expected.to_string());
+
+        // The bare spelling names no field, and the list offers the one that exists
+        let message = parse_err("kind: {type}", vec![], &input);
+        assert_eq!(
+            message,
+            "unknown field `type` in `#[display(...)]`, available fields: `r#type`, `inner`"
+        );
     }
 
     #[test]

@@ -24,15 +24,18 @@ pub struct DeclaredCoreError {
 
 #[test]
 fn declared_core_field_is_an_ordinary_field() {
-    let carried = OhnoCore::from(std::io::Error::new(std::io::ErrorKind::NotFound, "carried.txt"));
+    let carried = OhnoCore::without_backtrace(std::io::Error::new(std::io::ErrorKind::NotFound, "carried.txt"));
     let cause = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "root cause");
     let error = DeclaredCoreError::caused_by("/etc/config.toml".to_string(), carried, cause);
 
-    // The display template reaches the declared field like any other
-    assert_eq!(
-        error.to_string(),
-        "failed for /etc/config.toml, carrying carried.txt\ncaused by: root cause"
+    // The display template reaches the declared field like any other. The injected core appends a
+    // backtrace when one is enabled, so the rendering is matched by part rather than whole.
+    let rendered = error.to_string();
+    assert!(
+        rendered.starts_with("failed for /etc/config.toml, carrying carried.txt"),
+        "got: {rendered}"
     );
+    assert!(rendered.contains("caused by: root cause"), "got: {rendered}");
 
     // The source is the one wrapped by the injected field, not the one the declared field holds
     assert_eq!(error.source().expect("source").to_string(), "root cause");
@@ -41,7 +44,7 @@ fn declared_core_field_is_an_ordinary_field() {
 
 #[test]
 fn declared_core_field_does_not_take_over_the_error_representation() {
-    let carried = OhnoCore::from(std::io::Error::new(std::io::ErrorKind::NotFound, "carried.txt"));
+    let carried = OhnoCore::without_backtrace(std::io::Error::new(std::io::ErrorKind::NotFound, "carried.txt"));
     let error = DeclaredCoreError::new("/tmp/x".to_string(), carried);
 
     // With nothing wrapped by the injected field, the error has no source even though the declared
