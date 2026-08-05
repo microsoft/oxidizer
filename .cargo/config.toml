@@ -5,3 +5,8 @@ rustflags = ["-C", "target-cpu=x86-64-v3"]
 # enable use of modern CPU features on Windows for the benefit of our benchmarks
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+[env]
+# Workspace checks enable all features, but CI runners are not guaranteed to
+# have the optional Visual Studio Spectre libraries installed.
+MSVC_SPECTRE_LIBS_ALLOW_MISSING = "1"
