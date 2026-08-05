@@ -62,7 +62,7 @@ impl TokioDeps {
 /// Tuning knobs specific to the Tokio transport.
 ///
 /// These settings are deliberately *not* part of
-/// [`TransportOptions`][fetch_options::TransportOptions], because they describe how this
+/// [`TransportOptions`], because they describe how this
 /// transport dials `TCP` sockets rather than a policy every transport can honor. A transport
 /// that does not own its sockets (`WinHTTP`, for instance) has no way to apply them, so
 /// accepting them on the shared, transport-agnostic surface would silently ignore them.

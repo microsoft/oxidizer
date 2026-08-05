@@ -119,8 +119,9 @@ pub struct CustomContext<Extras = ()> {
 /// Transport-specific tuning is the transport's own concern: options that only some
 /// transports can honor (socket buffer sizes, protocol-specific windows) do not belong on
 /// [`TransportOptions`], because a transport that cannot apply them would silently ignore
-/// them. Accept them in the transport's own options type instead, the way
-/// [`TokioTransportOptions`](crate::tokio::TokioTransportOptions) does.
+/// them. Accept them in the transport's own options type instead, the way the bundled Tokio
+/// transport does with `fetch::tokio::TokioTransportOptions` (not linked here, because that
+/// module is feature-gated).
 ///
 /// Because the handler is the transport stage, the caller is responsible for TLS:
 /// if `https://` URIs are expected, the handler must negotiate TLS itself.

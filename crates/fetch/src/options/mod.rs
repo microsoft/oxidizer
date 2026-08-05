@@ -11,7 +11,10 @@
 //! [`SocketOptions`] is the exception: it is re-exported here for convenience, but it is not
 //! part of [`TransportOptions`] and has no [`HttpClientBuilder`](crate::HttpClientBuilder)
 //! setter, because only a transport that dials its own sockets can honor it. Supply it through
-//! [`fetch::tokio::TokioTransportOptions`](crate::tokio::TokioTransportOptions) instead.
+//! `fetch::tokio::TokioTransportOptions` instead.
+//!
+//! That reference is intentionally not an intra-doc link: the `tokio` module is feature-gated,
+//! so linking to it would break the documentation build when the feature is off.
 
 use data_privacy::RedactionEngine;
 pub use fetch_options::{
