@@ -266,9 +266,9 @@
 //! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
-//! - **`fast-instant`** - Adds `instant_fast` APIs that use a lower-overhead,
-//!   lower-precision source on Linux and Windows. Other platforms delegate to
-//!   [`std::time::Instant::now`]. Existing `instant` APIs are unchanged.
+//! - **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
+//!   lower-precision instant source on Linux and Windows. Other platforms delegate to
+//!   [`std::time::Instant::now`]. Clocks remain precise by default.
 //!
 //! # Additional Examples
 //!

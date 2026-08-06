@@ -68,6 +68,9 @@ use crate::timers::TimerKey;
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
 ///
+/// With the `fast-instant` feature, the instant retrieval setting is local to each clone. This allows
+/// precise and fast clones to share timers while independently selecting their instant source.
+///
 /// ```
 /// use tick::Clock;
 ///
@@ -316,6 +319,38 @@ impl Clock {
         crate::ClockControl::new_at(time).to_clock()
     }
 
+    /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
+    ///
+    /// The setting belongs to this clock instance. A differently configured clone can be used
+    /// independently, and time-derived values such as stopwatches retain the setting of the clock
+    /// they were created from.
+    ///
+    /// On Linux and Windows, enabling this option uses a lower-precision source that may lag
+    /// behind the operating-system clock by a few milliseconds. Timer deadlines created by a fast
+    /// clock therefore have the same reduced precision, even when the shared clock driver advances
+    /// timers using precise instants. On other platforms, fast retrieval delegates to
+    /// [`Instant::now`]. Controlled clocks are unaffected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tick::Clock;
+    ///
+    /// # fn configure_clock(clock: Clock) {
+    /// let precise_clock = clock;
+    /// let fast_clock = precise_clock.clone().with_fast_instant(true);
+    ///
+    /// let precise_watch = precise_clock.stopwatch();
+    /// let fast_watch = fast_clock.stopwatch();
+    /// # }
+    /// ```
+    #[cfg(feature = "fast-instant")]
+    #[must_use]
+    pub fn with_fast_instant(mut self, enabled: bool) -> Self {
+        self.time = self.time.with_fast_instant(enabled);
+        self
+    }
+
     /// Retrieves the current system time as [`SystemTime`].
     ///
     /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
@@ -400,18 +435,6 @@ impl Clock {
     #[must_use]
     pub fn instant(&self) -> Instant {
         self.simple_clock().instant()
-    }
-
-    /// Retrieves the current [`Instant`] using a lower-overhead time source where supported.
-    ///
-    /// On Linux and Windows, the returned instant may lag behind the operating-system clock
-    /// by a few milliseconds. On other platforms, this delegates to [`Instant::now`].
-    ///
-    /// Controlled clocks return their controlled instant, identically to [`instant`][Self::instant].
-    #[cfg(feature = "fast-instant")]
-    #[must_use]
-    pub fn instant_fast(&self) -> Instant {
-        self.simple_clock().instant_fast()
     }
 
     /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
@@ -586,11 +609,14 @@ mod tests {
     #[cfg(feature = "fast-instant")]
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
-    fn test_instant_fast_now() {
-        let clock = Clock::new_system_frozen();
-        let clock_instant = clock.instant_fast();
+    fn test_configured_fast_instant_now() {
+        let precise_clock = Clock::new_system_frozen();
+        let fast_clock = precise_clock.clone().with_fast_instant(true);
+        let precise_instant = precise_clock.instant();
+        let clock_instant = fast_clock.instant();
         let system_instant = Instant::now();
 
+        assert!(system_instant.saturating_duration_since(precise_instant) < Duration::from_millis(100));
         assert!(clock_instant.saturating_duration_since(system_instant) < Duration::from_millis(100));
         assert!(system_instant.saturating_duration_since(clock_instant) < Duration::from_millis(100));
     }
