@@ -135,6 +135,16 @@ fn test_tuple_display_with_subfield() {
 }
 
 #[test]
+fn test_tuple_index_literal_root() {
+    #[ohno::error]
+    #[display("Invalid data: {} - {}", 0, 1.abs())]
+    struct InvalidData(u32, i32);
+
+    let error = InvalidData::new(789u32, -444i32);
+    assert_error_message!(error, "Invalid data: 789 - 444");
+}
+
+#[test]
 fn test_mixed_display_syntax() {
     #[derive(Debug)]
     #[expect(dead_code, reason = "Test")]
