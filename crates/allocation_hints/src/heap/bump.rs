@@ -36,6 +36,7 @@ impl Options {
     pub const DEFAULT_MAX_RETAINED_CHUNKS: usize = 16;
 
     /// Returns the standard bump heap options.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             max_allocation_bytes: Self::DEFAULT_MAX_ALLOCATION_BYTES,
@@ -46,6 +47,7 @@ impl Options {
     }
 
     /// Sets the largest allocation eligible for bump allocation.
+    #[must_use]
     pub const fn with_max_allocation_bytes(mut self, bytes: usize) -> Self {
         assert!(
             bytes != 0 && bytes <= BUMP_SEGMENT_SIZE,
@@ -56,6 +58,7 @@ impl Options {
     }
 
     /// Sets the largest alignment eligible for bump allocation.
+    #[must_use]
     pub const fn with_max_alignment(mut self, alignment: usize) -> Self {
         assert!(
             alignment != 0 && alignment <= BUMP_SEGMENT_SIZE && alignment.is_power_of_two(),
@@ -66,6 +69,7 @@ impl Options {
     }
 
     /// Sets a fixed number of chunks retained when backing state returns to a pool.
+    #[must_use]
     pub const fn with_retained_chunks(mut self, chunks: usize) -> Self {
         assert!(chunks != 0, "a bump heap must retain at least its root chunk");
         self.retained_chunks = chunks;
@@ -74,6 +78,7 @@ impl Options {
     }
 
     /// Allows adaptive retention to grow through the given chunk count.
+    #[must_use]
     pub const fn with_max_retained_chunks(mut self, chunks: usize) -> Self {
         assert!(
             chunks >= self.retained_chunks,
@@ -84,21 +89,25 @@ impl Options {
     }
 
     /// Returns the largest bump allocation size.
+    #[must_use]
     pub const fn max_allocation_bytes(self) -> usize {
         self.max_allocation_bytes
     }
 
     /// Returns the largest bump allocation alignment.
+    #[must_use]
     pub const fn max_alignment(self) -> usize {
         self.max_alignment
     }
 
     /// Returns the minimum retained chunk count.
+    #[must_use]
     pub const fn retained_chunks(self) -> usize {
         self.retained_chunks
     }
 
     /// Returns the maximum retained chunk count.
+    #[must_use]
     pub const fn max_retained_chunks(self) -> usize {
         self.max_retained_chunks
     }
@@ -112,11 +121,13 @@ impl Default for Options {
 
 impl Info {
     /// Returns the heap options.
+    #[must_use]
     pub const fn options(&self) -> Options {
         self.options
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(options: Options) -> Self {
         Self { options }
     }
@@ -124,21 +135,25 @@ impl Info {
 
 impl Usage {
     /// Returns bytes passed by the bump cursor.
+    #[must_use]
     pub const fn cursor_used_bytes(&self) -> usize {
         self.cursor_used_bytes
     }
 
     /// Returns the total number of bump allocations made since reset.
+    #[must_use]
     pub const fn allocation_count(&self) -> usize {
         self.allocation_count
     }
 
     /// Returns the current chunk count.
+    #[must_use]
     pub const fn chunk_count(&self) -> usize {
         self.chunk_count
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(cursor_used_bytes: usize, allocation_count: usize, chunk_count: usize) -> Self {
         Self {
             cursor_used_bytes,

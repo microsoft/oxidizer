@@ -12,7 +12,7 @@ use allocation_hints::heap::{Usage as HeapUsage, UsageKind as HeapUsageKind};
 
 use crate::config::{Config, Standard};
 use crate::hal;
-use crate::hal::{read_free_next, read_free_requested, write_free_next, write_free_requested};
+use crate::hal::{peek_free_requested, read_free_next, read_free_requested, write_free_next, write_free_requested};
 use crate::heap::bump::{self, BumpState};
 use crate::heap::{HeapTarget, target_from_hint};
 use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation, TrackingState};
@@ -65,6 +65,7 @@ thread_local! {
     static TEST_FAIL_REMOTE_POP_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(test)]
     static TEST_FAIL_REMOTE_PUSH_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LAST_REGION: std::cell::Cell<*mut RegionState> = const { std::cell::Cell::new(ptr::null_mut()) };
 }
 
 /// A global allocator with thread-local general-purpose size-class slabs.
@@ -115,7 +116,7 @@ struct ExtraHeader {
     tracking: TrackingAllocation,
     class_index: usize,
     owner: *mut ReusableHeapState,
-    next_direct: *mut ExtraHeader,
+    next_direct: *mut Self,
     requested_bytes: usize,
     usable_bytes: usize,
 }
@@ -228,14 +229,14 @@ struct SlabHeader {
     marker: AtomicUsize,
     owner: *mut OwnerState,
     fresh_next: *mut u8,
-    next_partial: *mut SlabHeader,
+    next_partial: *mut Self,
     free_count: usize,
     recycled_summary: u32,
     recycled_batch_word: u32,
     recycled_batch: u64,
-    segment_next: *mut SlabHeader,
+    segment_next: *mut Self,
     remote_free: AtomicPtr<u8>,
-    inbox_next: *mut SlabHeader,
+    inbox_next: *mut Self,
     embedded_owner: OwnerState,
     remote_queued: AtomicBool,
     usable_blocks: u16,
@@ -253,7 +254,7 @@ struct RetiredSliceState {
     marker: AtomicUsize,
     owner: *mut OwnerState,
     remaining: AtomicUsize,
-    state: *mut RetiredSliceState,
+    state: *mut Self,
     ready: AtomicBool,
     released: AtomicBool,
     track_aggregates: bool,
@@ -279,7 +280,7 @@ pub(crate) struct DomainState {
     id: usize,
     is_default: AtomicBool,
     regions: MediumRegion,
-    next: AtomicPtr<DomainState>,
+    next: AtomicPtr<Self>,
 }
 
 struct MediumState {
@@ -301,13 +302,12 @@ struct RegionState {
     physical: [PhysicalSliceMeta; MEDIUM_REGION_SLICE_COUNT],
     allocations: [MediumAllocationMeta; MEDIUM_REGION_SLICE_COUNT],
     bins: [MediumBin; MEDIUM_MAX_SLICES],
-    next: AtomicPtr<RegionState>,
+    next: AtomicPtr<Self>,
 }
 
 struct PhysicalSliceMeta {
     kind_and_span: AtomicUsize,
     owner: AtomicUsize,
-    bump_state: AtomicPtr<BumpState>,
     segments: [AtomicUsize; 2],
     segment_usable_blocks: [AtomicUsize; 2],
     segment_live_blocks: [AtomicUsize; 2],
@@ -328,20 +328,28 @@ struct MediumBin {
 
 #[repr(C)]
 struct MediumFreeBlock {
-    next: *mut MediumFreeBlock,
+    next: *mut Self,
 }
 
 #[repr(C)]
 struct LargeFreeBlock {
-    next: *mut LargeFreeBlock,
+    next: *mut Self,
     slice_count: usize,
 }
 
+// SAFETY: MediumState is only accessed while its containing SpinLock is held.
 unsafe impl Send for MediumState {}
+// SAFETY: DomainState is process-retained. Its registry links are atomic, and
+// each region's mutable allocator metadata is protected by its SpinLock.
 unsafe impl Send for DomainState {}
 unsafe impl Sync for DomainState {}
+// SAFETY: DirectAllocationState is immutable after publication.
 unsafe impl Send for DirectAllocationState {}
+// SAFETY: RegionState is only accessed through the owning region lock, except
+// for immutable identity and atomic publication fields.
 unsafe impl Send for RegionState {}
+// SAFETY: RemoteHeapState is process-retained. Published queues and counters
+// are atomic; owner-only mutable fields are never accessed by remote threads.
 unsafe impl Send for RemoteHeapState {}
 unsafe impl Sync for RemoteHeapState {}
 
@@ -369,7 +377,6 @@ impl PhysicalSliceMeta {
         Self {
             kind_and_span: AtomicUsize::new(PHYSICAL_SLICE_UNKNOWN),
             owner: AtomicUsize::new(0),
-            bump_state: AtomicPtr::new(ptr::null_mut()),
             segments: [const { AtomicUsize::new(0) }; 2],
             segment_usable_blocks: [const { AtomicUsize::new(0) }; 2],
             segment_live_blocks: [const { AtomicUsize::new(0) }; 2],
@@ -385,6 +392,8 @@ struct SpinLock<T> {
     value: UnsafeCell<T>,
 }
 
+// SAFETY: SpinLock grants access to its UnsafeCell payload to only one holder,
+// and T: Send permits that exclusive access to move between threads.
 unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 struct SpinLockGuard<'a, T> {
@@ -415,11 +424,7 @@ impl Drop for UsageInspectionGuard {
 
 impl HeapOperationGuard {
     unsafe fn begin(retirement: *mut RetirementState) -> Option<Self> {
-        if unsafe { begin_heap_usage_operation(retirement) } {
-            Some(Self { retirement })
-        } else {
-            None
-        }
+        unsafe { begin_heap_usage_operation(retirement) }.then(|| Self { retirement })
     }
 }
 
@@ -644,7 +649,6 @@ impl MediumRegion {
             for metadata in &(&(*region).physical)[slice_index..slice_index + count] {
                 metadata.kind_and_span.store(PHYSICAL_SLICE_UNKNOWN, Ordering::Release);
                 metadata.owner.store(0, Ordering::Relaxed);
-                metadata.bump_state.store(ptr::null_mut(), Ordering::Relaxed);
                 metadata.segments[0].store(0, Ordering::Relaxed);
                 metadata.segments[1].store(0, Ordering::Relaxed);
                 metadata.segment_usable_blocks[0].store(0, Ordering::Relaxed);
@@ -759,6 +763,7 @@ where
     ///
     /// Every `Rallocator` used in the process must use the same effective
     /// configuration. Prefer [`crate::rallocator!`] for the global allocator.
+    #[must_use]
     pub const unsafe fn new() -> Self {
         let () = Self::VALIDATE_TUNABLES;
         Self { config: PhantomData }
@@ -1264,9 +1269,9 @@ where
                 retain_external_allocation(owner);
             }
         }
-        let tracking = tracking
-            .map(|tracking| tracking.commit(user_address, layout, owner.addr(), TrackingHeapKind::General))
-            .unwrap_or(TrackingAllocation::NONE);
+        let tracking = tracking.map_or(TrackingAllocation::NONE, |tracking| {
+            tracking.commit(user_address, layout, owner.addr(), TrackingHeapKind::General)
+        });
         unsafe {
             extra.write(ExtraHeader {
                 mapping_address,
@@ -1310,16 +1315,14 @@ where
         let block_size = ConfigSizeClasses::<C>::SIZES[class_index];
         let user_address = unsafe { block.add(context_user_offset(layout.align())) };
         let extra = unsafe { block.add(block_size - EXTRA_SIZE).cast::<ExtraHeader>() };
-        let tracking = tracking
-            .map(|tracking| {
-                let (heap_id, heap_kind) = if remote.is_null() {
-                    (heap.addr(), TrackingHeapKind::General)
-                } else {
-                    (remote.addr(), TrackingHeapKind::Thread)
-                };
-                tracking.commit(user_address, layout, heap_id, heap_kind)
-            })
-            .unwrap_or(TrackingAllocation::NONE);
+        let tracking = tracking.map_or(TrackingAllocation::NONE, |tracking| {
+            let (heap_id, heap_kind) = if remote.is_null() {
+                (heap.addr(), TrackingHeapKind::General)
+            } else {
+                (remote.addr(), TrackingHeapKind::Thread)
+            };
+            tracking.commit(user_address, layout, heap_id, heap_kind)
+        });
         unsafe {
             extra.write(ExtraHeader {
                 mapping_address: ptr::null_mut(),
@@ -1407,15 +1410,15 @@ where
             unsafe { (*class).active = ptr::null_mut() };
         }
         slab = unsafe { take_most_free_slab::<C::Tunables>(&mut (*lists).partial, class_index) };
-        if !slab.is_null() {
-            unsafe { (*slab).next_partial = ptr::null_mut() };
-        } else {
+        if slab.is_null() {
             unsafe { drain_remote_inbox::<C::Tunables>(state) };
             let lists = unsafe { state.class_lists.as_mut_ptr().add(class_index) };
             slab = unsafe { take_most_free_slab::<C::Tunables>(&mut (*lists).partial, class_index) };
             if !slab.is_null() {
                 unsafe { (*slab).next_partial = ptr::null_mut() };
             }
+        } else {
+            unsafe { (*slab).next_partial = ptr::null_mut() };
         }
         if !slab.is_null() {
             let class = unsafe { state.classes.as_mut_ptr().add(class_index) };
@@ -1463,15 +1466,15 @@ where
             unsafe { (*class).active = ptr::null_mut() };
         }
         slab = unsafe { take_most_free_slab::<C::Tunables>(&mut (*lists).partial, class_index) };
-        if !slab.is_null() {
-            unsafe { (*slab).next_partial = ptr::null_mut() };
-        } else {
+        if slab.is_null() {
             unsafe { drain_remote_inbox::<C::Tunables>(state) };
             let lists = unsafe { state.context_class_lists.as_mut_ptr().add(class_index) };
             slab = unsafe { take_most_free_slab::<C::Tunables>(&mut (*lists).partial, class_index) };
             if !slab.is_null() {
                 unsafe { (*slab).next_partial = ptr::null_mut() };
             }
+        } else {
+            unsafe { (*slab).next_partial = ptr::null_mut() };
         }
         if !slab.is_null() {
             let class = unsafe { state.context_classes.as_mut_ptr().add(class_index) };
@@ -1511,6 +1514,14 @@ where
     }
 
     #[inline(always)]
+    /// Deallocates a bump allocation previously classified by trusted chunk metadata.
+    ///
+    /// # Safety
+    ///
+    /// `address` must be a live allocation owned by `state`, and `layout` must
+    /// be the layout used to allocate it. `state` must remain alive through the
+    /// call. Tail reclamation is attempted only when the current thread has the
+    /// same bump heap active, which provides the exclusive cursor access.
     unsafe fn deallocate_bump(&self, address: *mut u8, layout: Layout, state: *mut BumpState) {
         self.record_deallocation(layout.size());
         let thread = unsafe { thread_state() };
@@ -1543,9 +1554,9 @@ where
             let bump = unsafe { (*state).active_bump };
             let address = unsafe { bump::allocate_tracked(bump, layout) };
             if !address.is_null() {
-                let allocation = tracking
-                    .map(|tracking| tracking.commit(address, layout, bump.addr(), TrackingHeapKind::Bump))
-                    .unwrap_or(TrackingAllocation::NONE);
+                let allocation = tracking.map_or(TrackingAllocation::NONE, |tracking| {
+                    tracking.commit(address, layout, bump.addr(), TrackingHeapKind::Bump)
+                });
                 unsafe { bump::set_tracking(address, allocation) };
                 self.record_allocation(layout.size());
                 return address;
@@ -1648,33 +1659,30 @@ where
     }
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
-        if default_class::<C::Tunables>(layout).is_none() {
-            let Some(region) = region_containing(address) else {
-                let header = unsafe { read_header(address) };
-                debug_assert_eq!(header.addr() & TAG_MASK, DIRECT_TAG);
-                let extra = header.map_addr(|address| address & !TAG_MASK);
-                unsafe { self.deallocate_direct(address, layout, extra) };
-                return;
-            };
-            if let Some(state) = bump_state_in_region(region, address) {
+        let segment = allocation_segment(address);
+        if address != segment {
+            let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
+            if let Some(state) = unsafe { bump::state_for_allocation(segment, marker) } {
                 unsafe { self.deallocate_bump(address, layout, state) };
-            } else {
+                return;
+            }
+        }
+
+        if default_class::<C::Tunables>(layout).is_none() {
+            if region_containing(address).is_some() && medium_slice_count(layout).is_some() {
                 let state = unsafe { thread_state() };
                 let heap = unsafe { current_initialized_reusable_heap(state) };
                 unsafe { self.deallocate_medium(address, layout, heap) };
+                return;
             }
+            let header = unsafe { read_header(address) };
+            debug_assert_eq!(header.addr() & TAG_MASK, DIRECT_TAG);
+            let extra = header.map_addr(|address| address & !TAG_MASK);
+            unsafe { self.deallocate_direct(address, layout, extra) };
             return;
         }
 
-        let segment = allocation_segment(address);
         let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
-        if marker == bump::BUMP_CHUNK_MARKER
-            && let Some(region) = region_containing(address)
-            && let Some(state) = bump_state_in_region(region, address)
-        {
-            unsafe { self.deallocate_bump(address, layout, state) };
-            return;
-        }
         if let Some(class_index) = slab_class_from_marker::<C::Tunables>(marker) {
             if C::TRACK_AGGREGATES {
                 record_physical_small_deallocation(address);
@@ -2083,7 +2091,7 @@ unsafe fn add_slab_usage(heap: &ReusableHeapState, slab: *mut SlabHeader, usage:
     let mut block = unsafe { (*slab).remote_free.load(Ordering::Acquire) };
     while !block.is_null() && block != RETIRED_REMOTE_SENTINEL {
         remote_blocks += 1;
-        remote_padding_bytes += unsafe { read_free_requested(block) };
+        remote_padding_bytes += unsafe { peek_free_requested(block) };
         block = unsafe { read_free_next(block) };
     }
     let live_blocks = unsafe { (*slab).usable_blocks as usize - (*slab).free_count - cached_blocks - remote_blocks };
@@ -2201,7 +2209,9 @@ unsafe fn prepare_retired_slice(
         while !block.is_null() && block != RETIRED_REMOTE_SENTINEL {
             remote_frees += 1;
             tracking::record_remote_drain();
-            block = unsafe { read_free_next(block) };
+            let next = unsafe { read_free_next(block) };
+            unsafe { read_free_requested(block) };
+            block = next;
         }
         unsafe { (*slab).free_count += remote_frees };
         remaining += unsafe { (*slab).usable_blocks as usize - (*slab).free_count };
@@ -2243,7 +2253,7 @@ unsafe fn prepare_retired_slice(
                 direct_mapping,
                 committed_bytes,
                 MEDIUM_SLICE_SIZE,
-            )
+            );
         };
     }
     true
@@ -2602,11 +2612,7 @@ fn medium_class(layout: Layout) -> Option<usize> {
 
 #[inline(always)]
 fn local_medium_class(slice_count: usize) -> Option<usize> {
-    if slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1)) {
-        Some(slice_count.trailing_zeros() as usize)
-    } else {
-        None
-    }
+    (slice_count.is_power_of_two() && slice_count <= (1 << (LOCAL_MEDIUM_CLASSES - 1))).then(|| slice_count.trailing_zeros() as usize)
 }
 
 #[inline(always)]
@@ -2691,12 +2697,21 @@ unsafe fn unregister_direct_allocation(extra: *mut ExtraHeader) {
 }
 
 fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
+    let cached = LAST_REGION.get();
+    if !cached.is_null() {
+        let base = unsafe { (*cached).base };
+        if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
+            return Some(cached);
+        }
+    }
+
     let mut domain = DOMAINS.load(Ordering::Acquire);
     while !domain.is_null() {
         let mut region = unsafe { (*domain).regions.regions.load(Ordering::Acquire) };
         while !region.is_null() {
             let base = unsafe { (*region).base };
             if address.addr() >= base.addr() && address.addr() < base.addr() + MEDIUM_REGION_SIZE {
+                LAST_REGION.set(region);
                 return Some(region);
             }
             region = unsafe { (*region).next.load(Ordering::Acquire) };
@@ -2764,26 +2779,16 @@ fn record_medium_span(region: *mut RegionState, slice_index: usize, slice_count:
 }
 
 pub(crate) fn register_bump_chunk(address: *mut u8, state: *mut BumpState) {
-    let region = region_containing(address).expect("new bump chunks must belong to their domain's retained region");
+    let Some(region) = region_containing(address) else {
+        debug_assert!(false, "new bump chunks must belong to their domain's retained region");
+        return;
+    };
     let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
     let metadata = unsafe { &(*region).physical[slice_index] };
     metadata.owner.store(state.addr(), Ordering::Relaxed);
-    metadata.bump_state.store(state, Ordering::Relaxed);
     metadata
         .kind_and_span
         .store(PHYSICAL_SLICE_BUMP | (1 << PHYSICAL_SPAN_SHIFT), Ordering::Release);
-}
-
-fn bump_state_in_region(region: *mut RegionState, address: *mut u8) -> Option<*mut BumpState> {
-    let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
-    let metadata = unsafe { &(*region).physical[slice_index] };
-    let kind = metadata.kind_and_span.load(Ordering::Acquire) & PHYSICAL_KIND_MASK;
-    if kind != PHYSICAL_SLICE_BUMP {
-        return None;
-    }
-    let state = metadata.bump_state.load(Ordering::Relaxed);
-    debug_assert!(!state.is_null());
-    (!state.is_null()).then_some(state)
 }
 
 fn encode_heap_owner(owner: *mut ReusableHeapState, retirable: bool) -> *mut ReusableHeapState {
@@ -3403,11 +3408,11 @@ unsafe fn recycle_local_block<T: Tunables>(slab: *mut SlabHeader, address: *mut 
     let block_size = T::SizeClasses::SIZES[class_index];
     let offset = address.addr() - slab.addr();
     let shift = unsafe { *T::SizeClasses::CLASS_SHIFTS.get_unchecked(class_index) };
-    let block_index = if shift != u8::MAX {
-        offset >> shift
-    } else {
+    let block_index = if shift == u8::MAX {
         let reciprocal = unsafe { *T::SizeClasses::CLASS_RECIPROCALS.get_unchecked(class_index) };
         ((offset as u128 * reciprocal as u128) >> usize::BITS) as usize
+    } else {
+        offset >> shift
     };
     debug_assert_eq!(block_index * block_size, offset);
     let word_index = block_index / 64;
@@ -3538,6 +3543,7 @@ unsafe fn pop_remote_block(class: &RemoteClass) -> *mut u8 {
         let comparison = class.blocks.compare_exchange_weak(head, next, Ordering::Acquire, Ordering::Relaxed);
         match comparison {
             Ok(_) => {
+                unsafe { read_free_requested(head) };
                 class.popping.store(false, Ordering::Release);
                 return head;
             }
@@ -3649,7 +3655,6 @@ fn record_medium_event(event: MediumEventKind, count: usize) {
 unsafe fn thread_state() -> *mut ThreadState {
     let state = THREAD_STATE.with(|storage| storage.get().cast::<ThreadState>());
     if !unsafe { (*state).cleanup_registered || (*state).tearing_down } {
-        crate::heap::ensure_backend_registered();
         THREAD_STATE_GUARD.with(|_| {});
         unsafe { (*state).cleanup_registered = true };
     }
@@ -3733,7 +3738,7 @@ mod tests {
     use super::*;
 
     fn new_domain() -> Domain {
-        crate::heap::ensure_backend_registered();
+        crate::initialize();
         Domain::new()
     }
 
@@ -3804,6 +3809,7 @@ mod tests {
 
     #[test]
     fn constructors_initialize_empty_runtime_state() {
+        crate::initialize();
         let state = ThreadState::new();
         assert_eq!(state.token, 0);
         assert!(state.default_heap.is_null());
@@ -3824,6 +3830,7 @@ mod tests {
 
     #[test]
     fn remote_available_retries_compare_exchange_failures() {
+        crate::initialize();
         let class = RemoteClass::new();
         let block = Box::into_raw(Box::new(0_usize)).cast::<u8>();
 
@@ -3841,6 +3848,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn allocator_propagates_hal_allocation_failures() {
+        crate::initialize();
         hal::fail_next_map();
         assert!(create_domain().is_null());
 
@@ -3877,6 +3885,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn slab_initialization_and_fallback_cover_capacity_edges() {
+        crate::initialize();
         let (first_block, block_count) = slab_block_layout(ConfigSizeClasses::<Standard>::SIZES[0]);
         assert!(first_block < block_count);
 
@@ -3909,6 +3918,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn slow_refills_reuse_active_and_partial_slabs() {
+        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
@@ -3976,6 +3986,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn allocator_recovers_from_commit_and_decommit_failures() {
+        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
@@ -4005,6 +4016,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn locality_slab_commit_failure_preserves_the_reserved_segment() {
+        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
@@ -4029,6 +4041,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn remote_and_direct_allocation_failures_return_null() {
+        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
@@ -4087,6 +4100,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn global_allocation_falls_back_after_injected_failures() {
+        crate::initialize();
         std::thread::spawn(|| {
             let allocator = unsafe { Rallocator::<Standard>::new() };
             hal::fail_next_map();
@@ -4107,6 +4121,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn thread_heap_and_bump_chunk_report_backing_failures() {
+        crate::initialize();
         std::thread::spawn(|| {
             hal::fail_next_map();
             assert!(thread_heap_state().is_none());
@@ -4150,6 +4165,7 @@ mod tests {
 
     #[test]
     fn tracking_target_creates_a_log_for_a_new_session() {
+        crate::initialize();
         tracking::track_callers(true);
         invalidate_tracking_cache();
         assert!(tracking_target::<Standard>().is_some());
@@ -4159,6 +4175,7 @@ mod tests {
 
     #[test]
     fn exhausted_bump_allocations_use_every_general_fallback_class() {
+        crate::initialize();
         let domain = new_domain();
         let options = allocation_hints::heap::bump::Options::new().with_max_allocation_bytes(1);
         let bump_state = bump::create_state(options, crate::domain::state(domain)).unwrap();
@@ -4216,6 +4233,7 @@ mod tests {
 
     #[test]
     fn medium_purge_releases_fixed_and_variable_spans() {
+        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let options = GeneralOptions::from_values(MEDIUM_SLICE_SIZE, 0);
@@ -4250,6 +4268,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn medium_purge_keeps_slices_reserved_when_decommit_fails() {
+        crate::initialize();
         let domain = new_domain();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut heap = ReusableHeapState::new(GeneralOptions::from_values(MEDIUM_SLICE_SIZE, 0), crate::domain::state(domain));
@@ -4282,6 +4301,7 @@ mod tests {
 
     #[test]
     fn invalid_medium_requests_and_non_region_metadata_are_rejected() {
+        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
@@ -4307,6 +4327,7 @@ mod tests {
 
     #[test]
     fn topology_snapshots_cover_continuations_and_truncated_spans() {
+        crate::initialize();
         let domain = new_domain();
         let domain_state = crate::domain::state(domain);
         let regions = unsafe { domain_regions(domain_state) };
@@ -4336,6 +4357,7 @@ mod tests {
 
     #[test]
     fn direct_slab_usage_and_list_removal_cover_non_head_entries() {
+        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
@@ -4416,6 +4438,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn retirement_handles_direct_slabs_and_decommit_failures() {
+        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let allocator = unsafe { Rallocator::<Standard>::new() };
@@ -4551,6 +4574,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn exhausted_region_and_secondary_extents_cover_search_edges() {
+        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let regions = &domain.regions;
@@ -4610,6 +4634,7 @@ mod tests {
 
     #[test]
     fn coordination_retries_and_partial_selection_cover_contended_paths() {
+        crate::initialize();
         let retirement = RetirementState::new();
         retirement.operations.store(OPERATION_RETIRED, Ordering::Relaxed);
         assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { acquire_heap_inspection(&retirement) })).is_err());
@@ -4710,6 +4735,7 @@ mod tests {
 
     #[test]
     fn publication_retries_after_deterministic_compare_exchange_contention() {
+        crate::initialize();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let mut workers = Vec::new();
         for _ in 0..2 {
@@ -4800,6 +4826,7 @@ mod tests {
 
     #[test]
     fn context_remote_inbox_returns_freed_blocks_to_partial_lists() {
+        crate::initialize();
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
@@ -4840,7 +4867,7 @@ mod tests {
                 drain_remote_inbox::<crate::tunables::Standard>(&mut ReusableHeapState::new(
                     GeneralOptions::new(),
                     ptr::from_mut(&mut domain),
-                ))
+                ));
             };
 
             unsafe {
@@ -4919,6 +4946,7 @@ mod tests {
 
     #[test]
     fn bitmap_and_extent_helpers_cover_wrapping_and_coalescing() {
+        crate::initialize();
         let mut used = [0; MEDIUM_REGION_BITMAP_WORDS];
         mark_slices(&mut used, 0, 2, true);
         mark_slices(&mut used, 4, 2, true);
@@ -4957,6 +4985,7 @@ mod tests {
 
     #[test]
     fn region_manager_expands_after_a_region_is_full() {
+        crate::initialize();
         let mut domain = DomainState::new();
         let domain_pointer = ptr::from_mut(&mut domain);
         let regions = &domain.regions;
@@ -4983,6 +5012,7 @@ mod tests {
 
     #[test]
     fn bump_chunks_are_slices_from_shared_regions() {
+        crate::initialize();
         let domain = new_domain();
         let domain_state = crate::domain::state(domain);
         let chunk = allocate_bump_chunk(domain_state);
@@ -4995,6 +5025,7 @@ mod tests {
     #[cfg(not(miri))]
     #[test]
     fn thread_exit_releases_empty_default_heap_slices() {
+        crate::initialize();
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let allocator = unsafe { Rallocator::<Standard>::new() };
@@ -5019,6 +5050,7 @@ mod tests {
 
     #[test]
     fn later_tls_destructor_can_use_allocator_after_thread_state_cleanup() {
+        crate::initialize();
         std::thread::spawn(|| {
             LATE_TLS_ALLOCATOR_USER.with(|_| {});
 
@@ -5034,6 +5066,7 @@ mod tests {
 
     #[test]
     fn escaped_thread_allocation_releases_its_slice_after_owner_exit() {
+        crate::initialize();
         let (sender, receiver) = mpsc::channel();
         let address = std::thread::spawn(move || {
             let allocator = unsafe { Rallocator::<Standard>::new() };

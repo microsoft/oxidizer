@@ -1,3 +1,11 @@
+//! Integration tests for allocator routes and custom configurations.
+#![expect(
+    clippy::cast_ptr_alignment,
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::undocumented_unsafe_blocks,
+    reason = "Tests construct deliberately aligned raw allocator storage and keep operations together for readability"
+)]
+
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::Mutex;
 
@@ -66,6 +74,7 @@ impl SendAddress {
 
 #[test]
 fn allocates_aligned_memory_and_tracks_statistics() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let warmup = Layout::from_size_align(16, 16).unwrap();
@@ -94,6 +103,7 @@ fn allocates_aligned_memory_and_tracks_statistics() {
 
 #[test]
 fn small_allocations_support_every_power_of_two_alignment() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     for alignment in [32, 64, 128, 256, 512, 1024, 2048, 4096] {
@@ -109,6 +119,7 @@ fn small_allocations_support_every_power_of_two_alignment() {
 
 #[test]
 fn application_defined_layout_builds_derived_lookup_tables() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(65, 16).unwrap();
@@ -119,6 +130,7 @@ fn application_defined_layout_builds_derived_lookup_tables() {
 
 #[test]
 fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(true);
     let layout = Layout::from_size_align(64, 16).unwrap();
@@ -153,6 +165,7 @@ fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
 
 #[test]
 fn small_allocations_reuse_size_class_slabs() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(64, 8).unwrap();
@@ -175,6 +188,7 @@ fn small_allocations_reuse_size_class_slabs() {
 
 #[test]
 fn local_small_reuse_does_not_overwrite_the_block() {
+    rallocator::initialize();
     let _test = test_lock();
     std::thread::spawn(|| {
         let allocator = &ALLOCATOR;
@@ -197,6 +211,7 @@ fn local_small_reuse_does_not_overwrite_the_block() {
 
 #[test]
 fn mixed_small_classes_share_a_locality_segment() {
+    rallocator::initialize();
     let _test = test_lock();
     std::thread::spawn(move || {
         let allocating = &ALLOCATOR;
@@ -229,6 +244,7 @@ fn mixed_small_classes_share_a_locality_segment() {
 
 #[test]
 fn large_allocations_release_direct_mappings() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = if cfg!(miri) {
@@ -251,6 +267,7 @@ fn large_allocations_release_direct_mappings() {
 
 #[test]
 fn medium_spans_are_aligned_and_reused() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let layout = Layout::from_size_align(64 * 1024, 64 * 1024).unwrap();
@@ -273,6 +290,7 @@ fn medium_spans_are_aligned_and_reused() {
 
 #[test]
 fn medium_region_supports_cached_and_variable_length_spans() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let before = stats().unwrap();
@@ -301,6 +319,7 @@ fn medium_region_supports_cached_and_variable_length_spans() {
 
 #[test]
 fn adjacent_large_extents_coalesce_and_split() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &ALLOCATOR;
     let (first_size, combined_size) = if cfg!(miri) {

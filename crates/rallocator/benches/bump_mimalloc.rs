@@ -1,3 +1,5 @@
+//! Bump workload benchmark using mimalloc.
+
 mod bump_workloads;
 mod ordinary_workloads;
 

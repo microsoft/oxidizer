@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-pub const WORKLOADS: crate::bump_workloads::Workloads = crate::bump_workloads::Workloads {
+pub(crate) const WORKLOADS: crate::bump_workloads::Workloads = crate::bump_workloads::Workloads {
     vectors,
     hash_maps,
     arcs_4: arcs::<4>,

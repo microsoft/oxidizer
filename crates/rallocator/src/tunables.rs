@@ -276,6 +276,7 @@ mod tests {
 
     #[test]
     fn runtime_size_class_validation_rejects_every_invalid_shape() {
+        crate::initialize();
         assert!(!valid_size_classes(black_box(&[])));
         assert!(!valid_size_classes(black_box(&[16; MAX_SIZE_CLASSES + 1])));
         assert!(!valid_size_classes(black_box(&[16, 32])));
@@ -287,6 +288,7 @@ mod tests {
 
     #[test]
     fn runtime_size_class_tables_cover_alignment_and_arithmetic_cases() {
+        crate::initialize();
         let sizes = black_box([16, 48, 64, 16_384]);
         let class_map = create_class_map(&sizes);
         assert_eq!(class_map[1], 0);

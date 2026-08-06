@@ -1,3 +1,5 @@
+//! Allocation benchmark with active caller tracking.
+
 mod workloads;
 
 rallocator::config!(AllTrackingWithCallersConfig {

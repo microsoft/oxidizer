@@ -1,3 +1,10 @@
+//! Integration tests for concurrent allocation and cross-thread frees.
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::undocumented_unsafe_blocks,
+    reason = "allocator integration tests group direct allocation operations into compact fixtures"
+)]
+
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::{Mutex, mpsc};
 
@@ -20,6 +27,8 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 #[derive(Clone, Copy)]
 struct SendAddress(*mut u8);
 
+// SAFETY: the wrapper only transports an address; tests deallocate it through the
+// same process-global allocator after ownership has moved to the receiving thread.
 unsafe impl Send for SendAddress {}
 
 impl SendAddress {
@@ -30,6 +39,7 @@ impl SendAddress {
 
 #[test]
 fn concurrent_threads_allocate_mixed_sizes() {
+    rallocator::initialize();
     let _test = test_lock();
     let before = stats().unwrap();
     let mut threads = Vec::new();
@@ -58,8 +68,8 @@ fn concurrent_threads_allocate_mixed_sizes() {
                 let address = unsafe { allocator.alloc(layout) };
                 assert!(!address.is_null());
                 unsafe {
-                    address.write((iteration & 0xFF) as u8);
-                    address.add(size - 1).write((thread_index & 0xFF) as u8);
+                    address.write(u8::try_from(iteration & 0xFF).unwrap());
+                    address.add(size - 1).write(u8::try_from(thread_index & 0xFF).unwrap());
                     allocator.dealloc(address, layout);
                 }
             }
@@ -77,6 +87,7 @@ fn concurrent_threads_allocate_mixed_sizes() {
 
 #[test]
 fn allocations_can_be_freed_on_another_thread() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &GLOBAL;
     let before = stats().unwrap();
@@ -106,6 +117,7 @@ fn allocations_can_be_freed_on_another_thread() {
 
 #[test]
 fn remotely_freed_small_blocks_return_to_the_owning_slab() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &GLOBAL;
     let layout = Layout::from_size_align(16 * 1024, 16).unwrap();
@@ -136,6 +148,7 @@ fn remotely_freed_small_blocks_return_to_the_owning_slab() {
 
 #[test]
 fn one_remote_inbox_entry_drains_many_blocks_from_the_same_slab() {
+    rallocator::initialize();
     let _test = test_lock();
     let blocks = if cfg!(miri) { 7 } else { 31 };
 
@@ -169,6 +182,7 @@ fn one_remote_inbox_entry_drains_many_blocks_from_the_same_slab() {
 
 #[test]
 fn small_blocks_can_be_freed_after_the_owner_thread_exits() {
+    rallocator::initialize();
     let _test = test_lock();
     let allocator = &GLOBAL;
     let before = stats().unwrap();
@@ -191,6 +205,7 @@ fn small_blocks_can_be_freed_after_the_owner_thread_exits() {
 
 #[test]
 fn concurrent_overaligned_allocations_preserve_alignment() {
+    rallocator::initialize();
     let _test = test_lock();
     let mut threads = Vec::new();
 

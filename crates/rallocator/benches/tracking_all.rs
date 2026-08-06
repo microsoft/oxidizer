@@ -1,3 +1,5 @@
+//! Allocation benchmark with all standard telemetry enabled.
+
 mod workloads;
 
 rallocator::config!(AllTrackingConfig {

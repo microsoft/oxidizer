@@ -17,6 +17,7 @@ pub struct Version {
 
 impl Version {
     /// Creates a producer version.
+    #[must_use]
     pub const fn new(major: u16, minor: u16, patch: u16) -> Self {
         Self { major, minor, patch }
     }
@@ -32,6 +33,7 @@ pub struct Header {
 
 impl Header {
     /// Creates a header for the current wire format.
+    #[must_use]
     pub const fn new(telemetry_schema: u16, producer: Version) -> Self {
         Self {
             wire_format: WIRE_FORMAT_VERSION,
@@ -41,21 +43,25 @@ impl Header {
     }
 
     /// Returns the encoded header length.
+    #[must_use]
     pub const fn encoded_len() -> usize {
         HEADER_LEN
     }
 
     /// Returns the wire-format version.
+    #[must_use]
     pub const fn wire_format(&self) -> u16 {
         self.wire_format
     }
 
     /// Returns the telemetry-schema version.
+    #[must_use]
     pub const fn telemetry_schema(&self) -> u16 {
         self.telemetry_schema
     }
 
     /// Returns the producer version.
+    #[must_use]
     pub const fn producer(&self) -> Version {
         self.producer
     }
@@ -79,21 +85,25 @@ pub struct Section<'a> {
 
 impl<'a> Section<'a> {
     /// Returns the encoded section-header length plus `payload_len`.
+    #[must_use]
     pub const fn encoded_len(payload_len: usize) -> usize {
         SECTION_HEADER_LEN + payload_len
     }
 
     /// Returns the section identifier.
+    #[must_use]
     pub const fn id(&self) -> u16 {
         self.id
     }
 
     /// Returns the section format version.
+    #[must_use]
     pub const fn version(&self) -> u16 {
         self.version
     }
 
     /// Returns the section payload.
+    #[must_use]
     pub const fn payload(&self) -> &'a [u8] {
         self.payload
     }

@@ -1,5 +1,3 @@
-use std::mem::size_of;
-
 pub(crate) const MEDIUM_MAX_SLICES: usize = 512;
 pub(crate) const MEDIUM_REGION_SIZE: usize = 1024 * 1024 * 1024;
 
@@ -30,4 +28,9 @@ pub(crate) unsafe fn write_free_requested(block: *mut u8, requested_bytes: usize
 #[inline(always)]
 pub(crate) unsafe fn read_free_requested(block: *mut u8) -> usize {
     unsafe { block.add(size_of::<usize>()).cast::<usize>().read() }
+}
+
+#[inline(always)]
+pub(crate) unsafe fn peek_free_requested(block: *mut u8) -> usize {
+    unsafe { read_free_requested(block) }
 }

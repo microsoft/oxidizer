@@ -1,3 +1,11 @@
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::undocumented_unsafe_blocks,
+    clippy::unwrap_used,
+    reason = "Bounded benchmark generators favor direct arithmetic and grouped raw allocation operations"
+)]
+
 use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::hint::black_box;
 use std::ptr;
@@ -27,7 +35,7 @@ struct LiveAllocation {
     layout: Layout,
 }
 
-pub fn run() {
+pub(crate) fn run() {
     let mut criterion = Criterion::default()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
@@ -142,7 +150,7 @@ fn run_mixed_scale_burst() -> usize {
             continue;
         }
 
-        if live_len != 0 && (live_len == live.len() || random & 3 == 0) {
+        if live_len != 0 && (live_len == live.len() || random.trailing_zeros() >= 2) {
             let index = (random as usize) % live_len;
             let allocation = live[index];
             live_len -= 1;

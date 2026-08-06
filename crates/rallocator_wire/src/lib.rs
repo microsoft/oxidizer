@@ -1,4 +1,12 @@
 #![no_std]
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "The compact wire primitives all return the crate's single documented error type"
+)]
+#![expect(
+    clippy::renamed_function_params,
+    reason = "Implementation parameter names are clearer than generic trait names"
+)]
 
 //! Allocation-free primitives for the rallocator snapshot wire format.
 //!
@@ -14,8 +22,16 @@ pub trait Encode {
     type Error;
 
     /// Returns the exact encoded byte length.
+    ///
+    /// # Errors
+    ///
+    /// Returns the implementation's error when the encoded length cannot be calculated.
     fn encoded_len(&self) -> Result<usize, Self::Error>;
     /// Writes the encoding into `output`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the implementation's error when `output` cannot hold the encoding.
     fn encode(&self, output: &mut [u8]) -> Result<usize, Self::Error>;
 }
 
@@ -25,6 +41,10 @@ pub trait Decode: Sized {
     type Error;
 
     /// Decodes a value from `input`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the implementation's error when `input` is malformed or unsupported.
     fn decode(input: &[u8]) -> Result<Self, Self::Error>;
 }
 

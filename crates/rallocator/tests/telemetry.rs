@@ -1,3 +1,12 @@
+//! Integration tests for allocator telemetry.
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::undocumented_unsafe_blocks,
+    clippy::unwrap_used,
+    reason = "Bounded fixtures exercise raw allocator telemetry and stop immediately on capture failures"
+)]
+
 use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
 use std::sync::Mutex;
@@ -33,6 +42,8 @@ rallocator::rallocator!(TelemetryConfig);
 fn caller_diagnostic_configuration_has_stable_defaults_and_overrides() {
     use rallocator::config::Config;
 
+    rallocator::initialize();
+
     const {
         assert!(TelemetryConfig::CALLER_EVENT_CAPACITY == 128 * 1024);
         assert!(TelemetryConfig::CALLER_ALLOCATION_STACK_FRAMES == 16);
@@ -50,6 +61,7 @@ fn caller_diagnostic_configuration_has_stable_defaults_and_overrides() {
 
 #[test]
 fn tracking_is_off_by_default_and_process_wide_when_enabled() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     let before = snapshot();
@@ -73,6 +85,7 @@ fn tracking_is_off_by_default_and_process_wide_when_enabled() {
 
 #[test]
 fn collection_includes_every_participating_thread_log() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -105,6 +118,7 @@ fn collection_includes_every_participating_thread_log() {
 
 #[test]
 fn remote_thread_heap_allocations_keep_caller_tracking() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     let heap = thread_heap().unwrap();
@@ -129,6 +143,7 @@ fn remote_thread_heap_allocations_keep_caller_tracking() {
 
 #[test]
 fn snapshot_encodes_allocations_by_stack() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -155,6 +170,7 @@ fn snapshot_encodes_allocations_by_stack() {
 
 #[test]
 fn tracked_allocation_can_be_freed_on_another_thread() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -201,6 +217,7 @@ fn tracked_allocation_can_be_freed_on_another_thread() {
 #[cfg(not(miri))]
 #[test]
 fn bounded_per_thread_logs_report_overwritten_events() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -223,6 +240,7 @@ fn bounded_per_thread_logs_report_overwritten_events() {
 
 #[test]
 fn collection_is_safe_while_a_thread_updates_its_log() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -258,6 +276,7 @@ fn collection_is_safe_while_a_thread_updates_its_log() {
 
 #[test]
 fn retained_call_stacks_are_encoded() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -279,6 +298,7 @@ fn retained_call_stacks_are_encoded() {
 
 #[test]
 fn tracked_larger_small_allocations_reuse_context_slabs() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     let allocator = &GLOBAL;
@@ -300,6 +320,7 @@ fn tracked_larger_small_allocations_reuse_context_slabs() {
 
 #[test]
 fn bump_heap_allocations_are_still_fully_tracked() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -328,6 +349,7 @@ fn bump_heap_allocations_are_still_fully_tracked() {
 
 #[test]
 fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -361,6 +383,7 @@ fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
 
 #[test]
 fn aggregate_and_per_thread_histograms_record_allocated_and_live_sizes() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     track_callers(true);
@@ -392,6 +415,7 @@ fn test_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[test]
 fn snapshot_reports_bounded_size_class_and_region_telemetry() {
+    rallocator::initialize();
     let _test = test_lock();
     track_callers(false);
     let value = Box::new([7_u8; 64]);
@@ -432,6 +456,7 @@ fn snapshot_reports_bounded_size_class_and_region_telemetry() {
 
 #[test]
 fn snapshot_reports_explicit_domain_region_use() {
+    rallocator::initialize();
     let _test = test_lock();
     let domain = Domain::new();
     let heap = Heap::with_options(Options::default().with_domain(domain));
@@ -451,6 +476,7 @@ fn snapshot_reports_explicit_domain_region_use() {
 
 #[test]
 fn sampler_and_session_report_interval_deltas() {
+    rallocator::initialize();
     let _test = test_lock();
     let mut sampler = Sampler::new().unwrap();
     drop(Box::new(11_u64));
@@ -467,6 +493,7 @@ fn sampler_and_session_report_interval_deltas() {
 
 #[test]
 fn opaque_snapshot_suppresses_operations_and_drop_releases_hal_storage() {
+    rallocator::initialize();
     let _test = test_lock();
     std::thread::sleep(std::time::Duration::from_millis(10));
     let path = format!("opaque-snapshot-{}.bin", std::process::id());

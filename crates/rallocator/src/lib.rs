@@ -1,3 +1,69 @@
+#![expect(
+    missing_debug_implementations,
+    missing_docs,
+    reason = "The initial allocator and telemetry surfaces remain intentionally unstable while their public shape is refined"
+)]
+#![expect(
+    clippy::assigning_clones,
+    reason = "Explicit clone operations make ownership changes visible in allocator state transitions"
+)]
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Allocator dimensions and wire fields are range-checked by their surrounding layout invariants"
+)]
+#![expect(
+    clippy::cast_ptr_alignment,
+    reason = "Raw mappings are explicitly aligned before typed allocator metadata is constructed"
+)]
+#![expect(clippy::inline_always, reason = "Selected allocator fast paths intentionally force inlining")]
+#![expect(
+    clippy::manual_let_else,
+    reason = "The existing forms mirror allocator state-machine and bitmap operations"
+)]
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "Internal configuration and telemetry types are documented through their containing API"
+)]
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::undocumented_unsafe_blocks,
+    reason = "Unsafe regions implement module-level allocator invariants documented at their helper and type boundaries"
+)]
+#![expect(
+    clippy::needless_pass_by_value,
+    clippy::needless_pass_by_ref_mut,
+    clippy::unused_self,
+    reason = "Signatures intentionally preserve uniform allocator and benchmark callback shapes"
+)]
+#![expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "Raw pointers reference process-retained or explicitly synchronized allocator state"
+)]
+#![expect(
+    clippy::renamed_function_params,
+    reason = "Implementation parameter names are clearer than generic trait names"
+)]
+#![expect(clippy::struct_field_names, reason = "Telemetry units stay explicit at call sites")]
+#![expect(
+    clippy::too_many_lines,
+    reason = "Allocator state-machine functions remain linear so lock and ownership transitions are auditable"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "Infallible formatting and test-only invariant checks use unwrap to expose programming errors"
+)]
+#![cfg_attr(
+    test,
+    expect(
+        clippy::clone_on_ref_ptr,
+        clippy::fn_to_numeric_cast_any,
+        clippy::iter_with_drain,
+        clippy::unnecessary_wraps,
+        reason = "Tests intentionally materialize ownership and mirror fallible callback signatures"
+    )
+)]
+
 //! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].
 //!
 //! # Usage
@@ -8,11 +74,14 @@
 //!
 //! ```
 //! rallocator::rallocator!();
+//! rallocator::initialize();
 //! ```
 //!
 //! The macro declares the required `#[global_allocator]` static and contains
 //! the unsafe call to [`Rallocator::new`], whose process-wide
-//! same-configuration invariant it establishes by construction.
+//! same-configuration invariant it establishes by construction. [`initialize`]
+//! registers rallocator with [`allocation_hints`] before heap or domain APIs are
+//! used.
 //!
 //! Ordinary allocations then use each thread's implicit general heap. To group
 //! related allocations, create a [`Heap`](allocation_hints::heap::Heap) and
@@ -23,6 +92,7 @@
 //! use allocation_hints::with_hint;
 //!
 //! rallocator::rallocator!();
+//! rallocator::initialize();
 //!
 //! let heap = Heap::bump(bump::Options::new());
 //! let values = with_hint(&heap, || vec![1, 2, 3]);
@@ -44,6 +114,7 @@
 //! rallocator::rallocator!(Telemetry);
 //!
 //! fn main() -> std::io::Result<()> {
+//!     rallocator::initialize();
 //!     track_callers(true);
 //!     let values = vec![1, 2, 3];
 //!     track_callers(false);
@@ -180,13 +251,22 @@ mod heap;
 pub mod telemetry;
 pub mod tunables;
 #[cfg(feature = "tuning-telemetry")]
-#[cfg_attr(not(test), allow(
-    dead_code,
-    reason = "internal tuning diagnostics are exercised by crate tests"
-))]
+#[cfg_attr(not(test), expect(dead_code, reason = "internal tuning diagnostics are exercised by crate tests"))]
 mod tuning_telemetry;
 
 pub use allocator::Rallocator;
+
+/// Registers rallocator as the process allocation-hint backend.
+///
+/// Call this once near the start of `main`, after declaring the global
+/// allocator with [`rallocator!`], and before creating allocation-hint heaps or
+/// domains. Repeated calls are harmless.
+///
+/// Ordinary global allocation does not require initialization and does not
+/// implicitly install the allocation-hint backend.
+pub fn initialize() {
+    heap::ensure_backend_registered();
+}
 
 /// Installs the process-global allocator.
 ///
@@ -195,6 +275,7 @@ pub use allocator::Rallocator;
 ///
 /// ```
 /// rallocator::rallocator!();
+/// rallocator::initialize();
 /// ```
 #[macro_export]
 macro_rules! rallocator {
@@ -205,4 +286,13 @@ macro_rules! rallocator {
         #[global_allocator]
         static GLOBAL: $crate::Rallocator<$config> = unsafe { $crate::Rallocator::new() };
     };
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn initialization_is_idempotent() {
+        crate::initialize();
+        crate::initialize();
+    }
 }

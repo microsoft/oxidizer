@@ -1,7 +1,6 @@
 //! Bump-backed allocation heaps.
 
 use std::alloc::Layout;
-use std::mem::{align_of, size_of};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
 
@@ -41,12 +40,14 @@ impl SegmentCredits {
 #[repr(C)]
 pub(crate) struct BumpChunk {
     marker: usize,
-    next: *mut BumpChunk,
+    state: *mut BumpState,
+    next: *mut Self,
 }
 
 #[repr(C)]
 struct BumpSegment {
     marker: usize,
+    state: *mut BumpState,
 }
 
 #[repr(C, align(64))]
@@ -72,7 +73,7 @@ pub(crate) struct BumpState {
     options: Options,
     pub(crate) domain: *mut DomainState,
     pub(crate) fallback_heap: *mut ReusableHeapState,
-    pub(crate) pool_next: *mut BumpState,
+    pub(crate) pool_next: *mut Self,
 }
 
 #[repr(C)]
@@ -92,7 +93,11 @@ struct GlobalBumpPool {
     head: std::cell::UnsafeCell<*mut BumpState>,
 }
 
+// SAFETY: The global pool head is read or written only while `locked` is held.
 unsafe impl Sync for GlobalBumpPool {}
+// SAFETY: A BumpState may move between threads only while inactive. Its
+// non-atomic allocation fields are serialized by the heap's exclusive claim;
+// cross-thread deallocation uses the atomic reference count and usage seqcount.
 unsafe impl Send for BumpState {}
 
 static GLOBAL_POOL: GlobalBumpPool = GlobalBumpPool {
@@ -111,6 +116,8 @@ pub(crate) fn usage(state: &BumpState) -> (usize, usize, usize, usize, usize, us
     usage_with_retry_hook(state, |_| {})
 }
 
+// The exclusive heap claim serializes allocation and inspection. The seqcount
+// only stabilizes the non-atomic accounting fields against cross-thread frees.
 fn usage_with_retry_hook(state: &BumpState, retry_hook: fn(&BumpState)) -> (usize, usize, usize, usize, usize, usize) {
     loop {
         let sequence = state.usage_sequence.load(Ordering::Acquire);
@@ -215,6 +222,23 @@ pub(crate) unsafe fn set_tracking(address: *mut u8, allocation: TrackingAllocati
     unsafe { (*header).allocation = allocation };
 }
 
+/// Returns the bump state recorded in an allocator-owned segment prefix.
+///
+/// # Safety
+///
+/// `segment` must point to readable allocator metadata preceding the
+/// allocation. The allocation must not begin at `segment`, because such an
+/// allocation owns the marker and state bytes itself.
+#[inline(always)]
+pub(crate) unsafe fn state_for_allocation(segment: *mut u8, marker: usize) -> Option<*mut BumpState> {
+    if marker != BUMP_CHUNK_MARKER {
+        return None;
+    }
+    let state = unsafe { (*segment.cast::<BumpSegment>()).state };
+    debug_assert!(!state.is_null());
+    (!state.is_null()).then_some(state)
+}
+
 #[inline(always)]
 pub(crate) unsafe fn deallocate(state: *mut BumpState, address: *mut u8, layout: Layout, reclaim_tail: bool) {
     let size = layout.size().max(1);
@@ -228,7 +252,7 @@ pub(crate) unsafe fn deallocate(state: *mut BumpState, address: *mut u8, layout:
             // recovering padding that preceded it.
             address,
             reclaim_tail,
-        )
+        );
     };
 }
 
@@ -342,6 +366,7 @@ pub(crate) fn create_state(options: Options, domain: *mut DomainState) -> Option
         root.write(BumpRoot {
             chunk: BumpChunk {
                 marker: BUMP_CHUNK_MARKER,
+                state,
                 next: ptr::null_mut(),
             },
             state: BumpState {
@@ -369,7 +394,7 @@ pub(crate) fn create_state(options: Options, domain: *mut DomainState) -> Option
                 pool_next: ptr::null_mut(),
             },
         });
-        write_second_segment(chunk);
+        write_second_segment(chunk, state);
     }
     crate::allocator::register_bump_chunk(mapping, state);
     Some(state)
@@ -437,9 +462,10 @@ unsafe fn advance_chunk(state: *mut BumpState) -> bool {
         unsafe {
             chunk.write(BumpChunk {
                 marker: BUMP_CHUNK_MARKER,
+                state,
                 next: ptr::null_mut(),
             });
-            write_second_segment(chunk);
+            write_second_segment(chunk, state);
             (*(*state).tail).next = chunk;
         }
         crate::allocator::register_bump_chunk(mapping, state);
@@ -567,10 +593,19 @@ fn second_segment_start(chunk: *mut BumpChunk) -> *mut u8 {
     chunk.cast::<u8>().with_addr(align_up(start, 16).unwrap())
 }
 
-unsafe fn write_second_segment(chunk: *mut BumpChunk) {
+/// Writes the allocator-owned prefix for a chunk's second segment.
+///
+/// # Safety
+///
+/// `chunk` must identify a live, writable [`BUMP_CHUNK_SIZE`]-byte bump chunk,
+/// and `state` must remain valid while allocations from that chunk are live.
+unsafe fn write_second_segment(chunk: *mut BumpChunk, state: *mut BumpState) {
     let segment = unsafe { chunk.cast::<u8>().add(BUMP_SEGMENT_SIZE).cast::<BumpSegment>() };
     unsafe {
-        segment.write(BumpSegment { marker: BUMP_CHUNK_MARKER });
+        segment.write(BumpSegment {
+            marker: BUMP_CHUNK_MARKER,
+            state,
+        });
     }
 }
 
@@ -652,7 +687,7 @@ mod tests {
     use super::*;
 
     fn default_domain_state() -> *mut crate::allocator::DomainState {
-        crate::heap::ensure_backend_registered();
+        crate::initialize();
         crate::domain::state(Domain::default())
     }
 
@@ -677,6 +712,7 @@ mod tests {
 
     #[test]
     fn usage_retries_while_a_writer_is_active_or_changes_sequence() {
+        crate::initialize();
         let state = state(Options::new());
         let state_ref = unsafe { &*state };
         assert_eq!(options(state_ref), Options::new());
@@ -694,6 +730,7 @@ mod tests {
 
     #[test]
     fn allocation_rejects_address_overflow_and_exhausted_backing() {
+        crate::initialize();
         let state = state(Options::new());
         let original_cursor = unsafe { (*state).cursor };
         unsafe { (*state).cursor = ptr::without_provenance_mut(usize::MAX) };
@@ -716,6 +753,7 @@ mod tests {
 
     #[test]
     fn deallocation_waits_for_an_in_progress_usage_update() {
+        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let address = unsafe { allocate(state, layout) };
@@ -733,6 +771,7 @@ mod tests {
 
     #[test]
     fn contiguous_latest_allocations_rewind_in_reverse_order() {
+        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let first = unsafe { allocate(state, layout) };
@@ -759,6 +798,7 @@ mod tests {
 
     #[test]
     fn tracked_latest_allocations_restore_alignment_padding() {
+        crate::initialize();
         let state = state(Options::new());
         let first_layout = Layout::from_size_align(3, 1).unwrap();
         let second_layout = Layout::from_size_align(5, 8).unwrap();
@@ -784,6 +824,7 @@ mod tests {
 
     #[test]
     fn non_latest_allocation_does_not_rewind_the_cursor() {
+        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let first = unsafe { allocate(state, layout) };
@@ -801,6 +842,7 @@ mod tests {
 
     #[test]
     fn headerless_alignment_padding_stops_the_rewind_chain_safely() {
+        crate::initialize();
         let state = state(Options::new());
         let first_layout = Layout::from_size_align(1, 1).unwrap();
         let second_layout = Layout::from_size_align(1, 64).unwrap();
@@ -818,6 +860,7 @@ mod tests {
 
     #[test]
     fn final_allocation_release_returns_state_without_a_handle() {
+        crate::initialize();
         let state = state(Options::new());
         let layout = Layout::new::<u64>();
         let address = unsafe { allocate(state, layout) };
@@ -831,6 +874,7 @@ mod tests {
 
     #[test]
     fn matching_state_removal_handles_a_non_head_domain() {
+        crate::initialize();
         let first = state(Options::new());
         let second = state(Options::new());
         let first_domain = ptr::without_provenance_mut::<DomainState>(std::mem::align_of::<DomainState>());
@@ -849,6 +893,7 @@ mod tests {
 
     #[test]
     fn state_creation_and_fallback_restoration_report_allocation_failures() {
+        crate::initialize();
         let domain = default_domain_state();
         inject_failure(&FAIL_NEXT_CHUNK_ALLOCATION);
         assert!(create_state(Options::new(), domain).is_none());
@@ -866,6 +911,7 @@ mod tests {
 
     #[test]
     fn state_thresholds_and_retention_cover_direct_lifecycle_paths() {
+        crate::initialize();
         let options = Options::new().with_retained_chunks(1).with_max_retained_chunks(4);
         let state = state(options);
         assert!(ensure_fallback_heap(state));
@@ -886,6 +932,7 @@ mod tests {
 
     #[test]
     fn reset_reuses_available_chunks_and_zero_credits_need_no_release() {
+        crate::initialize();
         let options = Options::new().with_retained_chunks(2);
         let state = state(options);
         let layout = Layout::from_size_align(BUMP_SEGMENT_SIZE / 2, 16).unwrap();
@@ -921,6 +968,7 @@ mod tests {
 
     #[test]
     fn global_pool_lock_spins_until_the_owner_releases_it() {
+        crate::initialize();
         GLOBAL_POOL.locked.store(true, Ordering::Relaxed);
         let started = Arc::new(AtomicBool::new(false));
         let worker_started = Arc::clone(&started);

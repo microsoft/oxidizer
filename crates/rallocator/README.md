@@ -23,14 +23,17 @@ Install the standard configuration as the process-global allocator:
 
 ```rust
 rallocator::rallocator!();
+rallocator::initialize();
 ```
 
 The macro declares the required `#[global_allocator]` static and contains
 the unsafe call to [`Rallocator::new`][__link1], whose process-wide
-same-configuration invariant it establishes by construction.
+same-configuration invariant it establishes by construction. [`initialize`][__link2]
+registers rallocator with [`allocation_hints`][__link3] before heap or domain APIs are
+used.
 
 Ordinary allocations then use each thread’s implicit general heap. To group
-related allocations, create a [`Heap`][__link2] and
+related allocations, create a [`Heap`][__link4] and
 activate it for a synchronous scope:
 
 ```rust
@@ -38,6 +41,7 @@ use allocation_hints::heap::{Heap, bump};
 use allocation_hints::with_hint;
 
 rallocator::rallocator!();
+rallocator::initialize();
 
 let heap = Heap::bump(bump::Options::new());
 let values = with_hint(&heap, || vec![1, 2, 3]);
@@ -46,8 +50,8 @@ assert_eq!(values.len(), 3);
 
 ### Telemetry
 
-Telemetry is opt-in at compile time. Define a [`config::Config`][__link3] with
-aggregate or caller tracking enabled, then pass it to [`rallocator!`][__link4]:
+Telemetry is opt-in at compile time. Define a [`config::Config`][__link5] with
+aggregate or caller tracking enabled, then pass it to [`rallocator!`][__link6]:
 
 ```rust
 use rallocator::telemetry::{snapshot, stats, track_callers};
@@ -59,6 +63,7 @@ rallocator::config!(Telemetry {
 rallocator::rallocator!(Telemetry);
 
 fn main() -> std::io::Result<()> {
+    rallocator::initialize();
     track_callers(true);
     let values = vec![1, 2, 3];
     track_callers(false);
@@ -81,9 +86,9 @@ snapshots include allocator topology, counters, and retained caller events.
 
 Rallocator is organized as a hierarchy:
 
-* A [`Domain`][__link5] owns one or more 1 GiB virtual-memory
+* A [`Domain`][__link7] owns one or more 1 GiB virtual-memory
   **regions**, divided into 64 KiB **slices**.
-* A domain can serve multiple [`Heap`][__link6] instances.
+* A domain can serve multiple [`Heap`][__link8] instances.
   Each heap keeps its own allocation state while drawing backing memory from
   its domain.
 * General heaps use slices for **locality segments** containing 32 KiB
@@ -167,7 +172,7 @@ Rallocator is organized as a hierarchy:
 </svg>
 </div>
 
-Each thread has an implicit general heap. [`with_hint`][__link7] can
+Each thread has an implicit general heap. [`with_hint`][__link9] can
 temporarily route allocations to an explicit general or bump heap instead;
 leaving the scope restores the previous heap. This keeps the common
 allocation path thread-local while allowing runtimes and data structures to
@@ -193,12 +198,14 @@ allocations that escaped its lifetime.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG3jSV9rxJobtGw2ha9tjZM2NGzkZv7TaLGdZG7KSCWWX9vqaYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG88UsUuNgPCaG3USoxX4G8TEG3G7lsDXIR-jG_lrpwv_oVeVYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
  [__link0]: https://crates.io/crates/allocation_hints/0.1.0
  [__link1]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
- [__link2]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link3]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
- [__link4]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
- [__link5]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
- [__link6]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link7]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
+ [__link3]: https://crates.io/crates/allocation_hints/0.1.0
+ [__link4]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
+ [__link5]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
+ [__link6]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
+ [__link7]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
+ [__link8]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
+ [__link9]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint

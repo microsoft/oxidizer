@@ -40,6 +40,7 @@ pub struct Options {
 
 impl Options {
     /// Creates options for `kind`.
+    #[must_use]
     pub const fn new(kind: Kind) -> Self {
         Self {
             kind,
@@ -49,38 +50,48 @@ impl Options {
     }
 
     /// Creates general-purpose heap options.
+    #[must_use]
     pub const fn general(options: general::Options) -> Self {
         Self::new(Kind::General(options))
     }
 
     /// Creates bump heap options.
+    #[must_use]
     pub const fn bump(options: bump::Options) -> Self {
         Self::new(Kind::Bump(options))
     }
 
     /// Returns the selected heap kind.
+    #[must_use]
     pub const fn kind(self) -> Kind {
         self.kind
     }
 
     /// Assigns the heap to `domain`.
+    #[must_use]
     pub fn with_domain(mut self, domain: impl Into<Domain>) -> Self {
         self.domain = Some(domain.into());
         self
     }
 
     /// Requests reusable backing state from the backend's thread-local pool.
+    ///
+    /// Pooling is intended for bump heaps. Backends may reject this policy for
+    /// other heap kinds.
+    #[must_use]
     pub const fn with_thread_pool(mut self) -> Self {
         self.creation_policy = CreationPolicy::ThreadPool;
         self
     }
 
     /// Returns the selected domain, if any.
+    #[must_use]
     pub const fn domain(self) -> Option<Domain> {
         self.domain
     }
 
     /// Returns the backing-state creation policy.
+    #[must_use]
     pub const fn creation_policy(self) -> CreationPolicy {
         self.creation_policy
     }
@@ -112,21 +123,25 @@ pub enum InfoKind {
 
 impl Info {
     /// Returns whether the heap is active.
+    #[must_use]
     pub const fn is_active(&self) -> bool {
         self.active
     }
 
     /// Returns heap-kind-specific information.
+    #[must_use]
     pub const fn kind(&self) -> &InfoKind {
         &self.kind
     }
 
     /// Returns the domain that supplies this heap's regions.
+    #[must_use]
     pub const fn domain(&self) -> Domain {
         self.domain
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(active: bool, domain: Domain, kind: InfoKind) -> Self {
         Self { active, domain, kind }
     }
@@ -155,11 +170,13 @@ pub enum UsageKind {
 
 impl Usage {
     /// Returns heap-kind-specific usage.
+    #[must_use]
     pub const fn kind(&self) -> &UsageKind {
         &self.kind
     }
 
     /// Returns general-purpose usage when this is a general heap.
+    #[must_use]
     pub const fn general(&self) -> Option<&general::Usage> {
         match &self.kind {
             UsageKind::General(usage) => Some(usage),
@@ -168,6 +185,7 @@ impl Usage {
     }
 
     /// Returns bump usage when this is a bump heap.
+    #[must_use]
     pub const fn bump(&self) -> Option<&bump::Usage> {
         match &self.kind {
             UsageKind::General(_) => None,
@@ -176,36 +194,43 @@ impl Usage {
     }
 
     /// Returns whether the heap has no live allocations.
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.live_allocations == 0
     }
 
     /// Returns the number of live allocations.
+    #[must_use]
     pub const fn live_allocations(&self) -> usize {
         self.live_allocations
     }
 
     /// Returns live requested bytes.
+    #[must_use]
     pub const fn live_requested_bytes(&self) -> usize {
         self.live_requested_bytes
     }
 
     /// Returns live usable bytes.
+    #[must_use]
     pub const fn live_usable_bytes(&self) -> usize {
         self.live_usable_bytes
     }
 
     /// Returns reserved bytes.
+    #[must_use]
     pub const fn reserved_bytes(&self) -> usize {
         self.reserved_bytes
     }
 
     /// Returns committed bytes.
+    #[must_use]
     pub const fn committed_bytes(&self) -> usize {
         self.committed_bytes
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(
         live_allocations: usize,
         live_requested_bytes: usize,
@@ -270,6 +295,7 @@ struct ReleaseClaim<'a>(&'a HeapId);
 
 impl Heap {
     /// Creates a fresh general-purpose heap with standard options.
+    #[must_use]
     pub fn new() -> Self {
         Self::with_options(Options::default())
     }
@@ -280,6 +306,7 @@ impl Heap {
     }
 
     /// Creates a fresh bump heap.
+    #[must_use]
     pub fn bump(options: bump::Options) -> Self {
         Self::with_options(Options::bump(options))
     }
@@ -290,6 +317,7 @@ impl Heap {
     }
 
     /// Creates a general-purpose or bump heap.
+    #[must_use]
     pub fn with_options(options: Options) -> Self {
         Self::try_with_options(options).unwrap_or_else(|error| panic!("{error}"))
     }
@@ -303,6 +331,7 @@ impl Heap {
     }
 
     /// Obtains pooled bump backing state from the current thread or creates it.
+    #[must_use]
     pub fn from_thread_pool(options: bump::Options) -> Self {
         Self::with_options(Options::bump(options).with_thread_pool())
     }
@@ -321,6 +350,7 @@ impl Heap {
     /// whether simultaneous scoped activation is safe. The backend must satisfy
     /// [`Backend::new`]'s callback invariants.
     #[doc(hidden)]
+    #[must_use]
     pub unsafe fn from_raw(hint: RawHint, backend: &'static Backend, claim_policy: ClaimPolicy) -> Self {
         unsafe { backend::register(backend) };
         assert!(!hint.is_global(), "a heap target must not be global");
@@ -342,23 +372,52 @@ impl Heap {
     }
 
     /// Returns the stable identity of this heap.
+    #[must_use]
     pub fn identity(&self) -> usize {
         self.id.identity()
     }
 
     /// Returns whether this heap currently holds an exclusive activation claim.
+    #[must_use]
     pub fn is_claimed(&self) -> bool {
         self.id.control.active.load(Ordering::Acquire)
     }
 
     /// Returns cheap identity and configuration information.
+    #[must_use]
     pub fn info(&self) -> Info {
         self.with_exclusive_access(|control, active_here| unsafe { (control.backend.info)(control.hint, active_here) })
     }
 
+    /// Tries to return cheap identity and configuration information without waiting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an exclusive heap is active on another thread.
+    pub fn try_info(&self) -> Result<Info, crate::Error> {
+        self.try_with_exclusive_access(|control, active_here| unsafe { (control.backend.info)(control.hint, active_here) })
+            .ok_or_else(crate::Error::inspection_contended)
+    }
+
     /// Returns a consistent usage snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a thread heap is queried outside its owner thread.
     pub fn usage(&self) -> Result<Usage, crate::Error> {
         self.with_exclusive_access(|control, _| unsafe { (control.backend.usage)(control.hint) })
+            .map_err(|()| crate::Error::usage_unavailable())
+    }
+
+    /// Tries to return a consistent usage snapshot without waiting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an exclusive heap is active on another thread or
+    /// when a thread heap is queried outside its owner thread.
+    pub fn try_usage(&self) -> Result<Usage, crate::Error> {
+        self.try_with_exclusive_access(|control, _| unsafe { (control.backend.usage)(control.hint) })
+            .ok_or_else(crate::Error::inspection_contended)?
             .map_err(|()| crate::Error::usage_unavailable())
     }
 
@@ -366,10 +425,14 @@ impl Heap {
     ///
     /// A heap already active on this thread is inspected directly.
     fn with_exclusive_access<R>(&self, inspect: impl FnOnce(&HeapControl, bool) -> R) -> R {
-        let active_here = crate::is_claimed(self.id.identity());
-        if active_here || self.id.claim_policy() == ClaimPolicy::Shared {
-            return inspect(&self.id.control, active_here);
+        let mut inspect = Some(inspect);
+        if let Some(result) = self.try_with_exclusive_access(|control, active_here| {
+            inspect.take().expect("inspection callback is invoked at most once")(control, active_here)
+        }) {
+            return result;
         }
+
+        let inspect = inspect.expect("a contended nonblocking inspection does not invoke its callback");
         let mut spins = 0;
         while !self.id.claim() {
             if spins < 64 {
@@ -382,12 +445,25 @@ impl Heap {
         let _release = ReleaseClaim(&self.id);
         inspect(&self.id.control, false)
     }
+
+    fn try_with_exclusive_access<R>(&self, inspect: impl FnOnce(&HeapControl, bool) -> R) -> Option<R> {
+        let active_here = crate::is_claimed(self.id.identity());
+        if active_here || self.id.claim_policy() == ClaimPolicy::Shared {
+            return Some(inspect(&self.id.control, active_here));
+        }
+        if !self.id.claim() {
+            return None;
+        }
+        let _release = ReleaseClaim(&self.id);
+        Some(inspect(&self.id.control, false))
+    }
 }
 
 /// Returns a handle that lets other threads allocate for the current thread.
 ///
 /// Returns `None` when no supporting allocator backend is installed or the
 /// backend cannot create the required process-retained queue metadata.
+#[must_use]
 pub fn thread_heap() -> Option<Heap> {
     let backend = installed_backend()?;
     let raw = (backend.thread_heap)()?;
@@ -396,12 +472,7 @@ pub fn thread_heap() -> Option<Heap> {
 }
 
 fn installed_backend() -> Option<&'static Backend> {
-    // Allocating this box can lazily initialize the process allocator and
-    // register its backend before the registry is inspected.
-    let registration_probe = Box::<u8>::new_uninit();
-    let backend = backend::installed();
-    drop(registration_probe);
-    backend
+    backend::installed()
 }
 
 impl Default for Heap {
@@ -410,8 +481,8 @@ impl Default for Heap {
     }
 }
 
-impl AsRef<Heap> for Heap {
-    fn as_ref(&self) -> &Heap {
+impl AsRef<Self> for Heap {
+    fn as_ref(&self) -> &Self {
         self
     }
 }

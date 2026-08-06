@@ -1,3 +1,37 @@
+#![expect(
+    clippy::inline_always,
+    reason = "Scoped hint entry and restoration are allocator hot paths intentionally forced inline"
+)]
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "Heap operations return the crate's small documented error type"
+)]
+#![expect(
+    clippy::missing_panics_doc,
+    reason = "Infallible constructors and validated builders panic only on documented contract violations"
+)]
+#![expect(
+    clippy::panic,
+    reason = "Infallible public APIs and invariant checks intentionally panic"
+)]
+#![expect(
+    clippy::renamed_function_params,
+    reason = "Implementation parameter names are clearer than generic trait names"
+)]
+#![expect(
+    clippy::undocumented_unsafe_blocks,
+    reason = "Unsafe backend calls are covered by the Backend and raw target safety contracts"
+)]
+#![cfg_attr(
+    test,
+    expect(
+        clippy::items_after_statements,
+        clippy::multiple_unsafe_ops_per_block,
+        clippy::unnecessary_wraps,
+        reason = "Test callbacks intentionally mirror the backend ABI and keep setup local to each scenario"
+    )
+)]
+
 //! Infrastructure for allocator-agnostic heap allocation hints.
 //!
 //! Libraries can use [`with_hint`] to set a thread-local [`Hint`] that a
@@ -57,10 +91,17 @@ pub struct Error {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ErrorKind {
+    InspectionContended,
     UsageUnavailable,
 }
 
 impl Error {
+    const fn inspection_contended() -> Self {
+        Self {
+            kind: ErrorKind::InspectionContended,
+        }
+    }
+
     const fn usage_unavailable() -> Self {
         Self {
             kind: ErrorKind::UsageUnavailable,
@@ -71,6 +112,7 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
+            ErrorKind::InspectionContended => formatter.write_str("the heap is active on another thread"),
             ErrorKind::UsageUnavailable => formatter.write_str("thread-heap usage must be queried from its owner thread"),
         }
     }
@@ -87,20 +129,27 @@ impl std::error::Error for Error {}
 /// Allocator-independent options applied by [`with_hint`].
 pub struct Hint {
     heap: Option<HeapId>,
+    not_sync: std::marker::PhantomData<Cell<()>>,
 }
 
 impl Hint {
     /// Creates a hint selecting the process-global allocation target.
+    #[must_use]
     pub const fn new() -> Self {
-        Self { heap: None }
+        Self {
+            heap: None,
+            not_sync: std::marker::PhantomData,
+        }
     }
 
     /// Selects the process-global allocation target.
+    #[must_use]
     pub const fn global() -> Self {
         Self::new()
     }
 
     /// Routes allocations through [`heap::Heap`].
+    #[must_use]
     pub fn with_heap(mut self, heap: &Heap) -> Self {
         self.heap = Some(heap.id.clone());
         self
@@ -113,7 +162,10 @@ impl Hint {
 
 impl Clone for Hint {
     fn clone(&self) -> Self {
-        Self { heap: self.heap.clone() }
+        Self {
+            heap: self.heap.clone(),
+            not_sync: std::marker::PhantomData,
+        }
     }
 }
 
@@ -154,6 +206,8 @@ impl fmt::Debug for Hint {
 ///
 /// Calls may be nested. The previous hint is restored even if `operation`
 /// panics. A [`Hint`] or a borrowed [`heap::Heap`] may be passed directly.
+/// At most 16 distinct exclusive heaps may be active in one nested scope chain;
+/// re-entering an already-active heap does not consume another slot.
 #[inline(always)]
 pub fn with_hint<R>(hint: impl Into<Hint>, operation: impl FnOnce() -> R) -> R {
     let hint = hint.into();
@@ -289,42 +343,24 @@ impl ThreadContext {
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::{GlobalAlloc, Layout, System};
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
 
     use super::*;
     use crate::backend::{RawDomain, RawHeap};
     use crate::domain::Domain;
     use crate::heap::{CreationError, Info, InfoKind, Options, Usage, UsageKind, bump, general};
 
+    static_assertions::assert_impl_all!(Hint: Clone);
+    static_assertions::assert_not_impl_any!(Hint: Sync);
+
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    static REGISTER_ON_NEXT_ALLOCATION: AtomicBool = AtomicBool::new(false);
-    static LAZY_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
     static ACTIVE_KIND: AtomicUsize = AtomicUsize::new(0);
     static NEXT_DOMAIN_IDENTITY: AtomicUsize = AtomicUsize::new(2);
     static DROPS: AtomicUsize = AtomicUsize::new(0);
     static THREAD_CONTEXT_CALLS: AtomicUsize = AtomicUsize::new(0);
     static PANIC_ON_ACTIVATE: AtomicBool = AtomicBool::new(false);
-
-    struct LazyRegisteringAllocator;
-
-    unsafe impl GlobalAlloc for LazyRegisteringAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            if REGISTER_ON_NEXT_ALLOCATION.swap(false, Ordering::Relaxed) {
-                unsafe { crate::backend::register(&TEST_BACKEND) };
-                LAZY_REGISTRATIONS.fetch_add(1, Ordering::Relaxed);
-            }
-            unsafe { System.alloc(layout) }
-        }
-
-        unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
-            unsafe { System.dealloc(address, layout) };
-        }
-    }
-
-    #[global_allocator]
-    static GLOBAL: LazyRegisteringAllocator = LazyRegisteringAllocator;
 
     fn create_domain() -> Option<RawDomain> {
         Some(unsafe { RawDomain::new(ptr::without_provenance_mut(NEXT_DOMAIN_IDENTITY.fetch_add(1, Ordering::Relaxed))) })
@@ -443,13 +479,11 @@ mod tests {
     #[test]
     fn backend_factory_creates_common_domains() {
         let _test = TEST_LOCK.lock().unwrap();
-        let registrations = LAZY_REGISTRATIONS.load(Ordering::Relaxed);
-        REGISTER_ON_NEXT_ALLOCATION.store(true, Ordering::Relaxed);
+        unsafe { crate::backend::register(&TEST_BACKEND) };
         let first = Domain::new();
         let second = Domain::try_new().unwrap();
         let default = Domain::default();
 
-        assert_eq!(LAZY_REGISTRATIONS.load(Ordering::Relaxed), registrations + 1);
         assert_ne!(first, second);
         assert_ne!(first, default);
         assert_eq!(default, Domain::default());
@@ -525,5 +559,48 @@ mod tests {
         .join()
         .unwrap();
         assert_eq!(THREAD_CONTEXT_CALLS.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn nonblocking_inspection_reports_an_exclusive_claim_on_another_thread() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let heap = heap(1, ClaimPolicy::Exclusive);
+        let remote_hint = Hint::new().with_heap(&heap);
+        let active = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let remote_active = Arc::clone(&active);
+        let remote_release = Arc::clone(&release);
+        let remote = std::thread::spawn(move || {
+            with_hint(remote_hint, || {
+                remote_active.wait();
+                remote_release.wait();
+            });
+        });
+
+        active.wait();
+        assert_eq!(heap.try_info().unwrap_err().to_string(), "the heap is active on another thread");
+        assert_eq!(heap.try_usage().unwrap_err().to_string(), "the heap is active on another thread");
+        release.wait();
+        remote.join().unwrap();
+        heap.try_info().unwrap();
+        heap.try_usage().unwrap();
+    }
+
+    #[test]
+    fn exclusive_heap_nesting_is_bounded() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let heaps = (0..=MAX_CLAIMED_HEAPS)
+            .map(|index| heap(index + 1, ClaimPolicy::Exclusive))
+            .collect::<Vec<_>>();
+
+        fn enter_all(heaps: &[Heap]) {
+            if let Some((heap, remaining)) = heaps.split_first() {
+                with_hint(heap, || enter_all(remaining));
+            }
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| enter_all(&heaps)));
+        assert!(result.is_err());
+        assert!(heaps.iter().all(|heap| !heap.is_claimed()));
     }
 }

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::renamed_function_params,
+    reason = "Display implementations use descriptive formatter names"
+)]
+
 //! Snapshot-to-HTML reporting for the `rallocator` command.
 
 mod commands;
@@ -38,7 +43,7 @@ fn execute(args: Vec<OsString>) -> ExitCode {
         Err(error) => {
             let code = error.exit_code();
             let _ = error.print();
-            return ExitCode::from(code as u8);
+            return ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
     };
     ExitCode::from(exit_code(run(cli)))

@@ -1,10 +1,15 @@
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "Bounded deterministic benchmark generators use compact integer arithmetic"
+)]
+
 use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 #[derive(Clone, Copy)]
-pub struct Workloads {
+pub(crate) struct Workloads {
     pub vectors: fn(usize, usize),
     pub hash_maps: fn(usize, usize),
     pub arcs_4: fn(usize),
@@ -13,7 +18,7 @@ pub struct Workloads {
     pub mixed_lifecycle: fn(usize, usize),
 }
 
-pub fn run(workloads: Workloads) {
+pub(crate) fn run(workloads: Workloads) {
     let mut criterion = Criterion::default()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
@@ -93,22 +98,22 @@ fn mixed_lifecycle_workloads(criterion: &mut Criterion, workload: fn(usize, usiz
     group.finish();
 }
 
-pub const MIXED_VECTOR_COUNT: usize = 24;
-pub const MIXED_MAP_ENTRIES: usize = 64;
-pub const MIXED_ARC_COUNT: usize = 24;
+pub(crate) const MIXED_VECTOR_COUNT: usize = 24;
+pub(crate) const MIXED_MAP_ENTRIES: usize = 64;
+pub(crate) const MIXED_ARC_COUNT: usize = 24;
 
-pub struct AllocationNoise {
+pub(crate) struct AllocationNoise {
     state: u64,
 }
 
 impl AllocationNoise {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             state: 0x7a15_4f29_d6e8_b3c1,
         }
     }
 
-    pub fn run(&mut self, operations: usize) {
+    pub(crate) fn run(&mut self, operations: usize) {
         const LIVE_SLOTS: usize = 32;
         const SIZES: [usize; 16] = [8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1_024, 2_048, 4_096];
 
@@ -121,14 +126,14 @@ impl AllocationNoise {
             let size = base_size + self.next() as usize % (base_size / 2 + 1);
             let mut allocation = vec![random as u8; size];
 
-            if random & 3 == 0 {
+            if random.trailing_zeros() >= 2 {
                 allocation.reserve_exact(base_size / 2 + 1);
             }
 
             let slot = self.next() as usize % LIVE_SLOTS;
             live[slot] = Some(allocation);
 
-            if random & 7 == 0 {
+            if random.trailing_zeros() >= 3 {
                 let dropped_slot = self.next() as usize % LIVE_SLOTS;
                 live[dropped_slot] = None;
             }
@@ -147,11 +152,11 @@ impl AllocationNoise {
     }
 }
 
-pub fn mixed_vector_length(round: usize, index: usize) -> usize {
+pub(crate) fn mixed_vector_length(round: usize, index: usize) -> usize {
     8 + (mix64(((round as u64) << 32) | index as u64) % 249) as usize
 }
 
-pub fn mixed_value(round: usize, index: usize) -> u64 {
+pub(crate) fn mixed_value(round: usize, index: usize) -> u64 {
     mix64(((round as u64) << 32) | index as u64)
 }
 

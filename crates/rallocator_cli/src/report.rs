@@ -1,7 +1,23 @@
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "Report coordinates, percentages, and color values are intentionally lossy display-only conversions"
+)]
+#![expect(
+    clippy::too_many_lines,
+    reason = "HTML sections remain linear to keep the generated document structure auditable"
+)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "Writing formatted text into String is infallible"
+)]
+
 //! Snapshot-to-HTML reporting for the `rallocator` command.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use rallocator_telemetry::callers::{AddressLookup, Callers, Event, EventKind, HeapKind};
 use rallocator_telemetry::snapshot::{Domain, Estimate, Snapshot};
@@ -41,6 +57,17 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
     )
     .unwrap();
 
+    if !snapshot.skipped_sections.is_empty() {
+        html.push_str("<section><h2>Compatibility warning</h2><p>This report omitted unsupported snapshot sections: ");
+        for (index, section) in snapshot.skipped_sections.iter().enumerate() {
+            if index != 0 {
+                html.push_str(", ");
+            }
+            write!(html, "{} (version {})", section.id, section.version).unwrap();
+        }
+        html.push_str(". Use a newer rallocator CLI to inspect all captured data.</p></section>");
+    }
+
     render_domains(&mut html, snapshot);
     render_allocation_histograms(&mut html, snapshot);
     render_physical_topology(&mut html, snapshot);
@@ -49,7 +76,7 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
 
     write!(
         html,
-        r#"<section><h2>{}</h2><table>
+        r"<section><h2>{}</h2><table>
 <tr><th>Metric</th><th>Value</th></tr>
 <tr><td>{}</td><td>{}</td></tr>
 <tr><td>{}</td><td>{}</td></tr>
@@ -57,7 +84,7 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
 <tr><td>{}</td><td>{:.3} ms</td></tr>
 <tr><td>{}</td><td>{} / {}</td></tr>
 <tr><td>{}</td><td>{} / {}</td></tr>
-</table></section>"#,
+</table></section>",
         concept(
             "Process totals",
             "Process-wide counters accumulated by the telemetry-enabled allocator."
@@ -99,10 +126,10 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
 
     write!(
         html,
-        r#"<section><h2>{}</h2><table><tr><th>Metric</th><th>Value</th></tr>
+        r"<section><h2>{}</h2><table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>{}</td><td>{}</td></tr><tr><td>{}</td><td>{}</td></tr>
 <tr><td>{}</td><td>{}</td></tr><tr><td>{}</td><td>{}</td></tr>
-<tr><td>{}</td><td>{}</td></tr></table></section>"#,
+<tr><td>{}</td><td>{}</td></tr></table></section>",
         concept(
             "Remote frees and reclamation",
             "Cross-thread deallocation queues and operating-system memory mapping activity."
@@ -341,7 +368,7 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
         let utilization = detail.and_then(slice_block_utilization);
         let utilization_style = utilization.map_or_else(String::new, |(live, usable)| {
             let ratio = if usable == 0 { 0.0 } else { live as f64 / usable as f64 };
-            format!(" style=\"fill-opacity:{:.3}\"", (0.18 + 0.82 * ratio).clamp(0.18, 1.0))
+            format!(" style=\"fill-opacity:{:.3}\"", 0.82f64.mul_add(ratio, 0.18).clamp(0.18, 1.0))
         });
         let utilization_label = utilization.map_or_else(String::new, |(live, usable)| {
             format!(
@@ -545,9 +572,7 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
             "<tr><td>#{class_index}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             block_sizes
                 .get(class_index)
-                .copied()
-                .map(format_bytes)
-                .unwrap_or_else(|| "Unknown".to_owned()),
+                .copied().map_or_else(|| "Unknown".to_owned(), format_bytes),
             if *context { "Context" } else { "General" },
             format_owner(*owner),
             format_count(*count),
@@ -814,8 +839,6 @@ fn histogram_label(bucket: usize) -> String {
 
 #[derive(Default)]
 struct Hotspot {
-    allocation_stack: Vec<u64>,
-    deallocation_stack: Vec<u64>,
     count: u64,
     bytes: u64,
 }
@@ -855,22 +878,18 @@ fn render_hotspots(html: &mut String, callers: &Callers, addresses: &[AddressLoo
 
 fn record_hotspot(hotspots: &mut HashMap<(Vec<u64>, Vec<u64>), Hotspot>, allocation: &Event, deallocation: &Event) {
     let key = (allocation.call_stack.clone(), deallocation.call_stack.clone());
-    let hotspot = hotspots.entry(key).or_insert_with(|| Hotspot {
-        allocation_stack: allocation.call_stack.clone(),
-        deallocation_stack: deallocation.call_stack.clone(),
-        ..Hotspot::default()
-    });
+    let hotspot = hotspots.entry(key).or_default();
     hotspot.count += 1;
     hotspot.bytes += allocation.size;
 }
 
 fn render_hotspot_group(html: &mut String, title: &str, hotspots: &HashMap<(Vec<u64>, Vec<u64>), Hotspot>, addresses: &[AddressLookup]) {
     let lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
-    let mut hotspots = hotspots.values().collect::<Vec<_>>();
-    hotspots.sort_unstable_by(|left, right| right.bytes.cmp(&left.bytes).then_with(|| right.count.cmp(&left.count)));
+    let mut hotspots = hotspots.iter().collect::<Vec<_>>();
+    hotspots.sort_unstable_by(|(_, left), (_, right)| right.bytes.cmp(&left.bytes).then_with(|| right.count.cmp(&left.count)));
     let empty = hotspots.is_empty();
     write!(html, "<details><summary>{}</summary><ol>", escape_html(title)).unwrap();
-    for hotspot in hotspots.into_iter().take(16) {
+    for ((allocation_stack, deallocation_stack), hotspot) in hotspots.into_iter().take(16) {
         write!(
             html,
             "<li><strong>{} across {} allocations</strong><div class=\"hotspot-stacks\"><div><b>Allocation</b>",
@@ -878,9 +897,9 @@ fn render_hotspot_group(html: &mut String, title: &str, hotspots: &HashMap<(Vec<
             format_count(hotspot.count),
         )
         .unwrap();
-        render_stack(html, &hotspot.allocation_stack, &lookups);
+        render_stack(html, allocation_stack, &lookups);
         html.push_str("</div><div><b>Deallocation</b>");
-        render_stack(html, &hotspot.deallocation_stack, &lookups);
+        render_stack(html, deallocation_stack, &lookups);
         html.push_str("</div></div></li>");
     }
     if empty {
@@ -921,7 +940,7 @@ fn render_thread_flow_diagram(html: &mut String, callers: &Callers, flows: &BTre
     let rows = threads
         .iter()
         .enumerate()
-        .map(|(index, thread)| (*thread, 68.0 + index as f64 * 68.0))
+        .map(|(index, thread)| (*thread, (index as f64).mul_add(68.0, 68.0)))
         .collect::<HashMap<_, _>>();
     let height = 98 + threads.len() * 68;
     let maximum = flows.values().map(|(_, bytes)| *bytes).max().unwrap_or(1);
@@ -961,7 +980,7 @@ fn render_thread_flow_diagram(html: &mut String, callers: &Callers, flows: &BTre
         let destination_y = rows[&destination];
         let width = 1.5 + 8.5 * (bytes as f64).ln_1p() / (maximum as f64).ln_1p();
         let class = if source == destination { "local" } else { "cross" };
-        let label_y = (source_y + destination_y) / 2.0 - 7.0;
+        let label_y = f64::midpoint(source_y, destination_y) - 7.0;
         write!(
             html,
             "<path class=\"thread-flow-link {class}\" data-source=\"{source}\" data-destination=\"{destination}\" d=\"M330 {source_y} C500 {source_y},700 {destination_y},870 {destination_y}\" style=\"stroke-width:{width}\"><title>{} → {} · {} · {} frees</title></path><text class=\"thread-flow-label {class}\" data-source=\"{source}\" data-destination=\"{destination}\" x=\"600\" y=\"{label_y}\" text-anchor=\"middle\">{} · {}</text>",
@@ -1006,7 +1025,7 @@ fn owner_color(owner: u64) -> String {
     if owner == 0 {
         return "#7d879e".to_owned();
     }
-    let hue = owner.wrapping_mul(11400714819323198485) % 360;
+    let hue = owner.wrapping_mul(11_400_714_819_323_198_485) % 360;
     format!("hsl({hue} 68% 58%)")
 }
 
@@ -1096,7 +1115,7 @@ fn info(explanation: &str) -> String {
 
 #[derive(Default)]
 struct StackTotal {
-    stack: Vec<u64>,
+    stack: Arc<[u64]>,
     allocations: u64,
     allocated_bytes: u64,
     deallocations: u64,
@@ -1106,20 +1125,24 @@ struct StackTotal {
 
 fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLookup]) {
     let mut totals = Vec::<StackTotal>::new();
-    let mut indices = HashMap::<Vec<u64>, usize>::new();
+    let mut indices = HashMap::<Arc<[u64]>, usize>::new();
     let mut live = HashMap::<(u64, u64), (usize, u64)>::new();
     let address_lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
     for event in &callers.events {
         match event.kind {
             EventKind::Allocated => {
-                let index = *indices.entry(event.call_stack.clone()).or_insert_with(|| {
+                let index = if let Some(&index) = indices.get(event.call_stack.as_slice()) {
+                    index
+                } else {
+                    let stack = Arc::<[u64]>::from(event.call_stack.as_slice());
                     let index = totals.len();
                     totals.push(StackTotal {
-                        stack: event.call_stack.clone(),
+                        stack: Arc::clone(&stack),
                         ..StackTotal::default()
                     });
+                    indices.insert(stack, index);
                     index
-                });
+                };
                 totals[index].allocations += 1;
                 totals[index].allocated_bytes += event.size;
                 live.insert((event.thread_log_id, event.allocation_id), (index, event.size));
@@ -1246,10 +1269,23 @@ fn format_count(value: u64) -> String {
     formatted
 }
 
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+fn escape_html(value: &str) -> Cow<'_, str> {
+    let Some(first_escape) = value.find(['&', '<', '>', '"']) else {
+        return Cow::Borrowed(value);
+    };
+    let mut escaped = String::with_capacity(value.len() + 16);
+    escaped.push_str(&value[..first_escape]);
+    for character in value[first_escape..].chars() {
+        escaped.push_str(match character {
+            '&' => "&amp;",
+            '<' => "&lt;",
+            '>' => "&gt;",
+            '"' => "&quot;",
+            _ => {
+                escaped.push(character);
+                continue;
+            }
+        });
+    }
+    Cow::Owned(escaped)
 }

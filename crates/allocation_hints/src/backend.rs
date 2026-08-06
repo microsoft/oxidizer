@@ -20,12 +20,18 @@ pub struct RawHint {
 
 // Backend targets are process-owned opaque identities. Backend registration
 // guarantees that their callbacks support cross-thread heap ownership.
+// SAFETY: RawHint is an opaque address and tag. Sending or sharing it does not
+// dereference the address; the registered backend owns all access invariants.
 unsafe impl Send for RawHint {}
+// SAFETY: Sharing RawHint does not access its target; only the backend interprets it.
 unsafe impl Sync for RawHint {}
 
 impl RawHint {
     /// The default process-global allocation target.
-    pub const GLOBAL: Self = unsafe { Self::new(ptr::null_mut(), 0) };
+    pub const GLOBAL: Self = {
+        // SAFETY: A null target paired with kind zero is the defined global hint.
+        unsafe { Self::new(ptr::null_mut(), 0) }
+    };
 
     /// Creates a raw allocator-native target.
     ///
@@ -37,16 +43,19 @@ impl RawHint {
     }
 
     /// Returns the opaque allocator-native target.
+    #[must_use]
     pub const fn target(self) -> *mut () {
         self.target
     }
 
     /// Returns the allocator-defined target kind.
+    #[must_use]
     pub const fn kind(self) -> usize {
         self.kind
     }
 
     /// Returns whether this selects the default process-global target.
+    #[must_use]
     pub const fn is_global(self) -> bool {
         self.target.is_null()
     }
@@ -58,7 +67,10 @@ pub struct RawDomain {
     target: *mut (),
 }
 
+// SAFETY: RawDomain is an opaque backend identity. Only its originating
+// backend interprets the address under that backend's lifetime contract.
 unsafe impl Send for RawDomain {}
+// SAFETY: Sharing RawDomain does not dereference the opaque backend target.
 unsafe impl Sync for RawDomain {}
 
 impl RawDomain {
@@ -73,6 +85,7 @@ impl RawDomain {
     }
 
     /// Returns the opaque target.
+    #[must_use]
     pub const fn target(self) -> *mut () {
         self.target
     }
@@ -101,12 +114,14 @@ impl RawHeap {
     ///
     /// `hint` must be a valid non-global target and `claim_policy` must describe
     /// its actual concurrency requirements.
+    #[must_use]
     pub const unsafe fn new(hint: RawHint, claim_policy: ClaimPolicy) -> Self {
         Self { hint, claim_policy }
     }
 }
 
 /// Type-erased allocator operations used by heap construction and scoped hints.
+#[derive(Debug)]
 pub struct Backend {
     pub(crate) create_domain: fn() -> Option<RawDomain>,
     pub(crate) default_domain: fn() -> RawDomain,
@@ -137,7 +152,7 @@ impl Backend {
     /// between threads and remain valid until its one destruction callback.
     /// Inspection must tolerate the concurrency permitted by its
     /// [`ClaimPolicy`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "The backend ABI is a flat callback table")]
     pub const unsafe fn new(
         create_domain: fn() -> Option<RawDomain>,
         default_domain: fn() -> RawDomain,
