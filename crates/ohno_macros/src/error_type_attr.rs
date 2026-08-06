@@ -5,6 +5,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input, parse_quote};
 
+use crate::derive_error::is_generated_error_field;
 use crate::utils::{GENERATED_ERROR_FIELD_MARKER, generate_unique_field_name};
 
 /// Attribute macro version of `error_type` that can handle documentation comments.
@@ -52,6 +53,9 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
     if let Err(err) = reject_marked_field(input) {
         return err.to_compile_error();
     }
+    if let Err(err) = reject_generated_marker(input) {
+        return err.to_compile_error();
+    }
     if let Err(err) = add_ohno_core_field(input) {
         return err.to_compile_error();
     }
@@ -61,6 +65,7 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
 }
 
 const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core yourself";
+const RESERVED_MARKER: &str = "This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it, and mark the field with `#[error]` if it is the one holding the OhnoCore";
 
 /// Reject a struct that marks a field with `#[error]`
 ///
@@ -73,6 +78,26 @@ fn reject_marked_field(input: &DeriveInput) -> syn::Result<()> {
     for field in &data_struct.fields {
         if let Some(attr) = field.attrs.iter().find(|attr| attr.path().is_ident("error")) {
             return Err(syn::Error::new_spanned(attr, ALREADY_MARKED));
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject a struct that already carries the marker this attribute writes
+///
+/// The attribute has not added its field yet, so a field carrying the marker here was written by
+/// hand. Two of them would leave the error field to declaration order, and both would be hidden
+/// from a display template. Catching it here, rather than in the derive, is what makes the marker
+/// a fact about the field the attribute adds.
+fn reject_generated_marker(input: &DeriveInput) -> syn::Result<()> {
+    let Data::Struct(data_struct) = &input.data else {
+        return Ok(());
+    };
+
+    for field in &data_struct.fields {
+        if is_generated_error_field(field) {
+            return Err(syn::Error::new_spanned(field, RESERVED_MARKER));
         }
     }
 
@@ -164,6 +189,35 @@ mod tests {
         ] {
             let input: DeriveInput = input;
             crate::error_type_attr::reject_marked_field(&input).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_reject_generated_marker() {
+        // The attribute has not added its field yet, so this marker was written by hand. One would
+        // take over the error representation; two would settle it by declaration order
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+        for input in [
+            parse_quote! { struct TestError { path: String, #[doc = #marker] mine: ohno::OhnoCore } },
+            parse_quote! { struct TestError(String, #[doc = #marker] ohno::OhnoCore); },
+            parse_quote! { struct TestError { #[doc = #marker] a: ohno::OhnoCore, #[doc = #marker] b: ohno::OhnoCore } },
+            parse_quote! { struct TestError { path: String, #[doc = #marker] other: String } },
+        ] {
+            let input: DeriveInput = input;
+            let err = crate::error_type_attr::reject_generated_marker(&input).unwrap_err();
+            assert_eq!(err.to_string(), crate::error_type_attr::RESERVED_MARKER);
+        }
+
+        // An ordinary doc comment is not the marker, and an input without fields has nothing to
+        // reject
+        for input in [
+            parse_quote! { struct TestError { #[doc = " The path."] path: String } },
+            parse_quote! { struct TestError { path: String, inner: ohno::OhnoCore } },
+            parse_quote! { struct TestError; },
+            parse_quote! { enum TestError { A } },
+        ] {
+            let input: DeriveInput = input;
+            crate::error_type_attr::reject_generated_marker(&input).unwrap();
         }
     }
 

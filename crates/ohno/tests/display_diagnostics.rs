@@ -32,6 +32,10 @@ fn display_diagnostics() {
     // field may be marked.
     t.compile_fail("tests/ui/ohno_error_marked_field.rs");
 
+    // The marker on the field `#[ohno::error]` adds is reserved, so a field already carrying it
+    // was written by hand.
+    t.compile_fail("tests/ui/ohno_error_reserved_marker.rs");
+
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
     t.compile_fail("tests/ui/display_tuple_index_reaching_injected_core.rs");
