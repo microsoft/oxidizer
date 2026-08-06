@@ -74,13 +74,13 @@ macro_rules! bail_spanned {
 
 pub(crate) use bail_spanned;
 
-/// Marker `#[ohno::error]` puts on the `OhnoCore` field it injects, as `#[error(generated)]`
+/// Attribute `#[ohno::error]` puts on the `OhnoCore` field it injects
 ///
 /// A user is free to declare an `OhnoCore` field themselves, and that field is theirs to
-/// reference; the marker is what tells the two apart.
-pub(crate) fn generated_error_field_marker() -> syn::Ident {
-    syn::Ident::new("generated", proc_macro2::Span::call_site())
-}
+/// reference; the attribute is what tells the two apart. It is deliberately not spelled as an
+/// argument to `#[error]`: that keeps `#[error]`'s own grammar argument-free, and makes the name
+/// obviously not user syntax should it be copied out of `cargo expand`.
+pub(crate) const GENERATED_ERROR_FIELD_ATTR: &str = "__auto_injected_error";
 
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields
 #[cfg_attr(test, mutants::skip)] // mutation testing leads to an infinite loop here...

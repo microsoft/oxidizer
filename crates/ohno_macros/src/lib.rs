@@ -39,7 +39,7 @@ mod utils;
 /// should either remove the manual Debug derive or add `#[no_debug]` to preserve the manual implementation.
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
-#[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
+#[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from, __auto_injected_error))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     derive_error::derive_error(input)

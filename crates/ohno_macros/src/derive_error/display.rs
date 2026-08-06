@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_positional_argument_with_self_prefix_is_rejected() {
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         // The spelling `thiserror` documents, which would expand to `&self.self.path`
         for arg in [
@@ -478,7 +478,8 @@ mod tests {
 
     #[test]
     fn test_unknown_field_reports_available_fields_without_the_error_core() {
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, code: i32, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput =
+            parse_quote! { struct TestError { path: PathBuf, code: i32, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         // Named reference and positional argument report the same thing
         for message in [
@@ -507,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_unknown_field_on_error_type_without_referenceable_fields() {
-        let input: DeriveInput = parse_quote! { struct TestError { #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { #[__auto_injected_error] ohno_core: OhnoCore } };
         let message = parse_err("bad path: {path}", vec![], &input);
         assert_eq!(
             message,
@@ -517,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_tuple_struct_fields_are_referenceable_by_index() {
-        let input: DeriveInput = parse_quote! { struct TestError(PathBuf, #[error(generated)] OhnoCore); };
+        let input: DeriveInput = parse_quote! { struct TestError(PathBuf, #[__auto_injected_error] OhnoCore); };
 
         let result = parse("bad path: {0}", vec![], &input);
         let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.0)) };
@@ -536,7 +537,7 @@ mod tests {
     fn test_index_of_the_generated_error_field_is_not_referenceable() {
         // Index 1 is in range but holds the injected OhnoCore, whose Display prints the error's
         // own chain; referencing it is a mistake rather than a way to reach the core
-        let input: DeriveInput = parse_quote! { struct TestError(PathBuf, #[error(generated)] OhnoCore); };
+        let input: DeriveInput = parse_quote! { struct TestError(PathBuf, #[__auto_injected_error] OhnoCore); };
 
         for message in [
             parse_err("bad path: {1}", vec![], &input),
@@ -548,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_name_of_the_generated_error_field_is_not_referenceable() {
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         for message in [
             parse_err("bad path: {ohno_core}", vec![], &input),
@@ -560,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_positional_argument_rooted_in_a_method_call_on_self_is_left_alone() {
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         // A method call on `self` is not a field access, so there is no field to validate
         let result = parse("bad path: {}", vec![parse_quote! { describe() }], &input);
@@ -571,7 +572,7 @@ mod tests {
     #[test]
     fn test_nested_tuple_index_is_validated_against_its_leading_component() {
         // `0.1` lexes as a float, but names field 0 of `self` and field 1 of its type
-        let input: DeriveInput = parse_quote! { struct TestError(Inner, #[error(generated)] OhnoCore); };
+        let input: DeriveInput = parse_quote! { struct TestError(Inner, #[__auto_injected_error] OhnoCore); };
 
         let result = parse("bad: {}", vec![parse_quote! { 0.1 }], &input);
         let expected = quote! { std::borrow::Cow::from(format!("bad: {}", &self.0.1)) };
@@ -585,7 +586,7 @@ mod tests {
     #[test]
     fn test_argument_root_is_found_through_leftmost_position() {
         // `self.` lands before the leftmost term, so these all keep the root a field of `self`
-        let input: DeriveInput = parse_quote! { struct TestError { count: u32, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { count: u32, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         let result = parse("total: {}", vec![parse_quote! { count * 2 }], &input);
         let expected = quote! { std::borrow::Cow::from(format!("total: {}", &self.count * 2)) };
@@ -608,7 +609,7 @@ mod tests {
     fn test_argument_rooted_in_something_that_cannot_follow_self_is_rejected() {
         // Each of these would otherwise expand to code that does not parse, such as
         // `&self.Self::LABEL.len()`, and be reported by rustc against generated code
-        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[error(generated)] ohno_core: OhnoCore } };
+        let input: DeriveInput = parse_quote! { struct TestError { path: PathBuf, #[__auto_injected_error] ohno_core: OhnoCore } };
 
         for arg in [
             parse_quote! { Self::LABEL.len() },

@@ -1,11 +1,17 @@
 error: `#[error]` takes no arguments
-  --> tests/ui/error_attribute_arguments.rs:10:7
+  --> tests/ui/error_attribute_arguments.rs:11:7
    |
-10 |     #[error(nonsense)]
+11 |     #[error(nonsense)]
    |       ^^^^^^^^^^^^^^^
 
 error: `#[error]` takes no arguments
-  --> tests/ui/error_attribute_arguments.rs:17:7
+  --> tests/ui/error_attribute_arguments.rs:18:7
    |
-17 |     #[error = "nonsense"]
+18 |     #[error = "nonsense"]
    |       ^^^^^^^^^^^^^^^^^^
+
+error: `#[error]` takes no arguments
+  --> tests/ui/error_attribute_arguments.rs:25:7
+   |
+25 |     #[error(generated)]
+   |       ^^^^^^^^^^^^^^^^
