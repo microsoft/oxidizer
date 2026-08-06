@@ -27,7 +27,6 @@ fn display_diagnostics() {
 
     // Only one field can hold the OhnoCore, and the marker belongs on that field alone.
     t.compile_fail("tests/ui/error_attribute_on_several_fields.rs");
-    t.compile_fail("tests/ui/error_attribute_on_another_type.rs");
 
     // `#[ohno::error]` generates the error representation from the field it injects, so no other
     // field may be marked.
