@@ -233,14 +233,54 @@ fn test_documented_fields_stay_referenceable() {
     assert_error_message!(error, "/etc/hosts failed with 13");
 }
 
+/// A count whose `Mul` differs by receiver, so a rendered value says which one ran.
+///
+/// `&(self.count * 2)` multiplies the field and borrows the result. `&self.count * 2`, the
+/// expansion before positional arguments were parenthesised, multiplies a reference instead.
+#[derive(Debug, Clone, Copy)]
+struct Count(u32);
+
+impl std::ops::Mul<u32> for Count {
+    type Output = u32;
+
+    fn mul(self, factor: u32) -> u32 {
+        self.0 * factor
+    }
+}
+
+impl std::ops::Mul<u32> for &Count {
+    type Output = u32;
+
+    fn mul(self, _: u32) -> u32 {
+        0
+    }
+}
+
 #[test]
-fn test_binary_and_cast_arguments() {
+fn test_binary_argument_applies_to_the_field_value() {
     #[ohno::error]
-    #[display("{} and {}", count * 2, count as u64)]
+    #[display("{}", count * 2)]
     struct TestError {
-        count: u32,
+        count: Count,
     }
 
-    let error = TestError::new(21_u32);
-    assert_error_message!(error, "42 and 21");
+    let error = TestError::new(Count(21));
+
+    // 0 is what the reference-side `Mul` returns, so it reports the operator having been applied
+    // around the borrow rather than under it
+    assert_error_message!(error, "42");
+}
+
+#[test]
+fn test_cast_argument_applies_to_the_field_value() {
+    // Casting the borrow instead of the value is not merely wrong, it does not compile: this is
+    // the `casting &u32 as u64 is invalid` that reached users as an error in generated code
+    #[ohno::error]
+    #[display("{}", size as u64)]
+    struct TestError {
+        size: u32,
+    }
+
+    let error = TestError::new(7_u32);
+    assert_error_message!(error, "7");
 }
