@@ -93,8 +93,10 @@
     (and only these runs) are redirected to a short scratch root — `%SystemDrive%\ox-semver`
     by default. Set the OXIDIZER_SEMVER_TARGET_DIR environment variable to
     relocate it (for example onto a different drive), or point it at the
-    repository's own `target` directory to restore the previous behavior. On
-    non-Windows platforms Cargo's default target directory is used unchanged.
+    repository's own `target` directory to restore the previous behavior.
+    OXIDIZER_SEMVER_TARGET_DIR is honored on every platform and must be an
+    absolute path; when it is unset, the short scratch root applies on Windows
+    only and all other platforms use Cargo's default target directory unchanged.
 
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a

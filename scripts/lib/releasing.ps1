@@ -631,7 +631,9 @@ function Get-WorkspacePackages {
 # generated tail well inside the limit wherever the repository lives. Set
 # OXIDIZER_SEMVER_TARGET_DIR to override the location (for example onto a
 # different drive); set it to the repository's own `target` directory to opt
-# back into the previous behaviour.
+# back into the previous behaviour. The override is honoured on every platform
+# and must be an absolute path — a relative one would be resolved against
+# differing working directories by this process and by the cargo child process.
 function Get-SemverChecksTargetDir {
     [CmdletBinding()]
     param()
@@ -675,9 +677,14 @@ function Invoke-SemverChecksCli {
 
     if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
         try {
-            if (-not (Test-Path -LiteralPath $targetDir)) {
-                New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction Stop | Out-Null
-            }
+            # Create literally rather than via New-Item, which only offers the
+            # wildcard-expanding -Path: OXIDIZER_SEMVER_TARGET_DIR is
+            # user-supplied and a path containing `[`, `]` or `*` would
+            # otherwise be glob-expanded into a different (or no) directory.
+            # CreateDirectory also creates intermediate directories and is a
+            # no-op when the directory already exists, so no separate existence
+            # check is needed.
+            [void][System.IO.Directory]::CreateDirectory($targetDir)
             $env:CARGO_TARGET_DIR = $targetDir
             $applied = $true
         } catch {

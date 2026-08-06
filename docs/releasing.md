@@ -279,8 +279,11 @@ scratch root, `%SystemDrive%\ox-semver` by default, leaving every other
 cargo invocation on the repository-local `target/` directory. Set
 `OXIDIZER_SEMVER_TARGET_DIR` to relocate it (for example onto a drive
 with more space), or point it at the repository's own `target` directory
-to restore the previous behaviour. On non-Windows platforms the default
-target directory is used unchanged. If the scratch directory cannot be
+to restore the previous behaviour. `OXIDIZER_SEMVER_TARGET_DIR` is
+honoured on **every** platform and must be an **absolute** path; when it
+is unset, the short scratch root applies on Windows only and all other
+platforms use the default target
+directory unchanged. If the scratch directory cannot be
 created, the run proceeds against the default target directory with a
 warning rather than failing — a long path only *may* overflow.
 
