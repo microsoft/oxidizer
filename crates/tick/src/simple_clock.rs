@@ -254,13 +254,29 @@ mod tests {
         assert!(second >= first);
     }
 
-    #[cfg(all(feature = "fast-instant", any(target_os = "linux", windows)))]
-    #[ignore = "test stub"]
+    #[cfg(feature = "fast-instant")]
+    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
     fn fast_instant_is_close_to_std_instant() {
-        // Arrange a system-backed clock with the fast instant feature enabled.
-        // Act by reading from tick and the standard library.
-        // Assert that the timestamps differ by less than 100 ms.
+        let clock = SimpleClock::new_system();
+
+        let fast = clock.instant_fast();
+        let standard = Instant::now();
+
+        assert!(fast.saturating_duration_since(standard) < Duration::from_millis(100));
+        assert!(standard.saturating_duration_since(fast) < Duration::from_millis(100));
+    }
+
+    #[cfg(feature = "fast-instant")]
+    #[test]
+    fn controlled_fast_instant_is_governed_by_clock_control() {
+        let control = ClockControl::new();
+        let clock = control.to_simple_clock();
+        let start = clock.instant_fast();
+
+        control.advance(Duration::from_secs(5));
+
+        assert_eq!(clock.instant_fast().duration_since(start), Duration::from_secs(5));
     }
 
     #[test]

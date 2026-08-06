@@ -583,6 +583,18 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "fast-instant")]
+    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
+    #[test]
+    fn test_instant_fast_now() {
+        let clock = Clock::new_system_frozen();
+        let clock_instant = clock.instant_fast();
+        let system_instant = Instant::now();
+
+        assert!(clock_instant.saturating_duration_since(system_instant) < Duration::from_millis(100));
+        assert!(system_instant.saturating_duration_since(clock_instant) < Duration::from_millis(100));
+    }
+
     #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.
     #[test]
     fn test_system_time() {

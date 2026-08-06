@@ -31,7 +31,7 @@ all-features = true
 
 [features]
 default = []
-# Uses a lower-overhead, lower-precision source for Instant on Linux and Windows
+# Adds lower-overhead, lower-precision Instant APIs on Linux and Windows
 fast-instant = ["dep:fast_time"]
 # Enables additional test-specific APIs
 test-util = []
