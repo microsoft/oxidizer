@@ -1,7 +1,5 @@
 # Stabilization Notes
 
-Tracking item: [O365 Core 7688110](https://o365exchange.visualstudio.com/O365%20Core/_workitems/edit/7688110)
-
 These notes capture the pending decisions for stabilizing `thread_aware`. They
 describe proposals under review, not a finalized stable API.
 
@@ -31,9 +29,8 @@ The packaging decision is still open:
   `thread_aware_core` crate while the remaining APIs stay in `thread_aware`.
 
 If the `thread_aware_utils` proposal is selected, rename the internal companion
-crates to `thread_aware_utils_macros` and
-`thread_aware_utils_macro_impl`. These crates are not intended for direct
-consumption.
+macro crates consistently with it. Their exact names remain pending because
+these crates are not intended for direct consumption.
 
 ## Pending review
 
