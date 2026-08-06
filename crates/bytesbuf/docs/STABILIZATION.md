@@ -11,6 +11,8 @@ Stabilize the core owned byte-sequence types:
 - `BytesView` for sharing and consuming immutable byte sequences.
 - The iterator and cursor types returned by their stable operations:
   `BytesBufRemaining`, `BytesBufVectoredWrite`, and `BytesViewSlices`.
+- `BlockMeta`, because the current slice iterator types expose it in their
+  public item types.
 - `MemoryGuard` for keeping memory alive while native or unsafe I/O uses it.
 
 The stable operation groups should cover:
@@ -22,8 +24,9 @@ The stable operation groups should cover:
 - Slicing, ranging, concatenating, advancing, and iterating over view contents.
 - Accessing unfilled buffer memory, including vectored access, and committing
   the number of bytes initialized by an owned-buffer read operation.
-- Standard I/O and `bytes` crate adapters where their Cargo features are
-  enabled.
+
+Standard I/O and `bytes` crate adapters require separate review before they
+join the stable boundary.
 
 ## Memory-provider boundary
 
@@ -31,7 +34,8 @@ Stabilize the provider contracts needed by consumers and I/O implementations:
 
 - `Memory` for reserving owned writable capacity.
 - `MemoryShared` and `HasMemory` for sharing an endpoint-compatible provider.
-- `GlobalPool` as the standard pooled provider.
+- `GlobalPool` as the standard pooled provider when the `std` feature is
+  enabled.
 - `OpaqueMemory` for storing a provider without exposing its concrete type.
 
 The provider surface must preserve ownership, reuse, and cross-thread release
@@ -39,15 +43,16 @@ semantics needed by asynchronous operating-system I/O.
 
 ## Deferred surface
 
-Keep convenience providers, test utilities, constants, and low-level block and
+Keep convenience providers, test utilities, constants, and low-level
 reference-counting machinery outside the stable surface unless the provider
 implementation review proves they are required. This includes
-`CallbackMemory`, `Block`, `BlockRef`, their metadata and vtable APIs, and
+`CallbackMemory`, `BlockRef`, its dynamic traits and vtable API, and
 `MAX_INLINE_SPANS`.
 
-If stable custom memory providers require any of these types, expose only the
-smallest reviewed construction boundary instead of stabilizing implementation
-details by default.
+These APIs are public today, so excluding them requires removing or hiding them
+before 1.0. The current custom-provider workflow also requires `Block` and the
+`BlockRef` family. Either stabilize the smallest reviewed subset of that
+machinery or replace it with a narrower stable construction API.
 
 ## Pending review
 
@@ -59,8 +64,11 @@ details by default.
 - [ ] Validate ownership transfer, reuse, cloning, range, and conversion
       semantics for asynchronous I/O.
 - [ ] Decide whether `BytesBufWriter` belongs in the stable standard-library
-      adapter surface.
+      adapter surface enabled by the `std` feature.
 - [ ] Decide which `bytes` compatibility implementations are stable.
-- [ ] Determine the minimal stable API for implementing custom memory providers.
+- [ ] Determine the minimal stable API for implementing custom memory providers,
+      including whether `Block`, `BlockRef`, and related traits remain public.
+- [ ] Confirm whether the metadata-returning iterator shapes remain stable; if
+      they change, reconsider whether `BlockMeta` belongs in the stable surface.
 - [ ] Confirm stable downstream crates expose no deferred `bytesbuf` types.
 - [ ] Identify all remaining APIs as stable, unstable, or unnecessary for 1.0.
