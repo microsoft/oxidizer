@@ -218,6 +218,15 @@ mod tests {
         assert!(second >= first);
     }
 
+    #[cfg(all(feature = "fast-instant", any(target_os = "linux", windows)))]
+    #[ignore = "test stub"]
+    #[test]
+    fn fast_instant_is_close_to_std_instant() {
+        // Arrange a system-backed clock with the fast instant feature enabled.
+        // Act by reading from tick and the standard library.
+        // Assert that the timestamps differ by less than 100 ms.
+    }
+
     #[test]
     fn controlled_time_is_governed_by_clock_control() {
         let control = ClockControl::new();
