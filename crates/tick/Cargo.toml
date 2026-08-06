@@ -109,6 +109,11 @@ required-features = ["test-util"]
 name = "clock_bench"
 harness = false
 
+[[bench]]
+name = "tick_instant"
+harness = false
+required-features = ["fast-instant"]
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
