@@ -18,7 +18,7 @@ categories = ["asynchronous"]
 
 [features]
 default = []
-unstable-testing = ["dep:scopeguard"]
+test-util = ["dep:scopeguard"]
 
 [dependencies]
 events_once = { workspace = true }
@@ -56,7 +56,7 @@ workspace = true
 [[bench]]
 name = "ae_basic_operations"
 harness = false
-required-features = ["unstable-testing"]
+required-features = ["test-util"]
 
 # Callgrind benches require Linux (Valgrind). The bench file is gated to compile
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
@@ -64,4 +64,4 @@ required-features = ["unstable-testing"]
 [[bench]]
 name = "ae_basic_operations_cg"
 harness = false
-required-features = ["unstable-testing"]
+required-features = ["test-util"]

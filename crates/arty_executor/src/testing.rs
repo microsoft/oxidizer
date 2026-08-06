@@ -3,11 +3,11 @@
 
 //! Functionality for testing, examples and benchmarks.
 //!
-//! Publicly exposed via the `unstable-testing` Cargo feature.
+//! Publicly exposed via the `test-util` Cargo feature.
 
-#[cfg(any(test, feature = "unstable-testing"))]
+#[cfg(any(test, feature = "test-util"))]
 mod functions;
-#[cfg(any(test, feature = "unstable-testing"))]
+#[cfg(any(test, feature = "test-util"))]
 pub use functions::*;
 
 #[cfg(test)]
