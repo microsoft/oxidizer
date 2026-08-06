@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use quote::quote;
-use syn::{Data, DeriveInput, Expr, Fields, Ident, Index, Member, Result};
+use syn::{Data, DeriveInput, Expr, Ident, Index, Member, Result};
 
 use crate::derive_error::attributes::DisplayAttribute;
 use crate::derive_error::field_detection::is_generated_error_field;
@@ -12,62 +12,77 @@ const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are impli
 const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
 
 /// A parsed piece of a display template
-enum Segment {
+///
+/// Every part borrows from the template, which is possible because none of them is rewritten:
+/// text, field names and format specifiers are all spelled in the template as they are used.
+enum Segment<'a> {
     /// Literal text, already spelled the way `format!` expects it
-    Text(String),
+    Text(&'a str),
     /// `{name}` or `{0}`, with its format specifier
-    Field { name: String, spec: String },
+    Field { name: &'a str, spec: &'a str },
     /// `{}`, with its format specifier
-    Positional { spec: String },
+    Positional { spec: &'a str },
 }
 
 /// Split a display template into its segments
 ///
 /// Parsing answers only what the template says. Whether a field exists, or whether the argument
 /// count matches, is decided afterwards against the parsed form.
-fn parse_template(template: &str) -> Vec<Segment> {
+fn parse_template(template: &str) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
-    let mut text = String::new();
-    let mut chars = template.chars().peekable();
+    let mut chars = template.char_indices().peekable();
+    let mut text_start = 0;
 
-    while let Some(ch) = chars.next() {
-        match ch {
-            // Escaped brace: `{{`
-            '{' if chars.peek() == Some(&'{') => {
-                chars.next();
-                text.push_str("{{");
-            }
-            '{' => {
-                if !text.is_empty() {
-                    segments.push(Segment::Text(std::mem::take(&mut text)));
-                }
-
-                let (name, spec) = parse_field_reference(&mut chars);
-                segments.push(if name.is_empty() {
-                    Segment::Positional { spec }
-                } else {
-                    Segment::Field { name, spec }
-                });
-            }
-            // Note: `}}` needs no arm of its own. Each `}` is kept verbatim, producing the `}}`
-            // that `format!` reads as a literal brace.
-            _ => text.push(ch),
+    while let Some((index, ch)) = chars.next() {
+        if ch != '{' {
+            continue;
         }
+
+        // An escaped brace stays part of the surrounding text, spelled `{{` there as well
+        if chars.next_if(|&(_, next)| next == '{').is_some() {
+            continue;
+        }
+
+        if index > text_start {
+            segments.push(Segment::Text(&template[text_start..index]));
+        }
+
+        // The placeholder runs to the next `}`, or to the end of an unterminated template
+        let body_start = index + ch.len_utf8();
+        let mut body_end = template.len();
+        text_start = template.len();
+        for (offset, ch) in chars.by_ref() {
+            if ch == '}' {
+                body_end = offset;
+                text_start = offset + ch.len_utf8();
+                break;
+            }
+        }
+
+        let body = &template[body_start..body_end];
+        let (name, spec) = body.split_once(':').unwrap_or((body, ""));
+        segments.push(if name.is_empty() {
+            Segment::Positional { spec }
+        } else {
+            Segment::Field { name, spec }
+        });
     }
 
-    if !text.is_empty() {
-        segments.push(Segment::Text(text));
+    if text_start < template.len() {
+        segments.push(Segment::Text(&template[text_start..]));
     }
 
     segments
 }
 
-/// Build the `format!` placeholder a segment stands for
-fn placeholder(spec: &str) -> String {
+/// Append the `format!` placeholder a segment stands for
+fn push_placeholder(result: &mut String, spec: &str) {
     if spec.is_empty() {
-        "{}".to_string()
+        result.push_str("{}");
     } else {
-        format!("{{:{spec}}}")
+        result.push_str("{:");
+        result.push_str(spec);
+        result.push('}');
     }
 }
 
@@ -82,15 +97,15 @@ pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &De
 
     for segment in parse_template(&display_attr.template) {
         match segment {
-            Segment::Text(text) => result.push_str(&text),
+            Segment::Text(text) => result.push_str(text),
             Segment::Field { name, spec } => {
-                result.push_str(&placeholder(&spec));
-                validate_field_exists(&name, input, display_attr.template_span)?;
-                let member = field_member(&name);
+                push_placeholder(&mut result, spec);
+                validate_field_exists(name, input, display_attr.template_span)?;
+                let member = field_member(name);
                 format_args.push(quote! { &self.#member });
             }
             Segment::Positional { spec } => {
-                result.push_str(&placeholder(&spec));
+                push_placeholder(&mut result, spec);
 
                 let Some(arg) = display_attr.args.get(arg_index) else {
                     bail!(display_attr.template_span, "Not enough arguments for format placeholders");
@@ -191,31 +206,6 @@ fn field_ident(field_name: &str) -> Ident {
         .map_or_else(|| Ident::new(field_name, span), |bare| Ident::new_raw(bare, span))
 }
 
-/// Extract field name from template between braces, handling format specifiers
-fn parse_field_reference(chars: &mut std::iter::Peekable<std::str::Chars>) -> (String, String) {
-    let mut field_name = String::new();
-    let mut format_spec = String::new();
-    let mut in_format = false;
-
-    while let Some(&ch) = chars.peek() {
-        if ch == '}' {
-            chars.next();
-            break;
-        } else if ch == ':' && !in_format {
-            in_format = true;
-            chars.next();
-        } else if in_format {
-            format_spec.push(ch);
-            chars.next();
-        } else {
-            field_name.push(ch);
-            chars.next();
-        }
-    }
-
-    (field_name, format_spec)
-}
-
 /// Validate that the field exists in the struct
 fn validate_field_exists(field_name: &str, input: &DeriveInput, span: proc_macro2::Span) -> Result<()> {
     if !field_exists(field_name, input) {
@@ -227,40 +217,35 @@ fn validate_field_exists(field_name: &str, input: &DeriveInput, span: proc_macro
 
 /// Describe the fields a display template is allowed to reference
 fn describe_referenceable_fields(input: &DeriveInput) -> String {
-    let names = referenceable_field_names(input);
+    let names = referenceable_field_names(input).map(|name| format!("`{name}`")).collect::<Vec<_>>();
     if names.is_empty() {
         return "the error type has no fields that can be referenced".to_string();
     }
 
-    let names = names.iter().map(|name| format!("`{name}`")).collect::<Vec<_>>().join(", ");
-    format!("available fields: {names}")
+    format!("available fields: {}", names.join(", "))
 }
 
-/// Collect the names a display template may reference, by name or by tuple index
+/// The names a display template may reference, by name or by tuple index
 ///
 /// The field injected by `#[ohno::error]` is left out; a core the user declared is kept. See
 /// `docs/error_display.md`.
-fn referenceable_field_names(input: &DeriveInput) -> Vec<String> {
-    let Data::Struct(data_struct) = &input.data else {
-        return Vec::new();
+fn referenceable_field_names(input: &DeriveInput) -> impl Iterator<Item = String> + '_ {
+    let fields = match &input.data {
+        Data::Struct(data_struct) => Some(&data_struct.fields),
+        _ => None,
     };
 
-    match &data_struct.fields {
-        Fields::Named(fields) => fields
-            .named
-            .iter()
-            .filter(|field| !is_generated_error_field(field))
-            .filter_map(|field| field.ident.as_ref().map(ToString::to_string))
-            .collect(),
-        Fields::Unnamed(fields) => fields
-            .unnamed
-            .iter()
-            .enumerate()
-            .filter(|(_, field)| !is_generated_error_field(field))
-            .map(|(index, _)| index.to_string())
-            .collect(),
-        Fields::Unit => Vec::new(),
-    }
+    fields
+        .into_iter()
+        // Positions are taken before filtering, so an index still names the field it did
+        .flat_map(|fields| fields.iter().enumerate())
+        .filter(|(_, field)| !is_generated_error_field(field))
+        .map(|(index, field)| {
+            field
+                .ident
+                .as_ref()
+                .map_or_else(|| index.to_string(), ToString::to_string)
+        })
 }
 
 /// Generate the final display expression
@@ -274,7 +259,7 @@ fn generate_display_expression(result: &str, format_args: &[proc_macro2::TokenSt
 
 /// Check if a field can be referenced from a display template, by name or by tuple index
 pub(crate) fn field_exists(field_name: &str, input: &DeriveInput) -> bool {
-    referenceable_field_names(input).iter().any(|name| name == field_name)
+    referenceable_field_names(input).any(|name| name == field_name)
 }
 
 #[cfg(test)]
