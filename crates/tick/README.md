@@ -250,10 +250,13 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`serde`** - Adds serialization and deserialization support via [serde][__link44].
 * **`fmt`** - Enables the [`fmt`][__link45] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
+* **`fast-instant`** - Adds `instant_fast` APIs that use a lower-overhead,
+  lower-precision source on Linux and Windows. Other platforms delegate to
+  [`std::time::Instant::now`][__link46]. Existing `instant` APIs are unchanged.
 
 ## Additional Examples
 
-The [time examples][__link46]
+The [time examples][__link47]
 contain additional examples of how to use the time primitives.
 
 
@@ -262,7 +265,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbn-ALXM8UiC8bIRESNiZavEAb64zavGelG-YbgLo76yq99ClhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbta0pvfbs8f8bmqQpNZE2658bos4Ubra3qbEbgCPjPGrzqvFhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
  [__link0]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.4.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.4.0/tick/?search=Error
@@ -304,7 +307,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link43]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
  [__link44]: https://serde.rs/
  [__link45]: https://docs.rs/tick/0.4.0/tick/fmt/index.html
- [__link46]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
+ [__link46]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
+ [__link47]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
  [__link5]: https://docs.rs/tick/0.4.0/tick/?search=Clock
  [__link6]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
  [__link7]: https://docs.rs/tick/0.4.0/tick/?search=Stopwatch

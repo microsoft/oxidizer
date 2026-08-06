@@ -17,7 +17,7 @@ thread_local! {
 fn fast_instant() -> Instant {
     #[cfg(all(feature = "fast-instant", any(target_os = "linux", windows)))]
     {
-        return FAST_CLOCK.with(|clock| clock.borrow_mut().now().into());
+        FAST_CLOCK.with(|clock| clock.borrow_mut().now().into())
     }
 
     #[cfg(not(all(feature = "fast-instant", any(target_os = "linux", windows))))]
