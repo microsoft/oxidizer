@@ -214,6 +214,16 @@ thread_local! {
     /// buried inside the transport once built, so this is the only way to assert that the
     /// options given to [`HttpClient::builder_tokio_with_options`] actually reach the
     /// connector instead of being silently dropped.
+    ///
+    /// Deliberately thread-local rather than a `static Mutex`: every test that builds a Tokio
+    /// client constructs a connector, so a process-global recorder would be written
+    /// concurrently by unrelated tests and make the assertions below flaky. Thread affinity is
+    /// what keeps each test's observations its own.
+    ///
+    /// The cost of that choice is an invariant for readers to preserve: a test must reset,
+    /// build, and assert without crossing a thread. Keep those steps free of `.await` and off
+    /// a `flavor = "multi_thread"` runtime, or a migrated task will read `None` and report a
+    /// missing option that was in fact delivered.
     static LAST_SOCKET_OPTIONS: std::cell::Cell<Option<SocketOptions>> = const { std::cell::Cell::new(None) };
 }
 
