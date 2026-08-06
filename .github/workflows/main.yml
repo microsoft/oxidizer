@@ -333,10 +333,10 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           # cargo-machete scans source text and flags a direct dependency even
           # when it is still pulled in transitively (which udeps ignores by
-          # design). It always runs workspace-wide -- it has no package
-          # selection -- so it is the backstop that catches stale unused deps in
-          # crates outside the current PR's impacted set.
-          cargo machete --with-metadata
+          # design). Run it for every workspace package, including packages
+          # outside the current PR's impacted set, while respecting workspace
+          # exclusions for verbatim legacy imports.
+          ./scripts/check-cargo-machete.ps1
           # Without --all-targets: enforce that every [dependencies] entry is used
           # by the library/bins (catches normal deps used only by tests/benches/
           # examples -- i.e. misplaced deps that should be [dev-dependencies]).
