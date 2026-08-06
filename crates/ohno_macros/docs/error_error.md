@@ -28,17 +28,28 @@ not find a type alias or a renamed import.
 
 That is why the macro does not check the type of a marked field. A user who
 marks a field has said which field it is. The type is left to `rustc`, which can
-resolve the alias. Without this, an aliased core could not be used at all:
+resolve the alias. Without this, an aliased core could not be used at all.
 
 ```rust
 type Core = ohno::OhnoCore;
 
+// Rejected. Step 3 looks for a type named `OhnoCore`, and this one is spelled
+// `Core`, so no error field is found.
+#[derive(ohno::Error)]
+#[display("failed for {path}")]
+struct AliasedError {
+    path: String,
+    inner: Core,
+}
+
+// Accepted. The marker names the field, so how its type is spelled stops
+// mattering.
 #[derive(ohno::Error)]
 #[display("failed for {path}")]
 struct AliasedError {
     path: String,
     #[error]
-    inner: Core,      // step 3 would never find this
+    inner: Core,
 }
 ```
 
