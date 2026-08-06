@@ -639,7 +639,22 @@ function Get-SemverChecksTargetDir {
     param()
 
     if (-not [string]::IsNullOrWhiteSpace($env:OXIDIZER_SEMVER_TARGET_DIR)) {
-        return $env:OXIDIZER_SEMVER_TARGET_DIR
+        $override = $env:OXIDIZER_SEMVER_TARGET_DIR.Trim()
+
+        # Enforce the absolute-path contract rather than only documenting it. A
+        # relative value resolves against whatever working directory each
+        # process happens to have, so the scratch directory would be created in
+        # one place and looked for in another; a drive-relative value like
+        # `C:foo` is worse still, resolving against a per-drive current
+        # directory. Both also defeat the containment check in
+        # Clear-LegacySemverChecksScratch, which compares against an absolute
+        # repository path and would conclude a same-directory override lies
+        # elsewhere — and delete the live scratch directory.
+        if (-not [System.IO.Path]::IsPathFullyQualified($override)) {
+            throw "OXIDIZER_SEMVER_TARGET_DIR must be an absolute path, but is '$override'. Use a fully qualified path such as 'D:\ox-semver'."
+        }
+
+        return $override
     }
 
     # Only Windows constrains path length this way. Elsewhere keep Cargo's

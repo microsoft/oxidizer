@@ -280,7 +280,9 @@ cargo invocation on the repository-local `target/` directory. Set
 `OXIDIZER_SEMVER_TARGET_DIR` to relocate it (for example onto a drive
 with more space), or point it at the repository's own `target` directory
 to restore the previous behaviour. `OXIDIZER_SEMVER_TARGET_DIR` is
-honoured on **every** platform and must be an **absolute** path; when it
+honoured on **every** platform and must be an **absolute** path — a
+relative or drive-relative value is rejected with an error rather than
+resolved against the current working directory. When it
 is unset, the short scratch root applies on Windows only and all other
 platforms use the default target
 directory unchanged. If the scratch directory cannot be

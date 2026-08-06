@@ -21,8 +21,27 @@ Describe 'Get-SemverChecksTargetDir' {
     }
 
     It 'honors an explicit OXIDIZER_SEMVER_TARGET_DIR override on every platform' {
-        $env:OXIDIZER_SEMVER_TARGET_DIR = 'D:\short'
-        Get-SemverChecksTargetDir | Should -Be 'D:\short'
+        # Must be an absolute path *for the current platform*: 'D:\short' is not
+        # fully qualified on Linux or macOS, so hardcoding it would both assert
+        # the wrong contract and fail there.
+        $absolute = Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver-override'
+        $env:OXIDIZER_SEMVER_TARGET_DIR = $absolute
+        Get-SemverChecksTargetDir | Should -Be $absolute
+    }
+
+    It 'rejects a relative override rather than resolving it against the working directory' {
+        # A relative path resolves differently in this process and in the cargo
+        # child process, so accepting it would recreate the class of failure
+        # this scratch directory exists to avoid.
+        $env:OXIDIZER_SEMVER_TARGET_DIR = 'ox-semver'
+        { Get-SemverChecksTargetDir } | Should -Throw '*must be an absolute path*'
+    }
+
+    It 'rejects a drive-relative override on Windows' -Skip:(-not $IsWindows) {
+        # 'C:ox-semver' looks absolute but resolves against the per-drive
+        # current directory.
+        $env:OXIDIZER_SEMVER_TARGET_DIR = 'C:ox-semver'
+        { Get-SemverChecksTargetDir } | Should -Throw '*must be an absolute path*'
     }
 
     It 'ignores a whitespace-only override' {
