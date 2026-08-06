@@ -1,9 +1,6 @@
 # Changelog
+
 ## [0.1.1] - 2026-08-06
-
-- 🔧 Maintenance
-
-  - Now requires `0.1.1` of `routerama_build`
 
 - ✨ Features
 

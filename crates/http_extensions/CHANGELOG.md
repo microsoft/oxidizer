@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.3.7` of `layered`
+  - Now requires `0.3.10` of `ohno`
+  - Now requires `0.1.8` of `recoverable`
+  - Now requires `0.3.7` of `templated_uri`
+  - Now requires `0.9.0` of `thread_aware`
+  - Now requires `0.4.1` of `tick`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- 🐛 Bug Fixes
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
 ## [0.8.0] - 2026-07-24
 
 - 🔧 Maintenance

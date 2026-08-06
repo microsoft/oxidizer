@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.7] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.10` of `ohno`
+
 ## [0.2.6] - 2026-07-24
 
 - 🔧 Maintenance

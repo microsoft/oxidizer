@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.10` of `ohno`
+
+- ✔️ Tasks
+
+  - bump syn to 3.0.2 and align proc-macro dependencies ([#621](https://github.com/microsoft/oxidizer/pull/621))
+
 ## [0.3.0] - 2026-07-31
 
 - ⚠️ Breaking

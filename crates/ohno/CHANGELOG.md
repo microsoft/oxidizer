@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.10] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `ohno_macros`
+
 ## [0.3.9] - 2026-07-24
 
 - ✨ Features

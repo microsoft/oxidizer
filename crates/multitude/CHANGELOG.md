@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.2] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.1.1` of `multitude_macros`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- ✨ Features
+
+  - support trait object coercion ([#617](https://github.com/microsoft/oxidizer/pull/617))
+
+- 🐛 Bug Fixes
+
+  - allow borrowed type arguments in trait-object coercion ([#624](https://github.com/microsoft/oxidizer/pull/624))
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+  - eliminate missed mutation cases ([#610](https://github.com/microsoft/oxidizer/pull/610))
+
+- ✔️ Tasks
+
+  - release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
+
 ## [0.7.1] - 2026-07-24
 
 - 🔧 Maintenance

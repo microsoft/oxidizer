@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.7] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.12.5` of `data_privacy`
+  - Now requires `0.3.10` of `ohno`
+  - Now requires `0.3.1` of `templated_uri_macros`
+
+- 🐛 Bug Fixes
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+
 ## [0.3.6] - 2026-07-31
 
 - 🐛 Bug Fixes

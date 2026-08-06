@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.14.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.1` of `anyspawn`
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.12.5` of `data_privacy`
+  - Now requires `0.5.1` of `fetch_hyper`
+  - Now requires `0.2.4` of `fetch_options`
+  - Now requires `0.2.7` of `fetch_tls`
+  - Now requires `0.8.1` of `http_extensions`
+  - Now requires `0.3.7` of `layered`
+  - Now requires `0.3.10` of `ohno`
+  - Now requires `0.6.2` of `seatbelt`
+  - Now requires `0.6.1` of `seatbelt_http`
+  - Now requires `0.3.7` of `templated_uri`
+  - Now requires `0.9.0` of `thread_aware`
+  - Now requires `0.4.1` of `tick`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- 🐛 Bug Fixes
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+  - isolate macro compatibility boundary ([#623](https://github.com/microsoft/oxidizer/pull/623))
+
+- 📚 Documentation
+
+  - add design document for WinHTTP custom transport ([#595](https://github.com/microsoft/oxidizer/pull/595))
+
 ## [0.14.0] - 2026-07-24
 
 - 🔧 Maintenance

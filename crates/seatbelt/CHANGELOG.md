@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.2] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `layered`
+  - Now requires `0.1.8` of `recoverable`
+  - Now requires `0.9.0` of `thread_aware`
+  - Now requires `0.4.1` of `tick`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- 🐛 Bug Fixes
+
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
 ## [0.6.1] - 2026-07-24
 
 - 🔧 Maintenance

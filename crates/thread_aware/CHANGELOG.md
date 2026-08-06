@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.0] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.6` of `thread_aware_macros`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.8.0] - 2026-07-07
 
 ### ⚠ Breaking Changes

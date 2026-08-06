@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.9.0` of `thread_aware`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+  - validate fmt values at construction, drop cross-format conversions ([#614](https://github.com/microsoft/oxidizer/pull/614))
+
+- ✨ Features
+
+  - add EcmaScript timestamp format ([#612](https://github.com/microsoft/oxidizer/pull/612))
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+
+- 📚 Documentation
+
+  - clarify auto_advance_timers behavior ([#606](https://github.com/microsoft/oxidizer/pull/606))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.4.0] - 2026-07-07
 
 - ⚠️ Breaking

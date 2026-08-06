@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.3.10` of `ohno`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
 ## [0.7.0] - 2026-07-24
 
 - 🔧 Maintenance

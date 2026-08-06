@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.1` of `anyspawn`
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.5.2` of `cachet_memory`
+  - Now requires `0.2.10` of `cachet_service`
+  - Now requires `0.2.8` of `cachet_tier`
+  - Now requires `0.3.7` of `layered`
+  - Now requires `0.4.1` of `tick`
+  - Now requires `0.3.1` of `uniflight`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- 🐛 Bug Fixes
+
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
 ## [0.10.0] - 2026-07-24
 
 - 🔧 Maintenance

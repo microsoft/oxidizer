@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.2] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.8` of `cachet_tier`
+  - Now requires `0.3.10` of `ohno`
+  - Now requires `0.9.0` of `thread_aware`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
 ## [0.5.1] - 2026-07-24
 
 - 🔧 Maintenance

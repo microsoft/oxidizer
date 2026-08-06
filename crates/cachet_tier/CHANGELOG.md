@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.10` of `ohno`
+  - Now requires `0.1.8` of `recoverable`
+
 ## [0.2.7] - 2026-07-24
 
 - 🔧 Maintenance

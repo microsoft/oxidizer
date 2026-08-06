@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.10] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.8` of `cachet_tier`
+  - Now requires `0.3.7` of `layered`
+
 ## [0.2.9] - 2026-07-24
 
 - 🔧 Maintenance

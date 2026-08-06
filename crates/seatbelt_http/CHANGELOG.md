@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.1` of `http_extensions`
+  - Now requires `0.6.2` of `seatbelt`
+  - Now requires `0.3.7` of `templated_uri`
+  - Now requires `0.4.1` of `tick`
+
 ## [0.6.0] - 2026-07-24
 
 - 🔧 Maintenance

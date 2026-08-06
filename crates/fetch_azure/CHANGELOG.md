@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.14.1` of `fetch`
+  - Now requires `0.3.7` of `layered`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
 ## [0.4.0] - 2026-07-24
 
 - 🔧 Maintenance

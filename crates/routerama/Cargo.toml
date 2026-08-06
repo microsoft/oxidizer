@@ -3,7 +3,7 @@
 
 [package]
 name = "routerama"
-version = "0.1.0"
+version = "0.1.1"
 description = "Blazingly fast HTTP route resolution and query string processing"
 readme = "README.md"
 keywords = ["http", "router", "routing", "path", "url"]

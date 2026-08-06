@@ -1,11 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.2.1] - 2026-08-06
 
 ### Added
 
@@ -57,3 +52,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No early per-chunk reclamation (chunks live until pool teardown).
 - No `Weak` handle.
+
+- ✨ Features
+
+  - support trait object coercion ([#617](https://github.com/microsoft/oxidizer/pull/617))
+
+- 🐛 Bug Fixes
+
+  - allow borrowed type arguments in trait-object coercion ([#624](https://github.com/microsoft/oxidizer/pull/624))
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+

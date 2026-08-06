@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.7] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.1` of `plurality`
+
+- 🐛 Bug Fixes
+
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+
 ## [0.3.6] - 2026-07-24
 
 - ✨ Features

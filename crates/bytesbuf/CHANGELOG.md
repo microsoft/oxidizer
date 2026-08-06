@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0] - 2026-08-06
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.1` of `plurality`
+  - Now requires `0.9.0` of `thread_aware`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+- 🐛 Bug Fixes
+
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+  - guard total capacity against overflow at growth sites ([#593](https://github.com/microsoft/oxidizer/pull/593))
+
 ## [0.7.0] - 2026-07-24
 
 - ⚠️ Breaking
