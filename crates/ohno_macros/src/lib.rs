@@ -34,6 +34,12 @@ mod utils;
 /// - `#[no_debug]` - Disable automatic Debug trait implementation
 /// - `#[from(Type1, Type2, ...)]` - Generate From implementations for specified types
 ///
+/// `#[__auto_injected_error]` also appears in the list of attributes above, because a helper
+/// attribute has to be registered to be inert. It is written by `#[ohno::error]` onto the
+/// `OhnoCore` field it injects, and is not user syntax: it marks the field as one the user never
+/// wrote, so the field is left out of the "available fields" a `#[display(...)]` template may
+/// reference.
+///
 /// By default, automatically implements `std::fmt::Debug` unless `#[no_debug]` is specified.
 /// This means existing code with manual `#[derive(Debug, Error)]` will have conflicts and
 /// should either remove the manual Debug derive or add `#[no_debug]` to preserve the manual implementation.
