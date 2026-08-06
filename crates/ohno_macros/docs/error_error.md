@@ -1,28 +1,34 @@
 # `#[error]` and the `OhnoCore` field
 
-How `#[derive(ohno::Error)]` decides which field holds the `OhnoCore`, and how
-`#[ohno::error]` interacts with that choice.
+How `#[derive(ohno::Error)]` picks the field that holds the `OhnoCore`, and how
+`#[ohno::error]` fits in.
 
 ## The error field
 
-Every generated error has exactly one *error field*: the field holding the
-`OhnoCore`. `source()`, the backtrace, enrichment, and the `caused by:` part of
-`Display` are all generated from it. Every other field is data.
+Each generated error has one *error field*. It holds the `OhnoCore`.
 
-## Designating the error field
+The macro reads that field for `source()`, for the backtrace, for enrichment,
+and for the `caused by:` part of `Display`. All other fields are plain data.
 
-There are two ways, tried in this order.
+## Picking the error field
 
-1. **An explicit `#[error]` marker** on a field.
-2. **Auto-detection**, when no field is marked: the one field whose type names
-   `OhnoCore` in its final path segment.
+The macro tries three things, in this order.
 
-Auto-detection reads the spelling and resolves nothing, so `OhnoCore`,
-`ohno::OhnoCore` and `crate::OhnoCore` are all found, while a core reached
-through a type alias or an import rename is not. The marker is the only way to
-designate one of those, which is why the marked field's type is deliberately
-**not** checked: the marker is an explicit statement about a field, so the type
-it names is left to `rustc` to resolve in the generated implementations.
+1. **A field with the reserved `#[doc]` marker.** `#[ohno::error]` puts that doc
+   string on the field it adds, so the macro can tell it apart from a core the
+   user wrote. The marker is internal. Its text is in
+   `GENERATED_ERROR_FIELD_MARKER`.
+2. **A field with `#[error]`.** This is how a user picks the field by hand.
+3. **A field whose type is named `OhnoCore`.** This runs only when no field is
+   marked. There must be exactly one such field.
+
+Step 3 looks at the last part of the type path. So it finds `OhnoCore`,
+`ohno::OhnoCore` and `crate::OhnoCore`. It does not resolve types, so it does
+not find a type alias or a renamed import.
+
+That is why the macro does not check the type of a marked field. A user who
+marks a field has said which field it is. The type is left to `rustc`, which can
+resolve the alias. Without this, an aliased core could not be used at all:
 
 ```rust
 type Core = ohno::OhnoCore;
@@ -32,33 +38,32 @@ type Core = ohno::OhnoCore;
 struct AliasedError {
     path: String,
     #[error]
-    inner: Core,      // auto-detection would never find this
+    inner: Core,      // step 3 would never find this
 }
 ```
 
-## `#[error]` grammar
+## Rules for `#[error]`
 
-The marker is a bare path. It takes no arguments in any form, so
-`#[error(anything)]`, `#[error()]` and `#[error = "x"]` are all rejected rather
-than ignored. At most one field may be marked, and a field may not carry the
-marker twice.
+`#[error]` is a bare word. It takes no arguments. `#[error(anything)]`,
+`#[error()]` and `#[error = "x"]` are all errors, not warnings.
 
-Marking is optional. A struct with no marker and one `OhnoCore` field is the
-ordinary case, and is what the crate's own examples use.
+Only one field may be marked. One field may not carry the marker twice.
+
+Marking is optional. Most errors have one `OhnoCore` field and no marker, and
+step 3 finds it.
 
 ## `#[ohno::error]`
 
-The attribute macro always adds the `OhnoCore` field itself and always generates
-the error representation from the field it adds. Two consequences follow.
+This attribute always adds the `OhnoCore` field itself. It always builds the
+error from the field it adds. Two things follow.
 
-**No field may be marked with `#[error]`.** A marker asks for a different field
-to be the error representation, which the attribute cannot honour. Use
-`#[derive(ohno::Error)]` on its own to place the core by hand.
+**No field may be marked with `#[error]`.** A marker asks for a different field,
+and the attribute cannot do that. To place the core by hand, use
+`#[derive(ohno::Error)]` on its own.
 
-**A field of type `OhnoCore` the user declares is ordinary data.** It is passed
-to the generated constructors like any other field, appears in the generated
-`Debug`, and can be interpolated by a `#[display(...)]` template. It is never
-read for `source()`, the backtrace, or enrichment.
+**A user's own `OhnoCore` field is plain data.** It goes into the generated
+constructors and into `Debug`, and a `#[display(...)]` template can print it.
+The macro never reads it for `source()`, the backtrace, or enrichment.
 
 ```rust
 #[ohno::error]
@@ -69,38 +74,38 @@ struct DeclaredCoreError {
 }
 ```
 
-Applied to a unit struct, the attribute rewrites it as a tuple struct holding
-the injected field. `#[derive(ohno::Error)]` on its own rejects a unit struct,
-because there is nowhere for the core to live.
+On a unit struct, the attribute rewrites the struct as a tuple struct holding
+the added field. `#[derive(ohno::Error)]` alone rejects a unit struct, because
+there is no room for a core.
 
-## The injected field marker
+## Why the added field uses a doc marker
 
-`#[ohno::error]` marks the field it injects with a reserved doc string, so the
-rest of the macro can tell it apart from a core the user declared. The marker is
-internal and is never part of the `#[error]` grammar, which is what keeps that
-grammar argument-free.
+A derive helper attribute must be listed in `attributes(...)` to be inert, and
+everything in that list shows up in the derive's public rustdoc. A doc string
+needs no such listing. The added field is private, and rustdoc does not print
+private fields, so the marker stays out of the docs.
 
-Unlike an attribute, a doc string cannot be rejected when a user writes it — it
-can only fail to match. The marker therefore carries a nonce, so an ordinary doc
-comment cannot collide with it. An `#[error]` marker in a struct that already
-carries the injected field is reported, which also keeps the two markers
-mutually exclusive: field lookup treats either as decisive and takes the first
-match, and that is only sound because a struct with both never reaches it.
+The cost is that a doc string cannot be rejected. A user may write one, and the
+macro can only compare text. So the marker text ends in a nonce, which an
+ordinary doc comment will not match.
 
-## Rejected inputs
+If a struct carries both markers, the macro reports it. That keeps the two
+apart, which matters because field lookup takes the first marked field it sees.
 
-| Input | Reported as |
+## What gets rejected
+
+| Input | Message |
 | --- | --- |
 | `#[error(...)]`, `#[error()]`, `#[error = "x"]` | `` `#[error]` takes no arguments `` |
-| Two fields marked | Multiple fields marked with `` `#[error]` `` |
+| Two marked fields | Multiple fields marked with `` `#[error]` `` |
 | One field marked twice | Duplicate `` `#[error]` `` on the same field |
-| `#[error]` beside the injected field | `#[ohno::error]` already added the field holding the OhnoCore |
+| `#[error]` next to the added field | `#[ohno::error]` already added the field holding the OhnoCore |
 | `#[error]` under `#[ohno::error]` | `#[ohno::error]` adds the OhnoCore field itself |
-| No marker and no `OhnoCore` field | No field marked with `` `#[error]` `` found |
-| No marker and several `OhnoCore` fields | Multiple OhnoCore fields found |
-| An enum, or a unit struct under the derive alone | The derive supports neither |
+| No marker, no `OhnoCore` field | No field marked with `` `#[error]` `` found |
+| No marker, several `OhnoCore` fields | Multiple OhnoCore fields found |
+| An enum, or a unit struct under the derive alone | Not supported |
 
-## Scope
+## Limits
 
-The generated implementations refer to the crate by the path `ohno`. Exposing
-the package under a different crate name is not supported.
+Generated code refers to the crate as `ohno`. Renaming the package in
+`Cargo.toml` is not supported.

@@ -1,6 +1,6 @@
 # `#[display(...)]`
 
-How `#[derive(ohno::Error)]` turns a display template into the error's message.
+How `#[derive(ohno::Error)]` turns a template into the error's message.
 
 ## Form
 
@@ -9,84 +9,86 @@ How `#[derive(ohno::Error)]` turns a display template into the error's message.
 #[display("template", arg1, arg2)]
 ```
 
-The template is a `format!` string. Anything that is not a plain field
-reference is passed as a positional argument.
+The template is a `format!` string. Anything that is not a plain field name goes
+in the argument list.
 
-## Template placeholders
+## Placeholders
 
 | Placeholder | Meaning |
 | --- | --- |
 | `{name}` | the field called `name` |
-| `{0}` | the tuple field at index 0 |
-| `{name:spec}` | the field, with `spec` as the format specifier |
-| `{}` | the next positional argument |
+| `{0}` | tuple field 0 |
+| `{name:spec}` | the field, with `spec` as the format spec |
+| `{}` | the next argument |
 | `{{`, `}}` | a literal brace |
 
-A named or indexed placeholder is resolved against the struct's own fields and
-expands to `&self.<field>`. A field that does not exist is reported at the
-template literal, listing the fields that can be referenced.
+`{name}` and `{0}` are looked up in the struct's own fields. They expand to
+`&self.<field>`. A name that is not a field is an error, reported at the
+template, and the message lists the names that do work.
 
-`{}` consumes the next argument from the argument list. Too few or too many
-arguments for the placeholders present is reported at the template literal.
+`{}` takes the next argument from the list. Too few or too many arguments is an
+error, also reported at the template.
 
-## Positional arguments are scoped to `self`
+## Arguments are scoped to `self`
 
-Each argument is expanded as `&self.<argument>`, so a field is referenced by its
-bare name. The `self.` prefix is implicit and must be omitted, which is where
-this differs from `thiserror`.
+Each argument expands to `&self.<argument>`. So a field is written by its bare
+name. The `self.` part is added for you. This is where the crate differs from
+`thiserror`.
 
-| Argument | Accepted |
+| Argument | Works |
 | --- | --- |
 | `path.display()` | yes |
 | `count * 2` | yes |
-| `self.path.display()` | no, the `self.` prefix is implicit |
-| `.path.display()` | no, not a valid expression |
+| `self.path.display()` | no, `self.` is already there |
+| `.path.display()` | no, not valid Rust |
 
-Because the prefix lands immediately before the argument's leftmost term, that
-term is the one that has to name a field. It is found by walking the expression
-down through the forms that keep a term in leftmost position: field access,
+`self.` lands in front of the argument's leftmost term, so that term is the one
+that must name a field. The macro finds it by walking left through field access,
 method calls, indexing, binary operators, casts, `await`, `?`, and ranges. So
-`count * 2` is rooted in `count`, and `t.0.message()` is rooted in `t`.
+`count * 2` is rooted at `count`, and `t.0.message()` is rooted at `t`.
 
-A root that names no field is reported at the term itself, not at the whole
-expression or at the attribute. Whether an argument can carry the prefix at all
-is then decided by parsing the expansion, rather than by enumerating the
-expression forms that may legally follow a dot.
+If that term is not a field, the error points at the term, not at the whole
+argument and not at the attribute.
 
-## Which fields can be referenced
+The macro then checks the argument can take the prefix at all. It builds
+`&self.<argument>` and tries to parse it. That is simpler than listing every
+expression that may follow a dot.
 
-Every field the user declared, by name for a named struct and by index for a
-tuple struct.
+## Which fields you can name
 
-The `OhnoCore` field injected by `#[ohno::error]` is excluded. Referencing it
-would print the error's own chain, and naming it in a diagnostic would point at
-a field absent from the user's source. A core field the user declared themselves
-is *not* excluded — it is ordinary data. See `error_error.md`.
+Every field the user wrote. By name for a named struct, by index for a tuple
+struct.
 
-Raw identifiers keep their prefix throughout. A field declared as `r#type` is
-written `{r#type}` in a template and is offered as `` `r#type` `` in a
-diagnostic, because `type` would name something that does not parse there.
+The `OhnoCore` field added by `#[ohno::error]` is left out. Printing it would
+print the error's own chain, and naming it in an error message would point at a
+field that is not in the user's code. A core field the user wrote is *not* left
+out. It is plain data. See `error_error.md`.
 
-## Diagnostics
+Raw identifiers keep their prefix. A field declared as `r#type` is written
+`{r#type}`, and error messages offer `` `r#type` ``, because `type` alone does
+not parse there.
 
-Everything above is reported by the macro during expansion. Without that, a
-mis-scoped, misspelled or unsupported argument reaches `rustc` as a field access
-in generated code the user cannot see, and the injected `OhnoCore` field leaks
-into rustc's own "available fields" note.
+## Error reporting
 
-Spans are placed at what the user wrote: at the template literal for a template
-error, and at the offending term for an argument error. A diagnostic covering
-more than one token is built with `syn::Error::new_spanned` rather than from a
-node span, because a node span covers the whole node only where `Span::join` is
-available and collapses to the first token elsewhere — which would render the
-same diagnostic differently between toolchains.
+The macro reports all of the above while it expands. Without that, a bad
+argument reaches `rustc` as a field access in code the user cannot see, and the
+added `OhnoCore` field shows up in rustc's own list of available fields.
 
-## Rejected inputs
+Errors point at what the user wrote: at the template for a template error, at
+the offending term for an argument error.
 
-| Input | Reported as |
+An error covering more than one token is built with `syn::Error::new_spanned`,
+not from a node span. A node span covers the whole node only where `Span::join`
+exists, and shrinks to the first token elsewhere. The same error would then
+underline different amounts of code on different toolchains, and no single
+`.stderr` snapshot could match both.
+
+## What gets rejected
+
+| Input | Message |
 | --- | --- |
 | `{nope}` | unknown field `nope` in `#[display(...)]`, available fields: … |
 | `{}` with no argument left | Not enough arguments for format placeholders |
-| an argument no `{}` consumes | Too many arguments for format placeholders |
+| an argument no `{}` uses | Too many arguments for format placeholders |
 | `self.path.display()` | positional arguments are implicitly scoped to `self` |
 | `Self::LABEL.len()`, `"prefix".len()` | each argument must be rooted in a field or method of `self` |
