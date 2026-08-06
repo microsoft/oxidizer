@@ -64,13 +64,7 @@ const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself an
 
 /// Reject a struct that marks a field with `#[error]`
 ///
-/// `#[ohno::error]` always adds the `OhnoCore` field and always generates the error representation
-/// from it, so a marker on another field asks for something the attribute cannot honour. Placing
-/// the field by hand is what `#[derive(ohno::Error)]` is for.
-///
-/// Declaring a field of type `OhnoCore` is not rejected: the injected field is marked, so it is the
-/// one the implementations are generated from, and the declared field stays an ordinary field the
-/// user is free to reference.
+/// See `docs/error_error.md`.
 fn reject_marked_field(input: &DeriveInput) -> syn::Result<()> {
     let Data::Struct(data_struct) = &input.data else {
         return Ok(());

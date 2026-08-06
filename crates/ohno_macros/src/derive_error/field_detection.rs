@@ -15,16 +15,7 @@ const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the fi
 
 /// Validate every `#[error]` attribute in the struct
 ///
-/// `#[error]` takes no arguments. The field `#[ohno::error]` injects is marked with a reserved doc
-/// string rather than an argument form, so this grammar stays argument-free and an `#[error(...)]`
-/// copied out of `cargo expand` is reported rather than honoured.
-///
-/// The doc marker itself cannot be rejected that way. It is valid syntax wherever a user writes it,
-/// so it can only fail to match, and a nonce is what keeps an ordinary doc comment from matching.
-///
-/// The marked field's type is deliberately not checked. The marker is an explicit statement about
-/// a field, so the type it names is left to `rustc` to resolve in the generated implementations,
-/// which is what lets a core reached through an alias or a rename be designated at all.
+/// See `docs/error_error.md` for the rules this enforces.
 pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
     let Data::Struct(data_struct) = &input.data else {
         return Ok(());
@@ -158,9 +149,8 @@ pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
 
 /// Check if a field carries the marker naming it the one holding the `OhnoCore`
 ///
-/// Either marker is decisive, and the first match wins. That is only sound because the two cannot
-/// coexist: `validate_error_attributes` rejects an `#[error]` in a struct that already carries the
-/// generated field, so a struct with both never reaches field lookup.
+/// Either marker is decisive and the first match wins, which is sound only because
+/// `validate_error_attributes` rejects a struct carrying both.
 fn has_error_attribute(field: &syn::Field) -> bool {
     field.attrs.iter().any(|attr| attr.path().is_ident("error")) || is_generated_error_field(field)
 }

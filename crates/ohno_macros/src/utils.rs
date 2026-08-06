@@ -76,17 +76,8 @@ pub(crate) use bail_spanned;
 
 /// Doc marker `#[ohno::error]` puts on the `OhnoCore` field it injects
 ///
-/// A user is free to declare an `OhnoCore` field themselves, and that field is theirs to
-/// reference; this marker is what tells the two apart.
-///
-/// It is a doc string rather than an attribute because a helper attribute has to be registered to
-/// be inert, and rustdoc renders the registered list in the derive's signature block. `doc` is
-/// built in, so nothing is registered and nothing is shown: the injected field is private, and
-/// rustdoc does not document private fields.
-///
-/// Unlike an attribute, a doc string cannot be rejected when a user writes it — it can only fail
-/// to match. The nonce is therefore load-bearing: a marker that read as prose would let an
-/// ordinary doc comment hide the field it documents from the display template.
+/// The nonce is load-bearing: a doc string cannot be rejected when a user writes it, only fail to
+/// match. See `docs/error_error.md`.
 pub(crate) const GENERATED_ERROR_FIELD_MARKER: &str = " ohno::generated-core@7f3d9c2a";
 
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields

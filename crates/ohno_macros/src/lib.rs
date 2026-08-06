@@ -24,12 +24,9 @@ mod utils;
 /// Derive macro for automatically implementing error traits.
 ///
 /// Supports the following attributes:
-/// - `#[error]` - Mark the field containing the `OhnoCore`. At most one field may be marked. With
-///   no marker the macro auto-detects a single field whose type names `OhnoCore` in its final path
-///   segment, so a core reached through an alias or a rename has to be marked explicitly
-/// - `#[display("...")]` - Custom display message with field interpolation. Positional
-///   arguments are implicitly scoped to `self`, so fields are referenced by their bare name
-///   (`path.display()`, not `self.path.display()`)
+/// - `#[error]` - Mark the field containing the `OhnoCore`. See `docs/error_error.md`
+/// - `#[display("...")]` - Custom display message with field interpolation. See
+///   `docs/error_display.md`
 /// - `#[no_constructors]` - Disable automatic constructor generation
 /// - `#[no_debug]` - Disable automatic Debug trait implementation
 /// - `#[from(Type1, Type2, ...)]` - Generate From implementations for specified types

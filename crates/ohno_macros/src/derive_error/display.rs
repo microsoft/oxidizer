@@ -71,11 +71,7 @@ pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &De
 
 /// Convert expression to appropriate field access
 ///
-/// Positional arguments are implicitly scoped to `self`, so the expression is prefixed with
-/// `&self.`. Both the root and the resulting expansion are checked first: otherwise a mis-scoped,
-/// misspelled or unsupported argument is only caught later by `rustc`, which reports it against
-/// generated code the user cannot see and leaks the macro-injected `OhnoCore` field into the
-/// diagnostic.
+/// See `docs/error_display.md` for the scoping rules and why they are checked here.
 fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     validate_arg_root(expr, input)?;
 
@@ -120,10 +116,8 @@ fn validate_literal_root(literal: &syn::ExprLit, input: &DeriveInput) -> Result<
 
 /// Walk an expression down to the term the whole expression is rooted in
 ///
-/// The argument is expanded as `&self.#expr`, so `self.` lands immediately before this term.
-/// Every form here keeps the root in leftmost position, which is what makes the expansion
-/// parse: `count * 2` becomes `&self.count * 2`, and `t.0.message()` becomes
-/// `&self.t.0.message()`.
+/// Every form here keeps the root in leftmost position, which is where `self.` lands. See
+/// `docs/error_display.md`.
 fn root_of_expr(expr: &Expr) -> &Expr {
     match expr {
         Expr::Field(inner) => root_of_expr(&inner.base),
@@ -148,9 +142,7 @@ fn field_member(field_name: &str) -> Member {
 
 /// Build the identifier naming a field, keeping raw identifiers raw
 ///
-/// Field names reach this point as text, taken from the display template or from the list of names
-/// the diagnostics offer, and a field declared as `r#type` is spelled with its prefix in both.
-/// `Ident::new` rejects that spelling and panics, which would turn an ordinary error in a user's
+/// `Ident::new` panics on the `r#` spelling, which would turn an ordinary error in a user's
 /// template into a macro crash.
 fn field_ident(field_name: &str) -> Ident {
     let span = proc_macro2::Span::call_site();
@@ -206,9 +198,8 @@ fn describe_referenceable_fields(input: &DeriveInput) -> String {
 
 /// Collect the names a display template may reference, by name or by tuple index
 ///
-/// The `OhnoCore` field injected by `#[ohno::error]` is left out, as the user never wrote it:
-/// referencing it would print the error's own chain, and naming it in a diagnostic would point at
-/// a field absent from their source. A core field the user declared themselves is kept.
+/// The field injected by `#[ohno::error]` is left out; a core the user declared is kept. See
+/// `docs/error_display.md`.
 fn referenceable_field_names(input: &DeriveInput) -> Vec<String> {
     let Data::Struct(data_struct) = &input.data else {
         return Vec::new();
