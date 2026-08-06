@@ -15,18 +15,18 @@ const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the fi
 
 /// A field of the struct, with the facts the derive needs about it
 struct ParsedField<'a> {
-    /// How the field is accessed: by name or by tuple index
+    /// How the field is accessed in generated code
     reference: ErrorFieldRef,
     /// Every literal `#[error]` on the field, in source order
     markers: Vec<&'a syn::Attribute>,
-    /// Whether the field is the one `#[ohno::error]` injected
+    /// Whether the field is the one `#[ohno::error]` added
     generated: bool,
     /// Whether the field's type names `OhnoCore`, which is what auto-detection reads
     holds_core: bool,
 }
 
 impl ParsedField<'_> {
-    /// Whether the field is designated as the error field, by either marker
+    /// Whether the field is picked as the error field, by either marker
     fn is_designated(&self) -> bool {
         !self.markers.is_empty() || self.generated
     }

@@ -16,15 +16,14 @@ The macro tries three things, in this order.
 
 1. **A field with the reserved `#[doc]` marker.** `#[ohno::error]` puts that doc
    string on the field it adds, so the macro can tell it apart from a core the
-   user wrote. The marker is internal. Its text is in
+   user wrote. The marker is internal; its text is in
    `GENERATED_ERROR_FIELD_MARKER`.
 2. **A field with `#[error]`.** This is how a user picks the field by hand.
 3. **A field whose type is named `OhnoCore`.** This runs only when no field is
    marked. There must be exactly one such field.
 
-Step 3 looks at the last part of the type path. So it finds `OhnoCore`,
-`ohno::OhnoCore` and `crate::OhnoCore`. It does not resolve types, so it does
-not find a type alias or a renamed import.
+Step 3 reads the last part of the type path and resolves nothing, so it does not
+find a type alias or a renamed import.
 
 That is why the macro does not check the type of a marked field. A user who
 marks a field has said which field it is. The type is left to `rustc`, which can
@@ -110,17 +109,13 @@ field lookup takes the first marked field it sees.
 
 ## What gets rejected
 
-| Input | Message |
-| --- | --- |
-| `#[error(...)]`, `#[error()]`, `#[error = "x"]` | `` `#[error]` takes no arguments `` |
-| Two marked fields | Multiple fields marked with `` `#[error]` `` |
-| One field marked twice | Duplicate `` `#[error]` `` on the same field |
-| `#[error]` next to the added field | `#[ohno::error]` already added the field holding the OhnoCore |
-| A hand-written reserved doc marker under `#[ohno::error]` | This doc comment is reserved for `#[ohno::error]` |
-| `#[error]` under `#[ohno::error]` | `#[ohno::error]` adds the OhnoCore field itself |
-| No marker, no `OhnoCore` field | No field marked with `` `#[error]` `` found |
-| No marker, several `OhnoCore` fields | Multiple OhnoCore fields found |
-| An enum, or a unit struct under the derive alone | Not supported |
+- `#[error]` with any argument.
+- Two marked fields, or one field marked twice.
+- `#[error]` in a struct that already has the added field.
+- A hand-written reserved doc marker under `#[ohno::error]`.
+- `#[error]` under `#[ohno::error]`.
+- No marker and no `OhnoCore` field, or no marker and several of them.
+- An enum, or a unit struct under the derive alone.
 
 ## Limits
 
