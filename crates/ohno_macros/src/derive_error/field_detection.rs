@@ -11,21 +11,26 @@ const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark
 const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
 const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore";
 const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
+const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the field holding the OhnoCore and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` on its own to place the OhnoCore yourself";
 
 /// Validate every `#[error]` attribute in the struct
 ///
-/// The attribute marks the field holding the `OhnoCore` and takes no arguments. The field
-/// `#[ohno::error]` injects is marked with a reserved doc string instead, so that the handoff
-/// between the two macros cannot be mistaken for — or copied out of `cargo expand` as — user
-/// syntax.
+/// `#[error]` takes no arguments. The field `#[ohno::error]` injects is marked with a reserved doc
+/// string rather than an argument form, so this grammar stays argument-free and an `#[error(...)]`
+/// copied out of `cargo expand` is reported rather than honoured.
 ///
-/// The marker is taken as authoritative: it is an explicit statement about a field, so the type it
-/// names is left to `rustc` to resolve in the generated implementations. Only the marker's own
-/// shape — its argument list, and how many of them there are — is checked here.
+/// The doc marker itself cannot be rejected that way. It is valid syntax wherever a user writes it,
+/// so it can only fail to match, and a nonce is what keeps an ordinary doc comment from matching.
+///
+/// The marked field's type is deliberately not checked. The marker is an explicit statement about
+/// a field, so the type it names is left to `rustc` to resolve in the generated implementations,
+/// which is what lets a core reached through an alias or a rename be designated at all.
 pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
     let Data::Struct(data_struct) = &input.data else {
         return Ok(());
     };
+
+    let generated = data_struct.fields.iter().any(is_generated_error_field);
 
     let mut marked = 0;
     for field in &data_struct.fields {
@@ -42,6 +47,13 @@ pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
 
         if !matches!(&attr.meta, Meta::Path(_)) {
             bail_spanned!(&attr.meta, ERROR_ATTRIBUTE_ARGUMENTS);
+        }
+
+        // The generated field is already the error representation, so a marker asks for a second
+        // one. Reporting it here also keeps the two markers mutually exclusive, which is what lets
+        // `has_error_attribute` treat either of them as decisive
+        if generated {
+            bail_spanned!(attr, MARKED_FIELD_WITH_GENERATED);
         }
 
         // Marking a second field leaves the choice of error field to declaration order, so it is
@@ -145,6 +157,10 @@ pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
 }
 
 /// Check if a field carries the marker naming it the one holding the `OhnoCore`
+///
+/// Either marker is decisive, and the first match wins. That is only sound because the two cannot
+/// coexist: `validate_error_attributes` rejects an `#[error]` in a struct that already carries the
+/// generated field, so a struct with both never reaches field lookup.
 fn has_error_attribute(field: &syn::Field) -> bool {
     field.attrs.iter().any(|attr| attr.path().is_ident("error")) || is_generated_error_field(field)
 }
@@ -304,6 +320,24 @@ mod tests {
             let input: DeriveInput = input;
             let message = validate_error_attributes(&input).unwrap_err().to_string();
             assert_eq!(message, MULTIPLE_MARKED_FIELDS);
+        }
+    }
+
+    #[test]
+    fn test_error_attribute_rejects_a_marker_beside_the_generated_field() {
+        // The generated field is already the error representation, so a marker asks for a second
+        // one. This is also what keeps the two markers mutually exclusive, so that treating either
+        // as decisive cannot resolve the choice by declaration order
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+        for input in [
+            parse_quote! { struct TestError { #[error] inner: OhnoCore, #[doc = #marker] ohno_core: OhnoCore } },
+            parse_quote! { struct TestError { #[doc = #marker] ohno_core: OhnoCore, #[error] inner: OhnoCore } },
+            parse_quote! { struct TestError(#[error] OhnoCore, #[doc = #marker] OhnoCore); },
+            parse_quote! { struct TestError { #[error] not_a_core: String, #[doc = #marker] ohno_core: OhnoCore } },
+        ] {
+            let input: DeriveInput = input;
+            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            assert_eq!(message, MARKED_FIELD_WITH_GENERATED);
         }
     }
 
