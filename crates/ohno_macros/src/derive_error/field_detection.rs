@@ -13,125 +13,141 @@ const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Ma
 const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
 const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the field holding the OhnoCore and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` on its own to place the OhnoCore yourself";
 
+/// A field of the struct, with the facts the derive needs about it
+struct ParsedField<'a> {
+    /// How the field is accessed: by name or by tuple index
+    reference: ErrorFieldRef,
+    /// Every literal `#[error]` on the field, in source order
+    markers: Vec<&'a syn::Attribute>,
+    /// Whether the field is the one `#[ohno::error]` injected
+    generated: bool,
+    /// Whether the field's type names `OhnoCore`, which is what auto-detection reads
+    holds_core: bool,
+}
+
+impl ParsedField<'_> {
+    /// Whether the field is designated as the error field, by either marker
+    fn is_designated(&self) -> bool {
+        !self.markers.is_empty() || self.generated
+    }
+}
+
+/// Every field of a struct, parsed once
+///
+/// Collecting first keeps the rules in one place, checking a whole struct rather than deciding
+/// each field as it is walked. See `docs/error_error.md`.
+struct ParsedFields<'a> {
+    fields: Vec<ParsedField<'a>>,
+    unit: bool,
+}
+
+impl<'a> ParsedFields<'a> {
+    /// Collect what the struct says, without judging any of it
+    fn parse(input: &'a DeriveInput) -> Option<Self> {
+        let Data::Struct(data_struct) = &input.data else {
+            return None;
+        };
+
+        let named = matches!(&data_struct.fields, Fields::Named(_));
+        let fields = data_struct
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| ParsedField {
+                reference: if named {
+                    ErrorFieldRef::Named(field.ident.clone().expect("named field"))
+                } else {
+                    ErrorFieldRef::Indexed(syn::Index::from(index))
+                },
+                markers: field.attrs.iter().filter(|attr| attr.path().is_ident("error")).collect(),
+                generated: is_generated_error_field(field),
+                holds_core: is_inner_error_type(&field.ty),
+            })
+            .collect();
+
+        Some(Self {
+            fields,
+            unit: matches!(&data_struct.fields, Fields::Unit),
+        })
+    }
+
+    /// Report anything the collected fields say that cannot be honoured
+    fn validate(&self) -> Result<()> {
+        let generated = self.fields.iter().any(|field| field.generated);
+        let mut marked = 0;
+
+        for field in &self.fields {
+            let Some(attr) = field.markers.first() else {
+                continue;
+            };
+
+            // A field carrying the marker twice says nothing a single one does not
+            if let Some(duplicate) = field.markers.get(1) {
+                bail_spanned!(duplicate, DUPLICATE_MARKER);
+            }
+
+            if !matches!(&attr.meta, Meta::Path(_)) {
+                bail_spanned!(&attr.meta, ERROR_ATTRIBUTE_ARGUMENTS);
+            }
+
+            // The generated field is already the error representation, so a marker asks for a
+            // second one. This is also what keeps the two markers mutually exclusive
+            if generated {
+                bail_spanned!(attr, MARKED_FIELD_WITH_GENERATED);
+            }
+
+            // Marking a second field leaves the choice of error field to declaration order, so it
+            // is reported rather than resolved silently
+            marked += 1;
+            if marked > 1 {
+                bail_spanned!(attr, MULTIPLE_MARKED_FIELDS);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Choose the error field: the designated one, or the sole field holding a core
+    fn error_field(self) -> Result<ErrorFieldRef> {
+        if self.unit {
+            bail!("Error derive does not support unit structs");
+        }
+
+        let mut cores = Vec::new();
+        for field in self.fields {
+            // A designated field wins outright, whatever its type is spelled as
+            if field.is_designated() {
+                return Ok(field.reference);
+            }
+
+            if field.holds_core {
+                cores.push(field);
+            }
+        }
+
+        let mut cores = cores.into_iter();
+        match (cores.next(), cores.next()) {
+            (None, _) => bail!(NO_ERROR_FIELD),
+            (Some(field), None) => Ok(field.reference),
+            (Some(_), Some(_)) => bail!(MULTIPLE_ERROR_FIELDS),
+        }
+    }
+}
+
 /// Validate every `#[error]` attribute in the struct
 ///
 /// See `docs/error_error.md` for the rules this enforces.
 pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
-    let Data::Struct(data_struct) = &input.data else {
-        return Ok(());
-    };
-
-    let generated = data_struct.fields.iter().any(is_generated_error_field);
-
-    let mut marked = 0;
-    for field in &data_struct.fields {
-        let mut markers = field.attrs.iter().filter(|attr| attr.path().is_ident("error"));
-
-        let Some(attr) = markers.next() else {
-            continue;
-        };
-
-        // A field carrying the marker twice says nothing a single one does not
-        if let Some(duplicate) = markers.next() {
-            bail_spanned!(duplicate, DUPLICATE_MARKER);
-        }
-
-        if !matches!(&attr.meta, Meta::Path(_)) {
-            bail_spanned!(&attr.meta, ERROR_ATTRIBUTE_ARGUMENTS);
-        }
-
-        // The generated field is already the error representation, so a marker asks for a second
-        // one. Reporting it here also keeps the two markers mutually exclusive, which is what lets
-        // `has_error_attribute` treat either of them as decisive
-        if generated {
-            bail_spanned!(attr, MARKED_FIELD_WITH_GENERATED);
-        }
-
-        // Marking a second field leaves the choice of error field to declaration order, so it is
-        // reported rather than resolved silently
-        marked += 1;
-        if marked > 1 {
-            bail_spanned!(attr, MULTIPLE_MARKED_FIELDS);
-        }
-    }
-
-    Ok(())
+    ParsedFields::parse(input).map_or(Ok(()), |fields| fields.validate())
 }
 
 /// Find the field marked with `#[error]` or auto-detect `OhnoCore` field
 pub(crate) fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
-    let Data::Struct(data_struct) = &input.data else {
+    let Some(fields) = ParsedFields::parse(input) else {
         bail!("Error derive only supports structs");
     };
 
-    match &data_struct.fields {
-        Fields::Named(fields) => find_error_field_named(fields),
-        Fields::Unnamed(fields) => find_error_field_unnamed(fields),
-        Fields::Unit => bail!("Error derive does not support unit structs"),
-    }
-}
-
-#[expect(clippy::unwrap_used, reason = "Field names are guaranteed to be present here")]
-fn find_error_field_named(fields: &syn::FieldsNamed) -> Result<ErrorFieldRef> {
-    // First, look for fields explicitly marked with #[error]
-    if let Some(field) = find_explicit_error_field_named(fields) {
-        return Ok(ErrorFieldRef::Named(field));
-    }
-
-    // Auto-detect OhnoCore fields
-    let fiasko_fields: Vec<_> = fields
-        .named
-        .iter()
-        .filter(|&field| is_inner_error_type(&field.ty))
-        .map(|field| field.ident.as_ref().unwrap())
-        .collect();
-
-    match fiasko_fields[..] {
-        [] => bail!(NO_ERROR_FIELD),
-        [field] => Ok(ErrorFieldRef::Named(field.clone())),
-        _ => bail!(MULTIPLE_ERROR_FIELDS),
-    }
-}
-
-fn find_error_field_unnamed(fields: &syn::FieldsUnnamed) -> Result<ErrorFieldRef> {
-    // First, look for fields explicitly marked with #[error]
-    if let Some(index) = find_explicit_error_field_unnamed(fields) {
-        return Ok(ErrorFieldRef::Indexed(syn::Index::from(index)));
-    }
-
-    // Auto-detect OhnoCore fields
-    let fiasko_indices: Vec<_> = fields
-        .unnamed
-        .iter()
-        .enumerate()
-        .filter(|(_, field)| is_inner_error_type(&field.ty))
-        .map(|(index, _)| index)
-        .collect();
-
-    match fiasko_indices[..] {
-        [] => bail!(NO_ERROR_FIELD),
-        [index] => Ok(ErrorFieldRef::Indexed(syn::Index::from(index))),
-        _ => bail!(MULTIPLE_ERROR_FIELDS),
-    }
-}
-
-/// Find field explicitly marked with `#[error]` in named fields
-fn find_explicit_error_field_named(fields: &syn::FieldsNamed) -> Option<syn::Ident> {
-    fields
-        .named
-        .iter()
-        .find(|field| has_error_attribute(field))
-        .and_then(|field| field.ident.clone())
-}
-
-/// Find field explicitly marked with `#[error]` in unnamed fields
-fn find_explicit_error_field_unnamed(fields: &syn::FieldsUnnamed) -> Option<usize> {
-    fields
-        .unnamed
-        .iter()
-        .enumerate()
-        .find(|(_, field)| has_error_attribute(field))
-        .map(|(index, _)| index)
+    fields.error_field()
 }
 
 /// Check if a field is the `OhnoCore` field injected by `#[ohno::error]`
@@ -145,14 +161,6 @@ pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
         },
         _ => false,
     })
-}
-
-/// Check if a field carries the marker naming it the one holding the `OhnoCore`
-///
-/// Either marker is decisive and the first match wins, which is sound only because
-/// `validate_error_attributes` rejects a struct carrying both.
-fn has_error_attribute(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| attr.path().is_ident("error")) || is_generated_error_field(field)
 }
 
 /// Check if a type is `OhnoCore` or a variant of it
@@ -498,10 +506,10 @@ mod tests {
     }
 
     #[test]
-    fn test_find_explicit_error_field_unnamed() {
-        let fields: syn::FieldsUnnamed = parse_quote! { (String, #[error] OhnoCore, OhnoCore) };
+    fn test_marked_field_wins_over_a_later_core_field() {
+        // The marker is decisive, so auto-detection never runs and the second core stays data
+        let input: DeriveInput = parse_quote! { struct TestError(String, #[error] OhnoCore, OhnoCore); };
 
-        let index = find_explicit_error_field_unnamed(&fields).expect("should find error attribute");
-        assert_eq!(index, 1);
+        assert_eq!(find_error_field(&input).unwrap().to_string(), "1");
     }
 }

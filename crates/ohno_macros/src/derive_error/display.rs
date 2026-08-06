@@ -11,53 +11,93 @@ use crate::utils::{bail, bail_spanned};
 const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix";
 const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
 
-/// Parse display template to support field references like `{field_name}`
-/// or format!-style with separate arguments
-pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
-    let mut result = String::new();
-    let mut chars = display_attr.template.chars().peekable();
-    let mut format_args = Vec::new();
-    let mut arg_index = 0;
+/// A parsed piece of a display template
+enum Segment {
+    /// Literal text, already spelled the way `format!` expects it
+    Text(String),
+    /// `{name}` or `{0}`, with its format specifier
+    Field { name: String, spec: String },
+    /// `{}`, with its format specifier
+    Positional { spec: String },
+}
+
+/// Split a display template into its segments
+///
+/// Parsing answers only what the template says. Whether a field exists, or whether the argument
+/// count matches, is decided afterwards against the parsed form.
+fn parse_template(template: &str) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut text = String::new();
+    let mut chars = template.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
-            '{' => {
-                if chars.peek() == Some(&'{') {
-                    // Escaped brace: {{
-                    chars.next();
-                    result.push_str("{{");
-                } else {
-                    // Parse placeholder: {} or {field_name} or {field_name:format}
-                    let (field_name, format_spec) = parse_field_reference(&mut chars);
-
-                    let format_str = if format_spec.is_empty() {
-                        "{}".to_string()
-                    } else {
-                        format!("{{:{format_spec}}}")
-                    };
-                    result.push_str(&format_str);
-
-                    if field_name.is_empty() {
-                        // Empty placeholder {}, use next argument from args list
-                        if arg_index >= display_attr.args.len() {
-                            bail!(display_attr.template_span, "Not enough arguments for format placeholders");
-                        }
-                        let arg = &display_attr.args[arg_index];
-                        let arg_tokens = convert_expr_to_field_access(arg, input)?;
-                        format_args.push(arg_tokens);
-                        arg_index += 1;
-                    } else {
-                        // Named field reference like {field_name} or tuple index like {0}
-                        validate_field_exists(&field_name, input, display_attr.template_span)?;
-                        let member = field_member(&field_name);
-                        format_args.push(quote! { &self.#member });
-                    }
-                }
+            // Escaped brace: `{{`
+            '{' if chars.peek() == Some(&'{') => {
+                chars.next();
+                text.push_str("{{");
             }
-            // Note: `}}` does not need a dedicated arm. The `_` arm pushes each `}`
-            // verbatim, producing the required `}}` sequence in the result format
-            // string, which `format!` interprets as a literal `}`.
-            _ => result.push(ch),
+            '{' => {
+                if !text.is_empty() {
+                    segments.push(Segment::Text(std::mem::take(&mut text)));
+                }
+
+                let (name, spec) = parse_field_reference(&mut chars);
+                segments.push(if name.is_empty() {
+                    Segment::Positional { spec }
+                } else {
+                    Segment::Field { name, spec }
+                });
+            }
+            // Note: `}}` needs no arm of its own. Each `}` is kept verbatim, producing the `}}`
+            // that `format!` reads as a literal brace.
+            _ => text.push(ch),
+        }
+    }
+
+    if !text.is_empty() {
+        segments.push(Segment::Text(text));
+    }
+
+    segments
+}
+
+/// Build the `format!` placeholder a segment stands for
+fn placeholder(spec: &str) -> String {
+    if spec.is_empty() {
+        "{}".to_string()
+    } else {
+        format!("{{:{spec}}}")
+    }
+}
+
+/// Parse display template to support field references like `{field_name}`
+/// or format!-style with separate arguments
+///
+/// See `docs/error_display.md`.
+pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
+    let mut result = String::new();
+    let mut format_args = Vec::new();
+    let mut arg_index = 0;
+
+    for segment in parse_template(&display_attr.template) {
+        match segment {
+            Segment::Text(text) => result.push_str(&text),
+            Segment::Field { name, spec } => {
+                result.push_str(&placeholder(&spec));
+                validate_field_exists(&name, input, display_attr.template_span)?;
+                let member = field_member(&name);
+                format_args.push(quote! { &self.#member });
+            }
+            Segment::Positional { spec } => {
+                result.push_str(&placeholder(&spec));
+
+                let Some(arg) = display_attr.args.get(arg_index) else {
+                    bail!(display_attr.template_span, "Not enough arguments for format placeholders");
+                };
+                format_args.push(convert_expr_to_field_access(arg, input)?);
+                arg_index += 1;
+            }
         }
     }
 
