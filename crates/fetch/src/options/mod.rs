@@ -17,6 +17,7 @@
 //! so linking to it would break the documentation build when the feature is off.
 
 use data_privacy::RedactionEngine;
+#[doc(inline)]
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, MAX_HTTP2_WINDOW_SIZE,
     MAX_SOCKET_BUFFER_SIZE, MIN_SOCKET_BUFFER_SIZE, PoolIndex, PoolSelection, RequestFilter, SocketOptions, TransportOptions,

@@ -45,6 +45,7 @@ mod transport;
 
 pub use connection_info::ConnectionInfo;
 pub use connection_keep_alive::ConnectionKeepAlive;
+#[doc(inline)]
 pub use http2::{Http2Options, MAX_HTTP2_WINDOW_SIZE};
 pub use pooling::{ConnectionIdleTimeout, ConnectionLifetime, ConnectionPoolOptions, PoolIndex, PoolSelection};
 pub use request_filter::RequestFilter;

@@ -93,9 +93,40 @@ impl Http2Options {
     /// ```
     #[must_use]
     pub fn initial_stream_window_size(mut self, size: impl Into<Option<u32>>) -> Self {
-        self.initial_stream_window_size = size.into().map(|size| size.min(MAX_HTTP2_WINDOW_SIZE));
+        self.initial_stream_window_size = size.into().map(clamp_window_size);
         self
     }
+
+    /// Returns the stream window size clamped to the protocol maximum.
+    ///
+    /// The builder method already clamps, but the field is public and may have been assigned
+    /// directly. HTTP transports must use this method instead of reading
+    /// [`initial_stream_window_size`][Self::initial_stream_window_size] verbatim.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fetch_options::{Http2Options, MAX_HTTP2_WINDOW_SIZE};
+    ///
+    /// let mut options = Http2Options::default();
+    /// options.initial_stream_window_size = Some(u32::MAX);
+    ///
+    /// assert_eq!(
+    ///     options.effective_initial_stream_window_size(),
+    ///     Some(MAX_HTTP2_WINDOW_SIZE)
+    /// );
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn effective_initial_stream_window_size(&self) -> Option<u32> {
+        self.initial_stream_window_size.map(clamp_window_size)
+    }
+}
+
+/// Clamps an HTTP/2 stream window size to the protocol maximum.
+#[inline]
+fn clamp_window_size(size: u32) -> u32 {
+    size.min(MAX_HTTP2_WINDOW_SIZE)
 }
 
 #[cfg(test)]
@@ -126,10 +157,27 @@ mod tests {
         let clamped = Http2Options::default().initial_stream_window_size(u32::MAX);
         assert_eq!(clamped.initial_stream_window_size, Some(MAX_HTTP2_WINDOW_SIZE));
 
+        let maximum = Http2Options::default().initial_stream_window_size(MAX_HTTP2_WINDOW_SIZE);
+        assert_eq!(maximum.initial_stream_window_size, Some(MAX_HTTP2_WINDOW_SIZE));
+
+        let above_maximum = Http2Options::default().initial_stream_window_size(MAX_HTTP2_WINDOW_SIZE + 1);
+        assert_eq!(above_maximum.initial_stream_window_size, Some(MAX_HTTP2_WINDOW_SIZE));
+
         let in_range = Http2Options::default().initial_stream_window_size(65_535);
         assert_eq!(in_range.initial_stream_window_size, Some(65_535));
 
         let cleared = Http2Options::default().initial_stream_window_size(None);
         assert_eq!(cleared.initial_stream_window_size, None);
+    }
+
+    #[test]
+    fn effective_stream_window_size_clamps_direct_assignment() {
+        let options = Http2Options {
+            initial_stream_window_size: Some(u32::MAX),
+            ..Default::default()
+        };
+
+        assert_eq!(options.effective_initial_stream_window_size(), Some(MAX_HTTP2_WINDOW_SIZE));
+        assert_eq!(Http2Options::default().effective_initial_stream_window_size(), None);
     }
 }
