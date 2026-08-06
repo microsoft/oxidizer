@@ -11,8 +11,8 @@ Stabilize the core owned byte-sequence types:
 - `BytesView` for sharing and consuming immutable byte sequences.
 - The iterator and cursor types returned by their stable operations:
   `BytesBufRemaining`, `BytesBufVectoredWrite`, and `BytesViewSlices`.
-- `BlockMeta`, because the current slice iterator types expose it in their
-  public item types.
+- `BlockMeta`, because the current slice iterator types and direct slice
+  metadata methods expose it in their public signatures.
 - `MemoryGuard` for keeping memory alive while native or unsafe I/O uses it.
 
 The stable operation groups should cover:
@@ -68,7 +68,8 @@ machinery or replace it with a narrower stable construction API.
 - [ ] Decide which `bytes` compatibility implementations are stable.
 - [ ] Determine the minimal stable API for implementing custom memory providers,
       including whether `Block`, `BlockRef`, and related traits remain public.
-- [ ] Confirm whether the metadata-returning iterator shapes remain stable; if
-      they change, reconsider whether `BlockMeta` belongs in the stable surface.
+- [ ] Confirm whether the metadata-returning iterator shapes and direct
+      `first_slice_meta()` methods remain stable. Removing `BlockMeta` from the
+      stable surface requires redesigning all of these exposure points.
 - [ ] Confirm stable downstream crates expose no deferred `bytesbuf` types.
 - [ ] Identify all remaining APIs as stable, unstable, or unnecessary for 1.0.
