@@ -1,10 +1,19 @@
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::needless_collect,
+    clippy::unwrap_used,
+    reason = "The example keeps retained allocations visible and uses small bounded worker identifiers"
+)]
+
+//! Demonstrates caller tracking, scoped heaps, and snapshot capture.
+
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::Arc;
 
 use allocation_hints::heap::Heap;
 use allocation_hints::heap::bump::Options as BumpOptions;
-use allocation_hints::{Hint, with_hint};
+use allocation_hints::with_hint;
 use rallocator::telemetry::{snapshot, track_callers};
 
 rallocator::config!(TrackingConfig {
@@ -15,38 +24,27 @@ rallocator::config!(TrackingConfig {
 rallocator::rallocator!(TrackingConfig);
 
 fn main() {
+    rallocator::initialize();
     track_callers(true);
 
-    for _ in 0..100 {
-        let workers: Vec<_> = (0..4)
-            .map(|worker| std::thread::spawn(move || worker_allocations(worker)))
-            .collect();
-        let retained: Vec<_> = workers
-            .into_iter()
-            .map(|worker| worker.join().expect("worker must not panic"))
-            .collect();
+    let workers: Vec<_> = (0..4)
+        .map(|worker| std::thread::spawn(move || worker_allocations(worker)))
+        .collect();
+    let retained: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("worker must not panic"))
+        .collect();
 
-        // let stats = stats().unwrap();
-        // dbg!(stats);
+    let heap = Heap::from_thread_pool(BumpOptions::new());
+    let scoped = with_hint(&heap, || vec![1, 2, 3]);
+    let live = snapshot().unwrap();
+    live.write_file("snapshot-live.rallocator").unwrap();
 
-        // let th = thread_heap().unwrap();
-        // dbg!(th.info());
-        // dbg!(th.usage().unwrap());
-
-        let heap = Heap::from_thread_pool(BumpOptions::new());
-        let _vec = with_hint(Hint::new().with_heap(&heap), || vec![1, 2, 3]);
-        // dbg!(heap.usage().unwrap());
-
-        // let snap = snapshot().unwrap();
-        // snap.write_file("snapshot.rallocator").unwrap();
-        // println!("wrote {} snapshot bytes", snap.as_bytes().len());
-
-        drop(retained);
-    }
+    drop((scoped, retained));
     track_callers(false);
 
     let after_drop = snapshot().unwrap();
-    after_drop.write_file("snapshot-after-drop2.rallocator").unwrap();
+    after_drop.write_file("snapshot-after-drop.rallocator").unwrap();
 }
 
 #[inline(never)]

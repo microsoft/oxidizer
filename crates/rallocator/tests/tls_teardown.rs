@@ -1,3 +1,5 @@
+//! Integration test for allocator use during thread-local teardown.
+
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,6 +25,7 @@ thread_local! {
 
 #[test]
 fn allocator_remains_usable_by_later_tls_destructors() {
+    rallocator::initialize();
     std::thread::spawn(|| {
         ALLOCATING_TLS_DESTRUCTOR.with(|_| {});
 

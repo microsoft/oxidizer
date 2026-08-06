@@ -1,3 +1,28 @@
+#![expect(
+    clippy::map_err_ignore,
+    reason = "Wire and integer conversion errors intentionally collapse into stable telemetry error categories"
+)]
+#![expect(
+    clippy::missing_errors_doc,
+    reason = "Public encoding and decoding functions return the crate's documented Error type"
+)]
+#![expect(
+    clippy::module_name_repetitions,
+    reason = "Schema field names remain explicit and stable when viewed independently"
+)]
+#![expect(
+    clippy::struct_field_names,
+    reason = "Wire schema fields retain explicit qualified names for standalone diagnostics and compatibility"
+)]
+#![expect(
+    clippy::renamed_function_params,
+    reason = "Implementation parameter names are clearer than generic trait names"
+)]
+#![expect(
+    clippy::too_many_lines,
+    reason = "Wire decoders remain linear so field order and validation are auditable against the schema"
+)]
+
 //! Owned rallocator snapshot schema and binary encoding.
 //!
 //! Snapshot data is organized into [`snapshot`], [`topology`], and
@@ -252,13 +277,25 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
         }
         if section.id() == SECTION_TOPOLOGY {
             if section.version() != SECTION_VERSION && section.version() != TOPOLOGY_SECTION_VERSION {
+                snapshot.skipped_sections.push(snapshot::SkippedSection {
+                    id: section.id(),
+                    version: section.version(),
+                });
                 continue;
             }
         } else if section.id() == SECTION_CALLERS {
-            if section.version() != SECTION_VERSION && section.version() != CALLERS_SECTION_VERSION {
+            if !(SECTION_VERSION..=CALLERS_SECTION_VERSION).contains(&section.version()) {
+                snapshot.skipped_sections.push(snapshot::SkippedSection {
+                    id: section.id(),
+                    version: section.version(),
+                });
                 continue;
             }
         } else if section.version() != SECTION_VERSION {
+            snapshot.skipped_sections.push(snapshot::SkippedSection {
+                id: section.id(),
+                version: section.version(),
+            });
             continue;
         }
         let mut payload = Reader::new(section.payload());
@@ -550,28 +587,51 @@ fn read_topology(reader: &mut Reader<'_>, section_version: u16) -> Result<Vec<To
         let base_address = reader.read_u64()?;
         let region_bytes = reader.read_u64()?;
         let slice_bytes = reader.read_u64()?;
-        if slice_bytes == 0
+        if region_bytes == 0
+            || slice_bytes == 0
             || !slice_bytes.is_power_of_two()
             || !base_address.is_multiple_of(slice_bytes)
             || !region_bytes.is_multiple_of(slice_bytes)
         {
             return Err(Error::malformed_section(SECTION_TOPOLOGY));
         }
+        let total_slices = region_bytes / slice_bytes;
+        let expected_bitmap_count = usize::try_from(total_slices.div_ceil(64)).map_err(|_| Error::malformed_section(SECTION_TOPOLOGY))?;
         let bitmap_count = usize_count(reader.read_u32()?)?;
-        if bitmap_count > reader.remaining() / 8 {
+        if bitmap_count != expected_bitmap_count || bitmap_count > reader.remaining() / 8 {
             return Err(Error::malformed_section(SECTION_TOPOLOGY));
         }
         let mut used_bitmap = Vec::with_capacity(bitmap_count);
         for _ in 0..bitmap_count {
             used_bitmap.push(reader.read_u64()?);
         }
+        let trailing_slices = total_slices % 64;
+        if trailing_slices != 0 && used_bitmap.last().is_some_and(|word| word >> trailing_slices != 0) {
+            return Err(Error::malformed_section(SECTION_TOPOLOGY));
+        }
         let slice_count = usize_count(reader.read_u32()?)?;
-        if slice_count > reader.remaining() / (4 + 1 + 4 + 3 * 8 + 1) {
+        let used_slice_count = used_bitmap.iter().try_fold(0_usize, |total, word| {
+            total
+                .checked_add(word.count_ones() as usize)
+                .ok_or_else(|| Error::malformed_section(SECTION_TOPOLOGY))
+        })?;
+        if slice_count != used_slice_count || slice_count > reader.remaining() / (4 + 1 + 4 + 3 * 8 + 1) {
             return Err(Error::malformed_section(SECTION_TOPOLOGY));
         }
         let mut slices = Vec::with_capacity(slice_count);
+        let mut detailed_bitmap = vec![0_u64; bitmap_count];
         for _ in 0..slice_count {
             let slice_index = reader.read_u32()?;
+            if u64::from(slice_index) >= total_slices {
+                return Err(Error::malformed_section(SECTION_TOPOLOGY));
+            }
+            let slice_offset = usize::try_from(slice_index).map_err(|_| Error::malformed_section(SECTION_TOPOLOGY))?;
+            let word_index = slice_offset / 64;
+            let slice_bit = 1_u64 << (slice_offset % 64);
+            if used_bitmap[word_index] & slice_bit == 0 || detailed_bitmap[word_index] & slice_bit != 0 {
+                return Err(Error::malformed_section(SECTION_TOPOLOGY));
+            }
+            detailed_bitmap[word_index] |= slice_bit;
             let kind = match reader.read_u8()? {
                 0 => SliceKind::Unknown,
                 1 => SliceKind::Small,
@@ -621,6 +681,9 @@ fn read_topology(reader: &mut Reader<'_>, section_version: u16) -> Result<Vec<To
                 usable_bytes,
                 segments,
             });
+        }
+        if detailed_bitmap != used_bitmap {
+            return Err(Error::malformed_section(SECTION_TOPOLOGY));
         }
         regions.push(TopologyRegion {
             region_index,

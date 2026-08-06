@@ -4,6 +4,7 @@ use crate::Error;
 use crate::format::{self, Header, Section, Version};
 
 /// Allocation-free writer for a fixed output buffer.
+#[derive(Debug)]
 pub struct Writer<'a> {
     bytes: &'a mut [u8],
     position: usize,
@@ -21,6 +22,7 @@ impl<'a> Writer<'a> {
     }
 
     /// Returns the number of bytes written.
+    #[must_use]
     pub const fn position(&self) -> usize {
         self.position
     }
@@ -51,7 +53,7 @@ impl<'a> Writer<'a> {
     /// Starts a section with a declared payload length.
     pub fn begin_section(&mut self, section_id: u16, section_version: u16, payload_len: usize) -> Result<(), Error> {
         self.finish_section()?;
-        let payload_len = u32::try_from(payload_len).map_err(|_| Error::LENGTH_OVERFLOW)?;
+        let payload_len = u32::try_from(payload_len).map_err(|_error| Error::LENGTH_OVERFLOW)?;
         self.write_u16(section_id)?;
         self.write_u16(section_version)?;
         self.write_u32(payload_len)?;
@@ -100,6 +102,7 @@ impl<'a> Writer<'a> {
 }
 
 /// Allocation-free reader for wire bytes.
+#[derive(Debug)]
 pub struct Reader<'a> {
     bytes: &'a [u8],
     position: usize,
@@ -107,11 +110,13 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     /// Creates a reader for `bytes`.
+    #[must_use]
     pub const fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, position: 0 }
     }
 
     /// Returns the unread byte count.
+    #[must_use]
     pub const fn remaining(&self) -> usize {
         self.bytes.len() - self.position
     }

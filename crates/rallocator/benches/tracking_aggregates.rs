@@ -1,3 +1,5 @@
+//! Allocation benchmark with aggregate telemetry enabled.
+
 mod workloads;
 
 rallocator::config!(AggregatesConfig { track_aggregates: true });

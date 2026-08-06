@@ -1,3 +1,12 @@
+//! Integration and migration tests for telemetry snapshot encoding.
+#![expect(
+    clippy::cast_possible_truncation,
+    clippy::panic,
+    clippy::too_many_lines,
+    clippy::unwrap_used,
+    reason = "Explicit wire fixtures use bounded test values and should fail immediately when malformed"
+)]
+
 use rallocator_telemetry::callers::{AddressLookup, Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 use rallocator_telemetry::snapshot::{Domain, Estimate, Region, SizeClass, Snapshot, Stats, Version};
 use rallocator_telemetry::topology::{Segment, Slice, SliceKind, TopologyRegion};
@@ -15,42 +24,41 @@ const SECTION_ADDRESSES: u16 = 6;
 const SECTION_TOPOLOGY: u16 = 7;
 const SECTION_DOMAINS: u16 = 8;
 
+macro_rules! schema {
+    ($base:expr, $($field:ident: $value:expr),+ $(,)?) => {{
+        let mut value = $base;
+        $(value.$field = $value;)+
+        value
+    }};
+}
+
 fn fixture() -> Snapshot {
     let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
     snapshot.metadata.capture_duration_nanos = 42;
-    snapshot.stats = Stats {
+    snapshot.stats = schema!(
+        Stats::default(),
         live_bytes: 123,
         mapped_bytes: 4096,
         allocations: 7,
-        remote_frees: 2,
-        ..Stats::default()
-    };
-    snapshot.size_classes.push(SizeClass {
+        remote_frees: 2
+    );
+    snapshot.size_classes.push(schema!(
+        SizeClass::default(),
         class_index: 3,
         block_bytes: 64,
-        live_allocations: Estimate {
-            value: 2,
-            lower_bound: 1,
-            upper_bound: 3,
-        },
-        requested_bytes: Estimate {
-            value: 96,
-            lower_bound: 80,
-            upper_bound: 112,
-        },
-        usable_bytes: Estimate {
-            value: 128,
-            lower_bound: 64,
-            upper_bound: 192,
-        },
-    });
-    snapshot.regions.push(Region {
+        live_allocations: schema!(Estimate::default(), value: 2, lower_bound: 1, upper_bound: 3),
+        requested_bytes: schema!(Estimate::default(), value: 96, lower_bound: 80, upper_bound: 112),
+        usable_bytes: schema!(Estimate::default(), value: 128, lower_bound: 64, upper_bound: 192)
+    ));
+    snapshot.regions.push(schema!(
+        Region::default(),
         region_index: 0,
         reserved_bytes: 1 << 30,
         used_slices: 8,
-        free_slices: 16_376,
-    });
-    snapshot.domains.push(Domain {
+        free_slices: 16_376
+    ));
+    snapshot.domains.push(schema!(
+        Domain::default(),
         domain_id: 1,
         is_default: true,
         region_count: 1,
@@ -61,82 +69,92 @@ fn fixture() -> Snapshot {
         medium_slices: 0,
         bump_slices: 1,
         unknown_slices: 6,
-        region_indices: vec![0],
-    });
-    snapshot.topology.push(TopologyRegion {
+        region_indices: vec![0]
+    ));
+    snapshot.topology.push(schema!(
+        TopologyRegion::default(),
         region_index: 0,
         base_address: 0x4000_0000,
-        region_bytes: 1 << 30,
+        region_bytes: 64 * (64 << 10),
         slice_bytes: 64 << 10,
-        used_bitmap: vec![0b11],
+        used_bitmap: vec![0b1_1111],
         slices: vec![
-            Slice {
+            schema!(
+                Slice::default(),
                 slice_index: 0,
                 kind: SliceKind::Small,
                 span_slices: 0,
                 owner: 0x1234,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: vec![Segment {
+                segments: vec![schema!(
+                    Segment::default(),
                     segment_index: 0,
                     class_index: 1,
                     context: false,
                     live_blocks: 7,
                     usable_blocks: 511,
-                    utilization_tracked: true,
-                }],
-            },
-            Slice {
+                    utilization_tracked: true
+                )]
+            ),
+            schema!(
+                Slice::default(),
                 slice_index: 1,
                 kind: SliceKind::Bump,
                 span_slices: 1,
                 owner: 0x5678,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: Vec::new(),
-            },
-            Slice {
+                segments: Vec::new()
+            ),
+            schema!(
+                Slice::default(),
                 slice_index: 2,
                 kind: SliceKind::Unknown,
                 span_slices: 1,
                 owner: 0,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: Vec::new(),
-            },
-            Slice {
+                segments: Vec::new()
+            ),
+            schema!(
+                Slice::default(),
                 slice_index: 3,
                 kind: SliceKind::Medium,
                 span_slices: 2,
                 owner: 0x9ABC,
                 requested_bytes: 32 << 10,
                 usable_bytes: 64 << 10,
-                segments: Vec::new(),
-            },
-            Slice {
+                segments: Vec::new()
+            ),
+            schema!(
+                Slice::default(),
                 slice_index: 4,
                 kind: SliceKind::MediumContinuation,
                 span_slices: 0,
                 owner: 0x9ABC,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: Vec::new(),
-            },
+                segments: Vec::new()
+            ),
         ],
-    });
-    snapshot.callers = Some(Callers {
+    ));
+    snapshot.callers = Some(schema!(
+        Callers::default(),
         session_id: 9,
         total_events: 1,
         lost_events: 0,
-        threads: vec![ThreadLog {
+        threads: vec![schema!(
+            ThreadLog::default(),
             thread_log_id: 1,
             total_events: 1,
             lost_events: 0,
             allocated_histogram: vec![0, 1],
-            live_histogram: vec![0, 0],
-        }],
+            live_histogram: vec![0, 0]
+        )],
         events: vec![
-            Event {
+            schema!(
+                Event::default(),
                 thread_log_id: 1,
                 event_thread_id: 1,
                 sequence: 1,
@@ -148,9 +166,10 @@ fn fixture() -> Snapshot {
                 address: 0x1234,
                 size: 64,
                 align: 8,
-                call_stack: vec![0xAAAA, 0xBBBB],
-            },
-            Event {
+                call_stack: vec![0xAAAA, 0xBBBB]
+            ),
+            schema!(
+                Event::default(),
                 thread_log_id: 1,
                 event_thread_id: 2,
                 sequence: 2,
@@ -162,27 +181,30 @@ fn fixture() -> Snapshot {
                 address: 0x1234,
                 size: 64,
                 align: 8,
-                call_stack: Vec::new(),
-            },
+                call_stack: Vec::new()
+            ),
         ],
         thread_names: vec![
-            ThreadName {
+            schema!(
+                ThreadName::default(),
                 thread_id: 1,
-                name: "allocator".to_owned(),
-            },
-            ThreadName {
+                name: "allocator".to_owned()
+            ),
+            schema!(
+                ThreadName::default(),
                 thread_id: 2,
-                name: "reclaimer".to_owned(),
-            },
+                name: "reclaimer".to_owned()
+            ),
         ],
-    });
-    snapshot.addresses.push(AddressLookup {
+    ));
+    snapshot.addresses.push(schema!(
+        AddressLookup::default(),
         address: 0xAAAA,
         symbol: Some("fixture::allocate".to_owned()),
         filename: Some("src/fixture.rs".to_owned()),
         line: Some(42),
-        column: Some(7),
-    });
+        column: Some(7)
+    ));
     snapshot
 }
 
@@ -228,7 +250,7 @@ fn duplicate_known_sections_are_rejected() {
     let payload_len = u32::from_le_bytes(bytes[header + 4..header + 8].try_into().unwrap()) as usize;
     let duplicate = bytes[header..payload + payload_len].to_vec();
     bytes.extend_from_slice(&duplicate);
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 }
 
 #[test]
@@ -236,7 +258,7 @@ fn noncanonical_booleans_are_rejected() {
     let mut bytes = encoded(&fixture());
     let (_, domains) = section(&bytes, SECTION_DOMAINS);
     bytes[domains + 4 + 8] = 2;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 }
 
 #[test]
@@ -259,8 +281,8 @@ fn empty_optional_data_round_trips() {
 fn encode_requires_exact_output_length() {
     let snapshot = fixture();
     let length = encoded_len(&snapshot).unwrap();
-    assert!(encode(&snapshot, &mut vec![0; length - 1]).is_err());
-    assert!(encode(&snapshot, &mut vec![0; length + 1]).is_err());
+    encode(&snapshot, &mut vec![0; length - 1]).unwrap_err();
+    encode(&snapshot, &mut vec![0; length + 1]).unwrap_err();
 }
 
 #[test]
@@ -284,7 +306,7 @@ fn truncated_payload_is_rejected() {
     let mut bytes = vec![0; encoded_len(&expected).unwrap()];
     encode(&expected, &mut bytes).unwrap();
     bytes.pop();
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 }
 
 #[test]
@@ -293,12 +315,12 @@ fn required_sections_must_be_present() {
     Writer::new(&mut bytes)
         .write_header(Header::new(current_schema(), Version::new(0, 1, 0)))
         .unwrap();
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (stats, _) = section(&bytes, SECTION_STATS);
     bytes[stats..stats + 2].copy_from_slice(&999_u16.to_le_bytes());
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 }
 
 #[test]
@@ -306,7 +328,7 @@ fn unsupported_schemas_and_section_versions_are_handled() {
     for schema in [0, current_schema() + 1] {
         let mut bytes = encoded(&fixture());
         bytes[10..12].copy_from_slice(&schema.to_le_bytes());
-        assert!(decode(&bytes).is_err());
+        decode(&bytes).unwrap_err();
     }
 
     let mut bytes = encoded(&fixture());
@@ -320,6 +342,12 @@ fn unsupported_schemas_and_section_versions_are_handled() {
     bytes[domains + 2..domains + 4].copy_from_slice(&2_u16.to_le_bytes());
     let decoded = decode(&bytes).unwrap();
     assert!(decoded.domains.is_empty());
+
+    let mut bytes = encoded(&fixture());
+    let (callers, _) = section(&bytes, SECTION_CALLERS);
+    bytes[callers + 2..callers + 4].copy_from_slice(&4_u16.to_le_bytes());
+    let decoded = decode(&bytes).unwrap();
+    assert!(decoded.callers.is_none());
 }
 
 #[test]
@@ -377,11 +405,46 @@ fn legacy_caller_events_decode_with_compatible_defaults() {
 }
 
 #[test]
+fn callers_v2_diagnostics_decode_without_thread_names() {
+    let mut expected = fixture();
+    expected.callers.as_mut().unwrap().thread_names.clear();
+    let mut bytes = encoded(&expected);
+    let (header, payload) = section(&bytes, SECTION_CALLERS);
+    let old_length = u32::from_le_bytes(bytes[header + 4..header + 8].try_into().unwrap()) as usize;
+    bytes[header + 2..header + 4].copy_from_slice(&2_u16.to_le_bytes());
+    bytes.drain(payload + old_length - 4..payload + old_length);
+    write_u32(&mut bytes, header + 4, (old_length - 4) as u32);
+
+    assert_eq!(decode(&bytes).unwrap().callers, expected.callers);
+}
+
+#[test]
 fn trailing_known_section_payload_is_rejected() {
     let mut bytes = encoded(&fixture());
     let (metadata, _) = section(&bytes, SECTION_METADATA);
     write_u32(&mut bytes, metadata + 4, 9);
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
+}
+
+#[test]
+fn malformed_topology_dimensions_and_counts_are_rejected() {
+    for (description, relative_offset, value) in [
+        ("zero region size", 16, 0_u32),
+        ("bitmap word count", 32, 2),
+        ("detailed slice count", 44, 4),
+        ("slice outside region", 48, u32::MAX),
+        ("duplicate detailed slice", 97, 0),
+    ] {
+        let mut bytes = encoded(&fixture());
+        let (_, payload) = section(&bytes, SECTION_TOPOLOGY);
+        write_u32(&mut bytes, payload + relative_offset, value);
+        assert!(decode(&bytes).is_err(), "{description}");
+    }
+
+    let mut bytes = encoded(&fixture());
+    let (_, payload) = section(&bytes, SECTION_TOPOLOGY);
+    bytes[payload + 16..payload + 24].copy_from_slice(&(2_u64 * (64 << 10)).to_le_bytes());
+    assert!(decode(&bytes).is_err(), "bitmap bits beyond the declared region");
 }
 
 #[test]
@@ -418,32 +481,32 @@ fn invalid_enum_discriminants_and_address_data_are_rejected() {
     let mut bytes = encoded(&fixture());
     let (_, topology) = section(&bytes, SECTION_TOPOLOGY);
     bytes[topology + 52] = u8::MAX;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
     bytes[callers] = 2;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
     bytes[callers + 129] = 3;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
     bytes[callers + 138] = u8::MAX;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, addresses) = section(&bytes, SECTION_ADDRESSES);
     bytes[addresses + 12] = 0x10;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, addresses) = section(&bytes, SECTION_ADDRESSES);
     bytes[addresses + 17] = 0xFF;
-    assert!(decode(&bytes).is_err());
+    decode(&bytes).unwrap_err();
 }
 
 #[test]

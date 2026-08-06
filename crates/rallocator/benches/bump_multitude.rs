@@ -1,3 +1,5 @@
+//! Bump workload benchmark using multitude.
+
 mod bump_workloads;
 
 use std::cell::RefCell;

@@ -14,8 +14,10 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 
+[lints]
+workspace = true
+
 [features]
-coverage-tests = []
 tuning-telemetry = []
 
 [dependencies]
@@ -45,6 +47,14 @@ harness = false
 
 [[bench]]
 name = "rallocator"
+harness = false
+
+[[bench]]
+name = "rallocator_threaded"
+harness = false
+
+[[bench]]
+name = "rallocator_threaded_mimalloc"
 harness = false
 
 [[bench]]

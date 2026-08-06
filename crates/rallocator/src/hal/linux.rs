@@ -100,15 +100,13 @@ fn map_aligned(size: usize, protection: i32) -> *mut u8 {
     aligned
 }
 
-#[cfg(not(target_arch = "x86_64"))]
-compile_error!("hal::linux currently supports only x86_64");
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn stack_capture_clamps_to_its_fixed_buffer() {
+        crate::initialize();
         let mut frames = [0; 128];
         assert!(capture_stack(&mut frames, usize::MAX) <= 60);
     }

@@ -14,5 +14,8 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_wire"
 
+[lints]
+workspace = true
+
 [lib]
 path = "src/lib.rs"

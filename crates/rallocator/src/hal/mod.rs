@@ -15,13 +15,13 @@ use linux as platform;
 #[cfg(miri)]
 pub(crate) use miri::{
     MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, align_down, capture_stack, commit, commit_locality_segment, commit_locality_slab, decommit,
-    initialize_storage, map, monotonic_millis, read_free_next, read_free_requested, release_storage, reserve, unmap, write_free_next,
-    write_free_requested,
+    initialize_storage, map, monotonic_millis, peek_free_requested, read_free_next, read_free_requested, release_storage, reserve, unmap,
+    write_free_next, write_free_requested,
 };
 #[cfg(not(miri))]
 pub(crate) use native::{
-    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, initialize_storage, read_free_next, read_free_requested, release_storage, write_free_next,
-    write_free_requested,
+    MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, initialize_storage, peek_free_requested, read_free_next, read_free_requested, release_storage,
+    write_free_next, write_free_requested,
 };
 #[cfg(not(miri))]
 pub(crate) use platform::{capture_stack, monotonic_millis, unmap};

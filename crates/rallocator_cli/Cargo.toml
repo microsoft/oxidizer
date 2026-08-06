@@ -14,6 +14,9 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_cli"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "rallocator_cli"
 path = "src/main.rs"

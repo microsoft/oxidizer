@@ -1,5 +1,13 @@
-use std::alloc::{Layout, alloc, dealloc};
-use std::mem::size_of;
+//! Integration tests for the installed global allocator.
+#![expect(
+    clippy::cast_ptr_alignment,
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::undocumented_unsafe_blocks,
+    clippy::unwrap_used,
+    reason = "Tests validate deliberately aligned raw allocations and fail immediately on invalid layouts"
+)]
+
+use std::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,6 +26,7 @@ static TEST_LOCK: Mutex<()> = Mutex::new(());
 const OLD_BUMP_MARKER: usize = 0x5241_4C4C_4152_454E;
 
 fn general_heap() -> Heap {
+    rallocator::initialize();
     Heap::with_options(Options::general(
         GeneralOptions::new()
             .with_locality_segment_bytes(64 * 1024)
@@ -28,11 +37,24 @@ fn general_heap() -> Heap {
 #[test]
 fn global_allocator_and_general_heap_retirement_work() {
     let _test = TEST_LOCK.lock().unwrap();
+    rallocator::initialize();
     let mut values = with_hint(Hint::new(), || Vec::with_capacity(128));
     values.extend(0..128_u64);
     assert_eq!(values.iter().sum::<u64>(), 8_128);
     let boxed = Box::new(String::from("allocated by rallocator"));
     assert_eq!(boxed.as_str(), "allocated by rallocator");
+
+    let original = Layout::from_size_align(32, 16).unwrap();
+    let zeroed = unsafe { alloc_zeroed(original) };
+    assert!(!zeroed.is_null());
+    assert!(
+        unsafe { std::slice::from_raw_parts(zeroed, original.size()) }
+            .iter()
+            .all(|byte| *byte == 0)
+    );
+    let grown = unsafe { realloc(zeroed, original, 96) };
+    assert!(!grown.is_null());
+    unsafe { dealloc(grown, Layout::from_size_align(96, 16).unwrap()) };
     let current_stats = stats().unwrap();
     assert!(current_stats.allocations > 0);
     assert!(current_stats.live_bytes > 0);
@@ -118,6 +140,7 @@ fn wait_for_sequence(completed: &AtomicUsize, expected: usize) {
 
 #[test]
 fn escaped_medium_and_direct_allocations_outlive_their_heap_handle() {
+    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     let heap = general_heap();
     let medium_layout = Layout::from_size_align(128 * 1024, 16).unwrap();
@@ -136,13 +159,59 @@ fn escaped_medium_and_direct_allocations_outlive_their_heap_handle() {
 }
 
 #[test]
+fn zeroed_allocation_and_reallocation_cover_general_routes() {
+    let _test = TEST_LOCK.lock().unwrap();
+    rallocator::initialize();
+
+    for layout in [
+        Layout::from_size_align(64, 16).unwrap(),
+        Layout::from_size_align(128 * 1024, 64).unwrap(),
+        Layout::from_size_align(20 * 1024 * 1024, 4096).unwrap(),
+    ] {
+        let address = unsafe { alloc_zeroed(layout) };
+        assert!(!address.is_null());
+        assert_eq!(address.addr() % layout.align(), 0);
+        assert!(
+            unsafe { std::slice::from_raw_parts(address, layout.size()) }
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        unsafe { dealloc(address, layout) };
+    }
+
+    unsafe {
+        assert_reallocation_preserves_prefix(64, 128 * 1024);
+        assert_reallocation_preserves_prefix(128 * 1024, 20 * 1024 * 1024);
+    }
+}
+
+unsafe fn assert_reallocation_preserves_prefix(original_size: usize, new_size: usize) {
+    let original = Layout::from_size_align(original_size, 16).unwrap();
+    let address = unsafe { alloc(original) };
+    assert!(!address.is_null());
+    unsafe { ptr::write_bytes(address, 0xA5, original_size) };
+
+    let grown = unsafe { realloc(address, original, new_size) };
+    assert!(!grown.is_null());
+    assert_eq!(grown.addr() % original.align(), 0);
+    assert!(
+        unsafe { std::slice::from_raw_parts(grown, original_size) }
+            .iter()
+            .all(|byte| *byte == 0xA5)
+    );
+    unsafe { dealloc(grown, Layout::from_size_align(new_size, original.align()).unwrap()) };
+}
+
+#[test]
 fn medium_payload_cannot_forge_bump_ownership() {
+    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     unsafe { allocate_forged_payload(Layout::from_size_align(3 * size_of::<usize>(), 64 * 1024).unwrap()) };
 }
 
 #[test]
 fn direct_payload_cannot_forge_bump_ownership() {
+    rallocator::initialize();
     let _test = TEST_LOCK.lock().unwrap();
     let before = stats().unwrap();
     unsafe { allocate_forged_payload(Layout::from_size_align(3 * size_of::<usize>(), 128 * 1024).unwrap()) };
@@ -150,6 +219,8 @@ fn direct_payload_cannot_forge_bump_ownership() {
 }
 
 unsafe fn allocate_forged_payload(layout: Layout) {
+    assert!(layout.size() >= 3 * size_of::<usize>());
+    assert!(layout.align() >= std::mem::align_of::<usize>());
     let address = unsafe { alloc(layout) };
     assert!(!address.is_null());
     let words = address.cast::<usize>();

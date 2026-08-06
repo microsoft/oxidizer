@@ -1,3 +1,5 @@
+//! General allocation workload benchmark using mimalloc.
+
 mod workloads;
 
 use mimalloc::MiMalloc;

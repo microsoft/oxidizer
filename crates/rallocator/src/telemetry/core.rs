@@ -173,6 +173,7 @@ pub struct SessionReport {
 }
 
 impl Stats {
+    #[must_use]
     pub const fn memory(&self) -> MemoryStats {
         MemoryStats {
             live_requested_bytes: Estimate::exact(self.live_bytes),
@@ -182,6 +183,7 @@ impl Stats {
         }
     }
 
+    #[must_use]
     pub const fn operations(&self) -> OperationStats {
         OperationStats {
             allocations: self.allocations,
@@ -191,6 +193,7 @@ impl Stats {
         }
     }
 
+    #[must_use]
     pub const fn reclamation(&self) -> ReclamationStats {
         ReclamationStats {
             committed_bytes: self.mapped_bytes,
@@ -199,6 +202,7 @@ impl Stats {
         }
     }
 
+    #[must_use]
     pub const fn remote(&self) -> RemoteStats {
         RemoteStats {
             frees: self.remote_frees,
@@ -213,64 +217,78 @@ impl Stats {
 }
 
 impl MemoryStats {
+    #[must_use]
     pub const fn live_requested_bytes(&self) -> Estimate<usize> {
         self.live_requested_bytes
     }
 
+    #[must_use]
     pub const fn live_usable_bytes(&self) -> Estimate<usize> {
         self.live_usable_bytes
     }
 
+    #[must_use]
     pub const fn committed_bytes(&self) -> usize {
         self.committed_bytes
     }
 
+    #[must_use]
     pub const fn peak_live_bytes(&self) -> usize {
         self.peak_live_bytes
     }
 }
 
 impl OperationStats {
+    #[must_use]
     pub const fn allocations(&self) -> usize {
         self.allocations
     }
 
+    #[must_use]
     pub const fn deallocations(&self) -> usize {
         self.deallocations
     }
 
+    #[must_use]
     pub const fn allocated_bytes(&self) -> usize {
         self.allocated_bytes
     }
 
+    #[must_use]
     pub const fn deallocated_bytes(&self) -> usize {
         self.deallocated_bytes
     }
 }
 
 impl ReclamationStats {
+    #[must_use]
     pub const fn committed_bytes(&self) -> usize {
         self.committed_bytes
     }
 
+    #[must_use]
     pub const fn mappings(&self) -> usize {
         self.mappings
     }
 
+    #[must_use]
     pub const fn unmappings(&self) -> usize {
         self.unmappings
     }
 }
 
 impl RemoteStats {
+    #[must_use]
     pub const fn frees(&self) -> usize {
         self.frees
     }
 
+    #[must_use]
     pub const fn pending_blocks(&self) -> Estimate<usize> {
         self.pending_blocks
     }
 
+    #[must_use]
     pub const fn drained_blocks(&self) -> usize {
         self.drained_blocks
     }
@@ -290,54 +308,66 @@ impl StatsDelta {
         }
     }
 
+    #[must_use]
     pub const fn allocated_bytes(&self) -> usize {
         self.allocated_bytes
     }
 
+    #[must_use]
     pub const fn deallocated_bytes(&self) -> usize {
         self.deallocated_bytes
     }
 
+    #[must_use]
     pub const fn allocations(&self) -> usize {
         self.allocations
     }
 
+    #[must_use]
     pub const fn deallocations(&self) -> usize {
         self.deallocations
     }
 
+    #[must_use]
     pub const fn mappings(&self) -> usize {
         self.mappings
     }
 
+    #[must_use]
     pub const fn unmappings(&self) -> usize {
         self.unmappings
     }
 
+    #[must_use]
     pub const fn remote_frees(&self) -> usize {
         self.remote_frees
     }
 
+    #[must_use]
     pub const fn drained_remote_blocks(&self) -> usize {
         self.drained_remote_blocks
     }
 }
 
 impl Sample {
+    #[must_use]
     pub const fn elapsed(&self) -> std::time::Duration {
         self.elapsed
     }
 
+    #[must_use]
     pub const fn current(&self) -> &Stats {
         &self.current
     }
 
+    #[must_use]
     pub const fn delta(&self) -> &StatsDelta {
         &self.delta
     }
 }
 
 impl Sampler {
+    #[must_use]
     pub fn new() -> Option<Self> {
         Some(Self {
             sampled_at: Instant::now(),
@@ -360,6 +390,7 @@ impl Sampler {
 }
 
 impl Session {
+    #[must_use]
     pub fn start() -> Option<Self> {
         let started_at = Instant::now();
         let baseline = stats()?;
@@ -377,6 +408,7 @@ impl Session {
         self.sampler.sample()
     }
 
+    #[must_use]
     pub fn finish(self) -> Option<SessionReport> {
         let finished_at = Instant::now();
         let final_stats = stats()?;
@@ -390,18 +422,22 @@ impl Session {
 }
 
 impl SessionReport {
+    #[must_use]
     pub const fn elapsed(&self) -> std::time::Duration {
         self.elapsed
     }
 
+    #[must_use]
     pub const fn initial(&self) -> &Stats {
         &self.initial
     }
 
+    #[must_use]
     pub const fn final_stats(&self) -> &Stats {
         &self.final_stats
     }
 
+    #[must_use]
     pub const fn delta(&self) -> &StatsDelta {
         &self.delta
     }
@@ -441,7 +477,7 @@ thread_local! {
 
 #[repr(C, align(64))]
 struct AggregateShard {
-    next: AtomicPtr<AggregateShard>,
+    next: AtomicPtr<Self>,
     shared: bool,
     allocated_bytes: AtomicUsize,
     deallocated_bytes: AtomicUsize,
@@ -510,6 +546,7 @@ impl AggregateSnapshot {
 }
 
 /// Returns aggregate statistics when they were compiled into the allocator.
+#[must_use]
 pub fn stats() -> Option<Stats> {
     aggregate_snapshot().map(|aggregates| aggregate_stats(&aggregates))
 }
@@ -591,6 +628,7 @@ pub fn track_callers(enabled: bool) {
 }
 
 /// Captures process statistics, allocator structure, and retained caller events.
+#[must_use]
 pub fn snapshot() -> Option<Snapshot> {
     with_telemetry_suppressed(|| {
         let started_at = Instant::now();
@@ -657,48 +695,48 @@ fn producer_version() -> Version {
 }
 
 fn encode_stats(stats: Stats) -> EncodedStats {
-    EncodedStats {
-        allocated_bytes: stats.allocated_bytes as u64,
-        deallocated_bytes: stats.deallocated_bytes as u64,
-        live_bytes: stats.live_bytes as u64,
-        peak_live_bytes: stats.peak_live_bytes as u64,
-        mapped_bytes: stats.mapped_bytes as u64,
-        os_mappings: stats.os_mappings as u64,
-        os_unmappings: stats.os_unmappings as u64,
-        allocations: stats.allocations as u64,
-        deallocations: stats.deallocations as u64,
-        remote_frees: stats.remote_frees as u64,
-        pending_remote_blocks: stats.pending_remote_blocks as u64,
-        remote_pushes_in_progress: stats.remote_pushes_in_progress as u64,
-        drained_remote_blocks: stats.drained_remote_blocks as u64,
-    }
+    let mut encoded = EncodedStats::default();
+    encoded.allocated_bytes = stats.allocated_bytes as u64;
+    encoded.deallocated_bytes = stats.deallocated_bytes as u64;
+    encoded.live_bytes = stats.live_bytes as u64;
+    encoded.peak_live_bytes = stats.peak_live_bytes as u64;
+    encoded.mapped_bytes = stats.mapped_bytes as u64;
+    encoded.os_mappings = stats.os_mappings as u64;
+    encoded.os_unmappings = stats.os_unmappings as u64;
+    encoded.allocations = stats.allocations as u64;
+    encoded.deallocations = stats.deallocations as u64;
+    encoded.remote_frees = stats.remote_frees as u64;
+    encoded.pending_remote_blocks = stats.pending_remote_blocks as u64;
+    encoded.remote_pushes_in_progress = stats.remote_pushes_in_progress as u64;
+    encoded.drained_remote_blocks = stats.drained_remote_blocks as u64;
+    encoded
 }
 
 fn encode_estimate(estimate: Estimate<usize>) -> EncodedEstimate {
-    EncodedEstimate {
-        value: estimate.value as u64,
-        lower_bound: estimate.lower_bound as u64,
-        upper_bound: estimate.upper_bound as u64,
-    }
+    let mut encoded = EncodedEstimate::default();
+    encoded.value = estimate.value as u64;
+    encoded.lower_bound = estimate.lower_bound as u64;
+    encoded.upper_bound = estimate.upper_bound as u64;
+    encoded
 }
 
 fn encode_size_class(class: &SizeClassSnapshot) -> EncodedSizeClass {
-    EncodedSizeClass {
-        class_index: class.class_index as u32,
-        block_bytes: class.block_bytes as u64,
-        live_allocations: encode_estimate(class.live_allocations),
-        requested_bytes: encode_estimate(class.requested_bytes),
-        usable_bytes: encode_estimate(class.usable_bytes),
-    }
+    let mut encoded = EncodedSizeClass::default();
+    encoded.class_index = class.class_index as u32;
+    encoded.block_bytes = class.block_bytes as u64;
+    encoded.live_allocations = encode_estimate(class.live_allocations);
+    encoded.requested_bytes = encode_estimate(class.requested_bytes);
+    encoded.usable_bytes = encode_estimate(class.usable_bytes);
+    encoded
 }
 
 fn encode_region(region: &RegionSnapshot) -> EncodedRegion {
-    EncodedRegion {
-        region_index: region.region_index as u32,
-        reserved_bytes: region.reserved_bytes as u64,
-        used_slices: region.used_slices as u64,
-        free_slices: region.free_slices as u64,
-    }
+    let mut encoded = EncodedRegion::default();
+    encoded.region_index = region.region_index as u32;
+    encoded.reserved_bytes = region.reserved_bytes as u64;
+    encoded.used_slices = region.used_slices as u64;
+    encoded.free_slices = region.free_slices as u64;
+    encoded
 }
 
 fn encode_domains(domains: &[DomainSnapshot], regions: &[RegionSnapshot]) -> Vec<EncodedDomain> {
@@ -706,11 +744,9 @@ fn encode_domains(domains: &[DomainSnapshot], regions: &[RegionSnapshot]) -> Vec
         .iter()
         .map(|domain| {
             let matching = regions.iter().filter(|region| region.domain_id == domain.domain_id);
-            let mut encoded = EncodedDomain {
-                domain_id: domain.domain_id as u64,
-                is_default: domain.is_default,
-                ..EncodedDomain::default()
-            };
+            let mut encoded = EncodedDomain::default();
+            encoded.domain_id = domain.domain_id as u64;
+            encoded.is_default = domain.is_default;
             for region in matching {
                 encoded.region_indices.push(region.region_index as u32);
                 encoded.region_count += 1;
@@ -732,104 +768,114 @@ fn encode_domains(domains: &[DomainSnapshot], regions: &[RegionSnapshot]) -> Vec
 }
 
 fn encode_topology_region(region: &RegionSnapshot) -> EncodedTopologyRegion {
-    EncodedTopologyRegion {
-        region_index: region.region_index as u32,
-        base_address: region.base_address as u64,
-        region_bytes: region.reserved_bytes as u64,
-        slice_bytes: region.slice_bytes as u64,
-        used_bitmap: region.used_bitmap.clone(),
-        slices: region
-            .slices
-            .iter()
-            .map(|slice| EncodedSlice {
-                slice_index: slice.slice_index as u32,
-                kind: match slice.kind {
-                    PhysicalSliceKind::Unknown => EncodedSliceKind::Unknown,
-                    PhysicalSliceKind::Small => EncodedSliceKind::Small,
-                    PhysicalSliceKind::Medium => EncodedSliceKind::Medium,
-                    PhysicalSliceKind::MediumContinuation => EncodedSliceKind::MediumContinuation,
-                    PhysicalSliceKind::Bump => EncodedSliceKind::Bump,
-                },
-                span_slices: slice.span_slices as u32,
-                owner: slice.owner as u64,
-                requested_bytes: slice.requested_bytes as u64,
-                usable_bytes: slice.usable_bytes as u64,
-                segments: slice
-                    .segments
-                    .iter()
-                    .map(|segment| EncodedSegment {
-                        segment_index: segment.segment_index as u8,
-                        class_index: segment.class_index as u32,
-                        context: segment.context,
-                        live_blocks: segment.live_blocks as u32,
-                        usable_blocks: segment.usable_blocks as u32,
-                        utilization_tracked: segment.utilization_tracked,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }
+    let mut encoded = EncodedTopologyRegion::default();
+    encoded.region_index = region.region_index as u32;
+    encoded.base_address = region.base_address as u64;
+    encoded.region_bytes = region.reserved_bytes as u64;
+    encoded.slice_bytes = region.slice_bytes as u64;
+    encoded.used_bitmap = region.used_bitmap.clone();
+    encoded.slices = region
+        .slices
+        .iter()
+        .map(|slice| {
+            let mut encoded = EncodedSlice::default();
+            encoded.slice_index = slice.slice_index as u32;
+            encoded.kind = match slice.kind {
+                PhysicalSliceKind::Unknown => EncodedSliceKind::Unknown,
+                PhysicalSliceKind::Small => EncodedSliceKind::Small,
+                PhysicalSliceKind::Medium => EncodedSliceKind::Medium,
+                PhysicalSliceKind::MediumContinuation => EncodedSliceKind::MediumContinuation,
+                PhysicalSliceKind::Bump => EncodedSliceKind::Bump,
+            };
+            encoded.span_slices = slice.span_slices as u32;
+            encoded.owner = slice.owner as u64;
+            encoded.requested_bytes = slice.requested_bytes as u64;
+            encoded.usable_bytes = slice.usable_bytes as u64;
+            encoded.segments = slice
+                .segments
+                .iter()
+                .map(|segment| {
+                    let mut encoded = EncodedSegment::default();
+                    encoded.segment_index = segment.segment_index as u8;
+                    encoded.class_index = segment.class_index as u32;
+                    encoded.context = segment.context;
+                    encoded.live_blocks = segment.live_blocks as u32;
+                    encoded.usable_blocks = segment.usable_blocks as u32;
+                    encoded.utilization_tracked = segment.utilization_tracked;
+                    encoded
+                })
+                .collect();
+            encoded
+        })
+        .collect();
+    encoded
 }
 
 fn encode_callers(callers: &CallerSnapshot) -> EncodedCallers {
-    EncodedCallers {
-        session_id: callers.session_id as u64,
-        total_events: callers.total_events as u64,
-        lost_events: callers.lost_events as u64,
-        threads: callers
-            .threads
-            .iter()
-            .map(|thread| EncodedThreadLog {
-                thread_log_id: thread.thread_log_id as u64,
-                total_events: thread.total_events as u64,
-                lost_events: thread.lost_events as u64,
-                allocated_histogram: thread.allocated_histogram.iter().map(|count| *count as u64).collect(),
-                live_histogram: thread.live_histogram.iter().map(|count| *count as u64).collect(),
-            })
-            .collect(),
-        events: callers
-            .events
-            .iter()
-            .map(|event| EncodedEvent {
-                thread_log_id: event.thread_log_id as u64,
-                event_thread_id: event.event_thread_id as u64,
-                sequence: event.sequence as u64,
-                allocation_id: event.allocation_id as u64,
-                kind: match event.kind {
-                    EventKind::Allocated => EncodedEventKind::Allocated,
-                    EventKind::Deallocated => EncodedEventKind::Deallocated,
-                },
-                heap_id: event.heap_id as u64,
-                heap_kind: match event.heap_kind {
-                    HeapKind::General => EncodedHeapKind::General,
-                    HeapKind::Bump => EncodedHeapKind::Bump,
-                    HeapKind::Thread => EncodedHeapKind::Thread,
-                },
-                freed_after_heap_release: event.freed_after_heap_release,
-                address: event.address as u64,
-                size: event.size as u64,
-                align: event.align as u64,
-                call_stack: event.call_stack.iter().map(|ip| ip.0 as u64).collect(),
-            })
-            .collect(),
-        thread_names: callers
-            .thread_names
-            .iter()
-            .map(|thread| EncodedThreadName {
-                thread_id: thread.thread_id as u64,
-                name: thread.name.clone(),
-            })
-            .collect(),
-    }
+    let mut encoded = EncodedCallers::default();
+    encoded.session_id = callers.session_id as u64;
+    encoded.total_events = callers.total_events as u64;
+    encoded.lost_events = callers.lost_events as u64;
+    encoded.threads = callers
+        .threads
+        .iter()
+        .map(|thread| {
+            let mut encoded = EncodedThreadLog::default();
+            encoded.thread_log_id = thread.thread_log_id as u64;
+            encoded.total_events = thread.total_events as u64;
+            encoded.lost_events = thread.lost_events as u64;
+            encoded.allocated_histogram = thread.allocated_histogram.iter().map(|count| *count as u64).collect();
+            encoded.live_histogram = thread.live_histogram.iter().map(|count| *count as u64).collect();
+            encoded
+        })
+        .collect();
+    encoded.events = callers
+        .events
+        .iter()
+        .map(|event| {
+            let mut encoded = EncodedEvent::default();
+            encoded.thread_log_id = event.thread_log_id as u64;
+            encoded.event_thread_id = event.event_thread_id as u64;
+            encoded.sequence = event.sequence as u64;
+            encoded.allocation_id = event.allocation_id as u64;
+            encoded.kind = match event.kind {
+                EventKind::Allocated => EncodedEventKind::Allocated,
+                EventKind::Deallocated => EncodedEventKind::Deallocated,
+            };
+            encoded.heap_id = event.heap_id as u64;
+            encoded.heap_kind = match event.heap_kind {
+                HeapKind::General => EncodedHeapKind::General,
+                HeapKind::Bump => EncodedHeapKind::Bump,
+                HeapKind::Thread => EncodedHeapKind::Thread,
+            };
+            encoded.freed_after_heap_release = event.freed_after_heap_release;
+            encoded.address = event.address as u64;
+            encoded.size = event.size as u64;
+            encoded.align = event.align as u64;
+            encoded.call_stack = event.call_stack.iter().map(|ip| ip.0 as u64).collect();
+            encoded
+        })
+        .collect();
+    encoded.thread_names = callers
+        .thread_names
+        .iter()
+        .map(|thread| {
+            let mut encoded = EncodedThreadName::default();
+            encoded.thread_id = thread.thread_id as u64;
+            encoded.name = thread.name.clone();
+            encoded
+        })
+        .collect();
+    encoded
 }
 
 fn encode_histograms(aggregates: Option<&AggregateSnapshot>) -> EncodedHistograms {
     let empty = AggregateSnapshot::new();
     let aggregates = aggregates.unwrap_or(&empty);
-    EncodedHistograms {
-        allocated: aggregates.size_allocations.iter().map(|count| *count as u64).collect(),
-        live: aggregates.size_live.iter().map(|count| (*count).max(0) as u64).collect(),
-    }
+    let mut encoded = EncodedHistograms::default();
+    encoded.allocated = aggregates.size_allocations.iter().map(|count| *count as u64).collect();
+    encoded.live = aggregates.size_live.iter().map(|count| (*count).max(0) as u64).collect();
+    encoded
 }
 
 fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
@@ -847,10 +893,8 @@ fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
         .into_iter()
         .map(|address| {
             #[cfg_attr(miri, allow(unused_mut))]
-            let mut lookup = EncodedAddressLookup {
-                address: address as u64,
-                ..EncodedAddressLookup::default()
-            };
+            let mut lookup = EncodedAddressLookup::default();
+            lookup.address = address as u64;
             #[cfg(not(miri))]
             {
                 backtrace::resolve(address as *mut c_void, |symbol| {
@@ -1221,6 +1265,7 @@ impl Drop for MappedBytes {
 
 impl Snapshot {
     /// Returns the complete encoded snapshot.
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         self.mapping.as_slice()
     }
@@ -1585,6 +1630,7 @@ struct TrackingSlot {
     data: UnsafeCell<TrackingSlotData>,
 }
 
+// SAFETY: TrackingSlot's data is accessed only while its atomic lock is held.
 unsafe impl Sync for TrackingSlot {}
 
 #[derive(Clone, Copy)]
@@ -1643,6 +1689,8 @@ struct StackTable {
     mask: usize,
 }
 
+// SAFETY: StackTable entries are accessed only through its lock guard, which
+// provides exclusive access to the UnsafeCell payload.
 unsafe impl Sync for StackTable {}
 
 #[derive(Clone, Copy)]
@@ -1879,6 +1927,7 @@ mod tests {
 
     #[test]
     fn telemetry_views_expose_values_and_sampling_progress() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let exact = Estimate::exact(7);
         assert_eq!(exact.value(), 7);
@@ -1937,6 +1986,7 @@ mod tests {
 
     #[test]
     fn private_snapshot_encoders_cover_every_topology_kind() {
+        crate::initialize();
         let class = SizeClassSnapshot {
             class_index: 2,
             block_bytes: 64,
@@ -2018,7 +2068,8 @@ mod tests {
 
     #[test]
     fn caller_encoding_and_address_details_are_deterministic() {
-        let stack_address = stack_hash as *const () as usize;
+        crate::initialize();
+        let stack_address = (stack_hash as *const ()).addr();
         let callers = CallerSnapshot {
             session_id: 3,
             total_events: 2,
@@ -2091,6 +2142,7 @@ mod tests {
 
     #[test]
     fn tracking_ring_and_stack_table_handle_reuse_and_contention() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         assert!(begin_allocation::<TestCallerConfig>().is_none());
         record_deallocation(
@@ -2240,6 +2292,7 @@ mod tests {
 
     #[test]
     fn suppression_and_counter_recorders_cover_disabled_paths() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         assert!(!telemetry_suppressed());
         with_telemetry_suppressed(|| {
@@ -2305,6 +2358,7 @@ mod tests {
 
     #[test]
     fn aggregate_shards_merge_cross_thread_deallocations() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let size = 2_048;
         let bucket = histogram_bucket(size);
@@ -2325,6 +2379,7 @@ mod tests {
 
     #[test]
     fn snapshot_debug_reports_encoded_size() {
+        crate::initialize();
         let encoded = EncodedSnapshot::new(producer_version());
         let missing_len = encode_snapshot_with(&encoded, no_encoded_len, null_mapping, encode_successfully);
         assert!(missing_len.is_none());

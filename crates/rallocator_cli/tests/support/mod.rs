@@ -1,3 +1,5 @@
+#![expect(clippy::unwrap_used, reason = "Shared test fixture construction should fail immediately")]
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -8,7 +10,7 @@ use rallocator_telemetry::{encode, encoded_len};
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
-pub fn render_html(snapshot: &Snapshot, test_name: &str) -> String {
+pub(crate) fn render_html(snapshot: &Snapshot, test_name: &str) -> String {
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
         "integration-{test_name}-{}-{}",
         std::process::id(),

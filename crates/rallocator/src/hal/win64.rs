@@ -44,6 +44,3 @@ pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
     }
     unsafe { RtlCaptureStackBackTrace(4, limit as u32, frames.as_mut_ptr().cast(), ptr::null_mut()) as usize }
 }
-
-#[cfg(not(target_arch = "x86_64"))]
-compile_error!("hal::win64 currently supports only x86_64");

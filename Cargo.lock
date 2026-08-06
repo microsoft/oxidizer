@@ -61,6 +61,9 @@ dependencies = [
 [[package]]
 name = "allocation_hints"
 version = "0.1.0"
+dependencies = [
+ "static_assertions",
+]
 
 [[package]]
 name = "allocator-api2"

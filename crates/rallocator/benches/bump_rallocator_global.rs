@@ -1,3 +1,5 @@
+//! Bump workload benchmark using rallocator's global heap.
+
 mod bump_workloads;
 mod ordinary_workloads;
 

@@ -12,10 +12,10 @@ static CLASS_COUNTERS: [ClassCounters; MAX_SIZE_CLASSES] = [const { ClassCounter
 static MEDIUM_COUNTERS: MediumCounters = MediumCounters::new();
 static PARTIAL_SCAN_LIMIT: AtomicU64 = AtomicU64::new(0);
 
-pub struct TuningTelemetry;
+pub(crate) struct TuningTelemetry;
 
 impl TuningTelemetry {
-    pub fn enable() -> usize {
+    pub(crate) fn enable() -> usize {
         let _transition = TRANSITION.lock().unwrap();
         ACTIVE_SESSION.store(0, Ordering::Release);
         wait_for_recorders();
@@ -26,21 +26,21 @@ impl TuningTelemetry {
         session_id
     }
 
-    pub fn disable() {
+    pub(crate) fn disable() {
         let _transition = TRANSITION.lock().unwrap();
         ACTIVE_SESSION.store(0, Ordering::Release);
         wait_for_recorders();
     }
 
-    pub fn is_enabled() -> bool {
+    pub(crate) fn is_enabled() -> bool {
         ACTIVE_SESSION.load(Ordering::Acquire) != 0
     }
 
-    pub fn collect() -> TuningTelemetryReport {
+    pub(crate) fn collect() -> TuningTelemetryReport {
         Self::collect_for::<StandardSizeClasses>()
     }
 
-    pub fn collect_for<L: SizeClassLayout>() -> TuningTelemetryReport {
+    pub(crate) fn collect_for<L: SizeClassLayout>() -> TuningTelemetryReport {
         let _transition = TRANSITION.lock().unwrap();
         let active_session = ACTIVE_SESSION.swap(0, Ordering::AcqRel);
         wait_for_recorders();
@@ -90,7 +90,7 @@ impl TuningTelemetry {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TuningTelemetryReport {
+pub(crate) struct TuningTelemetryReport {
     pub session_id: usize,
     pub classes: Vec<ClassTuningTelemetry>,
     pub medium: MediumTuningTelemetry,
@@ -98,7 +98,7 @@ pub struct TuningTelemetryReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ClassTuningTelemetry {
+pub(crate) struct ClassTuningTelemetry {
     pub class_index: usize,
     pub block_size: usize,
     pub allocations: u64,
@@ -117,7 +117,7 @@ pub struct ClassTuningTelemetry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MediumTuningTelemetry {
+pub(crate) struct MediumTuningTelemetry {
     pub tls_cache_hits: u64,
     pub global_cache_hits: u64,
     pub fresh_commits: u64,
@@ -127,7 +127,7 @@ pub struct MediumTuningTelemetry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TuningRecommendations {
+pub(crate) struct TuningRecommendations {
     pub recycled_bitmap_batch_max_block_size: usize,
     pub partial_slab_scan_limit: Option<usize>,
     pub medium_purge_delay_ms: u64,
@@ -487,6 +487,7 @@ mod tests {
 
     #[test]
     fn allocator_paths_produce_tuning_recommendations() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
         let session_id = TuningTelemetry::enable();
@@ -524,6 +525,7 @@ mod tests {
 
     #[test]
     fn reports_the_selected_size_class_layout() {
+        crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
         TuningTelemetry::enable();
@@ -537,6 +539,8 @@ mod tests {
     #[test]
     fn records_every_event_and_restores_collection_state() {
         const TEST_CLASS: usize = MAX_SIZE_CLASSES - 1;
+
+        crate::initialize();
 
         let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         TuningTelemetry::disable();
@@ -624,6 +628,7 @@ mod tests {
 
     #[test]
     fn counter_constructors_and_resets_clear_every_field() {
+        crate::initialize();
         let class_counters = ClassCounters::new();
         class_counters.allocations.store(1, Ordering::Relaxed);
         class_counters.tls_cache_hits.store(1, Ordering::Relaxed);
@@ -671,6 +676,7 @@ mod tests {
 
     #[test]
     fn display_includes_active_classes_and_both_scan_recommendations() {
+        crate::initialize();
         let visible = ClassTuningTelemetry {
             allocations: 1,
             tls_cache_hits: 2,
@@ -715,6 +721,7 @@ mod tests {
 
     #[test]
     fn display_propagates_errors_from_every_write() {
+        crate::initialize();
         let mut report = TuningTelemetryReport {
             session_id: 7,
             classes: vec![ClassTuningTelemetry {
@@ -751,6 +758,7 @@ mod tests {
 
     #[test]
     fn recommendations_cover_threshold_scan_and_purge_branches() {
+        crate::initialize();
         let mut classes = vec![class(64), class(256), class(512)];
         classes[0].recycled_batch_hits = 31;
         classes[1].recycled_word_refills = 32;
@@ -786,6 +794,7 @@ mod tests {
 
     #[test]
     fn recommendations_use_bitmap_refills_and_report_missing_scan_data() {
+        crate::initialize();
         let mut classes = StandardSizeClasses::SIZES
             .iter()
             .enumerate()

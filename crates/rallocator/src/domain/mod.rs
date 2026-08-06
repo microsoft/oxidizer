@@ -14,6 +14,8 @@ static FAIL_NEXT_DOMAIN_CREATION: std::sync::Mutex<Option<std::thread::ThreadId>
 
 struct DomainStatePtr(NonNull<DomainState>);
 
+// SAFETY: Domain states are process-retained, and DomainState synchronizes all
+// mutable shared state before the pointer is dereferenced across threads.
 unsafe impl Send for DomainStatePtr {}
 unsafe impl Sync for DomainStatePtr {}
 
@@ -52,7 +54,10 @@ fn fail_next_domain_creation() -> bool {
 
 pub(crate) fn default_domain() -> RawDomain {
     let state = DEFAULT_DOMAIN.get_or_init(|| {
-        let domain = create_domain().expect("failed to create the default allocation domain");
+        let domain = match create_domain() {
+            Some(domain) => domain,
+            None => std::process::abort(),
+        };
         let state = domain.target().cast::<DomainState>();
         crate::allocator::mark_default_domain(state);
         DomainStatePtr(NonNull::new(state).expect("domain creation returned a validated non-null target"))
@@ -66,11 +71,11 @@ mod tests {
 
     #[test]
     fn domain_creation_reports_mapping_failure() {
-        crate::heap::ensure_backend_registered();
+        crate::initialize();
         *FAIL_NEXT_DOMAIN_CREATION.lock().unwrap() = Some(std::thread::current().id());
         assert!(Domain::try_new().is_none());
 
         *FAIL_NEXT_DOMAIN_CREATION.lock().unwrap() = Some(std::thread::current().id());
-        assert!(std::panic::catch_unwind(Domain::new).is_err());
+        std::panic::catch_unwind(Domain::new).unwrap_err();
     }
 }

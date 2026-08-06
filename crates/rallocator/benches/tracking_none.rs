@@ -1,3 +1,5 @@
+//! Allocation benchmark with telemetry disabled.
+
 mod workloads;
 
 rallocator::rallocator!();

@@ -1,6 +1,7 @@
 //! Retained caller and symbol model types.
 
 /// Per-thread retained event-log summary.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ThreadLog {
     /// Thread-log identifier.
@@ -16,9 +17,10 @@ pub struct ThreadLog {
 }
 
 /// Kind of recorded allocation event.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EventKind {
     /// Allocation event.
+    #[default]
     Allocated,
     /// Deallocation event.
     Deallocated,
@@ -37,7 +39,8 @@ pub enum HeapKind {
 }
 
 /// A retained allocation or deallocation event.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Event {
     /// Owning thread-log identifier.
     pub thread_log_id: u64,
@@ -66,7 +69,8 @@ pub struct Event {
 }
 
 /// Name associated with a recorded thread.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ThreadName {
     /// Thread identifier.
     pub thread_id: u64,
@@ -75,6 +79,7 @@ pub struct ThreadName {
 }
 
 /// Retained caller telemetry.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Callers {
     /// Capture-session identifier.
@@ -92,6 +97,7 @@ pub struct Callers {
 }
 
 /// Symbol lookup information for one instruction address.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AddressLookup {
     /// Instruction address.

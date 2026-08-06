@@ -1,3 +1,5 @@
+//! Bump workload benchmark using an explicit rallocator bump heap.
+
 mod bump_workloads;
 
 use std::hint::black_box;
@@ -9,6 +11,7 @@ use allocation_hints::{Hint, with_hint};
 rallocator::rallocator!();
 
 fn main() {
+    rallocator::initialize();
     bump_workloads::run(bump_workloads::Workloads {
         vectors,
         hash_maps,

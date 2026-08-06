@@ -44,6 +44,7 @@ impl Options {
     pub const DEFAULT_MEDIUM_CACHE_MAX_BYTES: usize = MAX_MEDIUM_CACHE_BYTES;
 
     /// Returns the standard general-purpose heap options.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             locality_segment_bytes: Self::DEFAULT_LOCALITY_SEGMENT_BYTES,
@@ -52,6 +53,7 @@ impl Options {
     }
 
     /// Sets the locality segment size.
+    #[must_use]
     pub const fn with_locality_segment_bytes(mut self, bytes: usize) -> Self {
         assert!(
             bytes >= MEDIUM_SLICE_BYTES && bytes <= MAX_LOCALITY_SEGMENT_BYTES && bytes.is_power_of_two(),
@@ -62,6 +64,7 @@ impl Options {
     }
 
     /// Sets the largest power-of-two medium span retained in the local cache.
+    #[must_use]
     pub const fn with_medium_cache_max_bytes(mut self, bytes: usize) -> Self {
         assert!(
             bytes == 0 || (bytes >= MEDIUM_SLICE_BYTES && bytes <= MAX_MEDIUM_CACHE_BYTES && bytes.is_power_of_two()),
@@ -72,16 +75,19 @@ impl Options {
     }
 
     /// Returns the locality segment size.
+    #[must_use]
     pub const fn locality_segment_bytes(self) -> usize {
         self.locality_segment_bytes
     }
 
     /// Returns the largest locally cached medium span.
+    #[must_use]
     pub const fn medium_cache_max_bytes(self) -> usize {
         self.medium_cache_max_bytes
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn from_values(locality_segment_bytes: usize, medium_cache_max_bytes: usize) -> Self {
         Self {
             locality_segment_bytes,
@@ -98,16 +104,19 @@ impl Default for Options {
 
 impl Info {
     /// Returns the heap options.
+    #[must_use]
     pub const fn options(&self) -> Options {
         self.options
     }
 
     /// Returns whether this describes an implicit thread heap target.
+    #[must_use]
     pub const fn is_thread_target(&self) -> bool {
         self.thread_target
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(options: Options, thread_target: bool) -> Self {
         Self { options, thread_target }
     }
@@ -115,16 +124,19 @@ impl Info {
 
 impl AllocationUsage {
     /// Returns the number of live allocations.
+    #[must_use]
     pub const fn live_allocations(&self) -> usize {
         self.live_allocations
     }
 
     /// Returns the total requested bytes.
+    #[must_use]
     pub const fn requested_bytes(&self) -> usize {
         self.requested_bytes
     }
 
     /// Returns the total usable bytes.
+    #[must_use]
     pub const fn usable_bytes(&self) -> usize {
         self.usable_bytes
     }
@@ -139,36 +151,43 @@ impl AllocationUsage {
 
 impl Usage {
     /// Returns small-allocation usage.
+    #[must_use]
     pub const fn small(&self) -> &AllocationUsage {
         &self.small
     }
 
     /// Returns medium-allocation usage.
+    #[must_use]
     pub const fn medium(&self) -> &AllocationUsage {
         &self.medium
     }
 
     /// Returns direct-allocation usage.
+    #[must_use]
     pub const fn direct(&self) -> &AllocationUsage {
         &self.direct
     }
 
     /// Returns bytes held in the heap's medium cache.
+    #[must_use]
     pub const fn cached_medium_bytes(&self) -> usize {
         self.cached_medium_bytes
     }
 
     /// Returns the number of slabs owned by the heap.
+    #[must_use]
     pub const fn slab_count(&self) -> usize {
         self.slab_count
     }
 
     /// Returns the number of slices owned by the heap.
+    #[must_use]
     pub const fn slice_count(&self) -> usize {
         self.slice_count
     }
 
     #[doc(hidden)]
+    #[must_use]
     pub const fn new(
         small: AllocationUsage,
         medium: AllocationUsage,

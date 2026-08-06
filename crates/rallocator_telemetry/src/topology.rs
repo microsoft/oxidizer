@@ -1,9 +1,10 @@
 //! Physical allocator topology model types.
 
 /// Classifies an allocator slice.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SliceKind {
     /// Slice without a stable classification.
+    #[default]
     Unknown,
     /// Slice containing small-allocation slabs.
     Small,
@@ -16,6 +17,7 @@ pub enum SliceKind {
 }
 
 /// A small-allocation slab segment.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Segment {
     /// Segment index within its slice.
@@ -33,7 +35,8 @@ pub struct Segment {
 }
 
 /// A physical allocator slice.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Slice {
     /// Slice index within its region.
     pub slice_index: u32,
@@ -52,6 +55,7 @@ pub struct Slice {
 }
 
 /// Topology detail for an allocator region.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TopologyRegion {
     /// Region index.

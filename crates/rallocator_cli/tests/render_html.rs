@@ -1,45 +1,50 @@
+//! End-to-end tests for HTML report rendering.
+#![expect(
+    clippy::too_many_lines,
+    reason = "Large fixtures are intentionally assembled inline"
+)]
+
 use rallocator_telemetry::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 use rallocator_telemetry::snapshot::{Domain, Estimate, Histograms, Region, SizeClass, Snapshot, Stats, Version};
 use rallocator_telemetry::topology::{Segment, Slice, SliceKind, TopologyRegion};
 
 mod support;
 
+macro_rules! schema {
+    ($base:expr, $($field:ident: $value:expr),+ $(,)?) => {{
+        let mut value = $base;
+        $(value.$field = $value;)+
+        value
+    }};
+}
+
 #[test]
 fn html_report_contains_required_sections() {
     let mut snapshot = Snapshot::new(Version::new(1, 2, 3));
-    snapshot.stats = Stats {
+    snapshot.stats = schema!(
+        Stats::default(),
         live_bytes: 1024,
         mapped_bytes: 4096,
         allocations: 12,
-        remote_frees: 2,
-        ..Stats::default()
-    };
-    snapshot.size_classes.push(SizeClass {
+        remote_frees: 2
+    );
+    snapshot.size_classes.push(schema!(
+        SizeClass::default(),
         class_index: 1,
         block_bytes: 64,
-        live_allocations: Estimate {
-            value: 2,
-            lower_bound: 2,
-            upper_bound: 2,
-        },
-        requested_bytes: Estimate {
-            value: 100,
-            lower_bound: 100,
-            upper_bound: 100,
-        },
-        usable_bytes: Estimate {
-            value: 128,
-            lower_bound: 128,
-            upper_bound: 128,
-        },
-    });
-    snapshot.regions.push(Region {
+        live_allocations: schema!(Estimate::default(), value: 2, lower_bound: 2, upper_bound: 2),
+        requested_bytes: schema!(Estimate::default(), value: 100, lower_bound: 100, upper_bound: 100),
+        usable_bytes: schema!(Estimate::default(), value: 128, lower_bound: 128, upper_bound: 128)
+    ));
+    snapshot.regions.push(schema!(
+        Region::default(),
         region_index: 0,
         reserved_bytes: 1 << 30,
         used_slices: 10,
-        free_slices: 90,
-    });
-    snapshot.domains.push(Domain {
+        free_slices: 90
+    ));
+    snapshot.domains.push(schema!(
+        Domain::default(),
         domain_id: 7,
         is_default: true,
         region_count: 1,
@@ -50,59 +55,67 @@ fn html_report_contains_required_sections() {
         medium_slices: 0,
         bump_slices: 1,
         unknown_slices: 0,
-        region_indices: vec![0],
-    });
-    snapshot.topology.push(TopologyRegion {
+        region_indices: vec![0]
+    ));
+    snapshot.topology.push(schema!(
+        TopologyRegion::default(),
         region_index: 0,
         base_address: 0x1000_0000,
-        region_bytes: 1 << 30,
+        region_bytes: 64 * (64 << 10),
         slice_bytes: 64 << 10,
         used_bitmap: vec![0b11],
         slices: vec![
-            Slice {
+            schema!(
+                Slice::default(),
                 slice_index: 0,
                 kind: SliceKind::Small,
                 span_slices: 0,
                 owner: 0x1234,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: vec![Segment {
+                segments: vec![schema!(
+                    Segment::default(),
                     segment_index: 0,
                     class_index: 1,
                     context: false,
                     live_blocks: 7,
                     usable_blocks: 511,
-                    utilization_tracked: true,
-                }],
-            },
-            Slice {
+                    utilization_tracked: true
+                )]
+            ),
+            schema!(
+                Slice::default(),
                 slice_index: 1,
                 kind: SliceKind::Bump,
                 span_slices: 1,
                 owner: 0x5678,
                 requested_bytes: 0,
                 usable_bytes: 0,
-                segments: Vec::new(),
-            },
+                segments: Vec::new()
+            ),
         ],
-    });
-    snapshot.histograms = Histograms {
+    ));
+    snapshot.histograms = schema!(
+        Histograms::default(),
         allocated: vec![0, 0, 4],
-        live: vec![0, 0, 1],
-    };
-    snapshot.callers = Some(Callers {
+        live: vec![0, 0, 1]
+    );
+    snapshot.callers = Some(schema!(
+        Callers::default(),
         session_id: 1,
         total_events: 4,
         lost_events: 0,
-        threads: vec![ThreadLog {
+        threads: vec![schema!(
+            ThreadLog::default(),
             thread_log_id: 10,
             total_events: 4,
             lost_events: 0,
             allocated_histogram: vec![0, 0, 1],
-            live_histogram: vec![0, 0, 0],
-        }],
+            live_histogram: vec![0, 0, 0]
+        )],
         events: vec![
-            Event {
+            schema!(
+                Event::default(),
                 thread_log_id: 10,
                 event_thread_id: 10,
                 sequence: 1,
@@ -114,9 +127,10 @@ fn html_report_contains_required_sections() {
                 address: 0x2000,
                 size: 4,
                 align: 4,
-                call_stack: vec![0x3000],
-            },
-            Event {
+                call_stack: vec![0x3000]
+            ),
+            schema!(
+                Event::default(),
                 thread_log_id: 10,
                 event_thread_id: 11,
                 sequence: 2,
@@ -128,9 +142,10 @@ fn html_report_contains_required_sections() {
                 address: 0x2000,
                 size: 4,
                 align: 4,
-                call_stack: vec![0x4000],
-            },
-            Event {
+                call_stack: vec![0x4000]
+            ),
+            schema!(
+                Event::default(),
                 thread_log_id: 10,
                 event_thread_id: 10,
                 sequence: 3,
@@ -142,9 +157,10 @@ fn html_report_contains_required_sections() {
                 address: 0x2100,
                 size: 8,
                 align: 8,
-                call_stack: vec![0x3000],
-            },
-            Event {
+                call_stack: vec![0x3000]
+            ),
+            schema!(
+                Event::default(),
                 thread_log_id: 10,
                 event_thread_id: 10,
                 sequence: 4,
@@ -156,20 +172,22 @@ fn html_report_contains_required_sections() {
                 address: 0x2100,
                 size: 8,
                 align: 8,
-                call_stack: vec![0x4000],
-            },
+                call_stack: vec![0x4000]
+            ),
         ],
         thread_names: vec![
-            ThreadName {
+            schema!(
+                ThreadName::default(),
                 thread_id: 10,
-                name: "producer".to_owned(),
-            },
-            ThreadName {
+                name: "producer".to_owned()
+            ),
+            schema!(
+                ThreadName::default(),
                 thread_id: 11,
-                name: "consumer".to_owned(),
-            },
+                name: "consumer".to_owned()
+            ),
         ],
-    });
+    ));
 
     let html = support::render_html(&snapshot, "required-sections");
     for heading in [

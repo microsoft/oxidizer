@@ -4,6 +4,7 @@
 pub use rallocator_wire::format::Version;
 
 /// A bounded estimate with lower and upper bounds.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Estimate {
     /// Estimated value.
@@ -15,6 +16,7 @@ pub struct Estimate {
 }
 
 /// Process-wide allocator counters.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Stats {
     /// Cumulative requested bytes allocated.
@@ -46,6 +48,7 @@ pub struct Stats {
 }
 
 /// Statistics for one allocation size class.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SizeClass {
     /// Allocator-defined size-class index.
@@ -61,6 +64,7 @@ pub struct SizeClass {
 }
 
 /// Aggregate state for one allocator region.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Region {
     /// Region index.
@@ -74,6 +78,7 @@ pub struct Region {
 }
 
 /// Allocation-domain aggregate state.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Domain {
     /// Process-local domain identifier.
@@ -101,6 +106,7 @@ pub struct Domain {
 }
 
 /// Allocation-size histograms.
+#[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Histograms {
     /// Counts of allocated sizes by bucket.
@@ -110,6 +116,7 @@ pub struct Histograms {
 }
 
 /// Metadata associated with a snapshot.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Metadata {
     /// Version of the enclosing wire format.
@@ -122,7 +129,18 @@ pub struct Metadata {
     pub capture_duration_nanos: u64,
 }
 
+/// A recognized snapshot section skipped because its version is newer than this decoder supports.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SkippedSection {
+    /// Wire section identifier.
+    pub id: u16,
+    /// Unsupported section version.
+    pub version: u16,
+}
+
 /// Complete owned allocator telemetry snapshot.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Snapshot {
     /// Snapshot metadata.
@@ -143,10 +161,13 @@ pub struct Snapshot {
     pub histograms: Histograms,
     /// Symbol information for caller addresses.
     pub addresses: Vec<crate::callers::AddressLookup>,
+    /// Recognized sections skipped because their versions were unsupported.
+    pub skipped_sections: Vec<SkippedSection>,
 }
 
 impl Snapshot {
     /// Creates an empty snapshot for `producer_version`.
+    #[must_use]
     pub fn new(producer_version: Version) -> Self {
         Self {
             metadata: Metadata {
@@ -163,6 +184,7 @@ impl Snapshot {
             callers: None,
             histograms: Histograms::default(),
             addresses: Vec::new(),
+            skipped_sections: Vec::new(),
         }
     }
 }

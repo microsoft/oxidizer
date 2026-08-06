@@ -90,10 +90,7 @@ fn create_thread_heap() -> Option<RawHeap> {
 }
 
 fn create_heap(options: Options) -> Result<RawHeap, CreationError> {
-    let domain = options
-        .domain()
-        .map(crate::domain::state)
-        .unwrap_or_else(crate::domain::default_state);
+    let domain = options.domain().map_or_else(crate::domain::default_state, crate::domain::state);
     let creation_policy = options.creation_policy();
     let target = match options.kind() {
         Kind::General(options) => {
@@ -202,7 +199,10 @@ unsafe fn domain_from_state(state: *mut crate::allocator::DomainState) -> Domain
 }
 
 unsafe fn heap_info(hint: RawHint, claimed_active: bool) -> Info {
-    let target = target_from_hint(hint).expect("heap information requires a heap target");
+    let target = match target_from_hint(hint) {
+        Some(target) => target,
+        None => invalid_hint(),
+    };
     let active = match target {
         HeapTarget::Thread(state) => crate::allocator::thread_heap_is_active(state.as_ptr()),
         _ => claimed_active,
@@ -227,7 +227,10 @@ unsafe fn heap_info(hint: RawHint, claimed_active: bool) -> Info {
 }
 
 unsafe fn heap_usage(hint: RawHint) -> Result<Usage, ()> {
-    match target_from_hint(hint).expect("heap usage requires a heap target") {
+    match match target_from_hint(hint) {
+        Some(target) => target,
+        None => invalid_hint(),
+    } {
         HeapTarget::General(state) => Ok(unsafe { crate::allocator::general_heap_usage(state.as_ptr(), ptr::null_mut()) }),
         HeapTarget::Bump(state) => {
             let (reserved_bytes, cursor_used_bytes, allocation_count, live_allocations, live_requested_bytes, chunk_count) =
@@ -246,7 +249,10 @@ unsafe fn heap_usage(hint: RawHint) -> Result<Usage, ()> {
 }
 
 unsafe fn destroy_hint(hint: RawHint) {
-    match target_from_hint(hint).expect("heap destruction requires a heap target") {
+    match match target_from_hint(hint) {
+        Some(target) => target,
+        None => invalid_hint(),
+    } {
         HeapTarget::General(state) => unsafe { crate::allocator::retire_general_heap(state.as_ptr()) },
         HeapTarget::Bump(state) => unsafe { bump::release_handle(state.as_ptr()) },
         HeapTarget::Thread(_) => {}
@@ -267,8 +273,12 @@ pub(crate) fn target_from_hint(hint: RawHint) -> Option<HeapTarget> {
         TARGET_GENERAL => Some(HeapTarget::General(GeneralHeapPtr::new(hint.target().cast()))),
         TARGET_BUMP => Some(HeapTarget::Bump(BumpHeapPtr::new(hint.target().cast()))),
         TARGET_THREAD => Some(HeapTarget::Thread(RemoteHeapPtr::new(hint.target().cast()))),
-        _ => panic!("invalid rallocator allocation hint"),
+        _ => invalid_hint(),
     }
+}
+
+fn invalid_hint() -> ! {
+    std::process::abort()
 }
 
 #[cfg(test)]
@@ -278,7 +288,7 @@ fn inject_failure(failure: &std::sync::Mutex<Option<std::thread::ThreadId>>) {
 
 #[cfg(test)]
 fn exercise_heap_allocation_failures() {
-    ensure_backend_registered();
+    crate::initialize();
     inject_failure(&FAIL_NEXT_BUMP_STATE);
     assert_eq!(
         Heap::try_with_options(Options::bump(common_bump::Options::new())).unwrap_err(),
@@ -286,13 +296,16 @@ fn exercise_heap_allocation_failures() {
     );
 
     inject_failure(&FAIL_NEXT_BUMP_STATE);
-    assert!(std::panic::catch_unwind(|| { Heap::from_thread_pool_in(Domain::new(), common_bump::Options::new()) }).is_err());
+    std::panic::catch_unwind(|| Heap::from_thread_pool_in(Domain::new(), common_bump::Options::new())).unwrap_err();
 
     inject_failure(&FAIL_NEXT_FALLBACK_ENSURE);
     assert_eq!(
         Heap::try_with_options(Options::bump(common_bump::Options::new()).with_thread_pool()).unwrap_err(),
         CreationError::CreationFailed
     );
+    let recovered = crate::allocator::take_pooled_bump(crate::domain::default_state())
+        .expect("failed fallback initialization must return the pooled bump state");
+    crate::allocator::return_pooled_bump(recovered);
 
     inject_failure(&FAIL_NEXT_HEAP_MAPPING);
     assert_eq!(Heap::try_new().unwrap_err(), CreationError::CreationFailed);
@@ -304,6 +317,7 @@ mod tests {
 
     #[test]
     fn heap_creation_reports_backing_allocation_failures() {
+        crate::initialize();
         exercise_heap_allocation_failures();
     }
 }

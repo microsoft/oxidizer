@@ -116,6 +116,11 @@ pub(crate) unsafe fn read_free_requested(block: *mut u8) -> usize {
     requested_bytes
 }
 
+#[inline(always)]
+pub(crate) unsafe fn peek_free_requested(block: *mut u8) -> usize {
+    free_metadata(block, false).requested_bytes.load(Ordering::Relaxed)
+}
+
 unsafe fn allocate(size: usize) -> *mut u8 {
     unsafe { System.alloc_zeroed(allocation_layout(size)) }
 }

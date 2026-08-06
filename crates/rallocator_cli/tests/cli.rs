@@ -1,3 +1,6 @@
+//! Integration tests for the command-line interface.
+#![expect(clippy::unwrap_used, reason = "Test setup and assertions should fail immediately")]
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -29,7 +32,7 @@ fn snapshot_html_writes_default_output_beside_input() {
         .output()
         .unwrap();
     assert!(result.status.success());
-    let output = directory.join("snapshot.html");
+    let output = directory.join("capture.html");
     assert!(fs::read_to_string(&output).unwrap().contains("<style>"));
     assert_eq!(String::from_utf8(result.stdout).unwrap().trim(), output.display().to_string());
 
