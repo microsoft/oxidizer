@@ -364,20 +364,22 @@ function Update-EntryForRequiredChangeType {
 #          bump only the change-type tag.
 #        - or create a new cascade-source entry.
 #      Ordinary library dependents use their own cargo-semver-checks result,
-#      floored at patch. Proc-macro-only dependents use a provisional patch floor
-#      and are explicitly classified in the interactive review.
+#      floored at patch. A second direct-edge pass raises a dependent to breaking
+#      when it exposes a dependency whose planned version transition is
+#      incompatible. The pass repeats to a fixpoint so exposure chains cascade.
+#      Proc-macro-only dependents use a provisional patch floor and are explicitly
+#      classified in the interactive review.
 #      Cascade reasons are recorded per (target → dep) edge with dedup by
 #      target name (re-encountering an edge for an already-strengthened target
 #      overwrites the prior reason in place).
 #
-# Note: cascade is one-level. The set of dependents reachable from a user
-# target is the transitive published dependents BFS. For an ordinary library,
-# the dependent's cascade-applied change type is derived from cargo-semver-checks
-# analysing its OWN current working-tree public API vs its previous version-bump
-# commit, floored at patch because it must re-release to pick up the dependency
-# version. A proc-macro-only dependent starts at that mechanical patch floor and
-# is then classified by the user in the standard review dialog. This replaces
-# the former allowed_external_types exposure heuristic.
+# The release-set membership walk starts from user targets and includes every
+# transitive published dependent. Severity is then resolved from two independent
+# signals: cargo-semver-checks analyses each crate's own API diff, while
+# allowed_external_types detects incompatible version changes in dependencies
+# exposed through otherwise-unchanged public signatures. A proc-macro-only
+# dependent starts at the mechanical patch floor and is then classified by the
+# user in the standard review dialog.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
@@ -457,9 +459,23 @@ function Resolve-ReleaseSet {
     }
 
     # Snapshot the user-source folder names before cascade adds cascade-source
-    # entries — cascade-source entries are not themselves iterated for further
-    # cascades (one-level cascade semantics).
+    # entries.
     $userFolders = @($resolved.Keys) | ForEach-Object { $_ }
+
+    # Self-floor user roots before dependency exposure is evaluated. A root the
+    # caller requested as patch may itself require a breaking release, and that
+    # stronger planned transition must cascade to consumers exposing its types.
+    foreach ($folder in $userFolders) {
+        $entry = $resolved[$folder]
+        if ($entry.IsProcMacroOnly) { continue }
+        $required = & $GetRequiredChangeType $entry.Folder $entry.Name
+        if ($required -eq 'manual') {
+            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+        }
+        if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
+        Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
+            -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
+    }
 
     foreach ($targetFolder in $userFolders) {
         $targetEntry = $resolved[$targetFolder]
@@ -538,22 +554,65 @@ function Resolve-ReleaseSet {
         }
     }
 
-    # Self-floor: raise each USER-source entry's change type to at least what
-    # cargo-semver-checks requires for its OWN public API vs its previous
-    # version-bump commit. The cascade above already floored dependents; this catches
-    # user-source ROOTS that nothing cascades into (e.g. releasing a single leaf
-    # crate whose own API broke). Author intent is never downgraded — only raised
-    # when the real API diff demands a stronger change type.
-    foreach ($folder in $userFolders) {
-        $entry    = $resolved[$folder]
-        if ($entry.IsProcMacroOnly) { continue }
-        $required = & $GetRequiredChangeType $entry.Folder $entry.Name
-        if ($required -eq 'manual') {
-            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+    # cargo-semver-checks compares one crate's rustdoc API and cannot identify
+    # that an unchanged signature now names a type from an incompatible version
+    # of an external crate. Propagate that condition over direct dependency edges
+    # until no dependent is strengthened. Use the version that will actually be
+    # written, not EffectiveChangeType, so -Force pins do not create a fictitious
+    # breaking transition farther up the graph.
+    $exposureChanged = $true
+    while ($exposureChanged) {
+        $exposureChanged = $false
+
+        foreach ($sourceEntry in @($resolved.Values)) {
+            $sourcePkg = $baselineByFolder[$sourceEntry.Folder]
+            if ($null -eq $sourcePkg -or $sourcePkg.IsProcMacroOnly) { continue }
+
+            $plannedChangeType = Get-ChangeTypeFromVersions `
+                -oldVersion $sourceEntry.CurrentVersion `
+                -newVersion $sourceEntry.EffectiveTargetVersion
+            if (-not (Test-IsBreakingChange -oldVersion $sourceEntry.CurrentVersion -ChangeType $plannedChangeType)) {
+                continue
+            }
+
+            $sourceCargoName = $sourcePkg.Name.Replace('-', '_')
+            foreach ($dependentPkg in $WorkspaceBaseline) {
+                if (-not $dependentPkg.Published -or $dependentPkg.IsProcMacroOnly) { continue }
+                if ($dependentPkg.Deps -notcontains $sourceCargoName) { continue }
+                if (-not $resolved.Contains($dependentPkg.Folder)) { continue }
+                if (-not (Test-PackageExposesTarget -Dependent $dependentPkg -TargetPackageName $sourcePkg.Name)) {
+                    continue
+                }
+
+                $dependentEntry = $resolved[$dependentPkg.Folder]
+                $previousChangeType = $dependentEntry.EffectiveChangeType
+                $previousTargetVersion = $dependentEntry.EffectiveTargetVersion
+
+                Update-EntryForRequiredChangeType -Entry $dependentEntry -RequiredChangeType 'breaking' `
+                    -RequirementLabel 'exposed-dependency cascade' `
+                    -RequirementDetail "the incompatible planned version of '$($sourcePkg.Name)' exposed in its public API" `
+                    -Force:$Force
+
+                $reasonIndex = -1
+                for ($i = 0; $i -lt $dependentEntry.CascadeReasons.Count; $i++) {
+                    if ($dependentEntry.CascadeReasons[$i].Target -eq $sourcePkg.Name) {
+                        $reasonIndex = $i
+                        break
+                    }
+                }
+                $reason = [pscustomobject]@{ Target = $sourcePkg.Name; Breaking = $true }
+                if ($reasonIndex -ge 0) {
+                    $dependentEntry.CascadeReasons[$reasonIndex] = $reason
+                } else {
+                    $dependentEntry.CascadeReasons.Add($reason)
+                }
+
+                if ($dependentEntry.EffectiveChangeType -ne $previousChangeType -or
+                    $dependentEntry.EffectiveTargetVersion -ne $previousTargetVersion) {
+                    $exposureChanged = $true
+                }
+            }
         }
-        if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
-        Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
-            -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
     }
 
     return @($resolved.Values)
