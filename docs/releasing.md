@@ -225,17 +225,22 @@ published content lags the source), and it means an aborted release that
 bumped a crate to `4.0.0` without publishing is still the baseline the
 next change is measured against.
 
-This replaces the former
-`[package.metadata.cargo_check_external_types]` allowlist heuristic. That
-allowlist is a hand-maintained list of the external types a crate is
-*permitted* to expose; it was repurposed as a proxy for the types a
-crate *actually* re-exports. When the two drift apart — an entry missing
-or stale — the heuristic misjudged whether a dependent re-exports a
-changed dependency, so a breaking change in an exposed dependency could
-be cascaded as `patch` instead of `breaking` (the motivating defect: a
-breaking change in `bytesbuf` was not propagated to `bytesbuf_io`, which
-re-exports `bytesbuf` types). Analysing the real API with
-`cargo semver-checks` removes the proxy entirely.
+`cargo semver-checks` is combined with an exposed-dependency cascade.
+Rustdoc comparison cannot detect that an otherwise-unchanged signature
+now names a type from an incompatible version of an external crate. For
+each direct dependency edge, the planner therefore also consults
+`[package.metadata.cargo_check_external_types].allowed_external_types`.
+If the dependency's planned version transition is breaking and the
+dependent allows that dependency's types in its public API, the dependent
+is floored at `breaking`. The planner repeats this check to a fixpoint so
+the result propagates through chains such as `bytesbuf` → `bytesbuf_io` →
+another facade.
+
+Missing external-type metadata and wildcard roots are handled
+conservatively as possible exposure. The policy must remain validated by
+`cargo-check-external-types`: an extra allowlist entry can cause an
+unnecessary breaking bump, while omitting an actually exposed type is a
+policy-validation failure.
 
 **How the change type is determined.** `cargo semver-checks` is invoked
 as a CLI (not as a library) and its textual result is parsed into one of
@@ -253,8 +258,8 @@ notion (major / minor / none); the exact parsing lives in
 
 Cascade dependents are floored at `patch` (they must re-release to pick
 up the new dependency version even when their own public API is
-unchanged), then raised to whatever their own `cargo semver-checks`
-result requires.
+unchanged), then raised to the stronger of their own
+`cargo semver-checks` result and the exposed-dependency cascade.
 
 #### Proc-macro-only packages require manual SemVer review
 
