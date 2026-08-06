@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Demonstrates what happens when the executor fails to shut down due to a resource leak.
 //!

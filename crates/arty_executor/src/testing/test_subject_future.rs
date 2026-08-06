@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::cell::{Cell, RefCell};
 use std::pin::Pin;
@@ -21,10 +22,7 @@ pub(crate) struct TestSubjectFuture {
     completes_on_next_poll: Rc<Cell<bool>>,
     wakes_self_on_next_poll: Rc<Cell<bool>>,
 
-    #[expect(
-        clippy::type_complexity,
-        reason = "never needs to be named, good enough"
-    )]
+    #[expect(clippy::type_complexity, reason = "never needs to be named, good enough")]
     #[debug(ignore)]
     on_poll: Rc<RefCell<Box<dyn FnMut(&mut task::Context<'_>)>>>,
 }

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Special purpose example to explore effects of spawning and completing millions of tasks.
 
@@ -6,8 +7,8 @@ use std::cell::Cell;
 use std::iter;
 use std::rc::Rc;
 
-use nm::Report;
 use arty_executor::{CycleOutcome, Executor};
+use nm::Report;
 
 // Two layers multiplied together is 10 million.
 const FIRST_LAYER_TASK_COUNT: usize = 1_000;

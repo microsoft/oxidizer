@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::rc::{Rc, Weak};
 
@@ -19,9 +20,7 @@ pub struct TaskSet {
 
 impl TaskSet {
     pub(crate) fn new(core: &Rc<ExecutorCore>) -> Self {
-        Self {
-            core: Rc::downgrade(core),
-        }
+        Self { core: Rc::downgrade(core) }
     }
 
     /// Registers a future to be processed by the executor as a new task.

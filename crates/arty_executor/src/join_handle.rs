@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -42,9 +43,7 @@ impl<R: 'static> Future for JoinHandle<R> {
         // SAFETY: We are not moving anything.
         unsafe { self.map_unchecked_mut(|x| &mut x.rx) }
             .poll(cx)
-            .map(|x| {
-                x.expect("join handle is no longer connected - the task failed to reach completion")
-            })
+            .map(|x| x.expect("join handle is no longer connected - the task failed to reach completion"))
     }
 }
 

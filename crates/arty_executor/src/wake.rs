@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::collections::VecDeque;
 use std::marker::{PhantomData, PhantomPinned};
@@ -183,8 +184,7 @@ impl WakeSignal {
 
         // We failed to add the task to the awakened set, so the owner must walk the long road.
         // We use Release ordering, as we are releasing the synchronization block for `awakened`.
-        self.probe_embedded_wake_signals
-            .store(true, atomic::Ordering::Release);
+        self.probe_embedded_wake_signals.store(true, atomic::Ordering::Release);
 
         self.parent_waker.wake_by_ref();
     }
@@ -199,12 +199,7 @@ impl PinnedDrop for WakeSignal {
     }
 }
 
-static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    waker_clone_waker,
-    waker_wake,
-    waker_wake_by_ref,
-    waker_drop_waker,
-);
+static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone_waker, waker_wake, waker_wake_by_ref, waker_drop_waker);
 
 fn waker_clone_waker(ptr: *const ()) -> RawWaker {
     let signal = resurrect_signal_ref(ptr);

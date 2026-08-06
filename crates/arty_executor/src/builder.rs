@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::task::Waker;
 use std::time::Duration;
@@ -69,13 +70,7 @@ impl ExecutorBuilder {
     #[must_use]
     pub unsafe fn build(self) -> Executor {
         // SAFETY: Forwarding safety guarantees from caller.
-        let core = unsafe {
-            ExecutorCore::new(
-                self.owner_waker,
-                self.shutdown_timeout,
-                self.shutdown_timeout_behavior,
-            )
-        };
+        let core = unsafe { ExecutorCore::new(self.owner_waker, self.shutdown_timeout, self.shutdown_timeout_behavior) };
 
         Executor::new(core)
     }

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// The outcome of executing one processing cycle of the async task executor.
 ///

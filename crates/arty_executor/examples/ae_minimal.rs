@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Runs a single asynchronous task on the async task executor, as the minimal scenario.
 

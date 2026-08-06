@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::hash::{Hash, Hasher};
 use std::pin::Pin;

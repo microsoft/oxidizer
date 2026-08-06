@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #[cfg(debug_assertions)]
 use std::backtrace::Backtrace;
@@ -16,8 +17,8 @@ use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
 
 use crate::{
-    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask,
-    ShutdownTimeoutBehavior, Task, TaskRef, WakeSignal,
+    BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
+    WakeSignal,
 };
 
 /// The real implementation of the executor, shared by different public "client" API surfaces.
@@ -157,10 +158,7 @@ pub(crate) const AWAKENED_CAPACITY: usize = 1024;
 #[cfg(miri)]
 pub(crate) const AWAKENED_CAPACITY: usize = 4;
 
-#[expect(
-    clippy::unused_self,
-    reason = "semantically correct, even if not always necessary"
-)]
+#[expect(clippy::unused_self, reason = "semantically correct, even if not always necessary")]
 impl ExecutorCore {
     /// Creates a new async task executor.
     ///
@@ -181,9 +179,7 @@ impl ExecutorCore {
             reentrancy_safe: RefCell::new(ReentrancySafeState {
                 new_tasks: VecDeque::new(),
                 result_events: RawLocalEventLake::new(),
-                task_storage: RawBlindPool::builder()
-                    .drop_policy(DropPolicy::MustNotDropContents)
-                    .build(),
+                task_storage: RawBlindPool::builder().drop_policy(DropPolicy::MustNotDropContents).build(),
                 shutdown_deadline: None,
             }),
             exclusive: RefCell::new(ExclusiveState {
@@ -283,25 +279,23 @@ impl ExecutorCore {
 
             self.drop_inert_tasks(&mut state_exclusive, &mut state_reentrant);
 
-            let outcome =
-                if self.evaluate_shutdown_completion(&mut state_exclusive, &state_reentrant) {
-                    CycleOutcome::Shutdown
-                } else if self.has_work_to_do(&state_exclusive, &state_reentrant) {
-                    // We want to be immediately called again because we may have more work to do.
-                    CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
-                    CycleOutcome::Continue
-                } else {
-                    // We have no work to do, feel free to take a while before coming back to us.
-                    // We will try to trigger the owner's waker if more work arrives, though this is
-                    // not guaranteed.
-                    CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
-                    CycleOutcome::Suspend
-                };
+            let outcome = if self.evaluate_shutdown_completion(&mut state_exclusive, &state_reentrant) {
+                CycleOutcome::Shutdown
+            } else if self.has_work_to_do(&state_exclusive, &state_reentrant) {
+                // We want to be immediately called again because we may have more work to do.
+                CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
+                CycleOutcome::Continue
+            } else {
+                // We have no work to do, feel free to take a while before coming back to us.
+                // We will try to trigger the owner's waker if more work arrives, though this is
+                // not guaranteed.
+                CYCLE_OUTCOME_SUSPEND.with(Event::observe_once);
+                CycleOutcome::Suspend
+            };
 
             let cycle_end_timestamp = state_exclusive.clock.now();
 
-            let cycle_duration =
-                cycle_end_timestamp.saturating_duration_since(cycle_start_timestamp);
+            let cycle_duration = cycle_end_timestamp.saturating_duration_since(cycle_start_timestamp);
             state_exclusive.last_cycle_ended = Some(cycle_end_timestamp);
             CYCLE_DURATION_MILLIS.with(|x| x.observe_millis(cycle_duration));
 
@@ -314,11 +308,7 @@ impl ExecutorCore {
 
     /// Accepts new tasks that have been registered with the executor since the last call to this
     /// method.
-    fn accept_new_tasks(
-        &self,
-        state_exclusive: &mut ExclusiveState,
-        state_reentrant: &mut ReentrancySafeState,
-    ) {
+    fn accept_new_tasks(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
         if state_reentrant.new_tasks.is_empty() {
             // Nothing to do, no new tasks.
             return;
@@ -329,9 +319,7 @@ impl ExecutorCore {
         // Accepting a task just means moving it to the active list. We cannot do this immediately
         // when a task is queued because the active task list may be locked by `execute_cycle()`,
         // as new tasks may be enqueued even during an active processing cycle.
-        state_exclusive
-            .active
-            .append(&mut state_reentrant.new_tasks);
+        state_exclusive.active.append(&mut state_reentrant.new_tasks);
     }
 
     fn activate_awakened_tasks(&self, state_exclusive: &mut ExclusiveState) {
@@ -370,11 +358,7 @@ impl ExecutorCore {
         //
         // We use Acquire ordering as we are acquiring the synchronization block for the
         // wake-up flags inside the task wake signals.
-        if !self
-            .shared
-            .probe_embedded_wake_signals
-            .swap(false, atomic::Ordering::Acquire)
-        {
+        if !self.shared.probe_embedded_wake_signals.swap(false, atomic::Ordering::Acquire) {
             return;
         }
 
@@ -456,11 +440,7 @@ impl ExecutorCore {
     }
 
     #[cfg_attr(test, mutants::skip)] // If tasks are not dropped, executor will never shut down, leading to infinite loop.
-    fn drop_inert_tasks(
-        &self,
-        state_exclusive: &mut ExclusiveState,
-        state_reentrant: &mut ReentrancySafeState,
-    ) {
+    fn drop_inert_tasks(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &mut ReentrancySafeState) {
         let completed_before = state_exclusive.completed.len();
 
         // We drop all completed tasks that are inert, which means they have
@@ -503,11 +483,7 @@ impl ExecutorCore {
     /// Whether an immediately performed `execute_cycle()` would do any useful work.
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // It timeouts
-    fn has_work_to_do(
-        &self,
-        state_exclusive: &ExclusiveState,
-        state_reentrant: &ReentrancySafeState,
-    ) -> bool {
+    fn has_work_to_do(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
         // Work for us means there is a task that we can poll (either because it is new
         // or because it has been awakened).
 
@@ -521,16 +497,8 @@ impl ExecutorCore {
         );
 
         !state_reentrant.new_tasks.is_empty()
-            || !self
-                .shared
-                .awakened
-                .lock()
-                .expect(ERR_POISONED_LOCK)
-                .is_empty()
-            || self
-                .shared
-                .probe_embedded_wake_signals
-                .load(atomic::Ordering::Relaxed)
+            || !self.shared.awakened.lock().expect(ERR_POISONED_LOCK).is_empty()
+            || self.shared.probe_embedded_wake_signals.load(atomic::Ordering::Relaxed)
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
@@ -544,10 +512,11 @@ impl ExecutorCore {
         );
 
         let shutdown_start_time = state_exclusive.clock.now();
-        state_reentrant.shutdown_deadline =
-            Some(shutdown_start_time.checked_add(self.shared.shutdown_timeout).expect(
-                "impossible for shutdown timeout to be so high we cross the end of the universe",
-            ));
+        state_reentrant.shutdown_deadline = Some(
+            shutdown_start_time
+                .checked_add(self.shared.shutdown_timeout)
+                .expect("impossible for shutdown timeout to be so high we cross the end of the universe"),
+        );
 
         // We call `abort()` on all tasks that we are canceling. This will drop the maximum amount
         // of internal state such as any captured variables that may be holding on to join handles
@@ -565,18 +534,11 @@ impl ExecutorCore {
         let completed = &mut state_exclusive_real.completed;
 
         TASKS_ABORTED_ON_SHUTDOWN.with(|x| {
-            x.batch(
-                new.len()
-                    .saturating_add(active.len().saturating_add(inactive.len())),
-            )
-            .observe_once();
+            x.batch(new.len().saturating_add(active.len().saturating_add(inactive.len())))
+                .observe_once();
         });
 
-        for task_ref in active
-            .drain(..)
-            .chain(inactive.drain())
-            .chain(new.drain(..))
-        {
+        for task_ref in active.drain(..).chain(inactive.drain()).chain(new.drain(..)) {
             // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
@@ -594,11 +556,7 @@ impl ExecutorCore {
     /// Returns whether we are at the end of a successful shutdown process.
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
-    fn evaluate_shutdown_completion(
-        &self,
-        state_exclusive: &mut ExclusiveState,
-        state_reentrant: &ReentrancySafeState,
-    ) -> bool {
+    fn evaluate_shutdown_completion(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
         let Some(shutdown_deadline) = state_reentrant.shutdown_deadline else {
             // We are not in a shutdown process.
             return false;
@@ -626,11 +584,7 @@ impl ExecutorCore {
         false
     }
 
-    fn shutdown_failed(
-        &self,
-        state_exclusive: &ExclusiveState,
-        state_reentrant: &ReentrancySafeState,
-    ) {
+    fn shutdown_failed(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
         #[cfg(debug_assertions)]
         self.report_shutdown_diagnostics(state_exclusive, state_reentrant);
 
@@ -651,11 +605,7 @@ impl ExecutorCore {
 
     #[cfg(debug_assertions)]
     #[cfg_attr(test, mutants::skip)] // Purely telemetry, nothing worth testing.
-    fn report_shutdown_diagnostics(
-        &self,
-        state_exclusive: &ExclusiveState,
-        state_reentrant: &ReentrancySafeState,
-    ) {
+    fn report_shutdown_diagnostics(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
         // There are different shutdown-blocking states possible with join handles:
         // 1. The join handle's owner is not awaiting it, they just put it in their pocket and
         //    never used it.
@@ -675,18 +625,13 @@ impl ExecutorCore {
         // independent storage but not both at the same time - that will lead to shutdown timeout.
 
         use std::num::NonZero;
-        state_reentrant
-            .result_events
-            .inspect_awaiters(report_blocking_join_handle);
+        state_reentrant.result_events.inspect_awaiters(report_blocking_join_handle);
 
         // The above covers join handles that are awaited. We can use the total count to identify
         // whether there are also some that are not being awaited at all. We do not generally expect
         // a giant data set from here, so it should be obvious enough.
-        if let Some(blocking_join_handle_count) = NonZero::new(state_reentrant.result_events.len())
-        {
-            eprintln!(
-                "{blocking_join_handle_count} total JoinHandles blocking shutdown (awaited or not)",
-            );
+        if let Some(blocking_join_handle_count) = NonZero::new(state_reentrant.result_events.len()) {
+            eprintln!("{blocking_join_handle_count} total JoinHandles blocking shutdown (awaited or not)");
         }
 
         // In addition to being blocked by join handles, we can simply be blocked by other resources
@@ -739,9 +684,7 @@ impl Drop for ExecutorCore {
 fn report_blocking_join_handle(bt: &Backtrace) {
     // We write to standard error stream because the logging system is going to stop
     // functioning shortly, so any data written to logs might not survive.
-    eprintln!(
-        "JoinHandle blocking shutdown. Backtrace of where it was most recently awaited from: {bt}"
-    );
+    eprintln!("JoinHandle blocking shutdown. Backtrace of where it was most recently awaited from: {bt}");
 }
 
 const MILLIS_BUCKETS: &[Magnitude] = &[0, 1, 20, 50, 100, 1_000, 10_000];

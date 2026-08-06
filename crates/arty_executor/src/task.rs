@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::any::Any;
 use std::cell::UnsafeCell;
@@ -83,12 +84,7 @@ where
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
-        let maybe_payload = unsafe {
-            self.payload
-                .get()
-                .as_mut()
-                .expect("UnsafeCell pointer cannot be null")
-        };
+        let maybe_payload = unsafe { self.payload.get().as_mut().expect("UnsafeCell pointer cannot be null") };
 
         let Some(payload) = maybe_payload else {
             unreachable!("attempted to poll a task whose future was already dropped");
@@ -121,10 +117,7 @@ where
         // In debug builds, we wrap the waker with a diagnostic layer, as waker leaks are very
         // damaging due to blocking shutdown and we want to offer maximal debugging information.
         #[cfg(debug_assertions)]
-        let waker = DiagnosticWaker::with_inner_and_registry(
-            waker,
-            Arc::clone(&self.diagnostic_waker_registry),
-        );
+        let waker = DiagnosticWaker::with_inner_and_registry(waker, Arc::clone(&self.diagnostic_waker_registry));
 
         let mut cx = task::Context::from_waker(&waker);
 
@@ -140,11 +133,10 @@ where
         // We `AssertUnwindSafe` here because as we are terminating the process, there is no
         // validity violation that can occur no matter what the type of the future we are dealing
         // with.
-        let poll_result =
-            match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
-                Ok(x) => x,
-                Err(panic) => on_unhandled_task_panic(panic),
-            };
+        let poll_result = match catch_unwind(AssertUnwindSafe(|| future_as_mut_pinned.poll(&mut cx))) {
+            Ok(x) => x,
+            Err(panic) => on_unhandled_task_panic(panic),
+        };
 
         match poll_result {
             task::Poll::Ready(result) => {
@@ -168,13 +160,7 @@ where
         // SAFETY: The `Task` is single-threaded and after initialization, we only ever create
         // shared references to the wake signal, so creating a shared reference here is valid.
         // Before initialization, we do not create any escaping references to the wake signal.
-        let wake_signal = unsafe {
-            self.wake_signal
-                .get()
-                .as_ref()
-                .expect("UnsafeCell pointer cannot be null")
-                .as_ref()
-        };
+        let wake_signal = unsafe { self.wake_signal.get().as_ref().expect("UnsafeCell pointer cannot be null").as_ref() };
 
         wake_signal.is_none_or(WakeSignal::is_inert)
     }
@@ -200,8 +186,7 @@ where
         // SAFETY: The `Task` is single-threaded and we only ever create temporary references
         // to `payload` that do not escape `Task` methods, so we know there cannot be a conflicting
         // reference to this field.
-        let payload =
-            unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
+        let payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
         *payload = None;
     }
@@ -210,12 +195,7 @@ where
         // SAFETY: The `Task` is single-threaded and before initialization, we do not create any
         // escaping references to the wake signal, so we have exclusive access here. We rely on
         // the caller's safety guarantees that this is not called more than once.
-        let maybe_wake_signal = unsafe {
-            self.wake_signal
-                .get()
-                .as_mut()
-                .expect("UnsafeCell pointer cannot be null")
-        };
+        let maybe_wake_signal = unsafe { self.wake_signal.get().as_mut().expect("UnsafeCell pointer cannot be null") };
 
         debug_assert!(maybe_wake_signal.is_none());
 
@@ -228,10 +208,7 @@ where
     }
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "semantically correct to consume the panic"
-)]
+#[expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")]
 #[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
 fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
     if let Some(s) = panic.downcast_ref::<&str>() {
@@ -325,8 +302,8 @@ mod tests {
     use std::task::Waker;
 
     use events_once::{Disconnected, RawLocalEventPool};
-    use testing_aids::assert_panic;
     use static_assertions::assert_not_impl_any;
+    use testing_aids::assert_panic;
 
     use super::*;
     use crate::testing::TestSubjectFuture;

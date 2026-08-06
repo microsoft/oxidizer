@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -31,9 +32,11 @@ impl Hasher for PointerHasher {
 
     #[cfg_attr(test, mutants::skip)] // Difficult to test without getting silly and hardcoding results.
     fn write(&mut self, bytes: &[u8]) {
-        let input_raw = u64::from_ne_bytes(bytes.try_into().expect(
-            "PointerHasher only supports 64-bit input data, so the slice must be exactly 8 bytes long.",
-        ));
+        let input_raw = u64::from_ne_bytes(
+            bytes
+                .try_into()
+                .expect("PointerHasher only supports 64-bit input data, so the slice must be exactly 8 bytes long."),
+        );
 
         self.value ^= input_raw;
         self.value ^= input_raw.reverse_bits();

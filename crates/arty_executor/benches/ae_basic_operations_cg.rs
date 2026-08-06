@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Callgrind benchmarks for basic operations of the executor.
 //!
@@ -15,10 +16,7 @@
 //! together (Callgrind counts allocator instructions like any other), which
 //! is what the wall-clock benches also include.
 
-#![allow(
-    missing_docs,
-    reason = "no need for API documentation on benchmark code"
-)]
+#![allow(missing_docs, reason = "no need for API documentation on benchmark code")]
 #![cfg_attr(
     target_os = "linux",
     expect(
@@ -41,11 +39,11 @@ mod linux {
     use std::pin::Pin;
     use std::task::{Context, Waker};
 
-    use gungraun::prelude::*;
     use arty_executor::testing::new_guarded_executor;
     use arty_executor::{CycleOutcome, Executor, JoinHandle, TaskSet};
-    use testing_aids::YieldFuture;
+    use gungraun::prelude::*;
     use scopeguard::{Always, ScopeGuard};
+    use testing_aids::YieldFuture;
 
     // Bundles the executor, a pre-acquired `TaskSet` handle, and an optional
     // boxed-pinned join handle. The executor is wrapped in a `ScopeGuard` so its
@@ -132,10 +130,7 @@ mod linux {
     #[bench::async_completed(setup = make_with_completed_async)]
     fn poll_completed(mut state: State) -> State {
         let mut cx = Context::from_waker(Waker::noop());
-        let handle = state
-            .join_handle
-            .as_mut()
-            .expect("setup populated a completed join handle");
+        let handle = state.join_handle.as_mut().expect("setup populated a completed join handle");
         let _result = black_box(handle.as_mut().poll(&mut cx));
         state
     }
@@ -201,10 +196,7 @@ mod linux {
         state
     }
 
-    library_benchmark_group!(
-        name = composite_group,
-        benchmarks = [spawn_and_complete, yield_round_trip]
-    );
+    library_benchmark_group!(name = composite_group, benchmarks = [spawn_and_complete, yield_round_trip]);
 }
 
 #[cfg(target_os = "linux")]

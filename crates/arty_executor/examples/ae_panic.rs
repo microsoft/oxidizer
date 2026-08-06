@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Demonstrates what happens when an uncaught panic escapes from an async task.
 //!
@@ -11,6 +12,7 @@
 
 use arty_executor::Executor;
 
+#[expect(clippy::panic, reason = "the example demonstrates executor behavior when a task panics")]
 fn main() {
     // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
     // an execution cycle indicates the `Shutdown` outcome. We do.

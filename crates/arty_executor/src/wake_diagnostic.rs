@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::backtrace::Backtrace;
 use std::sync::atomic::AtomicU64;
@@ -35,10 +36,7 @@ impl DiagnosticWaker {
     /// It is valid to call this multiple times for the same family - the point is merely that as
     /// this instance is owned by the executor, there is no value in including its backtrace in the
     /// diagnostic data set as it is not possible to leak this instance, only to reference it.
-    pub(crate) fn with_inner_and_registry(
-        inner: Waker,
-        registry: Arc<DiagnosticWakerRegistry>,
-    ) -> Waker {
+    pub(crate) fn with_inner_and_registry(inner: Waker, registry: Arc<DiagnosticWakerRegistry>) -> Waker {
         let instance = Self {
             inner,
             registry,
@@ -85,12 +83,7 @@ impl Drop for DiagnosticWaker {
     }
 }
 
-static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    waker_clone_waker,
-    waker_wake,
-    waker_wake_by_ref,
-    waker_drop_waker,
-);
+static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(waker_clone_waker, waker_wake, waker_wake_by_ref, waker_drop_waker);
 
 fn waker_clone_waker(ptr: *const ()) -> RawWaker {
     let waker = unwrap_diagnostic_waker(ptr);
@@ -172,10 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[expect(
-        clippy::redundant_clone,
-        reason = "intentional - testing cloning logic"
-    )]
+    #[expect(clippy::redundant_clone, reason = "intentional - testing cloning logic")]
     fn smoke_test() {
         let registry = Arc::new(DiagnosticWakerRegistry::new());
 

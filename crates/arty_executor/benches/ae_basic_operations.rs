@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Benchmarks for basic operations of the executor.
 
@@ -7,10 +8,10 @@ use std::task::{Context, Waker};
 use std::time::Instant;
 
 use alloc_tracker::Allocator;
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use arty_executor::CycleOutcome;
 use arty_executor::testing::new_guarded_executor;
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use testing_aids::YieldFuture;
 
 criterion_group!(benches, entrypoint);
@@ -42,11 +43,7 @@ fn entrypoint(c: &mut Criterion) {
     time.print_to_stdout();
 }
 
-fn bench_spawn_and_complete_one(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
+fn bench_spawn_and_complete_one(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const NAME: &str = "spawn_and_complete_one";
 
     let executor = new_guarded_executor(Waker::noop().clone());
@@ -144,11 +141,7 @@ fn bench_spawn_and_complete_one_times_many(
     });
 }
 
-fn bench_spawn_and_complete_10k(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
+fn bench_spawn_and_complete_10k(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const NAME: &str = "spawn_and_complete_10k";
 
     let executor = new_guarded_executor(Waker::noop().clone());
@@ -201,11 +194,7 @@ fn bench_spawn_and_complete_10k(
     });
 }
 
-fn bench_yield_one(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
+fn bench_yield_one(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const NAME: &str = "yield_one";
 
     let executor = new_guarded_executor(Waker::noop().clone());
@@ -255,11 +244,7 @@ fn bench_yield_one(
     });
 }
 
-fn bench_yield_10k(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
+fn bench_yield_10k(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const NAME: &str = "yield_10k";
 
     let executor = new_guarded_executor(Waker::noop().clone());
@@ -318,11 +303,7 @@ fn bench_yield_10k(
     });
 }
 
-fn bench_noop(
-    group: &mut BenchmarkGroup<'_, WallTime>,
-    allocs: &alloc_tracker::Session,
-    time: &all_the_time::Session,
-) {
+fn bench_noop(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
     const NAME: &str = "noop";
 
     let executor = new_guarded_executor(Waker::noop().clone());

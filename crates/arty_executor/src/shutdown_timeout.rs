@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 /// What to do when the executor shutdown timeout is reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

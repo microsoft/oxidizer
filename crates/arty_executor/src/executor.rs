@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::rc::Rc;
 
@@ -84,9 +85,7 @@ impl Executor {
 
     #[must_use]
     pub(crate) fn new(core: ExecutorCore) -> Self {
-        Self {
-            core: Rc::new(core),
-        }
+        Self { core: Rc::new(core) }
     }
 
     /// Creates a new handle to the set of tasks registered with with the executor. You can use
@@ -159,8 +158,8 @@ mod tests {
     use std::task::{Context, Poll, Waker};
     use std::time::Duration;
 
-    use testing_aids::{YieldFuture, assert_panic};
     use static_assertions::assert_not_impl_any;
+    use testing_aids::{YieldFuture, assert_panic};
 
     use super::*;
     use crate::testing::{TestSubjectFuture, TestWaker, new_guarded_executor};

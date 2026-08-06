@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 // TODO(doc-coverage): remove once `missing_docs` is promoted to [workspace.lints.rust].
 #![deny(missing_docs)]

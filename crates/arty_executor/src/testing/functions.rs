@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::env;
 use std::task::Waker;
@@ -13,7 +14,7 @@ use crate::{CycleOutcome, Executor};
 /// mutation tests. Instead, we want the mutation test harness itself to time out! Therefore, this
 /// is a very high value to ensure that under mutation testing the executor timeout logic will
 /// never trigger.
-const MUTATION_TESTING_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(900);
+const MUTATION_TESTING_SHUTDOWN_TIMEOUT: Duration = Duration::from_mins(15);
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn is_mutation_testing() -> bool {
