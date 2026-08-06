@@ -83,6 +83,19 @@
     cargo-semver-checks remains a hard dependency for ordinary library packages
     (install the version pinned in constants.env); there is no heuristic fallback.
 
+    On Windows, cargo-semver-checks builds each `--baseline-rev` baseline in a
+    deeply nested scratch tree (keyed by the baseline commit SHA and a per-crate
+    build hash) whose generated path segments alone exceed 100 characters. MSVC's
+    `link.exe` still resolves paths against the legacy 260-character MAX_PATH
+    limit and does not honor the `LongPathsEnabled` policy, so a repository
+    cloned any distance from the drive root would fail the baseline build with
+    `LNK1104: cannot open file`. To keep well clear of that limit these runs
+    (and only these runs) are redirected to a short scratch root — `%SystemDrive%\ox-semver`
+    by default. Set the OXIDIZER_SEMVER_TARGET_DIR environment variable to
+    relocate it (for example onto a different drive), or point it at the
+    repository's own `target` directory to restore the previous behavior. On
+    non-Windows platforms Cargo's default target directory is used unchanged.
+
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a
     dependent that re-exports a breaking change is upgraded from your requested

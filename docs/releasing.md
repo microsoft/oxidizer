@@ -256,6 +256,38 @@ up the new dependency version even when their own public API is
 unchanged), then raised to whatever their own `cargo semver-checks`
 result requires.
 
+#### Windows: baseline builds run in a short scratch directory
+
+To rebuild a baseline, cargo-semver-checks creates a scratch tree keyed
+by the baseline commit and a per-crate build hash:
+
+```
+<target-dir>/semver-checks/git-<40-char-sha>/local-<crate>-<version>-<target-triple>-<hash>/target/debug/build/<dep>-<hash>/...
+```
+
+Those two generated segments alone exceed 100 characters, and the tail
+below them adds roughly 100 more. MSVC's `link.exe` still resolves paths
+against the legacy 260-character `MAX_PATH` limit — enabling the
+`LongPathsEnabled` policy does **not** help, because long-path awareness
+is opt-in through an application manifest and `link.exe` does not opt in.
+A repository cloned even a moderate distance from the drive root
+therefore overflows the limit, and the baseline build fails with
+`LNK1104: cannot open file` on an intermediate build-script executable.
+
+So on Windows the release scripts point **only these runs** at a short
+scratch root, `%SystemDrive%\ox-semver` by default, leaving every other
+cargo invocation on the repository-local `target/` directory. Set
+`OXIDIZER_SEMVER_TARGET_DIR` to relocate it (for example onto a drive
+with more space), or point it at the repository's own `target` directory
+to restore the previous behaviour. On non-Windows platforms the default
+target directory is used unchanged. If the scratch directory cannot be
+created, the run proceeds against the default target directory with a
+warning rather than failing — a long path only *may* overflow.
+
+Because the scratch root is shared across repositories and checkouts, it
+is safe to delete at any time; the next run re-creates it (at the cost of
+rebuilding baselines).
+
 #### Proc-macro-only packages require manual SemVer review
 
 `cargo semver-checks` deliberately supports ordinary library targets,
