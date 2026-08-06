@@ -18,15 +18,21 @@ should remain outside the stable boundary until each surface is reviewed separat
 
 ## Trait requirements
 
-Review each current trait requirement instead of carrying it into the stable API by
-default:
+The current `Read` and `Write` traits unconditionally require `HasMemory`, `Memory`,
+and `Debug`, and use `trait_variant` to require `Send` from implementations and
+returned futures. Review each requirement instead of carrying it into the stable API
+by default. Changing these requirements is a breaking API change that must be settled
+before 1.0:
 
 - Remove `HasMemory`, `Memory`, and `Debug` supertraits where they are not essential
   to the I/O contract. Memory providers can be exposed through separate capabilities
   or adapters when an implementation benefits from endpoint-specific allocation.
+  Extension methods that currently rely on these inherited capabilities must be
+  adjusted as part of the same decision.
 - Decide whether `Send` is required by the traits, by each returned future, or only
-  at usage sites. The stable contract should not impose cross-thread execution when
-  an implementation and its caller are both thread-local.
+  at usage sites. Removing the current requirement changes guarantees available to
+  downstream callers. The stable contract should not impose cross-thread execution
+  when an implementation and its caller are both thread-local.
 - Select the concrete error boundary. The associated error type and the crate's
   general-purpose `Error` wrapper must provide predictable composition without
   exposing unstable implementation details.
