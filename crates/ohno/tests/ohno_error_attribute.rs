@@ -52,3 +52,26 @@ fn declared_core_field_does_not_take_over_the_error_representation() {
     assert!(error.source().is_none());
     assert!(error.carried.source().is_some());
 }
+
+/// The remedy `#[ohno::error]` names when it rejects a field.
+///
+/// Both `ALREADY_MARKED` and `RESERVED_MARKER` tell the user to place the core themselves with
+/// `#[derive(ohno::Error)]` and mark it with `#[error]`. This is that struct, so the advice is
+/// pinned by something that compiles rather than only by the text of the message.
+#[derive(ohno::Error)]
+#[display("failed for {path}")]
+pub struct PlacedCoreError {
+    /// The path the operation failed for.
+    pub path: String,
+    #[error]
+    inner: OhnoCore,
+}
+
+#[test]
+fn suggested_remedy_places_the_core_by_hand() {
+    let cause = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "root cause");
+    let error = PlacedCoreError::caused_by("/etc/config.toml".to_string(), cause);
+
+    assert!(error.to_string().starts_with("failed for /etc/config.toml"), "got: {error}");
+    assert_eq!(error.source().expect("source").to_string(), "root cause");
+}

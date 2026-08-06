@@ -1,4 +1,4 @@
-error: This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it, and mark the field with `#[error]` if it is the one holding the OhnoCore
+error: This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`
   --> tests/ui/ohno_error_reserved_marker.rs:14:5
    |
 14 | /     /// ohno::generated-core@7f3d9c2a
