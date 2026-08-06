@@ -402,6 +402,18 @@ impl Clock {
         self.simple_clock().instant()
     }
 
+    /// Retrieves the current [`Instant`] using a lower-overhead time source where supported.
+    ///
+    /// On Linux and Windows, the returned instant may lag behind the operating-system clock
+    /// by a few milliseconds. On other platforms, this delegates to [`Instant::now`].
+    ///
+    /// Controlled clocks return their controlled instant, identically to [`instant`][Self::instant].
+    #[cfg(feature = "fast-instant")]
+    #[must_use]
+    pub fn instant_fast(&self) -> Instant {
+        self.simple_clock().instant_fast()
+    }
+
     /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
     ///
     /// This is a convenience method that calls [`Delay::new`][crate::Delay::new].

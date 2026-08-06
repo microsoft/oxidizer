@@ -31,6 +31,8 @@ all-features = true
 
 [features]
 default = []
+# Uses a lower-overhead, lower-precision source for Instant on Linux and Windows
+fast-instant = ["dep:fast_time"]
 # Enables additional test-specific APIs
 test-util = []
 # Serialization support for serde
@@ -50,6 +52,9 @@ pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
+
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+fast_time = { workspace = true, optional = true }
 
 [dev-dependencies]
 ohno = { path = "../ohno", features = ["app-err"] }

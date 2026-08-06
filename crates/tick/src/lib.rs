@@ -266,6 +266,9 @@
 //! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
+//! - **`fast-instant`** - Adds `instant_fast` APIs that use a lower-overhead,
+//!   lower-precision source on Linux and Windows. Other platforms delegate to
+//!   [`Instant::now`]. Existing `instant` APIs are unchanged.
 //!
 //! # Additional Examples
 //!
