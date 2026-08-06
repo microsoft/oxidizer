@@ -18,8 +18,8 @@
 
 use data_privacy::RedactionEngine;
 pub use fetch_options::{
-    ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, MAX_SOCKET_BUFFER_SIZE,
-    MIN_SOCKET_BUFFER_SIZE, PoolIndex, PoolSelection, RequestFilter, SocketOptions, TransportOptions,
+    ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, MAX_HTTP2_WINDOW_SIZE,
+    MAX_SOCKET_BUFFER_SIZE, MIN_SOCKET_BUFFER_SIZE, PoolIndex, PoolSelection, RequestFilter, SocketOptions, TransportOptions,
 };
 pub use http_extensions::HttpBodyOptions;
 use http_extensions::routing::Router;
