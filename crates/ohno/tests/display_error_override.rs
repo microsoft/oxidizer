@@ -232,3 +232,15 @@ fn test_documented_fields_stay_referenceable() {
     let error = TestError::new("/etc/hosts".to_string(), 13_u32);
     assert_error_message!(error, "/etc/hosts failed with 13");
 }
+
+#[test]
+fn test_binary_and_cast_arguments() {
+    #[ohno::error]
+    #[display("{} and {}", count * 2, count as u64)]
+    struct TestError {
+        count: u32,
+    }
+
+    let error = TestError::new(21_u32);
+    assert_error_message!(error, "42 and 21");
+}

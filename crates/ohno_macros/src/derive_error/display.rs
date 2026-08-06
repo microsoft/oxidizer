@@ -132,12 +132,14 @@ fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc
 
     // Whether an argument can carry the prefix at all is decided by parsing the expansion, rather
     // than by enumerating the expression forms that may follow a dot
-    let expanded = quote! { &self.#expr };
-    if syn::parse2::<Expr>(expanded.clone()).is_err() {
+    let scoped = quote! { self.#expr };
+    if syn::parse2::<Expr>(scoped.clone()).is_err() {
         bail_spanned!(expr, UNSUPPORTED_ROOT);
     }
 
-    Ok(expanded)
+    // The reference has to cover the whole argument. Without the parentheses it would bind to the
+    // root alone, so `count as u64` would expand to `&self.count as u64`, casting the reference
+    Ok(quote! { &(#scoped) })
 }
 
 /// Validate the field access a positional argument is rooted in
@@ -347,7 +349,7 @@ mod tests {
             vec![parse_quote! { data.0 }, parse_quote! { data.1 }],
             &input,
         );
-        let expected = quote! { std::borrow::Cow::from(format!("Invalid data: {} - {}", &self.data.0, &self.data.1)) };
+        let expected = quote! { std::borrow::Cow::from(format!("Invalid data: {} - {}", &(self.data.0), &(self.data.1))) };
         assert_eq!(result.to_string(), expected.to_string());
     }
 
@@ -422,7 +424,7 @@ mod tests {
         );
         assert_eq!(
             result.to_string(),
-            "std :: borrow :: Cow :: from (format ! (\"Error: {} - {}\" , & self . data . to_string () , & self . data . len ()))"
+            "std :: borrow :: Cow :: from (format ! (\"Error: {} - {}\" , & (self . data . to_string ()) , & (self . data . len ())))"
         );
     }
 
@@ -436,7 +438,7 @@ mod tests {
         );
         assert_eq!(
             result.to_string(),
-            "std :: borrow :: Cow :: from (format ! (\"Error: {} - {}\" , & self . t . 0 . 0 . 0 . message () , & self . t . 0 . 0 . 0 . m))"
+            "std :: borrow :: Cow :: from (format ! (\"Error: {} - {}\" , & (self . t . 0 . 0 . 0 . message ()) , & (self . t . 0 . 0 . 0 . m)))"
         );
     }
 
@@ -542,7 +544,7 @@ mod tests {
         assert_eq!(result.to_string(), expected.to_string());
 
         let result = parse("bad path: {}", vec![parse_quote! { 0.display() }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.0.display())) };
+        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &(self.0.display()))) };
         assert_eq!(result.to_string(), expected.to_string());
 
         // The injected OhnoCore is the second field, so only index 0 is offered
@@ -584,7 +586,7 @@ mod tests {
 
         // A method call on `self` is not a field access, so there is no field to validate
         let result = parse("bad path: {}", vec![parse_quote! { describe() }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &self.describe())) };
+        let expected = quote! { std::borrow::Cow::from(format!("bad path: {}", &(self.describe()))) };
         assert_eq!(result.to_string(), expected.to_string());
     }
 
@@ -594,7 +596,7 @@ mod tests {
         let input: DeriveInput = parse_quote! { struct TestError(Inner, #[doc = " ohno::generated-core@7f3d9c2a"] OhnoCore); };
 
         let result = parse("bad: {}", vec![parse_quote! { 0.1 }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("bad: {}", &self.0.1)) };
+        let expected = quote! { std::borrow::Cow::from(format!("bad: {}", &(self.0.1))) };
         assert_eq!(result.to_string(), expected.to_string());
 
         // Index 1 is the injected OhnoCore, so it is caught here rather than by rustc
@@ -608,8 +610,14 @@ mod tests {
         let input: DeriveInput =
             parse_quote! { struct TestError { count: u32, #[doc = " ohno::generated-core@7f3d9c2a"] ohno_core: OhnoCore } };
 
+        // The reference covers the whole argument, so the cast and the multiplication apply to the
+        // field's value rather than to a reference to it
         let result = parse("total: {}", vec![parse_quote! { count * 2 }], &input);
-        let expected = quote! { std::borrow::Cow::from(format!("total: {}", &self.count * 2)) };
+        let expected = quote! { std::borrow::Cow::from(format!("total: {}", &(self.count * 2))) };
+        assert_eq!(result.to_string(), expected.to_string());
+
+        let result = parse("total: {}", vec![parse_quote! { count as u64 }], &input);
+        let expected = quote! { std::borrow::Cow::from(format!("total: {}", &(self.count as u64))) };
         assert_eq!(result.to_string(), expected.to_string());
 
         // The root is still validated through those forms
