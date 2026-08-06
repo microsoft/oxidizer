@@ -7,8 +7,7 @@ describe proposals under review, not a finalized stable API.
 
 - Stabilize the `ThreadAware` trait.
 - Stabilize the `Affinity` type needed at `ThreadAware` API boundaries.
-- Allow stable downstream crates such as `arty`, `arty_io`, and `tick` to expose
-  these core types in their public APIs.
+- Allow stable downstream crates to expose these core types in their public APIs.
 
 ## Deferred surface
 
