@@ -121,16 +121,21 @@ field lookup takes the first marked field it sees.
 
 **The struct is parsed, validated and selected from in one call.** Selection
 takes the first picked field, which is only unambiguous once validation has
-ruled out the ways two fields could be picked. Keeping them one operation makes
-that order structural rather than a rule the caller has to remember.
+ruled out the ways it can. Keeping them one operation makes that order
+structural rather than a rule the caller has to remember.
 
 **Rejection happens where the input is still the user's.** `#[ohno::error]` runs
 before it adds anything, so it can say a marker was hand-written. The derive
 runs after, cannot tell the two apart, and so only compares text.
 
-**Two fields cannot end up picked.** A marker beside the added field is
-reported, so field lookup taking the first match can never settle the choice by
-declaration order.
+**A marker beside the added field cannot settle the choice by declaration
+order.** That combination is reported, so field lookup taking the first match
+never resolves it silently.
+
+Under the derive alone this does not hold: validation counts `#[error]`
+attributes, not generated ones, so two hand-written reserved markers pass it and
+field lookup takes the first. That is the text-comparison limit above, and
+`#[ohno::error]` closes the path a user realistically takes.
 
 ## Limits
 
