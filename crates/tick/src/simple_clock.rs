@@ -6,26 +6,6 @@ use std::time::{Instant, SystemTime};
 use crate::state::ClockState;
 use crate::thread_aware_move;
 
-#[cfg(all(feature = "fast-instant", any(target_os = "linux", windows)))]
-thread_local! {
-    static FAST_CLOCK: std::cell::RefCell<fast_time::Clock> =
-        std::cell::RefCell::new(fast_time::Clock::new());
-}
-
-#[cfg(feature = "fast-instant")]
-#[must_use]
-fn fast_instant() -> Instant {
-    #[cfg(all(feature = "fast-instant", any(target_os = "linux", windows)))]
-    {
-        FAST_CLOCK.with(|clock| clock.borrow_mut().now().into())
-    }
-
-    #[cfg(not(all(feature = "fast-instant", any(target_os = "linux", windows))))]
-    {
-        Instant::now()
-    }
-}
-
 /// A simplified clock used purely for **time retrieval**.
 ///
 /// Unlike [`Clock`][crate::Clock], a `SimpleClock` does not register or drive timers: it only
@@ -213,7 +193,7 @@ impl SimpleClock {
     #[must_use]
     pub fn instant_fast(&self) -> Instant {
         match &self.0 {
-            TimeKind::System => fast_instant(),
+            TimeKind::System => crate::fast_instant::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.instant(),
         }

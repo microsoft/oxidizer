@@ -32,7 +32,7 @@ all-features = true
 [features]
 default = []
 # Adds lower-overhead, lower-precision Instant APIs on Linux and Windows
-fast-instant = ["dep:fast_time"]
+fast-instant = ["dep:libc", "dep:windows-sys"]
 # Enables additional test-specific APIs
 test-util = []
 # Serialization support for serde
@@ -53,8 +53,11 @@ serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
-[target.'cfg(any(target_os = "linux", windows))'.dependencies]
-fast_time = { workspace = true, optional = true }
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true, features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 ohno = { path = "../ohno", features = ["app-err"] }

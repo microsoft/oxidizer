@@ -4529,11 +4529,11 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "criterion",
- "fast_time",
  "futures",
  "futures-core",
  "insta",
  "jiff",
+ "libc",
  "mutants",
  "ohno 0.3.9",
  "pin-project-lite",
@@ -4544,6 +4544,7 @@ dependencies = [
  "thread_aware",
  "time",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

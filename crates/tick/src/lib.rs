@@ -280,6 +280,8 @@ mod clock;
 mod clock_control;
 mod delay;
 mod error;
+#[cfg(feature = "fast-instant")]
+mod fast_instant;
 
 #[cfg(any(feature = "fmt", test))]
 pub mod fmt;
