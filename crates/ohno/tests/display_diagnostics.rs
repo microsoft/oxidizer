@@ -35,4 +35,11 @@ fn display_diagnostics() {
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
     t.compile_fail("tests/ui/display_tuple_index_reaching_injected_core.rs");
+
+    // A raw identifier is echoed back with its prefix, which is the spelling the user must write.
+    t.compile_fail("tests/ui/display_raw_identifier_unknown_field.rs");
+
+    // An argument's root is found through every expression form that keeps a term leftmost, and
+    // reported at that term rather than at the whole expression.
+    t.compile_fail("tests/ui/display_binary_argument_root.rs");
 }

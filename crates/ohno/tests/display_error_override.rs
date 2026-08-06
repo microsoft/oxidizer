@@ -200,3 +200,18 @@ fn test_deep_subfields() {
     let error = TestError::new(t);
     assert_error_message!(error, "Error Struct, Struct:Level0 - Level1 => Level2");
 }
+
+#[test]
+fn test_raw_identifier_field() {
+    // A field name reaches the template as text, so a raw identifier arrives spelled `r#type`.
+    // Rebuilding it with `Ident::new` rejects that spelling and panics, turning a template into a
+    // macro crash, so the prefix has to survive both the placeholder and the positional argument.
+    #[ohno::error]
+    #[display("{r#type} at {}", r#type.len())]
+    struct TestError {
+        r#type: String,
+    }
+
+    let error = TestError::new("timeout".to_string());
+    assert_error_message!(error, "timeout at 7");
+}
