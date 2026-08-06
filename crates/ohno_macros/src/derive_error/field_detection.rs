@@ -12,9 +12,12 @@ const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
 const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore";
 const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
 const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the field holding the OhnoCore and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` on its own to place the OhnoCore yourself";
+const MULTIPLE_GENERATED_FIELDS: &str = "More than one field carries the marker `#[ohno::error]` puts on the field it adds. That marker is internal and is not user syntax: remove the one you wrote, and use `#[error]` to choose the field holding the OhnoCore";
 
 /// A field of the struct, with the facts the derive needs about it
 struct ParsedField<'a> {
+    /// The field itself, kept so a diagnostic can point at it
+    field: &'a syn::Field,
     /// How the field is accessed: by name or by tuple index
     reference: ErrorFieldRef,
     /// Every literal `#[error]` on the field, in source order
@@ -54,6 +57,7 @@ impl<'a> ParsedFields<'a> {
             .iter()
             .enumerate()
             .map(|(index, field)| ParsedField {
+                field,
                 reference: if named {
                     ErrorFieldRef::Named(field.ident.clone().expect("named field"))
                 } else {
@@ -73,7 +77,15 @@ impl<'a> ParsedFields<'a> {
 
     /// Report anything the collected fields say that cannot be honoured
     fn validate(&self) -> Result<()> {
-        let generated = self.fields.iter().any(|field| field.generated);
+        let mut generated_fields = self.fields.iter().filter(|field| field.generated);
+        let generated = generated_fields.next().is_some();
+
+        // One of these is written by `#[ohno::error]`; a second can only have been written by
+        // hand, and would otherwise pick the error field by declaration order
+        if let Some(duplicate) = generated_fields.next() {
+            bail_spanned!(duplicate.field, MULTIPLE_GENERATED_FIELDS);
+        }
+
         let mut marked = 0;
 
         for field in &self.fields {
@@ -312,6 +324,23 @@ mod tests {
             let input: DeriveInput = input;
             let message = select_error_field(&input).unwrap_err().to_string();
             assert_eq!(message, MULTIPLE_MARKED_FIELDS);
+        }
+    }
+
+    #[test]
+    fn test_error_attribute_rejects_a_second_generated_field() {
+        // `#[ohno::error]` writes one of these, so a second was written by hand. Picking the first
+        // would settle the error field by declaration order, and both are hidden from a display
+        // template, so the field a user could still name would not be the one in use
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+        for input in [
+            parse_quote! { struct TestError { #[doc = #marker] first: OhnoCore, #[doc = #marker] second: OhnoCore } },
+            parse_quote! { struct TestError(#[doc = #marker] OhnoCore, #[doc = #marker] OhnoCore); },
+            parse_quote! { struct TestError { path: String, #[doc = #marker] a: OhnoCore, #[doc = #marker] b: OhnoCore } },
+        ] {
+            let input: DeriveInput = input;
+            let message = select_error_field(&input).unwrap_err().to_string();
+            assert_eq!(message, MULTIPLE_GENERATED_FIELDS);
         }
     }
 

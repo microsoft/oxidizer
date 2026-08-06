@@ -102,6 +102,9 @@ ordinary doc comment will not match.
 
 If a struct carries both markers, the macro reports it. That keeps the two
 apart, which matters because field lookup takes the first marked field it sees.
+Two fields carrying the reserved marker are reported for the same reason: one of
+them was written by hand, and picking either would settle the error field by
+declaration order.
 
 ## What gets rejected
 
@@ -111,6 +114,7 @@ apart, which matters because field lookup takes the first marked field it sees.
 | Two marked fields | Multiple fields marked with `` `#[error]` `` |
 | One field marked twice | Duplicate `` `#[error]` `` on the same field |
 | `#[error]` next to the added field | `#[ohno::error]` already added the field holding the OhnoCore |
+| Two fields with the reserved doc marker | More than one field carries the marker `#[ohno::error]` puts on the field it adds |
 | `#[error]` under `#[ohno::error]` | `#[ohno::error]` adds the OhnoCore field itself |
 | No marker, no `OhnoCore` field | No field marked with `` `#[error]` `` found |
 | No marker, several `OhnoCore` fields | Multiple OhnoCore fields found |
