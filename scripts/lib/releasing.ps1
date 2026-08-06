@@ -663,11 +663,63 @@ function Get-SemverChecksTargetDir {
 # Cargo's default target directory with a warning rather than failing outright —
 # a long path only *may* overflow, so a hard failure here would be worse than
 # attempting the run.
+# Removes a cargo-semver-checks scratch directory left inside the repository by
+# a previous run that used the repository-local target directory.
+#
+# This matters only while migrating to the redirected target directory. Cargo
+# ignores whatever directory is currently its target dir when it looks for
+# workspace manifests. Once CARGO_TARGET_DIR points at the short scratch root,
+# `<repo>/target` is no longer that directory, so the baseline source clones
+# cargo-semver-checks previously left under `<repo>/target/semver-checks/git-<sha>/`
+# become visible as ordinary workspace source. Cargo then sees the same package
+# declared twice and fails with `package <name> is ambiguous ... defined in
+# multiple manifests`.
+#
+# Anyone who already hit the MAX_PATH failure has exactly that leftover
+# directory, so without this cleanup the first run after the fix would trade one
+# confusing error for another. The directory is pure scratch owned by
+# cargo-semver-checks and is recreated on demand, so deleting it is safe; the
+# only cost is rebuilding baselines. Failure to delete is non-fatal but warns,
+# because the resulting cargo error is otherwise hard to connect to its cause.
+function Clear-LegacySemverChecksScratch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    $repoTarget = Join-Path $RepoRoot 'target'
+    $legacy = Join-Path $repoTarget 'semver-checks'
+
+    # When the override deliberately points back at the repository's own target
+    # directory, this *is* the live scratch directory — leave it alone.
+    $normalizedTarget = $TargetDir.TrimEnd('\', '/')
+    $normalizedRepoTarget = $repoTarget.TrimEnd('\', '/')
+    if ($normalizedTarget -eq $normalizedRepoTarget -or $normalizedTarget.StartsWith("$normalizedRepoTarget\", [StringComparison]::OrdinalIgnoreCase)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $legacy)) {
+        return
+    }
+
+    try {
+        Remove-Item -LiteralPath $legacy -Recurse -Force -ErrorAction Stop
+        Write-Host "Removed stale cargo-semver-checks scratch directory '$legacy' (superseded by '$TargetDir')."
+    } catch {
+        Write-Warning "Could not remove the stale cargo-semver-checks scratch directory '$legacy' ($($_.Exception.Message)). Delete it manually if cargo reports that a package is ambiguous because it is defined in multiple manifests."
+    }
+}
+
 function Invoke-SemverChecksCli {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
-        [Parameter(Mandatory = $true)][string]$BaselineSha
+        [Parameter(Mandatory = $true)][string]$BaselineSha,
+        # Repository root whose legacy scratch directory should be cleaned up.
+        # Both call sites invoke this with the repository root as the current
+        # location, so the default is correct for them.
+        [string]$RepoRoot = $PWD.ProviderPath
     )
 
     $targetDir = Get-SemverChecksTargetDir
@@ -690,6 +742,10 @@ function Invoke-SemverChecksCli {
         } catch {
             Write-Warning "Could not use '$targetDir' as the cargo-semver-checks target directory ($($_.Exception.Message)). Falling back to the default; on Windows a long repository path may overflow MAX_PATH and fail the baseline build. Set OXIDIZER_SEMVER_TARGET_DIR to a short writable path to override."
         }
+    }
+
+    if ($applied) {
+        Clear-LegacySemverChecksScratch -RepoRoot $RepoRoot -TargetDir $targetDir
     }
 
     try {

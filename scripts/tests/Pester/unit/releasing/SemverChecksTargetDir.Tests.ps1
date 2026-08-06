@@ -50,3 +50,46 @@ Describe 'Get-SemverChecksTargetDir' {
         }
     }
 }
+
+Describe 'Clear-LegacySemverChecksScratch' {
+    BeforeEach {
+        $script:repo = Join-Path ([System.IO.Path]::GetTempPath()) ("clsc-" + [guid]::NewGuid().ToString('N'))
+        $script:legacy = Join-Path $script:repo 'target\semver-checks'
+        [void][System.IO.Directory]::CreateDirectory($script:legacy)
+        Set-Content -LiteralPath (Join-Path $script:legacy 'marker.txt') -Value 'x'
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $script:repo) {
+            Remove-Item -LiteralPath $script:repo -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'removes the in-repo scratch directory when the target dir is redirected elsewhere' {
+        # Otherwise its baseline clones become visible workspace source and
+        # cargo fails with `package <name> is ambiguous`.
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir 'C:\ox-semver' 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeFalse
+    }
+
+    It 'leaves the directory alone when the target dir IS the repository target dir' {
+        # That is the opt-back-out configuration, where this is the live scratch.
+        $repoTarget = Join-Path $script:repo 'target'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $repoTarget 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
+    It 'leaves the directory alone when the target dir is nested inside the repository target dir' {
+        $nested = Join-Path $script:repo 'target\custom'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nested 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
+    It 'is a no-op when there is no scratch directory to remove' {
+        Remove-Item -LiteralPath $script:legacy -Recurse -Force
+        { Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir 'C:\ox-semver' 6>$null } | Should -Not -Throw
+    }
+}
