@@ -5,7 +5,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input, parse_quote};
 
-use crate::utils::{GENERATED_ERROR_FIELD_ATTR, generate_unique_field_name};
+use crate::utils::{GENERATED_ERROR_FIELD_MARKER, generate_unique_field_name};
 
 /// Attribute macro version of `error_type` that can handle documentation comments.
 ///
@@ -96,12 +96,12 @@ fn add_fiasko_error_derive(input: &mut DeriveInput) {
 
 fn add_ohno_core_field(input: &mut DeriveInput) -> syn::Result<()> {
     if let Data::Struct(data_struct) = &mut input.data {
-        let marker = syn::Ident::new(GENERATED_ERROR_FIELD_ATTR, proc_macro2::Span::call_site());
+        let marker = GENERATED_ERROR_FIELD_MARKER;
         match &mut data_struct.fields {
             Fields::Unit => {
                 // Unit struct: convert to tuple struct with OhnoCore
                 let field: syn::Field = parse_quote! {
-                    #[#marker] ohno::OhnoCore
+                    #[doc = #marker] ohno::OhnoCore
                 };
                 let mut fields = syn::punctuated::Punctuated::new();
                 fields.push(field);
@@ -113,7 +113,7 @@ fn add_ohno_core_field(input: &mut DeriveInput) -> syn::Result<()> {
             Fields::Unnamed(fields) => {
                 // Tuple struct: add OhnoCore as last field
                 fields.unnamed.push(parse_quote! {
-                    #[#marker] ohno::OhnoCore
+                    #[doc = #marker] ohno::OhnoCore
                 });
             }
             Fields::Named(fields) => {
@@ -124,7 +124,7 @@ fn add_ohno_core_field(input: &mut DeriveInput) -> syn::Result<()> {
                     .collect::<Vec<_>>();
                 let field_name = generate_unique_field_name(&names);
                 fields.named.push(parse_quote! {
-                    #[#marker]
+                    #[doc = #marker]
                     #field_name: ohno::OhnoCore
                 });
             }
@@ -187,7 +187,7 @@ mod tests {
             struct TestError {
                 path: String,
                 inner: ohno::OhnoCore,
-                #[__auto_injected_error]
+                #[doc = " ohno::generated-core@7f3d9c2a"]
                 ohno_core: ohno::OhnoCore
             }
         };
@@ -238,7 +238,7 @@ mod tests {
         let expected: proc_macro2::TokenStream = parse_quote! {
             struct TestError {
                 message: String,
-                #[__auto_injected_error]
+                #[doc = " ohno::generated-core@7f3d9c2a"]
                 ohno_core: ohno::OhnoCore
             }
         };

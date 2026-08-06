@@ -4,7 +4,7 @@
 use syn::{Data, DeriveInput, Fields, Meta, Result, Type, TypePath};
 
 use crate::derive_error::types::ErrorFieldRef;
-use crate::utils::{GENERATED_ERROR_FIELD_ATTR, bail, bail_spanned};
+use crate::utils::{GENERATED_ERROR_FIELD_MARKER, bail, bail_spanned};
 
 const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoCore field detected. Either mark a field with `#[error]` or include a field of type OhnoCore";
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
@@ -15,7 +15,7 @@ const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it 
 /// Validate every `#[error]` attribute in the struct
 ///
 /// The attribute marks the field holding the `OhnoCore` and takes no arguments. The field
-/// `#[ohno::error]` injects is marked with `#[__auto_injected_error]` instead, so that the handoff
+/// `#[ohno::error]` injects is marked with a reserved doc string instead, so that the handoff
 /// between the two macros cannot be mistaken for — or copied out of `cargo expand` as — user
 /// syntax.
 ///
@@ -133,15 +133,20 @@ fn find_explicit_error_field_unnamed(fields: &syn::FieldsUnnamed) -> Option<usiz
 
 /// Check if a field is the `OhnoCore` field injected by `#[ohno::error]`
 pub(crate) fn is_generated_error_field(field: &syn::Field) -> bool {
-    field.attrs.iter().any(|attr| attr.path().is_ident(GENERATED_ERROR_FIELD_ATTR))
+    field.attrs.iter().any(|attr| match &attr.meta {
+        Meta::NameValue(pair) if pair.path.is_ident("doc") => match &pair.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(text), ..
+            }) => text.value() == GENERATED_ERROR_FIELD_MARKER,
+            _ => false,
+        },
+        _ => false,
+    })
 }
 
 /// Check if a field carries the marker naming it the one holding the `OhnoCore`
 fn has_error_attribute(field: &syn::Field) -> bool {
-    field
-        .attrs
-        .iter()
-        .any(|attr| attr.path().is_ident("error") || attr.path().is_ident(GENERATED_ERROR_FIELD_ATTR))
+    field.attrs.iter().any(|attr| attr.path().is_ident("error")) || is_generated_error_field(field)
 }
 
 /// Check if a type is `OhnoCore` or a variant of it
@@ -155,6 +160,7 @@ pub(crate) fn is_inner_error_type(ty: &Type) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use quote::ToTokens;
     use syn::parse_quote;
 
     use super::*;
@@ -248,19 +254,19 @@ mod tests {
 
     #[test]
     fn test_error_attribute_accepts_the_bare_marker() {
-        // The marker takes no arguments; the field `#[ohno::error]` injects is marked with
-        // `#[__auto_injected_error]` instead, which is not part of this grammar
+        // `#[error]` takes no arguments; the field `#[ohno::error]` injects carries a reserved
+        // doc string instead, which is not part of this grammar
         let named: DeriveInput = parse_quote! {
             struct TestError { path: String, #[error] inner: OhnoCore }
         };
         validate_error_attributes(&named).unwrap();
 
         let generated: DeriveInput = parse_quote! {
-            struct TestError { path: String, #[__auto_injected_error] ohno_core: OhnoCore }
+            struct TestError { path: String, #[doc = " ohno::generated-core@7f3d9c2a"] ohno_core: OhnoCore }
         };
         validate_error_attributes(&generated).unwrap();
 
-        let tuple: DeriveInput = parse_quote! { struct TestError(String, #[__auto_injected_error] OhnoCore); };
+        let tuple: DeriveInput = parse_quote! { struct TestError(String, #[doc = " ohno::generated-core@7f3d9c2a"] OhnoCore); };
         validate_error_attributes(&tuple).unwrap();
 
         // Nothing to validate on an input that cannot carry the attribute
@@ -324,7 +330,7 @@ mod tests {
             parse_quote! { struct TestError(String, #[error] MyCore); },
             parse_quote! { struct TestError { #[error] inner: ohno::OhnoCore } },
             parse_quote! { struct TestError { #[error] inner: crate::OhnoCore } },
-            parse_quote! { struct TestError(String, #[__auto_injected_error] ohno::OhnoCore); },
+            parse_quote! { struct TestError(String, #[doc = " ohno::generated-core@7f3d9c2a"] ohno::OhnoCore); },
         ] {
             let input: DeriveInput = input;
             validate_error_attributes(&input).unwrap();
@@ -332,21 +338,57 @@ mod tests {
     }
 
     #[test]
-    fn test_injected_field_is_recognized_by_its_own_attribute() {
-        // The injected field is marked with `#[__auto_injected_error]` and nothing else, so a
-        // field the user wrote stays visible to the display template
-        let generated: syn::Field = parse_quote! { #[__auto_injected_error] ohno_core: OhnoCore };
+    fn test_injected_field_is_recognized_by_its_doc_marker() {
+        // The whole string is the contract. A doc string can only fail to match, never be
+        // rejected, so anything short of the exact marker has to be somebody's own doc comment
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+        let generated: syn::Field = parse_quote! { #[doc = #marker] ohno_core: OhnoCore };
         assert!(is_generated_error_field(&generated));
 
         for field in [
+            // Doc comments of the user's own, including ones that name the crate
+            parse_quote! { #[doc = " an ordinary doc comment"] inner: OhnoCore },
+            parse_quote! { #[doc = " the ohno generated core field"] inner: OhnoCore },
+            parse_quote! { #[doc = " ohno::generated-core"] inner: OhnoCore },
+            parse_quote! { #[doc = "ohno::generated-core@7f3d9c2a"] inner: OhnoCore },
+            parse_quote! { #[doc = " ohno::generated-core@7f3d9c2a "] inner: OhnoCore },
+            parse_quote! { #[doc = " ohno::generated-core@7f3d9c2b"] inner: OhnoCore },
+            // The marker under another attribute, or as a non-string value, says nothing
+            parse_quote! { #[cfg_attr(doc, doc = " ohno::generated-core@7f3d9c2a")] inner: OhnoCore },
             parse_quote! { #[error(generated)] inner: OhnoCore },
-            parse_quote! { #[display(__auto_injected_error)] inner: OhnoCore },
             parse_quote! { #[error] inner: OhnoCore },
             parse_quote! { inner: OhnoCore },
         ] {
             let field: syn::Field = field;
-            assert!(!is_generated_error_field(&field));
+            assert!(!is_generated_error_field(&field), "matched: {}", field.to_token_stream());
         }
+    }
+
+    #[test]
+    fn test_marker_is_not_plausible_prose() {
+        // A marker that read as an ordinary doc comment would let a user hide their own field by
+        // documenting it, and nothing can reject that, so the nonce is what keeps it out of reach
+        assert!(
+            GENERATED_ERROR_FIELD_MARKER.contains("7f3d9c2a"),
+            "the marker must carry a nonce no doc comment would contain"
+        );
+    }
+
+    #[test]
+    fn test_injected_field_is_found_without_a_marker_attribute() {
+        // The doc marker replaces the `#[error]` the attribute used to write, so field lookup has
+        // to recognise it as well, or `#[ohno::error]` structs lose their error field
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+
+        let named: DeriveInput = parse_quote! {
+            struct TestError { path: String, #[doc = #marker] ohno_core: ohno::OhnoCore }
+        };
+        assert_eq!(find_error_field(&named).unwrap().to_string(), "ohno_core");
+
+        let tuple: DeriveInput = parse_quote! {
+            struct TestError(String, #[doc = #marker] ohno::OhnoCore);
+        };
+        assert_eq!(find_error_field(&tuple).unwrap().to_string(), "1");
     }
 
     #[test]

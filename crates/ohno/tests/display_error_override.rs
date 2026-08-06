@@ -215,3 +215,20 @@ fn test_raw_identifier_field() {
     let error = TestError::new("timeout".to_string());
     assert_error_message!(error, "timeout at 7");
 }
+
+#[test]
+fn test_documented_fields_stay_referenceable() {
+    // The injected core is marked with a reserved doc string, so an ordinary doc comment must not
+    // be mistaken for it and hide the field it documents from the display template
+    #[ohno::error]
+    #[display("{path} failed with {code}")]
+    struct TestError {
+        /// Where the failure happened.
+        path: String,
+        /// The ohno generated core field is not this one.
+        code: u32,
+    }
+
+    let error = TestError::new("/etc/hosts".to_string(), 13_u32);
+    assert_error_message!(error, "/etc/hosts failed with 13");
+}
