@@ -691,11 +691,21 @@ function Clear-LegacySemverChecksScratch {
     $repoTarget = Join-Path $RepoRoot 'target'
     $legacy = Join-Path $repoTarget 'semver-checks'
 
-    # When the override deliberately points back at the repository's own target
-    # directory, this *is* the live scratch directory — leave it alone.
-    $normalizedTarget = $TargetDir.TrimEnd('\', '/')
-    $normalizedRepoTarget = $repoTarget.TrimEnd('\', '/')
-    if ($normalizedTarget -eq $normalizedRepoTarget -or $normalizedTarget.StartsWith("$normalizedRepoTarget\", [StringComparison]::OrdinalIgnoreCase)) {
+    # When the override deliberately points back at (or inside) the repository's
+    # own target directory, this *is* the live scratch directory — leave it
+    # alone. The containment test must use the platform's separator: hardcoding
+    # a backslash silently disables this guard on Linux and macOS, where the
+    # override is the only way to reach this code at all. Windows additionally
+    # accepts forward slashes and compares case-insensitively.
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    $normalizedTarget = if ($IsWindows) { $TargetDir.Replace('/', '\') } else { $TargetDir }
+    $normalizedRepoTarget = if ($IsWindows) { $repoTarget.Replace('/', '\') } else { $repoTarget }
+    $normalizedTarget = $normalizedTarget.TrimEnd($separator)
+    $normalizedRepoTarget = $normalizedRepoTarget.TrimEnd($separator)
+
+    if ($normalizedTarget.Equals($normalizedRepoTarget, $comparison) -or
+        $normalizedTarget.StartsWith("$normalizedRepoTarget$separator", $comparison)) {
         return
     }
 

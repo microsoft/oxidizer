@@ -54,7 +54,10 @@ Describe 'Get-SemverChecksTargetDir' {
 Describe 'Clear-LegacySemverChecksScratch' {
     BeforeEach {
         $script:repo = Join-Path ([System.IO.Path]::GetTempPath()) ("clsc-" + [guid]::NewGuid().ToString('N'))
-        $script:legacy = Join-Path $script:repo 'target\semver-checks'
+        # Build paths segment by segment: embedding a separator would bake in
+        # Windows semantics and mask separator bugs on Linux/macOS.
+        $script:repoTarget = Join-Path $script:repo 'target'
+        $script:legacy = Join-Path $script:repoTarget 'semver-checks'
         [void][System.IO.Directory]::CreateDirectory($script:legacy)
         Set-Content -LiteralPath (Join-Path $script:legacy 'marker.txt') -Value 'x'
     }
@@ -68,28 +71,44 @@ Describe 'Clear-LegacySemverChecksScratch' {
     It 'removes the in-repo scratch directory when the target dir is redirected elsewhere' {
         # Otherwise its baseline clones become visible workspace source and
         # cargo fails with `package <name> is ambiguous`.
-        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir 'C:\ox-semver' 6>$null
+        $elsewhere = Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver-elsewhere'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $elsewhere 6>$null
 
         Test-Path -LiteralPath $script:legacy | Should -BeFalse
     }
 
     It 'leaves the directory alone when the target dir IS the repository target dir' {
         # That is the opt-back-out configuration, where this is the live scratch.
-        $repoTarget = Join-Path $script:repo 'target'
-        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $repoTarget 6>$null
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $script:repoTarget 6>$null
 
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
     }
 
     It 'leaves the directory alone when the target dir is nested inside the repository target dir' {
-        $nested = Join-Path $script:repo 'target\custom'
+        $nested = Join-Path $script:repoTarget 'custom'
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nested 6>$null
 
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
     }
 
+    It 'leaves the directory alone when the target dir is the scratch directory itself' {
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $script:legacy 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
+    It 'still removes the scratch dir for a sibling path that merely shares a prefix' {
+        # `<repo>/target-scratch` is NOT inside `<repo>/target`, so the guard
+        # must not treat a bare string prefix as containment.
+        $sibling = Join-Path $script:repo 'target-scratch'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $sibling 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeFalse
+    }
+
     It 'is a no-op when there is no scratch directory to remove' {
         Remove-Item -LiteralPath $script:legacy -Recurse -Force
-        { Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir 'C:\ox-semver' 6>$null } | Should -Not -Throw
+        $elsewhere = Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver-elsewhere'
+        { Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $elsewhere 6>$null } | Should -Not -Throw
     }
 }
