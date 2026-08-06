@@ -214,7 +214,7 @@ try {
         $releaseIsBreaking = Test-IsBreakingChange -oldVersion $baselineVersion -ChangeType $releaseChangeType
 
         Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs v$baselineVersion @ $shortSha..."
-        $semverRun = Invoke-SemverChecksCli -PackageName $cargoName -BaselineSha $baselineSha
+        $semverRun = Invoke-SemverChecksCli -PackageName $cargoName -BaselineSha $baselineSha -RepoRoot $RepoRoot
         $out = $semverRun.Output
 
         # A build/tool failure makes ConvertFrom-SemverChecksOutput throw (no

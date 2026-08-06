@@ -651,7 +651,10 @@ function Get-SemverChecksTargetDir {
         # repository path and would conclude a same-directory override lies
         # elsewhere — and delete the live scratch directory.
         if (-not [System.IO.Path]::IsPathFullyQualified($override)) {
-            throw "OXIDIZER_SEMVER_TARGET_DIR must be an absolute path, but is '$override'. Use a fully qualified path such as 'D:\ox-semver'."
+            # The override is supported everywhere, so the example has to match
+            # the platform the user is actually on.
+            $example = if ($IsWindows) { 'D:\ox-semver' } else { '/var/tmp/ox-semver' }
+            throw "OXIDIZER_SEMVER_TARGET_DIR must be an absolute path, but is '$override'. Use a fully qualified path such as '$example'."
         }
 
         return $override
@@ -742,8 +745,9 @@ function Invoke-SemverChecksCli {
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $true)][string]$BaselineSha,
         # Repository root whose legacy scratch directory should be cleaned up.
-        # Both call sites invoke this with the repository root as the current
-        # location, so the default is correct for them.
+        # Defaulted for convenience, but callers that already know the root
+        # should pass it: depending on ambient location makes correctness rest
+        # on a Push-Location far from the call site.
         [string]$RepoRoot = $PWD.ProviderPath
     )
 
@@ -832,7 +836,7 @@ function Invoke-CrateSemverCheck {
 
     Push-Location $RepoRoot
     try {
-        $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha
+        $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
     } finally {
         Pop-Location
     }
