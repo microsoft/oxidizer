@@ -134,19 +134,17 @@ impl<'a> ParsedFields<'a> {
     }
 }
 
-/// Validate every `#[error]` attribute in the struct
+/// Pick the error field of a struct, reporting anything that makes the choice unclear
 ///
-/// See `docs/error_error.md` for the rules this enforces.
-pub(crate) fn validate_error_attributes(input: &DeriveInput) -> Result<()> {
-    ParsedFields::parse(input).map_or(Ok(()), |fields| fields.validate())
-}
-
-/// Find the field marked with `#[error]` or auto-detect `OhnoCore` field
-pub(crate) fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
+/// Parsing, validation and selection are one operation so that a field can never be selected from
+/// an input that was not validated first. See
+/// `docs/error_error.md`.
+pub(crate) fn select_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
     let Some(fields) = ParsedFields::parse(input) else {
         bail!("Error derive only supports structs");
     };
 
+    fields.validate()?;
     fields.error_field()
 }
 
@@ -189,7 +187,7 @@ mod tests {
             }
         };
 
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "inner");
     }
 
@@ -202,7 +200,7 @@ mod tests {
             }
         };
 
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "inner");
     }
 
@@ -215,7 +213,7 @@ mod tests {
             }
         };
 
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "error");
     }
 
@@ -229,7 +227,7 @@ mod tests {
             }
         };
 
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "inner2");
     }
 
@@ -242,7 +240,7 @@ mod tests {
             }
         };
 
-        let result = find_error_field(&input);
+        let result = select_error_field(&input);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Multiple OhnoCore fields found"));
     }
@@ -256,7 +254,7 @@ mod tests {
             }
         };
 
-        let result = find_error_field(&input);
+        let result = select_error_field(&input);
         assert!(result.is_err());
         assert!(
             result
@@ -273,19 +271,15 @@ mod tests {
         let named: DeriveInput = parse_quote! {
             struct TestError { path: String, #[error] inner: OhnoCore }
         };
-        validate_error_attributes(&named).unwrap();
+        select_error_field(&named).unwrap();
 
         let generated: DeriveInput = parse_quote! {
             struct TestError { path: String, #[doc = " ohno::generated-core@7f3d9c2a"] ohno_core: OhnoCore }
         };
-        validate_error_attributes(&generated).unwrap();
+        select_error_field(&generated).unwrap();
 
         let tuple: DeriveInput = parse_quote! { struct TestError(String, #[doc = " ohno::generated-core@7f3d9c2a"] OhnoCore); };
-        validate_error_attributes(&tuple).unwrap();
-
-        // Nothing to validate on an input that cannot carry the attribute
-        let enum_input: DeriveInput = parse_quote! { enum TestError { A, B } };
-        validate_error_attributes(&enum_input).unwrap();
+        select_error_field(&tuple).unwrap();
     }
 
     #[test]
@@ -302,7 +296,7 @@ mod tests {
             parse_quote! { struct TestError(String, #[error(nonsense)] OhnoCore); },
         ] {
             let input: DeriveInput = input;
-            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            let message = select_error_field(&input).unwrap_err().to_string();
             assert_eq!(message, ERROR_ATTRIBUTE_ARGUMENTS);
         }
     }
@@ -316,7 +310,7 @@ mod tests {
             parse_quote! { struct TestError { #[error] inner: OhnoCore, #[error] ohno_core: OhnoCore } },
         ] {
             let input: DeriveInput = input;
-            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            let message = select_error_field(&input).unwrap_err().to_string();
             assert_eq!(message, MULTIPLE_MARKED_FIELDS);
         }
     }
@@ -334,7 +328,7 @@ mod tests {
             parse_quote! { struct TestError { #[error] not_a_core: String, #[doc = #marker] ohno_core: OhnoCore } },
         ] {
             let input: DeriveInput = input;
-            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            let message = select_error_field(&input).unwrap_err().to_string();
             assert_eq!(message, MARKED_FIELD_WITH_GENERATED);
         }
     }
@@ -348,7 +342,7 @@ mod tests {
             parse_quote! { struct TestError(#[error] #[error] OhnoCore); },
         ] {
             let input: DeriveInput = input;
-            let message = validate_error_attributes(&input).unwrap_err().to_string();
+            let message = select_error_field(&input).unwrap_err().to_string();
             assert_eq!(message, DUPLICATE_MARKER);
         }
     }
@@ -365,7 +359,7 @@ mod tests {
             parse_quote! { struct TestError(String, #[doc = " ohno::generated-core@7f3d9c2a"] ohno::OhnoCore); },
         ] {
             let input: DeriveInput = input;
-            validate_error_attributes(&input).unwrap();
+            select_error_field(&input).unwrap();
         }
     }
 
@@ -415,39 +409,39 @@ mod tests {
         let named: DeriveInput = parse_quote! {
             struct TestError { path: String, #[doc = #marker] ohno_core: ohno::OhnoCore }
         };
-        assert_eq!(find_error_field(&named).unwrap().to_string(), "ohno_core");
+        assert_eq!(select_error_field(&named).unwrap().to_string(), "ohno_core");
 
         let tuple: DeriveInput = parse_quote! {
             struct TestError(String, #[doc = #marker] ohno::OhnoCore);
         };
-        assert_eq!(find_error_field(&tuple).unwrap().to_string(), "1");
+        assert_eq!(select_error_field(&tuple).unwrap().to_string(), "1");
     }
 
     #[test]
     fn test_find_error_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, #[error] OhnoCore); };
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "1");
     }
 
     #[test]
     fn test_find_unmarked_error_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, OhnoCore); };
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "1");
     }
 
     #[test]
     fn test_find_missing_error_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, String); };
-        let err = find_error_field(&input).unwrap_err();
+        let err = select_error_field(&input).unwrap_err();
         assert!(err.to_string().contains(NO_ERROR_FIELD));
     }
 
     #[test]
     fn test_double_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, OhnoCore, OhnoCore); };
-        let err = find_error_field(&input).unwrap_err();
+        let err = select_error_field(&input).unwrap_err();
         assert_eq!(
             err.to_string(),
             "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate"
@@ -457,9 +451,9 @@ mod tests {
     #[test]
     fn test_marked_field_with_another_type_in_tuple() {
         // The lookup answers only which field is marked; whether that field may hold the type it
-        // does is settled beforehand by `validate_error_attributes`
+        // does is settled beforehand by validation
         let input: DeriveInput = parse_quote! { struct TestError( String, #[error] MyCore); };
-        let field = find_error_field(&input).unwrap();
+        let field = select_error_field(&input).unwrap();
         assert_eq!(field.to_string(), "1");
     }
 
@@ -491,7 +485,7 @@ mod tests {
             enum TestError { Variant(OhnoCore) }
         };
 
-        let err = find_error_field(&input).unwrap_err();
+        let err = select_error_field(&input).unwrap_err();
         assert_eq!(err.to_string(), "Error derive only supports structs");
     }
 
@@ -501,7 +495,7 @@ mod tests {
             struct TestError;
         };
 
-        let err = find_error_field(&input).unwrap_err();
+        let err = select_error_field(&input).unwrap_err();
         assert_eq!(err.to_string(), "Error derive does not support unit structs");
     }
 
@@ -510,6 +504,6 @@ mod tests {
         // The marker is decisive, so auto-detection never runs and the second core stays data
         let input: DeriveInput = parse_quote! { struct TestError(String, #[error] OhnoCore, OhnoCore); };
 
-        assert_eq!(find_error_field(&input).unwrap().to_string(), "1");
+        assert_eq!(select_error_field(&input).unwrap().to_string(), "1");
     }
 }

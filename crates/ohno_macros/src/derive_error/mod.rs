@@ -40,8 +40,7 @@ fn impl_error_derive(input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // Parse attributes and find error field
-    validate_error_attributes(input)?;
-    let error_field = find_error_field(input)?;
+    let error_field = select_error_field(input)?;
     let display_override = find_display_attribute(input)?;
     let display_expr = if let Some(display_override) = display_override {
         Some(parse_display_template(&display_override, input)?)
