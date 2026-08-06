@@ -77,3 +77,33 @@ toolchains, and no single `.stderr` snapshot could match both.
 - A `{}` with no argument left, or an argument no `{}` uses.
 - An argument written with a `self.` prefix.
 - An argument rooted in anything other than a field or method of `self`.
+
+## Implementation notes
+
+**A template is parsed before it is judged.** Splitting it into segments first
+keeps "what the template says" apart from "whether that names a field", so
+neither decision is made halfway through a scan. Every segment borrows from the
+template, which works because none of them is rewritten on the way out.
+
+**The scoping prefix is applied by parsing, not by enumeration.** Whether an
+argument can carry `self.` at all is answered by building the unprefixed
+`self.<argument>` and asking `syn` to parse it. Enumerating the expression forms
+that may legally follow a dot would be a second copy of the grammar.
+
+**The result is then wrapped as `&(...)`.** The parentheses are load-bearing: a
+bare `&self.<argument>` binds the reference to the leftmost term alone, so
+`count as u64` would cast the reference rather than the field, and `count * 2`
+would multiply it.
+
+**Roots are found by walking left.** Field access, method calls, indexing,
+binary operators, casts, `await`, `?` and ranges all keep a term in leftmost
+position, which is where the prefix lands. A `self` root is reported separately,
+because it would otherwise expand to `self.self`.
+
+**A nested tuple index arrives as a float.** `0.1` lexes as one literal, and only
+its leading component names a field of `self`; the rest reaches into that
+field's own type and is left to `rustc`.
+
+**Raw identifiers keep their `r#`.** Field names reach the macro as text, and
+`Ident::new` panics on that spelling, which would turn a user's typo into a
+macro crash rather than a diagnostic.

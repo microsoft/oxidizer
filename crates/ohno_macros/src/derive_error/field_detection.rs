@@ -34,8 +34,7 @@ impl ParsedField<'_> {
 
 /// Every field of a struct, parsed once
 ///
-/// Collecting first keeps the rules in one place, checking a whole struct rather than deciding
-/// each field as it is walked. See `docs/error_error.md`.
+/// See `docs/error_error.md`.
 struct ParsedFields<'a> {
     fields: Vec<ParsedField<'a>>,
     unit: bool,
@@ -72,6 +71,8 @@ impl<'a> ParsedFields<'a> {
     }
 
     /// Report anything the collected fields say that cannot be honoured
+    ///
+    /// See `docs/error_error.md`.
     fn validate(&self) -> Result<()> {
         let generated = self.fields.iter().any(|field| field.generated);
         let mut marked = 0;
@@ -81,7 +82,6 @@ impl<'a> ParsedFields<'a> {
                 continue;
             };
 
-            // A field carrying the marker twice says nothing a single one does not
             if let Some(duplicate) = field.markers.get(1) {
                 bail_spanned!(duplicate, DUPLICATE_MARKER);
             }
@@ -90,14 +90,10 @@ impl<'a> ParsedFields<'a> {
                 bail_spanned!(&attr.meta, ERROR_ATTRIBUTE_ARGUMENTS);
             }
 
-            // The generated field is already the error representation, so a marker asks for a
-            // second one. This is also what keeps the two markers mutually exclusive
             if generated {
                 bail_spanned!(attr, MARKED_FIELD_WITH_GENERATED);
             }
 
-            // Marking a second field leaves the choice of error field to declaration order, so it
-            // is reported rather than resolved silently
             marked += 1;
             if marked > 1 {
                 bail_spanned!(attr, MULTIPLE_MARKED_FIELDS);
@@ -107,7 +103,9 @@ impl<'a> ParsedFields<'a> {
         Ok(())
     }
 
-    /// Choose the error field: the designated one, or the sole field holding a core
+    /// Choose the error field: the picked one, or the sole field holding a core
+    ///
+    /// See `docs/error_error.md`.
     fn error_field(self) -> Result<ErrorFieldRef> {
         if self.unit {
             bail!("Error derive does not support unit structs");
@@ -115,7 +113,7 @@ impl<'a> ParsedFields<'a> {
 
         let mut cores = Vec::new();
         for field in self.fields {
-            // A designated field wins outright, whatever its type is spelled as
+            // A picked field wins outright, whatever its type is spelled as
             if field.is_designated() {
                 return Ok(field.reference);
             }
@@ -136,9 +134,7 @@ impl<'a> ParsedFields<'a> {
 
 /// Pick the error field of a struct, reporting anything that makes the choice unclear
 ///
-/// Parsing, validation and selection are one operation so that a field can never be selected from
-/// an input that was not validated first. See
-/// `docs/error_error.md`.
+/// See `docs/error_error.md`.
 pub(crate) fn select_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
     let Some(fields) = ParsedFields::parse(input) else {
         bail!("Error derive only supports structs");

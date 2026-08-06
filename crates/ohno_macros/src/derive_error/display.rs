@@ -12,9 +12,6 @@ const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are impli
 const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
 
 /// A parsed piece of a display template
-///
-/// Every part borrows from the template, which is possible because none of them is rewritten:
-/// text, field names and format specifiers are all spelled in the template as they are used.
 enum Segment<'a> {
     /// Literal text, already spelled the way `format!` expects it
     Text(&'a str),
@@ -26,8 +23,7 @@ enum Segment<'a> {
 
 /// Split a display template into its segments
 ///
-/// Parsing answers only what the template says. Whether a field exists, or whether the argument
-/// count matches, is decided afterwards against the parsed form.
+/// See `docs/error_display.md`.
 fn parse_template(template: &str) -> Vec<Segment<'_>> {
     let mut segments = Vec::new();
     let mut chars = template.char_indices().peekable();
@@ -124,28 +120,25 @@ pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &De
     Ok(generate_display_expression(&result, &format_args))
 }
 
-/// Convert expression to appropriate field access
+/// Scope a positional argument to `self`
 ///
-/// See `docs/error_display.md` for the scoping rules and why they are checked here.
+/// See `docs/error_display.md`.
 fn convert_expr_to_field_access(expr: &Expr, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     validate_arg_root(expr, input)?;
 
-    // Whether an argument can carry the prefix at all is decided by parsing the expansion, rather
-    // than by enumerating the expression forms that may follow a dot
     let scoped = quote! { self.#expr };
     if syn::parse2::<Expr>(scoped.clone()).is_err() {
         bail_spanned!(expr, UNSUPPORTED_ROOT);
     }
 
-    // The reference has to cover the whole argument. Without the parentheses it would bind to the
-    // root alone, so `count as u64` would expand to `&self.count as u64`, casting the reference
     Ok(quote! { &(#scoped) })
 }
 
 /// Validate the field access a positional argument is rooted in
+///
+/// See `docs/error_display.md`.
 fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
     match root_of_expr(expr) {
-        // `self.path` would expand to `&self.self.path`
         Expr::Path(path) if path.path.is_ident("self") => bail_spanned!(path, SELF_SCOPED_ARGS),
         Expr::Path(path) => match path.path.get_ident() {
             Some(ident) => validate_field_exists(&ident.to_string(), input, ident.span()),
@@ -158,11 +151,11 @@ fn validate_arg_root(expr: &Expr, input: &DeriveInput) -> Result<()> {
 }
 
 /// Validate the tuple index a literal-rooted argument refers to
+///
+/// See `docs/error_display.md`.
 fn validate_literal_root(literal: &syn::ExprLit, input: &DeriveInput) -> Result<()> {
     match &literal.lit {
         syn::Lit::Int(index) => validate_field_exists(index.base10_digits(), input, index.span()),
-        // Nested tuple access such as `0.1` lexes as a float; only its leading component names a
-        // field of `self`, the rest reaches into the field's own type
         syn::Lit::Float(index) => match index.base10_digits().split_once('.') {
             Some((outer, _)) => validate_field_exists(outer, input, index.span()),
             None => Ok(()),
@@ -173,8 +166,7 @@ fn validate_literal_root(literal: &syn::ExprLit, input: &DeriveInput) -> Result<
 
 /// Walk an expression down to the term the whole expression is rooted in
 ///
-/// Every form here keeps the root in leftmost position, which is where `self.` lands. See
-/// `docs/error_display.md`.
+/// See `docs/error_display.md`.
 fn root_of_expr(expr: &Expr) -> &Expr {
     match expr {
         Expr::Field(inner) => root_of_expr(&inner.base),
@@ -199,8 +191,7 @@ fn field_member(field_name: &str) -> Member {
 
 /// Build the identifier naming a field, keeping raw identifiers raw
 ///
-/// `Ident::new` panics on the `r#` spelling, which would turn an ordinary error in a user's
-/// template into a macro crash.
+/// See `docs/error_display.md`.
 fn field_ident(field_name: &str) -> Ident {
     let span = proc_macro2::Span::call_site();
     field_name

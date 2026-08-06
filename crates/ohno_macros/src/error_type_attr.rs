@@ -86,10 +86,7 @@ fn reject_marked_field(input: &DeriveInput) -> syn::Result<()> {
 
 /// Reject a struct that already carries the marker this attribute writes
 ///
-/// The attribute has not added its field yet, so a field carrying the marker here was written by
-/// hand. Two of them would leave the error field to declaration order, and both would be hidden
-/// from a display template. Catching it here, rather than in the derive, is what makes the marker
-/// a fact about the field the attribute adds.
+/// See `docs/error_error.md`.
 fn reject_generated_marker(input: &DeriveInput) -> syn::Result<()> {
     let Data::Struct(data_struct) = &input.data else {
         return Ok(());
