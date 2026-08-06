@@ -8,26 +8,30 @@
 
 //! Link against the Spectre-mitigated MSVC CRT import libraries on Windows.
 //!
-//! Adding this crate as a build dependency makes its build script add the
+//! Adding this crate as a dependency makes its build script add the
 //! Spectre-mitigated (`/Qspectre`) C runtime import libraries to the linker
-//! search path for Windows MSVC targets. Dependent crates then link against the
-//! hardened runtime automatically, because a `cargo:rustc-link-search`
-//! directive propagates from a dependency to every crate that depends on it. On
-//! every non-Windows-MSVC target the crate does nothing.
+//! search path for Windows MSVC targets. Your crate then links against the
+//! hardened runtime automatically, because the `cargo:rustc-link-search`
+//! directive emitted by the build script propagates to every crate that links
+//! this one, up to and including the final artifact. On every
+//! non-Windows-MSVC target the crate does nothing.
 //!
 //! # Usage
 //!
 //! ```toml
-//! [build-dependencies]
+//! [dependencies]
 //! msvc_spectre_libs = "0.2"
 //! ```
 //!
 //! No source changes are required: linking the Spectre libraries is a pure
-//! build-script side effect.
+//! build-script side effect. Use a normal `[dependencies]` entry, not
+//! `[build-dependencies]`: a build-dependency lives in the host build graph, so
+//! its link-search path would apply only to that build script rather than to
+//! the shipped target artifact.
 //!
 //! # Locating the libraries
 //!
-//! The build script resolves the Spectre library directory in two steps:
+//! The build script resolves the Spectre library directory in three steps:
 //!
 //! 1. **Build-system override (preferred).** If the environment variable
 //!    `MSVC_SPECTRE_LIB_DIR_<target>` (for example
@@ -36,17 +40,22 @@
 //!    used verbatim. This lets an enlistment or CI system that already knows the
 //!    toolchain layout (for example one that provisions the MSVC libraries from
 //!    a package feed) supply the exact path without any registry probing.
-//! 2. **Toolchain discovery (fallback).** Otherwise the script locates `cl.exe`
+//! 2. **Enlistment toolchain (`VCToolsInstallDir`).** Otherwise, if the MSVC
+//!    build tools export `VCToolsInstallDir` (as a Visual Studio developer
+//!    command prompt or an enlistment that runs `vcvars` does), the script uses
+//!    `lib\spectre\<arch>` directly beneath it.
+//! 3. **Registry discovery (fallback).** Otherwise the script locates `cl.exe`
 //!    through the Windows registry and derives the `lib\spectre\<arch>`
 //!    directory that ships with the Visual Studio C++ build tools.
 //!
 //! Use [`resolve::override_var_name`] to compute the target-specific override
-//! variable name and [`resolve::spectre_arch`] to map a Rust target
-//! architecture to the toolchain's Spectre subdirectory.
+//! variable name, [`resolve::spectre_arch`] to map a Rust target architecture
+//! to the matching Spectre subdirectory, and [`resolve::spectre_lib_dir`] to
+//! build the `lib\spectre\<arch>` path beneath a toolchain root.
 //!
 //! # Features
 //!
-//! - `error`: turn the "libraries not found" build warning into a hard build
+//! - `error`: turn the libraries-not-found build warning into a hard build
 //!   error, for builds that must not silently fall back to the unmitigated
 //!   runtime.
 //!
@@ -55,7 +64,10 @@
 //! ```
 //! use msvc_spectre_libs::resolve::{override_var_name, spectre_arch};
 //!
-//! assert_eq!(override_var_name("x86_64-pc-windows-msvc"), "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc");
+//! assert_eq!(
+//!     override_var_name("x86_64-pc-windows-msvc"),
+//!     "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc"
+//! );
 //! assert_eq!(spectre_arch("x86_64"), Some("x64"));
 //! assert_eq!(spectre_arch("aarch64"), Some("arm64"));
 //! assert_eq!(spectre_arch("riscv64"), None);

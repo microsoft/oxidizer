@@ -7,8 +7,10 @@
 //! by this crate's build script and by build-system integrators that want to
 //! compute the override variable names themselves.
 
+use std::path::{Path, PathBuf};
+
 /// Maps a Rust target architecture (the value of the `CARGO_CFG_TARGET_ARCH`
-/// build-script environment variable) to the name of the MSVC toolchain's
+/// build-script environment variable) to the name of the MSVC
 /// `lib\spectre\<arch>` subdirectory.
 ///
 /// Returns [`None`] for architectures that have no Spectre-mitigated CRT.
@@ -53,16 +55,43 @@ pub fn spectre_arch(target_arch: &str) -> Option<&'static str> {
 /// ```
 /// use msvc_spectre_libs::resolve::override_var_name;
 ///
-/// assert_eq!(override_var_name("x86_64-pc-windows-msvc"), "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc");
+/// assert_eq!(
+///     override_var_name("x86_64-pc-windows-msvc"),
+///     "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc"
+/// );
 /// ```
 #[must_use]
 pub fn override_var_name(target: &str) -> String {
     format!("MSVC_SPECTRE_LIB_DIR_{}", target.replace('-', "_"))
 }
 
+/// Builds the `lib\spectre\<arch>` directory beneath an MSVC toolchain root.
+///
+/// `base` is typically the value of the `VCToolsInstallDir` environment
+/// variable (the MSVC build-tools install directory), and `arch` is a value
+/// returned by [`spectre_arch`]. Joining the components avoids hardcoding a
+/// separator or climbing parent directories relative to `cl.exe`.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// use msvc_spectre_libs::resolve::spectre_lib_dir;
+///
+/// let dir = spectre_lib_dir(Path::new("C:/VC/Tools/MSVC/14.40"), "x64");
+/// assert!(dir.ends_with("lib/spectre/x64"));
+/// ```
+#[must_use]
+pub fn spectre_lib_dir(base: &Path, arch: &str) -> PathBuf {
+    base.join("lib").join("spectre").join(arch)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{override_var_name, spectre_arch};
+    use std::path::Path;
+
+    use super::{override_var_name, spectre_arch, spectre_lib_dir};
 
     #[test]
     fn maps_known_architectures() {
@@ -77,6 +106,13 @@ mod tests {
     fn returns_none_for_unknown_architecture() {
         assert_eq!(spectre_arch("riscv64"), None);
         assert_eq!(spectre_arch(""), None);
+    }
+
+    #[test]
+    fn builds_spectre_lib_dir_beneath_the_toolchain_root() {
+        let dir = spectre_lib_dir(Path::new("C:/VC/Tools/MSVC/14.40"), "arm64");
+        assert!(dir.ends_with("lib/spectre/arm64"));
+        assert!(dir.starts_with("C:/VC/Tools/MSVC/14.40"));
     }
 
     #[test]
