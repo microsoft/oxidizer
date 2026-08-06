@@ -24,7 +24,7 @@ mod utils;
 /// Derive macro for automatically implementing error traits.
 ///
 /// Supports the following attributes:
-/// - `#[error]` - Mark the field containing the `OhnoCore`. Exactly one field may be marked. With
+/// - `#[error]` - Mark the field containing the `OhnoCore`. At most one field may be marked. With
 ///   no marker the macro auto-detects a single field whose type names `OhnoCore` in its final path
 ///   segment, so a core reached through an alias or a rename has to be marked explicitly
 /// - `#[display("...")]` - Custom display message with field interpolation. Positional
