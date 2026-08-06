@@ -68,8 +68,9 @@ machinery or replace it with a narrower stable construction API.
 - [ ] Decide which `bytes` compatibility implementations are stable.
 - [ ] Determine the minimal stable API for implementing custom memory providers,
       including whether `Block`, `BlockRef`, and related traits remain public.
-- [ ] Confirm whether the metadata-returning iterator shapes and direct
-      `first_slice_meta()` methods remain stable. Removing `BlockMeta` from the
-      stable surface requires redesigning all of these exposure points.
+- [ ] Confirm whether the metadata-returning iterator shapes,
+      `first_slice_meta()`, and `first_unfilled_slice_meta()` remain stable.
+      Removing `BlockMeta` from the stable surface requires redesigning all of
+      these exposure points.
 - [ ] Confirm stable downstream crates expose no deferred `bytesbuf` types.
 - [ ] Identify all remaining APIs as stable, unstable, or unnecessary for 1.0.
