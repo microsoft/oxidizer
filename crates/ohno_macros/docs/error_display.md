@@ -31,7 +31,7 @@ error, also reported at the template.
 
 ## Arguments are scoped to `self`
 
-Each argument expands to `&self.<argument>`. So a field is written by its bare
+Each argument expands to `&(self.<argument>)`. So a field is written by its bare
 name. The `self.` part is added for you. This is where the crate differs from
 `thiserror`.
 
@@ -50,9 +50,14 @@ method calls, indexing, binary operators, casts, `await`, `?`, and ranges. So
 If that term is not a field, the error points at the term, not at the whole
 argument and not at the attribute.
 
-The macro then checks the argument can take the prefix at all. It builds
-`&self.<argument>` and tries to parse it. That is simpler than listing every
-expression that may follow a dot.
+The parentheses put the whole argument behind the reference. Without them the
+reference binds to the root alone: `count as u64` would expand to
+`&self.count as u64`, which casts the reference and does not compile, and
+`count * 2` would multiply a reference rather than the field.
+
+The macro then checks the argument can take the prefix at all. It builds the
+unprefixed `self.<argument>` and tries to parse it. That is simpler than listing
+every expression that may follow a dot.
 
 ## Which fields you can name
 

@@ -96,17 +96,17 @@ everything in that list shows up in the derive's public rustdoc. A doc string
 needs no such listing. The added field is private, and rustdoc does not print
 private fields, so the marker stays out of the docs.
 
-The cost is that a doc string cannot be rejected. A user may write one, and the
-macro can only compare text. So the marker text ends in a nonce, which an
-ordinary doc comment will not match.
+The cost falls on the derive. It runs after `#[ohno::error]` has added the
+field, so it cannot tell a marker it was handed from one a user wrote, and can
+only compare text. That is why the marker ends in a nonce: an ordinary doc
+comment will not match it.
 
-If a struct carries both markers, the macro reports it. That keeps the two
-apart, which matters because field lookup takes the first marked field it sees.
+`#[ohno::error]` is under no such limit. It runs before it adds anything, so a
+marker present at that point was written by hand, and it says so. One would take
+over the error field, and two would settle the choice by declaration order.
 
-`#[ohno::error]` also rejects a struct that already carries the reserved marker.
-At that point it has not added its own field yet, so the marker was written by
-hand: one would take over the error field, and two would settle it by
-declaration order.
+If a struct carries both markers, the macro reports that too. It matters because
+field lookup takes the first marked field it sees.
 
 ## What gets rejected
 

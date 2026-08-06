@@ -365,8 +365,9 @@ mod tests {
 
     #[test]
     fn test_injected_field_is_recognized_by_its_doc_marker() {
-        // The whole string is the contract. A doc string can only fail to match, never be
-        // rejected, so anything short of the exact marker has to be somebody's own doc comment
+        // The whole string is the contract. Recognition here can only compare text — rejecting a
+        // hand-written marker is `#[ohno::error]`'s job — so anything short of the exact marker
+        // has to be somebody's own doc comment
         let marker = GENERATED_ERROR_FIELD_MARKER;
         let generated: syn::Field = parse_quote! { #[doc = #marker] ohno_core: OhnoCore };
         assert!(is_generated_error_field(&generated));
@@ -393,7 +394,8 @@ mod tests {
     #[test]
     fn test_marker_is_not_plausible_prose() {
         // A marker that read as an ordinary doc comment would let a user hide their own field by
-        // documenting it, and nothing can reject that, so the nonce is what keeps it out of reach
+        // documenting it under a plain `#[derive(Error)]`, where nothing rejects it, so the nonce
+        // is what keeps it out of reach
         assert!(
             GENERATED_ERROR_FIELD_MARKER.contains("7f3d9c2a"),
             "the marker must carry a nonce no doc comment would contain"

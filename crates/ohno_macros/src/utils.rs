@@ -76,8 +76,9 @@ pub(crate) use bail_spanned;
 
 /// Doc marker `#[ohno::error]` puts on the `OhnoCore` field it injects
 ///
-/// The nonce is load-bearing: a doc string cannot be rejected when a user writes it, only fail to
-/// match. See `docs/error_error.md`.
+/// The nonce is load-bearing: the derive runs after the field is added, so it can only compare
+/// text and never reject. `#[ohno::error]` runs before, and does reject. See
+/// `docs/error_error.md`.
 pub(crate) const GENERATED_ERROR_FIELD_MARKER: &str = " ohno::generated-core@7f3d9c2a";
 
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields
