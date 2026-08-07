@@ -271,6 +271,14 @@
 //!   scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`]. Clocks
 //!   remain precise by default.
 //!
+//! ## Fast instant contract
+//!
+//! Fast instant retrieval is disabled by default and configured independently on each clock clone.
+//! Its values are monotonically non-decreasing, but consecutive reads may be equal and precision is
+//! platform-dependent. Stopwatches inherit the configured retrieval source. `system_time()`,
+//! controlled clocks, and precise timer scheduling for delays and periodic timers are unaffected.
+//! On unsupported platforms, enabling the option preserves the standard instant source.
+//!
 //! ## Using precise and fast clocks together
 //!
 //! A component that already receives a [`Clock`] can derive a fast clone locally instead of

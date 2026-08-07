@@ -255,6 +255,14 @@ This crate provides several optional features that can be enabled in your `Cargo
   scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`][__link46]. Clocks
   remain precise by default.
 
+### Fast instant contract
+
+Fast instant retrieval is disabled by default and configured independently on each clock clone.
+Its values are monotonically non-decreasing, but consecutive reads may be equal and precision is
+platform-dependent. Stopwatches inherit the configured retrieval source. `system_time()`,
+controlled clocks, and precise timer scheduling for delays and periodic timers are unaffected.
+On unsupported platforms, enabling the option preserves the standard instant source.
+
 ### Using precise and fast clocks together
 
 A component that already receives a [`Clock`][__link47] can derive a fast clone locally instead of
@@ -283,7 +291,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbQJq2H4_Hzl8b8JLtzRTT0X0bV5e2YzObDpMbqNhtFEGGBLFhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
  [__link0]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.4.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.4.0/tick/?search=Error

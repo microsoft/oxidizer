@@ -7,40 +7,66 @@ use std::time::Instant;
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
 thread_local! {
-    static SOURCE: std::cell::RefCell<Source> = std::cell::RefCell::new(Source::new());
+    static SOURCE: std::cell::RefCell<Source> = std::cell::RefCell::new(Source::new(*calibration()));
 }
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
-#[derive(Debug)]
-struct Source {
+static CALIBRATION: std::sync::OnceLock<Calibration> = std::sync::OnceLock::new();
+
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+#[derive(Clone, Copy, Debug)]
+struct Calibration {
     instant_epoch: Instant,
     platform_epoch: Duration,
+}
+
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+fn calibration() -> &'static Calibration {
+    CALIBRATION.get_or_init(|| Calibration {
+        instant_epoch: Instant::now(),
+        platform_epoch: platform_time(),
+    })
+}
+
+/// Maps coarse platform timestamps into the process-wide [`Instant`] comparison domain.
+///
+/// Every instance uses the same calibration pair, so values remain comparable when clocks or
+/// stopwatches move between threads. Each thread keeps its own cache because repeated platform
+/// timestamps are common and avoiding reconstruction is important on the hot path.
+///
+/// The cache key and cached instant always describe the same sample. Equal or unexpectedly older
+/// samples reuse the cached value, preserving non-decreasing results. Newer samples are translated
+/// by adding their elapsed platform duration to the calibrated `Instant`.
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+#[derive(Debug)]
+struct Source {
+    calibration: Calibration,
     cache_key: Duration,
     cached: Instant,
 }
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
 impl Source {
-    fn new() -> Self {
-        let instant_epoch = Instant::now();
-
+    fn new(calibration: Calibration) -> Self {
         Self {
-            instant_epoch,
-            platform_epoch: platform_time(),
-            cache_key: Duration::ZERO,
-            cached: instant_epoch,
+            calibration,
+            cache_key: calibration.platform_epoch,
+            cached: calibration.instant_epoch,
         }
     }
 
     fn now(&mut self) -> Instant {
-        let platform_time = platform_time();
+        self.now_at(platform_time())
+    }
 
-        if self.cache_key == platform_time {
+    fn now_at(&mut self, platform_time: Duration) -> Instant {
+        if platform_time <= self.cache_key {
             return self.cached;
         }
 
-        let elapsed = platform_time.saturating_sub(self.platform_epoch);
+        let elapsed = platform_time.saturating_sub(self.calibration.platform_epoch);
         let now = self
+            .calibration
             .instant_epoch
             .checked_add(elapsed)
             .expect("a monotonic platform timestamp cannot exceed the range of Instant");
@@ -57,11 +83,11 @@ impl Source {
 fn platform_time() -> Duration {
     let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
 
-    // SAFETY: clock_gettime initializes the provided timespec pointer.
+    // SAFETY: `as_mut_ptr` is non-null, aligned, and writable for one `timespec`.
     let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_COARSE, timestamp.as_mut_ptr()) };
     assert_eq!(result, 0, "CLOCK_MONOTONIC_COARSE must be available");
 
-    // SAFETY: A successful clock_gettime call initialized the timespec above.
+    // SAFETY: The checked successful return guarantees that `timestamp` was initialized.
     let timestamp = unsafe { timestamp.assume_init() };
     let seconds = u64::try_from(timestamp.tv_sec).expect("CLOCK_MONOTONIC_COARSE seconds are guaranteed to be nonnegative");
     let nanoseconds = u32::try_from(timestamp.tv_nsec).expect("clock_gettime guarantees tv_nsec is between 0 and 999,999,999");
@@ -95,31 +121,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn repeated_calls_use_cached_instant() {
-        let mut previous = now();
+    fn cache_and_conversion_are_deterministic() {
+        let instant_epoch = Instant::now();
+        let platform_epoch = Duration::from_secs(10);
+        let mut source = Source::new(Calibration {
+            instant_epoch,
+            platform_epoch,
+        });
 
-        for _ in 0..1_000 {
-            let current = now();
-            if current == previous {
-                return;
-            }
-            previous = current;
-        }
+        assert_eq!(source.now_at(platform_epoch), instant_epoch);
 
-        panic!("the coarse platform clock must return the same timestamp for consecutive calls");
+        let advanced_platform = platform_epoch + Duration::from_millis(5);
+        let advanced = source.now_at(advanced_platform);
+        assert_eq!(advanced, instant_epoch + Duration::from_millis(5));
+        assert_eq!(source.now_at(advanced_platform), advanced);
+
+        assert_eq!(source.now_at(platform_epoch), advanced);
     }
 
     #[test]
-    fn cache_refreshes_when_platform_time_advances() {
-        let first = now();
+    fn shared_calibration_keeps_thread_results_comparable() {
+        let calibration = Calibration {
+            instant_epoch: Instant::now(),
+            platform_epoch: Duration::from_secs(10),
+        };
 
-        std::thread::sleep(Duration::from_millis(50));
+        let first = std::thread::spawn(move || Source::new(calibration).now_at(calibration.platform_epoch + Duration::from_millis(1)))
+            .join()
+            .expect("test thread must complete");
+        let second = std::thread::spawn(move || Source::new(calibration).now_at(calibration.platform_epoch + Duration::from_millis(2)))
+            .join()
+            .expect("test thread must complete");
 
-        assert!(now() > first);
+        assert!(second > first);
     }
 
     #[test]
-    fn platform_time_is_nonzero() {
-        assert_ne!(platform_time(), Duration::ZERO);
+    fn platform_time_can_be_read() {
+        _ = platform_time();
     }
 }
