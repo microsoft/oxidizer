@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Allocation telemetry, process-wide event tracking, and deferred stack resolution.
 
 use std::alloc::Layout;

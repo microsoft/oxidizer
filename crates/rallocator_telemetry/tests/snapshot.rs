@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration and migration tests for telemetry snapshot encoding.
 #![expect(
     clippy::cast_possible_truncation,

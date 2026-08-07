@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Bump heap configuration and usage information.
 
 const BUMP_SEGMENT_SIZE: usize = 32 * 1024;

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for the command-line interface.
 #![expect(clippy::unwrap_used, reason = "Test setup and assertions should fail immediately")]
 

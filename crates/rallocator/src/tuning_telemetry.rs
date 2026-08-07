@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 

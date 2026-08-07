@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Allocation benchmark with active caller tracking.
 
 mod workloads;

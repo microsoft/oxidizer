@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::cast_possible_truncation,
     clippy::multiple_unsafe_ops_per_block,

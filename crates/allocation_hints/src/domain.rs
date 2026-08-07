@@ -1,7 +1,9 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Process-retained allocation domains.
 
-use std::fmt;
-use std::ptr;
+use std::{fmt, ptr};
 
 use crate::backend::{self, Backend, RawDomain};
 

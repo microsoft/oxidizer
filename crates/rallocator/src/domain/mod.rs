@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Region ownership domains shared by one or more heaps.
 
 use std::ptr::NonNull;

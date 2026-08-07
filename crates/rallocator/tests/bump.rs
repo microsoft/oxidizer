@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for bump heaps and their lifecycle.
 #![expect(
     clippy::cast_possible_truncation,

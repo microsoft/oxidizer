@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Multithreaded allocation benchmarks using mimalloc.
 
 //! Multithreaded allocation benchmark using mimalloc.

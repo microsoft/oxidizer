@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! General allocation workload benchmark using mimalloc.
 
 mod workloads;

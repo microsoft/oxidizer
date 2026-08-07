@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Types that describe the snapshot wire container.
 
 const WIRE_FORMAT_VERSION: u16 = 1;

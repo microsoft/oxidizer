@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::cast_possible_truncation,
     reason = "Bounded deterministic benchmark generators use compact integer arithmetic"

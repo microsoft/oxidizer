@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::{fs, io};

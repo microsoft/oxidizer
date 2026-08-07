@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Core snapshot model types.
 
 /// Producer version carried by snapshot metadata.

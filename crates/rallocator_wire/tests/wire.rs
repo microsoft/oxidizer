@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for the public wire container API.
 
 use rallocator_wire::format::{Header, Section, Version};

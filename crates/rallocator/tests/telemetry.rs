@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for allocator telemetry.
 #![expect(
     clippy::cast_possible_truncation,
@@ -424,9 +427,9 @@ fn snapshot_reports_bounded_size_class_and_region_telemetry() {
     assert!(snapshot.stats.mapped_bytes >= snapshot.stats.live_bytes);
 
     let class = snapshot.size_classes.iter().find(|class| class.block_bytes == 64).unwrap();
-    assert!(class.live_allocations.lower_bound >= 1);
-    assert!(class.requested_bytes.lower_bound >= 64);
-    assert!(class.usable_bytes.lower_bound >= 64);
+    assert!(class.live_allocations.value >= 1);
+    assert!(class.requested_bytes.value >= 64);
+    assert!(class.usable_bytes.value >= 64);
     assert!(!snapshot.regions.is_empty());
     let default_domain = snapshot
         .domains

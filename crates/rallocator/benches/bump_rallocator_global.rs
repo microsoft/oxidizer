@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Bump workload benchmark using rallocator's global heap.
 
 mod bump_workloads;
