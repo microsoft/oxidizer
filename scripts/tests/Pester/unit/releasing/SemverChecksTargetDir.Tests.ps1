@@ -103,22 +103,29 @@ Describe 'Clear-LegacySemverChecksScratch' {
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
     }
 
-    It 'leaves the directory alone when the target dir is nested inside the repository target dir' {
+    It 'removes the legacy scratch when another target dir is nested under the repository target dir' {
         $nested = Join-Path $script:repoTarget 'custom'
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nested 6>$null
 
-        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+        Test-Path -LiteralPath $script:legacy | Should -BeFalse
     }
 
-    It 'leaves the directory alone when dot segments resolve inside the repository target dir' {
+    It 'removes the legacy scratch when dot segments resolve to another nested target dir' {
         $nestedViaDot = Join-Path (Join-Path $script:repoTarget '.') 'custom'
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nestedViaDot 6>$null
 
-        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+        Test-Path -LiteralPath $script:legacy | Should -BeFalse
     }
 
     It 'leaves the directory alone when the target dir is the scratch directory itself' {
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $script:legacy 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
+    It 'leaves the directory alone when the target dir is nested inside the scratch directory' {
+        $nestedScratch = Join-Path $script:legacy 'custom'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nestedScratch 6>$null
 
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
     }

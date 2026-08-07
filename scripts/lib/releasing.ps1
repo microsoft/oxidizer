@@ -709,28 +709,21 @@ function Clear-LegacySemverChecksScratch {
     $repoTarget = Join-Path $RepoRoot 'target'
     $legacy = Join-Path $repoTarget 'semver-checks'
 
-    # When the override deliberately points back at (or inside) the repository's
-    # own target directory, this *is* the live scratch directory — leave it
-    # alone. Canonicalize lexical dot segments before testing containment:
-    # `<repo>/target/../elsewhere` is outside the target directory, while
-    # `<repo>/target/./custom` is inside it. The containment test must use the
-    # platform's separator: hardcoding a backslash silently disables this guard
-    # on Linux and macOS, where the override is the only way to reach this code
-    # at all. Windows additionally accepts forward slashes and compares
-    # case-insensitively.
+    # Do not delete the directory when it is the active semver-checks scratch:
+    # Cargo's default target puts it at `<repo>/target/semver-checks`, and an
+    # override may point at that directory or one of its children. Other target
+    # directories nested under `<repo>/target` do not use this legacy scratch
+    # and must not suppress cleanup.
     $separator = [System.IO.Path]::DirectorySeparatorChar
-    $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
-    $normalizedTarget = [System.IO.Path]::GetFullPath($TargetDir)
-    $normalizedRepoTarget = [System.IO.Path]::GetFullPath($repoTarget)
-    if ($IsWindows) {
-        $normalizedTarget = $normalizedTarget.Replace('/', '\')
-        $normalizedRepoTarget = $normalizedRepoTarget.Replace('/', '\')
-    }
-    $normalizedTarget = $normalizedTarget.TrimEnd($separator)
-    $normalizedRepoTarget = $normalizedRepoTarget.TrimEnd($separator)
+    $relativeToRepoTarget = [System.IO.Path]::GetRelativePath($repoTarget, $TargetDir)
+    $relativeToLegacy = [System.IO.Path]::GetRelativePath($legacy, $TargetDir)
+    $targetIsLegacyOrChild = $relativeToLegacy -eq '.' -or (
+        -not [System.IO.Path]::IsPathRooted($relativeToLegacy) -and
+        $relativeToLegacy -ne '..' -and
+        -not $relativeToLegacy.StartsWith("..$separator", [StringComparison]::Ordinal)
+    )
 
-    if ($normalizedTarget.Equals($normalizedRepoTarget, $comparison) -or
-        $normalizedTarget.StartsWith("$normalizedRepoTarget$separator", $comparison)) {
+    if ($relativeToRepoTarget -eq '.' -or $targetIsLegacyOrChild) {
         return
     }
 
