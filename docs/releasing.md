@@ -258,7 +258,7 @@ result requires.
 
 #### Windows: baseline builds run in a short scratch directory
 
-On Windows, cargo-semver-checks uses `%SystemDrive%\ox-semver` to avoid
+On Windows, cargo-semver-checks uses `%TEMP%\ox-semver` to avoid
 path length failures. Set `OXIDIZER_SEMVER_TARGET_DIR` to an absolute
 path to override it on any platform. When unset, other platforms use
 Cargo's default target directory.

@@ -43,12 +43,12 @@ Describe 'Get-SemverChecksTargetDir' {
         $result | Should -Not -Be '   '
     }
 
-    It 'returns a short scratch root on Windows and nothing elsewhere' {
+    It 'uses the temp directory on Windows and nothing elsewhere' {
         $result = Get-SemverChecksTargetDir
 
         if ($IsWindows) {
-            $result | Should -Not -BeNullOrEmpty
-            $result.Length | Should -BeLessThan 24
+            $expected = Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver'
+            $result | Should -Be $expected
         } else {
             $result | Should -BeNullOrEmpty
         }
@@ -76,7 +76,6 @@ Describe 'Clear-LegacySemverChecksScratch' {
 
         Test-Path -LiteralPath $script:legacy | Should -BeFalse
     }
-    It 'leaves the directory alone when the target dir IS the repository target dir' {
     It 'leaves the directory alone when the target dir IS the repository target dir' {
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $script:repoTarget 6>$null
 
