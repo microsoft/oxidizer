@@ -6,75 +6,64 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
-thread_local! {
-    static SOURCE: std::cell::RefCell<Source> = std::cell::RefCell::new(Source::new(*calibration()));
-}
-
-#[cfg(all(any(target_os = "linux", windows), not(miri)))]
 static CALIBRATION: std::sync::OnceLock<Calibration> = std::sync::OnceLock::new();
+#[cfg(any(miri, not(any(target_os = "linux", windows))))]
+static CALIBRATION: Calibration = Calibration {};
 
-#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+/// Provides lower-precision [`Instant`] retrieval from one process-wide calibration domain.
+///
+/// On Linux and Windows, the platform clocks are non-decreasing, so translating every sample from
+/// the same pair preserves ordering and keeps values comparable when clocks or stopwatches move
+/// between threads. Equal platform samples produce equal instants. Other targets delegate to
+/// [`Instant::now`].
 #[derive(Clone, Copy, Debug)]
-struct Calibration {
+pub(crate) struct Calibration {
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     instant_epoch: Instant,
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     platform_epoch: Duration,
 }
 
-#[cfg(all(any(target_os = "linux", windows), not(miri)))]
-fn calibration() -> &'static Calibration {
-    CALIBRATION.get_or_init(|| Calibration {
-        instant_epoch: Instant::now(),
-        platform_epoch: platform_time(),
-    })
-}
-
-/// Maps coarse platform timestamps into the process-wide [`Instant`] comparison domain.
-///
-/// Every instance uses the same calibration pair, so values remain comparable when clocks or
-/// stopwatches move between threads. Each thread keeps its own cache because repeated platform
-/// timestamps are common and avoiding reconstruction is important on the hot path.
-///
-/// The cache key and cached instant always describe the same sample. Equal or unexpectedly older
-/// samples reuse the cached value, preserving non-decreasing results. Newer samples are translated
-/// by adding their elapsed platform duration to the calibrated `Instant`.
-#[cfg(all(any(target_os = "linux", windows), not(miri)))]
-#[derive(Debug)]
-struct Source {
-    calibration: Calibration,
-    cache_key: Duration,
-    cached: Instant,
-}
-
-#[cfg(all(any(target_os = "linux", windows), not(miri)))]
-impl Source {
-    fn new(calibration: Calibration) -> Self {
+impl Calibration {
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+    fn new() -> Self {
         Self {
-            calibration,
-            cache_key: calibration.platform_epoch,
-            cached: calibration.instant_epoch,
+            instant_epoch: Instant::now(),
+            platform_epoch: platform_time(),
         }
     }
 
-    fn now(&mut self) -> Instant {
-        self.now_at(platform_time())
-    }
-
-    fn now_at(&mut self, platform_time: Duration) -> Instant {
-        if platform_time <= self.cache_key {
-            return self.cached;
+    #[must_use]
+    pub(crate) fn now(&self) -> Instant {
+        #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+        {
+            self.now_at(platform_time())
         }
 
-        let elapsed = platform_time.saturating_sub(self.calibration.platform_epoch);
-        let now = self
-            .calibration
-            .instant_epoch
+        #[cfg(any(miri, not(any(target_os = "linux", windows))))]
+        {
+            Instant::now()
+        }
+    }
+
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+    fn now_at(&self, platform_time: Duration) -> Instant {
+        let elapsed = platform_time.saturating_sub(self.platform_epoch);
+        self.instant_epoch
             .checked_add(elapsed)
-            .expect("a monotonic platform timestamp cannot exceed the range of Instant");
+            .expect("a monotonic platform timestamp cannot exceed the range of Instant")
+    }
+}
 
-        self.cache_key = platform_time;
-        self.cached = now;
+pub(crate) fn calibration() -> &'static Calibration {
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+    {
+        CALIBRATION.get_or_init(Calibration::new)
+    }
 
-        now
+    #[cfg(any(miri, not(any(target_os = "linux", windows))))]
+    {
+        &CALIBRATION
     }
 }
 
@@ -102,41 +91,25 @@ fn platform_time() -> Duration {
     Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })
 }
 
-#[must_use]
-pub(crate) fn now() -> Instant {
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
-    {
-        SOURCE.with(|source| source.borrow_mut().now())
-    }
-
-    #[cfg(any(miri, not(any(target_os = "linux", windows))))]
-    {
-        Instant::now()
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
 mod tests {
     use super::*;
 
     #[test]
-    fn cache_and_conversion_are_deterministic() {
+    fn conversion_is_deterministic() {
         let instant_epoch = Instant::now();
         let platform_epoch = Duration::from_secs(10);
-        let mut source = Source::new(Calibration {
+        let calibration = Calibration {
             instant_epoch,
             platform_epoch,
-        });
+        };
 
-        assert_eq!(source.now_at(platform_epoch), instant_epoch);
+        assert_eq!(calibration.now_at(platform_epoch), instant_epoch);
+        assert_eq!(calibration.now_at(platform_epoch - Duration::from_secs(1)), instant_epoch);
 
         let advanced_platform = platform_epoch + Duration::from_millis(5);
-        let advanced = source.now_at(advanced_platform);
-        assert_eq!(advanced, instant_epoch + Duration::from_millis(5));
-        assert_eq!(source.now_at(advanced_platform), advanced);
-
-        assert_eq!(source.now_at(platform_epoch), advanced);
+        assert_eq!(calibration.now_at(advanced_platform), instant_epoch + Duration::from_millis(5));
     }
 
     #[test]
@@ -146,10 +119,10 @@ mod tests {
             platform_epoch: Duration::from_secs(10),
         };
 
-        let first = std::thread::spawn(move || Source::new(calibration).now_at(calibration.platform_epoch + Duration::from_millis(1)))
+        let first = std::thread::spawn(move || calibration.now_at(calibration.platform_epoch + Duration::from_millis(1)))
             .join()
             .expect("test thread must complete");
-        let second = std::thread::spawn(move || Source::new(calibration).now_at(calibration.platform_epoch + Duration::from_millis(2)))
+        let second = std::thread::spawn(move || calibration.now_at(calibration.platform_epoch + Duration::from_millis(2)))
             .join()
             .expect("test thread must complete");
 
