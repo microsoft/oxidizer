@@ -52,9 +52,8 @@ fn parse_template(template: &str, span: proc_macro2::Span) -> Result<Vec<Segment
             continue;
         }
 
-        if index > text_start {
-            segments.push(Segment::Text(&template[text_start..index]));
-        }
+        // An empty run yields an empty `Text`, which renders as nothing, so no guard is needed
+        segments.push(Segment::Text(&template[text_start..index]));
 
         // The placeholder runs to the next `}`; without one the template is reported rather than
         // parsed into a different, valid one
@@ -81,9 +80,7 @@ fn parse_template(template: &str, span: proc_macro2::Span) -> Result<Vec<Segment
         });
     }
 
-    if text_start < template.len() {
-        segments.push(Segment::Text(&template[text_start..]));
-    }
+    segments.push(Segment::Text(&template[text_start..]));
 
     Ok(segments)
 }
