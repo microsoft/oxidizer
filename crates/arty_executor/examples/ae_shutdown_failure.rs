@@ -16,10 +16,12 @@
 //! the maximum level of diagnostic information before terminating the process.
 
 use std::cell::Cell;
+use std::env;
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Waker;
+use std::time::Duration;
 use std::{task, thread};
 
 use arty_executor::{CycleOutcome, Executor};
@@ -28,9 +30,13 @@ use tracing::info;
 fn main() {
     tracing_subscriber::fmt::init();
 
+    let mut executor_builder = Executor::builder();
+    if env::var_os("IS_TESTING").is_some() {
+        executor_builder = executor_builder.shutdown_timeout(Duration::ZERO);
+    }
     // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
     // an execution cycle indicates the `Shutdown` outcome. We do.
-    let executor = unsafe { Executor::builder().build() };
+    let executor = unsafe { executor_builder.build() };
     let tasks = executor.tasks();
 
     // When our single task is done, it will set this signal to indicate that the app can exit.

@@ -4,6 +4,7 @@
 //! Special purpose example to explore effects of spawning and completing millions of tasks.
 
 use std::cell::Cell;
+use std::env;
 use std::iter;
 use std::rc::Rc;
 
@@ -13,8 +14,18 @@ use nm::Report;
 // Two layers multiplied together is 10 million.
 const FIRST_LAYER_TASK_COUNT: usize = 1_000;
 const SECOND_LAYER_TASK_COUNT: usize = 10_000;
+const TEST_FIRST_LAYER_TASK_COUNT: usize = 10;
+const TEST_SECOND_LAYER_TASK_COUNT: usize = 100;
 
 fn main() {
+    // Preserve the behavior while keeping automated example validation fast.
+    let (first_layer_task_count, second_layer_task_count) =
+        if env::var_os("IS_TESTING").is_some() {
+            (TEST_FIRST_LAYER_TASK_COUNT, TEST_SECOND_LAYER_TASK_COUNT)
+        } else {
+            (FIRST_LAYER_TASK_COUNT, SECOND_LAYER_TASK_COUNT)
+        };
+
     // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
     // an execution cycle indicates the `Shutdown` outcome. We do.
     let executor = unsafe { Executor::builder().build() };
@@ -43,7 +54,7 @@ fn main() {
                                 }
                             })
                         })
-                        .take(SECOND_LAYER_TASK_COUNT)
+                        .take(second_layer_task_count)
                         .collect::<Vec<_>>();
 
                         for join_handle in join_handles {
@@ -52,7 +63,7 @@ fn main() {
                     }
                 })
             })
-            .take(FIRST_LAYER_TASK_COUNT)
+            .take(first_layer_task_count)
             .collect::<Vec<_>>();
 
             for join_handle in join_handles {
