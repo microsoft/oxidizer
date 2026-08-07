@@ -28,11 +28,16 @@ use automation::{Outcome, run_with_timeout};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Examples that are expected to panic, hang, or require user interaction
-/// and so must be skipped by this runner.
+/// Examples that require user interaction and so must be skipped by this runner.
 const EXCLUDED_EXAMPLES: &[&str] = &[
     // Interactive - requires user input from stdin.
     "employees",
+];
+
+/// Examples that demonstrate process termination and must exit unsuccessfully.
+const EXPECTED_FAILURE_EXAMPLES: &[&str] = &[
+    "ae_panic",
+    "ae_shutdown_failure",
 ];
 
 /// Run all stand-alone example binaries in the workspace.
@@ -156,9 +161,24 @@ fn run(args: &Args) -> Result<(), AppError> {
             cmd.env("IS_TESTING", "1");
 
             let result = run_with_timeout(cmd, TIMEOUT)?;
+            let expects_failure = EXPECTED_FAILURE_EXAMPLES.contains(&example_name);
             match result.outcome {
+                Outcome::Success if expects_failure => {
+                    println!(
+                        "✗ Example '{example_name}' in package '{}' succeeded but was expected to fail",
+                        pkg.name
+                    );
+                    failures.push(format!("{}::{example_name} (unexpected success)", pkg.name));
+                }
                 Outcome::Success => {
                     println!("✓ Example '{example_name}' in package '{}' completed successfully", pkg.name);
+                    successes += 1;
+                }
+                Outcome::Failed(_) if expects_failure => {
+                    println!(
+                        "✓ Example '{example_name}' in package '{}' failed as expected",
+                        pkg.name
+                    );
                     successes += 1;
                 }
                 Outcome::Failed(code) => {

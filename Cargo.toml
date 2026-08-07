@@ -53,6 +53,7 @@ include = [
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
+all_the_time = { version = "0.4.4", default-features = false }
 alloc_tracker = { version = "0.7.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
@@ -94,6 +95,8 @@ deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
+events_once = { version = "0.5.19", default-features = false }
+fast_time = { version = "0.1.17", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 fetch = { path = "crates/fetch", default-features = false, version = "0.14.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.4.0" }
@@ -187,6 +190,7 @@ rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
+scopeguard = { version = "1.2.0", default-features = false }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.6.1" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.6.0" }
 serde = { version = "1.0.228", default-features = false }
