@@ -416,6 +416,26 @@ mod tests {
     }
 
     #[test]
+    fn test_the_marker_only_counts_as_a_doc_string_literal() {
+        let marker = GENERATED_ERROR_FIELD_MARKER;
+
+        let doc: syn::Field = parse_quote! { #[doc = #marker] ohno_core: ohno::OhnoCore };
+        assert!(is_generated_error_field(&doc));
+
+        // Matching the value alone would let any name-value attribute carrying the same text
+        // take over as the error field
+        let other_attribute: syn::Field = parse_quote! { #[note = #marker] ohno_core: ohno::OhnoCore };
+        assert!(!is_generated_error_field(&other_attribute));
+
+        // The derive compares literal text, so a marker assembled at expansion time is not
+        // recognized -- the marker can fail to match, which is the safe direction
+        let assembled: syn::Field = parse_quote! {
+            #[doc = concat!(" ohno::generated-core@", "7f3d9c2a")] ohno_core: ohno::OhnoCore
+        };
+        assert!(!is_generated_error_field(&assembled));
+    }
+
+    #[test]
     fn test_find_error_field_in_tuple() {
         let input: DeriveInput = parse_quote! { struct TestError( String, #[error] OhnoCore); };
         let field = select_error_field(&input).unwrap();
