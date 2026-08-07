@@ -12,6 +12,7 @@ If you only touch one package, you may use `just package=PACKAGE_NAME command` t
 
 ## Pre-commit Checklist
 
+- Run `just clippy` to verify the code compiles without linter errors.
 - Run `just format` to format code.
 - Run `just readme` to regenerate crate-level readme files.
 - Run `just spellcheck` to check spelling in code comments and docs.
@@ -50,7 +51,7 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 ## Feature-gated Doctests
 
-Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [AGENTS-feature-gated-doctests.md](AGENTS-feature-gated-doctests.md).
+Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [docs/feature-gated-doctests.md](docs/feature-gated-doctests.md).
 
 ## Required CI Checks
 
@@ -82,6 +83,10 @@ wrong and it does not explain why we believe this access can never be out of bou
 
 This is good code: `self_span.get(self_offset..).expect("guarded by min() above to never exceed span length")` - this explains
 why we believe the operation can never cause an out of bounds access.
+
+In test code, use `.unwrap()` instead of `.expect()` because the backtrace will be informative enough already.
+
+In example code, prefer `.expect()` unless it gets too verbose - `.unwrap()` is fine if you need to condense the text for readability.
 
 # [Testing tracing events](docs/tracing-tests.md)
 
