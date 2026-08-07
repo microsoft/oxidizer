@@ -247,12 +247,7 @@ fn referenceable_field_names(input: &DeriveInput) -> impl Iterator<Item = String
         // Positions are taken before filtering, so an index still names the field it did
         .flat_map(|fields| fields.iter().enumerate())
         .filter(|(_, field)| !is_generated_error_field(field))
-        .map(|(index, field)| {
-            field
-                .ident
-                .as_ref()
-                .map_or_else(|| index.to_string(), ToString::to_string)
-        })
+        .map(|(index, field)| field.ident.as_ref().map_or_else(|| index.to_string(), ToString::to_string))
 }
 
 /// Generate the final display expression
