@@ -136,7 +136,7 @@ fn add_ohno_core_field(input: &mut DeriveInput) -> syn::Result<()> {
                 let names = fields
                     .named
                     .iter()
-                    .map(|f| f.ident.as_ref().expect("unnamed field"))
+                    .map(|f| f.ident.as_ref().expect("Fields::Named always has idents"))
                     .collect::<Vec<_>>();
                 let field_name = generate_unique_field_name(&names);
                 fields.named.push(parse_quote! {

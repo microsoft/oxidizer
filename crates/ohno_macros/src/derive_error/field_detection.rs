@@ -54,7 +54,7 @@ impl<'a> ParsedFields<'a> {
             .enumerate()
             .map(|(index, field)| ParsedField {
                 reference: if named {
-                    ErrorFieldRef::Named(field.ident.clone().expect("named field"))
+                    ErrorFieldRef::Named(field.ident.clone().expect("`named` means Fields::Named"))
                 } else {
                     ErrorFieldRef::Indexed(syn::Index::from(index))
                 },
