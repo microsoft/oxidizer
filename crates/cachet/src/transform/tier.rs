@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 
 use crate::transform::codec::DecodeOutcome;
-use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, InsertOutcome, SizeError};
 
 /// Adapter that transforms keys and values between user types and storage types.
 ///
@@ -71,9 +71,13 @@ where
     }
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.insert_with_outcome(key, entry).await.map(drop)
+    }
+
+    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let mapped_key = self.key_encoder.encode(&key)?;
         let mapped_entry = entry.try_map_value(|v| self.value_codec.encode(&v))?;
-        self.inner.insert(mapped_key, mapped_entry).await
+        self.inner.insert_with_outcome(mapped_key, mapped_entry).await
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
@@ -152,6 +156,26 @@ mod tests {
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
         );
         assert_eq!(adapter.len().await.expect("MockCache::len returns Ok"), 2);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_delegates_to_inner() {
+        let inner = MockCache::<i32, i32>::new();
+        let inner_check = inner.clone();
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
+            Box::new(TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                infallible_owned(|v: i32| v.to_string()),
+            )),
+        );
+
+        adapter.insert("42".to_string(), CacheEntry::new("100".to_string())).await.unwrap();
+
+        let stored = inner_check.get(&42).await.unwrap().expect("insert should reach inner tier");
+        assert_eq!(*stored.value(), 100);
     }
 
     #[cfg_attr(miri, ignore)]
