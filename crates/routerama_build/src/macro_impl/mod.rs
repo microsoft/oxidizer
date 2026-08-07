@@ -12,7 +12,7 @@ use http_path_template::{Grammar, PathTemplate};
 use proc_macro2::TokenStream;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{DeriveInput, Fields, GenericParam, Generics, Ident, ItemEnum, LitStr, Token, Variant};
+use syn::{Attribute, DeriveInput, Fields, GenericParam, Generics, Ident, ItemEnum, LitStr, Token, Variant};
 
 use crate::trie::capture_field_names;
 use crate::{Route, is_http_token, route_field_name};
@@ -20,6 +20,7 @@ use crate::{Route, is_http_token, route_field_name};
 mod field;
 mod query;
 mod resolver;
+mod router;
 mod service;
 
 /// Expands `#[derive(FromQuery)]`.
@@ -54,6 +55,12 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
         .and_then(|attr| syn::parse2::<syn::ItemImpl>(item).map(|item| (attr, item)))
         .and_then(|(attr, item)| service::expand(item, attr.context))
         .unwrap_or_else(syn::Error::into_compile_error)
+}
+
+/// Expands `#[router]`.
+#[must_use]
+pub fn router(attr: TokenStream, item: TokenStream) -> TokenStream {
+    router::expand(attr, item)
 }
 
 #[derive(Default)]
@@ -106,17 +113,110 @@ impl Parse for ResolverAttr {
     }
 }
 
-/// The `#[route(METHOD, "path")]` attribute on a variant.
+/// The `#[route(METHOD, "path", ...)]` attribute on a variant or handler.
 ///
 /// Identifier methods are normalized to uppercase; string methods are used
-/// exactly as written and allow any RFC 9110 token.
+/// exactly as written and allow any RFC 9110 token. The optional `host`,
+/// `consumes`, `produces`, and `priority` arguments are HTTP route policy that
+/// only `#[router]` understands; `#[resolver]` rejects them explicitly.
 pub(crate) struct RouteAttr {
     pub(crate) method: String,
     pub(crate) path: LitStr,
+    pub(crate) dynamic: Option<proc_macro2::Span>,
+    pub(crate) host: Option<LitStr>,
+    pub(crate) consumes: Option<LitStr>,
+    pub(crate) produces: Option<LitStr>,
+    pub(crate) priority: Option<(i32, proc_macro2::Span)>,
+    /// The first policy argument seen, for `#[resolver]`'s rejection.
+    pub(crate) policy: Option<(String, proc_macro2::Span, bool)>,
+}
+
+/// Parses the optional trailing `key = "value"` route policy arguments.
+fn parse_route_policy(input: ParseStream<'_>, attr: &mut RouteAttr) -> syn::Result<()> {
+    while input.peek(Token![,]) {
+        let _comma: Token![,] = input.parse()?;
+        if input.is_empty() {
+            break;
+        }
+        let key: Ident = input.parse()?;
+        let name = key.to_string();
+        let _equals: Token![=] = input.parse()?;
+        match name.as_str() {
+            "host" | "consumes" | "produces" => {
+                let value: LitStr = input.parse()?;
+                let slot = match name.as_str() {
+                    "host" => &mut attr.host,
+                    "consumes" => &mut attr.consumes,
+                    _ => &mut attr.produces,
+                };
+                if slot.is_some() {
+                    return Err(syn::Error::new(key.span(), format!("duplicate `{name}` route argument")));
+                }
+                if attr.policy.is_none() {
+                    attr.policy = Some((name.clone(), value.span(), false));
+                }
+                *slot = Some(value);
+            }
+            "priority" => {
+                if attr.priority.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `priority` route argument"));
+                }
+                let negative = input.parse::<Option<Token![-]>>()?.is_some();
+                let literal: syn::Lit = input.parse()?;
+                let syn::Lit::Int(value) = &literal else {
+                    return Err(syn::Error::new(literal.span(), "`priority` must be an integer in the `i32` range"));
+                };
+                let magnitude = value
+                    .base10_parse::<i64>()
+                    .map_err(|_err| syn::Error::new(literal.span(), "`priority` must be an integer in the `i32` range"))?;
+                let signed = if negative { -magnitude } else { magnitude };
+                let priority = i32::try_from(signed)
+                    .map_err(|_err| syn::Error::new(literal.span(), "`priority` must be an integer in the `i32` range"))?;
+                if attr.policy.is_none() {
+                    attr.policy = Some((name, literal.span(), true));
+                }
+                attr.priority = Some((priority, literal.span()));
+            }
+            _ => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "unknown route argument; expected `host`, `consumes`, `produces`, or `priority`",
+                ));
+            }
+        }
+    }
+    if input.is_empty() {
+        Ok(())
+    } else {
+        Err(input.error("unexpected route attribute argument"))
+    }
 }
 
 impl Parse for RouteAttr {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        // `#[route(dynamic, ...)]` never names a path, so it is distinguished
+        // from a `DYNAMIC` verb by the absence of a following path literal.
+        if input.peek(Ident) {
+            let lookahead = input.fork();
+            let candidate: Ident = lookahead.parse()?;
+            let is_dynamic = candidate == "dynamic" && (lookahead.is_empty() || (lookahead.peek(Token![,]) && !lookahead.peek2(LitStr)));
+            if is_dynamic {
+                let marker: Ident = input.parse()?;
+                let mut attr = Self {
+                    method: String::new(),
+                    path: LitStr::new("", marker.span()),
+                    dynamic: Some(marker.span()),
+                    host: None,
+                    consumes: None,
+                    produces: None,
+                    priority: None,
+                    policy: None,
+                };
+                parse_route_policy(input, &mut attr)?;
+                return Ok(attr);
+            }
+        }
+
         let method = if input.peek(LitStr) {
             let method: LitStr = input.parse()?;
             let value = method.value();
@@ -140,7 +240,18 @@ impl Parse for RouteAttr {
         };
         let _comma: Token![,] = input.parse()?;
         let path: LitStr = input.parse()?;
-        Ok(Self { method, path })
+        let mut attr = Self {
+            method,
+            path,
+            dynamic: None,
+            host: None,
+            consumes: None,
+            produces: None,
+            priority: None,
+            policy: None,
+        };
+        parse_route_policy(input, &mut attr)?;
+        Ok(attr)
     }
 }
 
@@ -193,11 +304,22 @@ pub(crate) fn has_capture_lifetime(generics: &Generics) -> syn::Result<bool> {
     Ok(lifetime)
 }
 
-/// Whether `variant` carries at least one `#[route(...)]` attribute, i.e. it is
-/// a *static* route variant (as opposed to a dynamic one, registered at run
-/// time).
+/// Whether `variant` carries at least one *static* `#[route(...)]` attribute.
+///
+/// A variant is dynamic when it is unannotated or carries only the explicit
+/// `#[route(dynamic)]` marker; its paths are registered at run time through the
+/// generated builder.
 pub(crate) fn has_route_attr(variant: &Variant) -> bool {
-    variant.attrs.iter().any(|attr| attr.path().is_ident("route"))
+    variant
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("route"))
+        .any(|attr| !is_dynamic_route_attr(attr))
+}
+
+/// Whether a `#[route(...)]` attribute is the `dynamic` marker.
+pub(crate) fn is_dynamic_route_attr(attr: &Attribute) -> bool {
+    matches!(&attr.meta, syn::Meta::List(list) if list.tokens.to_string().trim_start().starts_with("dynamic"))
 }
 
 /// Lowers a variant and each of its `#[route(...)]` attributes into [`Route`]s,
@@ -221,7 +343,24 @@ pub(crate) fn routes_for_variant(variant: &Variant) -> syn::Result<Vec<Route>> {
     let mut routes = Vec::with_capacity(route_attrs.len());
     let mut first_capture_keys: Option<Vec<String>> = None;
     for route_attr in route_attrs {
-        let RouteAttr { method, path } = route_attr.parse_args()?;
+        let parsed: RouteAttr = route_attr.parse_args()?;
+        if let Some((name, span, is_priority)) = &parsed.policy {
+            let message = if *is_priority {
+                format!("`{name}` is HTTP route policy supported only by `#[router]`; `#[resolver]` resolves only methods and paths")
+            } else {
+                format!(
+                    "`{name}` is an HTTP request predicate supported only by `#[router]`; `#[resolver]` resolves only methods and paths"
+                )
+            };
+            return Err(syn::Error::new(*span, message));
+        }
+        if let Some(span) = parsed.dynamic {
+            return Err(syn::Error::new(
+                span,
+                "`#[route(dynamic)]` is supported only by `#[router]`; leave a `#[resolver]` variant unannotated to register it at run time",
+            ));
+        }
+        let RouteAttr { method, path, .. } = parsed;
 
         let path_str = path.value();
         let template = PathTemplate::parse(&path_str, Grammar::default().with_segment_affixes())

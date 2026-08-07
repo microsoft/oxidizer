@@ -389,7 +389,21 @@ impl IntoResponseParts for HeaderMap {
     type Error = Infallible;
 
     fn into_response_parts(self, mut response: ResponseParts) -> Result<ResponseParts, Self::Error> {
-        response.headers_mut().extend(self);
+        let headers = response.headers_mut();
+        let mut current_name = None;
+        for (name, value) in self {
+            if let Some(name) = name {
+                headers.insert(name.clone(), value);
+                current_name = Some(name);
+            } else {
+                headers.append(
+                    current_name
+                        .as_ref()
+                        .expect("HeaderMap iteration emits a name before its additional values"),
+                    value,
+                );
+            }
+        }
         Ok(response)
     }
 }

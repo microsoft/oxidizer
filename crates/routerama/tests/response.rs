@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use http::header::{HeaderName, HeaderValue, LOCATION};
+use http::header::{CONTENT_TYPE, HeaderName, HeaderValue, LOCATION, SET_COOKIE};
 use http::{HeaderMap, StatusCode};
 use http_body::{Body as HttpBody, Frame, SizeHint};
 use http_body_util::BodyExt as _;
@@ -139,6 +139,22 @@ async fn built_in_values_and_parts_compose_without_routing() {
             .expect("built-in response bodies are infallible")
             .to_bytes(),
         b"created"[..]
+    );
+}
+
+#[test]
+fn header_map_parts_replace_existing_names_and_preserve_multiple_values() {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.append(SET_COOKIE, HeaderValue::from_static("first=1"));
+    headers.append(SET_COOKIE, HeaderValue::from_static("second=2"));
+
+    let response = (headers, "created").into_response();
+
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+    assert_eq!(
+        response.headers().get_all(SET_COOKIE).iter().collect::<Vec<_>>(),
+        [HeaderValue::from_static("first=1"), HeaderValue::from_static("second=2")]
     );
 }
 

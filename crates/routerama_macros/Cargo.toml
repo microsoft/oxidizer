@@ -20,6 +20,15 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama_m
 [lib]
 proc-macro = true
 
+[features]
+default = []
+# Each feature exposes the macros of the matching `routerama` capability, so a
+# build that selects only one capability does not compile the others' entry
+# points.
+query = []
+resolve = []
+route = []
+
 [dependencies]
 routerama_build = { workspace = true, default-features = false, features = ["codegen"] }
 

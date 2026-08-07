@@ -126,6 +126,11 @@ jobs:
       - name: Tests
         if: success() || failure()
         run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
+      - name: Routerama feature contracts
+        if: (success() || failure()) && matrix.os == 'ubuntu-latest'
+        run: |
+          cargo test -p routerama --no-default-features --features response --test feature_gates
+          cargo test -p routerama --no-default-features --features route --test feature_gates
       - name: Docs
         if: success() || failure()
         env:

@@ -18,7 +18,7 @@ use syn::{
     parenthesized,
 };
 
-use super::resolver::runtime_path;
+use super::resolver::query_runtime_path;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Case {
@@ -452,10 +452,10 @@ fn standard_path(path: &syn::Path, name: &str, generic_types: &HashSet<String>) 
 
 fn parse_value(kind: ValueKind<'_>, runtime: &TokenStream, name: &str) -> TokenStream {
     match kind {
-        ValueKind::Str => quote! { #runtime::query::parse_borrowed(&value, #name, pair_offset)? },
-        ValueKind::Cow => quote! { #runtime::query::parse_cow(value) },
-        ValueKind::String => quote! { #runtime::query::parse_owned(value) },
-        ValueKind::Other(ty) => quote! { #runtime::query::parse_value::<#ty>(&value, #name, pair_offset)? },
+        ValueKind::Str => quote! { #runtime::parse_borrowed(&value, #name, pair_offset)? },
+        ValueKind::Cow => quote! { #runtime::parse_cow(value) },
+        ValueKind::String => quote! { #runtime::parse_owned(value) },
+        ValueKind::Other(ty) => quote! { #runtime::parse_value::<#ty>(&value, #name, pair_offset)? },
     }
 }
 
@@ -512,7 +512,7 @@ fn unique_lifetime_marker(parsed: &QueryInput<'_>) -> Ident {
 )]
 pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parsed = QueryInput::parse(input, true)?;
-    let runtime = runtime_path();
+    let runtime = query_runtime_path();
     let name = &input.ident;
     let original_generics = &input.generics;
     let (_, type_generics, _) = original_generics.split_for_impl();
@@ -570,7 +570,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
     }
     for (decoder, ty) in &flatten_decoders {
         decoder_generics.make_where_clause().predicates.push(syn::parse_quote! {
-            #decoder: #runtime::query::QueryDecoder<#query_lifetime, Output = #ty>
+            #decoder: #runtime::QueryDecoder<#query_lifetime, Output = #ty>
         });
     }
     replace_self_in_generics(&mut decoder_generics, &outer_type);
@@ -585,7 +585,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                 Some(quote! { #ident: ::core::option::Option<#ty> })
             }
             FieldKind::Optional(_, inner) => Some(quote! { #ident: ::core::option::Option<#inner> }),
-            FieldKind::Repeated(_, inner) => Some(quote! { #ident: #runtime::query::Repeated<#inner> }),
+            FieldKind::Repeated(_, inner) => Some(quote! { #ident: #runtime::Repeated<#inner> }),
             FieldKind::Flatten => {
                 let decoder = flatten_decoder_names[flatten_index];
                 flatten_index += 1;
@@ -598,10 +598,10 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         let ident = field.ident;
         match &field.kind {
             FieldKind::Scalar(_) | FieldKind::Optional(_, _) => Some(quote! { #ident: ::core::option::Option::None }),
-            FieldKind::Repeated(_, _) => Some(quote! { #ident: #runtime::query::Repeated::new() }),
+            FieldKind::Repeated(_, _) => Some(quote! { #ident: #runtime::Repeated::new() }),
             FieldKind::Flatten => {
                 let ty = &field.field.ty;
-                Some(quote! { #ident: <#ty as #runtime::query::DecodeFields<#query_lifetime>>::decoder() })
+                Some(quote! { #ident: <#ty as #runtime::DecodeFields<#query_lifetime>>::decoder() })
             }
             FieldKind::Skip => None,
         }
@@ -623,11 +623,11 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
             FieldKind::Scalar(kind) | FieldKind::Optional(kind, _) => {
                 let parse = parse_value(kind, &runtime, name);
                 quote! {
-                    if false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
-                        return ::core::result::Result::Err(#runtime::query::Error::ambiguous(pair_offset));
+                    if false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
+                        return ::core::result::Result::Err(#runtime::Error::ambiguous(pair_offset));
                     }
                     if self.#ident.is_some() {
-                        return ::core::result::Result::Err(#runtime::query::Error::duplicate(#name, pair_offset));
+                        return ::core::result::Result::Err(#runtime::Error::duplicate(#name, pair_offset));
                     }
                     self.#ident = ::core::option::Option::Some(#parse);
                 }
@@ -635,13 +635,13 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
             FieldKind::Repeated(kind, inner) => {
                 let parse = parse_value(kind, &runtime, name);
                 quote! {
-                    if false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
-                        return ::core::result::Result::Err(#runtime::query::Error::ambiguous(pair_offset));
+                    if false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )* {
+                        return ::core::result::Result::Err(#runtime::Error::ambiguous(pair_offset));
                     }
                     let repeated_len = self.#ident.len();
                     // Generated state starts empty and grows only through this guard.
                     if repeated_len == limits.max_repeated_values {
-                        return ::core::result::Result::Err(#runtime::query::Error::too_many_values(#name, pair_offset));
+                        return ::core::result::Result::Err(#runtime::Error::too_many_values(#name, pair_offset));
                     }
                     let value = #parse;
                     if repeated_len != 0 {
@@ -655,7 +655,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                         } else {
                             1
                         };
-                        let mut values = #runtime::query::Repeated::with_capacity(initial_capacity);
+                        let mut values = #runtime::Repeated::with_capacity(initial_capacity);
                         values.push(value);
                         self.#ident = values;
                     }
@@ -682,10 +682,10 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         .map(|(index, field)| {
             let ident = field.ident;
             quote! {
-                if #runtime::query::QueryDecoder::claims_field(&self.#ident, key) {
+                if #runtime::QueryDecoder::claims_field(&self.#ident, key) {
                     if __routerama_claimant.is_some() {
                         return ::core::result::Result::Err(
-                            #runtime::query::Error::ambiguous(pair_offset),
+                            #runtime::Error::ambiguous(pair_offset),
                         );
                     }
                     __routerama_claimant = ::core::option::Option::Some(#index);
@@ -700,7 +700,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
         .map(|(index, field)| {
             let ident = field.ident;
             quote! {
-                ::core::option::Option::Some(#index) => #runtime::query::QueryDecoder::decode_field(
+                ::core::option::Option::Some(#index) => #runtime::QueryDecoder::decode_field(
                     &mut self.#ident,
                     key,
                     value,
@@ -717,12 +717,12 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                 quote! { #ident: self.#ident.unwrap_or_default() }
             }
             FieldKind::Scalar(_) => quote! {
-                #ident: self.#ident.ok_or_else(|| #runtime::query::Error::missing(#field_name, end_offset))?
+                #ident: self.#ident.ok_or_else(|| #runtime::Error::missing(#field_name, end_offset))?
             },
             FieldKind::Optional(_, _) | FieldKind::Repeated(_, _) => quote! { #ident: self.#ident },
             FieldKind::Flatten => {
                 quote! {
-                    #ident: #runtime::query::QueryDecoder::finish(self.#ident, end_offset)?
+                    #ident: #runtime::QueryDecoder::finish(self.#ident, end_offset)?
                 }
             }
             FieldKind::Skip => quote! { #ident: ::core::default::Default::default() },
@@ -731,17 +731,17 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
 
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics #runtime::query::DecodeFields<#query_lifetime> for #name #type_generics #generated_where_clause {
+        impl #impl_generics #runtime::DecodeFields<#query_lifetime> for #name #type_generics #generated_where_clause {
             const DENY_UNKNOWN_FIELDS: bool = #deny_unknown_fields
-                #( || <#flattened_types as #runtime::query::DecodeFields<#query_lifetime>>::DENY_UNKNOWN_FIELDS )*;
+                #( || <#flattened_types as #runtime::DecodeFields<#query_lifetime>>::DENY_UNKNOWN_FIELDS )*;
 
-            fn decoder() -> impl #runtime::query::QueryDecoder<#query_lifetime, Output = Self> {
+            fn decoder() -> impl #runtime::QueryDecoder<#query_lifetime, Output = Self> {
                 struct #state_name #state_generics #state_where_clause {
                     #( #state_fields, )*
                     #marker: ::core::marker::PhantomData<fn() -> #name #type_generics>,
                 }
 
-                impl #decoder_impl_generics #runtime::query::QueryDecoder<#query_lifetime>
+                impl #decoder_impl_generics #runtime::QueryDecoder<#query_lifetime>
                     for #state_name #state_type_generics
                     #decoder_where
                 {
@@ -750,7 +750,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn claims_field(&self, key: &str) -> bool {
                         match key {
                             #( #claim_arms, )*
-                            _ => false #( || #runtime::query::QueryDecoder::claims_field(&self.#flatten_idents, key) )*,
+                            _ => false #( || #runtime::QueryDecoder::claims_field(&self.#flatten_idents, key) )*,
                         }
                     }
 
@@ -762,10 +762,10 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn decode_field(
                         &mut self,
                         key: &str,
-                        value: #runtime::query::Decoded<#query_lifetime>,
+                        value: #runtime::Decoded<#query_lifetime>,
                         pair_offset: usize,
-                        limits: #runtime::query::QueryLimits,
-                    ) -> ::core::result::Result<bool, #runtime::query::Error> {
+                        limits: #runtime::QueryLimits,
+                    ) -> ::core::result::Result<bool, #runtime::Error> {
                         match key {
                             #( #match_arms, )*
                             _ => {
@@ -784,7 +784,7 @@ pub(crate) fn expand_from_query(input: &DeriveInput) -> syn::Result<TokenStream>
                     fn finish(
                         self,
                         end_offset: usize,
-                    ) -> ::core::result::Result<Self::Output, #runtime::query::Error> {
+                    ) -> ::core::result::Result<Self::Output, #runtime::Error> {
                         ::core::result::Result::Ok(#name { #( #finishes, )* })
                     }
                 }
@@ -927,7 +927,7 @@ fn add_from_query_bounds(generics: &mut Generics, parsed: &QueryInput<'_>, runti
                 generics
                     .make_where_clause()
                     .predicates
-                    .push(syn::parse_quote!(#ty: #runtime::query::DecodeFields<#lifetime>));
+                    .push(syn::parse_quote!(#ty: #runtime::DecodeFields<#lifetime>));
             }
             FieldKind::Skip
             | FieldKind::Scalar(ValueKind::Str | ValueKind::Cow | ValueKind::String)
@@ -1007,7 +1007,7 @@ fn generic_list(parameters: &[TokenStream]) -> TokenStream {
 
 pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
     let parsed = QueryInput::parse(input, false)?;
-    let runtime = runtime_path();
+    let runtime = query_runtime_path();
     let name = &input.ident;
     let mut generated_generics = input.generics.clone();
     add_to_query_bounds(&mut generated_generics, &parsed, &runtime);
@@ -1051,18 +1051,18 @@ pub(crate) fn expand_to_query(input: &DeriveInput) -> syn::Result<TokenStream> {
                 }
             }
             FieldKind::Flatten => quote! {
-                #runtime::query::EncodeFields::encode_fields(&self.#ident, encoder)?;
+                #runtime::EncodeFields::encode_fields(&self.#ident, encoder)?;
             },
             FieldKind::Skip => TokenStream::new(),
         }
     });
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics #runtime::query::EncodeFields for #name #type_generics #where_clause {
+        impl #impl_generics #runtime::EncodeFields for #name #type_generics #where_clause {
             fn encode_fields<#writer: ::core::fmt::Write>(
                 &self,
-                encoder: &mut #runtime::query::Encoder<'_, #writer>,
-            ) -> ::core::result::Result<(), #runtime::query::Error> {
+                encoder: &mut #runtime::Encoder<'_, #writer>,
+            ) -> ::core::result::Result<(), #runtime::Error> {
                 #( #encoders )*
                 ::core::result::Result::Ok(())
             }
@@ -1086,7 +1086,7 @@ fn add_to_query_bounds(generics: &mut Generics, parsed: &QueryInput<'_>, runtime
                 generics
                     .make_where_clause()
                     .predicates
-                    .push(syn::parse_quote!(#ty: #runtime::query::EncodeFields));
+                    .push(syn::parse_quote!(#ty: #runtime::EncodeFields));
             }
             FieldKind::Skip
             | FieldKind::Scalar(ValueKind::Str | ValueKind::Cow | ValueKind::String)

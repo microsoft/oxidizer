@@ -34,8 +34,29 @@ struct TypedField {
     kind: FieldKind,
 }
 
-pub(crate) fn runtime_path() -> TokenStream2 {
+pub(crate) fn crate_path() -> TokenStream2 {
     runtime_path_for(crate_name("routerama").ok())
+}
+
+/// The runtime module referenced by `#[resolver]`-generated code.
+pub(crate) fn runtime_path() -> TokenStream2 {
+    let root = crate_path();
+    quote! { #root::resolve::__private }
+}
+
+/// The runtime module referenced by `#[router]`-generated code.
+///
+/// It mirrors the `resolve` runtime surface but is available whenever the
+/// `route` capability is enabled, so a router never requires `resolve`.
+pub(crate) fn route_runtime_path() -> TokenStream2 {
+    let root = crate_path();
+    quote! { #root::route::__private }
+}
+
+/// The runtime module referenced by the generated query codecs.
+pub(crate) fn query_runtime_path() -> TokenStream2 {
+    let root = crate_path();
+    quote! { #root::query::__private }
 }
 
 fn runtime_path_for(found: Option<FoundCrate>) -> TokenStream2 {
@@ -62,12 +83,21 @@ pub(crate) fn expand(item: ItemEnum) -> syn::Result<TokenStream2> {
     expand_named(item, None)
 }
 
+pub(crate) fn expand_named(item: ItemEnum, explicit_resolver_name: Option<Ident>) -> syn::Result<TokenStream2> {
+    expand_with_runtime(item, explicit_resolver_name, &runtime_path(), false)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "the codegen assembles many independent token fragments in one place; splitting it would obscure the static/dynamic branching it orchestrates"
 )]
-pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Ident>) -> syn::Result<TokenStream2> {
-    let runtime = runtime_path();
+pub(crate) fn expand_with_runtime(
+    mut item: ItemEnum,
+    explicit_resolver_name: Option<Ident>,
+    runtime: &TokenStream2,
+    reserve_static: bool,
+) -> syn::Result<TokenStream2> {
+    let runtime = runtime.clone();
     let has_lifetime = has_capture_lifetime(&item.generics)?;
     if item.ident.to_string().starts_with("r#") {
         return Err(Error::new(
@@ -151,7 +181,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
         quote! { #enum_name }
     };
     let extractor_ty = quote! {
-        fn(&#runtime::__rt::Captures<'_, '_, '_>)
+        fn(&#runtime::Captures<'_, '_, '_>)
             -> ::core::result::Result<#schema_ty, #runtime::ResolveError<'static>>
     };
     let visibility = item.vis.to_token_stream();
@@ -193,10 +223,20 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
     });
 
     let raw_enum = Ident::new(&format!("__{enum_name}Raw"), enum_name.span());
+    let reservations: Vec<TokenStream2> = static_routes
+        .iter()
+        .filter(|_| reserve_static)
+        .map(|route| {
+            let method = route.method().to_string();
+            let path = route.template().to_string();
+            let name = route.name().to_string();
+            quote! { #runtime::DynBuilder::reserve(&mut __builder, #method, #path, #name); }
+        })
+        .collect();
     let static_resolve_body = if has_static {
         let mut generator = Generator::new(raw_enum.to_string(), false);
         generator.full_api(false);
-        generator.runtime_path(quote! { #runtime::codegen_helpers });
+        generator.runtime_path(quote! { #runtime });
         generator.add_all(static_routes);
         let raw_impls = generator.generate();
 
@@ -270,7 +310,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
     let (state_ty, dynamic_resolve_fn) = if has_dynamic {
         (
             quote! {
-                #runtime::__rt::RawResolver<#runtime::__rt::DynRoute<#extractor_ty>>
+                #runtime::RawResolver<#runtime::DynRoute<#extractor_ty>>
             },
             quote! {
                 fn __convert_dynamic<'p>(__route: #schema_ty) -> #typed_ty {
@@ -281,21 +321,21 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 }
 
                 fn __dynamic_resolve<'p>(
-                    __dyn: &#runtime::__rt::RawResolver<#runtime::__rt::DynRoute<#extractor_ty>>,
+                    __dyn: &#runtime::RawResolver<#runtime::DynRoute<#extractor_ty>>,
                     __method: &str,
                     __path: &'p str,
                 ) -> ::core::result::Result<#typed_ty, #runtime::ResolveError<'p>> {
-                    match #runtime::__rt::RawResolver::resolve_scanned_checked(
+                    match #runtime::RawResolver::resolve_scanned_checked(
                         __dyn,
                         __method,
                         __path,
                         |__leaf, __route, __scanned| {
-                            let __caps = #runtime::__rt::Captures::new(
+                            let __caps = #runtime::Captures::new(
                                 __leaf,
                                 __scanned,
-                                #runtime::__rt::DynRoute::capture_order(__route),
+                                #runtime::DynRoute::capture_order(__route),
                             );
-                            match (*#runtime::__rt::DynRoute::extractor(__route))(&__caps) {
+                            match (*#runtime::DynRoute::extractor(__route))(&__caps) {
                                 ::core::result::Result::Ok(__r) => {
                                     ::core::result::Result::Ok(__convert_dynamic(__r))
                                 }
@@ -339,7 +379,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
             #[doc = #dynamic_builder_doc]
             #[derive(Debug)]
             #visibility struct #builder_name {
-                __dyn: #runtime::__rt::DynBuilder<#extractor_ty>,
+                __dyn: #runtime::DynBuilder<#extractor_ty>,
                 #( #seen_decls, )*
             }
 
@@ -352,10 +392,11 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                     self,
                 ) -> ::core::result::Result<#resolver_name, #runtime::ConfigurationError> {
                     let mut __builder = self.__dyn;
+                    #( #reservations )*
                     #( #requires )*
-                    let mut __resolver = #runtime::__rt::DynBuilder::finish(__builder)?;
+                    let mut __resolver = #runtime::DynBuilder::finish(__builder)?;
                     // All routes must apply the same verb-splitting rule.
-                    #runtime::__rt::RawResolver::force_verb_split(&mut __resolver, #static_any_verb);
+                    #runtime::RawResolver::force_verb_split(&mut __resolver, #static_any_verb);
                     ::core::result::Result::Ok(#resolver_name { __state: __resolver })
                 }
             }
@@ -367,8 +408,8 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
     let resolve_body = if has_dynamic && has_static && !static_any_verb {
         // A dynamic `:verb` route must not be consumed as a static capture.
         quote! {
-            let __matched = if #runtime::__rt::RawResolver::splits_verbs(__state)
-                && #runtime::codegen_helpers::split_verb(__path).1.is_some()
+            let __matched = if #runtime::RawResolver::splits_verbs(__state)
+                && #runtime::split_verb(__path).1.is_some()
             {
                 ::core::result::Result::Err(#runtime::ResolveError::NotFound(__path))
             } else {
@@ -403,7 +444,7 @@ pub(crate) fn expand_named(mut item: ItemEnum, explicit_resolver_name: Option<Id
                 #[must_use]
                 #visibility fn builder() -> #builder_name {
                     #builder_name {
-                        __dyn: #runtime::__rt::DynBuilder::new(),
+                        __dyn: #runtime::DynBuilder::new(),
                         #( #seen_inits, )*
                     }
                 }
@@ -591,9 +632,9 @@ fn convert_arm(variant: &TypedVariant, raw_enum: &Ident, typed_enum: &Ident, run
         let key = id.to_string();
         let value = match field.kind {
             FieldKind::Raw => quote! { #id },
-            FieldKind::Owned => quote! { #runtime::__rt::coerce_owned(#id, #key)? },
-            FieldKind::Cow => quote! { #runtime::__rt::coerce_cow(#id, #key)? },
-            FieldKind::Parse => quote! { #runtime::__rt::coerce_parse(#id, #key)? },
+            FieldKind::Owned => quote! { #runtime::coerce_owned(#id, #key)? },
+            FieldKind::Cow => quote! { #runtime::coerce_cow(#id, #key)? },
+            FieldKind::Parse => quote! { #runtime::coerce_parse(#id, #key)? },
         };
         quote! { #id: #value }
     });
@@ -615,12 +656,12 @@ fn dynamic_extractor(variant: &TypedVariant, typed_enum: &Ident, schema_ty: &Tok
                 FieldKind::Parse => quote! { parse },
                 FieldKind::Owned | FieldKind::Raw | FieldKind::Cow => quote! { owned },
             };
-            quote! { #id: #runtime::__rt::#helper(__caps, #index, #key)? }
+            quote! { #id: #runtime::#helper(__caps, #index, #key)? }
         });
         quote! { ::core::result::Result::Ok(#typed_enum::#name { #(#inits),* }) }
     };
     quote! {
-        fn __extract(__caps: &#runtime::__rt::Captures<'_, '_, '_>)
+        fn __extract(__caps: &#runtime::Captures<'_, '_, '_>)
             -> ::core::result::Result<#schema_ty, #runtime::ResolveError<'static>>
         {
             #body
@@ -665,7 +706,7 @@ fn add_method(
     quote! {
         #[doc = #doc]
         #[must_use]
-        #visibility fn #method(mut self, method: #runtime::HttpMethod, path: impl ::core::convert::AsRef<str>) -> Self {
+        #visibility fn #method(mut self, method: impl ::core::convert::AsRef<str>, path: impl ::core::convert::AsRef<str>) -> Self {
             #extractor
             let __extractor: #extractor_ty = __extract;
             self.__dyn.add(
@@ -735,7 +776,10 @@ mod tests {
         let code = expand_str(item).expect("valid");
         assert!(code.contains("fn resolve"), "{code}");
         assert!(code.contains("struct RouteResolver"), "{code}");
-        assert!(code.contains("impl :: routerama :: Resolver for RouteResolver"), "{code}");
+        assert!(
+            code.contains("impl :: routerama :: resolve :: __private :: Resolver for RouteResolver"),
+            "{code}"
+        );
         assert!(code.contains("coerce_owned"), "{code}");
         assert!(code.contains("coerce_cow"), "{code}");
     }
@@ -750,7 +794,7 @@ mod tests {
         let code = expand_str(item).expect("valid");
         assert!(code.contains("add_plugin"), "{code}");
         assert!(code.contains("RouteResolverBuilder"), "{code}");
-        assert!(code.contains("__rt :: parse"), "{code}");
+        assert!(code.contains("__private :: parse"), "{code}");
     }
 
     #[test]

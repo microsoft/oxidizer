@@ -94,6 +94,7 @@ use proc_macro::TokenStream;
 ///     second: &'b str,
 /// }
 /// ```
+#[cfg(feature = "query")]
 #[proc_macro_derive(FromQuery, attributes(query, serde))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_from_query(input: TokenStream) -> TokenStream {
@@ -159,6 +160,7 @@ pub fn derive_from_query(input: TokenStream) -> TokenStream {
 ///
 /// [`Option::None`]: core::option::Option::None
 /// [`Vec`]: std::vec::Vec
+#[cfg(feature = "query")]
 #[proc_macro_derive(ToQuery, attributes(query, serde))]
 #[cfg_attr(test, mutants::skip)]
 pub fn derive_to_query(input: TokenStream) -> TokenStream {
@@ -180,6 +182,7 @@ pub fn derive_to_query(input: TokenStream) -> TokenStream {
 /// represented by `routerama::ResolveError`. See the
 /// [`routerama`](https://docs.rs/routerama) crate documentation for the full
 /// model.
+#[cfg(feature = "resolve")]
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -236,8 +239,58 @@ pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// reports `routerama::ResolveError`. The generated implementation uses
 /// `routerama`'s existing tries and direct handler calls, without a runtime
 /// handler registry or trait objects.
+#[cfg(feature = "resolve")]
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
     routerama_build::macro_impl::service(attr.into(), item.into()).into()
+}
+
+/// Generates HTTP routing, request extraction, and response composition for an
+/// annotated inherent impl.
+///
+/// Apply `#[router]` to an inherent `impl` block whose methods carry
+/// `#[route(METHOD, "path")]` for compile-time static routes or
+/// `#[route(dynamic)]` for handlers registered at startup. Every handler must
+/// be `async`, begin with `&self`, and declare an explicit response type that
+/// implements `routerama::response::IntoResponse`.
+///
+/// # Attribute arguments
+///
+/// - `state = StateType` fixes the shared-state contract, generating
+///   `route<B>(request, &StateType)` and validating every state-dependent
+///   extractor when the impl is defined. Bare `#[router]` instead keeps the
+///   state generic and generates `route<B, S>(request, &S)`.
+/// - `erased_mounts` additionally generates `route_with_erased_mounts`. It
+///   requires a fixed `state` and the `mount` feature.
+///
+/// # Handler arguments
+///
+/// Static path captures are ordinary parameters named after the template's
+/// captures; dynamic captures use `#[capture]`. One position-independent
+/// `#[body]` parameter implements `FromRequestBody`; every other parameter
+/// implements `FromRequestParts`.
+///
+/// # Route policy
+///
+/// `#[route]` accepts `host`, `consumes`, and `produces` request predicates and
+/// an explicit `priority = <integer>` for intentionally overlapping routes.
+/// `#[fallback]` receives a `RouteFailure`, and `#[catch(Rejection)]` (or
+/// `#[catch(Rejection, from = Extractor)]`) converts an extractor rejection.
+///
+/// # Interceptors
+///
+/// `#[before]` runs before route resolution with a `BeforeContext`, while
+/// `#[before(handler, ...)]` runs after selection with a `SelectedContext`.
+/// `#[after]` observes every generated response and `#[after(handler, ...)]`
+/// only the named handlers'. `#[transform(limit = N, handler, ...)]` and
+/// `#[transform(stream, handler, ...)]` own the request body.
+///
+/// See the [`routerama::route`](https://docs.rs/routerama/latest/routerama/route/)
+/// module for the complete model and runnable examples.
+#[cfg(feature = "route")]
+#[cfg_attr(test, mutants::skip)]
+#[proc_macro_attribute]
+pub fn router(attr: TokenStream, item: TokenStream) -> TokenStream {
+    routerama_build::macro_impl::router(attr.into(), item.into()).into()
 }
