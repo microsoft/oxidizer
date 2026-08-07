@@ -58,14 +58,14 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
     .unwrap();
 
     if !snapshot.skipped_sections.is_empty() {
-        html.push_str("<section><h2>Compatibility warning</h2><p>This report omitted unsupported snapshot sections: ");
+        html.push_str("<section><h2>Compatibility warning</h2><p>This report omitted snapshot sections with unknown identifiers or versions unsupported by this decoder: ");
         for (index, section) in snapshot.skipped_sections.iter().enumerate() {
             if index != 0 {
                 html.push_str(", ");
             }
             write!(html, "{} (version {})", section.id, section.version).unwrap();
         }
-        html.push_str(". Use a newer rallocator CLI to inspect all captured data.</p></section>");
+        html.push_str(". Use a compatible rallocator_cli version to inspect the omitted data.</p></section>");
     }
 
     render_domains(&mut html, snapshot);

@@ -18,6 +18,18 @@ pub struct Estimate {
     pub upper_bound: u64,
 }
 
+impl Estimate {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(value: u64, lower_bound: u64, upper_bound: u64) -> Self {
+        Self {
+            value,
+            lower_bound,
+            upper_bound,
+        }
+    }
+}
+
 /// Process-wide allocator counters.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -50,6 +62,46 @@ pub struct Stats {
     pub drained_remote_blocks: u64,
 }
 
+impl Stats {
+    #[doc(hidden)]
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The full constructor preserves schema completeness for producers"
+    )]
+    pub const fn new(
+        allocated_bytes: u64,
+        deallocated_bytes: u64,
+        live_bytes: u64,
+        peak_live_bytes: u64,
+        mapped_bytes: u64,
+        os_mappings: u64,
+        os_unmappings: u64,
+        allocations: u64,
+        deallocations: u64,
+        remote_frees: u64,
+        pending_remote_blocks: u64,
+        remote_pushes_in_progress: u64,
+        drained_remote_blocks: u64,
+    ) -> Self {
+        Self {
+            allocated_bytes,
+            deallocated_bytes,
+            live_bytes,
+            peak_live_bytes,
+            mapped_bytes,
+            os_mappings,
+            os_unmappings,
+            allocations,
+            deallocations,
+            remote_frees,
+            pending_remote_blocks,
+            remote_pushes_in_progress,
+            drained_remote_blocks,
+        }
+    }
+}
+
 /// Statistics for one allocation size class.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -66,6 +118,26 @@ pub struct SizeClass {
     pub usable_bytes: Estimate,
 }
 
+impl SizeClass {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        class_index: u32,
+        block_bytes: u64,
+        live_allocations: Estimate,
+        requested_bytes: Estimate,
+        usable_bytes: Estimate,
+    ) -> Self {
+        Self {
+            class_index,
+            block_bytes,
+            live_allocations,
+            requested_bytes,
+            usable_bytes,
+        }
+    }
+}
+
 /// Aggregate state for one allocator region.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -78,6 +150,19 @@ pub struct Region {
     pub used_slices: u64,
     /// Available slices.
     pub free_slices: u64,
+}
+
+impl Region {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(region_index: u32, reserved_bytes: u64, used_slices: u64, free_slices: u64) -> Self {
+        Self {
+            region_index,
+            reserved_bytes,
+            used_slices,
+            free_slices,
+        }
+    }
 }
 
 /// Allocation-domain aggregate state.
@@ -108,6 +193,42 @@ pub struct Domain {
     pub region_indices: Vec<u32>,
 }
 
+impl Domain {
+    #[doc(hidden)]
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The full constructor preserves schema completeness for producers"
+    )]
+    pub const fn new(
+        domain_id: u64,
+        is_default: bool,
+        region_count: u64,
+        reserved_bytes: u64,
+        used_slices: u64,
+        free_slices: u64,
+        small_slices: u64,
+        medium_slices: u64,
+        bump_slices: u64,
+        unknown_slices: u64,
+        region_indices: Vec<u32>,
+    ) -> Self {
+        Self {
+            domain_id,
+            is_default,
+            region_count,
+            reserved_bytes,
+            used_slices,
+            free_slices,
+            small_slices,
+            medium_slices,
+            bump_slices,
+            unknown_slices,
+            region_indices,
+        }
+    }
+}
+
 /// Allocation-size histograms.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -116,6 +237,14 @@ pub struct Histograms {
     pub allocated: Vec<u64>,
     /// Counts of live sizes by bucket.
     pub live: Vec<u64>,
+}
+
+impl Histograms {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(allocated: Vec<u64>, live: Vec<u64>) -> Self {
+        Self { allocated, live }
+    }
 }
 
 /// Metadata associated with a snapshot.
@@ -132,14 +261,23 @@ pub struct Metadata {
     pub capture_duration_nanos: u64,
 }
 
-/// A recognized snapshot section skipped because its version is newer than this decoder supports.
+/// A snapshot section skipped because its identifier is unknown or its version is older or newer
+/// than the versions supported by this decoder.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SkippedSection {
     /// Wire section identifier.
     pub id: u16,
-    /// Unsupported section version.
+    /// Version reported by the skipped section.
     pub version: u16,
+}
+
+impl SkippedSection {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(id: u16, version: u16) -> Self {
+        Self { id, version }
+    }
 }
 
 /// Complete owned allocator telemetry snapshot.
@@ -164,7 +302,7 @@ pub struct Snapshot {
     pub histograms: Histograms,
     /// Symbol information for caller addresses.
     pub addresses: Vec<crate::callers::AddressLookup>,
-    /// Recognized sections skipped because their versions were unsupported.
+    /// Sections skipped because their identifiers were unknown or their versions were unsupported.
     pub skipped_sections: Vec<SkippedSection>,
 }
 

@@ -18,6 +18,14 @@ fn encoded_snapshot() -> Vec<u8> {
     bytes
 }
 
+fn encoded_snapshot_with_unknown_section() -> Vec<u8> {
+    let mut bytes = encoded_snapshot();
+    bytes.extend_from_slice(&999_u16.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes
+}
+
 fn directory(name: &str) -> PathBuf {
     PathBuf::from(format!("target/rallocator_cli-test-{}-{name}", std::process::id()))
 }
@@ -62,7 +70,7 @@ fn snapshot_html_reports_parse_and_io_errors() {
     assert!(
         String::from_utf8(result.stderr)
             .unwrap()
-            .starts_with("rallocator: invalid snapshot:")
+            .starts_with("rallocator_cli: invalid snapshot:")
     );
 
     fs::write(&invalid, encoded_snapshot()).unwrap();
@@ -74,5 +82,56 @@ fn snapshot_html_reports_parse_and_io_errors() {
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(2));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn snapshot_html_requires_force_to_replace_output() {
+    let directory = directory("force");
+    fs::create_dir_all(&directory).unwrap();
+    let input = directory.join("capture.rallocator");
+    let output = directory.join("capture.html");
+    fs::write(&input, encoded_snapshot()).unwrap();
+    fs::write(&output, "keep me").unwrap();
+
+    let binary = env!("CARGO_BIN_EXE_rallocator_cli");
+    let result = Command::new(binary).args(["snapshot", "html"]).arg(&input).output().unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(
+        String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("refusing to overwrite existing output")
+    );
+    assert_eq!(fs::read_to_string(&output).unwrap(), "keep me");
+
+    let result = Command::new(binary)
+        .args(["snapshot", "html", "--force"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    assert!(fs::read_to_string(&output).unwrap().contains("<style>"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn snapshot_html_renders_skipped_section_warning() {
+    let directory = directory("skipped");
+    fs::create_dir_all(&directory).unwrap();
+    let input = directory.join("capture.rallocator");
+    fs::write(&input, encoded_snapshot_with_unknown_section()).unwrap();
+
+    let result = Command::new(env!("CARGO_BIN_EXE_rallocator_cli"))
+        .args(["snapshot", "html"])
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let html = fs::read_to_string(directory.join("capture.html")).unwrap();
+    assert!(html.contains("Compatibility warning"));
+    assert!(html.contains("999 (version 1)"));
+    assert!(html.contains("unknown identifiers or versions unsupported by this decoder"));
+    assert!(html.contains("compatible rallocator_cli version"));
+
     fs::remove_dir_all(directory).unwrap();
 }

@@ -430,6 +430,10 @@ fn snapshot_reports_bounded_size_class_and_region_telemetry() {
     assert!(class.live_allocations.value >= 1);
     assert!(class.requested_bytes.value >= 64);
     assert!(class.usable_bytes.value >= 64);
+    for estimate in [class.live_allocations, class.requested_bytes, class.usable_bytes] {
+        assert!(estimate.lower_bound <= estimate.value);
+        assert!(estimate.value <= estimate.upper_bound);
+    }
     assert!(!snapshot.regions.is_empty());
     let default_domain = snapshot
         .domains

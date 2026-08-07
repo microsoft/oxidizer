@@ -37,6 +37,28 @@ pub struct Segment {
     pub utilization_tracked: bool,
 }
 
+impl Segment {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        segment_index: u8,
+        class_index: u32,
+        context: bool,
+        live_blocks: u32,
+        usable_blocks: u32,
+        utilization_tracked: bool,
+    ) -> Self {
+        Self {
+            segment_index,
+            class_index,
+            context,
+            live_blocks,
+            usable_blocks,
+            utilization_tracked,
+        }
+    }
+}
+
 /// A physical allocator slice.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -57,6 +79,30 @@ pub struct Slice {
     pub segments: Vec<Segment>,
 }
 
+impl Slice {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        slice_index: u32,
+        kind: SliceKind,
+        span_slices: u32,
+        owner: u64,
+        requested_bytes: u64,
+        usable_bytes: u64,
+        segments: Vec<Segment>,
+    ) -> Self {
+        Self {
+            slice_index,
+            kind,
+            span_slices,
+            owner,
+            requested_bytes,
+            usable_bytes,
+            segments,
+        }
+    }
+}
+
 /// Topology detail for an allocator region.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -73,4 +119,26 @@ pub struct TopologyRegion {
     pub used_bitmap: Vec<u64>,
     /// Detailed assigned slices.
     pub slices: Vec<Slice>,
+}
+
+impl TopologyRegion {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        region_index: u32,
+        base_address: u64,
+        region_bytes: u64,
+        slice_bytes: u64,
+        used_bitmap: Vec<u64>,
+        slices: Vec<Slice>,
+    ) -> Self {
+        Self {
+            region_index,
+            base_address,
+            region_bytes,
+            slice_bytes,
+            used_bitmap,
+            slices,
+        }
+    }
 }

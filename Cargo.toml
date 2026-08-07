@@ -179,6 +179,7 @@ ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 rallocator = { path = "crates/rallocator", default-features = false, version = "0.1.0" }
+rallocator_cli = { path = "crates/rallocator_cli", default-features = false, version = "0.1.0" }
 rallocator_telemetry = { path = "crates/rallocator_telemetry", default-features = false, version = "0.1.0" }
 rallocator_wire = { path = "crates/rallocator_wire", default-features = false, version = "0.1.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.2.0" }
@@ -195,6 +196,7 @@ rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.7.0" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.7.0" }
+same-file = { version = "1.0.6", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_html_form = { version = "0.4.1", default-features = false }

@@ -9,24 +9,28 @@ use clap::Args;
 
 #[derive(Args)]
 pub(crate) struct VerbArgs {
+    /// Replace an existing output file.
+    #[arg(long)]
+    pub(crate) force: bool,
     pub(crate) input: PathBuf,
     pub(crate) output: Option<PathBuf>,
 }
 
 pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
-    let explicit_output = args.output.is_some();
     let output = args.output.unwrap_or_else(|| args.input.with_extension("html"));
     if paths_refer_to_same_file(&args.input, &output).map_err(Error::Io)? {
         return Err(Error::SamePath(output));
     }
-    if explicit_output && output.try_exists().map_err(Error::Io)? {
+    if !args.force && output.try_exists().map_err(Error::Io)? {
         return Err(Error::OutputExists(output));
     }
 
     let bytes = fs::read(&args.input).map_err(Error::Io)?;
     let snapshot = rallocator_telemetry::decode(&bytes).map_err(Error::Decode)?;
     let html = crate::report::render_html(&snapshot);
-    if explicit_output {
+    if args.force {
+        fs::write(&output, html).map_err(Error::Io)?;
+    } else {
         let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&output).map_err(|error| {
             if error.kind() == io::ErrorKind::AlreadyExists {
                 Error::OutputExists(output.clone())
@@ -35,8 +39,6 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
             }
         })?;
         file.write_all(html.as_bytes()).map_err(Error::Io)?;
-    } else {
-        fs::write(&output, html).map_err(Error::Io)?;
     }
     println!("{}", output.display());
     Ok(())
@@ -46,20 +48,9 @@ fn paths_refer_to_same_file(input: &Path, output: &Path) -> io::Result<bool> {
     if input == output {
         return Ok(true);
     }
-    let input = fs::canonicalize(input)?;
-    match fs::canonicalize(output) {
-        Ok(output) => Ok(input == output),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let parent = output
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            match fs::canonicalize(parent) {
-                Ok(parent) => Ok(output.file_name().is_some_and(|name| parent.join(name) == input)),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(error),
-            }
-        }
+    match same_file::is_same_file(input, output) {
+        Ok(same) => Ok(same),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
 }
@@ -91,7 +82,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use rallocator_telemetry::snapshot::{Snapshot, Version};
+    use rallocator_telemetry::snapshot::{SkippedSection, Snapshot, Version};
     use rallocator_telemetry::{encode, encoded_len};
 
     use super::{Error, VerbArgs, verb};
@@ -122,6 +113,7 @@ mod tests {
         write_snapshot(&input);
 
         let result = verb(VerbArgs {
+            force: false,
             input,
             output: Some(output.clone()),
         });
@@ -138,6 +130,7 @@ mod tests {
         write_snapshot(&input);
 
         let result = verb(VerbArgs {
+            force: false,
             input: input.clone(),
             output: None,
         });
@@ -156,6 +149,7 @@ mod tests {
         fs::write(&output, "keep me").unwrap();
 
         let result = verb(VerbArgs {
+            force: false,
             input,
             output: Some(output.clone()),
         });
@@ -163,5 +157,78 @@ mod tests {
         assert!(matches!(result, Err(Error::OutputExists(path)) if path == output));
         assert_eq!(fs::read_to_string(&output).unwrap(), "keep me");
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn default_output_must_not_be_overwritten() {
+        let directory = directory("existing-default");
+        fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("capture.rallocator");
+        let output = directory.join("capture.html");
+        write_snapshot(&input);
+        fs::write(&output, "keep me").unwrap();
+
+        let result = verb(VerbArgs {
+            force: false,
+            input,
+            output: None,
+        });
+
+        assert!(matches!(result, Err(Error::OutputExists(path)) if path == output));
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep me");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn force_replaces_existing_output() {
+        let directory = directory("force");
+        fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("capture.rallocator");
+        let output = directory.join("report.html");
+        write_snapshot(&input);
+        fs::write(&output, "replace me").unwrap();
+
+        verb(VerbArgs {
+            force: true,
+            input,
+            output: Some(output.clone()),
+        })
+        .unwrap();
+
+        assert!(fs::read_to_string(&output).unwrap().contains("<style>"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn force_must_not_overwrite_input_through_hard_link() {
+        let directory = directory("hard-link");
+        fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("capture.rallocator");
+        let output = directory.join("report.html");
+        write_snapshot(&input);
+        fs::hard_link(&input, &output).unwrap();
+        let original = fs::read(&input).unwrap();
+
+        let result = verb(VerbArgs {
+            force: true,
+            input: input.clone(),
+            output: Some(output.clone()),
+        });
+
+        assert!(matches!(result, Err(Error::SamePath(path)) if path == output));
+        assert_eq!(fs::read(input).unwrap(), original);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn skipped_sections_render_compatibility_details() {
+        let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
+        snapshot.skipped_sections.push(SkippedSection::new(999, 0));
+
+        let html = crate::report::render_html(&snapshot);
+
+        assert!(html.contains("999 (version 0)"));
+        assert!(html.contains("unknown identifiers or versions unsupported by this decoder"));
+        assert!(html.contains("compatible rallocator_cli version"));
     }
 }

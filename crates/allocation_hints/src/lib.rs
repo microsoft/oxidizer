@@ -89,13 +89,23 @@ pub struct Error {
     kind: ErrorKind,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ErrorKind {
+/// Stable category of an allocation-hint operation error.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ErrorKind {
+    /// Heap inspection could not proceed while another thread was actively using the heap.
     InspectionContended,
+    /// Usage information is unavailable from the calling thread.
     UsageUnavailable,
 }
 
 impl Error {
+    /// Returns the stable category of this error.
+    #[must_use]
+    pub const fn kind(self) -> ErrorKind {
+        self.kind
+    }
+
     const fn inspection_contended() -> Self {
         Self {
             kind: ErrorKind::InspectionContended,

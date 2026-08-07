@@ -17,7 +17,7 @@ use allocation_hints::domain::Domain;
 use allocation_hints::heap::bump::Options as BumpOptions;
 use allocation_hints::heap::general::Options as GeneralOptions;
 use allocation_hints::heap::{Heap, InfoKind, Kind, Options, UsageKind, thread_heap};
-use allocation_hints::{Hint, with_hint};
+use allocation_hints::{ErrorKind, Hint, with_hint};
 
 rallocator::rallocator!();
 
@@ -243,7 +243,8 @@ fn general_usage_reports_cached_medium_spans() {
 fn thread_heap_usage_requires_its_owner_thread() {
     rallocator::initialize();
     let heap = thread_heap().unwrap();
-    let error = std::thread::spawn(move || heap.usage().unwrap_err()).join().unwrap();
+    let error = std::thread::spawn(move || heap.try_usage().unwrap_err()).join().unwrap();
+    assert_eq!(error.kind(), ErrorKind::UsageUnavailable);
     assert_eq!(error.to_string(), "thread-heap usage must be queried from its owner thread");
     assert!(format!("{error:?}").starts_with("Error("));
 }

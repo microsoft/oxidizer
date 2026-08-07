@@ -13,7 +13,7 @@
 
 </div>
 
-Snapshot-to-HTML reporting for the `rallocator` command.
+Snapshot-to-HTML reporting for the `rallocator_cli` command.
 
 
 <hr/>

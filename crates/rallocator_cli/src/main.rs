@@ -6,7 +6,7 @@
     reason = "Display implementations use descriptive formatter names"
 )]
 
-//! Snapshot-to-HTML reporting for the `rallocator` command.
+//! Snapshot-to-HTML reporting for the `rallocator_cli` command.
 
 mod commands;
 mod report;
@@ -56,7 +56,7 @@ fn exit_code(result: Result<(), commands::snapshot::html::Error>) -> u8 {
     match result {
         Ok(()) => 0,
         Err(error) => {
-            eprintln!("rallocator: {error}");
+            eprintln!("rallocator_cli: {error}");
             2
         }
     }

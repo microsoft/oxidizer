@@ -68,6 +68,8 @@ thread_local! {
     static TEST_FAIL_REMOTE_POP_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(test)]
     static TEST_FAIL_REMOTE_PUSH_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // Production region metadata is retained for the process lifetime. Tests that unmap synthetic
+    // regions clear this cache before releasing their metadata.
     static LAST_REGION: std::cell::Cell<*mut RegionState> = const { std::cell::Cell::new(ptr::null_mut()) };
 }
 
@@ -1245,6 +1247,11 @@ where
         if mapping_address.is_null() {
             return ptr::null_mut();
         }
+        debug_assert_eq!(
+            mapping_address.addr() & (SLAB_SIZE - 1),
+            0,
+            "direct mappings must be slab-aligned for deallocation classification"
+        );
         self.record_mapping(mapping_size);
 
         let first_user_address = unsafe { mapping_address.add(EXTRA_SIZE + HEADER_OFFSET) };
@@ -1663,6 +1670,8 @@ where
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
         let segment = allocation_segment(address);
+        // Bump allocations can begin inside a slice. Only trusted region metadata may identify the
+        // segment as bump-owned; allocation payload bytes are never sufficient.
         if address != segment {
             let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
             if let Some(state) = unsafe { bump::state_for_allocation(segment, marker) } {
@@ -1671,6 +1680,7 @@ where
             }
         }
 
+        // Layouts without a small class are either region-backed medium spans or direct mappings.
         if default_class::<C::Tunables>(layout).is_none() {
             if region_containing(address).is_some() && medium_slice_count(layout).is_some() {
                 let state = unsafe { thread_state() };
@@ -1685,6 +1695,8 @@ where
             return;
         }
 
+        // Ordinary layouts can still use a direct mapping after a slab fallback. A valid slab
+        // marker is therefore required before the address is treated as a small allocation.
         let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
         if let Some(class_index) = slab_class_from_marker::<C::Tunables>(marker) {
             if C::TRACK_AGGREGATES {
@@ -1696,6 +1708,8 @@ where
             return;
         }
 
+        // A region-owned ordinary layout may be a medium allocation; otherwise its tagged header
+        // distinguishes direct mappings from context allocations.
         if !is_context_marker::<C::Tunables>(marker) && region_containing(address).is_some() && medium_slice_count(layout).is_some() {
             let state = unsafe { thread_state() };
             let heap = unsafe { current_initialized_reusable_heap(state) };
@@ -2724,6 +2738,11 @@ fn region_containing(address: *mut u8) -> Option<*mut RegionState> {
     None
 }
 
+#[cfg(test)]
+fn clear_region_cache() {
+    LAST_REGION.set(ptr::null_mut());
+}
+
 fn record_small_segment(
     address: *mut u8,
     class_index: usize,
@@ -2783,8 +2802,7 @@ fn record_medium_span(region: *mut RegionState, slice_index: usize, slice_count:
 
 pub(crate) fn register_bump_chunk(address: *mut u8, state: *mut BumpState) {
     let Some(region) = region_containing(address) else {
-        debug_assert!(false, "new bump chunks must belong to their domain's retained region");
-        return;
+        std::process::abort();
     };
     let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
     let metadata = unsafe { &(*region).physical[slice_index] };
@@ -3740,6 +3758,8 @@ mod tests {
 
     use super::*;
 
+    crate::config!(DirectTrackingConfig { track_aggregates: true });
+
     fn new_domain() -> Domain {
         crate::initialize();
         Domain::new()
@@ -3908,6 +3928,7 @@ mod tests {
 
         let mut state = regions.state.lock();
         let region = state.regions;
+        clear_region_cache();
         unsafe {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
@@ -4102,6 +4123,29 @@ mod tests {
 
     #[cfg(not(miri))]
     #[test]
+    fn ordinary_alignment_direct_payload_cannot_forge_bump_ownership() {
+        const OLD_BUMP_MARKER: usize = 0x5241_4C4C_4152_454E;
+
+        crate::initialize();
+        let allocator = unsafe { Rallocator::<DirectTrackingConfig>::new() };
+        let layout = Layout::from_size_align(3 * size_of::<usize>(), align_of::<usize>()).unwrap();
+        let address = unsafe { allocator.allocate_direct(layout, false, None, ptr::null_mut()) };
+        assert!(!address.is_null());
+        let unmappings = tracking::stats().unwrap().os_unmappings;
+
+        let words = address.cast::<usize>();
+        unsafe {
+            words.write(OLD_BUMP_MARKER);
+            words.add(1).write(!OLD_BUMP_MARKER);
+            words.add(2).write(1);
+            allocator.dealloc(address, layout);
+        }
+
+        assert!(tracking::stats().unwrap().os_unmappings > unmappings);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
     fn global_allocation_falls_back_after_injected_failures() {
         crate::initialize();
         std::thread::spawn(|| {
@@ -4146,6 +4190,7 @@ mod tests {
         let regions = &domain.regions;
         let mut state = regions.state.lock();
         let region = state.regions;
+        clear_region_cache();
         unsafe {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
@@ -4317,7 +4362,6 @@ mod tests {
         let outside = ptr::without_provenance_mut::<u8>(0x1234_5000);
         record_small_segment(outside, 0, false, ptr::null_mut(), 1, false);
         update_physical_small_live_blocks(outside, true);
-        assert!(std::panic::catch_unwind(|| register_bump_chunk(outside, ptr::null_mut())).is_err());
         assert_eq!(allocation_segment(outside).addr(), outside.addr() & !(SLAB_SIZE - 1));
 
         let state = MediumState {
@@ -4626,6 +4670,7 @@ mod tests {
 
         assert!(unsafe { hal::decommit(full, 8 * MEDIUM_SLICE_SIZE) });
         let mut state = regions.state.lock();
+        clear_region_cache();
         unsafe {
             hal::unmap((*region).base, MEDIUM_REGION_SIZE);
             hal::unmap(region.cast(), size_of::<RegionState>());
@@ -5000,6 +5045,7 @@ mod tests {
         let mut state = regions.state.lock();
         assert_eq!(unsafe { find_region(&state, second) }.unwrap(), state.last_region);
         let mut region = state.regions;
+        clear_region_cache();
         while !region.is_null() {
             let next = unsafe { (*region).next.load(Ordering::Relaxed) };
             unsafe {

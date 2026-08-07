@@ -3691,6 +3691,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rallocator_telemetry",
+ "same-file",
 ]
 
 [[package]]
