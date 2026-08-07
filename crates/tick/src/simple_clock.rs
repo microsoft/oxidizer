@@ -73,6 +73,12 @@ impl SimpleClock {
     /// independently, and stopwatches created from each clock retain that clock's setting.
     /// Controlled clocks are unaffected.
     ///
+    /// # Performance
+    ///
+    /// Only enable fast instant retrieval when instrumentation shows that the default
+    /// [`Instant::now`] retrieval is a performance bottleneck. Otherwise, retain the default
+    /// precise source.
+    ///
     /// # Examples
     ///
     /// ```

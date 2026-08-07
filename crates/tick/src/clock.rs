@@ -331,6 +331,12 @@ impl Clock {
     /// timers using precise instants. On other platforms, fast retrieval delegates to
     /// [`Instant::now`]. Controlled clocks are unaffected.
     ///
+    /// # Performance
+    ///
+    /// Only enable fast instant retrieval when instrumentation shows that the default
+    /// [`Instant::now`] retrieval is a performance bottleneck. Otherwise, retain the default
+    /// precise source.
+    ///
     /// # Examples
     ///
     /// ```
