@@ -51,17 +51,13 @@ impl Source {
 }
 
 #[cfg(all(target_os = "linux", not(miri)))]
+#[cfg_attr(test, mutants::skip)] // The feature is disabled by the default mutation-test profile.
 fn platform_time() -> Duration {
     let mut timestamp = std::mem::MaybeUninit::<libc::timespec>::uninit();
 
     // SAFETY: clock_gettime initializes the provided timespec pointer.
     let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_COARSE, timestamp.as_mut_ptr()) };
-    assert_eq!(
-        result,
-        0,
-        "CLOCK_MONOTONIC_COARSE must be available: {}",
-        std::io::Error::last_os_error()
-    );
+    assert_eq!(result, 0, "CLOCK_MONOTONIC_COARSE must be available");
 
     // SAFETY: A successful clock_gettime call initialized the timespec above.
     let timestamp = unsafe { timestamp.assume_init() };
@@ -72,6 +68,7 @@ fn platform_time() -> Duration {
 }
 
 #[cfg(all(windows, not(miri)))]
+#[cfg_attr(test, mutants::skip)] // The feature is disabled by the default mutation-test profile.
 fn platform_time() -> Duration {
     // SAFETY: GetTickCount64 has no safety requirements.
     Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })
