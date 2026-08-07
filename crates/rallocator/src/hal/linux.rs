@@ -148,9 +148,9 @@ mod tests {
     #[test]
     fn aligned_mapping_works_with_large_page_granularities() {
         let host_page_size = page_size();
-        for simulated_page_size in [16 * 1024, 64 * 1024]
+        for simulated_page_size in [16_usize * 1024, 64 * 1024]
             .into_iter()
-            .filter(|page_size| page_size.is_multiple_of(host_page_size))
+            .filter(|page_size| (*page_size).is_multiple_of(host_page_size))
         {
             let size = simulated_page_size + 1;
             let address = map_aligned_with_page_size(size, PROT_READ | PROT_WRITE, simulated_page_size);
