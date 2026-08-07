@@ -256,6 +256,13 @@ up the new dependency version even when their own public API is
 unchanged), then raised to whatever their own `cargo semver-checks`
 result requires.
 
+#### Windows: baseline builds run in a short scratch directory
+
+On Windows, cargo-semver-checks uses `~\.cache\ox-sv` to avoid
+path length failures. Set `OXIDIZER_SEMVER_TARGET_DIR` to an absolute
+path to override it on any platform. When unset, other platforms use
+Cargo's default target directory.
+
 #### Proc-macro-only packages require manual SemVer review
 
 `cargo semver-checks` deliberately supports ordinary library targets,

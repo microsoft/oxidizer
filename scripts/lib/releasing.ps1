@@ -610,6 +610,123 @@ function Get-WorkspacePackages {
     return $packages
 }
 
+# Returns the target directory for semver checks. Windows uses a short per-user
+# cache path; other platforms keep Cargo's default.
+function Get-SemverChecksTargetDir {
+    [CmdletBinding()]
+    param()
+
+    if (-not [string]::IsNullOrWhiteSpace($env:OXIDIZER_SEMVER_TARGET_DIR)) {
+        $override = $env:OXIDIZER_SEMVER_TARGET_DIR.Trim()
+
+        if (-not [System.IO.Path]::IsPathFullyQualified($override)) {
+            $example = if ($IsWindows) { 'D:\ox-semver' } else { '/var/tmp/ox-semver' }
+            throw "OXIDIZER_SEMVER_TARGET_DIR must be an absolute path, but is '$override'. Use a fully qualified path such as '$example'."
+        }
+
+        return $override
+    }
+
+    if (-not $IsWindows) {
+        return $null
+    }
+
+    $cacheRoot = Join-Path $HOME '.cache'
+    return (Join-Path $cacheRoot 'ox-sv')
+}
+
+# Removes stale in-repo semver scratch data after redirecting Cargo elsewhere.
+function Clear-LegacySemverChecksScratch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+
+    $repoTarget = Join-Path $RepoRoot 'target'
+    $legacy = Join-Path $repoTarget 'semver-checks'
+
+    # Keep the directory when it is the active Cargo target or contains it.
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $relativeToRepoTarget = [System.IO.Path]::GetRelativePath($repoTarget, $TargetDir)
+    $relativeToLegacy = [System.IO.Path]::GetRelativePath($legacy, $TargetDir)
+    $targetIsLegacyOrChild = $relativeToLegacy -eq '.' -or (
+        -not [System.IO.Path]::IsPathRooted($relativeToLegacy) -and
+        $relativeToLegacy -ne '..' -and
+        -not $relativeToLegacy.StartsWith("..$separator", [StringComparison]::Ordinal)
+    )
+
+    if ($relativeToRepoTarget -eq '.' -or $targetIsLegacyOrChild) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $legacy)) {
+        return
+    }
+
+    try {
+        Remove-Item -LiteralPath $legacy -Recurse -Force -ErrorAction Stop
+        Write-Host "Removed stale cargo-semver-checks scratch directory '$legacy' (superseded by '$TargetDir')."
+    } catch {
+        Write-Warning "Could not remove the stale cargo-semver-checks scratch directory '$legacy' ($($_.Exception.Message)). Delete it manually if cargo reports that a package is ambiguous because it is defined in multiple manifests."
+    }
+}
+
+# Runs cargo semver-checks with a scoped target-directory override.
+function Invoke-SemverChecksCli {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$BaselineSha,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $targetDir = Get-SemverChecksTargetDir
+    $hadPrevious = Test-Path Env:\CARGO_TARGET_DIR
+    $previous = if ($hadPrevious) { $env:CARGO_TARGET_DIR } else { $null }
+    $applied = $false
+
+    if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
+        try {
+            # CreateDirectory treats user-provided paths literally.
+            [void][System.IO.Directory]::CreateDirectory($targetDir)
+            $env:CARGO_TARGET_DIR = $targetDir
+            $applied = $true
+        } catch {
+            Write-Warning "Could not use '$targetDir' as the cargo-semver-checks target directory ($($_.Exception.Message)). Falling back to the default; on Windows a long repository path may overflow MAX_PATH and fail the baseline build. Set OXIDIZER_SEMVER_TARGET_DIR to a short writable path to override."
+        }
+    }
+
+    if ($applied) {
+        Clear-LegacySemverChecksScratch -RepoRoot $RepoRoot -TargetDir $targetDir
+    }
+
+    try {
+        Push-Location $RepoRoot
+        try {
+            # A required version bump produces an expected non-zero exit code.
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & cargo semver-checks --package $PackageName --baseline-rev $BaselineSha --all-features --color never 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        if ($applied) {
+            if ($hadPrevious) {
+                $env:CARGO_TARGET_DIR = $previous
+            } else {
+                Remove-Item Env:\CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Output   = $output
+        ExitCode = $exitCode
+    }
+}
+
 # Runs `cargo semver-checks` for a single crate against its previous version-bump
 # commit in git history. The baseline commit is located with
 # Get-PreviousVersionBumpCommit and passed to cargo-semver-checks as
@@ -645,18 +762,9 @@ function Invoke-CrateSemverCheck {
         return 'none'
     }
 
-    Push-Location $RepoRoot
-    try {
-        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
-        # bump is required, which is expected and not an error for our purposes.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --baseline-rev $bump.Sha --all-features --color never 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
+    $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
 
-    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
+    return ConvertFrom-SemverChecksOutput -Output $result.Output -ExitCode $result.ExitCode -PackageName $PackageName
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
