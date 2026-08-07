@@ -81,6 +81,7 @@ toolchains, and no single `.stderr` snapshot could match both.
 - A `{}` with no argument left, or an argument no `{}` uses.
 - An argument written with a `self.` prefix.
 - An argument rooted in anything other than a field or method of `self`.
+- An unbalanced brace: a `{` with no matching `}`, or a `}` with no matching `{`.
 
 ## Implementation notes
 
@@ -88,6 +89,13 @@ toolchains, and no single `.stderr` snapshot could match both.
 keeps "what the template says" apart from "whether that names a field", so
 neither decision is made halfway through a scan. Every segment borrows from the
 template, which works because none of them is rewritten on the way out.
+
+**An unbalanced brace is reported, not repaired.** Letting an unterminated `{`
+run to the end of the template would honour `"{path"` as `"{path}"`, so a typo
+would render as a working message and never surface. A stray `}` is rejected for
+the mirror-image reason: it would otherwise be copied into the generated
+`format!` string, where `rustc` reports it against code the user cannot see. Both
+are spanned at the template, which is the only thing the user wrote.
 
 **The scoping prefix is applied by parsing, not by enumeration.** Whether an
 argument can carry `self.` at all is answered by building the unprefixed

@@ -46,4 +46,7 @@ fn display_diagnostics() {
     // An argument's root is found through every expression form that keeps a term leftmost, and
     // reported at that term rather than at the whole expression.
     t.compile_fail("tests/ui/display_binary_argument_root.rs");
+
+    // An unbalanced brace is reported rather than parsed into a different, valid template.
+    t.compile_fail("tests/ui/display_unbalanced_brace.rs");
 }

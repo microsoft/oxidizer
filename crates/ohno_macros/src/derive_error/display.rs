@@ -10,6 +10,10 @@ use crate::utils::{bail, bail_spanned};
 
 const SELF_SCOPED_ARGS: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix";
 const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`";
+const UNTERMINATED_PLACEHOLDER: &str =
+    "`#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace";
+const UNMATCHED_CLOSING_BRACE: &str =
+    "`#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace";
 
 /// A parsed piece of a display template
 enum Segment<'a> {
@@ -24,12 +28,21 @@ enum Segment<'a> {
 /// Split a display template into its segments
 ///
 /// See `docs/error_display.md`.
-fn parse_template(template: &str) -> Vec<Segment<'_>> {
+fn parse_template(template: &str, span: proc_macro2::Span) -> Result<Vec<Segment<'_>>> {
     let mut segments = Vec::new();
     let mut chars = template.char_indices().peekable();
     let mut text_start = 0;
 
     while let Some((index, ch)) = chars.next() {
+        if ch == '}' {
+            // An escaped brace stays part of the surrounding text, spelled `}}` there as well
+            if chars.next_if(|&(_, next)| next == '}').is_some() {
+                continue;
+            }
+
+            bail!(span, "{UNMATCHED_CLOSING_BRACE}");
+        }
+
         if ch != '{' {
             continue;
         }
@@ -43,17 +56,21 @@ fn parse_template(template: &str) -> Vec<Segment<'_>> {
             segments.push(Segment::Text(&template[text_start..index]));
         }
 
-        // The placeholder runs to the next `}`, or to the end of an unterminated template
+        // The placeholder runs to the next `}`; without one the template is reported rather than
+        // parsed into a different, valid one
         let body_start = index + ch.len_utf8();
-        let mut body_end = template.len();
-        text_start = template.len();
+        let mut body_end = None;
         for (offset, ch) in chars.by_ref() {
             if ch == '}' {
-                body_end = offset;
+                body_end = Some(offset);
                 text_start = offset + ch.len_utf8();
                 break;
             }
         }
+
+        let Some(body_end) = body_end else {
+            bail!(span, "{UNTERMINATED_PLACEHOLDER}");
+        };
 
         let body = &template[body_start..body_end];
         let (name, spec) = body.split_once(':').unwrap_or((body, ""));
@@ -68,7 +85,7 @@ fn parse_template(template: &str) -> Vec<Segment<'_>> {
         segments.push(Segment::Text(&template[text_start..]));
     }
 
-    segments
+    Ok(segments)
 }
 
 /// Append the `format!` placeholder a segment stands for
@@ -91,7 +108,7 @@ pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &De
     let mut format_args = Vec::new();
     let mut arg_index = 0;
 
-    for segment in parse_template(&display_attr.template) {
+    for segment in parse_template(&display_attr.template, display_attr.template_span)? {
         match segment {
             Segment::Text(text) => result.push_str(text),
             Segment::Field { name, spec } => {
@@ -395,14 +412,27 @@ mod tests {
         let r1 = parse("Error: {{static}} with {field}", vec![], &input);
         let e1 = quote! { std::borrow::Cow::from(format!("Error: {{static}} with {}", &self.field)) };
         assert_eq!(r1.to_string(), e1.to_string());
-        // Extra closing brace after placeholder
-        let r2 = parse("Error: {field}} extra brace", vec![], &input);
-        let e2 = quote! { std::borrow::Cow::from(format!("Error: {}} extra brace", &self.field)) };
+        // An escaped brace directly after a placeholder, which `format!` spells `}}` there too
+        let r2 = parse("Error: {field}}} extra brace", vec![], &input);
+        let e2 = quote! { std::borrow::Cow::from(format!("Error: {}}} extra brace", &self.field)) };
         assert_eq!(r2.to_string(), e2.to_string());
         // Multiple escaped braces
         let r3 = parse("{{Error}}: {field} {{end}}", vec![], &input);
         let e3 = quote! { std::borrow::Cow::from(format!("{{Error}}: {} {{end}}", &self.field)) };
         assert_eq!(r3.to_string(), e3.to_string());
+    }
+
+    #[test]
+    fn test_parse_display_template_rejects_an_unbalanced_brace() {
+        let input: DeriveInput = parse_quote! { struct TestError { field: String, #[error] inner: OhnoCore } };
+
+        // A `{` with no `}` would otherwise run to the end and be honoured as `{field}`
+        assert_eq!(parse_err("Error: {field", vec![], &input), UNTERMINATED_PLACEHOLDER);
+        assert_eq!(parse_err("Error: {", vec![], &input), UNTERMINATED_PLACEHOLDER);
+        // A `}` with no `{` would otherwise be copied into the generated `format!` string
+        assert_eq!(parse_err("Error: field}", vec![], &input), UNMATCHED_CLOSING_BRACE);
+        // Including the one left over by a single `}` after a placeholder
+        assert_eq!(parse_err("Error: {field}} extra", vec![], &input), UNMATCHED_CLOSING_BRACE);
     }
 
     #[test]
