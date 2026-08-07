@@ -53,6 +53,12 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [docs/feature-gated-doctests.md](docs/feature-gated-doctests.md).
 
+## `no_std` Support
+
+`no_std` support is optional when deciding whether to adopt or expand it. Support for constrained targets must not justify disproportionate implementation complexity, such as extensive `cfg` branching or specialized fallbacks for platforms without pointer-width atomics.
+
+Once a crate documents a `no_std` configuration as supported, that configuration is a real compatibility promise, not best-effort support. It must work correctly, be tested in CI, and be documented with its actual prerequisites and support boundary, including requirements such as `alloc`, pointer-width atomics, or specific target capabilities.
+
 ## Required CI Checks
 
 The `required-checks` job in `.github/workflows/main.yml` is a "fan-in"
