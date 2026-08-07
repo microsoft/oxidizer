@@ -160,6 +160,26 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn insert_delegates_to_inner() {
+        let inner = MockCache::<i32, i32>::new();
+        let inner_check = inner.clone();
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
+            Box::new(TransformCodec::new(
+                |v: &String| v.parse::<i32>(),
+                infallible_owned(|v: i32| v.to_string()),
+            )),
+        );
+
+        adapter.insert("42".to_string(), CacheEntry::new("100".to_string())).await.unwrap();
+
+        let stored = inner_check.get(&42).await.unwrap().expect("insert should reach inner tier");
+        assert_eq!(*stored.value(), 100);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn get_preserves_ttl_and_cached_at() {
         use std::time::{Duration, SystemTime};
 

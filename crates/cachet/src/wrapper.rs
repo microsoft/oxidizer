@@ -191,6 +191,31 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
+    struct RejectingCache;
+
+    impl CacheTier<String, i32> for RejectingCache {
+        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+            Ok(None)
+        }
+
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn insert_with_outcome(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+            Ok(InsertOutcome::Rejected)
+        }
+
+        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn clear(&self) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn wrapper_is_expired_with_no_ttl_returns_false() {
         let clock = Clock::new_frozen();
@@ -437,6 +462,22 @@ mod tests {
             CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), false);
         let result = wrapper.insert("key".to_string(), CacheEntry::new(1)).await;
         result.unwrap_err();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn wrapper_propagates_inner_rejection() {
+        let clock = Clock::new_frozen();
+        let telemetry = CacheTelemetry::new();
+        let wrapper = CacheWrapper::new("test", RejectingCache, clock, None, telemetry, InsertPolicy::default(), false);
+
+        let outcome = wrapper.insert_with_outcome("key".to_string(), CacheEntry::new(1)).await.unwrap();
+
+        assert_eq!(outcome, InsertOutcome::Rejected);
+        assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
+        wrapper.inner.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
+        wrapper.invalidate(&"key".to_string()).await.unwrap();
+        wrapper.clear().await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]

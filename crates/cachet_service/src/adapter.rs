@@ -160,6 +160,15 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn adapter_insert_with_outcome_preserves_acceptance() {
+        let adapter = ServiceAdapter::new(MockService);
+        let outcome = adapter.insert_with_outcome("key".to_string(), CacheEntry::new(100)).await.unwrap();
+
+        assert_eq!(outcome, InsertOutcome::Accepted);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn adapter_insert_with_outcome_preserves_rejection() {
         #[derive(Debug, Clone)]
         struct RejectingService;
@@ -181,6 +190,9 @@ mod tests {
         let outcome = adapter.insert_with_outcome("key".to_string(), CacheEntry::new(100)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Rejected);
+        assert!(adapter.get(&"key".to_string()).await.unwrap().is_none());
+        adapter.invalidate(&"key".to_string()).await.unwrap();
+        adapter.clear().await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]
