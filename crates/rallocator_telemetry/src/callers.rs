@@ -19,6 +19,26 @@ pub struct ThreadLog {
     pub live_histogram: Vec<u64>,
 }
 
+impl ThreadLog {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        thread_log_id: u64,
+        total_events: u64,
+        lost_events: u64,
+        allocated_histogram: Vec<u64>,
+        live_histogram: Vec<u64>,
+    ) -> Self {
+        Self {
+            thread_log_id,
+            total_events,
+            lost_events,
+            allocated_histogram,
+            live_histogram,
+        }
+    }
+}
+
 /// Kind of recorded allocation event.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EventKind {
@@ -71,6 +91,44 @@ pub struct Event {
     pub call_stack: Vec<u64>,
 }
 
+impl Event {
+    #[doc(hidden)]
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The full constructor preserves schema completeness for producers"
+    )]
+    pub const fn new(
+        thread_log_id: u64,
+        event_thread_id: u64,
+        sequence: u64,
+        allocation_id: u64,
+        kind: EventKind,
+        heap_id: u64,
+        heap_kind: HeapKind,
+        freed_after_heap_release: bool,
+        address: u64,
+        size: u64,
+        align: u64,
+        call_stack: Vec<u64>,
+    ) -> Self {
+        Self {
+            thread_log_id,
+            event_thread_id,
+            sequence,
+            allocation_id,
+            kind,
+            heap_id,
+            heap_kind,
+            freed_after_heap_release,
+            address,
+            size,
+            align,
+            call_stack,
+        }
+    }
+}
+
 /// Name associated with a recorded thread.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -79,6 +137,14 @@ pub struct ThreadName {
     pub thread_id: u64,
     /// Captured thread name.
     pub name: String,
+}
+
+impl ThreadName {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(thread_id: u64, name: String) -> Self {
+        Self { thread_id, name }
+    }
 }
 
 /// Retained caller telemetry.
@@ -99,6 +165,28 @@ pub struct Callers {
     pub thread_names: Vec<ThreadName>,
 }
 
+impl Callers {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(
+        session_id: u64,
+        total_events: u64,
+        lost_events: u64,
+        threads: Vec<ThreadLog>,
+        events: Vec<Event>,
+        thread_names: Vec<ThreadName>,
+    ) -> Self {
+        Self {
+            session_id,
+            total_events,
+            lost_events,
+            threads,
+            events,
+            thread_names,
+        }
+    }
+}
+
 /// Symbol lookup information for one instruction address.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -113,4 +201,18 @@ pub struct AddressLookup {
     pub line: Option<u32>,
     /// Resolved source column.
     pub column: Option<u32>,
+}
+
+impl AddressLookup {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(address: u64, symbol: Option<String>, filename: Option<String>, line: Option<u32>, column: Option<u32>) -> Self {
+        Self {
+            address,
+            symbol,
+            filename,
+            line,
+            column,
+        }
+    }
 }

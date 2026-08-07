@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::ptr;
+use std::sync::OnceLock;
+use std::{process, ptr};
 
 use libc::{
-    CLOCK_MONOTONIC, MADV_DONTNEED, MADV_HUGEPAGE, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE, clock_gettime,
-    madvise, mmap, mprotect, munmap, timespec,
+    _SC_PAGESIZE, CLOCK_MONOTONIC, MADV_DONTNEED, MADV_HUGEPAGE, MAP_ANONYMOUS, MAP_FAILED, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE,
+    clock_gettime, madvise, mmap, mprotect, munmap, sysconf, timespec,
 };
 
 const ALLOCATION_ALIGNMENT: usize = 2 * 1024 * 1024;
-const PAGE_SIZE: usize = 4 * 1024;
 
 pub(crate) fn map(size: usize) -> *mut u8 {
     map_aligned(size, PROT_READ | PROT_WRITE)
@@ -79,7 +79,8 @@ pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
 }
 
 fn map_aligned(size: usize, protection: i32) -> *mut u8 {
-    let Some(rounded_size) = size.checked_add(PAGE_SIZE - 1).map(|size| size & !(PAGE_SIZE - 1)) else {
+    let page_size = page_size();
+    let Some(rounded_size) = size.checked_add(page_size - 1).map(|size| size & !(page_size - 1)) else {
         return ptr::null_mut();
     };
     let Some(mapping_size) = rounded_size.checked_add(ALLOCATION_ALIGNMENT) else {
@@ -108,6 +109,21 @@ fn map_aligned(size: usize, protection: i32) -> *mut u8 {
     aligned
 }
 
+fn page_size() -> usize {
+    static PAGE_SIZE: OnceLock<usize> = OnceLock::new();
+
+    *PAGE_SIZE.get_or_init(|| {
+        let raw_page_size = unsafe { sysconf(_SC_PAGESIZE) };
+        let Ok(page_size) = usize::try_from(raw_page_size) else {
+            process::abort();
+        };
+        if page_size == 0 || !page_size.is_power_of_two() || !ALLOCATION_ALIGNMENT.is_multiple_of(page_size) {
+            process::abort();
+        }
+        page_size
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +133,12 @@ mod tests {
         crate::initialize();
         let mut frames = [0; 128];
         assert!(capture_stack(&mut frames, usize::MAX) <= 60);
+    }
+
+    #[test]
+    fn host_page_size_is_compatible_with_allocator_alignment() {
+        let page_size = page_size();
+        assert!(page_size.is_power_of_two());
+        assert!(ALLOCATION_ALIGNMENT.is_multiple_of(page_size));
     }
 }

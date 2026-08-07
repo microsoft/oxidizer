@@ -27,3 +27,4 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
 rallocator_telemetry.workspace = true
+same-file.workspace = true

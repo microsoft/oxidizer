@@ -698,48 +698,44 @@ fn producer_version() -> Version {
 }
 
 fn encode_stats(stats: Stats) -> EncodedStats {
-    let mut encoded = EncodedStats::default();
-    encoded.allocated_bytes = stats.allocated_bytes as u64;
-    encoded.deallocated_bytes = stats.deallocated_bytes as u64;
-    encoded.live_bytes = stats.live_bytes as u64;
-    encoded.peak_live_bytes = stats.peak_live_bytes as u64;
-    encoded.mapped_bytes = stats.mapped_bytes as u64;
-    encoded.os_mappings = stats.os_mappings as u64;
-    encoded.os_unmappings = stats.os_unmappings as u64;
-    encoded.allocations = stats.allocations as u64;
-    encoded.deallocations = stats.deallocations as u64;
-    encoded.remote_frees = stats.remote_frees as u64;
-    encoded.pending_remote_blocks = stats.pending_remote_blocks as u64;
-    encoded.remote_pushes_in_progress = stats.remote_pushes_in_progress as u64;
-    encoded.drained_remote_blocks = stats.drained_remote_blocks as u64;
-    encoded
+    EncodedStats::new(
+        stats.allocated_bytes as u64,
+        stats.deallocated_bytes as u64,
+        stats.live_bytes as u64,
+        stats.peak_live_bytes as u64,
+        stats.mapped_bytes as u64,
+        stats.os_mappings as u64,
+        stats.os_unmappings as u64,
+        stats.allocations as u64,
+        stats.deallocations as u64,
+        stats.remote_frees as u64,
+        stats.pending_remote_blocks as u64,
+        stats.remote_pushes_in_progress as u64,
+        stats.drained_remote_blocks as u64,
+    )
 }
 
 fn encode_estimate(estimate: Estimate<usize>) -> EncodedEstimate {
-    let mut encoded = EncodedEstimate::default();
-    encoded.value = estimate.value as u64;
-    encoded.lower_bound = estimate.lower_bound as u64;
-    encoded.upper_bound = estimate.upper_bound as u64;
-    encoded
+    EncodedEstimate::new(estimate.value as u64, estimate.lower_bound as u64, estimate.upper_bound as u64)
 }
 
 fn encode_size_class(class: &SizeClassSnapshot) -> EncodedSizeClass {
-    let mut encoded = EncodedSizeClass::default();
-    encoded.class_index = class.class_index as u32;
-    encoded.block_bytes = class.block_bytes as u64;
-    encoded.live_allocations = encode_estimate(class.live_allocations);
-    encoded.requested_bytes = encode_estimate(class.requested_bytes);
-    encoded.usable_bytes = encode_estimate(class.usable_bytes);
-    encoded
+    EncodedSizeClass::new(
+        class.class_index as u32,
+        class.block_bytes as u64,
+        encode_estimate(class.live_allocations),
+        encode_estimate(class.requested_bytes),
+        encode_estimate(class.usable_bytes),
+    )
 }
 
 fn encode_region(region: &RegionSnapshot) -> EncodedRegion {
-    let mut encoded = EncodedRegion::default();
-    encoded.region_index = region.region_index as u32;
-    encoded.reserved_bytes = region.reserved_bytes as u64;
-    encoded.used_slices = region.used_slices as u64;
-    encoded.free_slices = region.free_slices as u64;
-    encoded
+    EncodedRegion::new(
+        region.region_index as u32,
+        region.reserved_bytes as u64,
+        region.used_slices as u64,
+        region.free_slices as u64,
+    )
 }
 
 fn encode_domains(domains: &[DomainSnapshot], regions: &[RegionSnapshot]) -> Vec<EncodedDomain> {
@@ -747,138 +743,161 @@ fn encode_domains(domains: &[DomainSnapshot], regions: &[RegionSnapshot]) -> Vec
         .iter()
         .map(|domain| {
             let matching = regions.iter().filter(|region| region.domain_id == domain.domain_id);
-            let mut encoded = EncodedDomain::default();
-            encoded.domain_id = domain.domain_id as u64;
-            encoded.is_default = domain.is_default;
+            let mut region_indices = Vec::new();
+            let mut region_count = 0_u64;
+            let mut reserved_bytes = 0_u64;
+            let mut used_slices = 0_u64;
+            let mut free_slices = 0_u64;
+            let mut small_slices = 0_u64;
+            let mut medium_slices = 0_u64;
+            let mut bump_slices = 0_u64;
+            let mut unknown_slices = 0_u64;
             for region in matching {
-                encoded.region_indices.push(region.region_index as u32);
-                encoded.region_count += 1;
-                encoded.reserved_bytes += region.reserved_bytes as u64;
-                encoded.used_slices += region.used_slices as u64;
-                encoded.free_slices += region.free_slices as u64;
+                region_indices.push(region.region_index as u32);
+                region_count += 1;
+                reserved_bytes += region.reserved_bytes as u64;
+                used_slices += region.used_slices as u64;
+                free_slices += region.free_slices as u64;
                 for slice in &region.slices {
                     match slice.kind {
-                        PhysicalSliceKind::Small => encoded.small_slices += 1,
-                        PhysicalSliceKind::Medium | PhysicalSliceKind::MediumContinuation => encoded.medium_slices += 1,
-                        PhysicalSliceKind::Bump => encoded.bump_slices += 1,
-                        PhysicalSliceKind::Unknown => encoded.unknown_slices += 1,
+                        PhysicalSliceKind::Small => small_slices += 1,
+                        PhysicalSliceKind::Medium | PhysicalSliceKind::MediumContinuation => medium_slices += 1,
+                        PhysicalSliceKind::Bump => bump_slices += 1,
+                        PhysicalSliceKind::Unknown => unknown_slices += 1,
                     }
                 }
             }
-            encoded
+            EncodedDomain::new(
+                domain.domain_id as u64,
+                domain.is_default,
+                region_count,
+                reserved_bytes,
+                used_slices,
+                free_slices,
+                small_slices,
+                medium_slices,
+                bump_slices,
+                unknown_slices,
+                region_indices,
+            )
         })
         .collect()
 }
 
 fn encode_topology_region(region: &RegionSnapshot) -> EncodedTopologyRegion {
-    let mut encoded = EncodedTopologyRegion::default();
-    encoded.region_index = region.region_index as u32;
-    encoded.base_address = region.base_address as u64;
-    encoded.region_bytes = region.reserved_bytes as u64;
-    encoded.slice_bytes = region.slice_bytes as u64;
-    encoded.used_bitmap = region.used_bitmap.clone();
-    encoded.slices = region
+    let slices = region
         .slices
         .iter()
         .map(|slice| {
-            let mut encoded = EncodedSlice::default();
-            encoded.slice_index = slice.slice_index as u32;
-            encoded.kind = match slice.kind {
+            let kind = match slice.kind {
                 PhysicalSliceKind::Unknown => EncodedSliceKind::Unknown,
                 PhysicalSliceKind::Small => EncodedSliceKind::Small,
                 PhysicalSliceKind::Medium => EncodedSliceKind::Medium,
                 PhysicalSliceKind::MediumContinuation => EncodedSliceKind::MediumContinuation,
                 PhysicalSliceKind::Bump => EncodedSliceKind::Bump,
             };
-            encoded.span_slices = slice.span_slices as u32;
-            encoded.owner = slice.owner as u64;
-            encoded.requested_bytes = slice.requested_bytes as u64;
-            encoded.usable_bytes = slice.usable_bytes as u64;
-            encoded.segments = slice
+            let segments = slice
                 .segments
                 .iter()
                 .map(|segment| {
-                    let mut encoded = EncodedSegment::default();
-                    encoded.segment_index = segment.segment_index as u8;
-                    encoded.class_index = segment.class_index as u32;
-                    encoded.context = segment.context;
-                    encoded.live_blocks = segment.live_blocks as u32;
-                    encoded.usable_blocks = segment.usable_blocks as u32;
-                    encoded.utilization_tracked = segment.utilization_tracked;
-                    encoded
+                    EncodedSegment::new(
+                        segment.segment_index as u8,
+                        segment.class_index as u32,
+                        segment.context,
+                        segment.live_blocks as u32,
+                        segment.usable_blocks as u32,
+                        segment.utilization_tracked,
+                    )
                 })
                 .collect();
-            encoded
+            EncodedSlice::new(
+                slice.slice_index as u32,
+                kind,
+                slice.span_slices as u32,
+                slice.owner as u64,
+                slice.requested_bytes as u64,
+                slice.usable_bytes as u64,
+                segments,
+            )
         })
         .collect();
+    let mut encoded = EncodedTopologyRegion::new(
+        region.region_index as u32,
+        region.base_address as u64,
+        region.reserved_bytes as u64,
+        region.slice_bytes as u64,
+        Vec::new(),
+        slices,
+    );
+    encoded.used_bitmap = region.used_bitmap.clone();
     encoded
 }
 
 fn encode_callers(callers: &CallerSnapshot) -> EncodedCallers {
-    let mut encoded = EncodedCallers::default();
-    encoded.session_id = callers.session_id as u64;
-    encoded.total_events = callers.total_events as u64;
-    encoded.lost_events = callers.lost_events as u64;
-    encoded.threads = callers
+    let threads = callers
         .threads
         .iter()
         .map(|thread| {
-            let mut encoded = EncodedThreadLog::default();
-            encoded.thread_log_id = thread.thread_log_id as u64;
-            encoded.total_events = thread.total_events as u64;
-            encoded.lost_events = thread.lost_events as u64;
-            encoded.allocated_histogram = thread.allocated_histogram.iter().map(|count| *count as u64).collect();
-            encoded.live_histogram = thread.live_histogram.iter().map(|count| *count as u64).collect();
-            encoded
+            EncodedThreadLog::new(
+                thread.thread_log_id as u64,
+                thread.total_events as u64,
+                thread.lost_events as u64,
+                thread.allocated_histogram.iter().map(|count| *count as u64).collect(),
+                thread.live_histogram.iter().map(|count| *count as u64).collect(),
+            )
         })
         .collect();
-    encoded.events = callers
+    let events = callers
         .events
         .iter()
         .map(|event| {
-            let mut encoded = EncodedEvent::default();
-            encoded.thread_log_id = event.thread_log_id as u64;
-            encoded.event_thread_id = event.event_thread_id as u64;
-            encoded.sequence = event.sequence as u64;
-            encoded.allocation_id = event.allocation_id as u64;
-            encoded.kind = match event.kind {
+            let kind = match event.kind {
                 EventKind::Allocated => EncodedEventKind::Allocated,
                 EventKind::Deallocated => EncodedEventKind::Deallocated,
             };
-            encoded.heap_id = event.heap_id as u64;
-            encoded.heap_kind = match event.heap_kind {
+            let heap_kind = match event.heap_kind {
                 HeapKind::General => EncodedHeapKind::General,
                 HeapKind::Bump => EncodedHeapKind::Bump,
                 HeapKind::Thread => EncodedHeapKind::Thread,
             };
-            encoded.freed_after_heap_release = event.freed_after_heap_release;
-            encoded.address = event.address as u64;
-            encoded.size = event.size as u64;
-            encoded.align = event.align as u64;
-            encoded.call_stack = event.call_stack.iter().map(|ip| ip.0 as u64).collect();
-            encoded
+            EncodedEvent::new(
+                event.thread_log_id as u64,
+                event.event_thread_id as u64,
+                event.sequence as u64,
+                event.allocation_id as u64,
+                kind,
+                event.heap_id as u64,
+                heap_kind,
+                event.freed_after_heap_release,
+                event.address as u64,
+                event.size as u64,
+                event.align as u64,
+                event.call_stack.iter().map(|ip| ip.0 as u64).collect(),
+            )
         })
         .collect();
-    encoded.thread_names = callers
+    let thread_names = callers
         .thread_names
         .iter()
-        .map(|thread| {
-            let mut encoded = EncodedThreadName::default();
-            encoded.thread_id = thread.thread_id as u64;
-            encoded.name = thread.name.clone();
-            encoded
-        })
+        .map(|thread| EncodedThreadName::new(thread.thread_id as u64, thread.name.clone()))
         .collect();
-    encoded
+    EncodedCallers::new(
+        callers.session_id as u64,
+        callers.total_events as u64,
+        callers.lost_events as u64,
+        threads,
+        events,
+        thread_names,
+    )
 }
 
 fn encode_histograms(aggregates: Option<&AggregateSnapshot>) -> EncodedHistograms {
     let empty = AggregateSnapshot::new();
     let aggregates = aggregates.unwrap_or(&empty);
-    let mut encoded = EncodedHistograms::default();
-    encoded.allocated = aggregates.size_allocations.iter().map(|count| *count as u64).collect();
-    encoded.live = aggregates.size_live.iter().map(|count| (*count).max(0) as u64).collect();
-    encoded
+    EncodedHistograms::new(
+        aggregates.size_allocations.iter().map(|count| *count as u64).collect(),
+        aggregates.size_live.iter().map(|count| (*count).max(0) as u64).collect(),
+    )
 }
 
 fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
@@ -896,8 +915,7 @@ fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
         .into_iter()
         .map(|address| {
             #[cfg_attr(miri, allow(unused_mut))]
-            let mut lookup = EncodedAddressLookup::default();
-            lookup.address = address as u64;
+            let mut lookup = EncodedAddressLookup::new(address as u64, None, None, None, None);
             #[cfg(not(miri))]
             {
                 backtrace::resolve(address as *mut c_void, |symbol| {
@@ -2134,7 +2152,7 @@ mod tests {
         assert_eq!(addresses.len(), 1);
         assert_eq!(addresses[0].address, stack_address as u64);
 
-        let mut lookup = EncodedAddressLookup::default();
+        let mut lookup = EncodedAddressLookup::new(0, None, None, None, None);
         merge_address_lookup(&mut lookup, Some("first".into()), Some("first.rs".into()), Some(10), Some(20));
         merge_address_lookup(&mut lookup, Some("second".into()), Some("second.rs".into()), Some(30), Some(40));
         assert_eq!(lookup.symbol.as_deref(), Some("first"));

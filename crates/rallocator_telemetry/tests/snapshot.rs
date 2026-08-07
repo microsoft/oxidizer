@@ -5,13 +5,12 @@
 #![expect(
     clippy::cast_possible_truncation,
     clippy::panic,
-    clippy::too_many_lines,
     clippy::unwrap_used,
     reason = "Explicit wire fixtures use bounded test values and should fail immediately when malformed"
 )]
 
 use rallocator_telemetry::callers::{AddressLookup, Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
-use rallocator_telemetry::snapshot::{Domain, Estimate, Region, SizeClass, Snapshot, Stats, Version};
+use rallocator_telemetry::snapshot::{Domain, Estimate, Region, SizeClass, SkippedSection, Snapshot, Stats, Version};
 use rallocator_telemetry::topology::{Segment, Slice, SliceKind, TopologyRegion};
 use rallocator_telemetry::{decode, encode, encoded_len};
 use rallocator_wire::format::{Header, Section};
@@ -27,186 +26,81 @@ const SECTION_ADDRESSES: u16 = 6;
 const SECTION_TOPOLOGY: u16 = 7;
 const SECTION_DOMAINS: u16 = 8;
 
-macro_rules! schema {
-    ($base:expr, $($field:ident: $value:expr),+ $(,)?) => {{
-        let mut value = $base;
-        $(value.$field = $value;)+
-        value
-    }};
-}
-
 fn fixture() -> Snapshot {
     let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
     snapshot.metadata.capture_duration_nanos = 42;
-    snapshot.stats = schema!(
-        Stats::default(),
-        live_bytes: 123,
-        mapped_bytes: 4096,
-        allocations: 7,
-        remote_frees: 2
-    );
-    snapshot.size_classes.push(schema!(
-        SizeClass::default(),
-        class_index: 3,
-        block_bytes: 64,
-        live_allocations: schema!(Estimate::default(), value: 2, lower_bound: 1, upper_bound: 3),
-        requested_bytes: schema!(Estimate::default(), value: 96, lower_bound: 80, upper_bound: 112),
-        usable_bytes: schema!(Estimate::default(), value: 128, lower_bound: 64, upper_bound: 192)
+    snapshot.stats = Stats::new(0, 0, 123, 0, 4096, 0, 0, 7, 0, 2, 0, 0, 0);
+    snapshot.size_classes.push(SizeClass::new(
+        3,
+        64,
+        Estimate::new(2, 1, 3),
+        Estimate::new(96, 80, 112),
+        Estimate::new(128, 64, 192),
     ));
-    snapshot.regions.push(schema!(
-        Region::default(),
-        region_index: 0,
-        reserved_bytes: 1 << 30,
-        used_slices: 8,
-        free_slices: 16_376
-    ));
-    snapshot.domains.push(schema!(
-        Domain::default(),
-        domain_id: 1,
-        is_default: true,
-        region_count: 1,
-        reserved_bytes: 1 << 30,
-        used_slices: 8,
-        free_slices: 16_376,
-        small_slices: 1,
-        medium_slices: 0,
-        bump_slices: 1,
-        unknown_slices: 6,
-        region_indices: vec![0]
-    ));
-    snapshot.topology.push(schema!(
-        TopologyRegion::default(),
-        region_index: 0,
-        base_address: 0x4000_0000,
-        region_bytes: 64 * (64 << 10),
-        slice_bytes: 64 << 10,
-        used_bitmap: vec![0b1_1111],
-        slices: vec![
-            schema!(
-                Slice::default(),
-                slice_index: 0,
-                kind: SliceKind::Small,
-                span_slices: 0,
-                owner: 0x1234,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: vec![schema!(
-                    Segment::default(),
-                    segment_index: 0,
-                    class_index: 1,
-                    context: false,
-                    live_blocks: 7,
-                    usable_blocks: 511,
-                    utilization_tracked: true
-                )]
-            ),
-            schema!(
-                Slice::default(),
-                slice_index: 1,
-                kind: SliceKind::Bump,
-                span_slices: 1,
-                owner: 0x5678,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: Vec::new()
-            ),
-            schema!(
-                Slice::default(),
-                slice_index: 2,
-                kind: SliceKind::Unknown,
-                span_slices: 1,
-                owner: 0,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: Vec::new()
-            ),
-            schema!(
-                Slice::default(),
-                slice_index: 3,
-                kind: SliceKind::Medium,
-                span_slices: 2,
-                owner: 0x9ABC,
-                requested_bytes: 32 << 10,
-                usable_bytes: 64 << 10,
-                segments: Vec::new()
-            ),
-            schema!(
-                Slice::default(),
-                slice_index: 4,
-                kind: SliceKind::MediumContinuation,
-                span_slices: 0,
-                owner: 0x9ABC,
-                requested_bytes: 0,
-                usable_bytes: 0,
-                segments: Vec::new()
-            ),
+    snapshot.regions.push(Region::new(0, 1 << 30, 8, 16_376));
+    snapshot
+        .domains
+        .push(Domain::new(1, true, 1, 1 << 30, 8, 16_376, 1, 0, 1, 6, vec![0]));
+    snapshot.topology.push(TopologyRegion::new(
+        0,
+        0x4000_0000,
+        64 * (64 << 10),
+        64 << 10,
+        vec![0b1_1111],
+        vec![
+            Slice::new(0, SliceKind::Small, 0, 0x1234, 0, 0, vec![Segment::new(0, 1, false, 7, 511, true)]),
+            Slice::new(1, SliceKind::Bump, 1, 0x5678, 0, 0, Vec::new()),
+            Slice::new(2, SliceKind::Unknown, 1, 0, 0, 0, Vec::new()),
+            Slice::new(3, SliceKind::Medium, 2, 0x9ABC, 32 << 10, 64 << 10, Vec::new()),
+            Slice::new(4, SliceKind::MediumContinuation, 0, 0x9ABC, 0, 0, Vec::new()),
         ],
     ));
-    snapshot.callers = Some(schema!(
-        Callers::default(),
-        session_id: 9,
-        total_events: 1,
-        lost_events: 0,
-        threads: vec![schema!(
-            ThreadLog::default(),
-            thread_log_id: 1,
-            total_events: 1,
-            lost_events: 0,
-            allocated_histogram: vec![0, 1],
-            live_histogram: vec![0, 0]
-        )],
-        events: vec![
-            schema!(
-                Event::default(),
-                thread_log_id: 1,
-                event_thread_id: 1,
-                sequence: 1,
-                allocation_id: 4,
-                kind: EventKind::Allocated,
-                heap_id: 7,
-                heap_kind: HeapKind::General,
-                freed_after_heap_release: false,
-                address: 0x1234,
-                size: 64,
-                align: 8,
-                call_stack: vec![0xAAAA, 0xBBBB]
+    snapshot.callers = Some(Callers::new(
+        9,
+        1,
+        0,
+        vec![ThreadLog::new(1, 1, 0, vec![0, 1], vec![0, 0])],
+        vec![
+            Event::new(
+                1,
+                1,
+                1,
+                4,
+                EventKind::Allocated,
+                7,
+                HeapKind::General,
+                false,
+                0x1234,
+                64,
+                8,
+                vec![0xAAAA, 0xBBBB],
             ),
-            schema!(
-                Event::default(),
-                thread_log_id: 1,
-                event_thread_id: 2,
-                sequence: 2,
-                allocation_id: 4,
-                kind: EventKind::Deallocated,
-                heap_id: 7,
-                heap_kind: HeapKind::General,
-                freed_after_heap_release: false,
-                address: 0x1234,
-                size: 64,
-                align: 8,
-                call_stack: Vec::new()
+            Event::new(
+                1,
+                2,
+                2,
+                4,
+                EventKind::Deallocated,
+                7,
+                HeapKind::General,
+                false,
+                0x1234,
+                64,
+                8,
+                Vec::new(),
             ),
         ],
-        thread_names: vec![
-            schema!(
-                ThreadName::default(),
-                thread_id: 1,
-                name: "allocator".to_owned()
-            ),
-            schema!(
-                ThreadName::default(),
-                thread_id: 2,
-                name: "reclaimer".to_owned()
-            ),
+        vec![
+            ThreadName::new(1, "allocator".to_owned()),
+            ThreadName::new(2, "reclaimer".to_owned()),
         ],
     ));
-    snapshot.addresses.push(schema!(
-        AddressLookup::default(),
-        address: 0xAAAA,
-        symbol: Some("fixture::allocate".to_owned()),
-        filename: Some("src/fixture.rs".to_owned()),
-        line: Some(42),
-        column: Some(7)
+    snapshot.addresses.push(AddressLookup::new(
+        0xAAAA,
+        Some("fixture::allocate".to_owned()),
+        Some("src/fixture.rs".to_owned()),
+        Some(42),
+        Some(7),
     ));
     snapshot
 }
@@ -290,11 +184,12 @@ fn encode_requires_exact_output_length() {
 
 #[test]
 fn unknown_sections_are_skipped() {
-    let expected = fixture();
-    let original_len = encoded_len(&expected).unwrap();
+    let mut expected = fixture();
+    expected.skipped_sections.push(SkippedSection::new(999, 1));
+    let original_len = encoded_len(&fixture()).unwrap();
     let mut bytes = vec![0; original_len + Section::encoded_len(3)];
     let mut original = vec![0; original_len];
-    encode(&expected, &mut original).unwrap();
+    encode(&fixture(), &mut original).unwrap();
     bytes[..original_len].copy_from_slice(&original);
     let mut writer = Writer::new(&mut bytes[original_len..]);
     writer.begin_section(999, 1, 3).unwrap();
@@ -339,18 +234,21 @@ fn unsupported_schemas_and_section_versions_are_handled() {
     bytes[topology + 2..topology + 4].copy_from_slice(&3_u16.to_le_bytes());
     let decoded = decode(&bytes).unwrap();
     assert!(decoded.topology.is_empty());
+    assert_eq!(decoded.skipped_sections, vec![SkippedSection::new(SECTION_TOPOLOGY, 3)]);
 
     let mut bytes = encoded(&fixture());
     let (domains, _) = section(&bytes, SECTION_DOMAINS);
-    bytes[domains + 2..domains + 4].copy_from_slice(&2_u16.to_le_bytes());
+    bytes[domains + 2..domains + 4].copy_from_slice(&0_u16.to_le_bytes());
     let decoded = decode(&bytes).unwrap();
     assert!(decoded.domains.is_empty());
+    assert_eq!(decoded.skipped_sections, vec![SkippedSection::new(SECTION_DOMAINS, 0)]);
 
     let mut bytes = encoded(&fixture());
     let (callers, _) = section(&bytes, SECTION_CALLERS);
     bytes[callers + 2..callers + 4].copy_from_slice(&4_u16.to_le_bytes());
     let decoded = decode(&bytes).unwrap();
     assert!(decoded.callers.is_none());
+    assert_eq!(decoded.skipped_sections, vec![SkippedSection::new(SECTION_CALLERS, 4)]);
 }
 
 #[test]
