@@ -610,30 +610,8 @@ function Get-WorkspacePackages {
     return $packages
 }
 
-# Resolves the Cargo target directory used for `cargo semver-checks` runs, or
-# $null to leave Cargo's default (the repository's own `target/`) in place.
-#
-# Under `--baseline-rev` cargo-semver-checks builds each baseline in a scratch
-# tree keyed by the baseline commit and a per-crate build hash:
-#
-#   <target-dir>/semver-checks/git-<40-char-sha>/local-<crate>-<version>-<target-triple>-<16-char-hash>/target/debug/build/<dep>-<hash>/build_script_build-<hash>.exe
-#
-# Those two generated segments alone exceed 100 characters, and the tail below
-# them adds ~100 more. MSVC's `link.exe` still resolves paths against the legacy
-# 260-character MAX_PATH limit — the `LongPathsEnabled` policy does not help,
-# because long-path awareness is opt-in through an application manifest and
-# link.exe does not opt in. A repository cloned even a moderate distance from
-# the drive root therefore overflows the limit and the baseline build fails with
-# `LNK1104: cannot open file` on an intermediate build-script executable, which
-# surfaces as an unanalysable crate and aborts the release (AB#7696711).
-#
-# Pointing just the semver-checks runs at a short scratch root keeps the
-# generated tail well inside the limit wherever the repository lives. Set
-# OXIDIZER_SEMVER_TARGET_DIR to override the location (for example onto a
-# different drive); set it to the repository's own `target` directory to opt
-# back into the previous behaviour. The override is honoured on every platform
-# and must be an absolute path — a relative one would be resolved against
-# differing working directories by this process and by the cargo child process.
+# Returns the target directory for semver checks. Windows defaults to a short
+# path to avoid MAX_PATH failures; other platforms keep Cargo's default.
 function Get-SemverChecksTargetDir {
     [CmdletBinding()]
     param()
@@ -641,18 +619,7 @@ function Get-SemverChecksTargetDir {
     if (-not [string]::IsNullOrWhiteSpace($env:OXIDIZER_SEMVER_TARGET_DIR)) {
         $override = $env:OXIDIZER_SEMVER_TARGET_DIR.Trim()
 
-        # Enforce the absolute-path contract rather than only documenting it. A
-        # relative value resolves against whatever working directory each
-        # process happens to have, so the scratch directory would be created in
-        # one place and looked for in another; a drive-relative value like
-        # `C:foo` is worse still, resolving against a per-drive current
-        # directory. Both also defeat the containment check in
-        # Clear-LegacySemverChecksScratch, which compares against an absolute
-        # repository path and would conclude a same-directory override lies
-        # elsewhere — and delete the live scratch directory.
         if (-not [System.IO.Path]::IsPathFullyQualified($override)) {
-            # The override is supported everywhere, so the example has to match
-            # the platform the user is actually on.
             $example = if ($IsWindows) { 'D:\ox-semver' } else { '/var/tmp/ox-semver' }
             throw "OXIDIZER_SEMVER_TARGET_DIR must be an absolute path, but is '$override'. Use a fully qualified path such as '$example'."
         }
@@ -660,9 +627,6 @@ function Get-SemverChecksTargetDir {
         return $override
     }
 
-    # Only Windows constrains path length this way. Elsewhere keep Cargo's
-    # default so the repository-local target directory and its build cache are
-    # reused exactly as before.
     if (-not $IsWindows) {
         return $null
     }
@@ -671,34 +635,7 @@ function Get-SemverChecksTargetDir {
     return (Join-Path "$drive\" 'ox-semver')
 }
 
-# Invokes `cargo semver-checks` for one crate against a baseline commit,
-# redirecting the build to the short scratch root resolved by
-# Get-SemverChecksTargetDir so long repository paths cannot overflow MAX_PATH.
-# Returns the combined output and the process exit code; callers pass both to
-# ConvertFrom-SemverChecksOutput. The CARGO_TARGET_DIR override is scoped to the
-# invocation and always restored, so no other cargo command in the release flow
-# is affected. If the scratch directory cannot be created the run falls back to
-# Cargo's default target directory with a warning rather than failing outright —
-# a long path only *may* overflow, so a hard failure here would be worse than
-# attempting the run.
-# Removes a cargo-semver-checks scratch directory left inside the repository by
-# a previous run that used the repository-local target directory.
-#
-# This matters only while migrating to the redirected target directory. Cargo
-# ignores whatever directory is currently its target dir when it looks for
-# workspace manifests. Once CARGO_TARGET_DIR points at the short scratch root,
-# `<repo>/target` is no longer that directory, so the baseline source clones
-# cargo-semver-checks previously left under `<repo>/target/semver-checks/git-<sha>/`
-# become visible as ordinary workspace source. Cargo then sees the same package
-# declared twice and fails with `package <name> is ambiguous ... defined in
-# multiple manifests`.
-#
-# Anyone who already hit the MAX_PATH failure has exactly that leftover
-# directory, so without this cleanup the first run after the fix would trade one
-# confusing error for another. The directory is pure scratch owned by
-# cargo-semver-checks and is recreated on demand, so deleting it is safe; the
-# only cost is rebuilding baselines. Failure to delete is non-fatal but warns,
-# because the resulting cargo error is otherwise hard to connect to its cause.
+# Removes stale in-repo semver scratch data after redirecting Cargo elsewhere.
 function Clear-LegacySemverChecksScratch {
     [CmdletBinding()]
     param(
@@ -709,11 +646,7 @@ function Clear-LegacySemverChecksScratch {
     $repoTarget = Join-Path $RepoRoot 'target'
     $legacy = Join-Path $repoTarget 'semver-checks'
 
-    # Do not delete the directory when it is the active semver-checks scratch:
-    # Cargo's default target puts it at `<repo>/target/semver-checks`, and an
-    # override may point at that directory or one of its children. Other target
-    # directories nested under `<repo>/target` do not use this legacy scratch
-    # and must not suppress cleanup.
+    # Keep the directory when it is the active Cargo target or contains it.
     $separator = [System.IO.Path]::DirectorySeparatorChar
     $relativeToRepoTarget = [System.IO.Path]::GetRelativePath($repoTarget, $TargetDir)
     $relativeToLegacy = [System.IO.Path]::GetRelativePath($legacy, $TargetDir)
@@ -739,16 +672,13 @@ function Clear-LegacySemverChecksScratch {
     }
 }
 
+# Runs cargo semver-checks with a scoped target-directory override.
 function Invoke-SemverChecksCli {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $true)][string]$BaselineSha,
-        # Repository root whose legacy scratch directory should be cleaned up.
-        # Defaulted for convenience, but callers that already know the root
-        # should pass it: depending on ambient location makes correctness rest
-        # on a Push-Location far from the call site.
-        [string]$RepoRoot = $PWD.ProviderPath
+        [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
     $targetDir = Get-SemverChecksTargetDir
@@ -758,13 +688,7 @@ function Invoke-SemverChecksCli {
 
     if (-not [string]::IsNullOrWhiteSpace($targetDir)) {
         try {
-            # Create literally rather than via New-Item, which only offers the
-            # wildcard-expanding -Path: OXIDIZER_SEMVER_TARGET_DIR is
-            # user-supplied and a path containing `[`, `]` or `*` would
-            # otherwise be glob-expanded into a different (or no) directory.
-            # CreateDirectory also creates intermediate directories and is a
-            # no-op when the directory already exists, so no separate existence
-            # check is needed.
+            # CreateDirectory treats user-provided paths literally.
             [void][System.IO.Directory]::CreateDirectory($targetDir)
             $env:CARGO_TARGET_DIR = $targetDir
             $applied = $true
@@ -778,11 +702,15 @@ function Invoke-SemverChecksCli {
     }
 
     try {
-        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
-        # bump is required, which is expected and not an error for our purposes.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --baseline-rev $BaselineSha --all-features --color never 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
+        Push-Location $RepoRoot
+        try {
+            # A required version bump produces an expected non-zero exit code.
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & cargo semver-checks --package $PackageName --baseline-rev $BaselineSha --all-features --color never 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
     } finally {
         if ($applied) {
             if ($hadPrevious) {
@@ -834,12 +762,7 @@ function Invoke-CrateSemverCheck {
         return 'none'
     }
 
-    Push-Location $RepoRoot
-    try {
-        $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
-    } finally {
-        Pop-Location
-    }
+    $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
 
     return ConvertFrom-SemverChecksOutput -Output $result.Output -ExitCode $result.ExitCode -PackageName $PackageName
 }

@@ -258,40 +258,10 @@ result requires.
 
 #### Windows: baseline builds run in a short scratch directory
 
-To rebuild a baseline, cargo-semver-checks creates a scratch tree keyed
-by the baseline commit and a per-crate build hash:
-
-```
-<target-dir>/semver-checks/git-<40-char-sha>/local-<crate>-<version>-<target-triple>-<hash>/target/debug/build/<dep>-<hash>/...
-```
-
-Those two generated segments alone exceed 100 characters, and the tail
-below them adds roughly 100 more. MSVC's `link.exe` still resolves paths
-against the legacy 260-character `MAX_PATH` limit — enabling the
-`LongPathsEnabled` policy does **not** help, because long-path awareness
-is opt-in through an application manifest and `link.exe` does not opt in.
-A repository cloned even a moderate distance from the drive root
-therefore overflows the limit, and the baseline build fails with
-`LNK1104: cannot open file` on an intermediate build-script executable.
-
-So on Windows the release scripts point **only these runs** at a short
-scratch root, `%SystemDrive%\ox-semver` by default, leaving every other
-cargo invocation on the repository-local `target/` directory. Set
-`OXIDIZER_SEMVER_TARGET_DIR` to relocate it (for example onto a drive
-with more space), or point it at the repository's own `target` directory
-to restore the previous behaviour. `OXIDIZER_SEMVER_TARGET_DIR` is
-honoured on **every** platform and must be an **absolute** path — a
-relative or drive-relative value is rejected with an error rather than
-resolved against the current working directory. When it
-is unset, the short scratch root applies on Windows only and all other
-platforms use the default target
-directory unchanged. If the scratch directory cannot be
-created, the run proceeds against the default target directory with a
-warning rather than failing — a long path only *may* overflow.
-
-Because the scratch root is shared across repositories and checkouts, it
-is safe to delete at any time; the next run re-creates it (at the cost of
-rebuilding baselines).
+On Windows, cargo-semver-checks uses `%SystemDrive%\ox-semver` to avoid
+path length failures. Set `OXIDIZER_SEMVER_TARGET_DIR` to an absolute
+path to override it on any platform. When unset, other platforms use
+Cargo's default target directory.
 
 #### Proc-macro-only packages require manual SemVer review
 
