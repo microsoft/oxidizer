@@ -17,19 +17,14 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 
-[lints]
-workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[package.metadata.coverage-gate]
+min-lines-percent = 99.4
 
 [features]
 tuning-telemetry = []
-
-[dependencies]
-allocation_hints.workspace = true
-backtrace = { workspace = true, features = ["std"] }
-rallocator_telemetry.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [
@@ -38,11 +33,19 @@ windows-sys = { workspace = true, features = [
     "Win32_System_SystemInformation",
 ] }
 
+[dependencies]
+allocation_hints.workspace = true
+backtrace = { workspace = true, features = ["std"] }
+rallocator_telemetry.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 hashbrown = { workspace = true, features = ["default-hasher"] }
 mimalloc.workspace = true
 multitude = { workspace = true, features = ["hashbrown"] }
+
+[lints]
+workspace = true
 
 [[bench]]
 name = "mimalloc"

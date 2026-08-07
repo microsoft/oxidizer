@@ -17,8 +17,11 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_wire"
 
-[lints]
-workspace = true
+[package.metadata.coverage-gate]
+min-lines-percent = 94.8
 
 [lib]
 path = "src/lib.rs"
+
+[lints]
+workspace = true

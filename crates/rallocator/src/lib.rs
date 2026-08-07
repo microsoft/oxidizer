@@ -7,10 +7,6 @@
     reason = "The initial allocator and telemetry surfaces remain intentionally unstable while their public shape is refined"
 )]
 #![expect(
-    clippy::assigning_clones,
-    reason = "Explicit clone operations make ownership changes visible in allocator state transitions"
-)]
-#![expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "Allocator dimensions and wire fields are range-checked by their surrounding layout invariants"
@@ -60,11 +56,14 @@
     test,
     expect(
         clippy::clone_on_ref_ptr,
-        clippy::fn_to_numeric_cast_any,
         clippy::iter_with_drain,
         clippy::unnecessary_wraps,
         reason = "Tests intentionally materialize ownership and mirror fallible callback signatures"
     )
+)]
+#![cfg_attr(
+    all(test, target_os = "windows"),
+    expect(clippy::fn_to_numeric_cast_any, reason = "Windows callback tests compare function addresses")
 )]
 
 //! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].

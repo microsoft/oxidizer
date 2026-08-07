@@ -82,7 +82,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use rallocator_telemetry::snapshot::{SkippedSection, Snapshot, Version};
+    use rallocator_telemetry::snapshot::{SkippedSection, SkippedSectionFields, Snapshot, Version};
     use rallocator_telemetry::{encode, encoded_len};
 
     use super::{Error, VerbArgs, verb};
@@ -223,7 +223,9 @@ mod tests {
     #[test]
     fn skipped_sections_render_compatibility_details() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
-        snapshot.skipped_sections.push(SkippedSection::new(999, 0));
+        snapshot
+            .skipped_sections
+            .push(SkippedSection::from_fields(SkippedSectionFields { id: 999, version: 0 }));
 
         let html = crate::report::render_html(&snapshot);
 

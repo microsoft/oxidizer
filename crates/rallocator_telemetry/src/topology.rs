@@ -37,17 +37,29 @@ pub struct Segment {
     pub utilization_tracked: bool,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SegmentFields {
+    pub segment_index: u8,
+    pub class_index: u32,
+    pub context: bool,
+    pub live_blocks: u32,
+    pub usable_blocks: u32,
+    pub utilization_tracked: bool,
+}
+
 impl Segment {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        segment_index: u8,
-        class_index: u32,
-        context: bool,
-        live_blocks: u32,
-        usable_blocks: u32,
-        utilization_tracked: bool,
-    ) -> Self {
+    pub fn from_fields(fields: SegmentFields) -> Self {
+        let SegmentFields {
+            segment_index,
+            class_index,
+            context,
+            live_blocks,
+            usable_blocks,
+            utilization_tracked,
+        } = fields;
         Self {
             segment_index,
             class_index,
@@ -79,18 +91,31 @@ pub struct Slice {
     pub segments: Vec<Segment>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SliceFields {
+    pub slice_index: u32,
+    pub kind: SliceKind,
+    pub span_slices: u32,
+    pub owner: u64,
+    pub requested_bytes: u64,
+    pub usable_bytes: u64,
+    pub segments: Vec<Segment>,
+}
+
 impl Slice {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        slice_index: u32,
-        kind: SliceKind,
-        span_slices: u32,
-        owner: u64,
-        requested_bytes: u64,
-        usable_bytes: u64,
-        segments: Vec<Segment>,
-    ) -> Self {
+    pub fn from_fields(fields: SliceFields) -> Self {
+        let SliceFields {
+            slice_index,
+            kind,
+            span_slices,
+            owner,
+            requested_bytes,
+            usable_bytes,
+            segments,
+        } = fields;
         Self {
             slice_index,
             kind,
@@ -121,17 +146,29 @@ pub struct TopologyRegion {
     pub slices: Vec<Slice>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct TopologyRegionFields {
+    pub region_index: u32,
+    pub base_address: u64,
+    pub region_bytes: u64,
+    pub slice_bytes: u64,
+    pub used_bitmap: Vec<u64>,
+    pub slices: Vec<Slice>,
+}
+
 impl TopologyRegion {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        region_index: u32,
-        base_address: u64,
-        region_bytes: u64,
-        slice_bytes: u64,
-        used_bitmap: Vec<u64>,
-        slices: Vec<Slice>,
-    ) -> Self {
+    pub fn from_fields(fields: TopologyRegionFields) -> Self {
+        let TopologyRegionFields {
+            region_index,
+            base_address,
+            region_bytes,
+            slice_bytes,
+            used_bitmap,
+            slices,
+        } = fields;
         Self {
             region_index,
             base_address,

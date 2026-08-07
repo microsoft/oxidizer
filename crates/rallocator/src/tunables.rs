@@ -7,22 +7,25 @@ pub(crate) const CLASS_MAP_LEN: usize = 1_025;
 pub(crate) const ALIGNMENT_CLASS_MAPS: usize = 13;
 
 /// Compile-time small-allocation size-class layout.
+///
+/// The allocator derives all lookup tables from [`Self::SIZES`], so custom
+/// layouts only control the size classes themselves.
 pub trait SizeClassLayout {
     /// Strictly increasing, 16-byte-aligned classes ending at 16 KiB.
     const SIZES: &'static [usize];
+}
 
-    #[doc(hidden)]
+pub(crate) trait SizeClassTables: SizeClassLayout {
     const CLASS_MAP: [u8; CLASS_MAP_LEN] = create_class_map(Self::SIZES);
 
-    #[doc(hidden)]
     const ALIGNED_CLASS_MAP: [[u8; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS] = create_aligned_class_map(Self::SIZES);
 
-    #[doc(hidden)]
     const CLASS_RECIPROCALS: [usize; MAX_SIZE_CLASSES] = create_class_reciprocals(Self::SIZES);
 
-    #[doc(hidden)]
     const CLASS_SHIFTS: [u8; MAX_SIZE_CLASSES] = create_class_shifts(Self::SIZES);
 }
+
+impl<T: SizeClassLayout> SizeClassTables for T {}
 
 /// Compile-time allocator personality.
 ///
@@ -276,6 +279,32 @@ mod tests {
     use std::hint::black_box;
 
     use super::*;
+
+    enum ShadowedSizeClassTables {}
+
+    impl SizeClassLayout for ShadowedSizeClassTables {
+        const SIZES: &'static [usize] = &[16, 48, 64, 16_384];
+    }
+
+    impl ShadowedSizeClassTables {
+        const CLASS_MAP: [u8; CLASS_MAP_LEN] = [0; CLASS_MAP_LEN];
+        const ALIGNED_CLASS_MAP: [[u8; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS] = [[0; CLASS_MAP_LEN]; ALIGNMENT_CLASS_MAPS];
+        const CLASS_RECIPROCALS: [usize; MAX_SIZE_CLASSES] = [0; MAX_SIZE_CLASSES];
+        const CLASS_SHIFTS: [u8; MAX_SIZE_CLASSES] = [0; MAX_SIZE_CLASSES];
+    }
+
+    #[test]
+    fn derived_tables_cannot_be_shadowed_by_layout() {
+        crate::initialize();
+        assert_eq!(ShadowedSizeClassTables::CLASS_MAP[2], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_MAP[2], 1);
+        assert_eq!(ShadowedSizeClassTables::ALIGNED_CLASS_MAP[6][1], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::ALIGNED_CLASS_MAP[6][1], 2);
+        assert_eq!(ShadowedSizeClassTables::CLASS_RECIPROCALS[1], 0);
+        assert_ne!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_RECIPROCALS[1], 0);
+        assert_eq!(ShadowedSizeClassTables::CLASS_SHIFTS[1], 0);
+        assert_eq!(<ShadowedSizeClassTables as SizeClassTables>::CLASS_SHIFTS[1], u8::MAX);
+    }
 
     #[test]
     fn runtime_size_class_validation_rejects_every_invalid_shape() {

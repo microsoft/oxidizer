@@ -79,7 +79,10 @@ pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
 }
 
 fn map_aligned(size: usize, protection: i32) -> *mut u8 {
-    let page_size = page_size();
+    map_aligned_with_page_size(size, protection, page_size())
+}
+
+fn map_aligned_with_page_size(size: usize, protection: i32, page_size: usize) -> *mut u8 {
     let Some(rounded_size) = size.checked_add(page_size - 1).map(|size| size & !(page_size - 1)) else {
         return ptr::null_mut();
     };
@@ -140,5 +143,24 @@ mod tests {
         let page_size = page_size();
         assert!(page_size.is_power_of_two());
         assert!(ALLOCATION_ALIGNMENT.is_multiple_of(page_size));
+    }
+
+    #[test]
+    fn aligned_mapping_works_with_large_page_granularities() {
+        let host_page_size = page_size();
+        for simulated_page_size in [16 * 1024, 64 * 1024]
+            .into_iter()
+            .filter(|page_size| page_size.is_multiple_of(host_page_size))
+        {
+            let size = simulated_page_size + 1;
+            let address = map_aligned_with_page_size(size, PROT_READ | PROT_WRITE, simulated_page_size);
+            assert!(!address.is_null());
+            assert!(address.addr().is_multiple_of(ALLOCATION_ALIGNMENT));
+            unsafe {
+                address.write(1);
+                address.add(size - 1).write(2);
+                unmap(address, size);
+            }
+        }
     }
 }

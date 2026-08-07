@@ -19,16 +19,27 @@ pub struct ThreadLog {
     pub live_histogram: Vec<u64>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ThreadLogFields {
+    pub thread_log_id: u64,
+    pub total_events: u64,
+    pub lost_events: u64,
+    pub allocated_histogram: Vec<u64>,
+    pub live_histogram: Vec<u64>,
+}
+
 impl ThreadLog {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        thread_log_id: u64,
-        total_events: u64,
-        lost_events: u64,
-        allocated_histogram: Vec<u64>,
-        live_histogram: Vec<u64>,
-    ) -> Self {
+    pub fn from_fields(fields: ThreadLogFields) -> Self {
+        let ThreadLogFields {
+            thread_log_id,
+            total_events,
+            lost_events,
+            allocated_histogram,
+            live_histogram,
+        } = fields;
         Self {
             thread_log_id,
             total_events,
@@ -91,27 +102,41 @@ pub struct Event {
     pub call_stack: Vec<u64>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct EventFields {
+    pub thread_log_id: u64,
+    pub event_thread_id: u64,
+    pub sequence: u64,
+    pub allocation_id: u64,
+    pub kind: EventKind,
+    pub heap_id: u64,
+    pub heap_kind: HeapKind,
+    pub freed_after_heap_release: bool,
+    pub address: u64,
+    pub size: u64,
+    pub align: u64,
+    pub call_stack: Vec<u64>,
+}
+
 impl Event {
     #[doc(hidden)]
     #[must_use]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "The full constructor preserves schema completeness for producers"
-    )]
-    pub const fn new(
-        thread_log_id: u64,
-        event_thread_id: u64,
-        sequence: u64,
-        allocation_id: u64,
-        kind: EventKind,
-        heap_id: u64,
-        heap_kind: HeapKind,
-        freed_after_heap_release: bool,
-        address: u64,
-        size: u64,
-        align: u64,
-        call_stack: Vec<u64>,
-    ) -> Self {
+    pub fn from_fields(fields: EventFields) -> Self {
+        let EventFields {
+            thread_log_id,
+            event_thread_id,
+            sequence,
+            allocation_id,
+            kind,
+            heap_id,
+            heap_kind,
+            freed_after_heap_release,
+            address,
+            size,
+            align,
+            call_stack,
+        } = fields;
         Self {
             thread_log_id,
             event_thread_id,
@@ -139,10 +164,18 @@ pub struct ThreadName {
     pub name: String,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ThreadNameFields {
+    pub thread_id: u64,
+    pub name: String,
+}
+
 impl ThreadName {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(thread_id: u64, name: String) -> Self {
+    pub fn from_fields(fields: ThreadNameFields) -> Self {
+        let ThreadNameFields { thread_id, name } = fields;
         Self { thread_id, name }
     }
 }
@@ -165,17 +198,29 @@ pub struct Callers {
     pub thread_names: Vec<ThreadName>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct CallersFields {
+    pub session_id: u64,
+    pub total_events: u64,
+    pub lost_events: u64,
+    pub threads: Vec<ThreadLog>,
+    pub events: Vec<Event>,
+    pub thread_names: Vec<ThreadName>,
+}
+
 impl Callers {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        session_id: u64,
-        total_events: u64,
-        lost_events: u64,
-        threads: Vec<ThreadLog>,
-        events: Vec<Event>,
-        thread_names: Vec<ThreadName>,
-    ) -> Self {
+    pub fn from_fields(fields: CallersFields) -> Self {
+        let CallersFields {
+            session_id,
+            total_events,
+            lost_events,
+            threads,
+            events,
+            thread_names,
+        } = fields;
         Self {
             session_id,
             total_events,
@@ -203,10 +248,27 @@ pub struct AddressLookup {
     pub column: Option<u32>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct AddressLookupFields {
+    pub address: u64,
+    pub symbol: Option<String>,
+    pub filename: Option<String>,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+}
+
 impl AddressLookup {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(address: u64, symbol: Option<String>, filename: Option<String>, line: Option<u32>, column: Option<u32>) -> Self {
+    pub fn from_fields(fields: AddressLookupFields) -> Self {
+        let AddressLookupFields {
+            address,
+            symbol,
+            filename,
+            line,
+            column,
+        } = fields;
         Self {
             address,
             symbol,

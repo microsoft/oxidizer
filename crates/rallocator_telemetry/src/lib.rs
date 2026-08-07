@@ -39,7 +39,7 @@ use callers::{AddressLookup, Callers, Event, EventKind, HeapKind, ThreadLog, Thr
 use rallocator_wire::format::{Header, Section};
 use rallocator_wire::io::{Reader, Writer};
 use rallocator_wire::{Decode, Encode};
-use snapshot::{Domain, Estimate, Histograms, Region, SizeClass, Snapshot, Stats};
+use snapshot::{Domain, Estimate, Histograms, Region, SizeClass, SkippedSectionFields, Snapshot, Stats};
 use topology::{Segment, Slice, SliceKind, TopologyRegion};
 
 const TELEMETRY_SCHEMA_VERSION: u16 = 1;
@@ -271,35 +271,40 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
     let mut seen_sections = 0_u16;
 
     while let Some(section) = reader.read_section()? {
-        if !(SECTION_METADATA..=SECTION_HISTOGRAMS).contains(&section.id()) {
-            snapshot
-                .skipped_sections
-                .push(snapshot::SkippedSection::new(section.id(), section.version()));
-            continue;
+        let bit = section.id().checked_sub(1).and_then(|shift| 1_u16.checked_shl(u32::from(shift)));
+        if let Some(bit) = bit {
+            if seen_sections & bit != 0 {
+                return Err(Error::duplicate_section(section.id()));
+            }
+            seen_sections |= bit;
         }
-        let bit = 1_u16 << (section.id() - 1);
-        if seen_sections & bit != 0 {
-            return Err(Error::duplicate_section(section.id()));
-        }
-        seen_sections |= bit;
         if section.id() == SECTION_TOPOLOGY {
             if section.version() != SECTION_VERSION && section.version() != TOPOLOGY_SECTION_VERSION {
                 snapshot
                     .skipped_sections
-                    .push(snapshot::SkippedSection::new(section.id(), section.version()));
+                    .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
+                        id: section.id(),
+                        version: section.version(),
+                    }));
                 continue;
             }
         } else if section.id() == SECTION_CALLERS {
             if !(SECTION_VERSION..=CALLERS_SECTION_VERSION).contains(&section.version()) {
                 snapshot
                     .skipped_sections
-                    .push(snapshot::SkippedSection::new(section.id(), section.version()));
+                    .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
+                        id: section.id(),
+                        version: section.version(),
+                    }));
                 continue;
             }
         } else if section.version() != SECTION_VERSION {
             snapshot
                 .skipped_sections
-                .push(snapshot::SkippedSection::new(section.id(), section.version()));
+                .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
+                    id: section.id(),
+                    version: section.version(),
+                }));
             continue;
         }
         let mut payload = Reader::new(section.payload());
@@ -319,7 +324,15 @@ pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
             SECTION_CALLERS => snapshot.callers = read_callers(&mut payload, section.version())?,
             SECTION_HISTOGRAMS => snapshot.histograms = read_histograms(&mut payload)?,
             SECTION_ADDRESSES => snapshot.addresses = read_addresses(&mut payload)?,
-            _ => unreachable!("known telemetry sections are handled above"),
+            _ => {
+                snapshot
+                    .skipped_sections
+                    .push(snapshot::SkippedSection::from_fields(SkippedSectionFields {
+                        id: section.id(),
+                        version: section.version(),
+                    }));
+                continue;
+            }
         }
         if payload.remaining() != 0 {
             return Err(Error::malformed_section(section.id()));
