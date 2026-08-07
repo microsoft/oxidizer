@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::env;
 use std::task::Waker;
-use std::thread;
 use std::time::Duration;
+use std::{env, thread};
 
 use scopeguard::{Always, ScopeGuard};
 
