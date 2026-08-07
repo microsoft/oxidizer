@@ -61,11 +61,8 @@ impl TokioDeps {
 
 /// Tuning knobs specific to the Tokio transport.
 ///
-/// These settings are deliberately *not* part of
-/// [`TransportOptions`], because they describe how this
-/// transport dials `TCP` sockets rather than a policy every transport can honor. A transport
-/// that does not own its sockets (`WinHTTP`, for instance) has no way to apply them, so
-/// accepting them on the shared, transport-agnostic surface would silently ignore them.
+/// These settings configure how the bundled transport dials `TCP` sockets. They are not part
+/// of [`TransportOptions`] because transports that do not own sockets cannot honor them.
 ///
 /// Pass an instance to [`HttpClient::builder_tokio_with_options`] to apply it.
 ///
@@ -81,9 +78,6 @@ impl TokioDeps {
 ///         .send_buffer_size(256 * 1024),
 /// );
 /// ```
-// `Copy` is deliberately not derived: this type exists to grow, and the first knob that is
-// not a plain scalar would force its removal. `Http2Options` and `ConnectionPoolOptions` are
-// `Clone`-only for the same reason.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct TokioTransportOptions {
@@ -153,10 +147,6 @@ impl HttpClient {
         let clock = deps.clock.clone();
         let global_pool = deps.global_pool.clone();
 
-        // Re-layer on top of the in-crate `builder_custom_internal` path: the
-        // full `TokioDeps` rides through `CustomDeps::extras` so that the
-        // per-slot factory has the same data it had with the previous direct
-        // transport factory call.
         Self::builder_custom_internal(
             crate::constants::TOKIO_RUNTIME_NAME,
             crate::constants::HYPER_TRANSPORT_NAME,
@@ -186,9 +176,7 @@ impl HttpClient {
 
 /// Plain-TCP connector for the Tokio transport.
 ///
-/// Named pipes / Unix-domain sockets are intentionally not supported; the
-/// connector opens a TCP stream to the request authority and hands the wrapped
-/// stream to hyper. TLS, when required, is layered on top by the transport.
+/// Opens a TCP stream to the request authority. TLS is layered on top by the transport.
 ///
 /// The actual dialing is delegated to hyper's own [`HttpConnector`], which implements name
 /// resolution and RFC 6555 address-family fallback when a host has both IPv4 and IPv6
@@ -196,12 +184,7 @@ impl HttpClient {
 /// family remains pending, or immediately after the preferred family fails. This type only
 /// translates [`BaseUri`] into an [`http::Uri`] and [`SocketOptions`] into hyper's setters.
 ///
-/// Applying the socket options is best-effort: hyper logs a warning and proceeds when the
-/// kernel rejects a requested value, so a connection is never failed over a tuning knob.
-///
-/// Keepalive, local-address binding, `SO_REUSEADDR` and `TCP_USER_TIMEOUT` are also exposed by
-/// [`HttpConnector`] but are deliberately left at its defaults, because [`SocketOptions`] does
-/// not model them yet.
+/// Socket tuning is best-effort: hyper logs rejected settings without failing the connection.
 #[derive(Clone, Debug)]
 struct TokioConnector {
     connector: HttpConnector,

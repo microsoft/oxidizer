@@ -3,17 +3,12 @@
 
 //! Socket-level tuning requests for outbound TCP connections.
 //!
-//! This module defines [`SocketOptions`], a set of requested `TCP` socket overrides. It covers
-//! the Nagle algorithm ([`no_delay`][SocketOptions::no_delay]) and the kernel send/receive
-//! buffer sizes.
+//! [`SocketOptions`] requests `TCP_NODELAY` and kernel send/receive buffer overrides. `None`
+//! requests no override; the transport and its lower layers choose the effective behavior.
 //!
-//! Every option defaults to `None`, meaning this configuration requests no override. The
-//! transport and its lower layers choose the effective behavior.
+//! # Contents
 //!
-//! Transports that dial their own `TCP` sockets may attempt to apply these settings. They are
-//! deliberately not part of [`TransportOptions`][crate::TransportOptions]: a transport that
-//! does not own its sockets cannot honor them. The bundled Tokio transport accepts them
-//! through `fetch::tokio::TokioTransportOptions`.
+//! - [`SocketOptions`] - requested socket overrides.
 //!
 //! # Example
 //!
@@ -27,24 +22,16 @@
 //!
 //! # When to use
 //!
-//! Reach for these knobs on latency-sensitive, high-throughput links where the OS defaults
-//! are a poor fit, for example a service-to-service hop that sends many small messages
-//! (`no_delay`) or streams large payloads over a high bandwidth-delay-product path
-//! (buffer sizes).
+//! Use these knobs for latency-sensitive small writes or high-throughput streaming connections.
 //!
 //! # Relationship to other modules
 //!
-//! [`SocketOptions`] is consumed by a transport's connector rather than by
-//! [`TransportOptions`][crate::TransportOptions]. It tunes the socket underneath a connection,
-//! while [`Http2Options`][crate::Http2Options] tunes the protocol layer running on top of it.
+//! Socket-owning transports consume [`SocketOptions`] alongside their transport-specific
+//! configuration. [`Http2Options`][crate::Http2Options] configures the protocol layer instead.
 
 /// Requested socket-level settings for outbound `TCP` connections.
 ///
-/// Each field is `None` by default, which requests no override from the transport.
-///
-/// These requests are honored only by transports that dial their own `TCP` sockets. The
-/// bundled Tokio transport attempts to forward supported values through
-/// `fetch::tokio::TokioTransportOptions`; lower layers may accept, adjust, or reject them.
+/// Each field defaults to `None`, which requests no override from the transport.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SocketOptions {

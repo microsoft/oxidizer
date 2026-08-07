@@ -20,10 +20,9 @@ pub struct Http2Options {
     pub adaptive_window: bool,
     /// Initial flow-control window size, in bytes, for each HTTP/2 stream.
     ///
-    /// `None` requests no override; the transport chooses its initial value. Transports must
-    /// validate configured values against the HTTP/2 protocol limits. Ignored when
-    /// [`adaptive_window`][Self::adaptive_window] is enabled, because the window is then sized
-    /// dynamically.
+    /// `None` requests no override; the transport chooses its initial value. The bundled Hyper
+    /// transport clamps values above the HTTP/2 maximum. Ignored when
+    /// [`adaptive_window`][Self::adaptive_window] is enabled.
     pub initial_stream_window_size: Option<u32>,
 }
 
@@ -68,8 +67,8 @@ impl Http2Options {
 
     /// Sets the initial flow-control window size, in bytes, for each HTTP/2 stream.
     ///
-    /// The default is `None`, which requests no override. The transport validates configured
-    /// values against the HTTP/2 protocol limits. This value is ignored when
+    /// The default is `None`, which requests no override. The bundled Hyper transport clamps
+    /// values above the HTTP/2 maximum. This value is ignored when
     /// [`adaptive_window`][Self::adaptive_window] is enabled.
     ///
     /// # Examples

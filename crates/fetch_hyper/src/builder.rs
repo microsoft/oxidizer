@@ -263,10 +263,6 @@ fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Option
 const MAX_HTTP2_STREAM_WINDOW_SIZE: u32 = i32::MAX as u32;
 
 /// Applies the HTTP/2 protocol limit before forwarding the stream window to hyper.
-///
-/// This remains separate from [`apply_http2_options`] because that function cannot be observed
-/// through hyper's APIs and is excluded from mutation testing. Keeping the transformation here
-/// lets the boundary behavior remain directly testable.
 fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
     http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }

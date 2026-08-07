@@ -8,10 +8,8 @@
 //! together with the response-body, routing, redaction, and TLS configuration
 //! owned by the `fetch` request pipeline.
 //!
-//! [`SocketOptions`] is the exception: it is re-exported here for convenience, but it is not
-//! part of [`TransportOptions`] and has no [`HttpClientBuilder`](crate::HttpClientBuilder)
-//! setter, because only a transport that dials its own sockets can honor it. Supply it through
-//! `fetch::tokio::TokioTransportOptions` instead.
+//! [`SocketOptions`] is re-exported for transport-specific builders. It is not part of
+//! [`TransportOptions`] because only socket-owning transports can honor it.
 
 use data_privacy::RedactionEngine;
 #[doc(inline)]

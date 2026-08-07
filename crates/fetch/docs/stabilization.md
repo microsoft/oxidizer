@@ -206,53 +206,11 @@ only if the transport abstraction is richer than a plain layered/Tower service.
 
 ## 8. Transport-specific protocol and pool tuning still on the shared surface
 
-Two option groups on `TransportOptions` name transport-agnostic concepts but are, in
-practice, `fetch_hyper` pass-throughs. They are the same over-abstraction as items 2-4,
-and they are called out separately because - unlike TLS or timeouts - the *field names*
-actively misrepresent whose semantics they carry.
+`ConnectionPoolOptions`, `Http2Options`, and `ConnectionKeepAlive` remain on
+`TransportOptions`, although their current behavior is implemented by `fetch_hyper` and
+cannot be guaranteed by every transport.
 
-`ConnectionPoolOptions::max_connections` is documented as "maximum number of idle
-connections per host" and is applied verbatim as hyper's `pool_max_idle_per_host`
-(see `fetch_hyper`'s `apply_pool_options`). The name suggests a cap on total connections;
-the behavior is a hyper-internal idle-pool bound that a transport owning its own pool
-cannot reproduce. `connection_idle_timeout` is a thin alias for hyper's `pool_idle_timeout`,
-differing only in spelling "no limit" as an enum variant rather than `None`, and the
-surrounding doc comment names hyper explicitly - a
-transport-agnostic type documenting itself in terms of one transport. Of the four fields,
-only `multiple_pools` is genuinely `fetch`-level (item 3 covers its fate), and
-`connection_lifetime` is implemented by `fetch_hyper` itself because hyper has no such
-concept.
+`SocketOptions` belongs to `TokioTransportOptions`, where only the bundled socket-owning
+transport accepts it.
 
-`Http2Options` has the narrower version of the problem: every field maps 1:1 onto a
-`hyper::client::Builder` `http2_*` setter, and the whole group is inert on a transport that
-does not expose HTTP/2 tuning. The same is true of the sibling `ConnectionKeepAlive` field,
-which is applied entirely through hyper's `http2_keep_alive_*` setters and therefore has no
-effect on an HTTP/1.1-only or HTTP/3 transport despite its protocol-neutral name.
-
-All three of these appliers in `fetch_hyper` carry `#[cfg_attr(test, mutants::skip)] // cannot be
-verified with hyper APIs`, which is a fair summary of the situation: they are write-only
-pass-throughs whose effect `fetch` cannot observe, let alone generalize.
-
-`TransportOptions::extra` belongs in the same register. It is a public `http::Extensions`
-field on the shared surface with **no readers anywhere in the workspace** - not `fetch_hyper`,
-not `fetch_winhttp`, not `fetch` itself. Whatever a caller puts in it is silently ignored by
-every transport, which is the strictest form of the hazard this section describes. It should
-either be removed or documented as a transport-defined escape hatch that no bundled transport
-currently consumes.
-
-The silent-ignore hazard from item 2 applies here too, in its milder performance-only
-form: a caller who tunes a pool bound or an HTTP/2 window and then plugs in a transport
-that cannot honor it gets no signal, only different throughput.
-
-These were left in place deliberately rather than moved. Both types ship in published
-`fetch_options` versions, so relocating them is a breaking change, and where they should
-land depends on the per-transport configuration surface that items 1, 3 and 5 have yet to
-settle. Moving them piecemeal would pre-decide that design one knob at a time.
-
-`SocketOptions` is the counter-example and the intended end state. It covers the same
-kind of knob (`TCP_NODELAY`, `SO_SNDBUF`/`SO_RCVBUF`), but because it had not yet shipped
-it was placed on the transport that honors it - `fetch::tokio::TokioTransportOptions`,
-consumed by that transport's connector - instead of on `TransportOptions`. A transport
-that does not dial its own sockets cannot be handed these settings at all, so the
-unhonorable combination is unrepresentable rather than silently dropped. When items 1/3/5
-are resolved, `Http2Options` and `ConnectionPoolOptions` should move the same way.
+No bundled transport currently reads `TransportOptions::extra`.
