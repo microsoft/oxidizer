@@ -53,6 +53,7 @@ include = [
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
+actix-web = { version = "4.12.1", default-features = false }
 alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
@@ -163,6 +164,7 @@ rapidhash = { version = "4.1.1", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 regex = { version = "1.12.2", default-features = false }
 route-recognizer = { version = "0.3.1", default-features = false }
+rocket = { version = "0.5.1", default-features = false }
 routerama = { path = "crates/routerama", default-features = false, version = "0.1.0" }
 routerama_build = { path = "crates/routerama_build", default-features = false, version = "0.1.0" }
 routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "0.1.0" }
@@ -206,6 +208,7 @@ tracing-appender = { version = "0.2.5", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
+warp = { version = "0.4.2", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 unicode-ident = { version = "1.0.22", default-features = false }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
