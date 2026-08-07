@@ -265,7 +265,7 @@ impl layered::Service<BaseUri> for TokioConnector {
         let scheme = input.origin().scheme();
         if scheme != &Scheme::HTTP && scheme != &Scheme::HTTPS {
             return Err(HttpError::other(
-                "the connector only supports the http and https schemes",
+                format!("the connector does not support the '{scheme}' scheme; only http and https are supported"),
                 RecoveryInfo::never(),
                 LABEL_SCHEME_NOT_ALLOWED,
             ));
@@ -695,6 +695,10 @@ mod tests {
             .expect_err("the connector rejects every non-HTTP scheme before dialing");
 
         assert_eq!(error.label().as_str(), "scheme_not_allowed");
+        assert!(
+            error.to_string().contains("'ftp'"),
+            "the diagnostic must identify the rejected scheme: {error}"
+        );
         assert_eq!(error.recovery().kind(), RecoveryKind::Never);
         Ok(())
     }
