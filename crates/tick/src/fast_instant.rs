@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::time::{Duration, Instant};
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+use std::time::Duration;
+use std::time::Instant;
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
 thread_local! {
