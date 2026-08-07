@@ -76,4 +76,4 @@ pub use error::{Error, Result, SizeError, SizeErrorKind};
 #[doc(inline)]
 pub use testing::{CacheOp, MockCache};
 #[doc(inline)]
-pub use tier::CacheTier;
+pub use tier::{CacheTier, InsertOutcome};

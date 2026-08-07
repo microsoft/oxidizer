@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use cachet_tier::{CacheEntry, Error};
+use cachet_tier::{CacheEntry, Error, InsertOutcome};
 use layered::Service;
 
 use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
@@ -15,6 +15,22 @@ pub trait CacheServiceExt<K, V>: Sized {
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
     /// Inserts a value into the cache.
     fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Inserts a value and reports whether it was accepted.
+    ///
+    /// The provided implementation reports acceptance after a successful
+    /// [`insert`](Self::insert). Implementations that can reject writes without
+    /// an error must override this method.
+    fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send
+    where
+        Self: Sync,
+        K: Send,
+        V: Send,
+    {
+        async {
+            self.insert(key, entry).await?;
+            Ok(InsertOutcome::Accepted)
+        }
+    }
     /// Invalidates (removes) a value from the cache.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;
     /// Clears all entries from the cache.
@@ -36,9 +52,13 @@ where
     }
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.insert_with_outcome(key, entry).await.map(drop)
+    }
+
+    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let req = InsertRequest { key: key.clone(), entry };
         match self.execute(CacheOperation::Insert(req)).await? {
-            CacheResponse::Insert => Ok(()),
+            CacheResponse::Insert(outcome) => Ok(outcome),
             _ => Err(Error::from_message("unexpected response type")),
         }
     }
@@ -73,7 +93,7 @@ mod tests {
         async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
             match input {
                 CacheOperation::Get(_) => Ok(CacheResponse::Get(Some(CacheEntry::new(42)))),
-                CacheOperation::Insert(_) => Ok(CacheResponse::Insert),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
                 CacheOperation::Clear => Ok(CacheResponse::Clear),
             }
@@ -90,7 +110,7 @@ mod tests {
         async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
             match input {
                 CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
-                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert),
+                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
             }
         }
@@ -109,6 +129,16 @@ mod tests {
     async fn ext_insert_returns_ok() {
         let svc = CorrectService;
         CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42)).await.unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn ext_insert_with_outcome_returns_outcome() {
+        let svc = CorrectService;
+        let outcome = CacheServiceExt::insert_with_outcome(&svc, "key".to_string(), CacheEntry::new(42))
+            .await
+            .unwrap();
+        assert_eq!(outcome, InsertOutcome::Accepted);
     }
 
     #[cfg_attr(miri, ignore)]

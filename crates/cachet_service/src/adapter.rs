@@ -10,7 +10,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
+use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 use layered::Service;
 
 use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
@@ -73,9 +73,13 @@ where
     }
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.insert_with_outcome(key, entry).await.map(drop)
+    }
+
+    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
         match self.service.execute(request).await? {
-            CacheResponse::Insert => Ok(()),
+            CacheResponse::Insert(outcome) => Ok(outcome),
             _ => Err(Error::from_message("unexpected response type for insert")),
         }
     }
@@ -121,7 +125,7 @@ mod tests {
                         Ok(CacheResponse::Get(None))
                     }
                 }
-                CacheOperation::Insert(_) => Ok(CacheResponse::Insert),
+                CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
                 CacheOperation::Clear => Ok(CacheResponse::Clear),
             }
@@ -152,6 +156,31 @@ mod tests {
         let adapter = ServiceAdapter::new(MockService);
         let result = adapter.insert("key".to_string(), CacheEntry::new(100)).await;
         assert!(result.is_ok(), "insert should succeed");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn adapter_insert_with_outcome_preserves_rejection() {
+        #[derive(Debug, Clone)]
+        struct RejectingService;
+
+        impl Service<CacheOperation<String, i32>> for RejectingService {
+            type Out = Result<CacheResponse<i32>, Error>;
+
+            async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
+                match input {
+                    CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Rejected)),
+                    CacheOperation::Get(_) => Ok(CacheResponse::Get(None)),
+                    CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
+                    CacheOperation::Clear => Ok(CacheResponse::Clear),
+                }
+            }
+        }
+
+        let adapter = ServiceAdapter::new(RejectingService);
+        let outcome = adapter.insert_with_outcome("key".to_string(), CacheEntry::new(100)).await.unwrap();
+
+        assert_eq!(outcome, InsertOutcome::Rejected);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -200,7 +229,7 @@ mod tests {
                 // Returns Clear response for Insert requests (wrong type)
                 CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
                 // Returns Insert response for Get/Invalidate requests (wrong type)
-                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert),
+                CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 // Returns Get response for Clear requests (wrong type)
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
             }
