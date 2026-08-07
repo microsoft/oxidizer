@@ -528,3 +528,58 @@ Describe 'Reduce-DependencyChains' {
         ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' | Should -Be 'a -> baz|z -> baz'
     }
 }
+
+Describe 'Test-PackageExposesTarget' {
+    BeforeAll {
+        function New-Dependent { param($Allowed) [pscustomobject]@{ AllowedExternalTypes = $Allowed } }
+    }
+
+    It 'reports exposure when an entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes', 'std::io::Error')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in the target package name to underscores' {
+        # Crate `bytesbuf-io` is referred to as `bytesbuf_io` in Rust paths.
+        $dep = New-Dependent -Allowed @('bytesbuf_io::Reader')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf-io' | Should -BeTrue
+    }
+
+    It 'reports no exposure when no entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('std::io::Error', 'core::fmt::Debug')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'fails closed when the metadata is absent entirely' {
+        Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $null) -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'fails closed on a wildcard root that could match anything' {
+        foreach ($pattern in @('*', 'byte?buf::Bytes', '[bc]ytesbuf::Bytes')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($pattern)) -TargetPackageName 'bytesbuf' |
+                Should -BeTrue -Because "'$pattern' may match the target"
+        }
+    }
+
+    It 'fails closed on a malformed entry rather than silently reporting no exposure' {
+        # `-split` coerces anything to a string, so these do not throw: they
+        # collapse to '' and match nothing, which would let a breaking
+        # dependency bump ship as a compatible release.
+        foreach ($bad in @($null, '', '   ', 42, @{ a = 1 })) {
+            $rendered = if ($null -eq $bad) { '$null' } else { "'$bad'" }
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($bad)) -TargetPackageName 'bytesbuf' |
+                Should -BeTrue -Because "$rendered carries no exposure information"
+        }
+    }
+
+    It 'fails closed when a malformed entry follows valid ones' {
+        $dep = New-Dependent -Allowed @('std::io::Error', $null)
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'reports no exposure for an empty allowlist' {
+        # An explicit empty list means the crate exposes no external types at
+        # all, which is information -- unlike absent metadata.
+        Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @()) -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+}
