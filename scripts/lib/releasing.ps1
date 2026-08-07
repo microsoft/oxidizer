@@ -610,8 +610,8 @@ function Get-WorkspacePackages {
     return $packages
 }
 
-# Returns the target directory for semver checks. Windows uses a temp directory
-# to shorten build paths; other platforms keep Cargo's default.
+# Returns the target directory for semver checks. Windows uses a short per-user
+# cache path; other platforms keep Cargo's default.
 function Get-SemverChecksTargetDir {
     [CmdletBinding()]
     param()
@@ -631,7 +631,8 @@ function Get-SemverChecksTargetDir {
         return $null
     }
 
-    return (Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver')
+    $cacheRoot = Join-Path $HOME '.cache'
+    return (Join-Path $cacheRoot 'ox-sv')
 }
 
 # Removes stale in-repo semver scratch data after redirecting Cargo elsewhere.

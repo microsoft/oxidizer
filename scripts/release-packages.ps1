@@ -83,7 +83,7 @@
     cargo-semver-checks remains a hard dependency for ordinary library packages
     (install the version pinned in constants.env); there is no heuristic fallback.
 
-    On Windows, cargo-semver-checks uses `%TEMP%\ox-semver` to avoid path length
+    On Windows, cargo-semver-checks uses `~\.cache\ox-sv` to avoid path length
     failures. Set OXIDIZER_SEMVER_TARGET_DIR to an absolute path to override it
     on any platform. Other platforms use Cargo's default when the variable is
     unset.

@@ -43,11 +43,11 @@ Describe 'Get-SemverChecksTargetDir' {
         $result | Should -Not -Be '   '
     }
 
-    It 'uses the temp directory on Windows and nothing elsewhere' {
+    It 'uses a short per-user cache path on Windows and nothing elsewhere' {
         $result = Get-SemverChecksTargetDir
 
         if ($IsWindows) {
-            $expected = Join-Path ([System.IO.Path]::GetTempPath()) 'ox-semver'
+            $expected = Join-Path (Join-Path $HOME '.cache') 'ox-sv'
             $result | Should -Be $expected
         } else {
             $result | Should -BeNullOrEmpty
