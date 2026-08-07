@@ -269,6 +269,9 @@ mod tests {
         assert!(matches!(fast_clock.0, TimeKind::SystemFast));
         assert!(matches!(precise_again.0, TimeKind::System));
 
+        let before = SystemTime::now();
+        assert!(fast_clock.system_time() >= before);
+
         let fast = fast_clock.instant();
         let standard = Instant::now();
 

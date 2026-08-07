@@ -65,8 +65,10 @@ fn platform_time() -> Duration {
 
     // SAFETY: A successful clock_gettime call initialized the timespec above.
     let timestamp = unsafe { timestamp.assume_init() };
-    #[expect(clippy::cast_sign_loss, reason = "monotonic clock seconds and nanoseconds are always nonnegative")]
-    Duration::new(timestamp.tv_sec as u64, timestamp.tv_nsec as u32)
+    let seconds = u64::try_from(timestamp.tv_sec).expect("CLOCK_MONOTONIC_COARSE seconds are guaranteed to be nonnegative");
+    let nanoseconds = u32::try_from(timestamp.tv_nsec).expect("clock_gettime guarantees tv_nsec is between 0 and 999,999,999");
+
+    Duration::new(seconds, nanoseconds)
 }
 
 #[cfg(all(windows, not(miri)))]
@@ -85,5 +87,40 @@ pub(crate) fn now() -> Instant {
     #[cfg(any(miri, not(any(target_os = "linux", windows))))]
     {
         Instant::now()
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, any(target_os = "linux", windows), not(miri)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_calls_use_cached_instant() {
+        let mut previous = now();
+
+        for _ in 0..1_000 {
+            let current = now();
+            if current == previous {
+                return;
+            }
+            previous = current;
+        }
+
+        panic!("the coarse platform clock must return the same timestamp for consecutive calls");
+    }
+
+    #[test]
+    fn cache_refreshes_when_platform_time_advances() {
+        let first = now();
+
+        std::thread::sleep(Duration::from_millis(50));
+
+        assert!(now() > first);
+    }
+
+    #[test]
+    fn platform_time_is_nonzero() {
+        assert_ne!(platform_time(), Duration::ZERO);
     }
 }
