@@ -4,9 +4,8 @@
 //! Special purpose example to explore effects of spawning and completing millions of tasks.
 
 use std::cell::Cell;
-use std::env;
-use std::iter;
 use std::rc::Rc;
+use std::{env, iter};
 
 use arty_executor::{CycleOutcome, Executor};
 use nm::Report;
@@ -19,12 +18,11 @@ const TEST_SECOND_LAYER_TASK_COUNT: usize = 100;
 
 fn main() {
     // Preserve the behavior while keeping automated example validation fast.
-    let (first_layer_task_count, second_layer_task_count) =
-        if env::var_os("IS_TESTING").is_some() {
-            (TEST_FIRST_LAYER_TASK_COUNT, TEST_SECOND_LAYER_TASK_COUNT)
-        } else {
-            (FIRST_LAYER_TASK_COUNT, SECOND_LAYER_TASK_COUNT)
-        };
+    let (first_layer_task_count, second_layer_task_count) = if env::var_os("IS_TESTING").is_some() {
+        (TEST_FIRST_LAYER_TASK_COUNT, TEST_SECOND_LAYER_TASK_COUNT)
+    } else {
+        (FIRST_LAYER_TASK_COUNT, SECOND_LAYER_TASK_COUNT)
+    };
 
     // SAFETY: We are required to complete safe shutdown of the executor by only dropping it once
     // an execution cycle indicates the `Shutdown` outcome. We do.

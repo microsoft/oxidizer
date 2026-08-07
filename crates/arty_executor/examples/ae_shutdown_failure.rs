@@ -16,13 +16,12 @@
 //! the maximum level of diagnostic information before terminating the process.
 
 use std::cell::Cell;
-use std::env;
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Waker;
 use std::time::Duration;
-use std::{task, thread};
+use std::{env, task, thread};
 
 use arty_executor::{CycleOutcome, Executor};
 use tracing::info;
