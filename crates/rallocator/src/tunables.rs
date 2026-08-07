@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Compile-time allocation tuning parameters.
 pub(crate) const MAX_SIZE_CLASSES: usize = 48;
 pub(crate) const CLASS_MAP_LEN: usize = 1_025;

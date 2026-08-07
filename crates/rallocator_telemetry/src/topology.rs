@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Physical allocator topology model types.
 
 /// Classifies an allocator slice.

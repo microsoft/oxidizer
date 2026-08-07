@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration test for allocator use during thread-local teardown.
 
 use std::hint::black_box;

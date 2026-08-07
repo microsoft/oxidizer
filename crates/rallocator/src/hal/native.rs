@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 pub(crate) const MEDIUM_MAX_SLICES: usize = 512;
 pub(crate) const MEDIUM_REGION_SIZE: usize = 1024 * 1024 * 1024;
 

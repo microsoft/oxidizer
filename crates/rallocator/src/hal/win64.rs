@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::ptr;
 
 use windows_sys::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;

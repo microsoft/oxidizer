@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::hint::black_box;
 
 pub(crate) const WORKLOADS: crate::bump_workloads::Workloads = crate::bump_workloads::Workloads {

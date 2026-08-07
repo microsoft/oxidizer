@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Allocator-independent heap ownership, configuration, and inspection.
 
 pub mod bump;

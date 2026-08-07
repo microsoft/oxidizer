@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Compile-time allocator configurations.
 
 use crate::tunables::{Standard as StandardTunables, Tunables};

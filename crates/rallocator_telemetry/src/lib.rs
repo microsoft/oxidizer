@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::map_err_ignore,
     reason = "Wire and integer conversion errors intentionally collapse into stable telemetry error categories"

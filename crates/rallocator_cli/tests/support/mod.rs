@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(clippy::unwrap_used, reason = "Shared test fixture construction should fail immediately")]
 
 use std::fs;

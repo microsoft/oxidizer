@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::ptr;
 
 use libc::{
@@ -29,6 +32,10 @@ pub(crate) unsafe fn commit_locality_segment(address: *mut u8, segment_size: usi
     unsafe { commit(address, segment_size) }.then_some(segment_size)
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the platform HAL has one shared fallible locality-commit signature"
+)]
 pub(crate) unsafe fn commit_locality_slab(_address: *mut u8, _slab_size: usize) -> Option<usize> {
     Some(0)
 }
@@ -47,7 +54,7 @@ pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
 
 pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
-    let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut time) };
+    let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
     debug_assert_eq!(result, 0);
     (time.tv_sec as u64)
         .saturating_mul(1_000)
@@ -63,7 +70,8 @@ pub(crate) fn capture_stack(frames: &mut [usize], limit: usize) -> usize {
         return 0;
     }
     let mut captured_frames = [0_usize; MAX_CAPTURED_FRAMES];
-    let captured = unsafe { libc::backtrace(captured_frames.as_mut_ptr().cast(), (limit + SKIPPED_FRAMES) as i32) }.max(0) as usize;
+    let frame_count = i32::try_from(limit + SKIPPED_FRAMES).expect("frame count is bounded by the 64-entry local array");
+    let captured = unsafe { libc::backtrace(captured_frames.as_mut_ptr().cast(), frame_count) }.max(0) as usize;
     let skipped = captured.min(SKIPPED_FRAMES);
     let retained = (captured - skipped).min(limit);
     frames[..retained].copy_from_slice(&captured_frames[skipped..skipped + retained]);

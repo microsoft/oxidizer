@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(clippy::unwrap_used, reason = "The example exits immediately if heap inspection fails")]
 
 //! Routes ordinary containers through a reusable bump heap for one scope.

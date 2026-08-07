@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![no_std]
 #![expect(
     clippy::missing_errors_doc,

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for concurrent allocation and cross-thread frees.
 #![expect(
     clippy::multiple_unsafe_ops_per_block,

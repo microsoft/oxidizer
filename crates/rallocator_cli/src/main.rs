@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::renamed_function_params,
     reason = "Display implementations use descriptive formatter names"

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Configurable general-purpose and bump allocation heaps.
 
 pub(crate) mod bump;

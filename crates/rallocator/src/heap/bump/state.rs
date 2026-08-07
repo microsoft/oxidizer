@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Bump-backed allocation heaps.
 
 use std::alloc::Layout;

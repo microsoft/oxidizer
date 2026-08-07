@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Allocator-backend integration plumbing.
 //!
 //! Application code should not need this module. Allocator implementations use

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
@@ -7,10 +10,7 @@
     clippy::too_many_lines,
     reason = "HTML sections remain linear to keep the generated document structure auditable"
 )]
-#![expect(
-    clippy::unwrap_used,
-    reason = "Writing formatted text into String is infallible"
-)]
+#![expect(clippy::unwrap_used, reason = "Writing formatted text into String is infallible")]
 
 //! Snapshot-to-HTML reporting for the `rallocator` command.
 
@@ -572,7 +572,8 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
             "<tr><td>#{class_index}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             block_sizes
                 .get(class_index)
-                .copied().map_or_else(|| "Unknown".to_owned(), format_bytes),
+                .copied()
+                .map_or_else(|| "Unknown".to_owned(), format_bytes),
             if *context { "Context" } else { "General" },
             format_owner(*owner),
             format_count(*count),

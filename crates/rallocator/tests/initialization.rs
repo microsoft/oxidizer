@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for explicit allocation-hint backend initialization.
 
 use allocation_hints::domain::Domain;

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for the installed global allocator.
 #![expect(
     clippy::cast_ptr_alignment,

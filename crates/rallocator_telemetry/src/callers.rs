@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Retained caller and symbol model types.
 
 /// Per-thread retained event-log summary.

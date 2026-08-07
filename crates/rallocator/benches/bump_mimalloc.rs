@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Bump workload benchmark using mimalloc.
 
 mod bump_workloads;

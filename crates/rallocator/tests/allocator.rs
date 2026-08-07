@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for allocator routes and custom configurations.
 #![expect(
     clippy::cast_ptr_alignment,
@@ -9,8 +12,7 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::Mutex;
 
-use allocation_hints::heap::Heap;
-use allocation_hints::heap::thread_heap;
+use allocation_hints::heap::{Heap, thread_heap};
 use allocation_hints::{Hint, with_hint};
 use rallocator::Rallocator;
 use rallocator::config::Config;
@@ -349,5 +351,10 @@ fn adjacent_large_extents_coalesce_and_split() {
 }
 
 fn test_lock() -> std::sync::MutexGuard<'static, ()> {
-    TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    let guard = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let layout = Layout::new::<u8>();
+    let address = unsafe { ALLOCATOR.alloc(layout) };
+    assert!(!address.is_null());
+    unsafe { ALLOCATOR.dealloc(address, layout) };
+    guard
 }

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Multithreaded allocation benchmarks using rallocator.
 
 //! Multithreaded allocation benchmark using rallocator.

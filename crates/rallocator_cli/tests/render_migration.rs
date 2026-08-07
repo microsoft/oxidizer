@@ -1,8 +1,8 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Compatibility tests for rendering snapshots from older schemas.
-#![expect(
-    clippy::too_many_lines,
-    reason = "Migration fixtures are intentionally explicit"
-)]
+#![expect(clippy::too_many_lines, reason = "Migration fixtures are intentionally explicit")]
 
 use rallocator_telemetry::callers::{AddressLookup, Callers, Event, EventKind, HeapKind};
 use rallocator_telemetry::snapshot::{Domain, Estimate, Region, SizeClass, Snapshot, Stats, Version};

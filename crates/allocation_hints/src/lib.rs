@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 #![expect(
     clippy::inline_always,
     reason = "Scoped hint entry and restoration are allocator hot paths intentionally forced inline"
@@ -10,10 +13,7 @@
     clippy::missing_panics_doc,
     reason = "Infallible constructors and validated builders panic only on documented contract violations"
 )]
-#![expect(
-    clippy::panic,
-    reason = "Infallible public APIs and invariant checks intentionally panic"
-)]
+#![expect(clippy::panic, reason = "Infallible public APIs and invariant checks intentionally panic")]
 #![expect(
     clippy::renamed_function_params,
     reason = "Implementation parameter names are clearer than generic trait names"

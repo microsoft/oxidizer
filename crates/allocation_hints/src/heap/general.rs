@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! General-purpose heap configuration and usage information.
 
 const MEDIUM_SLICE_BYTES: usize = 64 * 1024;

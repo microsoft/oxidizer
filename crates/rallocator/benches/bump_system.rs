@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Bump workload benchmark using the system allocator.
 
 mod bump_workloads;

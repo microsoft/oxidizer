@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Allocation-free readers and writers for wire bytes.
 
 use crate::Error;

@@ -1,8 +1,8 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! End-to-end tests for HTML report rendering.
-#![expect(
-    clippy::too_many_lines,
-    reason = "Large fixtures are intentionally assembled inline"
-)]
+#![expect(clippy::too_many_lines, reason = "Large fixtures are intentionally assembled inline")]
 
 use rallocator_telemetry::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 use rallocator_telemetry::snapshot::{Domain, Estimate, Histograms, Region, SizeClass, Snapshot, Stats, Version};

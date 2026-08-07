@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 //! Integration tests for public heap and domain APIs.
 #![expect(
     clippy::multiple_unsafe_ops_per_block,
