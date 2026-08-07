@@ -626,9 +626,9 @@ function Get-WorkspacePackages {
 }
 
 # Returns $true when a package's external-type policy allows public API types
-# rooted at the target package. Missing metadata is treated conservatively:
-# an unknown exposure must not permit a breaking dependency bump to ship as a
-# compatible release.
+# rooted at the target package. Missing or malformed metadata is treated
+# conservatively: an unknown exposure must not permit a breaking dependency
+# bump to ship as a compatible release.
 function Test-PackageExposesTarget {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
@@ -641,6 +641,16 @@ function Test-PackageExposesTarget {
 
     $normalizedTarget = $TargetPackageName.Replace('-', '_')
     foreach ($entry in $Dependent.AllowedExternalTypes) {
+        # An entry that is not a usable non-empty string carries no information
+        # about what this crate exposes. Skipping it would let the loop fall
+        # through to "not exposed" and ship a breaking dependency bump as a
+        # compatible release, so treat it the same as absent metadata. (`-split`
+        # coerces anything to a string, so a malformed entry does not throw --
+        # it silently collapses to '' and matches nothing, which is worse.)
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            return $true
+        }
+
         $root = ($entry -split '::', 2)[0]
         if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
             return $true
