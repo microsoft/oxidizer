@@ -76,8 +76,8 @@ impl SimpleClock {
     /// # Performance
     ///
     /// Only enable fast instant retrieval when instrumentation shows that the default
-    /// [`Instant::now`] retrieval is a performance bottleneck. Otherwise, retain the default
-    /// precise source.
+    /// [`SimpleClock::instant`] retrieval is a performance bottleneck. Otherwise, retain the
+    /// default precise source.
     ///
     /// # Examples
     ///
