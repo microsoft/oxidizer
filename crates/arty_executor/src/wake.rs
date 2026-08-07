@@ -241,6 +241,7 @@ fn waker_drop_waker(ptr: *const ()) {
 ///
 /// We return it with `'static` because there is no Rust lifetime that corresponds to
 /// the waker reference's real lifetime. Just do not use it after the waker vtable methods.
+#[cfg_attr(coverage_nightly, coverage(off))] // A null pointer would violate this module's RawWaker invariant.
 fn resurrect_signal_ref(ptr: *const ()) -> &'static WakeSignal {
     // SAFETY: We only ever pass `&WakeSignal` into the Waker mechanisms, so it must be valid to
     // bring it back as a `&WakeSignal`. For lifetime logic, see function API comments.
@@ -451,6 +452,31 @@ mod tests {
         drop(waker_clone);
 
         assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+        assert!(signal.is_inert());
+    }
+
+    #[test]
+    fn consuming_waker_wakes_signal() {
+        // SAFETY: We can use it as a placeholder value but not actually dereference it.
+        let fake_task_ref = unsafe { TaskRef::fake() };
+
+        let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(1)));
+        let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
+
+        let signal = pin!(WakeSignal::new(
+            Arc::clone(&awakened_queue),
+            Arc::clone(&probe_embedded_wake_signals),
+            Waker::noop().clone(),
+            fake_task_ref
+        ));
+        let signal = signal.as_ref();
+
+        // SAFETY: The consuming wake releases the only waker before the signal is dropped.
+        let waker = unsafe { signal.waker() };
+        waker.wake();
+
+        assert_eq!(signal.waker_count.load(atomic::Ordering::Relaxed), 0);
+        assert!(!awakened_queue.lock().unwrap().is_empty());
         assert!(signal.is_inert());
     }
 }

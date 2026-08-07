@@ -123,6 +123,7 @@ fn waker_drop_waker(ptr: *const ()) {
 ///
 /// We return it with `'static` because there is no Rust lifetime that corresponds to
 /// the waker reference's real lifetime. Just do not use it after the waker vtable methods.
+#[cfg_attr(coverage_nightly, coverage(off))] // A null pointer would violate this module's RawWaker invariant.
 fn unwrap_diagnostic_waker(ptr: *const ()) -> &'static DiagnosticWaker {
     // SAFETY: We only pass `Box<DiagnosticWaker>::into_raw()` into the Waker mechanisms, so it
     // must be legal to bring it back as a `DiagnosticWaker`.

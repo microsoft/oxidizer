@@ -3,6 +3,7 @@
 
 // TODO(doc-coverage): remove once `missing_docs` is promoted to [workspace.lints.rust].
 #![deny(missing_docs)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Async task executor for the Arty Runtime.
 //!
@@ -54,6 +55,7 @@ pub(crate) use task_ref::*;
 pub use task_set::*;
 pub(crate) use wake::*;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub mod testing;
 
 #[cfg(debug_assertions)]
@@ -62,6 +64,7 @@ mod wake_diagnostic;
 pub(crate) use wake_diagnostic::*;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod task_mock;
 #[cfg(test)]
 pub(crate) use task_mock::*;

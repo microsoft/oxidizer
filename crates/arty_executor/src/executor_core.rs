@@ -584,6 +584,7 @@ impl ExecutorCore {
         false
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // The default behavior terminates the test process.
     fn shutdown_failed(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) {
         #[cfg(debug_assertions)]
         self.report_shutdown_diagnostics(state_exclusive, state_reentrant);
@@ -681,6 +682,7 @@ impl Drop for ExecutorCore {
 
 #[cfg(debug_assertions)]
 #[cfg_attr(test, mutants::skip)] // Purely telemetry, nothing worth testing.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn report_blocking_join_handle(bt: &Backtrace) {
     // We write to standard error stream because the logging system is going to stop
     // functioning shortly, so any data written to logs might not survive.

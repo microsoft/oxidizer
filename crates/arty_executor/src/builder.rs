@@ -81,3 +81,13 @@ impl Default for ExecutorBuilder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_builder() {
+        _ = ExecutorBuilder::default();
+    }
+}

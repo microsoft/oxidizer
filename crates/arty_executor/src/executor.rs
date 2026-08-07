@@ -340,23 +340,26 @@ mod tests {
     #[test]
     fn mass_awaken() {
         // We awaken a huge amount of tasks, greater than the capacity of the awakened queue.
-        // We still expect them all to awaken together on the same cycle, it may just be a
-        // bit less efficient as we fall back to the slow path for wake-up processing.
-        const TASK_COUNT: usize = AWAKENED_CAPACITY * 2;
+        // We still expect them all to awaken together on the same cycle, while one additional
+        // inactive task remains suspended when the executor probes all embedded wake signals.
+        const AWAKENED_TASK_COUNT: usize = AWAKENED_CAPACITY + 1;
 
         let executor = new_guarded_executor(Waker::noop().clone());
         let tasks = executor.tasks();
 
-        let mut join_handles = Vec::with_capacity(TASK_COUNT);
-        let mut future_wakers = Vec::with_capacity(TASK_COUNT);
-        let mut future_completes = Vec::with_capacity(TASK_COUNT);
+        let mut join_handles = Vec::with_capacity(AWAKENED_TASK_COUNT);
+        let mut future_wakers = Vec::with_capacity(AWAKENED_TASK_COUNT);
+        let mut future_completes = Vec::with_capacity(AWAKENED_TASK_COUNT);
 
-        for _ in 0..TASK_COUNT {
+        for _ in 0..AWAKENED_TASK_COUNT {
             let future = TestSubjectFuture::new();
             future_wakers.push(future.waker());
             future_completes.push(future.completes_on_next_poll());
             join_handles.push(tasks.add(future));
         }
+
+        let inactive_future = TestSubjectFuture::new();
+        let mut inactive_join_handle = tasks.add(inactive_future);
 
         // The futures should all inactivate, leading to a Suspend outcome.
         assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
@@ -379,6 +382,8 @@ mod tests {
             let result = Pin::new(&mut join_handle).poll(&mut cx);
             assert!(matches!(result, Poll::Ready(())));
         }
+
+        assert!(matches!(Pin::new(&mut inactive_join_handle).poll(&mut cx), Poll::Pending));
     }
 
     #[test]
@@ -426,6 +431,15 @@ mod tests {
             }
         }
 
+        impl Future for SetSignalOnDrop {
+            type Output = ();
+
+            #[cfg_attr(coverage_nightly, coverage(off))] // The test verifies drop before the first poll.
+            fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+                Poll::Pending
+            }
+        }
+
         let drop_signal = Rc::new(Cell::new(false));
 
         // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
@@ -435,11 +449,7 @@ mod tests {
 
         let signal_setter = SetSignalOnDrop(Rc::clone(&drop_signal));
 
-        tasks.add({
-            async move {
-                let _setter = signal_setter;
-            }
-        });
+        tasks.add(signal_setter);
 
         assert!(!drop_signal.get());
 
@@ -678,13 +688,10 @@ mod tests {
         tasks.add({
             let leaked_waiter = Rc::clone(&leaked_waiter);
 
-            async move {
-                poll_fn(|cx| {
-                    *leaked_waiter.borrow_mut() = Some(cx.waker().clone());
-                    Poll::Pending::<usize>
-                })
-                .await
-            }
+            poll_fn(move |cx| {
+                *leaked_waiter.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending::<usize>
+            })
         });
 
         _ = executor.execute_cycle();

@@ -210,6 +210,7 @@ where
 
 #[expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")]
 #[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
     if let Some(s) = panic.downcast_ref::<&str>() {
         eprintln!("unhandled panic in async task - terminating process: {s}");
@@ -377,13 +378,10 @@ mod tests {
             {
                 let stashed_wakers = Rc::clone(&stashed_wakers);
 
-                async move {
-                    poll_fn(|cx| {
-                        stashed_wakers.borrow_mut().push(cx.waker().clone());
-                        task::Poll::Pending
-                    })
-                    .await
-                }
+                poll_fn(move |cx| {
+                    stashed_wakers.borrow_mut().push(cx.waker().clone());
+                    task::Poll::Pending
+                })
             },
             tx,
         ));

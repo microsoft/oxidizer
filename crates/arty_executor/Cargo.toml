@@ -16,6 +16,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_execut
 keywords = ["arty", "executor", "async", "runtime"]
 categories = ["asynchronous"]
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["scopeguard::*"]
+
 [features]
 default = []
 test-util = ["dep:scopeguard"]
