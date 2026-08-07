@@ -110,10 +110,24 @@ Describe 'Clear-LegacySemverChecksScratch' {
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
     }
 
+    It 'leaves the directory alone when dot segments resolve inside the repository target dir' {
+        $nestedViaDot = Join-Path (Join-Path $script:repoTarget '.') 'custom'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $nestedViaDot 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
     It 'leaves the directory alone when the target dir is the scratch directory itself' {
         Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $script:legacy 6>$null
 
         Test-Path -LiteralPath $script:legacy | Should -BeTrue
+    }
+
+    It 'removes the scratch dir when parent segments resolve to a sibling' {
+        $siblingViaParent = Join-Path (Join-Path $script:repoTarget '..') 'semver-out'
+        Clear-LegacySemverChecksScratch -RepoRoot $script:repo -TargetDir $siblingViaParent 6>$null
+
+        Test-Path -LiteralPath $script:legacy | Should -BeFalse
     }
 
     It 'still removes the scratch dir for a sibling path that merely shares a prefix' {

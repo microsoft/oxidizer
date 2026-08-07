@@ -711,14 +711,21 @@ function Clear-LegacySemverChecksScratch {
 
     # When the override deliberately points back at (or inside) the repository's
     # own target directory, this *is* the live scratch directory — leave it
-    # alone. The containment test must use the platform's separator: hardcoding
-    # a backslash silently disables this guard on Linux and macOS, where the
-    # override is the only way to reach this code at all. Windows additionally
-    # accepts forward slashes and compares case-insensitively.
+    # alone. Canonicalize lexical dot segments before testing containment:
+    # `<repo>/target/../elsewhere` is outside the target directory, while
+    # `<repo>/target/./custom` is inside it. The containment test must use the
+    # platform's separator: hardcoding a backslash silently disables this guard
+    # on Linux and macOS, where the override is the only way to reach this code
+    # at all. Windows additionally accepts forward slashes and compares
+    # case-insensitively.
     $separator = [System.IO.Path]::DirectorySeparatorChar
     $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
-    $normalizedTarget = if ($IsWindows) { $TargetDir.Replace('/', '\') } else { $TargetDir }
-    $normalizedRepoTarget = if ($IsWindows) { $repoTarget.Replace('/', '\') } else { $repoTarget }
+    $normalizedTarget = [System.IO.Path]::GetFullPath($TargetDir)
+    $normalizedRepoTarget = [System.IO.Path]::GetFullPath($repoTarget)
+    if ($IsWindows) {
+        $normalizedTarget = $normalizedTarget.Replace('/', '\')
+        $normalizedRepoTarget = $normalizedRepoTarget.Replace('/', '\')
+    }
     $normalizedTarget = $normalizedTarget.TrimEnd($separator)
     $normalizedRepoTarget = $normalizedRepoTarget.TrimEnd($separator)
 
