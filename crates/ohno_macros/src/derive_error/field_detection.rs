@@ -70,7 +70,7 @@ impl<'a> ParsedFields<'a> {
         })
     }
 
-    /// Report anything the collected fields say that cannot be honoured
+    /// Report anything the collected fields say that cannot be honored
     ///
     /// See `docs/error_error.md`.
     fn validate(&self) -> Result<()> {
