@@ -395,6 +395,14 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
+    fn socket_buffer_sizes_are_widened_verbatim() {
+        assert_eq!(super::widen_socket_buffer_size(0), 0);
+        assert_eq!(super::widen_socket_buffer_size(1), 1);
+        assert_eq!(super::widen_socket_buffer_size(u32::MAX), u32::MAX as usize);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
     fn assert_tokio_transport_options_type() {
         static_assertions::assert_impl_all!(
             super::TokioTransportOptions: Send,
