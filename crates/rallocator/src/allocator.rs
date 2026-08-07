@@ -19,7 +19,7 @@ use crate::hal::{peek_free_requested, read_free_next, read_free_requested, write
 use crate::heap::bump::{self, BumpState};
 use crate::heap::{HeapTarget, target_from_hint};
 use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation, TrackingState};
-use crate::tunables::{MAX_SIZE_CLASSES, SizeClassLayout, Tunables, valid_size_classes};
+use crate::tunables::{MAX_SIZE_CLASSES, SizeClassLayout, SizeClassTables, Tunables, valid_size_classes};
 #[cfg(feature = "tuning-telemetry")]
 use crate::tuning_telemetry::{self, ClassEvent, MediumEvent};
 
@@ -766,8 +766,11 @@ where
     ///
     /// # Safety
     ///
-    /// Every `Rallocator` used in the process must use the same effective
-    /// configuration. Prefer [`crate::rallocator!`] for the global allocator.
+    /// Every `Rallocator` used in the process must use identical tunables and
+    /// caller-tracking configuration because those options affect allocation
+    /// representation. `TRACK_AGGREGATES` may differ because aggregate counters
+    /// do not alter shared allocator state. Prefer [`crate::rallocator!`] for
+    /// the global allocator.
     #[must_use]
     pub const unsafe fn new() -> Self {
         let () = Self::VALIDATE_TUNABLES;
@@ -1230,6 +1233,13 @@ where
 
     #[cold]
     #[inline(never)]
+    /// Allocates a mapping-backed block without consulting the normal size-class routes.
+    ///
+    /// # Safety
+    ///
+    /// When non-null, `owner` must point to a live reusable heap whose domain
+    /// remains valid for the allocation. A pending tracking record must belong
+    /// to the active tracking state and describe `layout`.
     unsafe fn allocate_direct(
         &self,
         layout: Layout,
@@ -1670,8 +1680,9 @@ where
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
         let segment = allocation_segment(address);
-        // Bump allocations can begin inside a slice. Only trusted region metadata may identify the
-        // segment as bump-owned; allocation payload bytes are never sufficient.
+        // Allocations entering this branch are preceded within their segment by
+        // allocator-owned metadata. Segment-base allocations are excluded above,
+        // so user payload can never own the marker or bump-state prefix.
         if address != segment {
             let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
             if let Some(state) = unsafe { bump::state_for_allocation(segment, marker) } {
@@ -2934,7 +2945,7 @@ fn class_index<T: Tunables>(required_size: usize) -> Option<usize> {
         None
     } else {
         let bucket = (required_size + 15) >> 4;
-        Some(unsafe { *T::SizeClasses::CLASS_MAP.get_unchecked(bucket) as usize })
+        Some(unsafe { *<T::SizeClasses as SizeClassTables>::CLASS_MAP.get_unchecked(bucket) as usize })
     }
 }
 
@@ -2945,7 +2956,7 @@ fn class_index_for_alignment<T: Tunables>(required_size: usize, alignment: usize
     }
     let bucket = required_size.div_ceil(16);
     let class_index = unsafe {
-        *T::SizeClasses::ALIGNED_CLASS_MAP
+        *<T::SizeClasses as SizeClassTables>::ALIGNED_CLASS_MAP
             .get_unchecked(alignment.trailing_zeros() as usize)
             .get_unchecked(bucket)
     };
@@ -3428,9 +3439,9 @@ unsafe fn take_slab_block<T: Tunables>(slab: *mut SlabHeader, class_index: usize
 unsafe fn recycle_local_block<T: Tunables>(slab: *mut SlabHeader, address: *mut u8, class_index: usize) {
     let block_size = T::SizeClasses::SIZES[class_index];
     let offset = address.addr() - slab.addr();
-    let shift = unsafe { *T::SizeClasses::CLASS_SHIFTS.get_unchecked(class_index) };
+    let shift = unsafe { *<T::SizeClasses as SizeClassTables>::CLASS_SHIFTS.get_unchecked(class_index) };
     let block_index = if shift == u8::MAX {
-        let reciprocal = unsafe { *T::SizeClasses::CLASS_RECIPROCALS.get_unchecked(class_index) };
+        let reciprocal = unsafe { *<T::SizeClasses as SizeClassTables>::CLASS_RECIPROCALS.get_unchecked(class_index) };
         ((offset as u128 * reciprocal as u128) >> usize::BITS) as usize
     } else {
         offset >> shift
@@ -4127,13 +4138,20 @@ mod tests {
         const OLD_BUMP_MARKER: usize = 0x5241_4C4C_4152_454E;
 
         crate::initialize();
+        // SAFETY: DirectTrackingConfig uses the same Standard tunables and block
+        // geometry as every other allocator in this test process; only aggregate
+        // counter instrumentation differs.
         let allocator = unsafe { Rallocator::<DirectTrackingConfig>::new() };
         let layout = Layout::from_size_align(3 * size_of::<usize>(), align_of::<usize>()).unwrap();
+        // SAFETY: the owner is null, tracking is disabled, and layout is valid.
         let address = unsafe { allocator.allocate_direct(layout, false, None, ptr::null_mut()) };
         assert!(!address.is_null());
         let unmappings = tracking::stats().unwrap().os_unmappings;
 
         let words = address.cast::<usize>();
+        // SAFETY: the successful allocation contains three aligned usize slots.
+        // All writes stay within that live allocation, and dealloc receives the
+        // original pointer with the identical layout.
         unsafe {
             words.write(OLD_BUMP_MARKER);
             words.add(1).write(!OLD_BUMP_MARKER);

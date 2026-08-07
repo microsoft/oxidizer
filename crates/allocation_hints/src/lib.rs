@@ -588,8 +588,12 @@ mod tests {
         });
 
         active.wait();
-        assert_eq!(heap.try_info().unwrap_err().to_string(), "the heap is active on another thread");
-        assert_eq!(heap.try_usage().unwrap_err().to_string(), "the heap is active on another thread");
+        let info_error = heap.try_info().unwrap_err();
+        assert_eq!(info_error.kind(), ErrorKind::InspectionContended);
+        assert_eq!(info_error.to_string(), "the heap is active on another thread");
+        let usage_error = heap.try_usage().unwrap_err();
+        assert_eq!(usage_error.kind(), ErrorKind::InspectionContended);
+        assert_eq!(usage_error.to_string(), "the heap is active on another thread");
         release.wait();
         remote.join().unwrap();
         heap.try_info().unwrap();

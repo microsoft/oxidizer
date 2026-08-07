@@ -18,10 +18,23 @@ pub struct Estimate {
     pub upper_bound: u64,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct EstimateFields {
+    pub value: u64,
+    pub lower_bound: u64,
+    pub upper_bound: u64,
+}
+
 impl Estimate {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(value: u64, lower_bound: u64, upper_bound: u64) -> Self {
+    pub fn from_fields(fields: EstimateFields) -> Self {
+        let EstimateFields {
+            value,
+            lower_bound,
+            upper_bound,
+        } = fields;
         Self {
             value,
             lower_bound,
@@ -62,28 +75,43 @@ pub struct Stats {
     pub drained_remote_blocks: u64,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct StatsFields {
+    pub allocated_bytes: u64,
+    pub deallocated_bytes: u64,
+    pub live_bytes: u64,
+    pub peak_live_bytes: u64,
+    pub mapped_bytes: u64,
+    pub os_mappings: u64,
+    pub os_unmappings: u64,
+    pub allocations: u64,
+    pub deallocations: u64,
+    pub remote_frees: u64,
+    pub pending_remote_blocks: u64,
+    pub remote_pushes_in_progress: u64,
+    pub drained_remote_blocks: u64,
+}
+
 impl Stats {
     #[doc(hidden)]
     #[must_use]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "The full constructor preserves schema completeness for producers"
-    )]
-    pub const fn new(
-        allocated_bytes: u64,
-        deallocated_bytes: u64,
-        live_bytes: u64,
-        peak_live_bytes: u64,
-        mapped_bytes: u64,
-        os_mappings: u64,
-        os_unmappings: u64,
-        allocations: u64,
-        deallocations: u64,
-        remote_frees: u64,
-        pending_remote_blocks: u64,
-        remote_pushes_in_progress: u64,
-        drained_remote_blocks: u64,
-    ) -> Self {
+    pub fn from_fields(fields: StatsFields) -> Self {
+        let StatsFields {
+            allocated_bytes,
+            deallocated_bytes,
+            live_bytes,
+            peak_live_bytes,
+            mapped_bytes,
+            os_mappings,
+            os_unmappings,
+            allocations,
+            deallocations,
+            remote_frees,
+            pending_remote_blocks,
+            remote_pushes_in_progress,
+            drained_remote_blocks,
+        } = fields;
         Self {
             allocated_bytes,
             deallocated_bytes,
@@ -118,16 +146,27 @@ pub struct SizeClass {
     pub usable_bytes: Estimate,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SizeClassFields {
+    pub class_index: u32,
+    pub block_bytes: u64,
+    pub live_allocations: Estimate,
+    pub requested_bytes: Estimate,
+    pub usable_bytes: Estimate,
+}
+
 impl SizeClass {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(
-        class_index: u32,
-        block_bytes: u64,
-        live_allocations: Estimate,
-        requested_bytes: Estimate,
-        usable_bytes: Estimate,
-    ) -> Self {
+    pub fn from_fields(fields: SizeClassFields) -> Self {
+        let SizeClassFields {
+            class_index,
+            block_bytes,
+            live_allocations,
+            requested_bytes,
+            usable_bytes,
+        } = fields;
         Self {
             class_index,
             block_bytes,
@@ -152,10 +191,25 @@ pub struct Region {
     pub free_slices: u64,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct RegionFields {
+    pub region_index: u32,
+    pub reserved_bytes: u64,
+    pub used_slices: u64,
+    pub free_slices: u64,
+}
+
 impl Region {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(region_index: u32, reserved_bytes: u64, used_slices: u64, free_slices: u64) -> Self {
+    pub fn from_fields(fields: RegionFields) -> Self {
+        let RegionFields {
+            region_index,
+            reserved_bytes,
+            used_slices,
+            free_slices,
+        } = fields;
         Self {
             region_index,
             reserved_bytes,
@@ -193,26 +247,39 @@ pub struct Domain {
     pub region_indices: Vec<u32>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct DomainFields {
+    pub domain_id: u64,
+    pub is_default: bool,
+    pub region_count: u64,
+    pub reserved_bytes: u64,
+    pub used_slices: u64,
+    pub free_slices: u64,
+    pub small_slices: u64,
+    pub medium_slices: u64,
+    pub bump_slices: u64,
+    pub unknown_slices: u64,
+    pub region_indices: Vec<u32>,
+}
+
 impl Domain {
     #[doc(hidden)]
     #[must_use]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "The full constructor preserves schema completeness for producers"
-    )]
-    pub const fn new(
-        domain_id: u64,
-        is_default: bool,
-        region_count: u64,
-        reserved_bytes: u64,
-        used_slices: u64,
-        free_slices: u64,
-        small_slices: u64,
-        medium_slices: u64,
-        bump_slices: u64,
-        unknown_slices: u64,
-        region_indices: Vec<u32>,
-    ) -> Self {
+    pub fn from_fields(fields: DomainFields) -> Self {
+        let DomainFields {
+            domain_id,
+            is_default,
+            region_count,
+            reserved_bytes,
+            used_slices,
+            free_slices,
+            small_slices,
+            medium_slices,
+            bump_slices,
+            unknown_slices,
+            region_indices,
+        } = fields;
         Self {
             domain_id,
             is_default,
@@ -239,10 +306,18 @@ pub struct Histograms {
     pub live: Vec<u64>,
 }
 
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct HistogramsFields {
+    pub allocated: Vec<u64>,
+    pub live: Vec<u64>,
+}
+
 impl Histograms {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(allocated: Vec<u64>, live: Vec<u64>) -> Self {
+    pub fn from_fields(fields: HistogramsFields) -> Self {
+        let HistogramsFields { allocated, live } = fields;
         Self { allocated, live }
     }
 }
@@ -272,10 +347,18 @@ pub struct SkippedSection {
     pub version: u16,
 }
 
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct SkippedSectionFields {
+    pub id: u16,
+    pub version: u16,
+}
+
 impl SkippedSection {
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(id: u16, version: u16) -> Self {
+    pub fn from_fields(fields: SkippedSectionFields) -> Self {
+        let SkippedSectionFields { id, version } = fields;
         Self { id, version }
     }
 }
