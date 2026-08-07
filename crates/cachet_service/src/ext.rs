@@ -81,7 +81,33 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
+
+    #[derive(Debug, Default)]
+    struct LegacyExtension {
+        inserted: AtomicBool,
+    }
+
+    impl CacheServiceExt<String, i32> for LegacyExtension {
+        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+            Ok(None)
+        }
+
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
+            self.inserted.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+
+        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn clear(&self) -> Result<(), Error> {
+            Ok(())
+        }
+    }
 
     // A correct service that returns expected response types
     #[derive(Debug)]
@@ -139,6 +165,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome, InsertOutcome::Accepted);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn ext_default_insert_with_outcome_delegates_to_insert() {
+        let extension = LegacyExtension::default();
+
+        let outcome = extension.insert_with_outcome("key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+        assert_eq!(outcome, InsertOutcome::Accepted);
+        assert!(extension.inserted.load(Ordering::Relaxed));
+        assert!(extension.get(&"key".to_string()).await.unwrap().is_none());
+        extension.invalidate(&"key".to_string()).await.unwrap();
+        extension.clear().await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]
