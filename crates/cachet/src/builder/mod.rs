@@ -8,6 +8,8 @@
 
 mod buildable;
 mod cache;
+#[cfg(feature = "encrypt")]
+mod encrypt;
 mod fallback;
 mod sealed;
 #[cfg(any(feature = "serialize", test))]
@@ -17,4 +19,6 @@ mod transform;
 pub use cache::CacheBuilder;
 pub use fallback::FallbackBuilder;
 pub use sealed::CacheTierBuilder;
+#[cfg(any(feature = "serialize", test))]
+pub use serialize::SerializeBuilder;
 pub use transform::TransformBuilder;

@@ -3,8 +3,22 @@
 
 use std::fmt::Debug;
 
-use crate::transform::codec::DecodeOutcome;
+use crate::transform::codec::{CodecContext, DecodeOutcome};
 use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
+
+/// Builds the per-operation [`CodecContext`] from a mapped storage key.
+///
+/// Returns a keyless context for a plain type transform, or a key-bound context for the
+/// serialize/protect boundary (where the storage key is bytes and doubles as associated
+/// data). It yields the whole [`CodecContext`] — not just the key — so new context fields
+/// can be added on the struct without changing this signature; boxed so both forms share
+/// one adapter type.
+pub(crate) type MakeContext<KT> = Box<dyn for<'a> Fn(&'a KT) -> CodecContext<'a> + Send + Sync>;
+
+/// A [`MakeContext`] that binds no key — the codec receives a keyless context.
+pub(crate) fn keyless_context<KT>() -> MakeContext<KT> {
+    Box::new(|_| CodecContext::keyless())
+}
 
 /// Adapter that transforms keys and values between user types and storage types.
 ///
@@ -13,7 +27,11 @@ use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
 /// - `KT, VT` are the storage types (the types used by the inner `S: CacheTier<KT, VT>`)
 /// - `key_encoder: K->KT` (one-directional), `value_codec: V<->VT` (bidirectional)
 ///
-/// Implements `CacheTier<K, V>` by encoding keys/values to `KT, VT` for the inner tier.
+/// `make_context` builds the [`CodecContext`] passed to the value codec: keyless for a
+/// plain transform, or key-bound for an authenticated (serialize/protect) boundary. The
+/// adapter is a pure transform: on read a [`DecodeOutcome::SoftFailure`] simply becomes a
+/// cache miss. Any observability of *why* (e.g. an authentication failure) is owned by
+/// the value codec that detected it, not by this general adapter.
 pub(crate) struct TransformAdapter<K, KT, V, VT, S>
 where
     S: CacheTier<KT, VT>,
@@ -21,18 +39,25 @@ where
     inner: S,
     key_encoder: Box<dyn Encoder<K, KT>>,
     value_codec: Box<dyn Codec<V, VT>>,
+    make_context: MakeContext<KT>,
 }
 
 impl<K, KT, V, VT, S> TransformAdapter<K, KT, V, VT, S>
 where
     S: CacheTier<KT, VT>,
 {
-    /// Creates a new `TransformAdapter` from pre-boxed codecs.
-    pub(crate) fn from_boxed(inner: S, key_encoder: Box<dyn Encoder<K, KT>>, value_codec: Box<dyn Codec<V, VT>>) -> Self {
+    /// Creates a new `TransformAdapter` from pre-boxed codecs and a context builder.
+    pub(crate) fn from_boxed(
+        inner: S,
+        key_encoder: Box<dyn Encoder<K, KT>>,
+        value_codec: Box<dyn Codec<V, VT>>,
+        make_context: MakeContext<KT>,
+    ) -> Self {
         Self {
             inner,
             key_encoder,
             value_codec,
+            make_context,
         }
     }
 }
@@ -47,32 +72,35 @@ where
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let mapped_key = self.key_encoder.encode(key)?;
-        let entry_option = self.inner.get(&mapped_key).await?;
-        if let Some(entry) = entry_option {
-            let ttl = entry.ttl();
-            let cached_at = entry.cached_at();
-            let decoded = self.value_codec.decode(entry.into_value())?;
-            match decoded {
-                DecodeOutcome::Value(v) => {
-                    let mut e = CacheEntry::new(v);
-                    if let Some(ttl) = ttl {
-                        e.set_ttl(ttl);
-                    }
-                    if let Some(t) = cached_at {
-                        e.ensure_cached_at(t);
-                    }
-                    Ok(Some(e))
+        let Some(entry) = self.inner.get(&mapped_key).await? else {
+            return Ok(None);
+        };
+        let ttl = entry.ttl();
+        let cached_at = entry.cached_at();
+        let stored = entry.into_value();
+
+        let ctx = (self.make_context)(&mapped_key);
+        match self.value_codec.decode(&ctx, stored)? {
+            DecodeOutcome::Value(v) => {
+                let mut e = CacheEntry::new(v);
+                if let Some(ttl) = ttl {
+                    e.set_ttl(ttl);
                 }
-                DecodeOutcome::SoftFailure(_) => Ok(None),
+                if let Some(t) = cached_at {
+                    e.ensure_cached_at(t);
+                }
+                Ok(Some(e))
             }
-        } else {
-            Ok(None)
+            DecodeOutcome::SoftFailure => Ok(None),
         }
     }
 
     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
         let mapped_key = self.key_encoder.encode(&key)?;
-        let mapped_entry = entry.try_map_value(|v| self.value_codec.encode(&v))?;
+        let mapped_entry = {
+            let ctx = (self.make_context)(&mapped_key);
+            entry.try_map_value(|v| self.value_codec.encode(&ctx, &v))?
+        };
         self.inner.insert(mapped_key, mapped_entry).await
     }
 
@@ -106,7 +134,9 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use bytesbuf::BytesView;
     use cachet_tier::MockCache;
 
     use super::*;
@@ -120,15 +150,15 @@ mod tests {
             |v: i32| Ok::<_, std::convert::Infallible>(v.to_string()),
         );
         // Exercise both directions so closure bodies are covered.
-        assert_eq!(codec.encode(&"42".to_string()).unwrap(), 42);
-        assert!(matches!(codec.decode(42).unwrap(), DecodeOutcome::Value(s) if s == "42"));
+        assert_eq!(codec.encode(&CodecContext::keyless(), &"42".to_string()).unwrap(), 42);
+        assert!(matches!(codec.decode(&CodecContext::keyless(), 42).unwrap(), DecodeOutcome::Value(s) if s == "42"));
 
         let key_encoder = TransformEncoder::new(|k: &String| k.parse::<i32>());
         // Exercise the encoder so the wrapping closure is covered.
         assert_eq!(key_encoder.encode(&"7".to_string()).unwrap(), 7);
 
         let inner = MockCache::<i32, i32>::new();
-        let adapter = TransformAdapter::from_boxed(inner, Box::new(key_encoder), Box::new(codec));
+        let adapter = TransformAdapter::from_boxed(inner, Box::new(key_encoder), Box::new(codec), keyless_context());
         let debug = format!("{adapter:?}");
         assert!(debug.contains("TransformAdapter"));
     }
@@ -150,6 +180,7 @@ mod tests {
             inner,
             Box::new(TransformEncoder::new(|k: &String| k.parse::<i32>())),
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
+            keyless_context(),
         );
         assert_eq!(adapter.len().await.expect("MockCache::len returns Ok"), 2);
     }
@@ -172,6 +203,7 @@ mod tests {
             inner,
             Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
             Box::new(TransformCodec::new(infallible(|v: &i32| *v), infallible_owned(|v: i32| v))),
+            keyless_context(),
         );
 
         let result = adapter.get(&1).await.unwrap().expect("should be Some");
@@ -182,15 +214,56 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn get_returns_none_on_soft_failure() {
+    async fn soft_failure_reads_as_a_miss() {
+        // The adapter is a pure transform: a decode soft-failure is just a miss, with no
+        // telemetry of its own (that belongs to whichever codec detected the failure).
         let inner = MockCache::with_data(std::iter::once((1, CacheEntry::new(42))).collect());
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
-            Box::new(MockCodec::<i32>::soft_failure("test failure")),
+            Box::new(MockCodec::<i32>::soft_failure()),
+            keyless_context(),
         );
 
-        let result = adapter.get(&1).await.unwrap();
-        assert!(result.is_none(), "soft failure should return None");
+        assert!(adapter.get(&1).await.unwrap().is_none(), "a soft failure reads as a miss");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn key_context_binds_the_mapped_key() {
+        // A codec whose decode returns the context key proves the adapter threads the
+        // mapped key bytes into the codec context (a keyless context would yield empty).
+        let inner = MockCache::<BytesView, BytesView>::new();
+        let adapter = TransformAdapter::from_boxed(
+            inner,
+            Box::new(TransformEncoder::new(|k: &BytesView| Ok::<_, std::convert::Infallible>(k.clone()))),
+            Box::new(KeyReportingCodec),
+            Box::new(|key: &BytesView| CodecContext::from_key(std::borrow::Cow::Owned(key.to_vec()))),
+        );
+
+        adapter
+            .insert(BytesView::from(b"k".to_vec()), CacheEntry::new(BytesView::from(b"v".to_vec())))
+            .await
+            .expect("insert should succeed");
+        let got = adapter
+            .get(&BytesView::from(b"k".to_vec()))
+            .await
+            .expect("get should succeed")
+            .expect("present");
+        assert_eq!(got.value().to_vec(), b"k", "decode must observe the bound key via the context");
+    }
+
+    /// A codec that stores the value as-is but decodes to the context key, so a test can
+    /// observe which key the adapter bound into the context.
+    struct KeyReportingCodec;
+
+    impl Codec<BytesView, BytesView> for KeyReportingCodec {
+        fn encode(&self, _ctx: &CodecContext<'_>, value: &BytesView) -> Result<BytesView, Error> {
+            Ok(value.clone())
+        }
+
+        fn decode(&self, ctx: &CodecContext<'_>, _value: BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+            Ok(DecodeOutcome::Value(BytesView::from(ctx.key().to_vec())))
+        }
     }
 }

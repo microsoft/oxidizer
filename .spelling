@@ -11,6 +11,8 @@
 5xx
 =
 >=
+AAD
+AEAD
 ABA
 ABI
 ACLs
@@ -137,6 +139,7 @@ RAII
 RDME
 RMW
 RMWs
+RNG
 RPC
 RSS
 Rc
@@ -254,6 +257,7 @@ chainable
 chrono
 chunked
 chunkless
+ciphertext
 clippt
 clippy
 clonable
@@ -277,6 +281,14 @@ covariant
 coverage.json
 crates.io
 crypto
+cryptographic
+cryptographically
+CryptProtectData
+DPAPI
+keystream
+SymCrypt
+undecryptable
+unprotect
 customizable
 cutover
 dSMS
@@ -290,6 +302,8 @@ decorrelate
 decrement
 decrementer
 decrementers
+decrypt
+decrypts
 dedup
 deduplicated
 deduplicating
@@ -345,6 +359,7 @@ freelist
 freezable
 frontend
 fundle
+GCM
 gRPC
 getter
 getters
@@ -460,6 +475,8 @@ passthrough
 performant
 pessimizes
 pointee
+plaintext
+pluggable
 pointees
 polyfill
 pre-approved
@@ -786,6 +803,7 @@ valgrind
 vendored
 webhook
 whitespace
+keyless
 Quiesce
 transactional
 snapshotted

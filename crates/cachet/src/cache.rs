@@ -869,13 +869,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::telemetry::handler::RequestId;
-    use crate::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
+    use crate::RecordingEventHandler;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
@@ -925,52 +922,15 @@ mod tests {
 
     #[test]
     fn cache_event_handler_receives_fallback_tier_events() {
-        type EventRecord = Vec<(RequestId, String, String, bool)>;
-
-        #[derive(Clone)]
-        struct RecordingHandler {
-            tier_events: Arc<Mutex<EventRecord>>,
-            operation_events: Arc<Mutex<EventRecord>>,
-        }
-
-        impl CacheEventHandler for RecordingHandler {
-            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
-                self.tier_events.lock().expect("test handler mutex should not be poisoned").push((
-                    event.request_id,
-                    event.tier_name.to_string(),
-                    event.outcome.to_string(),
-                    event.fallback,
-                ));
-            }
-
-            fn on_operation_complete(&self, event: &CacheOperationEvent<'_>) {
-                self.operation_events
-                    .lock()
-                    .expect("test handler mutex should not be poisoned")
-                    .push((
-                        event.request_id,
-                        event.cache_name.to_string(),
-                        event.operation.to_string(),
-                        event.coalesced,
-                    ));
-            }
-        }
-
-        let tier_events = Arc::new(Mutex::new(Vec::new()));
-        let operation_events = Arc::new(Mutex::new(Vec::new()));
+        let handler = RecordingEventHandler::new();
 
         block_on(async {
             let clock = Clock::new_frozen();
-            let handler = RecordingHandler {
-                tier_events: Arc::clone(&tier_events),
-                operation_events: Arc::clone(&operation_events),
-            };
-
             let l2 = Cache::builder::<String, i32>(clock.clone()).storage(MockCache::new()).name("l2");
             let cache = Cache::builder::<String, i32>(clock)
                 .storage(MockCache::new())
                 .name("l1")
-                .event_handler(handler)
+                .event_handler(handler.clone())
                 .fallback(l2)
                 .build();
 
@@ -978,30 +938,24 @@ mod tests {
             assert!(result.is_none());
         });
 
-        let tier_events = tier_events.lock().expect("test handler mutex should not be poisoned").clone();
-        let operation_events = operation_events.lock().expect("test handler mutex should not be poisoned").clone();
-        let request_id = operation_events[0].0;
+        let tier_events = handler.tier_events();
+        let operation_events = handler.operation_events();
+        let request_id = operation_events[0].request_id;
 
+        let miss = crate::telemetry::attributes::EVENT_MISS;
         assert_eq!(
-            tier_events,
-            vec![
-                (
-                    request_id,
-                    "l1".to_string(),
-                    crate::telemetry::attributes::EVENT_MISS.to_string(),
-                    false
-                ),
-                (
-                    request_id,
-                    "l2".to_string(),
-                    crate::telemetry::attributes::EVENT_MISS.to_string(),
-                    true
-                ),
-            ]
+            tier_events
+                .iter()
+                .map(|e| (e.request_id, e.tier_name.as_str(), e.outcome.as_str(), e.fallback))
+                .collect::<Vec<_>>(),
+            vec![(request_id, "l1", miss, false), (request_id, "l2", miss, true)]
         );
         assert_eq!(
-            operation_events,
-            vec![(request_id, "l1".to_string(), "cache.get".to_string(), false)]
+            operation_events
+                .iter()
+                .map(|e| (e.request_id, e.cache_name.as_str(), e.operation.as_str(), e.coalesced))
+                .collect::<Vec<_>>(),
+            vec![(request_id, "l1", "cache.get", false)]
         );
     }
 
