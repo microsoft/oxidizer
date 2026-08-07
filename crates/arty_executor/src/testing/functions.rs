@@ -17,6 +17,7 @@ use crate::{CycleOutcome, Executor};
 const MUTATION_TESTING_SHUTDOWN_TIMEOUT: Duration = Duration::from_mins(15);
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[cfg_attr(test, mutants::skip)] // Test-harness configuration is not production behavior.
 fn is_mutation_testing() -> bool {
     env::var("MUTATION_TESTING").as_deref() == Ok("1")
 }
