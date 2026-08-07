@@ -256,10 +256,17 @@ fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Option
         .http2_adaptive_window(http_2.adaptive_window);
 }
 
-/// Largest legal HTTP/2 stream flow-control window, in bytes.
+/// RFC 9113 limits `SETTINGS_INITIAL_WINDOW_SIZE` to `2^31 - 1`.
+///
+/// Exceeding this limit is a protocol error that would surface as a connection failure far
+/// from the configuration site, so the transport clamps requests at this boundary.
 const MAX_HTTP2_STREAM_WINDOW_SIZE: u32 = i32::MAX as u32;
 
-/// Returns the protocol-valid stream window forwarded to hyper.
+/// Applies the HTTP/2 protocol limit before forwarding the stream window to hyper.
+///
+/// This remains separate from [`apply_http2_options`] because that function cannot be observed
+/// through hyper's APIs and is excluded from mutation testing. Keeping the transformation here
+/// lets the boundary behavior remain directly testable.
 fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
     http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
