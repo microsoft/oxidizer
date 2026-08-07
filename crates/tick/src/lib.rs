@@ -270,6 +270,28 @@
 //!   lower-precision instant source on Linux and Windows. Other platforms delegate to
 //!   [`std::time::Instant::now`]. Clocks remain precise by default.
 //!
+//! ## Using precise and fast clocks together
+//!
+//! A component that already receives a [`Clock`] can derive a fast clone locally instead of
+//! requiring a separate application-level dependency. The original clock remains precise:
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(feature = "fast-instant")] {
+//! use tick::Clock;
+//!
+//! fn process(clock: &Clock) {
+//!     let fast_clock = clock.clone().with_fast_instant(true);
+//!
+//!     let decision_time = clock.instant();
+//!     let telemetry_time = fast_clock.instant();
+//!     // Use `decision_time` for logic and `telemetry_time` for debug instrumentation.
+//! #   let _ = (decision_time, telemetry_time);
+//! }
+//! # }
+//! # }
+//! ```
+//!
 //! # Additional Examples
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
