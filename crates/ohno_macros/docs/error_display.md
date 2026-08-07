@@ -91,7 +91,7 @@ neither decision is made halfway through a scan. Every segment borrows from the
 template, which works because none of them is rewritten on the way out.
 
 **An unbalanced brace is reported, not repaired.** Letting an unterminated `{`
-run to the end of the template would honour `"{path"` as `"{path}"`, so a typo
+run to the end of the template would honor `"{path"` as `"{path}"`, so a typo
 would render as a working message and never surface. A stray `}` is rejected for
 the mirror-image reason: it would otherwise be copied into the generated
 `format!` string, where `rustc` reports it against code the user cannot see. Both

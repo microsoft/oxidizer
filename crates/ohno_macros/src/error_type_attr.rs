@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn test_reject_marked_field() {
         // The attribute generates the error representation from the field it injects, so a marker
-        // on another field asks for something it cannot honour
+        // on another field asks for something it cannot honor
         for input in [
             parse_quote! { struct TestError { path: String, #[error] inner: ohno::OhnoCore } },
             parse_quote! { struct TestError(String, #[error] ohno::OhnoCore); },

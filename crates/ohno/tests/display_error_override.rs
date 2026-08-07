@@ -246,15 +246,15 @@ fn test_documented_fields_stay_referenceable() {
 /// A count whose `Mul` differs by receiver, so a rendered value says which one ran.
 ///
 /// `&(self.count * 2)` multiplies the field and borrows the result. `&self.count * 2`, the
-/// expansion before positional arguments were parenthesised, multiplies a reference instead.
+/// expansion before positional arguments were parenthesized, multiplies a reference instead.
 #[derive(Debug, Clone, Copy)]
 struct Count(u32);
 
 impl std::ops::Mul<u32> for Count {
     type Output = u32;
 
-    fn mul(self, factor: u32) -> u32 {
-        self.0 * factor
+    fn mul(self, rhs: u32) -> u32 {
+        self.0 * rhs
     }
 }
 

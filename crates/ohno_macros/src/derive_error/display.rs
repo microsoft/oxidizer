@@ -426,7 +426,7 @@ mod tests {
     fn test_parse_display_template_rejects_an_unbalanced_brace() {
         let input: DeriveInput = parse_quote! { struct TestError { field: String, #[error] inner: OhnoCore } };
 
-        // A `{` with no `}` would otherwise run to the end and be honoured as `{field}`
+        // A `{` with no `}` would otherwise run to the end and be honored as `{field}`
         assert_eq!(parse_err("Error: {field", vec![], &input), UNTERMINATED_PLACEHOLDER);
         assert_eq!(parse_err("Error: {", vec![], &input), UNTERMINATED_PLACEHOLDER);
         // A `}` with no `{` would otherwise be copied into the generated `format!` string

@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_injected_field_is_found_without_a_marker_attribute() {
         // The doc marker replaces the `#[error]` the attribute used to write, so field lookup has
-        // to recognise it as well, or `#[ohno::error]` structs lose their error field
+        // to recognize it as well, or `#[ohno::error]` structs lose their error field
         let marker = GENERATED_ERROR_FIELD_MARKER;
 
         let named: DeriveInput = parse_quote! {
