@@ -260,7 +260,6 @@ fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Option
 const MAX_HTTP2_STREAM_WINDOW_SIZE: u32 = i32::MAX as u32;
 
 /// Returns the protocol-valid stream window forwarded to hyper.
-#[inline]
 fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
     http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
@@ -349,6 +348,11 @@ mod tests {
     #[test]
     fn http2_stream_window_is_clamped_at_the_transport_boundary() {
         let mut http_2 = fetch_options::Http2Options::default();
+        assert_eq!(initial_stream_window_size(&http_2), None);
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE - 1);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE - 1));
+
         http_2.initial_stream_window_size = Some(u32::MAX);
 
         assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));

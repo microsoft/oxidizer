@@ -11,7 +11,8 @@
 pub struct Http2Options {
     /// Initial maximum number of streams that can be sent over HTTP/2 connections.
     ///
-    /// `None` means no client-side cap is applied and the server's settings are used.
+    /// `None` requests no override. The transport chooses its initial cap and updates it from
+    /// the peer's HTTP/2 settings.
     pub initial_max_send_streams: Option<usize>,
     /// Whether adaptive tuning of the HTTP/2 flow-control window is enabled.
     ///
@@ -19,16 +20,18 @@ pub struct Http2Options {
     pub adaptive_window: bool,
     /// Initial flow-control window size, in bytes, for each HTTP/2 stream.
     ///
-    /// `None` means the protocol default is used. Transports must validate the value against
-    /// the HTTP/2 protocol limits. Ignored when [`adaptive_window`][Self::adaptive_window] is
-    /// enabled, because the window is then sized dynamically.
+    /// `None` requests no override; the transport chooses its initial value. Transports must
+    /// validate configured values against the HTTP/2 protocol limits. Ignored when
+    /// [`adaptive_window`][Self::adaptive_window] is enabled, because the window is then sized
+    /// dynamically.
     pub initial_stream_window_size: Option<u32>,
 }
 
 impl Http2Options {
     /// Sets the initial maximum number of streams that can be sent over HTTP/2 connections.
     ///
-    /// The default is `None`, which means no limit is set, and the maximum number of streams is determined by the server.
+    /// The default is `None`, which requests no override. The transport chooses its initial cap
+    /// and updates it from the peer's HTTP/2 settings.
     ///
     /// # Examples
     ///
@@ -65,8 +68,8 @@ impl Http2Options {
 
     /// Sets the initial flow-control window size, in bytes, for each HTTP/2 stream.
     ///
-    /// The default is `None`, which uses the protocol default. The transport validates the
-    /// requested value against the HTTP/2 protocol limits. This value is ignored when
+    /// The default is `None`, which requests no override. The transport validates configured
+    /// values against the HTTP/2 protocol limits. This value is ignored when
     /// [`adaptive_window`][Self::adaptive_window] is enabled.
     ///
     /// # Examples

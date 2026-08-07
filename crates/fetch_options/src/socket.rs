@@ -1,21 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Socket-level tuning knobs applied to outbound TCP connections.
+//! Socket-level tuning requests for outbound TCP connections.
 //!
-//! This module defines [`SocketOptions`], the set of `TCP` socket settings a connector
-//! applies to every connection it opens. It covers the Nagle algorithm ([`no_delay`][SocketOptions::no_delay])
-//! and the kernel send/receive buffer sizes.
+//! This module defines [`SocketOptions`], a set of requested `TCP` socket overrides. It covers
+//! the Nagle algorithm ([`no_delay`][SocketOptions::no_delay]) and the kernel send/receive
+//! buffer sizes.
 //!
-//! Every option defaults to `None`, meaning "use the operating system default". Values left
-//! as `None` resolve to that default rather than to a value of this crate's choosing, so
-//! adding this struct never changes the observable behavior of an existing client.
+//! Every option defaults to `None`, meaning this configuration requests no override. The
+//! transport and its lower layers choose the effective behavior.
 //!
-//! These settings are applied by transports that dial their own `TCP` sockets. They are
+//! Transports that dial their own `TCP` sockets may attempt to apply these settings. They are
 //! deliberately not part of [`TransportOptions`][crate::TransportOptions]: a transport that
-//! does not own its sockets cannot honor them, and silently ignoring a tuning request is
-//! worse than not offering it. The bundled Tokio transport accepts them through
-//! `fetch::tokio::TokioTransportOptions`.
+//! does not own its sockets cannot honor them. The bundled Tokio transport accepts them
+//! through `fetch::tokio::TokioTransportOptions`.
 //!
 //! # Example
 //!
@@ -40,42 +38,37 @@
 //! [`TransportOptions`][crate::TransportOptions]. It tunes the socket underneath a connection,
 //! while [`Http2Options`][crate::Http2Options] tunes the protocol layer running on top of it.
 
-/// Socket-level settings applied to outbound `TCP` connections.
+/// Requested socket-level settings for outbound `TCP` connections.
 ///
-/// Each field is `None` by default, which leaves the operating system default untouched.
+/// Each field is `None` by default, which requests no override from the transport.
 ///
-/// These settings are honored only by transports that dial their own `TCP` sockets, which is
-/// why they are deliberately not part of [`TransportOptions`][crate::TransportOptions]: a
-/// transport that does not own its sockets cannot apply them, and silently ignoring a tuning
-/// request is worse than not offering it. The bundled Tokio transport accepts them through
-/// `fetch::tokio::TokioTransportOptions`.
-// The reference above is intentionally not an intra-doc link: `fetch` depends on this crate,
-// so linking the other way round would invert the dependency direction.
+/// These requests are honored only by transports that dial their own `TCP` sockets. The
+/// bundled Tokio transport attempts to forward supported values through
+/// `fetch::tokio::TokioTransportOptions`; lower layers may accept, adjust, or reject them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SocketOptions {
     /// Whether the Nagle algorithm is disabled (`TCP_NODELAY`).
     ///
-    /// `Some(true)` sends small writes immediately at the cost of extra packets.
-    /// `None` keeps the operating system default, which enables Nagle on every platform
-    /// `fetch` supports and is therefore equivalent to `Some(false)` in practice.
+    /// `Some(true)` requests immediate small writes at the cost of extra packets.
+    /// `None` requests no override; the transport's lower layer chooses the effective value.
     pub no_delay: Option<bool>,
     /// Size of the kernel receive buffer (`SO_RCVBUF`), in bytes.
     ///
-    /// `None` keeps the operating system default. The transport and kernel may clamp the
-    /// requested value to their supported ranges.
+    /// `None` requests no override. The transport and kernel may accept, adjust, or reject the
+    /// requested value.
     pub receive_buffer_size: Option<u32>,
     /// Size of the kernel send buffer (`SO_SNDBUF`), in bytes.
     ///
-    /// `None` keeps the operating system default. The transport and kernel may clamp the
-    /// requested value to their supported ranges.
+    /// `None` requests no override. The transport and kernel may accept, adjust, or reject the
+    /// requested value.
     pub send_buffer_size: Option<u32>,
 }
 
 impl SocketOptions {
     /// Sets whether the Nagle algorithm is disabled on connected sockets.
     ///
-    /// The default is `None`, which keeps the operating system default.
+    /// The default is `None`, which requests no override from the transport.
     ///
     /// # Examples
     ///
@@ -93,8 +86,8 @@ impl SocketOptions {
 
     /// Sets the kernel receive buffer size, in bytes.
     ///
-    /// The default is `None`, which keeps the operating system default. The transport and
-    /// kernel may clamp the requested value.
+    /// The default is `None`, which requests no override. The transport and kernel may accept,
+    /// adjust, or reject the requested value.
     ///
     /// # Examples
     ///
@@ -112,8 +105,8 @@ impl SocketOptions {
 
     /// Sets the kernel send buffer size, in bytes.
     ///
-    /// The default is `None`, which keeps the operating system default. The transport and
-    /// kernel may clamp the requested value.
+    /// The default is `None`, which requests no override. The transport and kernel may accept,
+    /// adjust, or reject the requested value.
     ///
     /// # Examples
     ///

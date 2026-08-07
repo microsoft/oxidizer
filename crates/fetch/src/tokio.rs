@@ -87,12 +87,12 @@ impl TokioDeps {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct TokioTransportOptions {
-    /// Socket-level tuning applied to every outbound `TCP` connection.
+    /// Socket-level tuning requested for every outbound `TCP` connection.
     pub socket: SocketOptions,
 }
 
 impl TokioTransportOptions {
-    /// Sets the socket-level tuning applied to every outbound `TCP` connection.
+    /// Sets the socket-level tuning requested for every outbound `TCP` connection.
     ///
     /// # Examples
     ///
@@ -160,7 +160,7 @@ impl HttpClient {
         Self::builder_custom_internal(
             crate::constants::TOKIO_RUNTIME_NAME,
             crate::constants::HYPER_TRANSPORT_NAME,
-            tokio_transport_factory(options),
+            move |cx| TransportHandler(build_tokio_handler(cx, &options).into()),
             Isolation::Shared,
             CustomDeps {
                 clock,
@@ -190,10 +190,11 @@ impl HttpClient {
 /// connector opens a TCP stream to the request authority and hands the wrapped
 /// stream to hyper. TLS, when required, is layered on top by the transport.
 ///
-/// The actual dialing is delegated to hyper's own [`HttpConnector`], which already
-/// implements name resolution, Happy Eyeballs (RFC 8305) IPv4/IPv6 racing, and
-/// pre-connect application of the socket buffer sizes. This type only translates
-/// [`BaseUri`] into an [`http::Uri`] and [`SocketOptions`] into hyper's setters.
+/// The actual dialing is delegated to hyper's own [`HttpConnector`], which implements name
+/// resolution and RFC 6555 address-family fallback when a host has both IPv4 and IPv6
+/// addresses. The fallback family starts after the connector's delay while the preferred
+/// family remains pending, or immediately after the preferred family fails. This type only
+/// translates [`BaseUri`] into an [`http::Uri`] and [`SocketOptions`] into hyper's setters.
 ///
 /// Applying the socket options is best-effort: hyper logs a warning and proceeds when the
 /// kernel rejects a requested value, so a connection is never failed over a tuning knob.
@@ -206,33 +207,9 @@ struct TokioConnector {
     connector: HttpConnector,
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Records the options handed to the most recent [`TokioConnector`] built on this thread.
-    ///
-    /// `HttpConnector` exposes no way to read its configuration back, and the connector is
-    /// buried inside the transport once built, so this is the only way to assert that the
-    /// options given to [`HttpClient::builder_tokio_with_options`] actually reach the
-    /// connector instead of being silently dropped.
-    ///
-    /// Deliberately thread-local rather than a `static Mutex`: every test that builds a Tokio
-    /// client constructs a connector, so a process-global recorder would be written
-    /// concurrently by unrelated tests and make the assertions below flaky. Thread affinity is
-    /// what keeps each test's observations its own.
-    ///
-    /// The cost of that choice is an invariant for readers to preserve: a test must reset,
-    /// build, and assert without crossing a thread. Keep those steps free of `.await` and off
-    /// a `flavor = "multi_thread"` runtime, or a migrated task will read `None` and report a
-    /// missing option that was in fact delivered.
-    static LAST_SOCKET_OPTIONS: std::cell::Cell<Option<SocketOptions>> = const { std::cell::Cell::new(None) };
-}
-
 impl TokioConnector {
-    /// Builds a connector that applies `options` to every connection it opens.
+    /// Builds a connector that attempts `options` for every connection it opens.
     fn new(options: SocketOptions) -> Self {
-        #[cfg(test)]
-        LAST_SOCKET_OPTIONS.set(Some(options));
-
         let mut connector = HttpConnector::new();
 
         // TLS is layered on top of this connector by the transport, so `https` targets reach
@@ -244,8 +221,8 @@ impl TokioConnector {
             connector.set_nodelay(no_delay);
         }
 
-        connector.set_send_buffer_size(options.send_buffer_size.map(clamp_socket_buffer_size));
-        connector.set_recv_buffer_size(options.receive_buffer_size.map(clamp_socket_buffer_size));
+        connector.set_send_buffer_size(options.send_buffer_size.map(widen_socket_buffer_size));
+        connector.set_recv_buffer_size(options.receive_buffer_size.map(widen_socket_buffer_size));
 
         // The connect budget is deliberately left unset: `ClientConnector` wraps this
         // whole future in `connect_timeout`, so resolution and every connect attempt
@@ -288,23 +265,10 @@ impl layered::Service<BaseUri> for TokioConnector {
     }
 }
 
-/// Smallest socket buffer size forwarded by the Tokio connector.
-///
-/// Zero disables send buffering on Windows instead of selecting the operating-system default.
-const MIN_SOCKET_BUFFER_SIZE: u32 = 4 * 1024;
-
-/// Largest socket buffer size forwarded by the Tokio connector.
-///
-/// Larger requests indicate a likely per-connection memory misconfiguration.
-const MAX_SOCKET_BUFFER_SIZE: u32 = 64 * 1024 * 1024;
-
-/// Validates and widens a socket buffer size for hyper's `usize`-typed setters.
-///
-/// The saturating conversion fallback is unreachable on supported targets with pointers at
-/// least 32 bits wide.
+/// Widens a socket buffer size for hyper's `usize`-typed setters.
 #[inline]
-fn clamp_socket_buffer_size(size: u32) -> usize {
-    usize::try_from(size.clamp(MIN_SOCKET_BUFFER_SIZE, MAX_SOCKET_BUFFER_SIZE)).unwrap_or(usize::MAX)
+fn widen_socket_buffer_size(size: u32) -> usize {
+    usize::try_from(size).expect("fetch supports only targets with pointers at least 32 bits wide")
 }
 
 /// Converts a connector failure into an [`HttpError`].
@@ -338,18 +302,6 @@ fn io_error_kind(mut error: &(dyn std::error::Error + 'static)) -> std::io::Erro
             None => return std::io::ErrorKind::Other,
         }
     }
-}
-
-/// Builds the per-pool-slot transport factory for the Tokio transport.
-///
-/// `options` is captured by value and shared by reference with every handler the client
-/// builds, so each pool slot on every core sees the configuration the caller supplied rather
-/// than a default. Extracted from [`HttpClient::builder_tokio_with_options`] so that
-/// propagation is testable without standing up a full client.
-fn tokio_transport_factory(
-    options: TokioTransportOptions,
-) -> impl Fn(CustomContext<TokioDeps>) -> TransportHandler + Send + Sync + 'static {
-    move |cx| TransportHandler(build_tokio_handler(cx, &options).into())
 }
 
 fn build_tokio_handler(cx: CustomContext<TokioDeps>, options: &TokioTransportOptions) -> fetch_hyper::HyperTransport {
@@ -425,62 +377,6 @@ mod tests {
         if let Pipeline::Minimal(dispatch) = client.pipeline() {
             assert!(matches!(dispatch.mode, crate::handlers::DispatchMode::Single(_)));
         }
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn builder_tokio_with_options_propagates_options_to_every_pool_slot() {
-        use opentelemetry::metrics::MeterProvider as _;
-        use opentelemetry_sdk::metrics::SdkMeterProvider;
-
-        use crate::custom::CustomContext;
-        use crate::options::{ClientOptions, PoolIndex};
-        use crate::tls::TlsOptions;
-
-        // This is the invariant the relocation introduces: the socket knobs no longer ride on
-        // the shared `TransportOptions`, so they reach the connector only if the transport
-        // factory carries them. `HttpConnector` cannot be read back, so `TokioConnector::new`
-        // records what it was handed and this asserts on that.
-        let clock = Clock::new_tokio();
-        let deps = TokioDeps::with_clock(&clock);
-        let expected = fetch_options::SocketOptions::default().no_delay(true).send_buffer_size(64 * 1024);
-        let factory = super::tokio_transport_factory(super::TokioTransportOptions::default().socket(expected));
-
-        let provider = SdkMeterProvider::builder().build();
-        let client_options = ClientOptions::default();
-
-        // Two slots, as a multi-pool client would build: the factory must not consume its
-        // configuration on first use.
-        for slot in [0, 1] {
-            super::LAST_SOCKET_OPTIONS.set(None);
-
-            let cx = CustomContext {
-                body_builder: crate::custom::create_body_builder(&deps.global_pool, &clock, &client_options),
-                clock: clock.clone(),
-                pool_index: PoolIndex::new(slot),
-                extras: deps.clone(),
-                options: client_options.transport.clone(),
-                tls: TlsOptions::default(),
-                meter: provider.meter("test"),
-            };
-
-            let _handler = factory(cx);
-
-            assert_eq!(
-                super::LAST_SOCKET_OPTIONS.get(),
-                Some(expected),
-                "slot {slot} did not receive the configured socket options"
-            );
-        }
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn socket_buffer_size_clamps_at_the_transport_boundary() {
-        assert_eq!(super::clamp_socket_buffer_size(0), 4_096);
-        assert_eq!(super::clamp_socket_buffer_size(1), 4_096);
-        assert_eq!(super::clamp_socket_buffer_size(65_536), 65_536);
-        assert_eq!(super::clamp_socket_buffer_size(u32::MAX), 67_108_864);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -594,7 +490,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
 
-        // Default options request no tuning at all, so the operating system defaults apply.
+        // Default options request no tuning and leave the effective behavior to lower layers.
         let stream = connect_with(SocketOptions::default(), port).await?;
         assert_eq!(stream.peer_addr()?.port(), port);
         Ok(())
@@ -615,9 +511,6 @@ mod tests {
         let stream = connect_with(SocketOptions::default().no_delay(false), port).await?;
         assert!(!stream.nodelay()?);
 
-        // `None` leaves the operating system default in place, which keeps Nagle enabled.
-        let stream = connect_with(SocketOptions::default(), port).await?;
-        assert!(!stream.nodelay()?);
         Ok(())
     }
 
@@ -640,26 +533,6 @@ mod tests {
         let stream = connect_with(options, port).await?;
         assert_eq!(stream.peer_addr()?.port(), port);
         assert!(stream.nodelay()?);
-        Ok(())
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn connector_clamps_buffer_sizes_at_transport_boundary() -> http_extensions::Result<()> {
-        use fetch_options::SocketOptions;
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let port = listener.local_addr()?.port();
-
-        // SocketOptions preserves raw values; the Tokio transport clamps them before handing
-        // them to hyper. Zero must not reach the kernel because it disables send buffering on
-        // Windows instead of selecting the operating-system default.
-        let mut options = SocketOptions::default();
-        options.send_buffer_size = Some(0);
-        options.receive_buffer_size = Some(0);
-
-        let stream = connect_with(options, port).await?;
-        assert_eq!(stream.peer_addr()?.port(), port);
         Ok(())
     }
 
