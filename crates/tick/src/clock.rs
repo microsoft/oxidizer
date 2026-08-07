@@ -322,14 +322,12 @@ impl Clock {
     /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
     ///
     /// The setting belongs to this clock instance. A differently configured clone can be used
-    /// independently, and time-derived values such as stopwatches retain the setting of the clock
-    /// they were created from.
+    /// independently, and stopwatches retain the setting of the clock they were created from.
     ///
     /// On Linux and Windows, enabling this option uses a lower-precision source that may lag
-    /// behind the operating-system clock by a few milliseconds. Timer deadlines created by a fast
-    /// clock therefore have the same reduced precision, even when the shared clock driver advances
-    /// timers using precise instants. On other platforms, fast retrieval delegates to
-    /// [`Instant::now`]. Controlled clocks are unaffected.
+    /// behind the operating-system clock by a few milliseconds. Timer scheduling continues to use
+    /// the clock driver's precise time source and is unaffected by this setting. On other
+    /// platforms, fast retrieval delegates to [`Instant::now`]. Controlled clocks are unaffected.
     ///
     /// # Performance
     ///
@@ -494,6 +492,14 @@ impl Clock {
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
         crate::Stopwatch::new(self)
+    }
+
+    pub(super) fn timer_instant(&self) -> Instant {
+        match self.clock_state() {
+            #[cfg(any(feature = "test-util", test))]
+            ClockState::ClockControl(control) => control.instant(),
+            ClockState::System(_) => Instant::now(),
+        }
     }
 
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {

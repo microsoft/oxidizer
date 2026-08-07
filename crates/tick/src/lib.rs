@@ -267,8 +267,9 @@
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
 //! - **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
-//!   lower-precision instant source on Linux and Windows. Other platforms delegate to
-//!   [`std::time::Instant::now`]. Clocks remain precise by default.
+//!   lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer
+//!   scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`]. Clocks
+//!   remain precise by default.
 //!
 //! ## Using precise and fast clocks together
 //!

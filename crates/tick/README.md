@@ -251,8 +251,9 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`fmt`** - Enables the [`fmt`][__link45] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
 * **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
-  lower-precision instant source on Linux and Windows. Other platforms delegate to
-  [`std::time::Instant::now`][__link46]. Clocks remain precise by default.
+  lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer
+  scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`][__link46]. Clocks
+  remain precise by default.
 
 ### Using precise and fast clocks together
 
@@ -282,7 +283,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbNIHPvEDb0dQbDV-37YiE2d0bs41DTRcidqwbeM5LRlKLlKFhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbQJq2H4_Hzl8b8JLtzRTT0X0bV5e2YzObDpMbqNhtFEGGBLFhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
  [__link0]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.4.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.4.0/tick/?search=Error
