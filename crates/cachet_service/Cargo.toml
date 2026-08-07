@@ -25,6 +25,7 @@ allowed_external_types = [
     "cachet_tier::entry::CacheEntry",
     "cachet_tier::error::Error",
     "cachet_tier::tier::CacheTier",
+    "cachet_tier::tier::InsertOutcome",
     "layered::service::Service",
 ]
 

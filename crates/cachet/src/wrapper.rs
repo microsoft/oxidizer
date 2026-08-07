@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use cachet_tier::{CacheTier, SizeError};
+use cachet_tier::{CacheTier, InsertOutcome, SizeError};
 use tick::Clock;
 
 use crate::cache::CacheName;
@@ -139,17 +139,22 @@ where
         }
     }
 
-    async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+        self.insert_with_outcome(key, entry).await.map(drop)
+    }
+
+    async fn insert_with_outcome(&self, key: K, mut entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         entry.ensure_cached_at(self.clock.system_time());
         if !self.policy.should_insert(&entry) {
             self.telemetry.record_insert_rejected(self.name, self.fallback);
-            return Ok(());
+            return Ok(InsertOutcome::Rejected);
         }
 
         let watch = self.clock.stopwatch();
-        let result = self.inner.insert(key, entry).await;
+        let result = self.inner.insert_with_outcome(key, entry).await;
         match &result {
-            Ok(()) => self.telemetry.record_inserted(self.name, watch.elapsed(), self.fallback),
+            Ok(InsertOutcome::Accepted) => self.telemetry.record_inserted(self.name, watch.elapsed(), self.fallback),
+            Ok(InsertOutcome::Rejected) => self.telemetry.record_insert_rejected(self.name, self.fallback),
             Err(_) => self.telemetry.record_insert_error(self.name, watch.elapsed(), self.fallback),
         }
         result
