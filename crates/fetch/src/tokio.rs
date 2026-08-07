@@ -240,15 +240,12 @@ impl TokioConnector {
         // them. The scheme is instead checked explicitly in `execute`.
         connector.enforce_http(false);
 
-        // hyper takes a plain `bool` here. `None` means "use the operating system default",
-        // and that default is Nagle enabled on every supported platform, which is exactly
-        // what `false` requests.
-        connector.set_nodelay(options.no_delay.unwrap_or(false));
+        if let Some(no_delay) = options.no_delay {
+            connector.set_nodelay(no_delay);
+        }
 
-        // The effective accessors are used rather than the public fields because the fields
-        // can be assigned directly, bypassing the range clamping.
-        connector.set_send_buffer_size(options.effective_send_buffer_size().map(to_usize));
-        connector.set_recv_buffer_size(options.effective_receive_buffer_size().map(to_usize));
+        connector.set_send_buffer_size(options.send_buffer_size.map(clamp_socket_buffer_size));
+        connector.set_recv_buffer_size(options.receive_buffer_size.map(clamp_socket_buffer_size));
 
         // The connect budget is deliberately left unset: `ClientConnector` wraps this
         // whole future in `connect_timeout`, so resolution and every connect attempt
@@ -291,14 +288,23 @@ impl layered::Service<BaseUri> for TokioConnector {
     }
 }
 
-/// Widens a socket buffer size for hyper's `usize`-typed setters.
+/// Smallest socket buffer size forwarded by the Tokio connector.
 ///
-/// Sizes are clamped to [`MAX_SOCKET_BUFFER_SIZE`][fetch_options::MAX_SOCKET_BUFFER_SIZE] by the
-/// caller, so the saturating fallback is unreachable on any target with a pointer at least 32
-/// bits wide.
+/// Zero disables send buffering on Windows instead of selecting the operating-system default.
+const MIN_SOCKET_BUFFER_SIZE: u32 = 4 * 1024;
+
+/// Largest socket buffer size forwarded by the Tokio connector.
+///
+/// Larger requests indicate a likely per-connection memory misconfiguration.
+const MAX_SOCKET_BUFFER_SIZE: u32 = 64 * 1024 * 1024;
+
+/// Validates and widens a socket buffer size for hyper's `usize`-typed setters.
+///
+/// The saturating conversion fallback is unreachable on supported targets with pointers at
+/// least 32 bits wide.
 #[inline]
-fn to_usize(size: u32) -> usize {
-    usize::try_from(size).unwrap_or(usize::MAX)
+fn clamp_socket_buffer_size(size: u32) -> usize {
+    usize::try_from(size.clamp(MIN_SOCKET_BUFFER_SIZE, MAX_SOCKET_BUFFER_SIZE)).unwrap_or(usize::MAX)
 }
 
 /// Converts a connector failure into an [`HttpError`].
@@ -470,11 +476,11 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn to_usize_widens_without_altering_the_value() {
-        assert_eq!(super::to_usize(0), 0);
-        assert_eq!(super::to_usize(1), 1);
-        assert_eq!(super::to_usize(fetch_options::MAX_SOCKET_BUFFER_SIZE), 67_108_864);
-        assert_eq!(super::to_usize(u32::MAX), 4_294_967_295);
+    fn socket_buffer_size_clamps_at_the_transport_boundary() {
+        assert_eq!(super::clamp_socket_buffer_size(0), 4_096);
+        assert_eq!(super::clamp_socket_buffer_size(1), 4_096);
+        assert_eq!(super::clamp_socket_buffer_size(65_536), 65_536);
+        assert_eq!(super::clamp_socket_buffer_size(u32::MAX), 67_108_864);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -572,7 +578,7 @@ mod tests {
     async fn connect_to(options: fetch_options::SocketOptions, uri: &str) -> http_extensions::Result<tokio::net::TcpStream> {
         use layered::Service as _;
 
-        let base_uri = templated_uri::BaseUri::try_from(uri).unwrap();
+        let base_uri = templated_uri::BaseUri::try_from(uri)?;
 
         super::TokioConnector::new(options)
             .execute(base_uri)
@@ -582,44 +588,46 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_connects_with_default_options() {
+    async fn connector_connects_with_default_options() -> http_extensions::Result<()> {
         use fetch_options::SocketOptions;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
 
         // Default options request no tuning at all, so the operating system defaults apply.
-        let stream = connect_with(SocketOptions::default(), port).await.unwrap();
-        assert_eq!(stream.peer_addr().unwrap().port(), port);
+        let stream = connect_with(SocketOptions::default(), port).await?;
+        assert_eq!(stream.peer_addr()?.port(), port);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_applies_no_delay() {
+    async fn connector_applies_no_delay() -> http_extensions::Result<()> {
         use fetch_options::SocketOptions;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
 
         // `no_delay` is applied to the connected stream, so it is observable on the result.
-        let stream = connect_with(SocketOptions::default().no_delay(true), port).await.unwrap();
-        assert!(stream.nodelay().unwrap());
+        let stream = connect_with(SocketOptions::default().no_delay(true), port).await?;
+        assert!(stream.nodelay()?);
 
-        let stream = connect_with(SocketOptions::default().no_delay(false), port).await.unwrap();
-        assert!(!stream.nodelay().unwrap());
+        let stream = connect_with(SocketOptions::default().no_delay(false), port).await?;
+        assert!(!stream.nodelay()?);
 
         // `None` leaves the operating system default in place, which keeps Nagle enabled.
-        let stream = connect_with(SocketOptions::default(), port).await.unwrap();
-        assert!(!stream.nodelay().unwrap());
+        let stream = connect_with(SocketOptions::default(), port).await?;
+        assert!(!stream.nodelay()?);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_connects_with_all_options_set() {
+    async fn connector_connects_with_all_options_set() -> http_extensions::Result<()> {
         use fetch_options::SocketOptions;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
 
         // The kernel is free to clamp or scale the requested buffer sizes, and hyper only warns
         // when it rejects one outright, so the sizes are not observable on the result. What is
@@ -629,50 +637,52 @@ mod tests {
             .send_buffer_size(64 * 1024)
             .no_delay(true);
 
-        let stream = connect_with(options, port).await.unwrap();
-        assert_eq!(stream.peer_addr().unwrap().port(), port);
-        assert!(stream.nodelay().unwrap());
+        let stream = connect_with(options, port).await?;
+        assert_eq!(stream.peer_addr()?.port(), port);
+        assert!(stream.nodelay()?);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_clamps_directly_assigned_buffer_sizes() {
+    async fn connector_clamps_buffer_sizes_at_transport_boundary() -> http_extensions::Result<()> {
         use fetch_options::SocketOptions;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
 
-        // The fields are public, so a caller can bypass the builder's clamping. Zero in
-        // particular must not reach the kernel: on Windows it disables send buffering outright.
+        // SocketOptions preserves raw values; the Tokio transport clamps them before handing
+        // them to hyper. Zero must not reach the kernel because it disables send buffering on
+        // Windows instead of selecting the operating-system default.
         let mut options = SocketOptions::default();
         options.send_buffer_size = Some(0);
         options.receive_buffer_size = Some(0);
 
-        let stream = connect_with(options, port).await.unwrap();
-        assert_eq!(stream.peer_addr().unwrap().port(), port);
+        let stream = connect_with(options, port).await?;
+        assert_eq!(stream.peer_addr()?.port(), port);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_accepts_https_targets() {
+    async fn connector_accepts_https_targets() -> http_extensions::Result<()> {
         use fetch_options::SocketOptions;
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
 
         // TLS is layered on top of this connector by the transport, so `https` targets arrive
         // with their original scheme and must still be dialed as plain TCP. This is the only
         // reason `enforce_http(false)` is set; flipping it back would break every HTTPS request.
-        let stream = connect_to(SocketOptions::default(), &format!("https://127.0.0.1:{port}"))
-            .await
-            .unwrap();
+        let stream = connect_to(SocketOptions::default(), &format!("https://127.0.0.1:{port}")).await?;
 
-        assert_eq!(stream.peer_addr().unwrap().port(), port);
+        assert_eq!(stream.peer_addr()?.port(), port);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_rejects_non_http_schemes() {
+    async fn connector_rejects_non_http_schemes() -> http_extensions::Result<()> {
         use ohno::Labeled as _;
         use seatbelt::{Recovery as _, RecoveryKind};
 
@@ -682,27 +692,28 @@ mod tests {
         // by the scheme guard rather than incidentally by the missing-default-port check.
         let error = connect_to(fetch_options::SocketOptions::default(), "ftp://127.0.0.1:21")
             .await
-            .unwrap_err();
+            .expect_err("the connector rejects every non-HTTP scheme before dialing");
 
         assert_eq!(error.label().as_str(), "scheme_not_allowed");
         assert_eq!(error.recovery().kind(), RecoveryKind::Never);
+        Ok(())
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn connector_surfaces_connect_failure_as_recoverable_io_error() {
+    async fn connector_surfaces_connect_failure_as_recoverable_io_error() -> http_extensions::Result<()> {
         use seatbelt::{Recovery as _, RecoveryInfo};
 
         // Binding then dropping the listener yields a port nothing is listening on, so the
         // connect fails. The port could in principle be re-bound by another process before the
         // connect, but the window is a few microseconds inside one test.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
         drop(listener);
 
         let error = connect_with(fetch_options::SocketOptions::default().send_buffer_size(64 * 1024), port)
             .await
-            .unwrap_err();
+            .expect_err("the listener was dropped before dialing, so the connection must be refused");
 
         // hyper's own `Display` is only a static summary, so the operating system detail has to
         // survive in the source chain for the message to be diagnosable at all.
@@ -715,6 +726,7 @@ mod tests {
             RecoveryInfo::from(std::io::ErrorKind::ConnectionRefused).kind(),
             "the refused connection must keep the recovery classification of a plain I/O error"
         );
+        Ok(())
     }
 
     /// An error that is not itself an [`std::io::Error`] but wraps one, mirroring the shape of

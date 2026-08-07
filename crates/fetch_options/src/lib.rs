@@ -46,10 +46,11 @@ mod transport;
 pub use connection_info::ConnectionInfo;
 pub use connection_keep_alive::ConnectionKeepAlive;
 #[doc(inline)]
-pub use http2::{Http2Options, MAX_HTTP2_WINDOW_SIZE};
+pub use http2::Http2Options;
 pub use pooling::{ConnectionIdleTimeout, ConnectionLifetime, ConnectionPoolOptions, PoolIndex, PoolSelection};
 pub use request_filter::RequestFilter;
-pub use socket::{MAX_SOCKET_BUFFER_SIZE, MIN_SOCKET_BUFFER_SIZE, SocketOptions};
+#[doc(inline)]
+pub use socket::SocketOptions;
 pub use transport::TransportOptions;
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);

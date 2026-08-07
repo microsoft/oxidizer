@@ -256,10 +256,13 @@ fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Option
         .http2_adaptive_window(http_2.adaptive_window);
 }
 
-/// Returns the validated stream window forwarded to hyper.
+/// Largest legal HTTP/2 stream flow-control window, in bytes.
+const MAX_HTTP2_STREAM_WINDOW_SIZE: u32 = i32::MAX as u32;
+
+/// Returns the protocol-valid stream window forwarded to hyper.
 #[inline]
 fn initial_stream_window_size(http_2: &Http2Options) -> Option<u32> {
-    http_2.effective_initial_stream_window_size()
+    http_2.initial_stream_window_size.map(|size| size.min(MAX_HTTP2_STREAM_WINDOW_SIZE))
 }
 
 #[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
@@ -348,7 +351,13 @@ mod tests {
         let mut http_2 = fetch_options::Http2Options::default();
         http_2.initial_stream_window_size = Some(u32::MAX);
 
-        assert_eq!(initial_stream_window_size(&http_2), Some(fetch_options::MAX_HTTP2_WINDOW_SIZE));
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
+
+        http_2.initial_stream_window_size = Some(MAX_HTTP2_STREAM_WINDOW_SIZE + 1);
+        assert_eq!(initial_stream_window_size(&http_2), Some(MAX_HTTP2_STREAM_WINDOW_SIZE));
     }
 
     #[test]
