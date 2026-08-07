@@ -60,12 +60,15 @@
     commit in git history (the most recent commit that changed the crate's
     `[package] version`, with the baseline rustdoc rebuilt from source via
     `--baseline-rev`, so no registry access is required and it works in OSS and
-    enterprise/offline environments alike): a dependent whose own public API is
-    unaffected by the release cascades as a `patch` (it still re-releases to pick
-    up the new dependency version), while a dependent whose API actually changes
-    (e.g. because it re-exports a changed type) cascades at the severity
-    `cargo semver-checks` reports. Dev-only dependents are skipped — they
-    automatically pick up the new workspace version.
+    enterprise/offline environments alike). Because rustdoc comparison cannot
+    identify an incompatible version change in an otherwise-unchanged exposed
+    dependency type, the planner also consults each dependent's
+    `[package.metadata.cargo_check_external_types].allowed_external_types`.
+    Exposing a dependency whose planned version transition is breaking floors
+    the dependent at `breaking`, recursively through direct dependency edges.
+    Other unaffected dependents cascade as `patch` so they still pick up the new
+    dependency version. Dev-only dependents are skipped — they automatically
+    pick up the new workspace version.
 
     Proc-macro-only packages are detected from `cargo metadata` before
     cargo-semver-checks runs. The tool cannot inspect procedural macro names,
@@ -81,7 +84,8 @@
     consumer's final result is breaking, and stops on any weaker result.
 
     cargo-semver-checks remains a hard dependency for ordinary library packages
-    (install the version pinned in constants.env); there is no heuristic fallback.
+    (install the version pinned in constants.env). Missing external-type metadata
+    is treated conservatively as possible exposure.
 
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a

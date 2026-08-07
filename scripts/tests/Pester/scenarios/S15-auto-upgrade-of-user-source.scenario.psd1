@@ -8,7 +8,12 @@
     Workspace = @{
         Spec = @{
             Packages = @(
-                @{ Name = 'dependent'; Version = '1.0.0'; Deps = @(@{ Name = 'target' }) }
+                @{
+                    Name = 'dependent'
+                    Version = '1.0.0'
+                    Deps = @(@{ Name = 'target' })
+                    AllowedExternalTypes = @('target::*')
+                }
                 @{ Name = 'target';    Version = '1.0.0' }
             )
         }
@@ -23,7 +28,6 @@
         # dependent's EffectiveChangeType to breaking and EffectiveTargetVersion
         # to 2.0.0.
         Packages = @('target@breaking', 'dependent@patch')
-        SemverVerdicts = @{ dependent = 'breaking' }
         Answers  = @()
     }
 

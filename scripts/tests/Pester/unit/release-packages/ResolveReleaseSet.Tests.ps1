@@ -15,7 +15,8 @@ BeforeAll {
             [string]   $Version = '0.1.0',
             [string[]] $Deps = @(),
             [bool]     $Published = $true,
-            [bool]     $IsProcMacroOnly = $false
+            [bool]     $IsProcMacroOnly = $false,
+            [AllowNull()][string[]] $AllowedExternalTypes = $null
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
         return [pscustomobject]@{
@@ -25,6 +26,7 @@ BeforeAll {
             Published = $Published
             Deps      = $Deps
             IsProcMacroOnly = $IsProcMacroOnly
+            AllowedExternalTypes = $AllowedExternalTypes
         }
     }
 
@@ -402,7 +404,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking')
@@ -430,7 +433,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@patch')
@@ -439,6 +443,106 @@ Describe 'Resolve-ReleaseSet' {
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveChangeType | Should -Be 'non-breaking'
             $byFolder['c'].EffectiveChangeType | Should -Be 'patch'
+        }
+
+        It 'raises an unchanged dependent when it exposes an incompatibly bumped dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'bytesbuf' -Version '0.7.0')
+                (New-BaselinePackage -Folder 'bytesbuf_io' -Version '0.7.0' -Deps @('bytesbuf') `
+                    -AllowedExternalTypes @('bytesbuf::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('bytesbuf@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['bytesbuf_io'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['bytesbuf_io'].EffectiveTargetVersion | Should -Be '0.8.0'
+            $byFolder['bytesbuf_io'].CascadeReasons[0].Breaking | Should -BeTrue
+        }
+
+        It 'keeps an unchanged dependent at patch when it does not expose the bumped dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('other_crate::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'patch'
+            $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+        }
+
+        It 'treats missing external-type metadata conservatively' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'treats wildcard external-type metadata as possible exposure' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'propagates exposed incompatible dependency versions through multiple direct edges' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['b'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['c'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['c'].CascadeReasons.Target | Should -Contain 'b'
+        }
+
+        It 'uses a self-floor breaking verdict before cascading exposed dependency versions' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('dependency::*'))
+            )
+            $classifier = New-StubClassifier @{ dependency = 'breaking' }
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@patch')
+
+            $resolved = Resolve-ReleaseSet `
+                -ParsedTokens $parsed `
+                -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['dependency'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['dependent'].EffectiveChangeType | Should -Be 'breaking'
         }
 
         It 'adds a proc-macro-only cascade dependent at the mechanical patch floor for manual review' {
@@ -659,7 +763,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('b@patch', 'a@breaking')

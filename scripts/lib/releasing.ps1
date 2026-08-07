@@ -571,6 +571,8 @@ function Get-CrateRequiredChangeType {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
+#                           or $null if the package does not declare them
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
@@ -593,6 +595,18 @@ function Get-WorkspacePackages {
             }
         }
 
+        $allowedTypes = $null
+        $pkgMeta = $package.PSObject.Properties['metadata']
+        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
+            $externalTypes = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
+            if ($externalTypes -and $null -ne $externalTypes.Value) {
+                $allowed = $externalTypes.Value.PSObject.Properties['allowed_external_types']
+                if ($allowed -and $null -ne $allowed.Value) {
+                    $allowedTypes = @($allowed.Value)
+                }
+            }
+        }
+
         $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
         $hasLibraryTarget = $targetKinds -contains 'lib'
 
@@ -602,12 +616,51 @@ function Get-WorkspacePackages {
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
+            AllowedExternalTypes = $allowedTypes
             HasLibraryTarget     = $hasLibraryTarget
             IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
     }
 
     return $packages
+}
+
+# Returns $true when a package's external-type policy allows public API types
+# rooted at the target package. Missing or malformed metadata is treated
+# conservatively: an unknown exposure must not permit a breaking dependency
+# bump to ship as a compatible release.
+function Test-PackageExposesTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $true
+    }
+
+    $normalizedTarget = $TargetPackageName.Replace('-', '_')
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        # An entry that is not a usable non-empty string carries no information
+        # about what this crate exposes. Skipping it would let the loop fall
+        # through to "not exposed" and ship a breaking dependency bump as a
+        # compatible release, so treat it the same as absent metadata. (`-split`
+        # coerces anything to a string, so a malformed entry does not throw --
+        # it silently collapses to '' and matches nothing, which is worse.)
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            return $true
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            return $true
+        }
+        if ($root -eq $normalizedTarget) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 # Runs `cargo semver-checks` for a single crate against its previous version-bump
