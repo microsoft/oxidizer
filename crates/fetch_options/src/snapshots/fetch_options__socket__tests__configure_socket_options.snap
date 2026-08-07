@@ -1,0 +1,15 @@
+---
+source: crates/fetch_options/src/socket.rs
+expression: options
+---
+SocketOptions {
+    no_delay: Some(
+        true,
+    ),
+    receive_buffer_size: Some(
+        65536,
+    ),
+    send_buffer_size: Some(
+        32768,
+    ),
+}

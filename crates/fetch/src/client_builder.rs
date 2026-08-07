@@ -602,6 +602,11 @@ mod tests {
         assert_eq!(builder.options.transport.http_2.initial_max_send_streams, Some(100));
 
         assert!(builder.options.transport.http_2.adaptive_window);
+        assert_eq!(builder.options.transport.http_2.initial_stream_window_size, None);
+
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+            .http2_options(Http2Options::default().initial_stream_window_size(1024 * 1024));
+        assert_eq!(builder.options.transport.http_2.initial_stream_window_size, Some(1_048_576));
     }
 
     #[test]

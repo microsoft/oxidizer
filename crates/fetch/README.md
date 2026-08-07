@@ -683,7 +683,9 @@ fetch = { version = "*", features = ["json", "tokio"] }
 ```
 
 * **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
-  constructor and related APIs for using the HTTP client in a Tokio-based application.
+  constructor (and `HttpClient::builder_tokio_with_options`, which additionally accepts the
+  transport-specific `TokioTransportOptions`) and related APIs for using the HTTP client in a
+  Tokio-based application.
 
 * **`json`**: Adds support for JSON serialization and deserialization, enabling methods like
   `HttpRequestBuilder::json` for sending JSON data and `HttpRequestBuilder::fetch_json` for receiving JSON responses.
@@ -712,7 +714,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMIJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbECLnTOeX12YbX9iOeUkyZdIbmdfyJmK3r8wbqVSCmNHoD_5hZIeCZWJ5dGVzZjEuMTIuMIJoYnl0ZXNidWZlMC43LjCCZWZldGNoZjAuMTQuMIJvaHR0cF9leHRlbnNpb25zZTAuOC4wgmdsYXllcmVkZTAuMy42gmhzZWF0YmVsdGUwLjYuMYJtdGVtcGxhdGVkX3VyaWUwLjMuNg
  [__link0]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.8.0/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.14.0/fetch/?search=HttpClient::post

@@ -116,6 +116,9 @@ pub struct CustomContext<Extras = ()> {
 /// thread-aware dependencies through to `factory` without resorting to globals.
 /// Leave it defaulted to `()` when no extras are needed.
 ///
+/// Accept transport-specific tuning through `Extras` rather than [`TransportOptions`], so
+/// unsupported options cannot be silently ignored.
+///
 /// Because the handler is the transport stage, the caller is responsible for TLS:
 /// if `https://` URIs are expected, the handler must negotiate TLS itself.
 /// Otherwise pair the builder with [`HttpClientBuilder::insecure_allow_http`] and
