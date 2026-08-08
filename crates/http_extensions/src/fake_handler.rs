@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn never_completes_handler() {
         let handler = FakeHandler::never_completes();
-        let clock = ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let error = block_on(
             handler
                 .request_builder()

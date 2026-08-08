@@ -375,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn retries_exhausted_ensure_telemetry_reported() {
         let tester = MetricTester::new();
-        let context = ResilienceContext::<String, String>::new(ClockControl::default().auto_advance_timers(true).to_clock())
+        let context = ResilienceContext::<String, String>::new(ClockControl::new_auto_advancing().to_clock())
             .name("test_pipeline")
             .use_metrics(tester.meter_provider());
 
@@ -413,7 +413,7 @@ mod tests {
         let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = ResilienceContext::<String, String>::new(clock).name("log_test_pipeline").use_logs();
 
         let service = Retry::layer("log_test_retry", &context)

@@ -19,18 +19,21 @@ pub trait FutureExt: Future {
     ///
     /// use tick::{Clock, FutureExt};
     ///
-    /// # async fn timeout_example(clock: &Clock) {
+    /// # async fn timeout_example(clock: &Clock) -> Result<(), Box<dyn std::error::Error>> {
     /// // Create a long-running future and apply a timeout
     /// let timeout_error = clock
     ///     .delay(Duration::from_millis(700))
     ///     .timeout(&clock, Duration::from_millis(200))
     ///     .await
-    ///     .unwrap_err();
+    ///     .err()
+    ///     .ok_or_else(|| std::io::Error::other("future unexpectedly completed"))?;
     ///
     /// assert_eq!(timeout_error.to_string(), "future timed out");
+    /// # Ok(())
     /// # }
     /// ```
-    fn timeout(self, clock: &Clock, timeout: Duration) -> Timeout<Self, Delay>
+    #[must_use = "futures do nothing unless awaited or polled"]
+    fn timeout(self, clock: &Clock, timeout: Duration) -> Timeout<Self>
     where
         Self: Sized,
     {
@@ -52,9 +55,10 @@ mod tests {
 
     #[test]
     fn timeout_control() {
-        let control = ClockControl::new()
+        let control = ClockControl::builder()
             .auto_advance(Duration::from_secs(1))
-            .auto_advance_limit(Duration::from_secs(2));
+            .auto_advance_limit(Duration::from_secs(2))
+            .build();
 
         let clock = control.to_clock();
 

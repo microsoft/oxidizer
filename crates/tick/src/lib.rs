@@ -3,10 +3,6 @@
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    not(all(feature = "test-util", feature = "tokio", feature = "fmt")),
-    expect(rustdoc::broken_intra_doc_links, reason = "simpler docs")
-)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/tick/favicon.ico")]
 #![cfg_attr(
@@ -35,12 +31,15 @@
 //!     123
 //! }
 //!
+//! # #[cfg(feature = "tokio")]
 //! #[tokio::main]
 //! async fn main() {
 //!     let clock = Clock::new_tokio();
 //!     let value = produce_value(&clock).await;
 //!     assert_eq!(value, 123);
 //! }
+//! # #[cfg(not(feature = "tokio"))]
+//! # fn main() {}
 //!
 //! #[cfg(test)]
 //! mod tests {
@@ -51,7 +50,7 @@
 //!     #[tokio::test]
 //!     async fn test_produce_value() {
 //!         // Automatically advance timers for instant, deterministic testing
-//!         let clock: Clock = ClockControl::new().auto_advance_timers(true).to_clock();
+//!         let clock: Clock = ClockControl::new_auto_advancing().to_clock();
 //!         assert_eq!(produce_value(&clock).await, 123);
 //!     }
 //! }
@@ -150,8 +149,11 @@
 //!
 //! # Thread-aware relocation
 //!
-//! All clock types implement [`ThreadAware`](thread_aware::ThreadAware), supporting per-core
-//! timer isolation in thread-per-core runtime architectures.
+//! [`Clock`], [`SimpleClock`], [`ClockControl`], and
+//! [`InactiveClock<Isolated>`][runtime::InactiveClock] implement
+//! [`ThreadAware`](thread_aware::ThreadAware), supporting per-core timer isolation in
+//! thread-per-core runtime architectures. [`InactiveClock<Shared>`][runtime::InactiveClock]
+//! deliberately does not implement `ThreadAware` because one driver owns its shared timer set.
 //!
 //! When an [`InactiveClock`][runtime::InactiveClock] is
 //! [relocated](thread_aware::ThreadAware::relocate) to a target thread, the underlying timer
@@ -266,11 +268,20 @@
 //! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
+//! - **`rt-shared`** - Enables
+//!   [`InactiveClock::new_shared`](https://docs.rs/tick/latest/tick/runtime/struct.InactiveClock.html#method.new_shared)
+//!   for runtimes that use one shared timer set and one driver.
 //!
 //! # Additional Examples
 //!
 //! The [time examples](https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples)
 //! contain additional examples of how to use the time primitives.
+//!
+//! [`ClockControl`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html
+//! [`ClockControl::to_simple_clock`]: https://docs.rs/tick/latest/tick/struct.ClockControl.html#method.to_simple_clock
+//! [`Clock::new_tokio`]: https://docs.rs/tick/latest/tick/struct.Clock.html#method.new_tokio
+//! [`fmt`]: https://docs.rs/tick/latest/tick/fmt/index.html
+//! [`SystemTimeExt`]: https://docs.rs/tick/latest/tick/trait.SystemTimeExt.html
 
 mod clock;
 #[cfg(any(feature = "test-util", test))]
@@ -286,6 +297,7 @@ mod periodic_timer;
 mod simple_clock;
 mod state;
 mod stopwatch;
+#[cfg(any(feature = "fmt", test))]
 mod system_time_ext;
 mod timers;
 
@@ -293,13 +305,14 @@ pub mod runtime;
 pub(crate) mod timeout;
 pub use clock::Clock;
 #[cfg(any(feature = "test-util", test))]
-pub use clock_control::ClockControl;
+pub use clock_control::{ClockControl, ClockControlBuilder};
 pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
+#[cfg(any(feature = "fmt", test))]
 pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;
 

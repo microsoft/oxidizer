@@ -42,7 +42,7 @@ use crate::Error;
 ///
 /// let before_epoch = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
 ///
-/// UnixSeconds::try_from(before_epoch).unwrap_err();
+/// assert!(UnixSeconds::try_from(before_epoch).is_err());
 /// ```
 ///
 /// # Examples
@@ -76,11 +76,7 @@ impl UnixSeconds {
     /// The largest value that can be represented by `UnixSeconds`.
     ///
     /// This represents `253402207200`, or `9999-12-30T22:00:00Z`.
-    #[expect(
-        clippy::duration_suboptimal_units,
-        reason = "UnixSeconds represents whole seconds since the Unix epoch, so seconds is the natural unit, matching to_secs() and Display"
-    )]
-    pub const MAX: Self = Self(Duration::from_secs(253_402_207_200));
+    pub const MAX: Self = Self(Duration::from_hours(70_389_502));
 
     /// The Unix epoch represented as `UnixSeconds`.
     ///
@@ -97,7 +93,7 @@ impl UnixSeconds {
     /// ```
     /// use tick::fmt::UnixSeconds;
     ///
-    /// UnixSeconds::from_secs(u64::MAX).unwrap_err();
+    /// assert!(UnixSeconds::from_secs(u64::MAX).is_err());
     /// ```
     ///
     /// # Examples
@@ -107,13 +103,15 @@ impl UnixSeconds {
     ///
     /// use tick::fmt::UnixSeconds;
     ///
-    /// let unix_seconds = UnixSeconds::from_secs(10).unwrap();
+    /// let unix_seconds = UnixSeconds::from_secs(10)?;
     /// let system_time: SystemTime = unix_seconds.into();
     ///
     /// assert_eq!(
     ///     system_time,
     ///     SystemTime::UNIX_EPOCH + Duration::from_secs(10)
     /// );
+    ///
+    /// # Ok::<(), tick::Error>(())
     /// ```
     pub fn from_secs(seconds: u64) -> Result<Self, Error> {
         Self::try_from(Duration::from_secs(seconds)).map_err(|_error| {
@@ -141,7 +139,7 @@ impl FromStr for UnixSeconds {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let secs: u64 = s.parse().map_err(Error::other)?;
+        let secs: u64 = s.parse()?;
         Self::from_secs(secs)
     }
 }

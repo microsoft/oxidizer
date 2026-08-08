@@ -34,6 +34,8 @@ impl TimerKey {
 /// timer checks, while setting it too high would reduce timer precision.
 pub(crate) const TIMER_RESOLUTION: Duration = Duration::from_millis(1);
 
+pub(crate) type ReadyTimers = BTreeMap<TimerKey, Waker>;
+
 /// Management of one-shot timers, inspired by the [glommio runtime](https://github.com/DataDog/glommio/blob/d3f6e7a2ee7fb071ada163edcf90fc3286424c31/glommio/src/reactor.rs#L80).
 ///
 /// The timers managed by this collection are one-shot, meaning they will not fire again after being triggered.
@@ -86,6 +88,17 @@ impl Timers {
         self.wakers.remove(&id);
     }
 
+    /// Replaces the waker for an existing timer when the awaiting task changes.
+    pub(crate) fn update_waker(&mut self, id: TimerKey, waker: &Waker) {
+        let Some(current) = self.wakers.get_mut(&id) else {
+            return;
+        };
+
+        if !current.will_wake(waker) {
+            current.clone_from(waker);
+        }
+    }
+
     /// Returns the instant when the next timer will fire, or `None` if no timers are registered.
     pub(crate) fn next_timer(&self) -> Option<Instant> {
         self.wakers.keys().next().map(TimerKey::tick)
@@ -98,26 +111,22 @@ impl Timers {
     /// In the future, the signature of this method can be easily expanded to return more
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub(crate) fn advance_timers(&mut self, now: Instant) -> Option<Instant> {
+    pub(crate) fn advance_timers(&mut self, now: Instant, ready: &mut ReadyTimers) -> Option<Instant> {
         self.alive = true;
-
-        // We are adding 1ns to the instant to ensure that even timers whose deadline is the current
-        // instant are advanced. This is required because of how BTreeMap::split_off works; it does
-        // not include keys that are equal to the split key. Adding 1ns to the value makes this work.
-        let adjusted_now = now.checked_add(Duration::from_nanos(1)).unwrap_or(now);
 
         // Check if there are any timers that are ready to be woken.
         match self.wakers.first_entry() {
             Some(entry) => {
-                if entry.key().tick() <= adjusted_now {
+                if entry.key().tick() <= now {
                     // Split timers into ready and pending timers.
-                    let pending = self.wakers.split_off(&TimerKey::new(adjusted_now, 0));
-                    let ready = mem::replace(&mut self.wakers, pending);
-
-                    // Invoke the wakers for timers that ticked.
-                    for (_, waker) in ready {
-                        waker.wake();
-                    }
+                    let mut expired = match now.checked_add(Duration::from_nanos(1)) {
+                        Some(after_now) => {
+                            let pending = self.wakers.split_off(&TimerKey::new(after_now, 0));
+                            mem::replace(&mut self.wakers, pending)
+                        }
+                        None => mem::take(&mut self.wakers),
+                    };
+                    ready.append(&mut expired);
 
                     // Return the next timer to be fired.
                     return self.next_timer();
@@ -149,7 +158,7 @@ mod tests {
 
         assert_ne!(key1, key2);
 
-        timers.advance_timers(when + Duration::from_secs(1));
+        advance_and_wake(&mut timers, when + Duration::from_secs(1));
         assert_eq!(timers.len(), 0);
     }
 
@@ -164,11 +173,11 @@ mod tests {
         let _id2 = timers.register(timer_second, Waker::noop().clone());
 
         assert_eq!(timers.len(), 2);
-        timers.advance_timers(timer_first + Duration::from_nanos(1));
+        advance_and_wake(&mut timers, timer_first + Duration::from_nanos(1));
         assert_eq!(timers.len(), 1);
 
         assert!(!timers.contains(id1));
-        timers.advance_timers(timer_second + Duration::from_nanos(1));
+        advance_and_wake(&mut timers, timer_second + Duration::from_nanos(1));
         assert_eq!(timers.len(), 0);
     }
 
@@ -221,12 +230,64 @@ mod tests {
     fn advance_timers_ensure_correct_result() {
         let mut timers = Timers::default();
         let now = Instant::now();
-        assert!(timers.advance_timers(now).is_none());
+        assert!(advance_and_wake(&mut timers, now).is_none());
 
         let next = now.checked_add(Duration::from_secs(1)).unwrap();
         let _ = timers.register(next, Waker::noop().clone());
-        assert_eq!(timers.advance_timers(now), Some(next));
+        assert_eq!(advance_and_wake(&mut timers, now), Some(next));
 
-        assert_eq!(timers.advance_timers(next), None);
+        assert_eq!(advance_and_wake(&mut timers, next), None);
+    }
+
+    #[test]
+    fn advance_timers_at_maximum_instant() {
+        let mut timers = Timers::default();
+        let maximum = maximum_instant_after(Instant::now());
+        let _ = timers.register(maximum, Waker::noop().clone());
+
+        assert!(advance_and_wake(&mut timers, maximum).is_none());
+        assert_eq!(timers.len(), 0);
+    }
+
+    fn advance_and_wake(timers: &mut Timers, now: Instant) -> Option<Instant> {
+        let mut ready = ReadyTimers::new();
+        let next = timers.advance_timers(now, &mut ready);
+
+        for waker in ready.into_values() {
+            waker.wake();
+        }
+
+        next
+    }
+
+    fn maximum_instant_after(anchor: Instant) -> Instant {
+        let mut lower = 0;
+        let mut upper = Duration::MAX.as_nanos();
+
+        while lower < upper {
+            let middle = lower + (upper - lower).div_ceil(2);
+            if anchor.checked_add(duration_from_nanos(middle)).is_some() {
+                lower = middle;
+            } else {
+                upper = middle - 1;
+            }
+        }
+
+        anchor
+            .checked_add(duration_from_nanos(lower))
+            .expect("binary search only retains durations that can be added to the anchor")
+    }
+
+    fn duration_from_nanos(nanos: u128) -> Duration {
+        const NANOS_PER_SECOND: u128 = 1_000_000_000;
+
+        Duration::new(
+            (nanos / NANOS_PER_SECOND)
+                .try_into()
+                .expect("Duration::MAX bounds the seconds component to u64"),
+            (nanos % NANOS_PER_SECOND)
+                .try_into()
+                .expect("the nanoseconds remainder is always less than one billion"),
+        )
     }
 }

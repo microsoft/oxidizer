@@ -78,6 +78,7 @@ use crate::timers::TIMER_RESOLUTION;
 /// # }
 /// ```
 #[derive(Debug)]
+#[must_use = "streams do nothing unless polled"]
 pub struct PeriodicTimer {
     period: Duration,
     clock: Clock,
@@ -91,7 +92,7 @@ impl PeriodicTimer {
     ///
     /// > **Note**: The minimum precision of the timer is 1ms. If a smaller period is specified,
     /// > it will be adjusted to 1ms.
-    #[must_use]
+    #[must_use = "streams do nothing unless polled"]
     pub fn new(clock: &Clock, period: Duration) -> Self {
         let period = period.max(TIMER_RESOLUTION);
 
@@ -142,7 +143,10 @@ impl Stream for PeriodicTimer {
                 Poll::Ready(Some(()))
             }
             // Timer is registered and will fire later in the future.
-            Some(_) => Poll::Pending,
+            Some(key) => {
+                this.clock.update_timer_waker(key, cx.waker());
+                Poll::Pending
+            }
 
             // Timer is not registered yet; let's register it.
             // The registration is lazy, occurring when someone polls the future. This means
@@ -167,6 +171,9 @@ impl Drop for PeriodicTimer {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Wake;
     use std::thread;
 
     use super::*;
@@ -275,11 +282,42 @@ mod tests {
         assert_eq!(clock.clock_state().timers_len(), 0);
     }
 
+    #[test]
+    fn latest_waker_is_notified() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let mut timer = PeriodicTimer::new(&clock, Duration::from_secs(1));
+        let first = Arc::new(WakeCounter::default());
+        let second = Arc::new(WakeCounter::default());
+
+        assert_eq!(poll_timer_with_waker(&mut timer, &Waker::from(Arc::clone(&first))), Poll::Pending);
+        assert_eq!(poll_timer_with_waker(&mut timer, &Waker::from(Arc::clone(&second))), Poll::Pending);
+
+        control.advance(Duration::from_secs(1));
+
+        assert_eq!(first.count.load(Ordering::Relaxed), 0);
+        assert_eq!(second.count.load(Ordering::Relaxed), 1);
+    }
+
     fn poll_timer(delay: &mut PeriodicTimer) -> Poll<Option<()>> {
-        let waker = Waker::noop().clone();
-        let mut cx = Context::from_waker(&waker);
+        poll_timer_with_waker(delay, Waker::noop())
+    }
+
+    fn poll_timer_with_waker(delay: &mut PeriodicTimer, waker: &Waker) -> Poll<Option<()>> {
+        let mut cx = Context::from_waker(waker);
         let delay = std::pin::pin!(delay);
 
         delay.poll_next(&mut cx)
+    }
+
+    #[derive(Default)]
+    struct WakeCounter {
+        count: AtomicUsize,
+    }
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.count.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }

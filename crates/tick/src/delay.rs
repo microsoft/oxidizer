@@ -36,6 +36,7 @@ use super::timers::TimerKey;
 /// # }
 /// ```
 #[derive(Debug)]
+#[must_use = "futures do nothing unless awaited or polled"]
 pub struct Delay {
     // Currently scheduled timer. This value is not initialized before
     // actually calling the `Future::poll` method.
@@ -68,7 +69,7 @@ impl Delay {
     /// assert!(stopwatch.elapsed() >= Duration::from_millis(10));
     /// # }
     /// ```
-    #[must_use]
+    #[must_use = "futures do nothing unless awaited or polled"]
     pub fn new(clock: &Clock, duration: Duration) -> Self {
         Self {
             duration,
@@ -112,7 +113,10 @@ impl Future for Delay {
 
                 Poll::Ready(())
             }
-            Some(_) => Poll::Pending,
+            Some(key) => {
+                this.clock.update_timer_waker(key, cx.waker());
+                Poll::Pending
+            }
         }
     }
 }
@@ -128,6 +132,9 @@ impl Drop for Delay {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::Wake;
     use std::thread;
 
     use super::*;
@@ -232,10 +239,42 @@ mod tests {
         assert_eq!(clock.clock_state().timers_len(), 0);
     }
 
+    #[test]
+    fn latest_waker_is_notified() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let mut delay = Delay::new(&clock, Duration::from_secs(1));
+        let first = Arc::new(WakeCounter::default());
+        let second = Arc::new(WakeCounter::default());
+
+        assert_eq!(poll_delay_with_waker(&mut delay, &Waker::from(Arc::clone(&first))), Poll::Pending);
+        assert_eq!(poll_delay_with_waker(&mut delay, &Waker::from(Arc::clone(&second))), Poll::Pending);
+
+        control.advance(Duration::from_secs(1));
+
+        assert_eq!(first.count.load(Ordering::Relaxed), 0);
+        assert_eq!(second.count.load(Ordering::Relaxed), 1);
+    }
+
     fn poll_delay(delay: &mut Delay) -> Poll<()> {
-        let mut cx = Context::from_waker(Waker::noop());
+        poll_delay_with_waker(delay, Waker::noop())
+    }
+
+    fn poll_delay_with_waker(delay: &mut Delay, waker: &Waker) -> Poll<()> {
+        let mut cx = Context::from_waker(waker);
         let delay = std::pin::pin!(delay);
 
         delay.poll(&mut cx)
+    }
+
+    #[derive(Default)]
+    struct WakeCounter {
+        count: AtomicUsize,
+    }
+
+    impl Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.count.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }

@@ -66,18 +66,6 @@ impl Stopwatch {
     }
 }
 
-impl From<Stopwatch> for Instant {
-    fn from(stopwatch: Stopwatch) -> Self {
-        stopwatch.start
-    }
-}
-
-impl From<Stopwatch> for Duration {
-    fn from(stopwatch: Stopwatch) -> Self {
-        stopwatch.elapsed()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::thread::sleep;
@@ -127,25 +115,5 @@ mod test {
 
         control.advance(Duration::from_secs(1));
         assert_eq!(watch.elapsed(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn test_stopwatch_into_instance() {
-        let clock = Clock::new_frozen();
-        let watch = clock.stopwatch();
-
-        let instant: Instant = watch.into();
-        assert_eq!(instant, clock.instant());
-    }
-
-    #[test]
-    fn test_stopwatch_into_duration() {
-        let control = ClockControl::new();
-        let clock = control.to_clock();
-        let watch = clock.stopwatch();
-        control.advance(Duration::from_secs(1));
-
-        let duration: Duration = watch.into();
-        assert_eq!(duration, Duration::from_secs(1));
     }
 }

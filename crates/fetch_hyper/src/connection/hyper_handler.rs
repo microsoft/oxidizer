@@ -209,7 +209,7 @@ mod tests {
     }
 
     fn make_handler(connector: FakeConnector, lifetime: ConnectionLifetime) -> HyperTransport {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
         options.connection_pool.connection_lifetime = lifetime;
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn debug_renders_handler_type() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
@@ -248,7 +248,7 @@ mod tests {
         // The byte stream is not a valid HTTP/1 response, so hyper's client
         // request future fails with a `legacy::Error`, exercising
         // `create_http_error_from_hyper_util`.
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(Bytes::from_static(b"NOT A VALID HTTP RESPONSE"), clock.clone());
         let handler = make_handler(connector, ConnectionLifetime::unlimited());
         let err = handler.execute(test_request()).await.expect_err("expected error");
@@ -261,7 +261,7 @@ mod tests {
         // Builder with HTTP/2-only flips `http2_only(true)` on hyper's builder.
         // Using FakeStream over HTTP/1.1-style data will fail, but we want to
         // simply exercise the build path and request execution.
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let mut options = fetch_options::TransportOptions::default();
         options.request_filter = RequestFilter::HttpAndHttps;
@@ -320,7 +320,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn end_to_end_response_is_returned_with_body() {
-        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let clock = tick::ClockControl::new_auto_advancing().to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let handler = make_handler(connector, ConnectionLifetime::unlimited());
         let resp = handler.execute(test_request()).await.unwrap();

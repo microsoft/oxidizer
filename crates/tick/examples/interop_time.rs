@@ -17,7 +17,7 @@ fn main() -> Result<(), ohno::AppError> {
     let time_display_format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
     // Retrieve the current time.
-    let now = clock.system_time_as::<OffsetDateTime>();
+    let now = OffsetDateTime::from(clock.system_time());
     println!("Current time (UTC): {}", now.format(&time_display_format)?);
 
     Ok(())

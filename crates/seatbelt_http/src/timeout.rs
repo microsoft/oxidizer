@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn timeout_fires_on_slow_handler() {
         let handler = FakeHandler::never_completes();
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = HttpResilienceContext::new(&clock);
 
         let service = (
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn fast_handler_succeeds_within_timeout() {
         let handler = FakeHandler::from(StatusCode::OK);
-        let clock = ClockControl::default().auto_advance_timers(true).to_clock();
+        let clock = ClockControl::new_auto_advancing().to_clock();
         let context = HttpResilienceContext::new(&clock);
 
         let service = (

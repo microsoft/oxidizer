@@ -21,7 +21,7 @@ async fn main() -> Result<(), ohno::AppError> {
     let api = MyApi::new(&clock);
 
     // Execute some operation that uses the clock.
-    api.do_something().await;
+    api.do_something().await?;
 
     // Execute a periodic timer.
     let timer = PeriodicTimer::new(&clock, Duration::from_secs(2));
@@ -50,7 +50,7 @@ impl MyApi {
         Self { clock: clock.clone() }
     }
 
-    pub(crate) async fn do_something(&self) {
+    pub(crate) async fn do_something(&self) -> tick::Result<()> {
         // Start the measurement.
         let watch = self.clock.stopwatch();
 
@@ -60,7 +60,9 @@ impl MyApi {
         println!(
             "Work done. Elapsed: {}ms, Timestamp: {}",
             watch.elapsed().as_millis(),
-            self.clock.system_time_as::<Iso8601>()
+            self.clock.try_system_time_as::<Iso8601>()?
         );
+
+        Ok(())
     }
 }

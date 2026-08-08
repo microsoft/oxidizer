@@ -41,7 +41,7 @@ fn build_tls() -> TlsBackend {
 }
 
 fn test_clock() -> Clock {
-    ClockControl::new().auto_advance_timers(true).to_clock()
+    ClockControl::new_auto_advancing().to_clock()
 }
 
 /// Builds [`TransportOptions`] with `HttpAndHttps`, a 5s connect timeout, and
