@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-08-09
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.15.0` of `fetch`
 ## [0.4.0] - 2026-07-24
 
 - 🔧 Maintenance

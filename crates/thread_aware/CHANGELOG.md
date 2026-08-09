@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0] - 2026-08-09
+
+### ⚠ Breaking Changes
+
+- **`no_std` support; the hosted API moved behind a new `std` feature** ([#615](https://github.com/microsoft/oxidizer/pull/615))
+  The crate itself now requires only `alloc`. `Arc`, `PerCore`, `PerNuma`, `PerProcess`, and `storage` need the `std` feature, which is enabled by default. Builds using `default-features = false` must add `std` to keep them. The `threads` feature now implies `std`.
+
 ## [0.8.0] - 2026-07-07
 
 ### ⚠ Breaking Changes

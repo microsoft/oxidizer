@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.0] - 2026-08-09
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.0` of `thread_aware`
+  - Now requires `0.5.0` of `tick`
 ## [0.6.1] - 2026-07-24
 
 - 🔧 Maintenance

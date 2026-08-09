@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.0] - 2026-08-09
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `bytesbuf`
 ## [0.7.0] - 2026-07-24
 
 - 🔧 Maintenance
