@@ -544,6 +544,7 @@ impl SessionReport {
 /// Maximum number of instruction pointers captured for one allocation.
 pub(crate) const MAX_TRACKED_STACK_FRAMES: usize = 24;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) const fn validate_config<C: Config>() {
     assert!(
         C::CALLER_EVENT_CAPACITY != 0 && C::CALLER_EVENT_CAPACITY.is_power_of_two(),
