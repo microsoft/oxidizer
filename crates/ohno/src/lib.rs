@@ -159,9 +159,9 @@
 //! error can be built under the control of the crate that owns it, so adding a field is not a
 //! breaking change for callers.
 //!
-//! To offer a constructor to other crates, write one yourself and give it the visibility you
-//! intend — either alongside the generated ones, or with `#[no_constructors]` (below) if you want
-//! `new` and `caused_by` to mean something different.
+//! To expose a constructor to other crates, write your own and declare it `pub`. A constructor
+//! under any other name coexists with the generated ones; one named `new` or `caused_by` collides
+//! with them (`error[E0592]: duplicate definitions`), so it also needs `#[no_constructors]`.
 //!
 //! **Disabling Automatic Constructors:**
 //!
