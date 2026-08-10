@@ -4527,11 +4527,14 @@ dependencies = [
 name = "tick"
 version = "0.4.0"
 dependencies = [
+ "alloc_tracker",
+ "benchmarking",
  "chrono",
  "chrono-tz",
  "criterion",
  "futures",
  "futures-core",
+ "gungraun",
  "insta",
  "jiff",
  "mutants",

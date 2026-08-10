@@ -166,18 +166,18 @@ where
             formatter.write_str("a timestamp string")
         }
 
-        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where
             E: serde_core::de::Error,
         {
-            value.parse().map_err(E::custom)
+            v.parse().map_err(E::custom)
         }
 
-        fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+        fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
         where
             E: serde_core::de::Error,
         {
-            value.parse().map_err(E::custom)
+            v.parse().map_err(E::custom)
         }
     }
 

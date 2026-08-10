@@ -35,28 +35,28 @@ mod linux {
     const ECMASCRIPT: &str = r#""2024-08-06T21:30:00.123Z""#;
 
     fn warm_rfc_2822() {
-        _ = serde_json::from_str::<Rfc2822>(RFC_2822).unwrap();
+        _ = serde_json::from_str::<Rfc2822>(RFC_2822).expect("RFC 2822 benchmark input is valid");
     }
 
     #[library_benchmark]
     fn formats_iso_8601() -> Iso8601 {
-        serde_json::from_str(black_box(ISO_8601)).unwrap()
+        serde_json::from_str(black_box(ISO_8601)).expect("ISO 8601 benchmark input is valid")
     }
 
     #[library_benchmark]
     #[bench::run(warm_rfc_2822())]
     fn formats_rfc_2822(_: ()) -> Rfc2822 {
-        serde_json::from_str(black_box(RFC_2822)).unwrap()
+        serde_json::from_str(black_box(RFC_2822)).expect("RFC 2822 benchmark input is valid")
     }
 
     #[library_benchmark]
     fn formats_unix_seconds() -> UnixSeconds {
-        serde_json::from_str(black_box(UNIX_SECONDS)).unwrap()
+        serde_json::from_str(black_box(UNIX_SECONDS)).expect("Unix seconds benchmark input is valid")
     }
 
     #[library_benchmark]
     fn formats_ecmascript() -> EcmaScript {
-        serde_json::from_str(black_box(ECMASCRIPT)).unwrap()
+        serde_json::from_str(black_box(ECMASCRIPT)).expect("ECMAScript benchmark input is valid")
     }
 
     library_benchmark_group!(

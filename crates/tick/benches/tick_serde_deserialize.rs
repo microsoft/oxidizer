@@ -43,7 +43,7 @@ where
 
 fn deserialize(c: &mut Criterion) {
     // Initialize RFC 2822's lower-bound LazyLock before measurements begin.
-    _ = serde_json::from_str::<Rfc2822>(RFC_2822).unwrap();
+    _ = serde_json::from_str::<Rfc2822>(RFC_2822).expect("RFC 2822 benchmark input is valid");
 
     let session = Session::new();
     let mut group = c.benchmark_group("tick_serde_deserialize/formats");

@@ -4,6 +4,7 @@
 //! Allocation contracts for timestamp deserialization.
 
 #![cfg(all(feature = "fmt", feature = "serde", not(miri)))]
+#![allow(clippy::unwrap_used, reason = "test code uses unwrap for concise failure backtraces")]
 
 use alloc_tracker::{Allocator, Session};
 use serde::de::DeserializeOwned;
