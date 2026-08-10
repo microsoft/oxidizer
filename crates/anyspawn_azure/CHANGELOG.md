@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - Now requires `0.7.0` of `anyspawn`
+  - Now requires `0.5.0` of `tick`
+
 ## [0.1.3] - 2026-07-07
 
 - 🔧 Maintenance
