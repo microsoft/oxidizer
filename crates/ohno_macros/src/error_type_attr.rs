@@ -22,7 +22,7 @@ use crate::utils::{GENERATED_ERROR_FIELD_MARKER, generate_unique_field_name};
 /// This macro converts a simple struct declaration into a complete error type
 /// with `OhnoCore` integration, preserving any documentation comments.
 ///
-/// It can also be applied to existing structs with fields, transforming them:
+/// It can also be applied to existing structs with fields:
 /// ```ignore
 /// /// My awesome error
 /// #[ohno::error]
@@ -30,17 +30,6 @@ use crate::utils::{GENERATED_ERROR_FIELD_MARKER, generate_unique_field_name};
 /// #[from(std::io::Error(kind: ErrorKind::Io))]
 /// pub struct Error {
 ///     pub(crate) kind: ErrorKind,
-/// }
-/// ```
-///
-/// Into:
-/// ```ignore
-/// /// My awesome error
-/// #[derive(Debug, ohno::Error)]
-/// #[from(std::io::Error(kind: ErrorKind::Io))]
-/// pub struct Error {
-///     pub(crate) kind: ErrorKind,
-///     ohno_core: OhnoCore,
 /// }
 /// ```
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
@@ -75,6 +64,10 @@ const NO_CONSTRUCTORS: &str = "`#[no_constructors]` is not supported under `#[oh
 ///
 /// See `docs/error_error.md`.
 fn reject_no_constructors(input: &DeriveInput) -> syn::Result<()> {
+    let Data::Struct(_) = &input.data else {
+        return Ok(());
+    };
+
     match input.attrs.iter().find(|attr| attr.path().is_ident("no_constructors")) {
         Some(attr) => Err(syn::Error::new_spanned(attr, NO_CONSTRUCTORS)),
         None => Ok(()),
@@ -246,10 +239,18 @@ mod tests {
             assert_eq!(err.to_string(), crate::error_type_attr::NO_CONSTRUCTORS);
         }
 
-        // Every other attribute is left alone
+        // The attribute is rejected wherever it is written relative to `#[ohno::error]`, since
+        // both orderings leave it in `input.attrs`
+        let input: DeriveInput = parse_quote! { #[no_constructors] #[derive(Clone)] struct TestError { path: String } };
+        let err = crate::error_type_attr::reject_no_constructors(&input).unwrap_err();
+        assert_eq!(err.to_string(), crate::error_type_attr::NO_CONSTRUCTORS);
+
+        // Every other attribute is left alone. An input this attribute cannot be applied to at all
+        // is left to `add_ohno_core_field`, so the author gets the accurate diagnostic
         for input in [
             parse_quote! { struct TestError { path: String } },
             parse_quote! { #[no_debug] #[display("boom")] struct TestError { path: String } },
+            parse_quote! { #[no_constructors] enum TestError { A } },
         ] {
             let input: DeriveInput = input;
             crate::error_type_attr::reject_no_constructors(&input).unwrap();

@@ -171,8 +171,8 @@ breaking change for callers.
 
 `#[no_constructors]` disables the generated constructors, leaving the names `new` and
 `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
-requires the `OhnoCore` field to be declared explicitly — and that field is the one such a
-constructor has to initialize:
+requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+hand-written constructor has to initialize:
 
 ```rust
 use ohno::{Error, OhnoCore};
@@ -340,7 +340,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY0_yn8Wm4cIbhr6rIu7z_RQbyUPRw0XtFRkbzt-TvjnLh4NhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv-Hzd015wccb3QHVUUNfzdYbgkSSUDnsKTUbn3uKf5ryHu1hZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

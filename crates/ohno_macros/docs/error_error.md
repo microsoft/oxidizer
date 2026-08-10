@@ -90,19 +90,18 @@ there is no room for a core.
 
 **`#[no_constructors]` is not accepted.** Opting out of the generated
 constructors means writing the struct literal by hand, and that needs the name
-of the field this attribute adds. The name is not the author's to rely on: it is
-`ohno_core`, unless the struct already declares one, in which case the added
-field becomes `ohno_core_1`. A constructor would then name a field chosen for it,
-which a later, unrelated field declaration can rename out from under it.
+of the field this attribute adds. That field is not part of the type's
+source-level contract, so it has no name the author may rely on.
 
-Declaring the core is what makes a hand-written constructor honest, so that is
-the supported path:
+Declaring the core gives a hand-written constructor a field name the author
+owns, so that is the supported path:
 
 ```rust
 #[derive(ohno::Error)]
 #[no_constructors]
 struct MyError {
     path: String,
+    #[error]
     ohno_core: ohno::OhnoCore,
 }
 ```

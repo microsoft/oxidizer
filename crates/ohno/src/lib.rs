@@ -166,8 +166,8 @@
 //!
 //! `#[no_constructors]` disables the generated constructors, leaving the names `new` and
 //! `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
-//! requires the `OhnoCore` field to be declared explicitly — and that field is the one such a
-//! constructor has to initialize:
+//! requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+//! hand-written constructor has to initialize:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};

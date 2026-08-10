@@ -44,6 +44,7 @@ use recoverable::{Recovery, RecoveryInfo};
 #[no_constructors]
 pub struct Error {
     recovery_info: RecoveryInfo,
+    #[error]
     ohno_core: OhnoCore,
 }
 
