@@ -67,7 +67,7 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
     quote! { #input }
 }
 
-const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core yourself";
+const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly";
 const RESERVED_MARKER: &str = "This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`";
 const NO_CONSTRUCTORS: &str = "`#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` has no stable name, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly";
 

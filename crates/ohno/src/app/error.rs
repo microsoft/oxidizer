@@ -17,7 +17,7 @@ struct Inner {
 
 /// Application-level error type that wraps any error.
 ///
-/// [`AppError`] is designed for use in applications where you need a simple,
+/// [`AppError`] is designed for use in applications that need a simple,
 /// catch-all error type.
 ///
 /// This type automatically captures backtraces and provides error context
@@ -25,7 +25,7 @@ struct Inner {
 ///
 /// # Examples
 ///
-/// - **Generic Error Handling**: Use [`AppError`] as a catch-all error type in your application
+/// - **Generic Error Handling**: Use [`AppError`] as a catch-all error type in an application
 ///   ```no_run
 ///   use std::io::Error as IoError;
 ///   use ohno::AppError;

@@ -64,7 +64,7 @@ pub struct MyError {
 ## `ohno::error`
 
 The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 without manually managing the error infrastructure.
 
 The attribute always adds that field and always generates the error representation from it, so
@@ -91,7 +91,7 @@ pub struct NetworkError {
 
 ## Display Error Override
 
-The `#[display("...")]` attribute allows you to customize the main error message
+The `#[display("...")]` attribute customizes the main error message
 while preserving the underlying error as a cause in the error chain.
 
 ```rust
@@ -185,7 +185,7 @@ struct CustomError {
 
 impl CustomError {
     pub fn new(custom_logic: bool) -> Self {
-        // Your custom constructor logic here
+        // Custom constructor logic here
         Self {
             inner_error: OhnoCore::default(),
         }
@@ -340,7 +340,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbMhu_2yz3rVIbIa8g5Cly-IcbQ_hNX-bPb1kb7VqB4q7Eu6phZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbY0_yn8Wm4cIbhr6rIu7z_RQbyUPRw0XtFRkbzt-TvjnLh4NhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html

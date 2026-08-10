@@ -59,7 +59,7 @@
 //! # `ohno::error`
 //!
 //! The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-//! field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+//! field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 //! without manually managing the error infrastructure.
 //!
 //! The attribute always adds that field and always generates the error representation from it, so
@@ -86,7 +86,7 @@
 //!
 //! # Display Error Override
 //!
-//! The `#[display("...")]` attribute allows you to customize the main error message
+//! The `#[display("...")]` attribute customizes the main error message
 //! while preserving the underlying error as a cause in the error chain.
 //!
 //! ```rust
@@ -180,7 +180,7 @@
 //!
 //! impl CustomError {
 //!     pub fn new(custom_logic: bool) -> Self {
-//!         // Your custom constructor logic here
+//!         // Custom constructor logic here
 //!         Self {
 //!             inner_error: OhnoCore::default(),
 //!         }

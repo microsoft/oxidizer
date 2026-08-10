@@ -46,7 +46,7 @@ float root is read as nested tuple access (see below).
 The operator applies to the field's value, not to a reference to it, so
 `count as u64` casts the field and `count * 2` uses the value's `Mul`.
 
-## Which fields you can name
+## Which fields can be named
 
 Every field the user wrote. By name for a named struct, by index for a tuple
 struct.
