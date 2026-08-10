@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.6` of `templated_uri`
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
 
 - ⚠️ Breaking
 
@@ -12,6 +12,7 @@
   - Now requires `0.8.0` of `bytesbuf`
   - Now requires `0.9.0` of `http_extensions`
   - Now requires `0.7.0` of `seatbelt`
+  - Now requires `0.4.0` of `templated_uri`
   - Now requires `0.5.0` of `tick`
 ## [0.5.0] - 2026-07-24
 

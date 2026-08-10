@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.9"
+version = "0.3.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -746,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.2.7"
+version = "0.3.0"
 dependencies = [
  "dynosaur",
  "ohno 0.3.9",
@@ -3597,7 +3597,7 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "insta",
  "ohno 0.3.9",
@@ -4394,7 +4394,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.3.6"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "data_privacy",

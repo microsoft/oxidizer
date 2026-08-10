@@ -77,8 +77,8 @@ bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.8.
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.8.0" }
 cachet = { path = "crates/cachet", default-features = false, version = "0.11.0" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.6.0" }
-cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.9" }
-cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.7" }
+cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.3.0" }
+cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.3.0" }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
@@ -175,7 +175,7 @@ protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
-recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
+recoverable = { path = "crates/recoverable", default-features = false, version = "0.2.0" }
 regex = { version = "1.12.2", default-features = false }
 rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.2.0" }
 route-recognizer = { version = "0.3.1", default-features = false }
@@ -205,7 +205,7 @@ string-interner = { version = "0.20.0", default-features = false }
 string_cache = { version = "0.10.0", default-features = false }
 symbol_table = { version = "0.5.0", default-features = false }
 syn = { version = "3.0.2", default-features = false }
-templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.6" }
+templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.4.0" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.3.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.3.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }

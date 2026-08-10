@@ -2,6 +2,10 @@
 
 ## [0.5.0] - 2026-08-09
 
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
 - ⚠️ Breaking
 
   - validate fmt values at construction, drop cross-format conversions ([#614](https://github.com/microsoft/oxidizer/pull/614))

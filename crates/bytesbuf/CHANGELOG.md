@@ -12,6 +12,7 @@
 
 - 🔧 Maintenance
 
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
   - Now requires `0.2.1` of `plurality`
 
 - 🐛 Bug Fixes

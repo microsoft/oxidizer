@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `UnwindSafe` and `RefUnwindSafe` impls for `Pool`, `Box`, `Alloc`, `Rc`, and
   `Arc`.
 
+### Changed
+
+- Minimum supported Rust version raised to 1.93.1.
+
 ### Fixed
 
 - `coerce!` accepts trait objects naming an enclosing generic type parameter,
