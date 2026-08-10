@@ -46,7 +46,7 @@ enum TimeKind {
     System,
     /// Reads lower-precision OS time with lower overhead.
     #[cfg(feature = "fast-instant")]
-    SystemFast(&'static crate::fast_instant::Calibration),
+    SystemFast,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
     Controlled(crate::ClockControl),
@@ -94,8 +94,8 @@ impl SimpleClock {
     #[must_use]
     pub fn with_fast_instant(self, enabled: bool) -> Self {
         match self.0 {
-            TimeKind::System | TimeKind::SystemFast(_) if enabled => Self(TimeKind::SystemFast(crate::fast_instant::calibration())),
-            TimeKind::System | TimeKind::SystemFast(_) => Self(TimeKind::System),
+            TimeKind::System | TimeKind::SystemFast if enabled => Self(TimeKind::SystemFast),
+            TimeKind::System | TimeKind::SystemFast => Self(TimeKind::System),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => Self(TimeKind::Controlled(control)),
         }
@@ -183,7 +183,7 @@ impl SimpleClock {
         match &self.0 {
             TimeKind::System => SystemTime::now(),
             #[cfg(feature = "fast-instant")]
-            TimeKind::SystemFast(_) => SystemTime::now(),
+            TimeKind::SystemFast => SystemTime::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.system_time(),
         }
@@ -223,7 +223,7 @@ impl SimpleClock {
         match &self.0 {
             TimeKind::System => Instant::now(),
             #[cfg(feature = "fast-instant")]
-            TimeKind::SystemFast(calibration) => calibration.now(),
+            TimeKind::SystemFast => crate::fast_instant::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.instant(),
         }
@@ -273,7 +273,7 @@ mod tests {
         let precise_again = fast_clock.clone().with_fast_instant(false);
 
         assert!(matches!(precise_clock.0, TimeKind::System));
-        assert!(matches!(fast_clock.0, TimeKind::SystemFast(_)));
+        assert!(matches!(fast_clock.0, TimeKind::SystemFast));
         assert!(matches!(precise_again.0, TimeKind::System));
 
         _ = fast_clock.system_time();

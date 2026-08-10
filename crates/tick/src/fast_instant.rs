@@ -7,25 +7,21 @@ use std::time::Instant;
 
 #[cfg(all(any(target_os = "linux", windows), not(miri)))]
 static CALIBRATION: std::sync::OnceLock<Calibration> = std::sync::OnceLock::new();
-#[cfg(any(miri, not(any(target_os = "linux", windows))))]
-static CALIBRATION: Calibration = Calibration {};
 
-/// Provides lower-precision [`Instant`] retrieval from one process-wide calibration domain.
+/// Maps coarse platform timestamps into one process-wide [`Instant`] comparison domain.
 ///
-/// On Linux and Windows, the platform clocks are non-decreasing, so translating every sample from
-/// the same pair preserves ordering and keeps values comparable when clocks or stopwatches move
-/// between threads. Equal platform samples produce equal instants. Other targets delegate to
-/// [`Instant::now`].
+/// The platform clocks are non-decreasing, so translating every sample from the same calibration
+/// pair preserves ordering and keeps values comparable when clocks or stopwatches move between
+/// threads. Equal platform samples produce equal instants.
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Calibration {
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+struct Calibration {
     instant_epoch: Instant,
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     platform_epoch: Duration,
 }
 
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
 impl Calibration {
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     fn new() -> Self {
         Self {
             instant_epoch: Instant::now(),
@@ -33,20 +29,10 @@ impl Calibration {
         }
     }
 
-    #[must_use]
-    pub(crate) fn now(&self) -> Instant {
-        #[cfg(all(any(target_os = "linux", windows), not(miri)))]
-        {
-            self.now_at(platform_time())
-        }
-
-        #[cfg(any(miri, not(any(target_os = "linux", windows))))]
-        {
-            Instant::now()
-        }
+    fn now(&self) -> Instant {
+        self.now_at(platform_time())
     }
 
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     fn now_at(&self, platform_time: Duration) -> Instant {
         let elapsed = platform_time.saturating_sub(self.platform_epoch);
         self.instant_epoch
@@ -55,16 +41,9 @@ impl Calibration {
     }
 }
 
-pub(crate) fn calibration() -> &'static Calibration {
-    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
-    {
-        CALIBRATION.get_or_init(Calibration::new)
-    }
-
-    #[cfg(any(miri, not(any(target_os = "linux", windows))))]
-    {
-        &CALIBRATION
-    }
+#[cfg(all(any(target_os = "linux", windows), not(miri)))]
+fn calibration() -> &'static Calibration {
+    CALIBRATION.get_or_init(Calibration::new)
 }
 
 #[cfg(all(target_os = "linux", not(miri)))]
@@ -89,6 +68,20 @@ fn platform_time() -> Duration {
 fn platform_time() -> Duration {
     // SAFETY: GetTickCount64 has no safety requirements.
     Duration::from_millis(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() })
+}
+
+#[must_use]
+#[inline]
+pub(crate) fn now() -> Instant {
+    #[cfg(all(any(target_os = "linux", windows), not(miri)))]
+    {
+        calibration().now()
+    }
+
+    #[cfg(any(miri, not(any(target_os = "linux", windows))))]
+    {
+        Instant::now()
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
