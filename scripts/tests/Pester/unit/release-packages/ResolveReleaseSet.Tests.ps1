@@ -16,6 +16,7 @@ BeforeAll {
             [string[]] $Deps = @(),
             [bool]     $Published = $true,
             [bool]     $IsProcMacroOnly = $false,
+            [hashtable] $DepAliases = @{},
             [AllowNull()][string[]] $AllowedExternalTypes = $null
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
@@ -25,6 +26,7 @@ BeforeAll {
             Version   = $Version
             Published = $Published
             Deps      = $Deps
+            DepAliases = $DepAliases
             IsProcMacroOnly = $IsProcMacroOnly
             AllowedExternalTypes = $AllowedExternalTypes
         }
@@ -525,6 +527,41 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['c'].CascadeReasons.Target | Should -Contain 'b'
         }
 
+        It 'cascades through an allowlist entry rooted at a renamed dependency alias' {
+            # `dependent` declares `dependency` under `package = "..."` as
+            # `aliased_dep`, so its allowlist can only name the alias. Matching
+            # on the real package name alone would miss it and ship the break.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -DepAliases @{ dependency = @('aliased_dep') } `
+                    -AllowedExternalTypes @('aliased_dep::Handle'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType    | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'does not cascade when the alias in the allowlist belongs to a different dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -DepAliases @{ other_crate = @('aliased_dep') } `
+                    -AllowedExternalTypes @('aliased_dep::Handle'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType    | Should -Be 'patch'
+            $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+        }
+
         It 'uses a self-floor breaking verdict before cascading exposed dependency versions' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
@@ -685,6 +722,55 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].RequestedTargetVersion    | Should -Be '1.1.0'
             $byFolder['b'].EffectiveChangeType       | Should -Be 'breaking'
             $byFolder['b'].PinHonoredAgainstCascade  | Should -BeTrue
+        }
+
+        It '-Force stops the exposure cascade at the pinned crate rather than at its tag' {
+            # Exposed chain a -> b -> c. a@breaking would normally drive both b
+            # and c to breaking, but b is pinned to 1.1.0 -- a compatible
+            # transition from 1.0.0. c never sees an incompatible b, so it must
+            # stay at its BFS patch floor. Cascading from b's 'breaking' *tag*
+            # instead of its planned version would invent a break for c that no
+            # consumer of b can observe.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.1.0'
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'breaking'
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeTrue
+
+            $byFolder['c'].EffectiveChangeType      | Should -Be 'patch'
+            $byFolder['c'].EffectiveTargetVersion   | Should -Be '1.0.1'
+        }
+
+        It 'resumes the exposure cascade past a pinned crate when the pin is itself breaking' {
+            # Same chain, but b is pinned to 2.0.0 -- an incompatible
+            # transition -- so c must inherit the break.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@2.0.0')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].EffectiveTargetVersion | Should -Be '2.0.0'
+            $byFolder['c'].EffectiveChangeType    | Should -Be 'breaking'
+            $byFolder['c'].EffectiveTargetVersion | Should -Be '2.0.0'
         }
 
         It '-Force emits a warning naming the package, the pin, the required minimum, and the sources' {

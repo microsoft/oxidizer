@@ -571,6 +571,9 @@ function Get-CrateRequiredChangeType {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   DepAliases            - hashtable mapping a normalized dependency name to the normalized
+#                           aliases it is renamed to, for the deps that declare `package = "..."`;
+#                           empty when nothing is renamed
 #   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
 #                           or $null if the package does not declare them
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
@@ -589,9 +592,26 @@ function Get-WorkspacePackages {
         }
 
         $deps = @()
+        $depAliases = @{}
         foreach ($dep in $package.dependencies) {
-            if ($dep.kind -ne 'dev') {
-                $deps += $dep.name.Replace('-', '_')
+            if ($dep.kind -eq 'dev') {
+                continue
+            }
+
+            $depCargoName = $dep.name.Replace('-', '_')
+            $deps += $depCargoName
+
+            # `rename` is the `package = "..."` form in Cargo.toml: the crate is
+            # declared under one name but reachable in Rust source -- and hence
+            # in an allowed_external_types entry -- only under the alias. Record
+            # it so Test-PackageExposesTarget can recognize the aliased root.
+            $renameProp = $dep.PSObject.Properties['rename']
+            if ($renameProp -and -not [string]::IsNullOrWhiteSpace($renameProp.Value)) {
+                $alias = ([string]$renameProp.Value).Replace('-', '_')
+                # A package may be depended on more than once under different
+                # aliases (per-target or per-feature), so collect them all.
+                $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $alias |
+                        Where-Object { $_ } | Sort-Object -Unique)
             }
         }
 
@@ -616,6 +636,7 @@ function Get-WorkspacePackages {
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
+            DepAliases           = $depAliases
             AllowedExternalTypes = $allowedTypes
             HasLibraryTarget     = $hasLibraryTarget
             IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
@@ -657,6 +678,17 @@ function Test-PackageExposesTarget {
     }
 
     $normalizedTarget = $TargetPackageName.Replace('-', '_')
+
+    # A dependency declared with `package = "..."` is nameable in Rust source
+    # only under its alias, so that is the root an allowed_external_types entry
+    # will carry. Matching solely on the real package name would find nothing
+    # and report "not exposed" -- a fail-open that ships a break as compatible.
+    $acceptedRoots = @($normalizedTarget)
+    if ($Dependent.PSObject.Properties['DepAliases'] -and $null -ne $Dependent.DepAliases) {
+        $acceptedRoots += @($Dependent.DepAliases[$normalizedTarget])
+    }
+    $acceptedRoots = @($acceptedRoots | Where-Object { $_ })
+
     foreach ($entry in $Dependent.AllowedExternalTypes) {
         # An entry that is not a usable non-empty string carries no information
         # about what this crate exposes. Skipping it would let the loop fall
@@ -672,7 +704,7 @@ function Test-PackageExposesTarget {
         if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
             return $true
         }
-        if ($root -eq $normalizedTarget) {
+        if ($acceptedRoots -contains $root) {
             return $true
         }
     }

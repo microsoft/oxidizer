@@ -531,7 +531,10 @@ Describe 'Reduce-DependencyChains' {
 
 Describe 'Test-PackageExposesTarget' {
     BeforeAll {
-        function New-Dependent { param($Allowed) [pscustomobject]@{ AllowedExternalTypes = $Allowed } }
+        function New-Dependent {
+            param($Allowed, $DepAliases = @{})
+            [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
+        }
     }
 
     It 'reports exposure when an entry is rooted at the target package' {
@@ -581,5 +584,40 @@ Describe 'Test-PackageExposesTarget' {
         # An explicit empty list means the crate exposes no external types at
         # all, which is information -- unlike absent metadata.
         Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @()) -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'reports exposure when the entry is rooted at the alias of a renamed dependency' {
+        # `bytesbuf = { package = "bytesbuf", ... }` renamed to `buf`: Rust
+        # source -- and therefore the allowlist -- can only name it as `buf`.
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in a rename alias' {
+        $dep = New-Dependent -Allowed @('bytes_buf::Bytes') -DepAliases @{ bytesbuf = @('bytes_buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'reports exposure under any one of several aliases for the same dependency' {
+        $aliases = @{ bytesbuf = @('buf_v1', 'buf_v2') }
+        foreach ($root in @('buf_v1', 'buf_v2')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @("$root::Bytes") -DepAliases $aliases) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue -Because "'$root' is an alias of the target"
+        }
+    }
+
+    It 'does not treat an alias of a different dependency as exposure of the target' {
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ other_crate = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'still matches the real package name when that dependency is also aliased elsewhere' {
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'tolerates a package record that predates the DepAliases field' {
+        $dep = [pscustomobject]@{ AllowedExternalTypes = @('std::io::Error') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
     }
 }
