@@ -145,8 +145,11 @@
 //! }
 //!
 //! // The derive macro automatically generates:
-//! // - pub(crate) fn ConfigError::new(path: String) -> Self
-//! // - pub(crate) fn ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+//! //
+//! // impl ConfigError {
+//! //     pub(crate) fn new(path: String) -> Self { ... }
+//! //     pub(crate) fn caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//! // }
 //!
 //! let error = ConfigError::new("/etc/config.toml");
 //! let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
