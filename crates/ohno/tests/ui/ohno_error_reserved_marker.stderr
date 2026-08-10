@@ -1,0 +1,6 @@
+error: This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`
+  --> tests/ui/ohno_error_reserved_marker.rs:14:5
+   |
+14 | /     /// ohno::generated-core@7f3d9c2a
+15 | |     mine: ohno::OhnoCore,
+   | |________________________^

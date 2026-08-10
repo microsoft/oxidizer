@@ -2889,6 +2889,7 @@ dependencies = [
  "regex",
  "testing_aids",
  "tokio",
+ "trybuild",
  "typeid",
 ]
 
