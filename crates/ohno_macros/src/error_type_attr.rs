@@ -56,6 +56,9 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
     if let Err(err) = reject_generated_marker(input) {
         return err.to_compile_error();
     }
+    if let Err(err) = reject_no_constructors(input) {
+        return err.to_compile_error();
+    }
     if let Err(err) = add_ohno_core_field(input) {
         return err.to_compile_error();
     }
@@ -66,6 +69,17 @@ fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
 
 const ALREADY_MARKED: &str = "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core yourself";
 const RESERVED_MARKER: &str = "This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`";
+const NO_CONSTRUCTORS: &str = "`#[no_constructors]` is not supported under `#[ohno::error]`. Writing a constructor by hand means writing the struct literal, which needs the name of the OhnoCore field this attribute adds -- a name it chooses, and changes if you later declare a field of your own called `ohno_core`. Use `#[derive(ohno::Error)]` and declare the OhnoCore field yourself, so the field your constructor names is one you can see";
+
+/// Reject a struct that opts out of the generated constructors
+///
+/// See `docs/error_error.md`.
+fn reject_no_constructors(input: &DeriveInput) -> syn::Result<()> {
+    match input.attrs.iter().find(|attr| attr.path().is_ident("no_constructors")) {
+        Some(attr) => Err(syn::Error::new_spanned(attr, NO_CONSTRUCTORS)),
+        None => Ok(()),
+    }
+}
 
 /// Reject a struct that marks a field with `#[error]`
 ///
@@ -215,6 +229,30 @@ mod tests {
         ] {
             let input: DeriveInput = input;
             crate::error_type_attr::reject_generated_marker(&input).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_reject_no_constructors() {
+        // Opting out of the generated constructors means writing the struct literal by hand, which
+        // needs the name of the field this attribute adds
+        for input in [
+            parse_quote! { #[no_constructors] struct TestError { path: String } },
+            parse_quote! { #[no_constructors] struct TestError(String); },
+            parse_quote! { #[derive(Clone)] #[no_constructors] struct TestError; },
+        ] {
+            let input: DeriveInput = input;
+            let err = crate::error_type_attr::reject_no_constructors(&input).unwrap_err();
+            assert_eq!(err.to_string(), crate::error_type_attr::NO_CONSTRUCTORS);
+        }
+
+        // Every other attribute is left alone
+        for input in [
+            parse_quote! { struct TestError { path: String } },
+            parse_quote! { #[no_debug] #[display("boom")] struct TestError { path: String } },
+        ] {
+            let input: DeriveInput = input;
+            crate::error_type_attr::reject_no_constructors(&input).unwrap();
         }
     }
 

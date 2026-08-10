@@ -168,9 +168,12 @@
 //!
 //! **Disabling Automatic Constructors:**
 //!
-//! Use `#[no_constructors]` to disable automatic generation when you need custom constructors.
-//! Note that a hand-written constructor is only reachable outside the defining crate if you
-//! declare it `pub`, as in the `pub fn new` below:
+//! `#[no_constructors]` disables the generated constructors when you need custom ones. It belongs
+//! to `#[derive(Error)]` and is rejected under `#[ohno::error]`: writing a constructor by hand
+//! means writing the struct literal, which needs the name of the `OhnoCore` field — and
+//! `#[ohno::error]` adds that field itself. Declare the core yourself so your constructor names a
+//! field you can see. A hand-written constructor is reachable outside the defining crate only if
+//! you declare it `pub`, as in the `pub fn new` below:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};

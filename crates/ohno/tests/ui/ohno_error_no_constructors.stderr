@@ -1,0 +1,5 @@
+error: `#[no_constructors]` is not supported under `#[ohno::error]`. Writing a constructor by hand means writing the struct literal, which needs the name of the OhnoCore field this attribute adds -- a name it chooses, and changes if you later declare a field of your own called `ohno_core`. Use `#[derive(ohno::Error)]` and declare the OhnoCore field yourself, so the field your constructor names is one you can see
+  --> tests/ui/ohno_error_no_constructors.rs:11:1
+   |
+11 | #[no_constructors]
+   | ^^^^^^^^^^^^^^^^^^
