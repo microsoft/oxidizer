@@ -65,19 +65,33 @@ pub struct Error {
     kind: ErrorKind,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ErrorKind {
+/// Stable category of a telemetry encoding or decoding error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// The encoded snapshot length cannot be represented.
     LengthOverflow,
+    /// The output buffer is too small.
     OutputTooSmall,
+    /// The output buffer does not have the exact encoded length.
     OutputLengthMismatch,
+    /// The wire container is invalid.
     Wire(rallocator_wire::Error),
+    /// The telemetry schema version is unsupported.
     UnsupportedSchema(u16),
+    /// A required section is missing.
     MissingSection(u16),
+    /// A section appears more than once.
     DuplicateSection(u16),
+    /// A section payload is malformed.
     MalformedSection(u16),
+    /// A decoded integer cannot fit in the target type.
     IntegerOverflow,
+    /// A section contains invalid UTF-8.
     InvalidUtf8(u16),
+    /// An allocation event kind is unknown.
     UnknownEventKind(u8),
+    /// A topology slice kind is unknown.
     UnknownSliceKind(u8),
 }
 
@@ -89,6 +103,12 @@ impl Error {
 
     const fn new(kind: ErrorKind) -> Self {
         Self { kind }
+    }
+
+    /// Returns the stable category of this error.
+    #[must_use]
+    pub const fn kind(self) -> ErrorKind {
+        self.kind
     }
 
     const fn wire(error: rallocator_wire::Error) -> Self {
@@ -801,7 +821,7 @@ fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>
     match reader.read_u8()? {
         0 => return Ok(None),
         1 => {}
-        value => return Err(Error::unknown_event_kind(value)),
+        _ => return Err(Error::malformed_section(SECTION_CALLERS)),
     }
     let session_id = reader.read_u64()?;
     let total_events = reader.read_u64()?;
@@ -1109,9 +1129,19 @@ mod tests {
             assert_eq!(error.to_string(), message);
             assert_eq!(format!("{error:?}"), format!("Error({message})"));
         }
+        assert_eq!(
+            Error::malformed_section(SECTION_CALLERS).kind(),
+            ErrorKind::MalformedSection(SECTION_CALLERS)
+        );
 
         assert!(std::error::Error::source(&Error::wire(wire_source)).is_some());
         assert!(std::error::Error::source(&Error::LENGTH_OVERFLOW).is_none());
+    }
+
+    #[test]
+    fn invalid_callers_presence_flag_is_a_malformed_section() {
+        let error = read_callers(&mut Reader::new(&[2]), CALLERS_SECTION_VERSION).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::MalformedSection(SECTION_CALLERS));
     }
 
     #[test]

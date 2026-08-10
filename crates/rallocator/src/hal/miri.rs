@@ -113,10 +113,12 @@ pub(crate) unsafe fn write_free_requested(block: *mut u8, requested_bytes: usize
 
 #[inline(always)]
 pub(crate) unsafe fn read_free_requested(block: *mut u8) -> usize {
-    let metadata = free_metadata(block, false);
-    let requested_bytes = metadata.requested_bytes.load(Ordering::Relaxed);
-    metadata.block.store(ptr::null_mut(), Ordering::Release);
-    requested_bytes
+    free_metadata(block, false).requested_bytes.load(Ordering::Relaxed)
+}
+
+#[inline(always)]
+pub(crate) unsafe fn release_free_metadata(block: *mut u8) {
+    free_metadata(block, false).block.store(ptr::null_mut(), Ordering::Release);
 }
 
 #[inline(always)]

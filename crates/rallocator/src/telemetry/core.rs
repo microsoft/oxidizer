@@ -7,7 +7,7 @@ use std::alloc::Layout;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::cell::{Cell, UnsafeCell};
-#[cfg(not(miri))]
+#[cfg(all(not(miri), feature = "caller-symbolization"))]
 use std::ffi::c_void;
 use std::hint::spin_loop;
 use std::path::Path;
@@ -108,7 +108,7 @@ pub struct Stats {
 pub struct MemoryStats {
     live_requested_bytes: Estimate<usize>,
     live_usable_bytes: Estimate<usize>,
-    committed_bytes: usize,
+    mapped_bytes: usize,
     peak_live_bytes: usize,
 }
 
@@ -124,7 +124,7 @@ pub struct OperationStats {
 /// Operating-system mapping and reclamation totals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReclamationStats {
-    committed_bytes: usize,
+    mapped_bytes: usize,
     mappings: usize,
     unmappings: usize,
 }
@@ -182,13 +182,84 @@ pub struct SessionReport {
     delta: StatsDelta,
 }
 
+/// Stable category of a snapshot capture error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SnapshotErrorKind {
+    /// Neither aggregate nor caller telemetry is available.
+    Unavailable,
+    /// The encoded snapshot length could not be calculated.
+    SizingFailed,
+    /// Memory for the encoded snapshot could not be mapped.
+    AllocationFailed,
+    /// Encoding into the mapped snapshot buffer failed.
+    EncodingFailed,
+}
+
+/// An error reported while capturing a telemetry snapshot.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct SnapshotError {
+    kind: SnapshotErrorKind,
+}
+
+impl SnapshotError {
+    const fn unavailable() -> Self {
+        Self {
+            kind: SnapshotErrorKind::Unavailable,
+        }
+    }
+
+    const fn sizing_failed() -> Self {
+        Self {
+            kind: SnapshotErrorKind::SizingFailed,
+        }
+    }
+
+    const fn allocation_failed() -> Self {
+        Self {
+            kind: SnapshotErrorKind::AllocationFailed,
+        }
+    }
+
+    const fn encoding_failed() -> Self {
+        Self {
+            kind: SnapshotErrorKind::EncodingFailed,
+        }
+    }
+
+    /// Returns the stable category of this error.
+    #[must_use]
+    pub const fn kind(self) -> SnapshotErrorKind {
+        self.kind
+    }
+}
+
+impl std::fmt::Display for SnapshotError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            SnapshotErrorKind::Unavailable => formatter.write_str("allocator telemetry is unavailable"),
+            SnapshotErrorKind::SizingFailed => formatter.write_str("the telemetry snapshot length could not be calculated"),
+            SnapshotErrorKind::AllocationFailed => formatter.write_str("the telemetry snapshot mapping could not be allocated"),
+            SnapshotErrorKind::EncodingFailed => formatter.write_str("the telemetry snapshot could not be encoded"),
+        }
+    }
+}
+
+impl std::fmt::Debug for SnapshotError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "SnapshotError({self})")
+    }
+}
+
+impl std::error::Error for SnapshotError {}
+
 impl Stats {
     #[must_use]
     pub const fn memory(&self) -> MemoryStats {
         MemoryStats {
             live_requested_bytes: Estimate::exact(self.live_bytes),
             live_usable_bytes: Estimate::bounded(self.live_bytes, self.live_bytes, self.mapped_bytes),
-            committed_bytes: self.mapped_bytes,
+            mapped_bytes: self.mapped_bytes,
             peak_live_bytes: self.peak_live_bytes,
         }
     }
@@ -206,7 +277,7 @@ impl Stats {
     #[must_use]
     pub const fn reclamation(&self) -> ReclamationStats {
         ReclamationStats {
-            committed_bytes: self.mapped_bytes,
+            mapped_bytes: self.mapped_bytes,
             mappings: self.os_mappings,
             unmappings: self.os_unmappings,
         }
@@ -238,8 +309,16 @@ impl MemoryStats {
     }
 
     #[must_use]
+    pub const fn mapped_bytes(&self) -> usize {
+        self.mapped_bytes
+    }
+
+    /// Returns mapped bytes.
+    ///
+    /// This compatibility alias predates the more accurate [`MemoryStats::mapped_bytes`] name.
+    #[must_use]
     pub const fn committed_bytes(&self) -> usize {
-        self.committed_bytes
+        self.mapped_bytes
     }
 
     #[must_use]
@@ -272,8 +351,17 @@ impl OperationStats {
 
 impl ReclamationStats {
     #[must_use]
+    pub const fn mapped_bytes(&self) -> usize {
+        self.mapped_bytes
+    }
+
+    /// Returns mapped bytes.
+    ///
+    /// This compatibility alias predates the more accurate
+    /// [`ReclamationStats::mapped_bytes`] name.
+    #[must_use]
     pub const fn committed_bytes(&self) -> usize {
-        self.committed_bytes
+        self.mapped_bytes
     }
 
     #[must_use]
@@ -454,7 +542,22 @@ impl SessionReport {
 }
 
 /// Maximum number of instruction pointers captured for one allocation.
-const MAX_TRACKED_STACK_FRAMES: usize = 24;
+pub(crate) const MAX_TRACKED_STACK_FRAMES: usize = 24;
+
+pub(crate) const fn validate_config<C: Config>() {
+    assert!(
+        C::CALLER_EVENT_CAPACITY != 0 && C::CALLER_EVENT_CAPACITY.is_power_of_two(),
+        "caller event capacity must be a nonzero power of two"
+    );
+    assert!(
+        C::CALLER_ALLOCATION_STACK_FRAMES <= MAX_TRACKED_STACK_FRAMES,
+        "caller allocation stack depth cannot exceed 24"
+    );
+    assert!(
+        C::CALLER_DEALLOCATION_STACK_FRAMES <= MAX_TRACKED_STACK_FRAMES,
+        "caller deallocation stack depth cannot exceed 24"
+    );
+}
 
 static ACTIVE_SESSION: AtomicUsize = AtomicUsize::new(0);
 static LAST_SESSION: AtomicUsize = AtomicUsize::new(0);
@@ -472,7 +575,6 @@ static PENDING_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 static REMOTE_PUSHES_IN_PROGRESS: AtomicUsize = AtomicUsize::new(0);
 static DRAINED_REMOTE_BLOCKS: AtomicUsize = AtomicUsize::new(0);
 const HISTOGRAM_BUCKETS: usize = usize::BITS as usize + 1;
-const REFRESH_INTERVAL: usize = 64;
 static NEXT_THREAD_LOG_ID: AtomicUsize = AtomicUsize::new(1);
 static REGISTRY: OnceLock<Mutex<Vec<Arc<TrackingState>>>> = OnceLock::new();
 static AGGREGATE_REGISTRY: AtomicPtr<AggregateShard> = AtomicPtr::new(ptr::null_mut());
@@ -480,6 +582,8 @@ static FALLBACK_AGGREGATE_REGISTERED: AtomicBool = AtomicBool::new(false);
 static FALLBACK_AGGREGATE_SHARD: AggregateShard = AggregateShard::new(true);
 static THREAD_NAMES: OnceLock<Mutex<Vec<ThreadName>>> = OnceLock::new();
 static CONTROL: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 thread_local! {
     static TELEMETRY_SUPPRESSION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static AGGREGATE_SHARD: Cell<*const AggregateShard> = const { Cell::new(ptr::null()) };
@@ -617,31 +721,46 @@ fn aggregate_snapshot() -> Option<AggregateSnapshot> {
     Some(snapshot)
 }
 
-/// Globally enables or disables caller tracking.
+/// Globally enables or disables caller tracking for the process.
 ///
 /// Caller tracking has no effect unless the global allocator's [`crate::config::Config`]
-/// sets `TRACK_CALLERS` to `true`. Enabling after a disable starts a new session.
+/// sets `TRACK_CALLERS` to `true`. The toggle affects every thread, not only the
+/// caller. Enabling after a disable starts a new session; the previously
+/// completed session remains available to [`snapshot`] until another session
+/// starts. Threads observe a toggle at their next allocation, while an
+/// allocation racing the toggle may belong to either adjacent session.
 pub fn track_callers(enabled: bool) {
     let _control = lock_control();
-    if enabled {
-        if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
-            return;
-        }
-        with_telemetry_suppressed(|| {
+    with_telemetry_suppressed(|| {
+        if enabled {
+            if ACTIVE_SESSION.load(Ordering::Acquire) != 0 {
+                return;
+            }
             let _ = registry();
             let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
+            lock_registry().clear();
             LAST_SESSION.store(session, Ordering::Release);
             ACTIVE_SESSION.store(session, Ordering::Release);
-        });
-    } else {
-        ACTIVE_SESSION.store(0, Ordering::Release);
-    }
-    crate::allocator::invalidate_tracking_cache();
+        } else {
+            ACTIVE_SESSION.store(0, Ordering::Release);
+        }
+        crate::allocator::invalidate_tracking_cache();
+    });
 }
 
 /// Captures process statistics, allocator structure, and retained caller events.
 #[must_use]
 pub fn snapshot() -> Option<Snapshot> {
+    try_snapshot().ok()
+}
+
+/// Captures process statistics, allocator structure, and retained caller events.
+///
+/// # Errors
+///
+/// Returns a typed error when telemetry is unavailable or snapshot allocation,
+/// sizing, or encoding fails.
+pub fn try_snapshot() -> Result<Snapshot, SnapshotError> {
     with_telemetry_suppressed(|| {
         let started_at = Instant::now();
         let aggregates_before = aggregate_snapshot();
@@ -654,7 +773,7 @@ pub fn snapshot() -> Option<Snapshot> {
             _ => Vec::new(),
         };
         let callers = caller_snapshot();
-        let stats = snapshot_stats(stats, callers.is_some())?;
+        let stats = snapshot_stats(stats, callers.is_some()).ok_or(SnapshotError::unavailable())?;
         let mut encoded = EncodedSnapshot::new(producer_version());
         encoded.stats = encode_stats(stats);
         encoded.size_classes = size_classes.iter().map(encode_size_class).collect();
@@ -666,12 +785,11 @@ pub fn snapshot() -> Option<Snapshot> {
         encoded.addresses = callers.as_ref().map(resolve_addresses).unwrap_or_default();
         encoded.metadata.capture_duration_nanos = u64::try_from(started_at.elapsed().as_nanos()).unwrap_or(u64::MAX);
 
-        encode_snapshot_with(
-            &encoded,
-            |snapshot| rallocator_telemetry::encoded_len(snapshot).ok(),
-            crate::hal::map,
-            |snapshot, bytes| rallocator_telemetry::encode(snapshot, bytes).is_ok(),
-        )
+        let len = rallocator_telemetry::encoded_len(&encoded).map_err(|_error| SnapshotError::sizing_failed())?;
+        let address = NonNull::new(crate::hal::map(len)).ok_or(SnapshotError::allocation_failed())?;
+        let mut mapping = MappedBytes { address, len };
+        rallocator_telemetry::encode(&encoded, mapping.as_mut_slice()).map_err(|_error| SnapshotError::encoding_failed())?;
+        Ok(Snapshot { mapping })
     })
 }
 
@@ -683,6 +801,7 @@ fn snapshot_stats(stats: Option<Stats>, has_callers: bool) -> Option<Stats> {
     }
 }
 
+#[cfg(test)]
 fn encode_snapshot_with(
     encoded: &EncodedSnapshot,
     encoded_len: fn(&EncodedSnapshot) -> Option<usize>,
@@ -930,16 +1049,16 @@ fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
     addresses
         .into_iter()
         .map(|address| {
-            #[cfg_attr(miri, allow(unused_mut))]
-            let mut lookup = EncodedAddressLookup::from_fields(EncodedAddressLookupFields {
+            let lookup = EncodedAddressLookup::from_fields(EncodedAddressLookupFields {
                 address: address as u64,
                 symbol: None,
                 filename: None,
                 line: None,
                 column: None,
             });
-            #[cfg(not(miri))]
+            #[cfg(all(not(miri), feature = "caller-symbolization"))]
             {
+                let mut lookup = lookup;
                 backtrace::resolve(address as *mut c_void, |symbol| {
                     merge_address_lookup(
                         &mut lookup,
@@ -949,13 +1068,17 @@ fn resolve_addresses(callers: &CallerSnapshot) -> Vec<EncodedAddressLookup> {
                         symbol.colno(),
                     );
                 });
+                lookup
             }
-            lookup
+            #[cfg(any(miri, not(feature = "caller-symbolization")))]
+            {
+                lookup
+            }
         })
         .collect()
 }
 
-#[cfg_attr(miri, allow(dead_code))]
+#[cfg(any(test, all(not(miri), feature = "caller-symbolization")))]
 fn merge_address_lookup(
     lookup: &mut EncodedAddressLookup,
     symbol: Option<String>,
@@ -1444,11 +1567,12 @@ pub(crate) struct PendingTracking {
 
 #[inline(always)]
 pub(crate) fn begin_allocation<C: Config>() -> Option<PendingTracking> {
-    if ACTIVE_SESSION.load(Ordering::Relaxed) == 0 {
+    let session = ACTIVE_SESSION.load(Ordering::Acquire);
+    if session == 0 {
         return None;
     }
 
-    let state = tracking_target::<C>()?;
+    let state = tracking_target::<C>(session)?;
     CALLERS_AVAILABLE.store(true, Ordering::Release);
     let state_ref = unsafe { &*state };
     let _internal = TelemetrySuppressionGuard::enter();
@@ -1480,6 +1604,7 @@ impl PendingTracking {
             },
             &self.frames[..self.frame_count],
         );
+        unsafe { Arc::increment_strong_count(self.state) };
         TrackingAllocation {
             state: self.state,
             allocation_id: self.allocation_id,
@@ -1511,6 +1636,7 @@ pub(crate) fn record_deallocation(allocation: TrackingAllocation, address: *mut 
         },
         &frames[..frame_count],
     );
+    unsafe { Arc::decrement_strong_count(allocation.state) };
 }
 
 struct TrackingRecord {
@@ -1541,19 +1667,8 @@ pub(crate) struct TrackingState {
 }
 
 pub(crate) fn create_thread_log<C: Config>(session_id: usize) -> *const TrackingState {
+    let _internal = TelemetrySuppressionGuard::enter();
     let event_capacity = C::CALLER_EVENT_CAPACITY;
-    assert!(
-        event_capacity != 0 && event_capacity.is_power_of_two(),
-        "caller event capacity must be a nonzero power of two"
-    );
-    assert!(
-        C::CALLER_ALLOCATION_STACK_FRAMES <= MAX_TRACKED_STACK_FRAMES,
-        "caller allocation stack depth cannot exceed 24"
-    );
-    assert!(
-        C::CALLER_DEALLOCATION_STACK_FRAMES <= MAX_TRACKED_STACK_FRAMES,
-        "caller deallocation stack depth cannot exceed 24"
-    );
     let state = Arc::new(TrackingState {
         session_id,
         thread_log_id: NEXT_THREAD_LOG_ID.fetch_add(1, Ordering::Relaxed),
@@ -1572,9 +1687,16 @@ pub(crate) fn create_thread_log<C: Config>(session_id: usize) -> *const Tracking
         write_index: AtomicUsize::new(0),
         next_allocation_id: AtomicUsize::new(1),
     });
-    let pointer = Arc::as_ptr(&state);
+    let pointer = Arc::into_raw(Arc::clone(&state));
     lock_registry().push(state);
     pointer
+}
+
+pub(crate) unsafe fn release_thread_log(state: *const TrackingState) {
+    if !state.is_null() {
+        let _internal = TelemetrySuppressionGuard::enter();
+        drop(unsafe { Arc::from_raw(state) });
+    }
 }
 
 pub(crate) fn register_thread_identity(thread_id: usize) {
@@ -1592,12 +1714,9 @@ pub(crate) fn register_thread_identity(thread_id: usize) {
     });
 }
 
+#[cfg(test)]
 pub(crate) fn active_session() -> usize {
     ACTIVE_SESSION.load(Ordering::Acquire)
-}
-
-pub(crate) fn refresh_interval() -> usize {
-    REFRESH_INTERVAL
 }
 
 impl TrackingState {
@@ -1877,13 +1996,15 @@ fn stack_hash(frames: &[usize]) -> u64 {
 
 struct TelemetrySuppressionGuard {
     previous: bool,
+    depth_entered: bool,
 }
 
 impl TelemetrySuppressionGuard {
     fn enter() -> Self {
-        TELEMETRY_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        let depth_entered = TELEMETRY_SUPPRESSION_DEPTH.try_with(|depth| depth.set(depth.get() + 1)).is_ok();
         Self {
             previous: enter_tracking_internal(),
+            depth_entered,
         }
     }
 }
@@ -1891,12 +2012,19 @@ impl TelemetrySuppressionGuard {
 impl Drop for TelemetrySuppressionGuard {
     fn drop(&mut self) {
         restore_tracking_internal(self.previous);
-        TELEMETRY_SUPPRESSION_DEPTH.with(|depth| depth.set(depth.get() - 1));
+        if self.depth_entered {
+            restore_suppression_depth();
+        }
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn restore_suppression_depth() {
+    let _ = TELEMETRY_SUPPRESSION_DEPTH.try_with(|depth| depth.set(depth.get() - 1));
+}
+
 fn telemetry_suppressed() -> bool {
-    TELEMETRY_SUPPRESSION_DEPTH.with(|depth| depth.get() != 0)
+    TELEMETRY_SUPPRESSION_DEPTH.try_with(|depth| depth.get() != 0).unwrap_or(true)
 }
 
 fn registry() -> &'static Mutex<Vec<Arc<TrackingState>>> {
@@ -1938,8 +2066,14 @@ mod tests {
         caller_allocation_stack_frames: 2,
         caller_deallocation_stack_frames: 2,
     });
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    crate::config!(ZeroCapacityConfig { caller_event_capacity: 0 });
+    crate::config!(NonPowerOfTwoCapacityConfig { caller_event_capacity: 3 });
+    crate::config!(ExcessiveAllocationStackConfig {
+        caller_allocation_stack_frames: MAX_TRACKED_STACK_FRAMES + 1,
+    });
+    crate::config!(ExcessiveDeallocationStackConfig {
+        caller_deallocation_stack_frames: MAX_TRACKED_STACK_FRAMES + 1,
+    });
 
     fn sample_stats() -> Stats {
         Stats {
@@ -1999,6 +2133,7 @@ mod tests {
         let memory = expected.memory();
         assert_eq!(memory.live_requested_bytes(), Estimate::exact(60));
         assert_eq!(memory.live_usable_bytes(), Estimate::bounded(60, 60, 256));
+        assert_eq!(memory.mapped_bytes(), 256);
         assert_eq!(memory.committed_bytes(), 256);
         assert_eq!(memory.peak_live_bytes(), 80);
 
@@ -2009,6 +2144,7 @@ mod tests {
         assert_eq!(operations.deallocated_bytes(), 41);
 
         let reclamation = expected.reclamation();
+        assert_eq!(reclamation.mapped_bytes(), 256);
         assert_eq!(reclamation.committed_bytes(), 256);
         assert_eq!(reclamation.mappings(), 7);
         assert_eq!(reclamation.unmappings(), 3);
@@ -2017,6 +2153,34 @@ mod tests {
         assert_eq!(remote.frees(), 4);
         assert_eq!(remote.pending_blocks(), Estimate::bounded(3, 1, 3));
         assert_eq!(remote.drained_blocks(), 1);
+
+        let errors = [
+            (
+                SnapshotError::unavailable(),
+                SnapshotErrorKind::Unavailable,
+                "allocator telemetry is unavailable",
+            ),
+            (
+                SnapshotError::sizing_failed(),
+                SnapshotErrorKind::SizingFailed,
+                "the telemetry snapshot length could not be calculated",
+            ),
+            (
+                SnapshotError::allocation_failed(),
+                SnapshotErrorKind::AllocationFailed,
+                "the telemetry snapshot mapping could not be allocated",
+            ),
+            (
+                SnapshotError::encoding_failed(),
+                SnapshotErrorKind::EncodingFailed,
+                "the telemetry snapshot could not be encoded",
+            ),
+        ];
+        for (error, kind, message) in errors {
+            assert_eq!(error.kind(), kind);
+            assert_eq!(error.to_string(), message);
+            assert_eq!(format!("{error:?}"), format!("SnapshotError({message})"));
+        }
 
         let delta = StatsDelta::between(sample_stats(), Stats::default());
         assert_eq!(delta.allocated_bytes(), 0);
@@ -2041,6 +2205,20 @@ mod tests {
         assert!(report.elapsed() <= Duration::from_secs(1));
         assert_eq!(report.initial(), report.final_stats());
         assert_eq!(report.delta(), &StatsDelta::between(*report.initial(), *report.final_stats()));
+    }
+
+    #[test]
+    fn caller_tracking_configuration_rejects_invalid_shapes() {
+        std::hint::black_box((
+            ZeroCapacityConfig,
+            NonPowerOfTwoCapacityConfig,
+            ExcessiveAllocationStackConfig,
+            ExcessiveDeallocationStackConfig,
+        ));
+        assert!(std::panic::catch_unwind(validate_config::<ZeroCapacityConfig>).is_err());
+        assert!(std::panic::catch_unwind(validate_config::<NonPowerOfTwoCapacityConfig>).is_err());
+        assert!(std::panic::catch_unwind(validate_config::<ExcessiveAllocationStackConfig>).is_err());
+        assert!(std::panic::catch_unwind(validate_config::<ExcessiveDeallocationStackConfig>).is_err());
     }
 
     #[test]
@@ -2211,15 +2389,17 @@ mod tests {
     fn tracking_ring_and_stack_table_handle_reuse_and_contention() {
         crate::initialize();
         let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
-        assert!(begin_allocation::<TestCallerConfig>().is_none());
+        {
+            let _control = lock_control();
+            ACTIVE_SESSION.store(0, Ordering::Release);
+            assert!(begin_allocation::<TestCallerConfig>().is_none());
+        }
         record_deallocation(
             TrackingAllocation::NONE,
             ptr::null_mut(),
             Layout::from_size_align(1, 1).unwrap(),
             false,
         );
-        assert_eq!(refresh_interval(), REFRESH_INTERVAL);
-
         let table = Arc::new(StackTable::new(4));
         let first = table.replace(0, &[1, 2]);
         let shared = table.replace(0, &[1, 2]);
@@ -2355,6 +2535,8 @@ mod tests {
         let callers = caller_snapshot().unwrap();
         assert_eq!(callers.events.len(), 2);
         CALLERS_AVAILABLE.store(false, Ordering::Release);
+        lock_registry().clear();
+        unsafe { release_thread_log(registered) };
     }
 
     #[test]

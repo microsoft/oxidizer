@@ -56,6 +56,10 @@ impl Options {
     }
 
     /// Sets the locality segment size.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `bytes` is a power of two from 64 KiB through 1 GiB.
     #[must_use]
     pub const fn with_locality_segment_bytes(mut self, bytes: usize) -> Self {
         assert!(
@@ -67,6 +71,10 @@ impl Options {
     }
 
     /// Sets the largest power-of-two medium span retained in the local cache.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `bytes` is zero or a power of two from 64 KiB through 8 MiB.
     #[must_use]
     pub const fn with_medium_cache_max_bytes(mut self, bytes: usize) -> Self {
         assert!(
@@ -90,12 +98,17 @@ impl Options {
     }
 
     #[doc(hidden)]
+    /// Creates provider-facing options from validated primitive values.
+    ///
+    /// # Panics
+    ///
+    /// Panics when either value violates the corresponding public builder's
+    /// contract.
     #[must_use]
     pub const fn from_values(locality_segment_bytes: usize, medium_cache_max_bytes: usize) -> Self {
-        Self {
-            locality_segment_bytes,
-            medium_cache_max_bytes,
-        }
+        Self::new()
+            .with_locality_segment_bytes(locality_segment_bytes)
+            .with_medium_cache_max_bytes(medium_cache_max_bytes)
     }
 }
 
@@ -207,5 +220,20 @@ impl Usage {
             slab_count,
             slice_count,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_constructor_enforces_public_option_invariants() {
+        let options = Options::from_values(MEDIUM_SLICE_BYTES, 0);
+        assert_eq!(options.locality_segment_bytes(), MEDIUM_SLICE_BYTES);
+        assert_eq!(options.medium_cache_max_bytes(), 0);
+
+        std::panic::catch_unwind(|| Options::from_values(MEDIUM_SLICE_BYTES - 1, 0)).unwrap_err();
+        std::panic::catch_unwind(|| Options::from_values(MEDIUM_SLICE_BYTES, 1)).unwrap_err();
     }
 }

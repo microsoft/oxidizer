@@ -57,10 +57,13 @@
     test,
     expect(
         clippy::clone_on_ref_ptr,
-        clippy::iter_with_drain,
         clippy::unnecessary_wraps,
         reason = "Tests intentionally materialize ownership and mirror fallible callback signatures"
     )
+)]
+#![cfg_attr(
+    all(test, feature = "tuning-telemetry"),
+    expect(clippy::iter_with_drain, reason = "The test explicitly drains before reverse-order deallocation")
 )]
 
 //! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].
@@ -131,6 +134,10 @@
 //! Aggregate counters remain active for the process lifetime. Caller tracking
 //! can be enabled only around the interval of interest to limit its overhead;
 //! snapshots include allocator topology, counters, and retained caller events.
+//! The default `caller-symbolization` feature resolves captured instruction
+//! pointers through the optional `backtrace` dependency. Disabling default
+//! features retains caller tracking and raw addresses without in-process symbol
+//! resolution.
 //!
 //! # Internals
 //!

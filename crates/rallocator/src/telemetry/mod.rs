@@ -5,7 +5,7 @@
 
 mod core;
 pub(crate) use core::*;
-pub use core::{snapshot, stats, track_callers};
+pub use core::{SnapshotError, SnapshotErrorKind, snapshot, stats, track_callers, try_snapshot};
 
 pub mod snapshot;
 pub mod stats;

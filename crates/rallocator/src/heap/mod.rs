@@ -43,6 +43,17 @@ pub(crate) struct BumpHeapPtr(NonNull<BumpState>);
 #[derive(Clone, Copy)]
 pub(crate) struct RemoteHeapPtr(NonNull<RemoteHeapState>);
 
+enum SupportedKind {
+    General(common_general::Options),
+    Bump(common_bump::Options),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum SupportedCreationPolicy {
+    Fresh,
+    ThreadPool,
+}
+
 macro_rules! native_heap_pointer {
     ($name:ident, $target:ty) => {
         impl $name {
@@ -94,23 +105,25 @@ fn create_thread_heap() -> Option<RawHeap> {
 
 fn create_heap(options: Options) -> Result<RawHeap, CreationError> {
     let domain = options.domain().map_or_else(crate::domain::default_state, crate::domain::state);
-    let creation_policy = options.creation_policy();
-    let target = match options.kind() {
-        Kind::General(options) => {
-            if creation_policy != CreationPolicy::Fresh {
+    let creation_policy = supported_creation_policy(options.creation_policy())?;
+    let target = match supported_kind(options.kind())? {
+        SupportedKind::General(options) => {
+            if creation_policy != SupportedCreationPolicy::Fresh {
                 return Err(CreationError::CreationFailed);
             }
             HeapTarget::General(GeneralHeapPtr::new(
                 new_general(options, domain).ok_or(CreationError::CreationFailed)?,
             ))
         }
-        Kind::Bump(options) => {
+        SupportedKind::Bump(options) => {
             let state = match creation_policy {
-                CreationPolicy::Fresh => create_bump_state(options, domain),
-                CreationPolicy::ThreadPool => crate::allocator::take_pooled_bump(domain).or_else(|| create_bump_state(options, domain)),
+                SupportedCreationPolicy::Fresh => create_bump_state(options, domain),
+                SupportedCreationPolicy::ThreadPool => {
+                    crate::allocator::take_pooled_bump(domain).or_else(|| create_bump_state(options, domain))
+                }
             }
             .ok_or(CreationError::CreationFailed)?;
-            if creation_policy == CreationPolicy::ThreadPool && !ensure_bump_fallback_heap(state) {
+            if creation_policy == SupportedCreationPolicy::ThreadPool && !ensure_bump_fallback_heap(state) {
                 crate::allocator::return_pooled_bump(state);
                 return Err(CreationError::CreationFailed);
             }
@@ -119,6 +132,24 @@ fn create_heap(options: Options) -> Result<RawHeap, CreationError> {
         }
     };
     Ok(unsafe { RawHeap::new(raw_hint(target), ClaimPolicy::Exclusive) })
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn supported_kind(kind: Kind) -> Result<SupportedKind, CreationError> {
+    match kind {
+        Kind::General(options) => Ok(SupportedKind::General(options)),
+        Kind::Bump(options) => Ok(SupportedKind::Bump(options)),
+        _ => Err(CreationError::CreationFailed),
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn supported_creation_policy(policy: CreationPolicy) -> Result<SupportedCreationPolicy, CreationError> {
+    match policy {
+        CreationPolicy::Fresh => Ok(SupportedCreationPolicy::Fresh),
+        CreationPolicy::ThreadPool => Ok(SupportedCreationPolicy::ThreadPool),
+        _ => Err(CreationError::CreationFailed),
+    }
 }
 
 fn new_general(options: common_general::Options, domain: *mut crate::allocator::DomainState) -> Option<*mut ReusableHeapState> {

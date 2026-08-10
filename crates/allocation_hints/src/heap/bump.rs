@@ -50,6 +50,10 @@ impl Options {
     }
 
     /// Sets the largest allocation eligible for bump allocation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bytes` is zero or exceeds 32 KiB.
     #[must_use]
     pub const fn with_max_allocation_bytes(mut self, bytes: usize) -> Self {
         assert!(
@@ -61,6 +65,10 @@ impl Options {
     }
 
     /// Sets the largest alignment eligible for bump allocation.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `alignment` is a nonzero power of two through 32 KiB.
     #[must_use]
     pub const fn with_max_alignment(mut self, alignment: usize) -> Self {
         assert!(
@@ -72,6 +80,10 @@ impl Options {
     }
 
     /// Sets a fixed number of chunks retained when backing state returns to a pool.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `chunks` is zero.
     #[must_use]
     pub const fn with_retained_chunks(mut self, chunks: usize) -> Self {
         assert!(chunks != 0, "a bump heap must retain at least its root chunk");
@@ -81,6 +93,10 @@ impl Options {
     }
 
     /// Allows adaptive retention to grow through the given chunk count.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `chunks` is below the configured retained minimum.
     #[must_use]
     pub const fn with_max_retained_chunks(mut self, chunks: usize) -> Self {
         assert!(

@@ -15,7 +15,7 @@ use allocation_hints::heap::{Usage as HeapUsage, UsageKind as HeapUsageKind};
 
 use crate::config::{Config, Standard};
 use crate::hal;
-use crate::hal::{peek_free_requested, read_free_next, read_free_requested, write_free_next, write_free_requested};
+use crate::hal::{peek_free_requested, read_free_next, read_free_requested, release_free_metadata, write_free_next, write_free_requested};
 use crate::heap::bump::{self, BumpState};
 use crate::heap::{HeapTarget, target_from_hint};
 use crate::telemetry::{self as tracking, HeapKind as TrackingHeapKind, PendingTracking, TrackingAllocation, TrackingState};
@@ -135,7 +135,6 @@ struct ThreadState {
     remote_heap: *mut RemoteHeapState,
     tracking_session: usize,
     tracking_log: *const TrackingState,
-    tracking_refresh_countdown: usize,
     tracking_identity_registered: bool,
     in_tracking: bool,
     active_heap: *mut ReusableHeapState,
@@ -486,7 +485,6 @@ impl ThreadState {
             remote_heap: ptr::null_mut(),
             tracking_session: 0,
             tracking_log: ptr::null(),
-            tracking_refresh_countdown: 0,
             tracking_identity_registered: false,
             in_tracking: false,
             active_heap: ptr::null_mut(),
@@ -501,6 +499,8 @@ impl ThreadState {
         debug_assert!(self.active_heap.is_null());
         debug_assert!(self.active_bump.is_null());
         debug_assert!(self.active_remote.is_null());
+        unsafe { tracking::release_thread_log(self.tracking_log) };
+        self.tracking_log = ptr::null();
 
         while self.bump_pool_len != 0 {
             self.bump_pool_len -= 1;
@@ -761,6 +761,7 @@ where
         C::Tunables::PARTIAL_SLAB_SCAN_LIMIT != 0 && valid_size_classes(ConfigSizeClasses::<C>::SIZES),
         "invalid allocator tunables"
     );
+    const VALIDATE_CONFIG: () = tracking::validate_config::<C>();
 
     /// Creates an allocator handle for the process-global allocator state.
     ///
@@ -774,6 +775,7 @@ where
     #[must_use]
     pub const unsafe fn new() -> Self {
         let () = Self::VALIDATE_TUNABLES;
+        let () = Self::VALIDATE_CONFIG;
         Self { config: PhantomData }
     }
 
@@ -1742,31 +1744,23 @@ where
     }
 }
 
-pub(crate) fn tracking_target<C: Config>() -> Option<*const TrackingState> {
+pub(crate) fn tracking_target<C: Config>(session: usize) -> Option<*const TrackingState> {
     let state = unsafe { thread_state() };
     if unsafe { (*state).in_tracking } {
         return None;
     }
 
-    if unsafe { (*state).tracking_refresh_countdown } == 0 {
-        let session = tracking::active_session();
+    if session != unsafe { (*state).tracking_session } {
+        let previous_log = unsafe { (*state).tracking_log };
         unsafe {
-            (*state).tracking_refresh_countdown = tracking::refresh_interval();
+            (*state).tracking_session = session;
+            (*state).tracking_log = ptr::null();
         }
-        if session != unsafe { (*state).tracking_session } {
-            unsafe {
-                (*state).tracking_session = session;
-                (*state).tracking_log = ptr::null();
-            }
-            if session != 0 {
-                let previous = enter_tracking_internal();
-                let _restore = RestoreTrackingInternal(previous);
-                unsafe { (*state).tracking_log = tracking::create_thread_log::<C>(session) };
-            }
-        }
-    } else {
-        unsafe {
-            (*state).tracking_refresh_countdown -= 1;
+        let previous = enter_tracking_internal();
+        let _restore = RestoreTrackingInternal(previous);
+        unsafe { tracking::release_thread_log(previous_log) };
+        if session != 0 {
+            unsafe { (*state).tracking_log = tracking::create_thread_log::<C>(session) };
         }
     }
 
@@ -1901,10 +1895,11 @@ pub(crate) fn telemetry_domain_snapshots() -> Vec<tracking::DomainSnapshot> {
 
 pub(crate) fn invalidate_tracking_cache() {
     let state = unsafe { thread_state() };
+    let log = unsafe { (*state).tracking_log };
     unsafe {
         (*state).tracking_session = usize::MAX;
         (*state).tracking_log = ptr::null();
-        (*state).tracking_refresh_countdown = 0;
+        tracking::release_thread_log(log);
     }
 }
 
@@ -2240,7 +2235,7 @@ unsafe fn prepare_retired_slice(
             remote_frees += 1;
             tracking::record_remote_drain();
             let next = unsafe { read_free_next(block) };
-            unsafe { read_free_requested(block) };
+            unsafe { release_free_metadata(block) };
             block = next;
         }
         unsafe { (*slab).free_count += remote_frees };
@@ -3471,6 +3466,7 @@ unsafe fn drain_remote_blocks<T: Tunables>(slab: *mut SlabHeader, class_index: u
         let next = unsafe { read_free_next(block) };
         tracking::record_remote_drain();
         unsafe { (*slab).requested_bytes -= read_free_requested(block) };
+        unsafe { release_free_metadata(block) };
         unsafe { recycle_local_block::<T>(slab, block, class_index) };
         block = next;
     }
@@ -3573,16 +3569,16 @@ unsafe fn pop_remote_block(class: &RemoteClass) -> *mut u8 {
         #[cfg(test)]
         let comparison = TEST_FAIL_REMOTE_POP_CAS.with(|fail| {
             if fail.replace(false) {
-                Err(class.blocks.load(Ordering::Relaxed))
+                Err(class.blocks.load(Ordering::Acquire))
             } else {
-                class.blocks.compare_exchange_weak(head, next, Ordering::Acquire, Ordering::Relaxed)
+                class.blocks.compare_exchange_weak(head, next, Ordering::Acquire, Ordering::Acquire)
             }
         });
         #[cfg(not(test))]
-        let comparison = class.blocks.compare_exchange_weak(head, next, Ordering::Acquire, Ordering::Relaxed);
+        let comparison = class.blocks.compare_exchange_weak(head, next, Ordering::Acquire, Ordering::Acquire);
         match comparison {
             Ok(_) => {
-                unsafe { read_free_requested(head) };
+                unsafe { release_free_metadata(head) };
                 class.popping.store(false, Ordering::Release);
                 return head;
             }
@@ -4266,9 +4262,10 @@ mod tests {
     #[test]
     fn tracking_target_creates_a_log_for_a_new_session() {
         crate::initialize();
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         tracking::track_callers(true);
         invalidate_tracking_cache();
-        assert!(tracking_target::<Standard>().is_some());
+        assert!(tracking_target::<Standard>(tracking::active_session()).is_some());
         tracking::track_callers(false);
         invalidate_tracking_cache();
     }
@@ -4276,6 +4273,7 @@ mod tests {
     #[test]
     fn caller_tracking_allocates_directly_from_an_active_bump() {
         crate::initialize();
+        let _test = tracking::TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let domain = new_domain();
         let options = allocation_hints::heap::bump::Options::new();
         let bump_state = bump::create_state(options, crate::domain::state(domain)).unwrap();

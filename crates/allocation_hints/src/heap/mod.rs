@@ -8,6 +8,7 @@ pub mod general;
 
 use std::cell::Cell;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +18,7 @@ use crate::domain::Domain;
 
 /// The allocation strategy selected for a [`Heap`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum Kind {
     /// A general-purpose heap.
     General(general::Options),
@@ -26,6 +28,7 @@ pub enum Kind {
 
 /// The backing-state creation policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CreationPolicy {
     /// Create fresh backing state.
     Fresh,
@@ -283,7 +286,12 @@ pub struct Heap {
     not_sync: PhantomData<Cell<()>>,
 }
 
-pub(crate) struct HeapId {
+/// An opaque identity that keeps its heap identity unique while retained.
+///
+/// Clones compare equal and keep the underlying identity alive. A newly created
+/// heap cannot receive the same identity while any `HeapId` for an older heap
+/// remains alive.
+pub struct HeapId {
     control: Arc<HeapControl>,
 }
 
@@ -298,34 +306,64 @@ struct ReleaseClaim<'a>(&'a HeapId);
 
 impl Heap {
     /// Creates a fresh general-purpose heap with standard options.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no backend is installed or heap creation fails.
     #[must_use]
     pub fn new() -> Self {
         Self::with_options(Options::default())
     }
 
     /// Attempts to create a fresh general-purpose heap with standard options.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no backend is installed or heap creation fails.
     pub fn try_new() -> Result<Self, CreationError> {
         Self::try_with_options(Options::default())
     }
 
     /// Creates a fresh bump heap.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no backend is installed or heap creation fails.
     #[must_use]
     pub fn bump(options: bump::Options) -> Self {
         Self::with_options(Options::bump(options))
     }
 
     /// Attempts to create a fresh bump heap.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no backend is installed or heap creation fails.
     pub fn try_bump(options: bump::Options) -> Result<Self, CreationError> {
         Self::try_with_options(Options::bump(options))
     }
 
     /// Creates a general-purpose or bump heap.
+    ///
+    /// # Panics
+    ///
+    /// Panics when [`Heap::try_with_options`] returns an error.
     #[must_use]
     pub fn with_options(options: Options) -> Self {
         Self::try_with_options(options).unwrap_or_else(|error| panic!("{error}"))
     }
 
     /// Attempts to create a general-purpose or bump heap.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no backend is installed or it cannot create the
+    /// requested heap.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the installed backend violates its contract by returning the
+    /// process-global target as a heap.
     pub fn try_with_options(options: Options) -> Result<Self, CreationError> {
         let backend = installed_backend().ok_or(CreationError::BackendUnavailable)?;
         let raw = (backend.create)(options)?;
@@ -334,14 +372,42 @@ impl Heap {
     }
 
     /// Obtains pooled bump backing state from the current thread or creates it.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the backend cannot provide the requested heap.
     #[must_use]
     pub fn from_thread_pool(options: bump::Options) -> Self {
         Self::with_options(Options::bump(options).with_thread_pool())
     }
 
     /// Obtains pooled bump backing state belonging to `domain` or creates it.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the backend cannot provide the requested heap.
     pub fn from_thread_pool_in(domain: impl Into<Domain>, options: bump::Options) -> Self {
         Self::with_options(Options::bump(options).with_domain(domain).with_thread_pool())
+    }
+
+    /// Attempts to obtain pooled bump backing state from the current thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no backend is installed or it cannot provide the
+    /// requested heap.
+    pub fn try_from_thread_pool(options: bump::Options) -> Result<Self, CreationError> {
+        Self::try_with_options(Options::bump(options).with_thread_pool())
+    }
+
+    /// Attempts to obtain pooled bump backing state belonging to `domain`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no backend is installed or it cannot provide the
+    /// requested heap.
+    pub fn try_from_thread_pool_in(domain: impl Into<Domain>, options: bump::Options) -> Result<Self, CreationError> {
+        Self::try_with_options(Options::bump(options).with_domain(domain).with_thread_pool())
     }
 
     /// Wraps a stable allocator-native heap target.
@@ -352,6 +418,11 @@ impl Heap {
     /// destruction callback runs. `claim_policy` must accurately describe
     /// whether simultaneous scoped activation is safe. The backend must satisfy
     /// [`Backend::new`]'s callback invariants.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another backend is registered or `hint` is the process-global
+    /// target.
     #[doc(hidden)]
     #[must_use]
     pub unsafe fn from_raw(hint: RawHint, backend: &'static Backend, claim_policy: ClaimPolicy) -> Self {
@@ -374,7 +445,17 @@ impl Heap {
         }
     }
 
-    /// Returns the stable identity of this heap.
+    /// Returns an opaque stable identity for this heap.
+    #[must_use]
+    pub fn id(&self) -> HeapId {
+        self.id.clone()
+    }
+
+    /// Returns a process-local numeric representation of this heap's identity.
+    ///
+    /// The value remains collision-free while this heap or any [`HeapId`]
+    /// returned by [`Heap::id`] remains alive. Prefer `id` when retaining or
+    /// comparing identities.
     #[must_use]
     pub fn identity(&self) -> usize {
         self.id.identity()
@@ -466,6 +547,11 @@ impl Heap {
 ///
 /// Returns `None` when no supporting allocator backend is installed or the
 /// backend cannot create the required process-retained queue metadata.
+///
+/// # Panics
+///
+/// Panics if the installed backend violates its contract by returning the
+/// process-global target as a thread heap.
 #[must_use]
 pub fn thread_heap() -> Option<Heap> {
     let backend = installed_backend()?;
@@ -493,6 +579,26 @@ impl AsRef<Self> for Heap {
 impl fmt::Debug for Heap {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_struct("Heap").field("identity", &self.id.identity()).finish()
+    }
+}
+
+impl PartialEq for HeapId {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.control, &other.control)
+    }
+}
+
+impl Eq for HeapId {}
+
+impl Hash for HeapId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.identity().hash(state);
+    }
+}
+
+impl fmt::Debug for HeapId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("HeapId").field(&self.identity()).finish()
     }
 }
 

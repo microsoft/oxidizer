@@ -144,9 +144,11 @@ impl Backend {
     ///
     /// All callbacks must agree on native target representations and lifetimes.
     /// A successful `create_domain` callback and every `default_domain` callback
-    /// must return non-null, process-retained targets, and `default_domain` must
-    /// always return the same target. A successful `thread_heap` callback must
-    /// return a process-retained target associated with the calling thread.
+    /// must return non-null, process-retained targets. Each live target returned
+    /// by `create_domain` must be distinct from every other live domain target,
+    /// including the target returned by `default_domain`, and `default_domain`
+    /// must always return the same target. A successful `thread_heap` callback
+    /// must return a process-retained target associated with the calling thread.
     /// Thread contexts must remain valid for their thread's lifetime. Callbacks
     /// must not unwind or reenter this crate.
     /// Activation callbacks run only on the thread owning their thread context;
@@ -190,6 +192,10 @@ impl Backend {
 ///
 /// The backend must satisfy the invariants of [`Backend::new`] for every target
 /// it creates, and the process must not use a different allocation backend.
+///
+/// # Panics
+///
+/// Panics if a different backend was already registered.
 #[doc(hidden)]
 pub unsafe fn register(backend: &'static Backend) {
     if let Some(current) = BACKEND.get() {

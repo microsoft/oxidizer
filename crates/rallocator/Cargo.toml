@@ -21,6 +21,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 libc.workspace = true
 
 [features]
+default = ["caller-symbolization"]
+caller-symbolization = ["dep:backtrace"]
 tuning-telemetry = []
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -32,7 +34,7 @@ windows-sys = { workspace = true, features = [
 
 [dependencies]
 allocation_hints.workspace = true
-backtrace = { workspace = true, features = ["std"] }
+backtrace = { workspace = true, features = ["std"], optional = true }
 rallocator_telemetry.workspace = true
 
 [dev-dependencies]

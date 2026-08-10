@@ -444,10 +444,10 @@ pub(crate) unsafe fn take_fallback_heap(state: *mut BumpState) -> *mut ReusableH
 }
 
 unsafe fn advance_chunk(state: *mut BumpState) -> bool {
-    unsafe { release_unused_references(state) };
     let second_segment = unsafe { (*state).current.cast::<u8>().add(BUMP_SEGMENT_SIZE) };
     if unsafe { (*state).end } == second_segment {
         unsafe {
+            release_unused_references(state);
             (*state).cursor = second_segment_start((*state).current);
             (*state).end = (*state).current.cast::<u8>().add(BUMP_CHUNK_SIZE);
             reserve_segment_references(state);
@@ -484,6 +484,7 @@ unsafe fn advance_chunk(state: *mut BumpState) -> bool {
     };
 
     unsafe {
+        release_unused_references(state);
         (*state).current = chunk;
         (*state).cursor = chunk_start(chunk);
         (*state).end = chunk.cast::<u8>().add(BUMP_SEGMENT_SIZE);
@@ -919,12 +920,36 @@ mod tests {
         inject_failure(&FAIL_NEXT_FALLBACK_ALLOCATION);
         assert!(create_state(Options::new(), domain).is_none());
 
-        let state = state(Options::new());
-        let fallback = unsafe { take_fallback_heap(state) };
+        let fallback_state = state(Options::new());
+        let fallback = unsafe { take_fallback_heap(fallback_state) };
         inject_failure(&FAIL_NEXT_FALLBACK_ALLOCATION);
-        assert!(!ensure_fallback_heap(state));
-        unsafe { (*state).fallback_heap = fallback };
-        unsafe { release_handle(state) };
+        assert!(!ensure_fallback_heap(fallback_state));
+        unsafe { (*fallback_state).fallback_heap = fallback };
+        unsafe { release_handle(fallback_state) };
+
+        let credit_state = state(Options::new());
+        let layout = Layout::from_size_align(BUMP_SEGMENT_SIZE / 2, 16).unwrap();
+        let first = unsafe { allocate(credit_state, layout) };
+        let second = unsafe { allocate(credit_state, layout) };
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+
+        let credits = unsafe { (*credit_state).remaining_reference_credits };
+        let references = unsafe { (*credit_state).references.load(Ordering::Relaxed) };
+        let cursor = unsafe { (*credit_state).cursor };
+        let end = unsafe { (*credit_state).end };
+        inject_failure(&FAIL_NEXT_CHUNK_ALLOCATION);
+        assert!(unsafe { allocate(credit_state, layout) }.is_null());
+        assert_eq!(unsafe { (*credit_state).remaining_reference_credits }, credits);
+        assert_eq!(unsafe { (*credit_state).references.load(Ordering::Relaxed) }, references);
+        assert_eq!(unsafe { (*credit_state).cursor }, cursor);
+        assert_eq!(unsafe { (*credit_state).end }, end);
+
+        unsafe {
+            deallocate(credit_state, first, layout, false);
+            deallocate(credit_state, second, layout, false);
+            release_handle(credit_state);
+        }
     }
 
     #[test]

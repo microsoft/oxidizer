@@ -16,6 +16,7 @@ license.workspace = true
 homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
+links = "allocation_hints_backend"
 
 [dev-dependencies]
 static_assertions.workspace = true

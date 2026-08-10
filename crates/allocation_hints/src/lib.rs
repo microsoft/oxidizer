@@ -5,14 +5,6 @@
     clippy::inline_always,
     reason = "Scoped hint entry and restoration are allocator hot paths intentionally forced inline"
 )]
-#![expect(
-    clippy::missing_errors_doc,
-    reason = "Heap operations return the crate's small documented error type"
-)]
-#![expect(
-    clippy::missing_panics_doc,
-    reason = "Infallible constructors and validated builders panic only on documented contract violations"
-)]
 #![expect(clippy::panic, reason = "Infallible public APIs and invariant checks intentionally panic")]
 #![expect(
     clippy::renamed_function_params,
@@ -97,6 +89,10 @@ pub enum ErrorKind {
     InspectionContended,
     /// Usage information is unavailable from the calling thread.
     UsageUnavailable,
+    /// An exclusive heap is already active on another thread or outer scope.
+    HintActivationContended,
+    /// The nested hint chain already contains the maximum number of distinct exclusive heaps.
+    HintNestingLimit,
 }
 
 impl Error {
@@ -117,6 +113,18 @@ impl Error {
             kind: ErrorKind::UsageUnavailable,
         }
     }
+
+    const fn hint_activation_contended() -> Self {
+        Self {
+            kind: ErrorKind::HintActivationContended,
+        }
+    }
+
+    const fn hint_nesting_limit() -> Self {
+        Self {
+            kind: ErrorKind::HintNestingLimit,
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -124,6 +132,8 @@ impl fmt::Display for Error {
         match self.kind {
             ErrorKind::InspectionContended => formatter.write_str("the heap is active on another thread"),
             ErrorKind::UsageUnavailable => formatter.write_str("thread-heap usage must be queried from its owner thread"),
+            ErrorKind::HintActivationContended => formatter.write_str("a heap cannot be active on multiple threads or outer scopes"),
+            ErrorKind::HintNestingLimit => formatter.write_str("too many nested active heaps"),
         }
     }
 }
@@ -218,15 +228,34 @@ impl fmt::Debug for Hint {
 /// panics. A [`Hint`] or a borrowed [`heap::Heap`] may be passed directly.
 /// At most 16 distinct exclusive heaps may be active in one nested scope chain;
 /// re-entering an already-active heap does not consume another slot.
+///
+/// # Panics
+///
+/// Panics if an exclusive heap is already active on another thread or outer
+/// scope, or if the nesting limit is exceeded. Use [`try_with_hint`] to handle
+/// these conditions without panicking.
 #[inline(always)]
 pub fn with_hint<R>(hint: impl Into<Hint>, operation: impl FnOnce() -> R) -> R {
+    try_with_hint(hint, operation).unwrap_or_else(|error| panic!("{error}"))
+}
+
+/// Tries to run `operation` with an allocation hint active on this thread.
+///
+/// The previous hint is restored even if `operation` panics.
+///
+/// # Errors
+///
+/// Returns an error without invoking `operation` if an exclusive heap is
+/// already active elsewhere or the nested exclusive-heap limit is exhausted.
+#[inline(always)]
+pub fn try_with_hint<R>(hint: impl Into<Hint>, operation: impl FnOnce() -> R) -> Result<R, Error> {
     let hint = hint.into();
-    let snapshot = enter(&hint);
+    let snapshot = enter(&hint)?;
     let _restore = RestoreContext {
         snapshot: Some(snapshot),
         hint,
     };
-    operation()
+    Ok(operation())
 }
 
 struct ContextSnapshot {
@@ -279,7 +308,7 @@ impl Drop for PendingClaim<'_> {
 }
 
 #[inline(always)]
-fn enter(hint: &Hint) -> ContextSnapshot {
+fn enter(hint: &Hint) -> Result<ContextSnapshot, Error> {
     CONTEXT.with(|context| {
         let mut current = context.get();
         let claimed = if let Some(heap) = hint.heap.as_ref() {
@@ -287,8 +316,12 @@ fn enter(hint: &Hint) -> ContextSnapshot {
             if heap.claim_policy() == ClaimPolicy::Shared || current.claimed[..current.claimed_len].contains(&identity) {
                 false
             } else {
-                assert!(current.claimed_len < current.claimed.len(), "too many nested active heaps");
-                assert!(heap.claim(), "a heap cannot be active on multiple threads or scopes");
+                if current.claimed_len == current.claimed.len() {
+                    return Err(Error::hint_nesting_limit());
+                }
+                if !heap.claim() {
+                    return Err(Error::hint_activation_contended());
+                }
                 true
             }
         } else {
@@ -319,7 +352,7 @@ fn enter(hint: &Hint) -> ContextSnapshot {
         }
         context.set(current);
         pending_claim.commit();
-        ContextSnapshot { previous, claimed }
+        Ok(ContextSnapshot { previous, claimed })
     })
 }
 
@@ -353,6 +386,8 @@ impl ThreadContext {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, OnceLock};
@@ -543,6 +578,18 @@ mod tests {
             CreationError::BackendUnavailable.to_string(),
             "no allocation heap backend is installed"
         );
+        assert_eq!(
+            crate::domain::CreationError::BackendUnavailable.to_string(),
+            "no allocation domain backend is installed"
+        );
+        assert_eq!(
+            crate::domain::CreationError::CreationFailed.to_string(),
+            "the allocation backend could not create a domain"
+        );
+        assert_eq!(
+            crate::domain::CreationError::InvalidTarget.to_string(),
+            "the allocation backend returned a null domain target"
+        );
     }
 
     fn heap(kind: usize, claim_policy: ClaimPolicy) -> Heap {
@@ -561,8 +608,20 @@ mod tests {
         unsafe { crate::backend::register(&TEST_BACKEND) };
         let heap = Heap::bump(bump::Options::new());
         let fallible_heap = Heap::try_bump(bump::Options::new()).unwrap();
+        let pooled = Heap::try_from_thread_pool(bump::Options::new()).unwrap();
+        let pooled_in = Heap::try_from_thread_pool_in(Domain::process(), bump::Options::new()).unwrap();
         assert_ne!(heap.identity(), 0);
         assert_ne!(fallible_heap.identity(), 0);
+        assert_ne!(pooled.identity(), 0);
+        assert_ne!(pooled_in.identity(), 0);
+        let id = heap.id();
+        assert_eq!(id, id.clone());
+        assert_eq!(format!("{id:?}"), format!("HeapId({})", heap.identity()));
+        let mut first_hash = DefaultHasher::new();
+        id.hash(&mut first_hash);
+        let mut second_hash = DefaultHasher::new();
+        id.clone().hash(&mut second_hash);
+        assert_eq!(first_hash.finish(), second_hash.finish());
         assert!(matches!(heap.info().kind(), InfoKind::General(_)));
         assert!(heap.usage().unwrap().is_empty());
     }
@@ -581,10 +640,12 @@ mod tests {
         let _test = TEST_LOCK.lock().unwrap();
         unsafe { crate::backend::register(&TEST_BACKEND) };
         let first = Domain::new();
-        let second = Domain::try_new().unwrap();
-        let default = Domain::default();
+        let second = Domain::try_independent().unwrap();
+        let third = Domain::try_new().unwrap();
+        let default = Domain::process();
 
         assert_ne!(first, second);
+        assert_ne!(second, third);
         assert_ne!(first, default);
         assert_eq!(default, Domain::default());
     }
@@ -684,6 +745,14 @@ mod tests {
         let usage_error = heap.try_usage().unwrap_err();
         assert_eq!(usage_error.kind(), ErrorKind::InspectionContended);
         assert_eq!(usage_error.to_string(), "the heap is active on another thread");
+        let mut invoked = false;
+        let activation_error = try_with_hint(&heap, || invoked = true).unwrap_err();
+        assert!(!invoked);
+        assert_eq!(activation_error.kind(), ErrorKind::HintActivationContended);
+        assert_eq!(
+            activation_error.to_string(),
+            "a heap cannot be active on multiple threads or outer scopes"
+        );
         release.wait();
         remote.join().unwrap();
         heap.try_info().unwrap();
@@ -706,8 +775,20 @@ mod tests {
         enter_all(&heaps[..MAX_CLAIMED_HEAPS]);
         assert!(heaps.iter().all(|heap| !heap.is_claimed()));
 
+        fn try_enter_all(heaps: &[Heap]) -> Result<(), Error> {
+            if let Some((heap, remaining)) = heaps.split_first() {
+                try_with_hint(heap, || try_enter_all(remaining))??;
+            }
+            Ok(())
+        }
+
+        assert_eq!(try_enter_all(&[]), Ok(()));
+        let error = try_enter_all(&heaps).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::HintNestingLimit);
+        assert_eq!(error.to_string(), "too many nested active heaps");
+        assert!(heaps.iter().all(|heap| !heap.is_claimed()));
+
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| enter_all(&heaps)));
         assert!(result.is_err());
-        assert!(heaps.iter().all(|heap| !heap.is_claimed()));
     }
 }

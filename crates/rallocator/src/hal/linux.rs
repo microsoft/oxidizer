@@ -20,8 +20,7 @@ pub(crate) fn reserve(size: usize) -> *mut u8 {
     if address.is_null() {
         return address;
     }
-    let advised = unsafe { madvise(address.cast(), size, MADV_HUGEPAGE) };
-    debug_assert_eq!(advised, 0);
+    let _ = unsafe { madvise(address.cast(), size, MADV_HUGEPAGE) };
     address
 }
 
@@ -47,13 +46,13 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
 
 pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
     let released = unsafe { munmap(address.cast(), size) };
-    debug_assert_eq!(released, 0);
+    abort_on_failure(released);
 }
 
 pub(crate) fn monotonic_millis() -> u64 {
     let mut time = timespec { tv_sec: 0, tv_nsec: 0 };
     let result = unsafe { clock_gettime(CLOCK_MONOTONIC, &raw mut time) };
-    debug_assert_eq!(result, 0);
+    abort_on_failure(result);
     (time.tv_sec as u64)
         .saturating_mul(1_000)
         .saturating_add(time.tv_nsec as u64 / 1_000_000)
@@ -99,13 +98,20 @@ fn map_aligned_with_page_size(size: usize, protection: i32, page_size: usize) ->
     let suffix_size = mapping_size - prefix_size - rounded_size;
     if prefix_size != 0 {
         let result = unsafe { munmap(mapping.cast(), prefix_size) };
-        debug_assert_eq!(result, 0);
+        abort_on_failure(result);
     }
 
     let suffix = unsafe { aligned.add(rounded_size) };
     let result = unsafe { munmap(suffix.cast(), suffix_size) };
-    debug_assert_eq!(result, 0);
+    abort_on_failure(result);
     aligned
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn abort_on_failure(result: i32) {
+    if result != 0 {
+        process::abort();
+    }
 }
 
 fn page_size() -> usize {

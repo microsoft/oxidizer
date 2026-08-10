@@ -52,6 +52,7 @@ impl ThreadLog {
 
 /// Kind of recorded allocation event.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum EventKind {
     /// Allocation event.
     #[default]
@@ -62,6 +63,7 @@ pub enum EventKind {
 
 /// Kind of heap that recorded an event.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum HeapKind {
     /// General-purpose heap.
     #[default]

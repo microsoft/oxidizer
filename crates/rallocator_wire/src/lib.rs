@@ -57,14 +57,23 @@ pub struct Error {
     kind: ErrorKind,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ErrorKind {
+/// Stable category of a wire-format error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// The input or output ended before the operation completed.
     UnexpectedEnd,
+    /// The container magic bytes are invalid.
     InvalidMagic,
+    /// The container uses an unsupported wire-format version.
     UnsupportedWireFormat(u16),
+    /// A length cannot be represented by the wire format.
     LengthOverflow,
+    /// The output contains unused trailing bytes.
     TrailingBytes,
+    /// A reserved field contains a nonzero value.
     InvalidReserved,
+    /// A section payload differs from its declared length.
     SectionLengthMismatch,
 }
 
@@ -78,6 +87,12 @@ impl Error {
 
     const fn new(kind: ErrorKind) -> Self {
         Self { kind }
+    }
+
+    /// Returns the stable category of this error.
+    #[must_use]
+    pub const fn kind(self) -> ErrorKind {
+        self.kind
     }
 
     pub(crate) const fn unsupported_wire_format(version: u16) -> Self {
@@ -106,3 +121,25 @@ impl core::fmt::Debug for Error {
 }
 
 impl core::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_kind_exposes_stable_categories() {
+        let cases = [
+            (Error::UNEXPECTED_END, ErrorKind::UnexpectedEnd),
+            (Error::INVALID_MAGIC, ErrorKind::InvalidMagic),
+            (Error::unsupported_wire_format(7), ErrorKind::UnsupportedWireFormat(7)),
+            (Error::LENGTH_OVERFLOW, ErrorKind::LengthOverflow),
+            (Error::TRAILING_BYTES, ErrorKind::TrailingBytes),
+            (Error::INVALID_RESERVED, ErrorKind::InvalidReserved),
+            (Error::SECTION_LENGTH_MISMATCH, ErrorKind::SectionLengthMismatch),
+        ];
+
+        for (error, kind) in cases {
+            assert_eq!(error.kind(), kind);
+        }
+    }
+}

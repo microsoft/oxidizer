@@ -535,20 +535,16 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
                     owners.entry(slice.owner).or_default()[0] += 1;
                 }
             }
-            match slice.kind {
-                SliceKind::Medium => {
-                    medium.push((region, slice));
-                    if slice.owner != 0 {
-                        owners.entry(slice.owner).or_default()[1] += 1;
-                    }
+            if slice.kind == SliceKind::Medium {
+                medium.push((region, slice));
+                if slice.owner != 0 {
+                    owners.entry(slice.owner).or_default()[1] += 1;
                 }
-                SliceKind::Bump => {
-                    *bumps.entry(slice.owner).or_default() += 1;
-                    if slice.owner != 0 {
-                        owners.entry(slice.owner).or_default()[2] += 1;
-                    }
+            } else if slice.kind == SliceKind::Bump {
+                *bumps.entry(slice.owner).or_default() += 1;
+                if slice.owner != 0 {
+                    owners.entry(slice.owner).or_default()[2] += 1;
                 }
-                _ => {}
             }
         }
     }
@@ -844,17 +840,35 @@ struct Hotspot {
     bytes: u64,
 }
 
+#[derive(Clone, Copy)]
+enum SupportedEventKind {
+    Allocated,
+    Deallocated,
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn supported_events(events: &[Event]) -> impl Iterator<Item = (&Event, SupportedEventKind)> {
+    events.iter().filter_map(|event| {
+        let kind = match event.kind {
+            EventKind::Allocated => SupportedEventKind::Allocated,
+            EventKind::Deallocated => SupportedEventKind::Deallocated,
+            _ => return None,
+        };
+        Some((event, kind))
+    })
+}
+
 fn render_hotspots(html: &mut String, callers: &Callers, addresses: &[AddressLookup]) {
     let mut live = HashMap::<(u64, u64), &Event>::new();
     let mut cross_thread = HashMap::<(Vec<u64>, Vec<u64>), Hotspot>::new();
     let mut escaped_bump = HashMap::<(Vec<u64>, Vec<u64>), Hotspot>::new();
     let mut thread_flows = BTreeMap::<(u64, u64), (u64, u64)>::new();
-    for event in &callers.events {
-        match event.kind {
-            EventKind::Allocated => {
+    for (event, kind) in supported_events(&callers.events) {
+        match kind {
+            SupportedEventKind::Allocated => {
                 live.insert((event.thread_log_id, event.allocation_id), event);
             }
-            EventKind::Deallocated => {
+            SupportedEventKind::Deallocated => {
                 let Some(allocation) = live.remove(&(event.thread_log_id, event.allocation_id)) else {
                     continue;
                 };
@@ -1129,9 +1143,9 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
     let mut indices = HashMap::<Arc<[u64]>, usize>::new();
     let mut live = HashMap::<(u64, u64), (usize, u64)>::new();
     let address_lookups = addresses.iter().map(|lookup| (lookup.address, lookup)).collect::<HashMap<_, _>>();
-    for event in &callers.events {
-        match event.kind {
-            EventKind::Allocated => {
+    for (event, kind) in supported_events(&callers.events) {
+        match kind {
+            SupportedEventKind::Allocated => {
                 let index = if let Some(&index) = indices.get(event.call_stack.as_slice()) {
                     index
                 } else {
@@ -1148,7 +1162,7 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
                 totals[index].allocated_bytes += event.size;
                 live.insert((event.thread_log_id, event.allocation_id), (index, event.size));
             }
-            EventKind::Deallocated => {
+            SupportedEventKind::Deallocated => {
                 if let Some((index, _)) = live.remove(&(event.thread_log_id, event.allocation_id)) {
                     totals[index].deallocations += 1;
                 }

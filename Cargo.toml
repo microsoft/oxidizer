@@ -31,6 +31,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 # doc fragments are packaged while binary diagram assets beside them are not.
 include = [
     "/src/**",
+    "/build.rs",
     "/examples/**",
     "/benches/**",
     "/tests/**",

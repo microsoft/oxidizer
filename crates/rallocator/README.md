@@ -81,6 +81,10 @@ Convert the snapshot to HTML with `rallocator_cli snapshot html snapshot.ralloca
 Aggregate counters remain active for the process lifetime. Caller tracking
 can be enabled only around the interval of interest to limit its overhead;
 snapshots include allocator topology, counters, and retained caller events.
+The default `caller-symbolization` feature resolves captured instruction
+pointers through the optional `backtrace` dependency. Disabling default
+features retains caller tracking and raw addresses without in-process symbol
+resolution.
 
 ## Internals
 
@@ -198,7 +202,7 @@ allocations that escaped its lifetime.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG88UsUuNgPCaG3USoxX4G8TEG3G7lsDXIR-jG_lrpwv_oVeVYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG_nqrMyc21GuGxCn1WUpIA7NG_Tp19Vm32c3GzZwhcJvN3fCYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
  [__link0]: https://crates.io/crates/allocation_hints/0.1.0
  [__link1]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
