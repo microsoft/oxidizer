@@ -10,10 +10,6 @@
 
   - improve `#[display]` and `#[error]` diagnostics ([#634](https://github.com/microsoft/oxidizer/pull/634))
 
-- ✨ Features
-
-  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
-
 - 🏗️ Build System
 
   - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))

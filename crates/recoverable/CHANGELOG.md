@@ -11,10 +11,6 @@
   - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
   - Now requires `0.4.0` of `ohno`
 
-- ✨ Features
-
-  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
-
 - 🏗️ Build System
 
   - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
