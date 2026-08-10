@@ -147,8 +147,8 @@
 //! // The derive macro automatically generates:
 //! //
 //! // impl ConfigError {
-//! //     pub(crate) fn new(path: String) -> Self { ... }
-//! //     pub(crate) fn caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//! //     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//! //     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
 //! // }
 //!
 //! let error = ConfigError::new("/etc/config.toml");
@@ -162,18 +162,12 @@
 //! error can be built under the control of the crate that owns it, so adding a field is not a
 //! breaking change for callers.
 //!
-//! To expose a constructor to other crates, write your own and declare it `pub`. A constructor
-//! under any other name coexists with the generated ones; one named `new` or `caused_by` collides
-//! with them (`error[E0592]: duplicate definitions`), so it also needs `#[no_constructors]`.
-//!
 //! **Disabling Automatic Constructors:**
 //!
-//! `#[no_constructors]` disables the generated constructors when you need custom ones. It belongs
-//! to `#[derive(Error)]` and is rejected under `#[ohno::error]`: writing a constructor by hand
-//! means writing the struct literal, which needs the name of the `OhnoCore` field — and
-//! `#[ohno::error]` adds that field itself. Declare the core yourself so your constructor names a
-//! field you can see. A hand-written constructor is reachable outside the defining crate only if
-//! you declare it `pub`, as in the `pub fn new` below:
+//! `#[no_constructors]` disables the generated constructors, leaving the names `new` and
+//! `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+//! requires the `OhnoCore` field to be declared explicitly — and that field is the one such a
+//! constructor has to initialize:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};

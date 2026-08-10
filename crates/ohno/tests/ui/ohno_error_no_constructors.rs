@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `#[ohno::error]` adds the `OhnoCore` field itself, so opting out of the generated constructors
-//! would leave a hand-written constructor naming a field the attribute chose — and renames when the
-//! struct later declares an `ohno_core` of its own.
+//! `#[ohno::error]` adds the `OhnoCore` field itself, and the name of that field is not stable, so
+//! a hand-written constructor cannot initialize it.
 //!
-//! `#[derive(ohno::Error)]` with a declared core is the supported way to write constructors by hand.
+//! `#[derive(ohno::Error)]` with an explicitly declared core is the supported way to write
+//! constructors by hand.
 
 #[ohno::error]
 #[no_constructors]

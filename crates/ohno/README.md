@@ -152,8 +152,8 @@ struct ConfigError {
 // The derive macro automatically generates:
 //
 // impl ConfigError {
-//     pub(crate) fn new(path: String) -> Self { ... }
-//     pub(crate) fn caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
 // }
 
 let error = ConfigError::new("/etc/config.toml");
@@ -167,18 +167,12 @@ of its public API, so a `pub struct` error exported from a library cannot be con
 error can be built under the control of the crate that owns it, so adding a field is not a
 breaking change for callers.
 
-To expose a constructor to other crates, write your own and declare it `pub`. A constructor
-under any other name coexists with the generated ones; one named `new` or `caused_by` collides
-with them (`error[E0592]: duplicate definitions`), so it also needs `#[no_constructors]`.
-
 **Disabling Automatic Constructors:**
 
-`#[no_constructors]` disables the generated constructors when you need custom ones. It belongs
-to `#[derive(Error)]` and is rejected under `#[ohno::error]`: writing a constructor by hand
-means writing the struct literal, which needs the name of the `OhnoCore` field — and
-`#[ohno::error]` adds that field itself. Declare the core yourself so your constructor names a
-field you can see. A hand-written constructor is reachable outside the defining crate only if
-you declare it `pub`, as in the `pub fn new` below:
+`#[no_constructors]` disables the generated constructors, leaving the names `new` and
+`caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+requires the `OhnoCore` field to be declared explicitly — and that field is the one such a
+constructor has to initialize:
 
 ```rust
 use ohno::{Error, OhnoCore};
@@ -346,7 +340,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbos4OfQe6SYYbTkhW9WkmEC8bOv14MQ3nEwgbnbAUuDMQBcZhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbMhu_2yz3rVIbIa8g5Cly-IcbQ_hNX-bPb1kb7VqB4q7Eu6phZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
