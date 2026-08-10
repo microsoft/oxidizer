@@ -43,6 +43,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+trybuild = { workspace = true }
 
 [[example]]
 name = "app_err_automatic_conversion"
