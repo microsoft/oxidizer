@@ -625,16 +625,33 @@ function Get-WorkspacePackages {
     return $packages
 }
 
-# Returns $true when a package's external-type policy allows public API types
-# rooted at the target package. Missing or malformed metadata is treated
-# conservatively: an unknown exposure must not permit a breaking dependency
-# bump to ship as a compatible release.
+# Returns $true unless the package's cargo-check-external-types allowlist is
+# positive evidence that its public API cannot name types rooted at the target
+# package. Anything short of that evidence counts as exposure: an unknown must
+# not permit a breaking dependency bump to ship as a compatible release.
 function Test-PackageExposesTarget {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
         [Parameter(Mandatory = $true)][string]$TargetPackageName
     )
 
+    # `$null` here means the crate declares no allowed_external_types policy at
+    # all. That is deliberately *not* the same as declaring an empty one:
+    # `@()` is a positive claim -- "my public API names nothing foreign" -- so
+    # it skips this branch, matches nothing in the loop below, and correctly
+    # returns $false. Absent metadata makes no claim at all, so it cannot be
+    # read as the stricter of the two. Hence absent => $true, empty => $false.
+    #
+    # Absent is *nearly* proof of non-exposure anyway: CI runs
+    # cargo-check-external-types with an empty allowlist when a crate declares
+    # none, so any foreign type in the public API fails the required
+    # external-type-exposure job.
+    #
+    # It is not proof, because CI validates *merged* code while release
+    # planning analyses the *working tree* (see Invoke-CrateSemverCheck): an
+    # in-progress edit that exposes a dependency's type without adding the
+    # allowlist entry has never been checked by anything. A brand-new crate has
+    # the same gap until its first CI run. Assume exposure.
     if ($null -eq $Dependent.AllowedExternalTypes) {
         return $true
     }
