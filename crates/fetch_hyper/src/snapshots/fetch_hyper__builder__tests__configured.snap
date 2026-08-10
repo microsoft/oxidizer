@@ -23,6 +23,9 @@ fetch_hyper::builder::HyperTransportBuilder<fetch_hyper::testing::FakeConnector,
         http_2: Http2Options {
             initial_max_send_streams: None,
             adaptive_window: false,
+            initial_stream_window_size: Some(
+                1048576,
+            ),
         },
         extra: {},
     },

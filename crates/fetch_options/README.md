@@ -16,7 +16,8 @@
 Configuration options for HTTP client transport behavior.
 
 This crate provides types for configuring various aspects of HTTP connections,
-including connection keep-alive behavior, connection pooling, and HTTP version support.
+including connection keep-alive behavior, connection pooling, HTTP version support,
+HTTP/2 flow control, and socket-level tuning.
 
 ## Example
 

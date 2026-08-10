@@ -7,4 +7,7 @@ Http2Options {
         100,
     ),
     adaptive_window: true,
+    initial_stream_window_size: Some(
+        1048576,
+    ),
 }
