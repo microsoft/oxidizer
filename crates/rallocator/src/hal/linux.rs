@@ -16,7 +16,7 @@ pub(crate) fn map(size: usize) -> *mut u8 {
 }
 
 pub(crate) fn reserve(size: usize) -> *mut u8 {
-    let address = map_aligned(size, PROT_READ | PROT_WRITE);
+    let address = map_aligned(size, PROT_NONE);
     if address.is_null() {
         return address;
     }

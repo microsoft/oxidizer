@@ -68,6 +68,10 @@ thread_local! {
     static TEST_FAIL_REMOTE_POP_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(test)]
     static TEST_FAIL_REMOTE_PUSH_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(test)]
+    static TEST_FAIL_REMOTE_REFILL_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(test)]
+    static TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     // Production region metadata is retained for the process lifetime. Tests that unmap synthetic
     // regions clear this cache before releasing their metadata.
     static LAST_REGION: std::cell::Cell<*mut RegionState> = const { std::cell::Cell::new(ptr::null_mut()) };
@@ -111,6 +115,12 @@ fn fail_next_test_remote_pop_cas() {
 #[cfg(test)]
 fn fail_next_test_remote_push_cas() {
     TEST_FAIL_REMOTE_PUSH_CAS.with(|fail| fail.set(true));
+}
+
+#[cfg(test)]
+fn force_next_test_remote_refill_contention() {
+    TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(true));
+    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(true));
 }
 
 #[repr(C, align(16))]
@@ -835,13 +845,26 @@ where
                 record_class_event(class_index, ClassEventKind::Allocation);
                 return block;
             }
-            if class
-                .refilling
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_err()
-            {
+            #[cfg(test)]
+            let refill = TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| {
+                if fail.replace(false) {
+                    class.refilling.store(true, Ordering::Relaxed);
+                    Err(true)
+                } else {
+                    class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                }
+            });
+            #[cfg(not(test))]
+            let refill = class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
+            if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
+                    #[cfg(test)]
+                    TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
+                        if clear.replace(false) {
+                            class.refilling.store(false, Ordering::Release);
+                        }
+                    });
                 }
                 continue;
             }
@@ -4123,6 +4146,15 @@ mod tests {
                 .pop_or_refill_remote(ptr::from_mut(remote.as_mut()), 0, false, 1)
                 .is_null()
         );
+        assert_eq!(remote.usage.operations.load(Ordering::Relaxed), 0);
+
+        force_next_test_remote_refill_contention();
+        assert!(
+            !allocator
+                .pop_or_refill_remote(ptr::from_mut(remote.as_mut()), 0, false, 1)
+                .is_null()
+        );
+        assert!(!remote.classes[0].refilling.load(Ordering::Relaxed));
         assert_eq!(remote.usage.operations.load(Ordering::Relaxed), 0);
 
         hal::fail_next_align_offset();
