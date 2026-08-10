@@ -18,6 +18,7 @@
 use std::cell::Cell;
 use std::future::poll_fn;
 use std::pin::Pin;
+use std::process::Command;
 use std::rc::Rc;
 use std::task::Waker;
 use std::time::Duration;
@@ -26,7 +27,27 @@ use std::{env, task, thread};
 use arty_executor::{CycleOutcome, Executor};
 use tracing::info;
 
+const EXPECTED_FAILURE_CHILD_ENV: &str = "ARTY_EXECUTOR_EXPECTED_FAILURE_CHILD";
+
 fn main() {
+    if env::var_os("IS_TESTING").is_some() && env::var_os(EXPECTED_FAILURE_CHILD_ENV).is_none() {
+        assert_failure_in_child();
+    } else {
+        run_example();
+    }
+}
+
+fn assert_failure_in_child() {
+    let executable = env::current_exe().expect("the running example necessarily has a current executable path");
+    let status = Command::new(executable)
+        .env(EXPECTED_FAILURE_CHILD_ENV, "1")
+        .status()
+        .expect("the example executable that is already running must be startable as a child");
+
+    assert!(!status.success(), "the child example must terminate after shutdown times out");
+}
+
+fn run_example() {
     tracing_subscriber::fmt::init();
 
     let mut executor_builder = Executor::builder();
