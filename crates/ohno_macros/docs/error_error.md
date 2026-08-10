@@ -89,12 +89,14 @@ the added field. `#[derive(ohno::Error)]` alone rejects a unit struct, because
 there is no room for a core.
 
 **`#[no_constructors]` is not accepted.** Opting out of the generated
-constructors means writing the struct literal by hand, and that needs the name
-of the field this attribute adds. That field is not part of the type's
-source-level contract, so it has no name the author may rely on.
+constructors means writing the struct literal by hand, and that has to reach the
+field this attribute adds. That field is an implementation detail rather than
+part of the type's source-level contract, so nothing about it — its name on a
+named struct, its position on a tuple or unit struct — is the author's to rely
+on.
 
-Declaring the core gives a hand-written constructor a field name the author
-owns, so that is the supported path:
+Declaring the core gives a hand-written constructor a field the author owns, so
+that is the supported path:
 
 ```rust
 #[derive(ohno::Error)]
