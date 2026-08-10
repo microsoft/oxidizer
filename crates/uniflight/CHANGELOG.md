@@ -9,6 +9,7 @@
 - ⚠️ Breaking
 
   - Now requires `0.9.0` of `thread_aware`
+
 ## [0.3.0] - 2026-07-07
 
 - ⚠️ Breaking

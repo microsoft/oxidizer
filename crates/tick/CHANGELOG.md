@@ -9,11 +9,13 @@
 - ⚠️ Breaking
 
   - validate fmt values at construction, drop cross-format conversions ([#614](https://github.com/microsoft/oxidizer/pull/614))
+  - Now requires `0.4.0` of `ohno`
   - Now requires `0.9.0` of `thread_aware`
 
 - ✨ Features
 
   - add EcmaScript timestamp format ([#612](https://github.com/microsoft/oxidizer/pull/612))
+
 ## [0.4.0] - 2026-07-07
 
 - ⚠️ Breaking

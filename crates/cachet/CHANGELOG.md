@@ -15,6 +15,7 @@
   - Now requires `0.3.0` of `cachet_tier`
   - Now requires `0.5.0` of `tick`
   - Now requires `0.4.0` of `uniflight`
+
 ## [0.10.0] - 2026-07-24
 
 - 🔧 Maintenance

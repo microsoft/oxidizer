@@ -99,7 +99,7 @@ fetch = { path = "crates/fetch", default-features = false, version = "0.15.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.5.0" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.6.0" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
-fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.6" }
+fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.3.0" }
 fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, version = "0.1.0" }
 foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.5" }
@@ -145,8 +145,8 @@ native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.9" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
+ohno = { path = "crates/ohno", default-features = false, version = "0.4.0" }
+ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.4.0" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
@@ -206,8 +206,8 @@ string_cache = { version = "0.10.0", default-features = false }
 symbol_table = { version = "0.5.0", default-features = false }
 syn = { version = "3.0.2", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.4.0" }
-templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.3.0" }
-templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.3.0" }
+templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.4.0" }
+templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.4.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
 thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.9.0" }

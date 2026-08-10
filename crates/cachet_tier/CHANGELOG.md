@@ -8,6 +8,7 @@
 
 - ⚠️ Breaking
 
+  - Now requires `0.4.0` of `ohno`
   - Now requires `0.2.0` of `recoverable`
 
 ## [0.2.7] - 2026-07-24

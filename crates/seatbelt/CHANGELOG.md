@@ -8,9 +8,11 @@
 
 - ⚠️ Breaking
 
+  - Now requires `0.4.0` of `ohno`
   - Now requires `0.2.0` of `recoverable`
   - Now requires `0.9.0` of `thread_aware`
   - Now requires `0.5.0` of `tick`
+
 ## [0.6.1] - 2026-07-24
 
 - 🔧 Maintenance

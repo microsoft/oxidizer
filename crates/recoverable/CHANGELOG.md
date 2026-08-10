@@ -9,6 +9,7 @@
 - ⚠️ Breaking
 
   - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - Now requires `0.4.0` of `ohno`
 
 - ✨ Features
 

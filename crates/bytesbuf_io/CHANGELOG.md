@@ -9,6 +9,8 @@
 - ⚠️ Breaking
 
   - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.4.0` of `ohno`
+
 ## [0.7.0] - 2026-07-24
 
 - 🔧 Maintenance

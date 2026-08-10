@@ -18,6 +18,7 @@
 - 🐛 Bug Fixes
 
   - guard total capacity against overflow at growth sites ([#593](https://github.com/microsoft/oxidizer/pull/593))
+
 ## [0.7.0] - 2026-07-24
 
 - ⚠️ Breaking
