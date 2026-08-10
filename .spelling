@@ -792,3 +792,8 @@ snapshotted
 Sharding
 parallelizes
 prefetches
+Spectre
+Msvc
+subdirectory
+hardcoding
+integrators
