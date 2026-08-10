@@ -7,7 +7,9 @@
 #![allow(clippy::unwrap_used, reason = "test code uses unwrap for concise failure backtraces")]
 
 use alloc_tracker::{Allocator, Session};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::de::value::{Error as ValueError, StrDeserializer};
 use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 
 #[global_allocator]
@@ -52,4 +54,12 @@ fn textual_format_rejects_non_string_json_with_clear_expectation() {
         error.to_string(),
         "invalid type: integer `123`, expected a timestamp string at line 1 column 3"
     );
+}
+
+#[test]
+fn textual_format_deserializes_transient_string() {
+    let deserializer = StrDeserializer::<ValueError>::new("2024-08-06T21:30:00Z");
+    let iso = Iso8601::deserialize(deserializer).unwrap();
+
+    assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
 }
