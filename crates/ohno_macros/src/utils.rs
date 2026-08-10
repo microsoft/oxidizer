@@ -41,6 +41,44 @@ macro_rules! bail {
 // Re-export the macro for use in other modules
 pub(crate) use bail;
 
+/// Bail macro for early return with `Error::new_spanned`
+///
+/// Prefer this over `bail!` whenever the diagnostic points at more than a single token. A span
+/// taken from a multi-token node covers the whole node only where `Span::join` is available, and
+/// collapses to the node's first token elsewhere, so the same diagnostic renders differently
+/// between toolchains. `Error::new_spanned` carries the start and end tokens explicitly and
+/// renders the full range either way.
+///
+/// As in `bail!`, a literal message is a format string, so implicit captures such as `{name}`
+/// interpolate and a literal brace has to be escaped. A message that is mostly braces, such as one
+/// quoting `#[display("{}")]`, is better declared as a `&'static str` const and passed by name,
+/// which is handed to `syn` unchanged.
+///
+/// Usage:
+/// - `bail_spanned!(tokens, "message")`
+/// - `bail_spanned!(tokens, MESSAGE_CONST)`
+/// - `bail_spanned!(tokens, "format string {}", value)`
+macro_rules! bail_spanned {
+    ($tokens:expr, $msg:literal) => {
+        return Err(syn::Error::new_spanned($tokens, format!($msg)))
+    };
+
+    ($tokens:expr, $msg:ident) => {
+        return Err(syn::Error::new_spanned($tokens, $msg))
+    };
+
+    ($tokens:expr, $fmt:literal, $($arg:tt)*) => {
+        return Err(syn::Error::new_spanned($tokens, format!($fmt, $($arg)*)))
+    };
+}
+
+pub(crate) use bail_spanned;
+
+/// Doc marker `#[ohno::error]` puts on the `OhnoCore` field it adds
+///
+/// The nonce is load-bearing. See `docs/error_error.md`.
+pub(crate) const GENERATED_ERROR_FIELD_MARKER: &str = " ohno::generated-core@7f3d9c2a";
+
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields
 #[cfg_attr(test, mutants::skip)] // mutation testing leads to an infinite loop here...
 pub(crate) fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident {

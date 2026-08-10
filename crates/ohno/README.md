@@ -67,6 +67,15 @@ The `#[ohno::error]` attribute macro is a convenience wrapper that automatically
 field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 without manually managing the error infrastructure.
 
+The attribute always adds that field and always generates the error representation from it, so
+no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use
+`#[derive(Error)]` directly to place the core by hand.
+
+A field of type `OhnoCore` may still be declared, and is then treated as data rather than as the
+error: it is passed to the generated constructors like any other field, appears in the generated
+`Debug`, and can be referenced from a `#[display(...)]` template — but it is never read for
+`source()`, the backtrace, or enrichment, which all come from the injected field.
+
 ```rust
 // Simple error without extra fields
 #[ohno::error]
@@ -103,6 +112,32 @@ let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 The template string supports field interpolation using `{field_name}` syntax. The underlying
 error (if any) is automatically shown as “Caused by:” in the error chain. If the inner error
 has no source, only the custom message is displayed.
+
+Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
+
+### Format Arguments
+
+Anything that is not a plain field reference is passed as a positional argument, with
+`format!`’s placeholder and argument-counting semantics:
+
+```rust
+use std::path::PathBuf;
+
+#[ohno::error]
+#[display("failed to read config: {}", path.display())]
+pub struct ConfigError {
+    pub path: PathBuf,
+}
+```
+
+Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
+name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+
+|Argument|Accepted|
+|--------|--------|
+|`path.display()`|yes|
+|`self.path.display()`|no, the `self.` prefix is implicit|
+|`.path.display()`|no, not a valid expression|
 
 ## Automatic Constructors
 
@@ -292,25 +327,25 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbrCd9xja6IUYbReuvcH7u-4wbH1ETqam4eFAbE9V6cT1GHJphZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbgjMBSvjp6w4bwfaMEGzXfRgby9FUFp299zcbvnnJEboWBUxhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
- [__link11]: https://docs.rs/ohno_macros/0.3.5/ohno_macros/?search=enrich_err
- [__link12]: https://docs.rs/ohno_macros/0.3.5/ohno_macros/?search=enrich_err
- [__link13]: https://docs.rs/ohno/0.3.9/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link15]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link16]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel
- [__link17]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel::from_error_chain
+ [__link11]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link12]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
+ [__link14]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link15]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
  [__link18]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link19]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel
- [__link2]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.3.9/ohno/?search=Labeled
- [__link21]: https://docs.rs/ohno/0.3.9/ohno/?search=Labeled::label
- [__link3]: https://docs.rs/ohno/0.3.9/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link5]: https://docs.rs/ohno/0.3.9/ohno/?search=OhnoCore
+ [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link2]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt
+ [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
+ [__link21]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
+ [__link3]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link5]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
  [__link6]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link8]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug

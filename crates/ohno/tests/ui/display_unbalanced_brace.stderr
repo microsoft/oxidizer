@@ -1,0 +1,11 @@
+error: `#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace
+  --> tests/ui/display_unbalanced_brace.rs:15:11
+   |
+15 | #[display("bad path: {path")]
+   |           ^^^^^^^^^^^^^^^^^
+
+error: `#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace
+  --> tests/ui/display_unbalanced_brace.rs:21:11
+   |
+21 | #[display("bad path: path}")]
+   |           ^^^^^^^^^^^^^^^^^

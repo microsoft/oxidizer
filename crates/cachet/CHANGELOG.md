@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - Now requires `0.7.0` of `anyspawn`
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.6.0` of `cachet_memory`
+  - Now requires `0.3.0` of `cachet_service`
+  - Now requires `0.3.0` of `cachet_tier`
+  - Now requires `0.5.0` of `tick`
+  - Now requires `0.4.0` of `uniflight`
+
 ## [0.10.0] - 2026-07-24
 
 - 🔧 Maintenance
