@@ -127,6 +127,9 @@
 //! // Output: Time: 1970-01-01T01:00:00.000Z
 //! ```
 
+use std::fmt::{self, Display};
+use std::marker::PhantomData;
+use std::str::FromStr;
 use std::time::SystemTime;
 
 use jiff::Timestamp;
@@ -142,6 +145,44 @@ pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
+
+#[cfg(any(feature = "serde", test))]
+fn deserialize_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde_core::Deserializer<'de>,
+    T: FromStr,
+    T::Err: Display,
+{
+    struct FromStrVisitor<T>(PhantomData<T>);
+
+    impl<'de, T> serde_core::de::Visitor<'de> for FromStrVisitor<T>
+    where
+        T: FromStr,
+        T::Err: Display,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a timestamp string")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde_core::de::Error,
+        {
+            value.parse().map_err(E::custom)
+        }
+
+        fn visit_borrowed_str<E>(self, value: &'de str) -> Result<Self::Value, E>
+        where
+            E: serde_core::de::Error,
+        {
+            value.parse().map_err(E::custom)
+        }
+    }
+
+    deserializer.deserialize_str(FromStrVisitor(PhantomData))
+}
 
 /// Converts `timestamp` to `SystemTime` if the platform can represent it.
 ///

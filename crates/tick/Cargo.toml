@@ -52,6 +52,7 @@ thread_aware = { workspace = true, default-features = false, features = ["std"] 
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 
 #external
