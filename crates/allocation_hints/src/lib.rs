@@ -456,6 +456,7 @@ mod tests {
     };
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not preserve function-pointer identity through black_box")]
     fn backend_constructor_runs_at_runtime() {
         let constructor = std::hint::black_box(
             Backend::new

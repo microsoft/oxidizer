@@ -43,6 +43,7 @@ mod faults {
     pub(super) const DECOMMIT: u32 = 1 << 5;
     pub(super) const ALIGN_OFFSET: u32 = 1 << 6;
     pub(super) const COMMIT_LOCALITY_SLAB_ZERO: u32 = 1 << 7;
+    pub(super) const COMMIT_LOCALITY_SLAB_FULL: u32 = 1 << 8;
 
     thread_local! {
         static NEXT: Cell<u32> = const { Cell::new(0) };
@@ -106,6 +107,10 @@ pub(crate) unsafe fn commit_locality_slab(address: *mut u8, slab_size: usize) ->
     if faults::take(faults::COMMIT_LOCALITY_SLAB_ZERO) {
         return Some(0);
     }
+    #[cfg(test)]
+    if faults::take(faults::COMMIT_LOCALITY_SLAB_FULL) {
+        return Some(slab_size);
+    }
     unsafe { platform::commit_locality_slab(address, slab_size) }
 }
 
@@ -160,6 +165,11 @@ pub(crate) fn fail_next_commit_locality_slab() {
 #[cfg(all(test, not(miri)))]
 pub(crate) fn zero_next_commit_locality_slab() {
     faults::fail_next(faults::COMMIT_LOCALITY_SLAB_ZERO);
+}
+
+#[cfg(all(test, not(miri)))]
+pub(crate) fn fully_commit_next_locality_slab() {
+    faults::fail_next(faults::COMMIT_LOCALITY_SLAB_FULL);
 }
 
 #[cfg(all(test, not(miri)))]

@@ -57,7 +57,6 @@
     test,
     expect(
         clippy::clone_on_ref_ptr,
-        clippy::fn_to_numeric_cast_any,
         clippy::iter_with_drain,
         clippy::unnecessary_wraps,
         reason = "Tests intentionally materialize ownership and mirror fallible callback signatures"

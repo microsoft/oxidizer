@@ -2127,8 +2127,10 @@ mod tests {
 
     #[test]
     fn caller_encoding_and_address_details_are_deterministic() {
+        static STACK_MARKER: () = ();
+
         crate::initialize();
-        let stack_address = (stack_hash as *const ()).addr();
+        let stack_address = (&raw const STACK_MARKER).addr();
         let callers = CallerSnapshot {
             session_id: 3,
             total_events: 2,

@@ -4078,6 +4078,8 @@ mod tests {
         assert!(!allocator.allocate_slab(&mut heap).address.is_null());
         hal::zero_next_commit_locality_slab();
         assert!(!allocator.allocate_slab(&mut heap).address.is_null());
+        hal::fully_commit_next_locality_slab();
+        assert!(!allocator.allocate_slab(&mut heap).address.is_null());
 
         hal::fail_next_commit_locality_slab();
         assert!(allocator.allocate_slab(&mut heap).address.is_null());
@@ -4297,6 +4299,15 @@ mod tests {
 
         tracking::track_callers(false);
         invalidate_tracking_cache();
+        let untracked = unsafe { allocator.alloc(layout) };
+        assert!(!untracked.is_null());
+        unsafe { allocator.dealloc(untracked, layout) };
+
+        let fallback_layout = Layout::from_size_align(bump::BUMP_SEGMENT_SIZE + 1, 16).unwrap();
+        let fallback = unsafe { allocator.alloc(fallback_layout) };
+        assert!(!fallback.is_null());
+        unsafe { allocator.dealloc(fallback, fallback_layout) };
+
         unsafe {
             ((*state).active_heap, (*state).active_bump, (*state).active_remote) = saved;
             bump::release_handle(bump_state);

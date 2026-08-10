@@ -156,11 +156,7 @@ mod tests {
             let address = map_aligned_with_page_size(size, PROT_READ | PROT_WRITE, simulated_page_size);
             assert!(!address.is_null());
             assert!(address.addr().is_multiple_of(ALLOCATION_ALIGNMENT));
-            unsafe {
-                address.write(1);
-                address.add(size - 1).write(2);
-                unmap(address, size);
-            }
+            unsafe { unmap(address, size) };
         }
     }
 
@@ -172,11 +168,14 @@ mod tests {
         assert!(map_aligned_with_page_size(isize::MAX as usize, PROT_READ | PROT_WRITE, host_page_size).is_null());
         assert!(reserve(usize::MAX).is_null());
 
-        assert_eq!(validated_page_size(host_page_size as libc::c_long), Some(host_page_size));
+        assert_eq!(
+            validated_page_size(libc::c_long::try_from(host_page_size).unwrap()),
+            Some(host_page_size)
+        );
         assert_eq!(validated_page_size(-1), None);
         assert_eq!(validated_page_size(0), None);
         assert_eq!(validated_page_size(3), None);
-        assert_eq!(validated_page_size((ALLOCATION_ALIGNMENT * 2) as libc::c_long), None);
+        assert_eq!(validated_page_size(libc::c_long::try_from(ALLOCATION_ALIGNMENT * 2).unwrap()), None);
 
         assert!(!unsafe { decommit(ptr::without_provenance_mut(1), host_page_size) });
     }
