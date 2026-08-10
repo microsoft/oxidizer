@@ -53,7 +53,7 @@ fn platform_time() -> Duration {
 
     // SAFETY: `as_mut_ptr` is non-null, aligned, and writable for one `timespec`.
     let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_COARSE, timestamp.as_mut_ptr()) };
-    assert_eq!(result, 0, "CLOCK_MONOTONIC_COARSE must be available");
+    assert_eq!(result, 0, "CLOCK_MONOTONIC_COARSE predates Rust's minimum supported Linux kernel");
 
     // SAFETY: The checked successful return guarantees that `timestamp` was initialized.
     let timestamp = unsafe { timestamp.assume_init() };
