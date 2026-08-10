@@ -495,30 +495,33 @@ impl ThreadState {
         }
     }
 
-    fn cleanup(&mut self) {
-        debug_assert!(self.active_heap.is_null());
-        debug_assert!(self.active_bump.is_null());
-        debug_assert!(self.active_remote.is_null());
-        unsafe { tracking::release_thread_log(self.tracking_log) };
-        self.tracking_log = ptr::null();
+    unsafe fn cleanup(state: *mut Self) {
+        debug_assert!(unsafe { (*state).active_heap.is_null() });
+        debug_assert!(unsafe { (*state).active_bump.is_null() });
+        debug_assert!(unsafe { (*state).active_remote.is_null() });
+        let tracking_log = unsafe { (*state).tracking_log };
+        unsafe { (*state).tracking_log = ptr::null() };
+        unsafe { tracking::release_thread_log(tracking_log) };
 
-        while self.bump_pool_len != 0 {
-            self.bump_pool_len -= 1;
-            let state = self.bump_pool[self.bump_pool_len];
-            self.bump_pool[self.bump_pool_len] = ptr::null_mut();
-            unsafe { bump::return_global(state) };
+        while unsafe { (*state).bump_pool_len != 0 } {
+            unsafe { (*state).bump_pool_len -= 1 };
+            let index = unsafe { (*state).bump_pool_len };
+            let bump_state = unsafe { (*state).bump_pool[index] };
+            unsafe { (*state).bump_pool[index] = ptr::null_mut() };
+            unsafe { bump::return_global(bump_state) };
         }
 
-        if !self.remote_heap.is_null() {
+        let remote_heap = unsafe { (*state).remote_heap };
+        if !remote_heap.is_null() {
             unsafe {
-                (*self.remote_heap).owner_token.store(0, Ordering::Release);
-                (*self.remote_heap).owner_heap.store(ptr::null_mut(), Ordering::Release);
+                (*remote_heap).owner_token.store(0, Ordering::Release);
+                (*remote_heap).owner_heap.store(ptr::null_mut(), Ordering::Release);
             }
         }
 
-        if !self.default_heap.is_null() {
-            let heap = self.default_heap;
-            self.default_heap = ptr::null_mut();
+        let heap = unsafe { (*state).default_heap };
+        if !heap.is_null() {
+            unsafe { (*state).default_heap = ptr::null_mut() };
             unsafe { retire_general_heap(heap) };
         }
     }
@@ -527,9 +530,11 @@ impl ThreadState {
 impl Drop for ThreadStateGuard {
     fn drop(&mut self) {
         THREAD_STATE.with(|storage| {
-            let state = unsafe { &mut *storage.get().cast::<ThreadState>() };
-            state.tearing_down = true;
-            state.cleanup();
+            let state = storage.get().cast::<ThreadState>();
+            unsafe {
+                (*state).tearing_down = true;
+                ThreadState::cleanup(state);
+            }
         });
     }
 }
