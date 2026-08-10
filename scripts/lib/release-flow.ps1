@@ -305,6 +305,101 @@ function Update-EntryForRequiredChangeType {
     }
 }
 
+# Records one cascade reason on an entry, keyed by target package name.
+# Re-encountering the same (target -> dependent) edge on a later strengthening
+# pass overwrites the prior reason in place instead of appending a duplicate, so
+# the list stays one-per-edge however many fixpoint iterations run.
+function Set-CascadeReason {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry,
+        [Parameter(Mandatory = $true)][pscustomobject]$Reason
+    )
+
+    for ($i = 0; $i -lt $Entry.CascadeReasons.Count; $i++) {
+        if ($Entry.CascadeReasons[$i].Target -eq $Reason.Target) {
+            $Entry.CascadeReasons[$i] = $Reason
+            return
+        }
+    }
+
+    $Entry.CascadeReasons.Add($Reason)
+}
+
+# Returns $true when the version this entry will actually write is an
+# incompatible transition from the version currently on disk.
+#
+# Deliberately derived from EffectiveTargetVersion rather than
+# EffectiveChangeType: a -Force pin honored below the cascade-required version
+# carries a 'breaking' tag while writing a version that is not in fact a
+# breaking transition, and cascading from the tag would invent a break farther
+# up the graph that consumers never actually see.
+function Test-EntryPlansBreakingRelease {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry
+    )
+
+    $plannedChangeType = Get-ChangeTypeFromVersions `
+        -oldVersion $Entry.CurrentVersion `
+        -newVersion $Entry.EffectiveTargetVersion
+
+    return Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $plannedChangeType
+}
+
+# Returns the baseline packages that must inherit a breaking bump from
+# $TargetPackage: those already in the release set that depend on it directly
+# and name its types in their own public API.
+#
+# Proc-macro-only dependents are excluded because they have no rustdoc API to
+# expose anything through; they reach the release set via the manual-review
+# queue instead.
+function Get-PublishedDependentsExposingTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$TargetPackage,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        # Read-only: used only to test release-set membership. Typed as
+        # IDictionary rather than [hashtable] because the caller's dictionary is
+        # [ordered], which is not a Hashtable -- PowerShell would satisfy a
+        # [hashtable] annotation by silently substituting a converted copy.
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Resolved
+    )
+
+    # Cargo dependency names use underscores; package names may use hyphens.
+    $targetCargoName = $TargetPackage.Name.Replace('-', '_')
+
+    return @($WorkspaceBaseline | Where-Object {
+            $_.Published -and
+            -not $_.IsProcMacroOnly -and
+            $_.Deps -contains $targetCargoName -and
+            $Resolved.Contains($_.Folder) -and
+            (Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name)
+        })
+}
+
+# Raises one dependent entry to 'breaking' because it exposes an incompatibly
+# versioned dependency, records the reason, and returns $true when that actually
+# strengthened the entry. The return value is what drives fixpoint termination:
+# once a pass strengthens nothing, the cascade is complete.
+function Update-EntryForExposedDependency {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName,
+        [switch]$Force
+    )
+
+    $previousChangeType    = $Entry.EffectiveChangeType
+    $previousTargetVersion = $Entry.EffectiveTargetVersion
+
+    Update-EntryForRequiredChangeType -Entry $Entry -RequiredChangeType 'breaking' `
+        -RequirementLabel 'exposed-dependency cascade' `
+        -RequirementDetail "the incompatible planned version of '$TargetPackageName' exposed in its public API" `
+        -Force:$Force
+
+    Set-CascadeReason -Entry $Entry -Reason ([pscustomobject]@{ Target = $TargetPackageName; Breaking = $true })
+
+    return ($Entry.EffectiveChangeType -ne $previousChangeType -or
+        $Entry.EffectiveTargetVersion -ne $previousTargetVersion)
+}
+
 # Turns the parsed token entries from Parse-ReleaseTokens into a *resolved
 # release set* — every package that will receive a release in this invocation,
 # whether the user asked for it directly or it was pulled in by cascade.
@@ -458,14 +553,18 @@ function Resolve-ReleaseSet {
         }
     }
 
-    # Snapshot the user-source folder names before cascade adds cascade-source
-    # entries.
-    $userFolders = @($resolved.Keys) | ForEach-Object { $_ }
+    # Snapshot the folders requested for release before cascade adds pulled-in
+    # entries: these are the origins the cascade expands from, and everything
+    # added later is derived from them. Must stay a snapshot -- the loops below
+    # add to $resolved, and $resolved.Keys is a live view that throws if
+    # enumerated during mutation.
+    $requestedFolders = @($resolved.Keys) | ForEach-Object { $_ }
 
-    # Self-floor user roots before dependency exposure is evaluated. A root the
-    # caller requested as patch may itself require a breaking release, and that
-    # stronger planned transition must cascade to consumers exposing its types.
-    foreach ($folder in $userFolders) {
+    # Self-floor requested folders before dependency exposure is evaluated. A
+    # crate the caller requested as patch may itself require a breaking release,
+    # and that stronger planned transition must cascade to consumers exposing
+    # its types.
+    foreach ($folder in $requestedFolders) {
         $entry = $resolved[$folder]
         if ($entry.IsProcMacroOnly) { continue }
         $required = & $GetRequiredChangeType $entry.Folder $entry.Name
@@ -477,7 +576,7 @@ function Resolve-ReleaseSet {
             -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
     }
 
-    foreach ($targetFolder in $userFolders) {
+    foreach ($targetFolder in $requestedFolders) {
         $targetEntry = $resolved[$targetFolder]
         $targetPkg   = $baselineByFolder[$targetFolder]
 
@@ -515,18 +614,7 @@ function Resolve-ReleaseSet {
                 # Dedup cascade reasons by target name (re-encountering the
                 # same edge after a strengthening pass overwrites the prior
                 # reason in place rather than adding a duplicate).
-                $existingReasonIdx = -1
-                for ($i = 0; $i -lt $existing.CascadeReasons.Count; $i++) {
-                    if ($existing.CascadeReasons[$i].Target -eq $cascadeReason.Target) {
-                        $existingReasonIdx = $i
-                        break
-                    }
-                }
-                if ($existingReasonIdx -ge 0) {
-                    $existing.CascadeReasons[$existingReasonIdx] = $cascadeReason
-                } else {
-                    $existing.CascadeReasons.Add($cascadeReason)
-                }
+                Set-CascadeReason -Entry $existing -Reason $cascadeReason
 
                 $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
                 Update-EntryForRequiredChangeType -Entry $existing -RequiredChangeType $dependentChangeType `
@@ -567,50 +655,18 @@ function Resolve-ReleaseSet {
         foreach ($sourceEntry in @($resolved.Values)) {
             $sourcePkg = $baselineByFolder[$sourceEntry.Folder]
             if ($null -eq $sourcePkg -or $sourcePkg.IsProcMacroOnly) { continue }
+            if (-not (Test-EntryPlansBreakingRelease -Entry $sourceEntry)) { continue }
 
-            $plannedChangeType = Get-ChangeTypeFromVersions `
-                -oldVersion $sourceEntry.CurrentVersion `
-                -newVersion $sourceEntry.EffectiveTargetVersion
-            if (-not (Test-IsBreakingChange -oldVersion $sourceEntry.CurrentVersion -ChangeType $plannedChangeType)) {
-                continue
-            }
+            $dependentPkgs = Get-PublishedDependentsExposingTarget -TargetPackage $sourcePkg `
+                -WorkspaceBaseline $WorkspaceBaseline -Resolved $resolved
 
-            $sourceCargoName = $sourcePkg.Name.Replace('-', '_')
-            foreach ($dependentPkg in $WorkspaceBaseline) {
-                if (-not $dependentPkg.Published -or $dependentPkg.IsProcMacroOnly) { continue }
-                if ($dependentPkg.Deps -notcontains $sourceCargoName) { continue }
-                if (-not $resolved.Contains($dependentPkg.Folder)) { continue }
-                if (-not (Test-PackageExposesTarget -Dependent $dependentPkg -TargetPackageName $sourcePkg.Name)) {
-                    continue
-                }
-
-                $dependentEntry = $resolved[$dependentPkg.Folder]
-                $previousChangeType = $dependentEntry.EffectiveChangeType
-                $previousTargetVersion = $dependentEntry.EffectiveTargetVersion
-
-                Update-EntryForRequiredChangeType -Entry $dependentEntry -RequiredChangeType 'breaking' `
-                    -RequirementLabel 'exposed-dependency cascade' `
-                    -RequirementDetail "the incompatible planned version of '$($sourcePkg.Name)' exposed in its public API" `
+            foreach ($dependentPkg in $dependentPkgs) {
+                $strengthened = Update-EntryForExposedDependency `
+                    -Entry $resolved[$dependentPkg.Folder] `
+                    -TargetPackageName $sourcePkg.Name `
                     -Force:$Force
 
-                $reasonIndex = -1
-                for ($i = 0; $i -lt $dependentEntry.CascadeReasons.Count; $i++) {
-                    if ($dependentEntry.CascadeReasons[$i].Target -eq $sourcePkg.Name) {
-                        $reasonIndex = $i
-                        break
-                    }
-                }
-                $reason = [pscustomobject]@{ Target = $sourcePkg.Name; Breaking = $true }
-                if ($reasonIndex -ge 0) {
-                    $dependentEntry.CascadeReasons[$reasonIndex] = $reason
-                } else {
-                    $dependentEntry.CascadeReasons.Add($reason)
-                }
-
-                if ($dependentEntry.EffectiveChangeType -ne $previousChangeType -or
-                    $dependentEntry.EffectiveTargetVersion -ne $previousTargetVersion) {
-                    $exposureChanged = $true
-                }
+                if ($strengthened) { $exposureChanged = $true }
             }
         }
     }
