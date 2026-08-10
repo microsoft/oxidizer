@@ -150,16 +150,29 @@ struct ConfigError {
 }
 
 // The derive macro automatically generates:
-// - ConfigError::new(path: String) -> Self
-// - ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+// - pub(crate) fn ConfigError::new(path: String) -> Self
+// - pub(crate) fn ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
 
 let error = ConfigError::new("/etc/config.toml");
 let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
 ```
 
+**The generated constructors are `pub(crate)`, regardless of the visibility of the error type
+itself.** They are an implementation convenience for the crate that defines the error, not part
+of its public API, so a `pub struct` error exported from a library cannot be constructed with
+`new()` or `caused_by()` by a downstream crate. This is deliberate: it keeps the set of ways an
+error can be built under the control of the crate that owns it, so adding a field is not a
+breaking change for callers.
+
+To offer a constructor to other crates, write one yourself and give it the visibility you
+intend — either alongside the generated ones, or with `#[no_constructors]` (below) if you want
+`new` and `caused_by` to mean something different.
+
 **Disabling Automatic Constructors:**
 
-Use `#[no_constructors]` to disable automatic generation when you need custom constructors:
+Use `#[no_constructors]` to disable automatic generation when you need custom constructors.
+Note that a hand-written constructor is only reachable outside the defining crate if you
+declare it `pub`, as in the `pub fn new` below:
 
 ```rust
 use ohno::{Error, OhnoCore};
