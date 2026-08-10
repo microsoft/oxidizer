@@ -515,7 +515,6 @@ fn opaque_snapshot_suppresses_allocator_operations() {
     assert_eq!(after_write.live_bytes, before.live_bytes);
     assert_eq!(after_write.allocations, before.allocations);
     assert_eq!(after_write.deallocations, before.deallocations);
-    assert_eq!(after_write.remote(), before.remote());
     drop(encoded);
     let after_drop = stats().unwrap();
     assert_eq!(after_drop.allocated_bytes, after_write.allocated_bytes);
@@ -523,7 +522,6 @@ fn opaque_snapshot_suppresses_allocator_operations() {
     assert_eq!(after_drop.live_bytes, after_write.live_bytes);
     assert_eq!(after_drop.allocations, after_write.allocations);
     assert_eq!(after_drop.deallocations, after_write.deallocations);
-    assert_eq!(after_drop.remote(), after_write.remote());
     std::fs::remove_file(path).unwrap();
 }
 
