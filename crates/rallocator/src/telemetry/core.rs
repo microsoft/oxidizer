@@ -1114,7 +1114,7 @@ fn register_aggregate_shard(shard: *mut AggregateShard) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 fn set_aggregate_registration_barrier(barrier: Arc<std::sync::Barrier>) {
     AGGREGATE_REGISTRATION_BARRIER.with(|slot| *slot.borrow_mut() = Some(barrier));
 }

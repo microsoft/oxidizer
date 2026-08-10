@@ -3776,6 +3776,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg(not(miri))]
     crate::config!(DirectTrackingConfig { track_aggregates: true });
     crate::config!(CallerTrackingConfig {
         track_callers: true,
