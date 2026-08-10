@@ -39,32 +39,29 @@ pub(crate) fn error(_args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 fn error_impl(input: &mut DeriveInput) -> proc_macro2::TokenStream {
-    if let Err(err) = validate(input) {
+    // The shape is settled once, here: every rejection below describes a struct, so on anything
+    // else the accurate complaint is that the attribute does not apply at all.
+    let Data::Struct(data_struct) = &mut input.data else {
+        return syn::Error::new_spanned(&input.ident, NOT_A_STRUCT).to_compile_error();
+    };
+
+    if let Err(err) = validate(data_struct, &input.attrs) {
         return err.to_compile_error();
     }
 
-    if let Data::Struct(data_struct) = &mut input.data {
-        add_ohno_core_field(data_struct);
-    }
+    add_ohno_core_field(data_struct);
     add_fiasko_error_derive(input);
 
     quote! { #input }
 }
 
-/// Check everything this attribute refuses, in one place
-///
-/// The shape is settled first: every rejection below describes a struct, so on anything else the
-/// accurate complaint is that the attribute does not apply at all.
+/// Check everything this attribute refuses about a struct, in one place
 ///
 /// See `docs/error_error.md`.
-fn validate(input: &DeriveInput) -> syn::Result<()> {
-    let Data::Struct(data_struct) = &input.data else {
-        return Err(syn::Error::new_spanned(&input.ident, NOT_A_STRUCT));
-    };
-
+fn validate(data_struct: &DataStruct, attrs: &[syn::Attribute]) -> syn::Result<()> {
     reject_marked_field(data_struct)?;
     reject_generated_marker(data_struct)?;
-    reject_no_constructors(input)
+    reject_no_constructors(attrs)
 }
 
 const NOT_A_STRUCT: &str = "#[ohno::error] can only be applied to structs";
@@ -76,8 +73,8 @@ const NO_CONSTRUCTORS: &str = "`#[no_constructors]` is not supported under `#[oh
 /// Reject a struct that opts out of the generated constructors
 ///
 /// See `docs/error_error.md`.
-fn reject_no_constructors(input: &DeriveInput) -> syn::Result<()> {
-    match input.attrs.iter().find(|attr| attr.path().is_ident("no_constructors")) {
+fn reject_no_constructors(attrs: &[syn::Attribute]) -> syn::Result<()> {
+    match attrs.iter().find(|attr| attr.path().is_ident("no_constructors")) {
         Some(attr) => Err(syn::Error::new_spanned(attr, NO_CONSTRUCTORS)),
         None => Ok(()),
     }
@@ -161,12 +158,11 @@ mod tests {
 
     use super::*;
 
-    /// The three rejections take the struct the shape check has already established
-    fn data_struct(input: &DeriveInput) -> &DataStruct {
-        match &input.data {
-            Data::Struct(data_struct) => data_struct,
-            _ => panic!("test input is not a struct"),
-        }
+    /// Every rejection is asserted through `error_impl`, the one entry point that settles the
+    /// shape, so no test has to take a `DataStruct` apart
+    fn expand(input: DeriveInput) -> String {
+        let mut input = input;
+        crate::error_type_attr::error_impl(&mut input).to_string()
     }
 
     #[test]
@@ -179,8 +175,8 @@ mod tests {
             parse_quote! { struct TestError { path: String, #[error] other: String } },
         ] {
             let input: DeriveInput = input;
-            let err = crate::error_type_attr::reject_marked_field(data_struct(&input)).unwrap_err();
-            assert_eq!(err.to_string(), crate::error_type_attr::ALREADY_MARKED);
+            let expansion = expand(input);
+            assert!(expansion.contains(crate::error_type_attr::ALREADY_MARKED), "got: {expansion}");
         }
 
         // A declared core field is an ordinary field, since the injected one is the marked one. A
@@ -192,7 +188,8 @@ mod tests {
             parse_quote! { struct TestError; },
         ] {
             let input: DeriveInput = input;
-            crate::error_type_attr::reject_marked_field(data_struct(&input)).unwrap();
+            let expansion = expand(input);
+            assert!(!expansion.contains("compile_error"), "got: {expansion}");
         }
     }
 
@@ -208,8 +205,8 @@ mod tests {
             parse_quote! { struct TestError { path: String, #[doc = #marker] other: String } },
         ] {
             let input: DeriveInput = input;
-            let err = crate::error_type_attr::reject_generated_marker(data_struct(&input)).unwrap_err();
-            assert_eq!(err.to_string(), crate::error_type_attr::RESERVED_MARKER);
+            let expansion = expand(input);
+            assert!(expansion.contains(crate::error_type_attr::RESERVED_MARKER), "got: {expansion}");
         }
 
         // An ordinary doc comment is not the marker, and a struct without fields has nothing to
@@ -220,7 +217,8 @@ mod tests {
             parse_quote! { struct TestError; },
         ] {
             let input: DeriveInput = input;
-            crate::error_type_attr::reject_generated_marker(data_struct(&input)).unwrap();
+            let expansion = expand(input);
+            assert!(!expansion.contains("compile_error"), "got: {expansion}");
         }
     }
 
@@ -234,15 +232,15 @@ mod tests {
             parse_quote! { #[derive(Clone)] #[no_constructors] struct TestError; },
         ] {
             let input: DeriveInput = input;
-            let err = crate::error_type_attr::reject_no_constructors(&input).unwrap_err();
-            assert_eq!(err.to_string(), crate::error_type_attr::NO_CONSTRUCTORS);
+            let expansion = expand(input);
+            assert!(expansion.contains(crate::error_type_attr::NO_CONSTRUCTORS), "got: {expansion}");
         }
 
         // The attribute is rejected wherever it is written relative to `#[ohno::error]`, since
-        // both orderings leave it in `input.attrs`
+        // both orderings leave it in the item's attributes
         let input: DeriveInput = parse_quote! { #[no_constructors] #[derive(Clone)] struct TestError { path: String } };
-        let err = crate::error_type_attr::reject_no_constructors(&input).unwrap_err();
-        assert_eq!(err.to_string(), crate::error_type_attr::NO_CONSTRUCTORS);
+        let expansion = expand(input);
+        assert!(expansion.contains(crate::error_type_attr::NO_CONSTRUCTORS), "got: {expansion}");
 
         // Every other attribute is left alone
         for input in [
@@ -250,12 +248,13 @@ mod tests {
             parse_quote! { #[no_debug] #[display("boom")] struct TestError { path: String } },
         ] {
             let input: DeriveInput = input;
-            crate::error_type_attr::reject_no_constructors(&input).unwrap();
+            let expansion = expand(input);
+            assert!(!expansion.contains("compile_error"), "got: {expansion}");
         }
     }
 
     #[test]
-    fn test_validate_settles_the_shape_before_the_attributes() {
+    fn test_the_shape_is_settled_before_the_attributes() {
         // An enum cannot carry the added field at all, so it is told that rather than being given
         // advice about constructors it could never follow
         for input in [
@@ -264,8 +263,8 @@ mod tests {
             parse_quote! { #[no_constructors] union TestError { a: u32 } },
         ] {
             let input: DeriveInput = input;
-            let err = crate::error_type_attr::validate(&input).unwrap_err();
-            assert_eq!(err.to_string(), crate::error_type_attr::NOT_A_STRUCT);
+            let expansion = expand(input);
+            assert!(expansion.contains(crate::error_type_attr::NOT_A_STRUCT), "got: {expansion}");
         }
     }
 
@@ -277,12 +276,10 @@ mod tests {
             struct TestError { path: String, inner: ohno::OhnoCore }
         };
 
-        let Data::Struct(data) = &mut input.data else {
-            panic!("not a struct")
-        };
-        crate::error_type_attr::add_ohno_core_field(data);
+        let expansion = crate::error_type_attr::error_impl(&mut input).to_string();
 
         let expected: proc_macro2::TokenStream = parse_quote! {
+            #[derive(ohno::Error)]
             struct TestError {
                 path: String,
                 inner: ohno::OhnoCore,
@@ -291,7 +288,7 @@ mod tests {
             }
         };
 
-        assert_eq!(input.to_token_stream().to_string(), expected.to_string());
+        assert_eq!(expansion, expected.to_string());
     }
 
     #[test]
@@ -332,12 +329,10 @@ mod tests {
             }
         };
 
-        let Data::Struct(data) = &mut input.data else {
-            panic!("not a struct")
-        };
-        crate::error_type_attr::add_ohno_core_field(data);
+        let expansion = crate::error_type_attr::error_impl(&mut input).to_string();
 
         let expected: proc_macro2::TokenStream = parse_quote! {
+            #[derive(ohno::Error)]
             struct TestError {
                 message: String,
                 #[doc = " ohno::generated-core@7f3d9c2a"]
@@ -345,27 +340,7 @@ mod tests {
             }
         };
 
-        assert_eq!(input.to_token_stream().to_string(), expected.to_string());
-    }
-
-    #[test]
-    fn test_error_impl_reports_the_shape_before_the_attributes() {
-        // The whole point of settling the shape first: `#[no_constructors]` on an enum reports the
-        // shape, not constructor advice the author could never act on
-        let mut input: DeriveInput = parse_quote! {
-            #[no_constructors]
-            enum NotAStruct {
-                A,
-            }
-        };
-
-        let expansion = crate::error_type_attr::error_impl(&mut input).to_string();
-
-        assert!(expansion.contains("compile_error"), "got: {expansion}");
-        assert!(
-            expansion.contains("can only be applied to structs"),
-            "the shape is the accurate complaint, got: {expansion}"
-        );
+        assert_eq!(expansion, expected.to_string());
     }
 
     #[test]
