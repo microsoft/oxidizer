@@ -1,0 +1,367 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Integration tests for the value-protection transform via `CacheBuilder`.
+//!
+//! These exercise the protection *pipeline* (builder wiring, key-as-context binding,
+//! relocation defense, fallback chaining) using the crypto-free [`MockValueProtector`]
+//! shipped under `test-util`, so they run with no cryptographic dependency.
+
+#![cfg(all(feature = "encrypt", feature = "serialize", feature = "test-util"))]
+
+// Integration binaries link the library with `cfg(test)` false, so the crate-root
+// tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
+testing_aids::init_tracing!();
+
+use bytesbuf::BytesView;
+use cachet::{Cache, CacheEntry, CacheOp, CacheTier, MockCache, MockValueProtector, ValueProtector};
+use tick::Clock;
+
+/// Returns the serialized (version byte + postcard) form of a value, matching
+/// what the `serialize()` boundary produces before protection.
+fn serialized(value: &str) -> Vec<u8> {
+    let mut out = vec![1u8]; // FORMAT_VERSION
+    out.extend_from_slice(&postcard::to_allocvec(value).expect("postcard serialization should not fail"));
+    out
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn encrypt_pipeline_stores_ciphertext_and_round_trips() {
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    let key = "greeting".to_string();
+    let value = "Hello, world!".to_string();
+    cache.insert(key.clone(), value.clone()).await.expect("insert should succeed");
+
+    // Inspect what actually landed in the post-transform tier.
+    let after_ops = l2.operations();
+    let insert = after_ops
+        .iter()
+        .find_map(|op| match op {
+            CacheOp::Insert { key, entry } => Some((key.clone(), entry.value().clone())),
+            _ => None,
+        })
+        .expect("post-transform tier should have received an insert");
+    let (stored_key, stored_value) = insert;
+
+    // Keys are NOT encrypted (encryption is non-deterministic), so the stored key
+    // is exactly the serialized key and remains lookupable.
+    assert_eq!(stored_key.to_vec(), serialized(&key), "key must be serialized but not encrypted");
+
+    // Values ARE encrypted: the stored bytes differ from the plaintext-serialized
+    // form, and the plaintext never appears verbatim anywhere in the ciphertext.
+    let plaintext = serialized(&value);
+    let stored = stored_value.to_vec();
+    assert_ne!(stored, plaintext, "stored value must be ciphertext, not plaintext");
+    assert!(
+        !stored.windows(plaintext.len()).any(|w| w == plaintext.as_slice()),
+        "plaintext must not appear verbatim in the stored ciphertext"
+    );
+
+    // Force the read to fall back to the encrypted tier and decrypt.
+    l1.invalidate(&key).await.expect("invalidate should succeed");
+    let fetched = cache.get(&key).await.expect("get should succeed").expect("value should be present");
+    assert_eq!(*fetched.value(), value, "decrypted value must match the original");
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn encrypt_each_insert_uses_fresh_nonce() {
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(MockCache::<String, String>::new())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    // Insert the same key/value twice; the ciphertext must differ each time.
+    cache
+        .insert("k".to_string(), "same".to_string())
+        .await
+        .expect("insert should succeed");
+    cache
+        .insert("k".to_string(), "same".to_string())
+        .await
+        .expect("insert should succeed");
+
+    let ciphertexts: Vec<Vec<u8>> = l2
+        .operations()
+        .iter()
+        .filter_map(|op| match op {
+            CacheOp::Insert { entry, .. } => Some(entry.value().to_vec()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ciphertexts.len(), 2, "both inserts should reach the encrypted tier");
+    assert_ne!(ciphertexts[0], ciphertexts[1], "each encryption must use a fresh nonce");
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn encrypt_on_fallback_builder() {
+    // `.protect_with()` must be reachable after `.serialize()` on a FallbackBuilder path.
+    let l3 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(MockCache::<String, String>::new())
+        .fallback(Cache::builder::<String, String>(Clock::new_frozen()).storage(MockCache::<String, String>::new()))
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
+        .build();
+
+    cache
+        .insert("key".to_string(), "value".to_string())
+        .await
+        .expect("insert should succeed");
+
+    let l3_ops = l3.operations();
+    let stored_value = l3_ops
+        .iter()
+        .find_map(|op| match op {
+            CacheOp::Insert { entry, .. } => Some(entry.value().to_vec()),
+            _ => None,
+        })
+        .expect("encrypted tier should have received an insert");
+    assert_ne!(
+        stored_value,
+        serialized("value"),
+        "value must be encrypted through the fallback path"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn relocated_ciphertext_reads_as_a_miss() {
+    // End-to-end: a value is bound to its key via AAD, so an attacker who moves a
+    // valid ciphertext blob to a different key in the untrusted remote tier cannot
+    // make it decrypt — the read is a miss, not a leak of the other key's value.
+    let l1 = MockCache::<String, String>::new();
+    let remote = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(remote.clone()))
+        .build();
+
+    // Legitimately cache A -> "secret-A".
+    cache
+        .insert("A".to_string(), "secret-A".to_string())
+        .await
+        .expect("insert should succeed");
+
+    // Recover A's stored key and ciphertext blob from the remote tier.
+    let stored = remote
+        .operations()
+        .iter()
+        .find_map(|op| match op {
+            CacheOp::Insert { key, entry } => Some((key.clone(), entry.value().clone())),
+            _ => None,
+        })
+        .expect("remote tier should have received an insert");
+    let (stored_key_a, blob_a) = stored;
+    assert_eq!(stored_key_a.to_vec(), serialized("A"), "sanity: key stored is serialized key A");
+
+    // Attacker relocates A's ciphertext under key B in the untrusted remote tier.
+    let key_b = BytesView::from(serialized("B"));
+    remote
+        .insert(key_b, CacheEntry::new(blob_a))
+        .await
+        .expect("planting the blob should succeed");
+
+    // Reading B must fail the AAD check and read as a miss — never A's value.
+    let result = cache.get("B").await.expect("get should succeed");
+    assert!(result.is_none(), "relocated ciphertext must not decrypt under a different key");
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn encrypted_transform_builder_debug() {
+    let builder = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(MockCache::<String, String>::new())
+        .serialize()
+        .protect_with(MockValueProtector::new());
+    assert!(format!("{builder:?}").contains("SerializeBuilder"));
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn encrypt_chained_post_transform_fallbacks() {
+    // Chain two byte-speaking fallback tiers, each with its own `.serialize()`
+    // boundary; the value must round-trip through the composed hierarchy and each tier
+    // stores ciphertext.
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let l3 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
+        .build();
+
+    cache.insert("k".to_string(), "v".to_string()).await.expect("insert should succeed");
+
+    // Force a read past L1 so the encrypted post chain decrypts the value.
+    l1.invalidate(&"k".to_string()).await.expect("invalidate should succeed");
+    let fetched = cache.get("k").await.expect("get should succeed").expect("value present");
+    assert_eq!(
+        *fetched.value(),
+        "v",
+        "value must round-trip through the chained encrypted fallbacks"
+    );
+
+    // The first post tier stored ciphertext, not plaintext.
+    let stored = l2
+        .operations()
+        .iter()
+        .find_map(|op| match op {
+            CacheOp::Insert { entry, .. } => Some(entry.value().to_vec()),
+            _ => None,
+        })
+        .expect("first post tier should have received an insert");
+    assert_ne!(stored, serialized("v"), "value must be encrypted in the chained fallback");
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn tampered_first_post_tier_falls_through_to_valid_second() {
+    // Both post tiers receive a copy on insert. If the first tier's copy is tampered
+    // but the second's is intact, a read must fall through to the second and return the
+    // value — a tampered tier must not shadow a good copy in a later tier.
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let l3 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l3.clone()))
+        .build();
+
+    cache.insert("k".to_string(), "v".to_string()).await.expect("insert should succeed");
+
+    // Corrupt the first post tier's stored ciphertext, and evict L1 so the read must
+    // consult the encrypted post chain.
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+        .await
+        .expect("tampering should succeed");
+    l1.invalidate(&"k".to_string()).await.expect("invalidate should succeed");
+
+    let fetched = cache.get("k").await.expect("get should succeed");
+    assert_eq!(
+        fetched.map(|entry| entry.value().clone()),
+        Some("v".to_string()),
+        "a tampered first post tier must not shadow the valid copy in the next tier"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn unprotect_failure_emits_structured_event_correlated_with_get() {
+    use cachet::RecordingEventHandler;
+    use cachet::telemetry::attributes::EVENT_UNPROTECT_FAILED;
+
+    // Assert the public structured event schema and request-id correlation, not just
+    // the tracing text. Handlers are taken by value, so register a clone and keep the
+    // original to read back the captured events.
+    let handler = RecordingEventHandler::new();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .event_handler(handler.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    // Plant a well-formed blob protected under a DIFFERENT key directly in the untrusted
+    // post tier. A read falls past L1, finds it, and fails authentication (the bound key
+    // doesn't match) — the security-relevant case that must emit the event.
+    let planted = MockValueProtector::new()
+        .protect(&serialized("wrong-key"), &BytesView::from(serialized("v")))
+        .expect("crafting the blob should succeed");
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(planted))
+        .await
+        .expect("planting the blob should succeed");
+
+    assert!(
+        cache.get("k").await.expect("get should succeed").is_none(),
+        "an unprotectable value must read as a miss"
+    );
+
+    // The structured tier callback must carry the unprotect-failure outcome, be tagged
+    // as a fallback-side event, and carry a real (nonzero) request id.
+    let unprotect = handler
+        .tier_events()
+        .into_iter()
+        .find(|event| event.outcome == EVENT_UNPROTECT_FAILED)
+        .expect("a cache.unprotect_failed tier event must be emitted");
+    assert!(unprotect.fallback, "unprotect_failed must be tagged fallback = true");
+    assert_ne!(unprotect.request_id, 0, "unprotect_failed must carry a real request id");
+
+    // That request id must match the completed `cache.get` operation event.
+    let get_op = handler
+        .operation_events()
+        .into_iter()
+        .find(|event| event.operation == "cache.get")
+        .expect("a completed cache.get operation event must be emitted");
+    assert_eq!(
+        get_op.request_id, unprotect.request_id,
+        "unprotect_failed must correlate with the get that observed it"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn malformed_protected_blob_is_a_silent_miss() {
+    use cachet::RecordingEventHandler;
+    use cachet::telemetry::attributes::EVENT_UNPROTECT_FAILED;
+
+    // A structurally invalid blob (too short to be an envelope) is a benign Malformed
+    // reject, NOT an authentication failure: it reads as a miss but must not raise the
+    // security-relevant cache.unprotect_failed event (no crying wolf on format drift).
+    let handler = RecordingEventHandler::new();
+    let l1 = MockCache::<String, String>::new();
+    let l2 = MockCache::<BytesView, BytesView>::new();
+    let cache = Cache::builder::<String, String>(Clock::new_frozen())
+        .storage(l1.clone())
+        .event_handler(handler.clone())
+        .serialize()
+        .protect_with(MockValueProtector::new())
+        .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
+        .build();
+
+    l2.insert(BytesView::from(serialized("k")), CacheEntry::new(BytesView::from(vec![0u8; 2])))
+        .await
+        .expect("planting the blob should succeed");
+
+    assert!(
+        cache.get("k").await.expect("get should succeed").is_none(),
+        "a malformed value must read as a miss"
+    );
+    assert!(
+        handler
+            .tier_events()
+            .into_iter()
+            .all(|event| event.outcome != EVENT_UNPROTECT_FAILED),
+        "a malformed (non-authentication) failure must not emit cache.unprotect_failed"
+    );
+}
