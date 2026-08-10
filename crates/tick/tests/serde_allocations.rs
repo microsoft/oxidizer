@@ -43,3 +43,13 @@ fn borrowed_json_deserialization_is_allocation_free() {
     assert_deserialize_without_allocation::<UnixSeconds>("1722979800", "unix_seconds");
     assert_deserialize_without_allocation::<EcmaScript>(r#""2024-08-06T21:30:00.123Z""#, "ecmascript");
 }
+
+#[test]
+fn textual_format_rejects_non_string_json_with_clear_expectation() {
+    let error = serde_json::from_str::<Iso8601>("123").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid type: integer `123`, expected a timestamp string at line 1 column 3"
+    );
+}
