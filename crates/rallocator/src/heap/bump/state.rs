@@ -739,6 +739,7 @@ mod tests {
         unsafe { (*state).cursor = ptr::without_provenance_mut(usize::MAX) };
         let aligned = Layout::from_size_align(1, 2).unwrap();
         assert!(unsafe { allocate(state, aligned) }.is_null());
+        assert!(unsafe { allocate_tracked(state, aligned) }.is_null());
         unsafe { (*state).cursor = original_cursor };
 
         let layout = Layout::from_size_align(BUMP_SEGMENT_SIZE / 2, 16).unwrap();
@@ -751,6 +752,20 @@ mod tests {
 
         unsafe { deallocate(state, first, layout, false) };
         unsafe { deallocate(state, second, layout, false) };
+
+        let tracked_too_large = Layout::from_size_align(BUMP_SEGMENT_SIZE + 1, 16).unwrap();
+        assert!(unsafe { allocate_tracked(state, tracked_too_large) }.is_null());
+        let tracked_layout = Layout::from_size_align(BUMP_SEGMENT_SIZE / 2, 16).unwrap();
+        let first = unsafe { allocate_tracked(state, tracked_layout) };
+        let second = unsafe { allocate_tracked(state, tracked_layout) };
+        assert!(!first.is_null());
+        assert!(!second.is_null());
+        inject_failure(&FAIL_NEXT_CHUNK_ALLOCATION);
+        assert!(unsafe { allocate_tracked(state, tracked_layout) }.is_null());
+        unsafe {
+            deallocate_tracked(state, first, tracked_layout, false);
+            deallocate_tracked(state, second, tracked_layout, false);
+        }
         unsafe { release_handle(state) };
     }
 

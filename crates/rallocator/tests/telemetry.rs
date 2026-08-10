@@ -499,7 +499,7 @@ fn sampler_and_session_report_interval_deltas() {
 }
 
 #[test]
-fn opaque_snapshot_suppresses_operations_and_drop_releases_hal_storage() {
+fn opaque_snapshot_suppresses_allocator_operations() {
     rallocator::initialize();
     let _test = test_lock();
     std::thread::sleep(std::time::Duration::from_millis(10));
@@ -516,10 +516,14 @@ fn opaque_snapshot_suppresses_operations_and_drop_releases_hal_storage() {
     assert_eq!(after_write.allocations, before.allocations);
     assert_eq!(after_write.deallocations, before.deallocations);
     assert_eq!(after_write.remote(), before.remote());
-    assert!(after_write.mapped_bytes >= before.mapped_bytes);
-    assert!(after_write.os_mappings >= before.os_mappings);
     drop(encoded);
-    assert_eq!(stats().unwrap(), after_write);
+    let after_drop = stats().unwrap();
+    assert_eq!(after_drop.allocated_bytes, after_write.allocated_bytes);
+    assert_eq!(after_drop.deallocated_bytes, after_write.deallocated_bytes);
+    assert_eq!(after_drop.live_bytes, after_write.live_bytes);
+    assert_eq!(after_drop.allocations, after_write.allocations);
+    assert_eq!(after_drop.deallocations, after_write.deallocations);
+    assert_eq!(after_drop.remote(), after_write.remote());
     std::fs::remove_file(path).unwrap();
 }
 

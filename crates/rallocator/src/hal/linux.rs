@@ -17,10 +17,11 @@ pub(crate) fn map(size: usize) -> *mut u8 {
 
 pub(crate) fn reserve(size: usize) -> *mut u8 {
     let address = map_aligned(size, PROT_READ | PROT_WRITE);
-    if !address.is_null() {
-        let advised = unsafe { madvise(address.cast(), size, MADV_HUGEPAGE) };
-        debug_assert_eq!(advised, 0);
+    if address.is_null() {
+        return address;
     }
+    let advised = unsafe { madvise(address.cast(), size, MADV_HUGEPAGE) };
+    debug_assert_eq!(advised, 0);
     address
 }
 
@@ -41,10 +42,7 @@ pub(crate) unsafe fn commit_locality_slab(_address: *mut u8, _slab_size: usize) 
 }
 
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
-    if unsafe { mprotect(address.cast(), size, PROT_NONE) } != 0 {
-        return false;
-    }
-    unsafe { madvise(address.cast(), size, MADV_DONTNEED) == 0 }
+    unsafe { mprotect(address.cast(), size, PROT_NONE) == 0 && madvise(address.cast(), size, MADV_DONTNEED) == 0 }
 }
 
 pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
@@ -104,11 +102,9 @@ fn map_aligned_with_page_size(size: usize, protection: i32, page_size: usize) ->
         debug_assert_eq!(result, 0);
     }
 
-    if suffix_size != 0 {
-        let suffix = unsafe { aligned.add(rounded_size) };
-        let result = unsafe { munmap(suffix.cast(), suffix_size) };
-        debug_assert_eq!(result, 0);
-    }
+    let suffix = unsafe { aligned.add(rounded_size) };
+    let result = unsafe { munmap(suffix.cast(), suffix_size) };
+    debug_assert_eq!(result, 0);
     aligned
 }
 
@@ -117,14 +113,18 @@ fn page_size() -> usize {
 
     *PAGE_SIZE.get_or_init(|| {
         let raw_page_size = unsafe { sysconf(_SC_PAGESIZE) };
-        let Ok(page_size) = usize::try_from(raw_page_size) else {
-            process::abort();
-        };
-        if page_size == 0 || !page_size.is_power_of_two() || !ALLOCATION_ALIGNMENT.is_multiple_of(page_size) {
-            process::abort();
-        }
-        page_size
+        validated_page_size(raw_page_size).unwrap_or_else(abort_invalid_page_size)
     })
+}
+
+fn validated_page_size(raw_page_size: libc::c_long) -> Option<usize> {
+    let page_size = usize::try_from(raw_page_size).ok()?;
+    (page_size != 0 && page_size.is_power_of_two() && ALLOCATION_ALIGNMENT.is_multiple_of(page_size)).then_some(page_size)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn abort_invalid_page_size<T>() -> T {
+    process::abort()
 }
 
 #[cfg(test)]
@@ -162,5 +162,22 @@ mod tests {
                 unmap(address, size);
             }
         }
+    }
+
+    #[test]
+    fn mapping_failures_and_page_size_validation_are_reported() {
+        let host_page_size = page_size();
+        assert!(map_aligned_with_page_size(usize::MAX, PROT_READ | PROT_WRITE, host_page_size).is_null());
+        assert!(map_aligned_with_page_size(usize::MAX - (host_page_size - 1), PROT_READ | PROT_WRITE, host_page_size).is_null());
+        assert!(map_aligned_with_page_size(isize::MAX as usize, PROT_READ | PROT_WRITE, host_page_size).is_null());
+        assert!(reserve(usize::MAX).is_null());
+
+        assert_eq!(validated_page_size(host_page_size as libc::c_long), Some(host_page_size));
+        assert_eq!(validated_page_size(-1), None);
+        assert_eq!(validated_page_size(0), None);
+        assert_eq!(validated_page_size(3), None);
+        assert_eq!(validated_page_size((ALLOCATION_ALIGNMENT * 2) as libc::c_long), None);
+
+        assert!(!unsafe { decommit(ptr::without_provenance_mut(1), host_page_size) });
     }
 }

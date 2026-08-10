@@ -118,12 +118,7 @@ fn create_heap(options: Options) -> Result<RawHeap, CreationError> {
             HeapTarget::Bump(BumpHeapPtr::new(state))
         }
     };
-    let claim_policy = if matches!(target, HeapTarget::Thread(_)) {
-        ClaimPolicy::Shared
-    } else {
-        ClaimPolicy::Exclusive
-    };
-    Ok(unsafe { RawHeap::new(raw_hint(target), claim_policy) })
+    Ok(unsafe { RawHeap::new(raw_hint(target), ClaimPolicy::Exclusive) })
 }
 
 fn new_general(options: common_general::Options, domain: *mut crate::allocator::DomainState) -> Option<*mut ReusableHeapState> {
@@ -202,10 +197,7 @@ unsafe fn domain_from_state(state: *mut crate::allocator::DomainState) -> Domain
 }
 
 unsafe fn heap_info(hint: RawHint, claimed_active: bool) -> Info {
-    let target = match target_from_hint(hint) {
-        Some(target) => target,
-        None => invalid_hint(),
-    };
+    let target = required_target(hint);
     let active = match target {
         HeapTarget::Thread(state) => crate::allocator::thread_heap_is_active(state.as_ptr()),
         _ => claimed_active,
@@ -230,10 +222,7 @@ unsafe fn heap_info(hint: RawHint, claimed_active: bool) -> Info {
 }
 
 unsafe fn heap_usage(hint: RawHint) -> Result<Usage, ()> {
-    match match target_from_hint(hint) {
-        Some(target) => target,
-        None => invalid_hint(),
-    } {
+    match required_target(hint) {
         HeapTarget::General(state) => Ok(unsafe { crate::allocator::general_heap_usage(state.as_ptr(), ptr::null_mut()) }),
         HeapTarget::Bump(state) => {
             let (reserved_bytes, cursor_used_bytes, allocation_count, live_allocations, live_requested_bytes, chunk_count) =
@@ -252,10 +241,7 @@ unsafe fn heap_usage(hint: RawHint) -> Result<Usage, ()> {
 }
 
 unsafe fn destroy_hint(hint: RawHint) {
-    match match target_from_hint(hint) {
-        Some(target) => target,
-        None => invalid_hint(),
-    } {
+    match required_target(hint) {
         HeapTarget::General(state) => unsafe { crate::allocator::retire_general_heap(state.as_ptr()) },
         HeapTarget::Bump(state) => unsafe { bump::release_handle(state.as_ptr()) },
         HeapTarget::Thread(_) => {}
@@ -271,17 +257,28 @@ fn raw_hint(target: HeapTarget) -> RawHint {
 }
 
 pub(crate) fn target_from_hint(hint: RawHint) -> Option<HeapTarget> {
+    target_from_hint_or_else(hint, || -> Option<HeapTarget> { std::process::abort() })
+}
+
+fn target_from_hint_or_else(hint: RawHint, on_invalid: impl FnOnce() -> Option<HeapTarget>) -> Option<HeapTarget> {
     match hint.kind() {
         0 if hint.is_global() => None,
         TARGET_GENERAL => Some(HeapTarget::General(GeneralHeapPtr::new(hint.target().cast()))),
         TARGET_BUMP => Some(HeapTarget::Bump(BumpHeapPtr::new(hint.target().cast()))),
         TARGET_THREAD => Some(HeapTarget::Thread(RemoteHeapPtr::new(hint.target().cast()))),
-        _ => invalid_hint(),
+        _ => on_invalid(),
     }
 }
 
-fn invalid_hint() -> ! {
-    std::process::abort()
+fn required_target(hint: RawHint) -> HeapTarget {
+    required_target_or_else(hint, || -> HeapTarget { std::process::abort() })
+}
+
+fn required_target_or_else(hint: RawHint, on_invalid: impl FnOnce() -> HeapTarget) -> HeapTarget {
+    match target_from_hint(hint) {
+        Some(target) => target,
+        None => on_invalid(),
+    }
 }
 
 #[cfg(test)]
@@ -322,5 +319,18 @@ mod tests {
     fn heap_creation_reports_backing_allocation_failures() {
         crate::initialize();
         exercise_heap_allocation_failures();
+    }
+
+    #[test]
+    fn heap_creation_rejects_general_pooling_and_invalid_hints_delegate_failure() {
+        crate::initialize();
+        assert_eq!(
+            create_heap(Options::general(common_general::Options::new()).with_thread_pool()).unwrap_err(),
+            CreationError::CreationFailed
+        );
+
+        assert!(std::panic::catch_unwind(|| required_target_or_else(RawHint::GLOBAL, || panic!("injected invalid global hint"))).is_err());
+        let invalid = unsafe { RawHint::new(NonNull::<u8>::dangling().as_ptr().cast(), usize::MAX) };
+        assert!(std::panic::catch_unwind(|| target_from_hint_or_else(invalid, || panic!("injected invalid target kind"))).is_err());
     }
 }

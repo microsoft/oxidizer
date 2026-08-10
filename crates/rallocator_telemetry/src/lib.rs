@@ -699,9 +699,7 @@ fn read_topology(reader: &mut Reader<'_>, section_version: u16) -> Result<Vec<To
                 segments,
             });
         }
-        if detailed_bitmap != used_bitmap {
-            return Err(Error::malformed_section(SECTION_TOPOLOGY));
-        }
+        validate_detailed_bitmap(&detailed_bitmap, &used_bitmap)?;
         regions.push(TopologyRegion {
             region_index,
             base_address,
@@ -712,6 +710,13 @@ fn read_topology(reader: &mut Reader<'_>, section_version: u16) -> Result<Vec<To
         });
     }
     Ok(regions)
+}
+
+fn validate_detailed_bitmap(detailed_bitmap: &[u64], used_bitmap: &[u64]) -> Result<(), Error> {
+    if detailed_bitmap != used_bitmap {
+        return Err(Error::malformed_section(SECTION_TOPOLOGY));
+    }
+    Ok(())
 }
 
 fn callers_encoded_len(callers: Option<&Callers>) -> Result<usize, Error> {
@@ -1070,4 +1075,57 @@ fn checked_add(left: usize, right: usize) -> Result<usize, Error> {
 
 fn checked_mul(left: usize, right: usize) -> Result<usize, Error> {
     left.checked_mul(right).ok_or(Error::LENGTH_OVERFLOW)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_have_descriptive_output_and_sources() {
+        let wire_source = Reader::new(&[]).read_u8().unwrap_err();
+        let cases = [
+            (Error::LENGTH_OVERFLOW, "the encoded snapshot length cannot be represented"),
+            (Error::OUTPUT_TOO_SMALL, "the snapshot output buffer is too small"),
+            (
+                Error::OUTPUT_LENGTH_MISMATCH,
+                "the snapshot output buffer must have the exact encoded length",
+            ),
+            (
+                Error::wire(wire_source),
+                "invalid wire container: the input or output ended unexpectedly",
+            ),
+            (Error::unsupported_schema(2), "telemetry schema version 2 is unsupported"),
+            (Error::missing_section(3), "required telemetry section 3 is missing"),
+            (Error::duplicate_section(4), "telemetry section 4 appears more than once"),
+            (Error::malformed_section(5), "telemetry section 5 is malformed"),
+            (Error::INTEGER_OVERFLOW, "a decoded integer cannot fit in the target type"),
+            (Error::invalid_utf8(6), "telemetry section 6 contains invalid UTF-8"),
+            (Error::unknown_event_kind(7), "event kind 7 is unknown"),
+            (Error::unknown_slice_kind(8), "slice kind 8 is unknown"),
+        ];
+
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(format!("{error:?}"), format!("Error({message})"));
+        }
+
+        assert!(std::error::Error::source(&Error::wire(wire_source)).is_some());
+        assert!(std::error::Error::source(&Error::LENGTH_OVERFLOW).is_none());
+    }
+
+    #[test]
+    fn detailed_topology_bitmap_must_match_used_bitmap() {
+        validate_detailed_bitmap(&[0b01], &[0b11]).unwrap_err();
+    }
+
+    #[test]
+    fn caller_heap_kind_write_errors_are_propagated() {
+        let callers = Callers {
+            events: vec![Event::default()],
+            ..Callers::default()
+        };
+        let mut bytes = [0_u8; 1 + 3 * 8 + 4 + 4 + 4 * 8 + 1 + 8];
+        write_callers(&mut Writer::new(&mut bytes), Some(&callers)).unwrap_err();
+    }
 }

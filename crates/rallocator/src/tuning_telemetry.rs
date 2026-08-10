@@ -271,11 +271,16 @@ struct RecordingGuard;
 
 impl RecordingGuard {
     fn begin() -> Option<Self> {
+        Self::begin_with(|| {})
+    }
+
+    fn begin_with(after_start: impl FnOnce()) -> Option<Self> {
         let session = ACTIVE_SESSION.load(Ordering::Acquire);
         if session == 0 {
             return None;
         }
         RECORDERS.fetch_add(1, Ordering::Acquire);
+        after_start();
         if ACTIVE_SESSION.load(Ordering::Acquire) != session {
             RECORDERS.fetch_sub(1, Ordering::Release);
             return None;
@@ -291,7 +296,12 @@ impl Drop for RecordingGuard {
 }
 
 fn wait_for_recorders() {
+    wait_for_recorders_with(|| {});
+}
+
+fn wait_for_recorders_with(mut on_wait: impl FnMut()) {
     while RECORDERS.load(Ordering::Acquire) != 0 {
+        on_wait();
         std::hint::spin_loop();
     }
 }
@@ -675,6 +685,27 @@ mod tests {
         assert_eq!(medium_counters.cached_frees.load(Ordering::Relaxed), 0);
         assert_eq!(medium_counters.global_frees.load(Ordering::Relaxed), 0);
         assert_eq!(medium_counters.purged_spans.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn recorder_transition_and_wait_retries_are_deterministic() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        ACTIVE_SESSION.store(1, Ordering::Release);
+        assert!(
+            RecordingGuard::begin_with(|| {
+                ACTIVE_SESSION.store(0, Ordering::Release);
+            })
+            .is_none()
+        );
+        assert_eq!(RECORDERS.load(Ordering::Acquire), 0);
+
+        RECORDERS.store(1, Ordering::Release);
+        let mut waits = 0;
+        wait_for_recorders_with(|| {
+            waits += 1;
+            RECORDERS.store(0, Ordering::Release);
+        });
+        assert_eq!(waits, 1);
     }
 
     #[test]

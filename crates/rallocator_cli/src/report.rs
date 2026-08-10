@@ -1290,3 +1290,24 @@ fn escape_html(value: &str) -> Cow<'_, str> {
     }
     Cow::Owned(escaped)
 }
+
+#[cfg(test)]
+mod tests {
+    use rallocator_telemetry::topology::TopologyRegion;
+
+    use super::{grid_width, histogram_label, render_region, slice_runs};
+
+    #[test]
+    fn empty_regions_and_boundary_grids_render_safely() {
+        let mut region = TopologyRegion::default();
+        region.slice_bytes = 1;
+        let mut html = String::new();
+
+        render_region(&mut html, &region, None);
+
+        assert!(html.contains("0.00%"));
+        assert!(slice_runs(&[], 0).is_empty());
+        assert_eq!(grid_width(16_384), 128);
+        assert_eq!(histogram_label(0), "0 B");
+    }
+}

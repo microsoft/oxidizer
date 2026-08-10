@@ -4,6 +4,8 @@
 //! Allocation telemetry, process-wide event tracking, and deferred stack resolution.
 
 use std::alloc::Layout;
+#[cfg(test)]
+use std::cell::RefCell;
 use std::cell::{Cell, UnsafeCell};
 #[cfg(not(miri))]
 use std::ffi::c_void;
@@ -481,6 +483,8 @@ static CONTROL: Mutex<()> = Mutex::new(());
 thread_local! {
     static TELEMETRY_SUPPRESSION_DEPTH: Cell<usize> = const { Cell::new(0) };
     static AGGREGATE_SHARD: Cell<*const AggregateShard> = const { Cell::new(ptr::null()) };
+    #[cfg(test)]
+    static AGGREGATE_REGISTRATION_BARRIER: RefCell<Option<Arc<std::sync::Barrier>>> = const { RefCell::new(None) };
 }
 
 #[repr(C, align(64))]
@@ -1101,11 +1105,27 @@ fn register_aggregate_shard(shard: *mut AggregateShard) {
     let mut head = AGGREGATE_REGISTRY.load(Ordering::Acquire);
     loop {
         unsafe { (*shard).next.store(head, Ordering::Relaxed) };
+        #[cfg(test)]
+        wait_at_aggregate_registration_barrier();
         match AGGREGATE_REGISTRY.compare_exchange_weak(head, shard, Ordering::Release, Ordering::Acquire) {
             Ok(_) => return,
             Err(current) => head = current,
         }
     }
+}
+
+#[cfg(test)]
+fn set_aggregate_registration_barrier(barrier: Arc<std::sync::Barrier>) {
+    AGGREGATE_REGISTRATION_BARRIER.with(|slot| *slot.borrow_mut() = Some(barrier));
+}
+
+#[cfg(test)]
+fn wait_at_aggregate_registration_barrier() {
+    AGGREGATE_REGISTRATION_BARRIER.with(|slot| {
+        if let Some(barrier) = slot.borrow_mut().take() {
+            barrier.wait();
+        }
+    });
 }
 
 #[cold]
@@ -2399,6 +2419,47 @@ mod tests {
         track_callers(true);
         assert_eq!(active_session(), session);
         track_callers(false);
+    }
+
+    #[cfg(not(miri))]
+    #[test]
+    fn aggregate_helpers_cover_shared_fallback_and_registration_retry_paths() {
+        crate::initialize();
+        let _test = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(histogram_bucket(0), 0);
+
+        let shared = AggregateShard::new(true);
+        add_owner(&shared, &shared.allocations, 2);
+        add_owner_signed(&shared, &shared.size_live[0], -1);
+        assert_eq!(shared.allocations.load(Ordering::Relaxed), 2);
+        assert_eq!(shared.size_live[0].load(Ordering::Relaxed), -1);
+
+        hal::fail_next_map();
+        assert!(ptr::eq(initialize_aggregate_shard(), &raw const FALLBACK_AGGREGATE_SHARD));
+
+        let barrier = Arc::new(Barrier::new(2));
+        let workers = (0..2)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    set_aggregate_registration_barrier(barrier);
+                    register_aggregate_shard(Box::into_raw(Box::new(AggregateShard::new(false))));
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        thread::Builder::new()
+            .name("rallocator-telemetry-test".to_owned())
+            .spawn(|| {
+                register_thread_identity(usize::MAX);
+                register_thread_identity(usize::MAX);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

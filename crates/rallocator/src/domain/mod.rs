@@ -57,15 +57,19 @@ fn fail_next_domain_creation() -> bool {
 
 pub(crate) fn default_domain() -> RawDomain {
     let state = DEFAULT_DOMAIN.get_or_init(|| {
-        let domain = match create_domain() {
-            Some(domain) => domain,
-            None => std::process::abort(),
-        };
+        let domain = domain_or_else(create_domain(), || -> RawDomain { std::process::abort() });
         let state = domain.target().cast::<DomainState>();
         crate::allocator::mark_default_domain(state);
         DomainStatePtr(NonNull::new(state).expect("domain creation returned a validated non-null target"))
     });
     unsafe { RawDomain::new(state.0.as_ptr().cast()) }
+}
+
+fn domain_or_else(domain: Option<RawDomain>, on_failure: impl FnOnce() -> RawDomain) -> RawDomain {
+    match domain {
+        Some(domain) => domain,
+        None => on_failure(),
+    }
 }
 
 #[cfg(test)]
@@ -80,5 +84,10 @@ mod tests {
 
         *FAIL_NEXT_DOMAIN_CREATION.lock().unwrap() = Some(std::thread::current().id());
         std::panic::catch_unwind(Domain::new).unwrap_err();
+    }
+
+    #[test]
+    fn default_domain_delegates_unrecoverable_creation_failure() {
+        std::panic::catch_unwind(|| domain_or_else(None, || panic!("injected domain creation failure"))).unwrap_err();
     }
 }

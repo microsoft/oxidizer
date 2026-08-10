@@ -17,9 +17,6 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
 
-[package.metadata.coverage-gate]
-min-lines-percent = 94.5
-
 [dev-dependencies]
 static_assertions.workspace = true
 

@@ -217,6 +217,10 @@ fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
+    bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+}
+
 #[test]
 fn snapshot_round_trips() {
     let expected = fixture();
@@ -450,6 +454,7 @@ fn malformed_collection_counts_are_rejected() {
         (SECTION_CALLERS, 73),
         (SECTION_CALLERS, 93),
         (SECTION_CALLERS, 164),
+        (SECTION_CALLERS, 255),
         (SECTION_ADDRESSES, 0),
     ] {
         let mut bytes = encoded(&fixture());
@@ -486,6 +491,11 @@ fn invalid_enum_discriminants_and_address_data_are_rejected() {
     decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
+    let (_, callers) = section(&bytes, SECTION_CALLERS);
+    write_u64(&mut bytes, callers + 140, 0);
+    decode(&bytes).unwrap_err();
+
+    let mut bytes = encoded(&fixture());
     let (_, addresses) = section(&bytes, SECTION_ADDRESSES);
     bytes[addresses + 12] = 0x10;
     decode(&bytes).unwrap_err();
@@ -494,6 +504,15 @@ fn invalid_enum_discriminants_and_address_data_are_rejected() {
     let (_, addresses) = section(&bytes, SECTION_ADDRESSES);
     bytes[addresses + 17] = 0xFF;
     decode(&bytes).unwrap_err();
+}
+
+#[test]
+fn all_heap_kinds_round_trip() {
+    let mut expected = fixture();
+    let events = &mut expected.callers.as_mut().unwrap().events;
+    events[0].heap_kind = HeapKind::Bump;
+    events[1].heap_kind = HeapKind::Thread;
+    assert_eq!(decode(&encoded(&expected)).unwrap(), expected);
 }
 
 #[test]

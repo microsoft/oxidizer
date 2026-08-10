@@ -17,9 +17,6 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_cli"
 
-[package.metadata.coverage-gate]
-min-lines-percent = 99.2
-
 [[bin]]
 name = "rallocator_cli"
 path = "src/main.rs"

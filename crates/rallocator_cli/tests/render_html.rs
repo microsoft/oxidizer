@@ -251,3 +251,33 @@ fn html_report_contains_required_sections() {
     assert!(!html.contains("http://"));
     assert!(!html.contains("https://"));
 }
+
+#[test]
+fn html_report_handles_empty_and_boundary_data() {
+    let mut snapshot = Snapshot::new(Version::new(1, 2, 3));
+    snapshot.histograms = schema!(
+        Histograms::default(),
+        allocated: vec![1],
+        live: vec![0]
+    );
+    snapshot.topology = vec![schema!(
+        TopologyRegion::default(),
+        region_index: 1,
+        region_bytes: (64 << 10) * 16_384,
+        slice_bytes: 64 << 10,
+        used_bitmap: vec![0; 256],
+    )];
+    snapshot.callers = Some(schema!(
+        Callers::default(),
+        threads: vec![schema!(
+            ThreadLog::default(),
+            thread_log_id: 77,
+        )],
+    ));
+
+    let html = support::render_html(&snapshot, "empty-boundary-data");
+
+    assert!(html.contains("viewBox=\"0 0 128 128\""));
+    assert!(html.contains("<span class=\"histogram-label\">0 B</span>"));
+    assert!(html.contains("Thread log #77"));
+}

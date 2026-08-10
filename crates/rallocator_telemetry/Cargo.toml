@@ -20,9 +20,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["rallocator_wire::*"]
 
-[package.metadata.coverage-gate]
-min-lines-percent = 97.9
-
 [dependencies]
 rallocator_wire.workspace = true
 

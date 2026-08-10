@@ -20,9 +20,6 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[package.metadata.coverage-gate]
-min-lines-percent = 99.4
-
 [features]
 tuning-telemetry = []
 

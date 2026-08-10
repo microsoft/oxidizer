@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     missing_debug_implementations,
     missing_docs,
@@ -56,14 +57,11 @@
     test,
     expect(
         clippy::clone_on_ref_ptr,
+        clippy::fn_to_numeric_cast_any,
         clippy::iter_with_drain,
         clippy::unnecessary_wraps,
         reason = "Tests intentionally materialize ownership and mirror fallible callback signatures"
     )
-)]
-#![cfg_attr(
-    all(test, target_os = "windows"),
-    expect(clippy::fn_to_numeric_cast_any, reason = "Windows callback tests compare function addresses")
 )]
 
 //! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].

@@ -199,8 +199,12 @@ pub unsafe fn register(backend: &'static Backend) {
         );
         return;
     }
-    if BACKEND.set(backend).is_err() {
-        let current = BACKEND.get().expect("backend registration raced");
+    complete_registration(&BACKEND, backend);
+}
+
+pub(crate) fn complete_registration(slot: &OnceLock<&'static Backend>, backend: &'static Backend) {
+    if slot.set(backend).is_err() {
+        let current = slot.get().expect("backend registration raced");
         assert!(
             ptr::eq(*current, backend),
             "a different allocation heap backend is already installed"

@@ -1574,9 +1574,11 @@ where
             let bump = unsafe { (*state).active_bump };
             let address = unsafe { bump::allocate_tracked(bump, layout) };
             if !address.is_null() {
-                let allocation = tracking.map_or(TrackingAllocation::NONE, |tracking| {
+                let allocation = if let Some(tracking) = tracking {
                     tracking.commit(address, layout, bump.addr(), TrackingHeapKind::Bump)
-                });
+                } else {
+                    TrackingAllocation::NONE
+                };
                 unsafe { bump::set_tracking(address, allocation) };
                 self.record_allocation(layout.size());
                 return address;
@@ -2812,15 +2814,20 @@ fn record_medium_span(region: *mut RegionState, slice_index: usize, slice_count:
 }
 
 pub(crate) fn register_bump_chunk(address: *mut u8, state: *mut BumpState) {
-    let Some(region) = region_containing(address) else {
-        std::process::abort();
-    };
+    let region = bump_chunk_region_or_else(address, || -> *mut RegionState { std::process::abort() });
     let slice_index = (address.addr() - unsafe { (*region).base.addr() }) / MEDIUM_SLICE_SIZE;
     let metadata = unsafe { &(*region).physical[slice_index] };
     metadata.owner.store(state.addr(), Ordering::Relaxed);
     metadata
         .kind_and_span
         .store(PHYSICAL_SLICE_BUMP | (1 << PHYSICAL_SPAN_SHIFT), Ordering::Release);
+}
+
+fn bump_chunk_region_or_else(address: *mut u8, on_missing: impl FnOnce() -> *mut RegionState) -> *mut RegionState {
+    match region_containing(address) {
+        Some(region) => region,
+        None => on_missing(),
+    }
 }
 
 fn encode_heap_owner(owner: *mut ReusableHeapState, retirable: bool) -> *mut ReusableHeapState {
@@ -3770,6 +3777,12 @@ mod tests {
     use super::*;
 
     crate::config!(DirectTrackingConfig { track_aggregates: true });
+    crate::config!(CallerTrackingConfig {
+        track_callers: true,
+        caller_event_capacity: 4,
+        caller_allocation_stack_frames: 0,
+        caller_deallocation_stack_frames: 0,
+    });
 
     fn new_domain() -> Domain {
         crate::initialize();
@@ -4011,6 +4024,9 @@ mod tests {
         heap.context_class_lists[0].partial = context_header;
         hal::fail_next_commit_locality_segment();
         assert!(allocator.pop_or_refill_context_slow(0, &mut heap).is_null());
+        hal::fail_next_commit_locality_segment();
+        assert!(allocator.pop_or_refill_context_slow(0, &mut heap).is_null());
+        assert!(heap.context_classes[0].active.is_null());
 
         unsafe {
             hal::unmap(normal, SLAB_SIZE);
@@ -4120,6 +4136,15 @@ mod tests {
             );
         }
 
+        let aligned_layout = Layout::new::<u64>();
+        let shifted = unsafe { allocator.allocate_direct(aligned_layout, true, None, ptr::from_mut(&mut heap)) };
+        assert!(!shifted.is_null());
+        assert_ne!(shifted.addr() & (ConfigSizeClasses::<Standard>::SIZES[0] - 1), 0);
+        unsafe {
+            let header = read_header(shifted);
+            allocator.deallocate_direct(shifted, aligned_layout, header.map_addr(|address| address & !TAG_MASK));
+        }
+
         let state = ptr::from_mut(unsafe { &mut *thread_state() });
         let over_aligned = Layout::from_size_align(32, 2 * MAX_SMALL_ALIGNMENT).unwrap();
         let contextual = unsafe { allocator.allocate_with_context(over_aligned, None, state) };
@@ -4175,6 +4200,12 @@ mod tests {
             assert!(!unsafe { ensure_default_heap(ptr::from_mut(state)) }.is_null());
             hal::fail_next_commit();
             let layout = Layout::from_size_align(MEDIUM_SLICE_SIZE, 16).unwrap();
+            let address = unsafe { allocator.alloc(layout) };
+            assert!(!address.is_null());
+            unsafe { allocator.dealloc(address, layout) };
+
+            hal::fail_next_commit_locality_segment();
+            let layout = Layout::new::<u8>();
             let address = unsafe { allocator.alloc(layout) };
             assert!(!address.is_null());
             unsafe { allocator.dealloc(address, layout) };
@@ -4237,6 +4268,59 @@ mod tests {
         assert!(tracking_target::<Standard>().is_some());
         tracking::track_callers(false);
         invalidate_tracking_cache();
+    }
+
+    #[test]
+    fn caller_tracking_allocates_directly_from_an_active_bump() {
+        crate::initialize();
+        let domain = new_domain();
+        let options = allocation_hints::heap::bump::Options::new();
+        let bump_state = bump::create_state(options, crate::domain::state(domain)).unwrap();
+        unsafe { bump::reset_state(bump_state, options) };
+        assert!(bump::ensure_fallback_heap(bump_state));
+
+        let state = unsafe { thread_state() };
+        let saved = unsafe { ((*state).active_heap, (*state).active_bump, (*state).active_remote) };
+        unsafe {
+            (*state).active_heap = (*bump_state).fallback_heap;
+            (*state).active_bump = bump_state;
+            (*state).active_remote = ptr::null_mut();
+        }
+        tracking::track_callers(true);
+        invalidate_tracking_cache();
+
+        let allocator = unsafe { Rallocator::<CallerTrackingConfig>::new() };
+        let layout = Layout::new::<u64>();
+        let address = unsafe { allocator.alloc(layout) };
+        assert!(!address.is_null());
+        unsafe { allocator.dealloc(address, layout) };
+
+        tracking::track_callers(false);
+        invalidate_tracking_cache();
+        unsafe {
+            ((*state).active_heap, (*state).active_bump, (*state).active_remote) = saved;
+            bump::release_handle(bump_state);
+        }
+    }
+
+    #[test]
+    fn thread_heap_usage_rejects_a_detached_owner_heap() {
+        crate::initialize();
+        let state = unsafe { thread_state() };
+        let token = unsafe { thread_token(state) };
+        let mut remote = Box::new(RemoteHeapState {
+            owner: ptr::null_mut(),
+            embedded_owner: OwnerState::new(),
+            owner_token: AtomicUsize::new(token),
+            owner_heap: AtomicPtr::new(ptr::null_mut()),
+            domain: crate::domain::default_state(),
+            options: GeneralOptions::new(),
+            usage: RemoteUsage::new(),
+            classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
+            context_classes: [const { RemoteClass::new() }; MAX_SIZE_CLASSES],
+        });
+        remote.owner = ptr::addr_of_mut!(remote.embedded_owner);
+        assert_eq!(unsafe { thread_heap_usage(ptr::from_mut(remote.as_mut())) }, Err(()));
     }
 
     #[test]
@@ -4388,6 +4472,21 @@ mod tests {
         };
         assert!(unsafe { find_region(&state, outside) }.is_none());
         assert!(!slices_are_free(outside, 1));
+    }
+
+    #[test]
+    fn ordinary_layout_medium_allocation_uses_region_deallocation_path() {
+        crate::initialize();
+        let domain = new_domain();
+        let allocator = unsafe { Rallocator::<Standard>::new() };
+        let mut heap = ReusableHeapState::new(GeneralOptions::new(), crate::domain::state(domain));
+        let layout = Layout::new::<[u8; 16]>();
+        let address = allocator.allocate_medium(layout, &mut heap);
+        assert!(!address.is_null());
+        unsafe {
+            address.cast::<usize>().write(0);
+            allocator.dealloc(address, layout);
+        }
     }
 
     #[test]
@@ -4896,6 +4995,31 @@ mod tests {
         let allocator = unsafe { Rallocator::<Standard>::new() };
         let mut domain = DomainState::new();
         let mut heap = ReusableHeapState::new(GeneralOptions::new(), ptr::from_mut(&mut domain));
+        let normal_slab = hal::map(SLAB_SIZE);
+        let normal_block = allocator.initialize_slab(
+            SlabAllocation {
+                address: normal_slab,
+                segment_slices: DIRECT_SLAB_SEGMENT,
+                committed_bytes: SLAB_SIZE,
+            },
+            0,
+            &mut heap,
+            SLAB_MARKER,
+        );
+        let normal_header = normal_slab.cast::<SlabHeader>();
+        unsafe {
+            (*normal_header).free_count = 0;
+            (*normal_header).fresh_next = ptr::null_mut();
+            write_free_next(normal_block, ptr::null_mut());
+            write_free_requested(normal_block, 0);
+            (*normal_header).remote_free.store(normal_block, Ordering::Relaxed);
+            (*normal_header).remote_queued.store(true, Ordering::Relaxed);
+            (*heap.owner).remote_slabs.store(normal_header, Ordering::Relaxed);
+        }
+        heap.classes[0].active = ptr::null_mut();
+        assert!(!allocator.pop_or_refill_slow(0, &mut heap).is_null());
+        assert_eq!(heap.classes[0].active, normal_header);
+
         let slab = hal::map(SLAB_SIZE);
         let block = allocator.initialize_slab(
             SlabAllocation {
@@ -5007,7 +5131,45 @@ mod tests {
             unsafe { push_context_block::<crate::tunables::Standard>(remote_block, 0, 1, ptr::from_mut(&mut thread)) };
             assert!(!unsafe { pop_remote_block(&remote.context_classes[0]) }.is_null());
             unsafe { hal::unmap(remote_slab, SLAB_SIZE) };
+
+            let spill_slab = hal::map(SLAB_SIZE);
+            let first = allocator.initialize_slab(
+                SlabAllocation {
+                    address: spill_slab,
+                    segment_slices: DIRECT_SLAB_SEGMENT,
+                    committed_bytes: SLAB_SIZE,
+                },
+                0,
+                &mut heap,
+                CONTEXT_SLAB_MARKER,
+            );
+            let second = unsafe { take_local_slab_block::<crate::tunables::Standard>(spill_slab.cast(), 0) };
+            let third = unsafe { take_local_slab_block::<crate::tunables::Standard>(spill_slab.cast(), 0) };
+            let spill_header = spill_slab.cast::<SlabHeader>();
+            let block_size = ConfigSizeClasses::<Standard>::SIZES[0];
+            unsafe {
+                (*spill_header).free_count = 0;
+                (*spill_header).requested_bytes = block_size * 3;
+            }
+            heap.context_classes[0].active = ptr::null_mut();
+            let mut thread = ThreadState::new();
+            thread.default_heap = ptr::from_mut(&mut heap);
+            unsafe {
+                push_context_block::<crate::tunables::Standard>(first, 0, block_size, ptr::from_mut(&mut thread));
+                push_context_block::<crate::tunables::Standard>(second, 0, block_size, ptr::from_mut(&mut thread));
+                push_context_block::<crate::tunables::Standard>(third, 0, block_size, ptr::from_mut(&mut thread));
+            }
+            assert_eq!(heap.context_class_lists[0].partial, spill_header);
+            unsafe { hal::unmap(spill_slab, SLAB_SIZE) };
         }
+
+        unsafe { hal::unmap(normal_slab, SLAB_SIZE) };
+    }
+
+    #[test]
+    fn missing_bump_chunk_region_delegates_failure() {
+        std::panic::catch_unwind(|| bump_chunk_region_or_else(ptr::without_provenance_mut(1), || panic!("injected missing bump region")))
+            .unwrap_err();
     }
 
     #[test]

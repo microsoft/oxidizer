@@ -355,7 +355,7 @@ impl ThreadContext {
 mod tests {
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier};
+    use std::sync::{Arc, Barrier, OnceLock};
 
     use super::*;
     use crate::backend::{RawDomain, RawHeap};
@@ -454,6 +454,95 @@ mod tests {
             destroy,
         )
     };
+
+    #[test]
+    fn backend_constructor_runs_at_runtime() {
+        let constructor = std::hint::black_box(
+            Backend::new
+                as unsafe fn(
+                    fn() -> Option<RawDomain>,
+                    fn() -> RawDomain,
+                    fn(Options) -> Result<RawHeap, CreationError>,
+                    fn() -> Option<RawHeap>,
+                    fn() -> *mut (),
+                    unsafe fn(*mut (), RawHint),
+                    unsafe fn(RawHint, bool) -> Info,
+                    unsafe fn(RawHint) -> Result<Usage, ()>,
+                    unsafe fn(RawHint),
+                ) -> Backend,
+        );
+        let backend = unsafe {
+            constructor(
+                create_domain,
+                default_domain,
+                create,
+                thread_heap,
+                thread_context,
+                activate,
+                info,
+                usage,
+                destroy,
+            )
+        };
+
+        assert!(std::ptr::fn_addr_eq(
+            backend.create_domain,
+            create_domain as fn() -> Option<RawDomain>
+        ));
+        assert!(std::ptr::fn_addr_eq(backend.default_domain, default_domain as fn() -> RawDomain));
+        assert!(std::ptr::fn_addr_eq(
+            backend.create,
+            create as fn(Options) -> Result<RawHeap, CreationError>
+        ));
+        assert!(std::ptr::fn_addr_eq(backend.thread_heap, thread_heap as fn() -> Option<RawHeap>));
+        assert!(std::ptr::fn_addr_eq(backend.thread_context, thread_context as fn() -> *mut ()));
+        assert!(std::ptr::fn_addr_eq(backend.activate, activate as unsafe fn(*mut (), RawHint)));
+        assert!(std::ptr::fn_addr_eq(backend.info, info as unsafe fn(RawHint, bool) -> Info));
+        assert!(std::ptr::fn_addr_eq(
+            backend.usage,
+            usage as unsafe fn(RawHint) -> Result<Usage, ()>
+        ));
+        assert!(std::ptr::fn_addr_eq(backend.destroy, destroy as unsafe fn(RawHint)));
+    }
+
+    #[test]
+    fn registration_race_accepts_the_same_backend() {
+        let slot = OnceLock::new();
+        slot.set(&TEST_BACKEND).unwrap();
+
+        crate::backend::complete_registration(&slot, &TEST_BACKEND);
+        assert!(slot.get().is_some());
+    }
+
+    #[test]
+    fn hint_clone_and_default_preserve_the_target() {
+        let _test = TEST_LOCK.lock().unwrap();
+        let heap = heap(1, ClaimPolicy::Shared);
+        let hint = Hint::from(&heap);
+
+        assert_eq!(Hint::default(), Hint::global());
+        assert_eq!(hint.clone(), hint);
+    }
+
+    #[test]
+    fn thread_context_constructor_initializes_an_empty_context() {
+        let constructor: fn() -> ThreadContext = std::hint::black_box(ThreadContext::new);
+        let context = constructor();
+
+        assert_eq!(context.active, RawHint::GLOBAL);
+        assert!(context.backend.is_none());
+        assert!(context.backend_context.is_null());
+        assert_eq!(context.claimed, [0; MAX_CLAIMED_HEAPS]);
+        assert_eq!(context.claimed_len, 0);
+    }
+
+    #[test]
+    fn backend_unavailable_creation_error_has_a_message() {
+        assert_eq!(
+            CreationError::BackendUnavailable.to_string(),
+            "no allocation heap backend is installed"
+        );
+    }
 
     fn heap(kind: usize, claim_policy: ClaimPolicy) -> Heap {
         unsafe {
@@ -612,6 +701,9 @@ mod tests {
                 with_hint(heap, || enter_all(remaining));
             }
         }
+
+        enter_all(&heaps[..MAX_CLAIMED_HEAPS]);
+        assert!(heaps.iter().all(|heap| !heap.is_claimed()));
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| enter_all(&heaps)));
         assert!(result.is_err());

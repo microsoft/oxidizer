@@ -31,13 +31,11 @@ pub(crate) fn verb(args: VerbArgs) -> Result<(), Error> {
     if args.force {
         fs::write(&output, html).map_err(Error::Io)?;
     } else {
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&output).map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                Error::OutputExists(output.clone())
-            } else {
-                Error::Io(error)
-            }
-        })?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output)
+            .map_err(|error| map_create_error(error, &output))?;
         file.write_all(html.as_bytes()).map_err(Error::Io)?;
     }
     println!("{}", output.display());
@@ -52,6 +50,14 @@ fn paths_refer_to_same_file(input: &Path, output: &Path) -> io::Result<bool> {
         Ok(same) => Ok(same),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
+    }
+}
+
+fn map_create_error(error: io::Error, output: &Path) -> Error {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        Error::OutputExists(output.to_owned())
+    } else {
+        Error::Io(error)
     }
 }
 
@@ -78,14 +84,14 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{fs, io};
 
     use rallocator_telemetry::snapshot::{SkippedSection, SkippedSectionFields, Snapshot, Version};
     use rallocator_telemetry::{encode, encoded_len};
 
-    use super::{Error, VerbArgs, verb};
+    use super::{Error, VerbArgs, map_create_error, paths_refer_to_same_file, verb};
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -221,15 +227,43 @@ mod tests {
     }
 
     #[test]
+    fn create_errors_are_classified() {
+        let output = Path::new("report.html");
+        let error = map_create_error(io::Error::from(io::ErrorKind::AlreadyExists), output);
+        assert!(matches!(error, Error::OutputExists(path) if path == output));
+
+        let error = map_create_error(io::Error::from(io::ErrorKind::PermissionDenied), output);
+        assert!(matches!(error, Error::Io(error) if error.kind() == io::ErrorKind::PermissionDenied));
+    }
+
+    #[test]
+    fn same_file_errors_are_propagated() {
+        let error = paths_refer_to_same_file(Path::new("\0"), Path::new("report.html")).unwrap_err();
+        assert_ne!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn same_path_error_includes_the_path() {
+        let path = PathBuf::from("capture.rallocator");
+        assert_eq!(
+            Error::SamePath(path).to_string(),
+            "input and output refer to the same path: capture.rallocator"
+        );
+    }
+
+    #[test]
     fn skipped_sections_render_compatibility_details() {
         let mut snapshot = Snapshot::new(Version::new(0, 1, 0));
         snapshot
             .skipped_sections
             .push(SkippedSection::from_fields(SkippedSectionFields { id: 999, version: 0 }));
+        snapshot
+            .skipped_sections
+            .push(SkippedSection::from_fields(SkippedSectionFields { id: 1000, version: 1 }));
 
         let html = crate::report::render_html(&snapshot);
 
-        assert!(html.contains("999 (version 0)"));
+        assert!(html.contains("999 (version 0), 1000 (version 1)"));
         assert!(html.contains("unknown identifiers or versions unsupported by this decoder"));
         assert!(html.contains("compatible rallocator_cli version"));
     }
