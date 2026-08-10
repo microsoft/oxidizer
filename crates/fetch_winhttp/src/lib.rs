@@ -20,18 +20,22 @@
 //! - Proxy selection follows automatic Windows proxy policy, including
 //!   automatic discovery and proxy auto-configuration scripts; no proxy
 //!   override or direct-connection fallback is exposed.
-//! - Generic TLS configuration and generic transport options that WinHTTP
-//!   cannot represent, including finite connection limits and connection
-//!   idle/lifetime settings, are accepted but ignored.
+//! - The connection idle timeout is honored, subject to a platform minimum
+//!   window.
+//! - Generic TLS configuration and the generic transport options WinHTTP
+//!   cannot represent, including finite connection limits and bounded
+//!   connection lifetimes, are accepted but ignored.
 //! - The request body is fully sent before response reception begins.
 //! - A request carrying a `Transfer-Encoding` header is rejected before
 //!   anything is sent, because this transport performs request framing itself
 //!   and cannot honor a caller-supplied transfer coding. Removing the header
 //!   does not change how the body is framed on the wire.
-//! - A `Content-Length` header must state the exact length of the request
-//!   body. Repeated values must agree with each other, and a value that
-//!   disagrees with the body fails the request before anything is sent. A
-//!   header that survives is sent in normalized decimal form.
+//! - A `Content-Length` header must be a single well-formed value, and
+//!   repeated values must agree with each other. When the request body reports
+//!   its own length, the header must equal it, and a disagreement fails the
+//!   request before anything is sent. When the body cannot report a length, the
+//!   header declares it and is taken on trust. A header that survives is sent
+//!   in normalized decimal form.
 //! - Redirects are not followed, no cookie store is kept, and authentication
 //!   challenges are not answered automatically. A redirect response is
 //!   returned to the caller as an ordinary response, and `Set-Cookie`,

@@ -670,19 +670,41 @@ mod tests {
             };
 
             if secure_first {
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload readable and unmodified for the call, no
+                // overlapping notification, no outstanding exclusive borrow,
+                // and no use of the context after the reclaiming notification.
+                // `installed` returned the pointer it recorded, and only
+                // `finish` below reclaims it; the payload is the initialized
+                // local `secure_flags`, which outlives the call and nothing
+                // else can reach; this test delivers every notification from
+                // its own thread; and it borrows the context only sharedly.
+                unsafe {
+                    complete(
+                        context,
+                        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+                        (&raw mut secure_flags).cast(),
+                        status_info_len::<u32>(),
+                    );
+                }
+            }
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload readable and unmodified for the call, no
+            // overlapping notification, no outstanding exclusive borrow, and no
+            // use of the context after the reclaiming notification. `installed`
+            // returned the pointer it recorded, and only `finish` below
+            // reclaims it; the payload is the initialized local `async_result`,
+            // which outlives the call and nothing else can reach; this test
+            // delivers every notification from its own thread; and it borrows
+            // the context only sharedly.
+            unsafe {
                 complete(
                     context,
-                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
-                    (&raw mut secure_flags).cast(),
-                    status_info_len::<u32>(),
+                    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+                    (&raw mut async_result).cast(),
+                    status_info_len::<WINHTTP_ASYNC_RESULT>(),
                 );
             }
-            complete(
-                context,
-                WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-                (&raw mut async_result).cast(),
-                status_info_len::<WINHTTP_ASYNC_RESULT>(),
-            );
 
             let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
                 panic!("request error must produce an error completion");
@@ -692,18 +714,40 @@ mod tests {
             assert_eq!(error.secure_failure_flags(), secure_first.then_some(0x20));
 
             if !secure_first {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
-                    (&raw mut secure_flags).cast(),
-                    status_info_len::<u32>(),
-                );
-                // SAFETY: the guard is still alive, so callback ownership keeps
-                // the installed context valid.
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload readable and unmodified for the call, no
+                // overlapping notification, no outstanding exclusive borrow,
+                // and no use of the context after the reclaiming notification.
+                // `installed` returned the pointer it recorded, and only
+                // `finish` below reclaims it; the payload is the initialized
+                // local `secure_flags`, which outlives the call and nothing
+                // else can reach; this test delivers every notification from
+                // its own thread; and it borrows the context only sharedly.
+                unsafe {
+                    complete(
+                        context,
+                        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+                        (&raw mut secure_flags).cast(),
+                        status_info_len::<u32>(),
+                    );
+                }
+                // SAFETY: dereferencing the pointer requires an aligned,
+                // initialized context that stays live and free of exclusive
+                // borrows for the read. `installed` returned the pointer of the
+                // pooled context it built, the guard below is still unconsumed
+                // so no reclaiming notification has run, and this borrow is
+                // shared and ends with the statement.
                 assert_eq!(unsafe { &*context }.secure_failure_flags(), Some(0x20));
             }
 
-            finish(guard, context, &contexts, session, &closes);
+            // SAFETY: finish requires an installed, not-yet-reclaimed context,
+            // no overlapping notification, and no outstanding exclusive borrow.
+            // `installed` returned the pointer it recorded and nothing has
+            // reclaimed it, this test delivers every notification from its own
+            // thread, and it borrows the context only sharedly.
+            unsafe {
+                finish(guard, context, &contexts, session, &closes);
+            }
         }
     }
 
@@ -711,18 +755,49 @@ mod tests {
     fn connect_attribution_is_bounded_and_handle_created_is_inert() {
         let (guard, context, contexts, session, closes) = installed();
 
-        complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
+        // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+        // payload matching the notification, no overlapping notification, no
+        // outstanding exclusive borrow, and no use of the context after the
+        // reclaiming notification. `installed` returned the pointer it
+        // recorded, and only `finish` below reclaims it; these diagnostic
+        // statuses carry no payload, which a null pointer of zero length
+        // states; this test delivers every notification from its own thread;
+        // and it borrows the context only sharedly.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, std::ptr::null_mut(), 0);
+        }
+        // SAFETY: dereferencing the pointer requires an aligned, initialized
+        // context that stays live and free of exclusive borrows for the read.
+        // `installed` returned the pointer of the pooled context it built, the
+        // guard below is still unconsumed so no reclaiming notification has
+        // run, and this borrow is shared and ends with the statement.
         assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Unobserved);
 
-        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
+        // SAFETY: as for the preceding payload-free notification, which this
+        // test delivers to the same recorded context from the same thread.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        }
+        // SAFETY: as for the preceding shared borrow: the guard below still
+        // keeps the recorded context from being reclaimed.
         assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connecting);
 
-        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, std::ptr::null_mut(), 0);
-        // SAFETY: the guard is alive and therefore the context is valid.
+        // SAFETY: as for the preceding payload-free notification, which this
+        // test delivers to the same recorded context from the same thread.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, std::ptr::null_mut(), 0);
+        }
+        // SAFETY: as for the preceding shared borrow: the guard below still
+        // keeps the recorded context from being reclaimed.
         assert_eq!(unsafe { &*context }.cold_connect_state(), ColdConnectState::Connected);
 
-        finish(guard, context, &contexts, session, &closes);
+        // SAFETY: finish requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, and no outstanding exclusive borrow.
+        // `installed` returned the pointer it recorded and nothing has
+        // reclaimed it, this test delivers every notification from its own
+        // thread, and it borrows the context only sharedly.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 }

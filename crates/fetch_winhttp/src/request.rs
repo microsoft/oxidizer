@@ -599,7 +599,6 @@ struct ZeroPortError;
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
@@ -625,9 +624,8 @@ mod tests {
     use tick::{Clock, ClockControl};
     use widestring::U16CString;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
-        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
         WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
@@ -642,12 +640,14 @@ mod tests {
         WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
-    use crate::callback::dispatch_completion;
     use crate::context::ColdConnectState;
     use crate::error::{WinHttpError, WinHttpOperation};
-    use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
+    use crate::handle::{ConnectHandle, RequestHandle};
     use crate::operation::{ContextInstallation, ContextPool};
-    use crate::session::WinHttpSession;
+    use crate::testing::{
+        CONNECT, CloseCounts, REQUEST, SESSION, closing, complete, complete_request_error, context_pointer, installed_context,
+        installed_context_value, raw_handle, session, status_info_len,
+    };
 
     // HttpError contains user-erased error state without unwind-safety bounds.
     assert_not_impl_any!(RequestFailure: UnwindSafe, RefUnwindSafe);
@@ -658,10 +658,6 @@ mod tests {
     // Every `ohno` error owns a boxed source without unwind-safety bounds.
     assert_not_impl_any!(RequestTranslationError: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(UnsendableRequestVersionError: UnwindSafe, RefUnwindSafe);
-
-    const SESSION: usize = 1;
-    const CONNECT: usize = 2;
-    const REQUEST: usize = 3;
 
     #[derive(Debug)]
     struct ScriptedBody {
@@ -736,7 +732,17 @@ mod tests {
 
         assert_eq!(response.status(), 404);
         assert_eq!(response.version(), Version::HTTP_2);
-        assert!(response.body().is_empty());
+        assert_eq!(
+            record.sent_total_length.load(Ordering::SeqCst),
+            0,
+            "a request without body content advertises no content length"
+        );
+        assert_eq!(record.write_calls.load(Ordering::SeqCst), 0, "no request body is written");
+        assert_eq!(
+            record.data_available_calls.load(Ordering::SeqCst),
+            0,
+            "response body reads begin only when the caller polls the body"
+        );
         assert!(response.extensions().is_empty(), "ConnectionInfo is not attached");
         assert!(response.headers().get("content-length").is_none());
         assert_eq!(
@@ -795,7 +801,11 @@ mod tests {
 
         assert_eq!(response.status(), 204);
         assert_eq!(response.version(), Version::HTTP_11);
-        assert!(response.body().is_empty());
+        assert_eq!(
+            record.data_available_calls.load(Ordering::SeqCst),
+            0,
+            "response body reads begin only when the caller polls the body"
+        );
         assert_eq!(*record.connect.lock().unwrap(), Some(("example.com".to_owned(), 8080)));
         assert_eq!(*record.open_request.lock().unwrap(), Some(("HEAD".to_owned(), "/".to_owned(), 0)));
         assert_eq!(
@@ -883,6 +893,33 @@ mod tests {
             assert_eq!(error.label(), "invalid_request");
             assert_eq!(error.recovery(), RecoveryInfo::never());
             assert!(error.to_string().contains(message), "{uri}: {error}");
+            assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn authority_user_information_is_rejected_before_native_io() {
+        for uri in [
+            "https://user@example.com/",
+            "https://user:pass@example.com/",
+            "https://user:pass@example.com:8443/",
+        ] {
+            let (result, record) = run_lifecycle(
+                request(Method::GET, uri),
+                TransportOptions::default(),
+                WinHttpTlsConfig::default(),
+                LifecycleConfig::default(),
+            );
+
+            let error = result.unwrap_err();
+            assert_eq!(error.label(), "invalid_request");
+            assert_eq!(error.recovery(), RecoveryInfo::never());
+            assert!(
+                error
+                    .to_string()
+                    .contains("the request URI authority contains unsupported user information"),
+                "{uri}: {error}"
+            );
             assert_eq!(record.connect_calls.load(Ordering::SeqCst), 0);
         }
     }
@@ -1298,15 +1335,26 @@ mod tests {
         assert_eq!(record.end_write_completions.load(Ordering::SeqCst), 0);
         assert_eq!(record.receive_calls.load(Ordering::SeqCst), 0);
 
-        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
+        let context = recorded_context(&record);
         let mut written = 0_u32;
         record.end_write_completions.fetch_add(1, Ordering::SeqCst);
-        complete(
-            context,
-            WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
-            (&raw mut written).cast(),
-            status_info_len::<u32>(),
-        );
+        // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+        // payload readable and unmodified for the call, no overlapping
+        // notification, no outstanding exclusive borrow, and no use of the
+        // context after the reclaiming notification. The lifecycle mock
+        // registered this context at installation and this test reclaims it
+        // only below; the payload is the initialized local `written`, which
+        // outlives the call and nothing else can reach; the test drives every
+        // notification from its own thread, and the deferred script raises
+        // none; and the pipeline borrows the context only sharedly.
+        unsafe {
+            complete(
+                context,
+                WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                (&raw mut written).cast(),
+                status_info_len::<u32>(),
+            );
+        }
 
         let Poll::Ready(response) = future.as_mut().poll(&mut cx) else {
             panic!("response becomes ready after the terminal write completes");
@@ -1318,7 +1366,16 @@ mod tests {
         drop(response);
         drop((request, options, tls));
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // context was registered at installation and nothing has reclaimed it;
+        // the response owning the guard is dropped above, so no notification is
+        // in flight and none can follow; and nothing borrowed the context
+        // exclusively. The pointer is not used again.
+        unsafe {
+            closing(context);
+        }
         drop(session);
 
         assert!(body_polled);
@@ -1569,8 +1626,17 @@ mod tests {
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
         assert_eq!(contexts.lock().unwrap().len(), 1);
 
-        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // lifecycle mock registered this context at installation and nothing
+        // has reclaimed it; the future owning the guard is dropped above, so no
+        // notification is in flight and the deferred script raises none; the
+        // pipeline borrows the context only sharedly; and the pointer is not
+        // used again.
+        unsafe {
+            closing(recorded_context(&record));
+        }
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
@@ -1633,8 +1699,17 @@ mod tests {
         assert_eq!(contexts.lock().unwrap().len(), 1);
 
         drop(session);
-        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // lifecycle mock registered this context at installation and nothing
+        // has reclaimed it; the future owning the guard is dropped above, so no
+        // notification is in flight and the deferred script raises none; the
+        // pipeline borrows the context only sharedly; and the pointer is not
+        // used again.
+        unsafe {
+            closing(recorded_context(&record));
+        }
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
@@ -1704,8 +1779,17 @@ mod tests {
         assert!(body_polled);
         drop(session);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
-        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // lifecycle mock registered this context at installation and nothing
+        // has reclaimed it; the future owning the guard is dropped above, so no
+        // notification is in flight and the deferred script raises none; the
+        // pipeline borrows the context only sharedly; and the pointer is not
+        // used again.
+        unsafe {
+            closing(recorded_context(&record));
+        }
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
@@ -1751,8 +1835,17 @@ mod tests {
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
 
-        let context = std::ptr::with_exposed_provenance_mut(record.installed_context.load(Ordering::SeqCst));
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // lifecycle mock registered this context at installation and nothing
+        // has reclaimed it; the body owning the guard is consumed above, so no
+        // notification is in flight and the deferred script raises none; the
+        // pipeline borrows the context only sharedly; and the pointer is not
+        // used again.
+        unsafe {
+            closing(recorded_context(&record));
+        }
         drop(session);
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
@@ -1998,6 +2091,12 @@ mod tests {
             Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)).map_err(RequestFailure::into_error),
             Err(error) => Err(error),
         };
+        // The response body owns the request guard, so it must be released here
+        // for the HANDLE_CLOSING dispatch below to complete the ownership
+        // protocol. The returned response therefore carries a stand-in body:
+        // it reflects nothing the driver produced, and response-body behavior
+        // is asserted through the record or by tests that drive the body
+        // themselves.
         let result = result.map(|response| {
             let (parts, body) = response.into_parts();
             drop(body);
@@ -2005,14 +2104,23 @@ mod tests {
         });
         drop((request, options, tls));
 
-        let context = record.installed_context.load(Ordering::SeqCst);
-        if context != 0 {
+        if record.installed_context.load(Ordering::SeqCst) != 0 {
             assert_eq!(
                 record.request_closes.load(Ordering::SeqCst),
                 1,
                 "the request guard closes before HANDLE_CLOSING"
             );
-            closing(std::ptr::with_exposed_provenance_mut(context));
+            // SAFETY: closing requires an installed, not-yet-reclaimed context,
+            // no overlapping notification, no outstanding exclusive borrow, and
+            // no dereference of the pointer or of a guard holding it
+            // afterwards. The lifecycle mock registered this context at
+            // installation and delivered no reclaiming notification; the
+            // pipeline has run to completion and its response body, which owns
+            // the guard, is dropped above, so nothing is in flight and nothing
+            // can follow; and the pipeline borrows the context only sharedly.
+            unsafe {
+                closing(recorded_context(&record));
+            }
         }
 
         drop(session);
@@ -2021,6 +2129,17 @@ mod tests {
         (result, record)
     }
 
+    /// Builds a mock `WinHTTP` that plays `config` for one request lifecycle.
+    ///
+    /// The script this installs is what discharges the obligations of
+    /// [`complete`] for every notification it delivers. Each notification is
+    /// raised from inside a binding the request pipeline called, so it runs on
+    /// the submitting thread - or, where the script models a foreign completion
+    /// thread, on a thread joined before the binding returns - and can overlap
+    /// no other notification for the context; the context is the one registered
+    /// here at installation, and only [`run_lifecycle`] reclaims it, after the
+    /// pipeline and the guard it owns are dropped; and nothing in the pipeline
+    /// borrows the context exclusively.
     #[expect(
         clippy::too_many_lines,
         reason = "the lifecycle mock keeps one complete WinHTTP script visible in one place"
@@ -2064,8 +2183,11 @@ mod tests {
                 ));
             }
             if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                let context = usize::from_ne_bytes(value.try_into().unwrap());
-                option_record.installed_context.store(context, Ordering::SeqCst);
+                // The context is registered where its installation is observed.
+                // Registering it at delivery instead would admit every address
+                // the harness could name and cost the record its purpose.
+                let context = installed_context_value(usize::from_ne_bytes(value.try_into().unwrap()));
+                option_record.installed_context.store(context.addr(), Ordering::SeqCst);
             }
             Ok(())
         });
@@ -2084,50 +2206,93 @@ mod tests {
 
             match send_config.cold_connect_state {
                 ColdConnectState::Unobserved => {}
-                ColdConnectState::Connecting => complete(
-                    std::ptr::with_exposed_provenance_mut(context),
-                    WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-                    std::ptr::null_mut(),
-                    0,
-                ),
+                ColdConnectState::Connecting => {
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload matching the notification, no
+                    // overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The script (`lifecycle_bindings`)
+                    // establishes all of them; a diagnostic connect status
+                    // carries no payload, which a null pointer of zero length
+                    // states.
+                    unsafe {
+                        complete(
+                            recorded_context(&send_record),
+                            WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                            std::ptr::null_mut(),
+                            0,
+                        );
+                    }
+                }
                 ColdConnectState::Connected => {
-                    complete(
-                        std::ptr::with_exposed_provenance_mut(context),
-                        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-                        std::ptr::null_mut(),
-                        0,
-                    );
-                    complete(
-                        std::ptr::with_exposed_provenance_mut(context),
-                        WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
-                        std::ptr::null_mut(),
-                        0,
-                    );
+                    // SAFETY: as for the `Connecting` arm above, which delivers
+                    // the same payload-free diagnostic status to the same
+                    // registered context from this same thread.
+                    unsafe {
+                        complete(
+                            recorded_context(&send_record),
+                            WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                            std::ptr::null_mut(),
+                            0,
+                        );
+                    }
+                    // SAFETY: as for the notification immediately above.
+                    unsafe {
+                        complete(
+                            recorded_context(&send_record),
+                            WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
+                            std::ptr::null_mut(),
+                            0,
+                        );
+                    }
                 }
             }
 
             if send_config.failure == Some(LifecycleFailure::SendCallback) {
-                complete_request_error(context, 12030);
+                // SAFETY: complete_request_error requires an installed,
+                // not-yet-reclaimed context, no overlapping notification, no
+                // outstanding exclusive borrow, and no use of the context after
+                // the reclaiming notification, and it supplies the payload
+                // itself. The script (`lifecycle_bindings`) establishes all of
+                // them.
+                unsafe {
+                    complete_request_error(recorded_context(&send_record), 12030);
+                }
             } else if send_config.defer_send_completion {
                 return Ok(());
             } else if send_config.complete_send_on_foreign_thread {
                 thread::spawn(move || {
-                    complete(
-                        std::ptr::with_exposed_provenance_mut(context),
-                        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-                        std::ptr::null_mut(),
-                        0,
-                    );
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload matching the notification, no
+                    // overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The script (`lifecycle_bindings`)
+                    // establishes all of them: this thread is joined below
+                    // before the binding returns, so the notification it
+                    // delivers still overlaps no other one. A send completion
+                    // carries no payload.
+                    unsafe {
+                        complete(
+                            context_pointer(context),
+                            WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+                            std::ptr::null_mut(),
+                            0,
+                        );
+                    }
                 })
                 .join()
                 .unwrap();
             } else {
-                complete(
-                    std::ptr::with_exposed_provenance_mut(context),
-                    WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-                    std::ptr::null_mut(),
-                    0,
-                );
+                // SAFETY: as for the foreign-thread delivery above, except that
+                // this one runs on the submitting thread itself.
+                unsafe {
+                    complete(
+                        recorded_context(&send_record),
+                        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                }
             }
 
             Ok(())
@@ -2165,7 +2330,7 @@ mod tests {
                 return Ok(());
             }
 
-            let context = write_record.installed_context.load(Ordering::SeqCst);
+            let context = recorded_context(&write_record);
             if write_config.failure
                 == Some(if ending_chunking {
                     LifecycleFailure::EndWriteCallback
@@ -2173,7 +2338,15 @@ mod tests {
                     LifecycleFailure::WriteCallback
                 })
             {
-                complete_request_error(context, 12030);
+                // SAFETY: complete_request_error requires an installed,
+                // not-yet-reclaimed context, no overlapping notification, no
+                // outstanding exclusive borrow, and no use of the context after
+                // the reclaiming notification, and it supplies the payload
+                // itself. The script (`lifecycle_bindings`) establishes all of
+                // them.
+                unsafe {
+                    complete_request_error(context, 12030);
+                }
             } else {
                 let mut written = write_config.max_write_completion.map_or(len, |maximum| maximum.min(len));
                 if ending_chunking {
@@ -2181,12 +2354,21 @@ mod tests {
                 } else {
                     write_config.completed_writes.fetch_add(1, Ordering::SeqCst);
                 }
-                complete(
-                    std::ptr::with_exposed_provenance_mut(context),
-                    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
-                    (&raw mut written).cast(),
-                    status_info_len::<u32>(),
-                );
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload readable and unmodified for the call, no
+                // overlapping notification, no outstanding exclusive borrow,
+                // and no use of the context after the reclaiming notification.
+                // The script (`lifecycle_bindings`) establishes all of them;
+                // the payload is the initialized local `written`, which
+                // outlives the call and nothing else can reach.
+                unsafe {
+                    complete(
+                        context,
+                        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                        (&raw mut written).cast(),
+                        status_info_len::<u32>(),
+                    );
+                }
             }
 
             Ok(())
@@ -2210,16 +2392,27 @@ mod tests {
                 return Err(WinHttpError::new(12002, WinHttpOperation::ReceiveResponse));
             }
 
-            let context = receive_record.installed_context.load(Ordering::SeqCst);
+            let context = recorded_context(&receive_record);
             if receive_config.failure == Some(LifecycleFailure::ReceiveCallback) {
-                complete_request_error(context, 12175);
+                // SAFETY: complete_request_error requires an installed,
+                // not-yet-reclaimed context, no overlapping notification, no
+                // outstanding exclusive borrow, and no use of the context after
+                // the reclaiming notification, and it supplies the payload
+                // itself. The script (`lifecycle_bindings`) establishes all of
+                // them.
+                unsafe {
+                    complete_request_error(context, 12175);
+                }
             } else {
-                complete(
-                    std::ptr::with_exposed_provenance_mut(context),
-                    WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
-                    std::ptr::null_mut(),
-                    0,
-                );
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload matching the notification, no overlapping
+                // notification, no outstanding exclusive borrow, and no use of
+                // the context after the reclaiming notification. The script
+                // (`lifecycle_bindings`) establishes all of them, and a
+                // headers-available completion carries no payload.
+                unsafe {
+                    complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+                }
             }
             Ok(())
         });
@@ -2233,25 +2426,41 @@ mod tests {
             }
 
             let mut available = 0_u32;
-            let context = data_available_record.installed_context.load(Ordering::SeqCst);
-            complete(
-                std::ptr::with_exposed_provenance_mut(context),
-                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                (&raw mut available).cast(),
-                status_info_len::<u32>(),
-            );
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload readable and unmodified for the call, no
+            // overlapping notification, no outstanding exclusive borrow, and no
+            // use of the context after the reclaiming notification. The script
+            // (`lifecycle_bindings`) establishes all of them; the payload is
+            // the initialized local `available`, which outlives the call and
+            // nothing else can reach.
+            unsafe {
+                complete(
+                    recorded_context(&data_available_record),
+                    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                    (&raw mut available).cast(),
+                    status_info_len::<u32>(),
+                );
+            }
             Ok(())
         });
 
         let read_record = Arc::clone(&record);
         bindings.expect_read_data().returning(move |_, _, _| {
-            let context = read_record.installed_context.load(Ordering::SeqCst);
-            complete(
-                std::ptr::with_exposed_provenance_mut(context),
-                WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-                std::ptr::null_mut(),
-                0,
-            );
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. The script
+            // (`lifecycle_bindings`) establishes all of them; a read that
+            // returned nothing reports a null address and a zero count, which
+            // `WinHTTP` uses to signal the end of the response body.
+            unsafe {
+                complete(
+                    recorded_context(&read_record),
+                    WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+                    std::ptr::null_mut(),
+                    0,
+                );
+            }
             Ok(())
         });
 
@@ -2359,19 +2568,6 @@ mod tests {
         Ok(())
     }
 
-    fn complete_request_error(context: usize, code: u32) {
-        let mut result = WINHTTP_ASYNC_RESULT {
-            dwResult: 0,
-            dwError: code,
-        };
-        complete(
-            std::ptr::with_exposed_provenance_mut(context),
-            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-            (&raw mut result).cast(),
-            status_info_len::<WINHTTP_ASYNC_RESULT>(),
-        );
-    }
-
     fn dword_options(record: &LifecycleRecord) -> Vec<(u32, u32)> {
         record
             .options
@@ -2436,8 +2632,20 @@ mod tests {
             .once()
             .returning(move |_| {
                 request_counts.request.fetch_add(1, Ordering::SeqCst);
-                let context = std::ptr::with_exposed_provenance_mut(request_counts.context.load(Ordering::SeqCst));
-                closing(context);
+                // SAFETY: closing requires an installed, not-yet-reclaimed
+                // context, no overlapping notification, no outstanding
+                // exclusive borrow, and no dereference of the pointer or of a
+                // guard holding it afterwards. The context was registered when
+                // the test read it from the guard, and no earlier notification
+                // reclaimed it; the future that owned the pending operation is
+                // dropped before this close, so no notification is in flight
+                // and the mock raises none after this one; the test borrows the
+                // context only sharedly; and the only step left is the
+                // remainder of `RequestGuard::drop`, which releases the request
+                // handle without reaching the context.
+                unsafe {
+                    closing(context_pointer(request_counts.context.load(Ordering::SeqCst)));
+                }
                 Ok(())
             });
         let request_facade = BindingsFacade::mock(Arc::new(request_bindings));
@@ -2465,7 +2673,7 @@ mod tests {
         )
         .install()
         .unwrap();
-        let context = guard.context_ptr();
+        let context = installed_context(&guard);
         let headers = U16CString::from_str("").unwrap();
         let mut future = Box::pin(send_request_headers(
             &mut guard,
@@ -2479,7 +2687,18 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
 
         assert!(future.as_mut().poll(&mut cx).is_pending());
-        complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+        // payload matching the notification, no overlapping notification, no
+        // outstanding exclusive borrow, and no use of the context after the
+        // reclaiming notification. `installed_context` returned the recorded
+        // pointer for the live guard and nothing has reclaimed it; the test
+        // drives every notification from its own thread and the mock raises
+        // none of its own until the close below; the send-request future
+        // borrows the context only sharedly; and a connect-progress
+        // notification carries no payload.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+        }
         control.advance(Duration::from_secs(1));
         let Poll::Ready(Err((error, state))) = future.as_mut().poll(&mut cx) else {
             panic!("the connect timeout must win the pending send");
@@ -2498,35 +2717,8 @@ mod tests {
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);
     }
 
-    fn complete(context: *mut crate::context::RequestContext, status: u32, info: *mut c_void, len: u32) {
-        // SAFETY: every test passes a live installed context and preserves each
-        // status-info object for the duration of the synchronous dispatch.
-        unsafe {
-            dispatch_completion(context, status, info, len);
-        }
-    }
-
-    fn status_info_len<T>() -> u32 {
-        u32::try_from(size_of::<T>()).unwrap()
-    }
-
-    fn closing(context: *mut crate::context::RequestContext) {
-        complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
-    }
-
-    fn session(facade: BindingsFacade) -> Arc<WinHttpSession> {
-        Arc::new(WinHttpSession::from_handle(SessionHandle::new(raw_handle(SESSION), facade)))
-    }
-
-    #[derive(Default)]
-    struct CloseCounts {
-        context: AtomicUsize,
-        session: AtomicUsize,
-        connect: AtomicUsize,
-        request: AtomicUsize,
-    }
-
-    fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(std::ptr::without_provenance_mut::<c_void>(value)).unwrap()
+    /// Reads the context pointer the lifecycle mock recorded at installation.
+    fn recorded_context(record: &LifecycleRecord) -> *mut crate::context::RequestContext {
+        context_pointer(record.installed_context.load(Ordering::SeqCst))
     }
 }

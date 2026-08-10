@@ -179,8 +179,8 @@ mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use tick::{Clock, ClockControl};
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
     };
 
     use super::{FailedTransport, ReadyTransport, TransportInputs, TransportState, WinHttpTransport};
@@ -189,11 +189,12 @@ mod tests {
         BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE, WINHTTP_OPTION_HTTP_PROTOCOL_USED, WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE,
     };
-    use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
+    use crate::handle::ConnectHandle;
     use crate::operation::ContextPool;
     use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
+    use crate::testing::{closing, complete, complete_request_error, context_pointer, installed_context_value};
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
@@ -308,11 +309,17 @@ mod tests {
             "dropping the response body closes the request handle"
         );
 
-        let context = std::ptr::with_exposed_provenance_mut(context.load(Ordering::SeqCst));
-        // SAFETY: the mock records the live installed RequestContext pointer,
-        // and HANDLE_CLOSING is its final synthetic callback.
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // mock registered this context at installation and nothing has
+        // reclaimed it; the response body owning the request guard is dropped
+        // above, which the close count asserted, so no notification is in
+        // flight and the mock raises none of its own; the transport reaches the
+        // context only through that guard, sharedly; and the pointer is not
+        // used again.
         unsafe {
-            dispatch_completion(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+            closing(context_pointer(context.load(Ordering::SeqCst)));
         }
         drop(transport);
 
@@ -483,14 +490,25 @@ mod tests {
         finish_failed_request(transport, &context, &closes);
     }
 
+    /// Reclaims the context of a request that failed and asserts the teardown.
+    ///
+    /// A failed request drops its guard as it unwinds, which closes the request
+    /// handle; the connect handle and the session are released only when
+    /// `HANDLE_CLOSING` reclaims the context, and the session's own handle
+    /// closes when the last transport reference goes away.
     fn finish_failed_request(transport: WinHttpTransport, context: &Arc<AtomicUsize>, closes: &Arc<AtomicUsize>) {
         assert_eq!(closes.load(Ordering::SeqCst), 1);
 
-        let context = std::ptr::with_exposed_provenance_mut(context.load(Ordering::SeqCst));
-        // SAFETY: the mock records the live installed RequestContext pointer,
-        // and HANDLE_CLOSING is its final synthetic callback.
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards. The
+        // mock registered this context at installation and nothing has
+        // reclaimed it; the failed request dropped its guard, which the close
+        // count asserted above, so no notification is in flight and the mock
+        // raises none of its own; the transport reaches the context only
+        // through that guard, sharedly; and the pointer is not used again.
         unsafe {
-            dispatch_completion(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+            closing(context_pointer(context.load(Ordering::SeqCst)));
         }
         drop(transport);
 
@@ -509,14 +527,40 @@ mod tests {
         assert_send(transport.execute(request("https://example.com/")));
     }
 
+    /// Nothing is shared between two materialized transports: each opens its own
+    /// `WinHTTP` session and rents callback contexts from its own pool. Both halves are
+    /// observable - a shared session hands both instances the same native handle, and a
+    /// shared pool reports a live rental made through one instance as occupancy in the
+    /// other.
     #[test]
-    fn ready_transports_own_distinct_context_pools() {
-        let first = WinHttpTransport::new(inputs(Sink::noop()), BindingsFacade::mock(Arc::new(successful_bindings())));
-        let second = WinHttpTransport::new(inputs(Sink::noop()), BindingsFacade::mock(Arc::new(successful_bindings())));
+    fn ready_transports_own_distinct_sessions_and_context_pools() {
+        let first = WinHttpTransport::new(
+            inputs(Sink::noop()),
+            BindingsFacade::mock(Arc::new(session_bindings(raw_handle_value(1)))),
+        );
+        let second = WinHttpTransport::new(
+            inputs(Sink::noop()),
+            BindingsFacade::mock(Arc::new(session_bindings(raw_handle_value(2)))),
+        );
+        // The rented context needs a connect handle; its own bindings keep that
+        // handle's close out of either transport's expectations.
+        let mut connect_bindings = MockBindings::new();
+        connect_bindings.expect_close_handle().once().returning(|_| Ok(()));
+        let connect = ConnectHandle::new(raw_handle_value(3), BindingsFacade::mock(Arc::new(connect_bindings)));
 
         match (&first.state, &second.state) {
             (TransportState::Ready(first), TransportState::Ready(second)) => {
-                assert!(!std::ptr::eq(&raw const first.contexts, &raw const second.contexts));
+                assert_ne!(first.session.handle().raw(), second.session.handle().raw());
+
+                let rented = first
+                    .contexts
+                    .lock()
+                    .unwrap()
+                    .alloc_box(RequestContext::new(connect, Arc::clone(&first.session)));
+
+                assert_eq!(first.contexts.lock().unwrap().len(), 1);
+                assert_eq!(second.contexts.lock().unwrap().len(), 0);
+                drop(rented);
             }
             _ => panic!("both transports must initialize successfully"),
         }
@@ -548,8 +592,12 @@ mod tests {
     }
 
     fn successful_bindings() -> MockBindings {
+        session_bindings(raw_handle())
+    }
+
+    fn session_bindings(session: crate::handle::RawHandle) -> MockBindings {
         let mut bindings = MockBindings::new();
-        bindings.expect_open().once().returning(|_, _| Ok(raw_handle()));
+        bindings.expect_open().once().returning(move |_, _| Ok(session));
         bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
         bindings
             .expect_set_option()
@@ -560,18 +608,29 @@ mod tests {
         bindings
     }
 
+    /// Records the context the transport installs and reports it through `record`.
+    ///
+    /// A transport owns its request pipeline, so its mock bindings observe the
+    /// installation only as the pointer-sized value `WinHTTP` is handed. That
+    /// value is registered here, where the installation happens, which is what
+    /// admits the context to the dispatch helpers; registering it at delivery
+    /// would admit every address a script could name.
+    fn expect_context_option(bindings: &mut MockBindings, record: Arc<AtomicUsize>) {
+        bindings.expect_set_option().returning(move |_, option, value| {
+            if option == WINHTTP_OPTION_CONTEXT_VALUE {
+                let context = installed_context_value(usize::from_ne_bytes(value.try_into().unwrap()));
+                record.store(context.addr(), Ordering::SeqCst);
+            }
+            Ok(())
+        });
+    }
+
     fn cold_connect_failure_bindings(context: &Arc<AtomicUsize>, closes: Arc<AtomicUsize>, control: ClockControl) -> MockBindings {
         let mut bindings = MockBindings::new();
         bindings.expect_open().once().returning(|_, _| Ok(raw_handle_value(1)));
         bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
 
-        let context_option = Arc::clone(context);
-        bindings.expect_set_option().returning(move |_, option, value| {
-            if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
-            }
-            Ok(())
-        });
+        expect_context_option(&mut bindings, Arc::clone(context));
         bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
         bindings.expect_connect().once().returning(|_, _, _| Ok(raw_handle_value(2)));
         bindings
@@ -580,26 +639,28 @@ mod tests {
             .returning(|_, _, _, _| Ok(raw_handle_value(3)));
         bindings.expect_send_request().once().returning(move |_, _, total_len, context| {
             assert_eq!(total_len, 0);
-            let context = std::ptr::with_exposed_provenance_mut(context);
-            // SAFETY: send receives the installed live context and dispatch is
-            // synchronous while the operation is armed.
+            let context = context_pointer(context);
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. The context option
+            // above registered the value the transport installed and only
+            // `finish_failed_request` reclaims it; a connect-progress
+            // notification carries no payload; this runs inside the send the
+            // transport submitted, on the submitting thread, with nothing else
+            // dispatching, so it overlaps no other notification; and a
+            // submission runs with no exclusive borrow of the context
+            // outstanding.
             unsafe {
-                dispatch_completion(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
+                complete(context, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, std::ptr::null_mut(), 0);
             }
             control.advance(Duration::from_millis(250));
-            let mut result = WINHTTP_ASYNC_RESULT {
-                dwResult: 0,
-                dwError: 12029,
-            };
-            // SAFETY: the result storage remains valid for the synchronous
-            // callback, and the context still owns the active send operation.
+            // SAFETY: complete_request_error carries the obligations of
+            // complete except the payload, which it supplies. They hold as for
+            // the connect-progress notification above, which returned before
+            // this one begins.
             unsafe {
-                dispatch_completion(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-                    (&raw mut result).cast(),
-                    u32::try_from(size_of::<WINHTTP_ASYNC_RESULT>()).unwrap(),
-                );
+                complete_request_error(context, 12029);
             }
             Ok(())
         });
@@ -620,13 +681,7 @@ mod tests {
         bindings.expect_open().once().returning(|_, _| Ok(raw_handle_value(1)));
         bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
 
-        let context_option = Arc::clone(&context);
-        bindings.expect_set_option().returning(move |_, option, value| {
-            if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
-            }
-            Ok(())
-        });
+        expect_context_option(&mut bindings, Arc::clone(&context));
         bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
         bindings.expect_connect().once().returning(|_, _, _| Ok(raw_handle_value(2)));
         bindings
@@ -636,11 +691,20 @@ mod tests {
 
         bindings.expect_send_request().once().returning(|_, _, total_len, context| {
             assert_eq!(total_len, 0);
-            // SAFETY: send receives the installed live context and dispatch is
-            // synchronous while the operation is armed.
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. The context option
+            // above registered the value the transport installed and only the
+            // test's own `HANDLE_CLOSING` reclaims it; a send completion
+            // carries no payload; this runs inside the send the transport
+            // submitted, on the submitting thread, with nothing else
+            // dispatching, so it overlaps no other notification; and a
+            // submission runs with no exclusive borrow of the context
+            // outstanding.
             unsafe {
-                dispatch_completion(
-                    std::ptr::with_exposed_provenance_mut(context),
+                complete(
+                    context_pointer(context),
                     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
                     std::ptr::null_mut(),
                     0,
@@ -650,11 +714,13 @@ mod tests {
         });
         let receive_context = Arc::clone(&context);
         bindings.expect_receive_response().once().returning(move |_| {
-            // SAFETY: receive runs after context installation and while the
-            // headers operation is armed.
+            // SAFETY: as for the send completion above, except that this runs
+            // inside the response reception the transport submitted after that
+            // send completed, so the two cannot overlap. A headers-available
+            // completion likewise carries no payload.
             unsafe {
-                dispatch_completion(
-                    std::ptr::with_exposed_provenance_mut(receive_context.load(Ordering::SeqCst)),
+                complete(
+                    context_pointer(receive_context.load(Ordering::SeqCst)),
                     WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
                     std::ptr::null_mut(),
                     0,
@@ -720,13 +786,7 @@ mod tests {
         bindings.expect_open().once().returning(|_, _| Ok(raw_handle_value(1)));
         bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
 
-        let context_option = Arc::clone(context);
-        bindings.expect_set_option().returning(move |_, option, value| {
-            if option == WINHTTP_OPTION_CONTEXT_VALUE {
-                context_option.store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
-            }
-            Ok(())
-        });
+        expect_context_option(&mut bindings, Arc::clone(context));
         bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
         bindings.expect_connect().once().returning(|_, _, _| Ok(raw_handle_value(2)));
         bindings
@@ -738,11 +798,19 @@ mod tests {
             if failure == UploadFailure::Send {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
             }
-            // SAFETY: send receives the installed live context and dispatch is
-            // synchronous while the operation is armed.
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. The context option
+            // above registered the value the transport installed and only
+            // `finish_failed_request` reclaims it; a send completion carries no
+            // payload; this runs inside the send the transport submitted, on
+            // the submitting thread, with nothing else dispatching, so it
+            // overlaps no other notification; and a submission runs with no
+            // exclusive borrow of the context outstanding.
             unsafe {
-                dispatch_completion(
-                    std::ptr::with_exposed_provenance_mut(context),
+                complete(
+                    context_pointer(context),
                     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
                     std::ptr::null_mut(),
                     0,

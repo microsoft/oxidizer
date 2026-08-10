@@ -7,11 +7,11 @@ use std::fmt;
 use fetch::options::{ConnectionKeepAlive, TransportOptions};
 use widestring::U16CString;
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE, WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE,
-    WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE, WINHTTP_CALLBACK_FLAG_READ_COMPLETE, WINHTTP_CALLBACK_FLAG_REQUEST_ERROR,
-    WINHTTP_CALLBACK_FLAG_SECURE_FAILURE, WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE,
-    WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
-    WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
+    WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE, WINHTTP_CALLBACK_FLAG_READ_COMPLETE,
+    WINHTTP_CALLBACK_FLAG_REQUEST_ERROR, WINHTTP_CALLBACK_FLAG_SECURE_FAILURE, WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE,
+    WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+    WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS,
+    WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
 };
 
 use crate::WinHttpOptions;
@@ -29,18 +29,26 @@ use crate::handle::SessionHandle;
 const USER_AGENT: &str = "fetch_winhttp";
 const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 
-const ALL_COMPLETIONS: u32 = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
+/// Completion notifications the callback protocol consumes.
+///
+/// This is narrower than the native `WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS`,
+/// which also covers the proxy-resolution completions. The transport resolves
+/// proxies through automatic detection configured on the session rather than
+/// through `WinHttpGetProxyForUrlEx` or `WinHttpGetProxySettingsEx`, so those
+/// notifications can never arrive and the callback has no handling for them.
+/// Subscribing to them would describe a protocol the transport does not
+/// implement.
+const DISPATCHED_COMPLETIONS: u32 = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
     | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
     | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
     | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
     | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
-    | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR
-    | WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE
-    | WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE;
+    | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR;
 const HANDLES: u32 = WINHTTP_CALLBACK_STATUS_HANDLE_CREATED | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING;
 const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
 
-pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
+pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 =
+    DISPATCHED_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
 
 /// Count of `set_option` calls one session performs with keep-alive disabled.
 ///
@@ -74,16 +82,23 @@ impl WinHttpSession {
         transport_options: &TransportOptions,
     ) -> Result<Self, SessionInitializationFailure> {
         let user_agent = U16CString::from_str(USER_AGENT).expect("the static WinHTTP user agent contains no NUL characters");
-        // SAFETY: no WinHTTP handles exist yet. WINHTTP_FLAG_ASYNC establishes
-        // the callback-based behavior required by every child handle. A
-        // successful handle is immediately transferred to SessionHandle for
-        // exactly-once closure.
+        // SAFETY: open requires the trait-level invariants, WINHTTP_FLAG_ASYNC
+        // among the flags, and a returned handle that immediately acquires one
+        // exactly-once owner. The flag is passed literally; a successful handle
+        // is moved into SessionHandle on the next statement, which is the sole
+        // closer; and the trait-level invariants are vacuous here because no
+        // handle, context, operation, or lent buffer exists yet.
         let raw = unsafe { bindings.open(&user_agent, WINHTTP_FLAG_ASYNC) }
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Open, error))?;
         let handle = SessionHandle::new(raw, bindings);
 
-        // SAFETY: the owned session is live, has no children, and this call
-        // uses the exact native timeout representations.
+        // SAFETY: set_timeouts requires a live session that cannot close during
+        // the call, plus the trait-level invariants. The local SessionHandle is
+        // the only owner of a just-opened session, so no other thread can close
+        // it; the values are the native millisecond representation the option
+        // takes. The session was opened with WINHTTP_FLAG_ASYNC and still has
+        // no child handle, context, operation, or lent buffer, so the
+        // trait-level invariants hold.
         unsafe {
             handle.bindings().set_timeouts(
                 handle.raw(),
@@ -94,17 +109,22 @@ impl WinHttpSession {
             )
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetTimeouts, error))?;
-        // SAFETY: the owned session is live and has no children. TRUE_BYTES is
-        // the required native BOOL representation for this session option.
+        // SAFETY: set_option requires a live handle, the native representation
+        // for the option, a valid lifecycle stage, and the trait-level
+        // invariants. The local SessionHandle solely owns a live session,
+        // TRUE_BYTES is the native BOOL this option takes, and a session accepts
+        // it before it has children, which is this stage. The trait-level
+        // invariants hold because the session was opened with
+        // WINHTTP_FLAG_ASYNC and has no child handle, context, operation, or
+        // lent buffer yet.
         unsafe {
             handle
                 .bindings()
                 .set_option(handle.raw(), WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, &TRUE_BYTES)
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::DisableGlobalPooling, error))?;
-        // SAFETY: the owned session is live and has no children, which this
-        // option additionally requires. The byte array is the exact DWORD
-        // representation required by this option.
+        // SAFETY: as for the option above, with dword_bytes supplying the
+        // native DWORD representation this option takes.
         unsafe {
             handle.bindings().set_option(
                 handle.raw(),
@@ -115,8 +135,17 @@ impl WinHttpSession {
             )
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::ConnectionIdleTimeout, error))?;
-        // SAFETY: the owned session is live and has no children. TRUE_BYTES is
-        // the required native BOOL representation for this session option.
+        // This option promises WinHTTP that the status callback returns
+        // promptly and never waits for a subsequent WinHTTP call, which lets
+        // WinHTTP dispatch notifications on threads it cannot afford to stall.
+        // The callback honors that: it only moves an already-prepared
+        // completion payload across a channel, and the one WinHTTP call it can
+        // reach, closing the parent handles a reclaimed context released, only
+        // starts their teardown rather than awaiting an operation.
+        // Ref: callback.rs, close_context.
+        //
+        // SAFETY: as for the option above, with TRUE_BYTES supplying the native
+        // BOOL representation this option takes.
         unsafe {
             handle
                 .bindings()
@@ -124,8 +153,8 @@ impl WinHttpSession {
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
         if let Some(interval) = Self::keep_alive_interval(&transport_options.connection_keep_alive) {
-            // SAFETY: the owned session is live and has no children. The byte
-            // array is the exact DWORD representation required by this option.
+            // SAFETY: as for the options above, with dword_bytes supplying the
+            // native DWORD representation this option takes.
             unsafe {
                 handle.bindings().set_option(
                     handle.raw(),
@@ -134,8 +163,8 @@ impl WinHttpSession {
                 )
             }
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http2KeepAlive, error))?;
-            // SAFETY: the owned session is live and has no children. The byte
-            // array is the exact DWORD representation required by this option.
+            // SAFETY: as for the options above, with dword_bytes supplying the
+            // native DWORD representation this option takes.
             unsafe {
                 handle.bindings().set_option(
                     handle.raw(),
@@ -145,11 +174,18 @@ impl WinHttpSession {
             }
             .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::Http3KeepAlive, error))?;
         }
-        // SAFETY: the owned session is live and still has no children. The
-        // callback has the WinHTTP ABI and remains static for the session
-        // lifetime. SESSION_NOTIFICATION_FLAGS includes every completion,
-        // request error, diagnostic, and final handle-closing status consumed
-        // by the callback protocol, and registration precedes every request.
+        // SAFETY: set_status_callback requires a live session, a callback that
+        // is present and stays valid for the session lifetime, notification
+        // flags enabling every status the callback protocol requires, and
+        // registration before every child request that relies on that protocol,
+        // plus the trait-level invariants. The local SessionHandle solely owns
+        // a live session; status_callback is a static function item, so it
+        // outlives the session; notification_mask_enables_every_dispatched_status
+        // proves SESSION_NOTIFICATION_FLAGS covers every consumed status; and
+        // the session is returned to the caller only after this call, so no
+        // child request can exist yet. That same absence of children,
+        // contexts, operations, and lent buffers discharges the trait-level
+        // invariants for a session opened with WINHTTP_FLAG_ASYNC.
         unsafe {
             handle
                 .bindings()
@@ -260,6 +296,7 @@ mod tests {
     use mockall::Sequence;
     use static_assertions::assert_impl_all;
     use windows::Win32::Networking::WinHttp::{
+        WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE, WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE,
         WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
         WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
         WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
@@ -437,6 +474,28 @@ mod tests {
 
         for (name, status) in DISPATCHED_STATUSES {
             assert_status_enabled(name, status);
+        }
+    }
+
+    /// Asserts that `SESSION_NOTIFICATION_FLAGS` enables no notification the
+    /// callback protocol cannot receive.
+    ///
+    /// The proxy-resolution completions are the ones a reader is most likely to
+    /// add back, because the native `WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS`
+    /// includes them. The transport never calls `WinHttpGetProxyForUrlEx` or
+    /// `WinHttpGetProxySettingsEx`, so subscribing would announce handling that
+    /// the callback does not implement.
+    #[test]
+    fn notification_mask_excludes_proxy_completions_the_transport_cannot_receive() {
+        for (name, flag) in [
+            ("GETPROXYFORURL_COMPLETE", WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE),
+            ("GETPROXYSETTINGS_COMPLETE", WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE),
+        ] {
+            assert_eq!(
+                SESSION_NOTIFICATION_FLAGS & flag,
+                0,
+                "SESSION_NOTIFICATION_FLAGS enables {name}, but the transport never calls the API that raises it"
+            );
         }
     }
 

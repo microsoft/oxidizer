@@ -434,18 +434,30 @@ mod tests {
         assert_eq!(http3_keep_alive_millis(Duration::from_millis(1)), 1);
     }
 
+    /// Pins the floor recorded on [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`].
+    /// `WinHTTP` rejects a shorter window instead of clamping it, so a lower floor would
+    /// make every session that configures a limited idle timeout fail to initialize, for
+    /// every request, permanently. Only a literal expectation catches that: an expectation
+    /// derived from the constant moves wherever the constant moves.
+    #[test]
+    fn idle_timeout_floor_matches_the_native_minimum() {
+        assert_eq!(CONNECTION_IDLE_TIMEOUT_MINIMUM_MS, 5_000);
+    }
+
     #[test]
     fn idle_timeout_conversion_floors_saturates_and_encodes_unlimited() {
         assert_eq!(connection_idle_timeout_millis(&ConnectionIdleTimeout::Unlimited), u32::MAX);
         assert_eq!(
             connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::ZERO)),
-            CONNECTION_IDLE_TIMEOUT_MINIMUM_MS
+            5_000
         );
         assert_eq!(
-            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_millis(
-                u64::from(CONNECTION_IDLE_TIMEOUT_MINIMUM_MS) - 1
-            ))),
-            CONNECTION_IDLE_TIMEOUT_MINIMUM_MS
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_millis(4_999))),
+            5_000
+        );
+        assert_eq!(
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_millis(5_001))),
+            5_001
         );
         assert_eq!(
             connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_mins(1))),

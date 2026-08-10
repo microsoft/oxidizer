@@ -89,10 +89,19 @@ impl ContextInstallation {
         let context_value = context.as_ptr().expose_provenance();
         let option_value = context_bytes(context_value);
 
-        // SAFETY: the request is live and has not submitted an asynchronous
-        // operation. option_value is the exact pointer-sized context
-        // representation, and raw_owner keeps the initialized context alive
-        // until WinHTTP accepts ownership.
+        // SAFETY: set_option requires a live handle, the native representation
+        // for the option, a valid lifecycle stage, and the trait-level
+        // invariants. The RequestHandle owns the sole close authority for a
+        // handle nothing has closed; context_bytes produces the pointer-sized
+        // value WINHTTP_OPTION_CONTEXT_VALUE takes, in a local that outlives
+        // the call; and a request handle accepts that option before its first
+        // asynchronous operation, which is this stage, because installation
+        // precedes every submission. The trait-level invariants hold for the
+        // same reason: the session registered the callback when it opened with
+        // WINHTTP_FLAG_ASYNC, this request has no operation outstanding and no
+        // buffer lent out, the context was fully initialized before its pointer
+        // was exposed, and no borrow of it is held across the call. raw_owner
+        // keeps that initialized allocation alive until WinHTTP accepts it.
         if let Err(error) = unsafe {
             request
                 .bindings()
@@ -146,9 +155,13 @@ impl Drop for RawContextOwner {
             return;
         };
 
-        // SAFETY: this guard uniquely owns the exact pointer returned by
-        // plurality::Box::into_raw and reconstructs it only on installation
-        // failure, before WinHTTP takes callback ownership.
+        // SAFETY: plurality::Box::from_raw requires the exact pointer returned
+        // by into_raw, the same allocator type, and exactly one reconstruction.
+        // This guard is constructed with that pointer and is its only owner
+        // until installation succeeds, at which point release() empties the
+        // field; taking the field above therefore reconstructs the pooled Box
+        // at most once, and only while that right still belongs to this crate
+        // rather than to the callback.
         drop(unsafe { plurality::Box::<RequestContext>::from_raw(context) });
     }
 }
@@ -203,8 +216,14 @@ impl RequestGuard {
             .request
             .as_ref()
             .expect("an unfinished OperationFuture prevents RequestGuard context access");
-        // SAFETY: the guard remains alive, so callback ownership keeps the
-        // installed context valid while it owns the request handle.
+        // SAFETY: NonNull::as_ref requires an aligned, dereferenceable pointer
+        // to an initialized value that stays live and free of exclusive
+        // references for the borrow. The pointer is the into_raw pointer of the
+        // context this guard installed, so it is aligned and initialized; only
+        // HANDLE_CLOSING reclaims it, and that cannot have arrived while this
+        // guard still owns the unclosed request handle checked above. No
+        // exclusive reference to an installed context exists, and this borrow
+        // ends with the statement.
         unsafe { self.context.as_ref() }.cold_connect_state()
     }
 
@@ -220,30 +239,45 @@ impl RequestGuard {
             .expect("cancelling or forgetting an OperationFuture prevents RequestGuard reuse");
         let raw = request.raw();
 
-        // SAFETY: the context was installed from stable pooled storage. The
-        // returned future leaves the request-handle slot empty until its
-        // receiver endpoint has been destroyed.
+        // SAFETY: NonNull::as_ref requires an aligned, dereferenceable pointer
+        // to an initialized value that stays live and free of exclusive
+        // references for the borrow. The pointer is the into_raw pointer of the
+        // installed context, which only HANDLE_CLOSING reclaims and which the
+        // request handle taken above therefore keeps alive, since that
+        // notification follows closing the handle this method still owns. No
+        // exclusive reference to an installed context exists, and the borrow
+        // ends at the arming call below, before the submission runs, as the
+        // trait-level invariant on inline completion requires.
         let context = unsafe { self.context.as_ref() };
-        // SAFETY: the pooled context has a stable address until
-        // HANDLE_CLOSING reclaims it.
+        // SAFETY: Pin::new_unchecked requires the value never to move again
+        // before it is dropped. The context lives in a pooled slot whose
+        // address plurality::Box::into_raw fixed until the pointer is handed
+        // back, which only the reclaiming callback does, and the value is
+        // reached solely through that raw pointer until then.
         let context = unsafe { Pin::new_unchecked(context) };
-        // SAFETY: the context remains pinned until HANDLE_CLOSING reclaims it,
-        // which outlives both endpoints of the event armed here. The slot is
-        // idle: taking the request handle above proves no earlier submission is
-        // outstanding, because the handle only returns to the guard once the
-        // previous OperationFuture's receiver is destroyed, and destroying that
-        // receiver is exactly what drives the previous event to its terminal
-        // state.
+        // SAFETY: arm requires an idle slot under the caller's exclusive
+        // RequestGuard borrow, a previous event that reached its terminal
+        // state, and storage pinned until both new endpoints are destroyed.
+        // This method holds that exclusive borrow, and taking the request
+        // handle above proves no earlier submission is outstanding, because the
+        // handle returns to the guard only once the previous OperationFuture's
+        // receiver is destroyed, which is exactly what drives the previous
+        // event to its terminal state. The pinned storage outlives both
+        // endpoints, as HANDLE_CLOSING cannot precede closing the handle this
+        // method holds.
         let receiver = unsafe { context.arm(kind, buffer) };
 
         let submit_result = submit(raw, self.context_value());
 
         if let Err(error) = submit_result {
-            // SAFETY: the local request handle keeps the context valid. The
-            // operation kind atomically wins only if no inline callback
-            // already consumed the operation, so synchronous failure cannot
-            // double-complete it. No later operation can begin before this
-            // method returns because the guard's handle slot remains empty.
+            // SAFETY: NonNull::as_ref requires an aligned, dereferenceable
+            // pointer to an initialized value that stays live and free of
+            // exclusive references for the borrow. The local request handle
+            // still keeps the installed context from being reclaimed, and no
+            // exclusive reference to it exists. Claiming the operation is
+            // atomic, so it yields the payload only if no inline callback
+            // already consumed it, and no later operation can be armed before
+            // this method returns because the guard's handle slot is empty.
             if let Some(active) = unsafe { self.context.as_ref() }.take_kind(kind) {
                 active.completion.send(CompletionResult::error(error, active.buffer));
             }
@@ -263,8 +297,14 @@ impl RequestGuard {
     }
 }
 
-// SAFETY: moving the guard transfers the sole request-handle close authority.
-// The context pointer remains valid independently through HANDLE_CLOSING.
+// SAFETY: Send requires that transferring ownership to another thread is
+// sound. The guard holds a RequestHandle, which is Send, and a raw pointer to
+// an installed RequestContext, which is Sync and is only ever borrowed
+// immutably through that pointer, so the shared access the guard performs is
+// sound from whichever thread now owns it. The guard never reclaims the
+// allocation, which stays the reclaiming callback's exclusive duty, and moving
+// the guard moves the sole request-handle close authority with it, so the
+// handle is still closed exactly once and from a single thread.
 unsafe impl Send for RequestGuard {}
 
 impl Drop for RequestGuard {
@@ -294,17 +334,24 @@ impl Future for OperationFuture<'_> {
     type Output = std::result::Result<CompletionResult, Disconnected>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY: this mutable reference is used only to pin-project the
-        // receiver and update unpinned ownership fields; the receiver is not
-        // moved.
+        // SAFETY: get_unchecked_mut requires that the returned reference is
+        // never used to move the pinned value. It is used only to pin-project
+        // the receiver in place and to update the ownership fields, whose types
+        // are Unpin, so nothing structurally pinned is moved out.
         let this = unsafe { self.get_unchecked_mut() };
         assert!(this.receiver_live, "OperationFuture cannot be polled after completion");
-        // SAFETY: the receiver remains in place for the lifetime of this pinned
-        // OperationFuture.
+        // SAFETY: Pin::new_unchecked requires the value never to move again
+        // before it is dropped. The receiver is reached only through this
+        // pinned future, which the projection above does not move it out of,
+        // and it is destroyed in place below, so its address is fixed for the
+        // remainder of its life.
         let result = unsafe { Pin::new_unchecked(&mut *this.receiver) }.poll(cx);
         if result.is_ready() {
-            // SAFETY: the receiver is pinned in place and will not be accessed
-            // again after receiver_live is cleared.
+            // SAFETY: ManuallyDrop::drop requires that the value is never used
+            // again and is dropped at most once. receiver_live is true here and
+            // is cleared immediately afterwards, and both the poll assertion
+            // and this future's Drop consult that flag, so no path reaches the
+            // receiver after this point.
             unsafe {
                 ManuallyDrop::drop(&mut this.receiver);
             }
@@ -327,8 +374,14 @@ impl OperationFuture<'_> {
             .expect("cold-connect state is available only while an operation is pending");
         let context = NonNull::new(with_exposed_provenance_mut::<RequestContext>(self.context))
             .expect("OperationFuture retains the non-null installed request context");
-        // SAFETY: this future owns the live request handle, so callback
-        // ownership keeps the installed context valid.
+        // SAFETY: NonNull::as_ref requires an aligned, dereferenceable pointer
+        // to an initialized value that stays live and free of exclusive
+        // references for the borrow. The address round-trips the exposed
+        // provenance of the installed context, so it carries provenance for
+        // that allocation and is aligned and initialized; the request handle
+        // checked above is still open, so the reclaiming HANDLE_CLOSING
+        // notification cannot have run. No exclusive reference to an installed
+        // context exists, and the borrow ends with this statement.
         unsafe { context.as_ref() }.cold_connect_state()
     }
 }
@@ -336,8 +389,9 @@ impl OperationFuture<'_> {
 impl Drop for OperationFuture<'_> {
     fn drop(&mut self) {
         if self.receiver_live {
-            // SAFETY: Drop runs exactly once, and receiver_live proves the
-            // manually managed receiver has not already been destroyed.
+            // SAFETY: ManuallyDrop::drop requires that the value is never used
+            // again and is dropped at most once. Drop runs once per value, and
+            // receiver_live proves poll has not already destroyed the receiver.
             unsafe {
                 ManuallyDrop::drop(&mut self.receiver);
             }
@@ -352,8 +406,8 @@ impl Drop for OperationFuture<'_> {
 mod tests {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
     use std::ptr::NonNull;
-    use std::sync::Arc;
     use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
     use std::thread;
 
     use bytesbuf::BytesView;
@@ -369,7 +423,10 @@ mod tests {
     use crate::context::{CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
-    use crate::testing::{CONNECT, REQUEST, bindings, closing, complete, finish, installed, raw_handle, session, status_info_len};
+    use crate::testing::{
+        CONNECT, REQUEST, bindings, closing, complete, context_pointer, finish, installed, installed_context, raw_handle, session,
+        status_info_len,
+    };
 
     assert_impl_all!(ContextPool: Send, Sync, std::fmt::Debug, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(ContextInstallation: Send, std::fmt::Debug, UnwindSafe);
@@ -425,7 +482,7 @@ mod tests {
         )
         .install()
         .unwrap();
-        let context = guard.context_ptr();
+        let context = installed_context(&guard);
 
         drop(session);
         drop(guard);
@@ -435,7 +492,17 @@ mod tests {
         assert_eq!(closes.session.load(Ordering::SeqCst), 0);
         assert_eq!(contexts.lock().unwrap().len(), 1);
 
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards.
+        // `installed_context` recorded the pointer at installation and no
+        // earlier notification reclaimed it; this test submits no operation, so
+        // nothing is in flight; nothing borrows the context exclusively; and
+        // the guard is dropped above, so neither it nor the pointer is used
+        // again.
+        unsafe {
+            closing(context);
+        }
 
         assert_eq!(contexts.lock().unwrap().len(), 0);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
@@ -448,7 +515,18 @@ mod tests {
         let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, context_value| {
             assert_eq!(context_value, context.expose_provenance());
             assert_eq!(context_value, closes.context.load(Ordering::SeqCst));
-            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. `installed` returned
+            // the recorded pointer and only `finish` below reclaims it; a send
+            // completion carries no payload; this is the only notification the
+            // test delivers before awaiting the future; and a submission
+            // closure runs with no exclusive borrow of the context
+            // outstanding, which is what admits inline completion at all.
+            unsafe {
+                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            }
             Ok(())
         });
 
@@ -456,17 +534,39 @@ mod tests {
             futures::executor::block_on(future).unwrap(),
             CompletionResult::SendRequestComplete
         ));
-        finish(guard, context, &contexts, session, &closes);
+        // SAFETY: finish requires an installed, not-yet-reclaimed context and
+        // no overlapping notification. The inline delivery above left the
+        // context installed and the awaited future proves it has returned;
+        // consuming the guard discharges the obligation forbidding later use of
+        // it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
     fn foreign_thread_completion_wakes_send_future() {
         let (mut guard, context, contexts, session, closes) = installed();
-        let future = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, context_value| {
-            thread::spawn(move || {
-                let context = std::ptr::with_exposed_provenance_mut(context_value);
-                complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
-            });
+        let completer = Arc::new(Mutex::new(None));
+        let spawner = Arc::clone(&completer);
+        let future = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), move |_, context_value| {
+            *spawner.lock().unwrap() = Some(thread::spawn(move || {
+                let context = context_pointer(context_value);
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload matching the notification, no overlapping
+                // notification, no outstanding exclusive borrow, and no use of
+                // the context after the reclaiming notification. The value
+                // handed to the submission closure round-trips the provenance
+                // the guard exposed for the installed context, which only
+                // `finish` below reclaims, and the test joins this thread
+                // before that; a headers-available completion carries no
+                // payload; this is the only notification in flight; and a
+                // submission runs with no exclusive borrow of the context
+                // outstanding.
+                unsafe {
+                    complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+                }
+            }));
             Ok(())
         });
 
@@ -474,7 +574,25 @@ mod tests {
             futures::executor::block_on(future).unwrap(),
             CompletionResult::HeadersAvailable
         ));
-        finish(guard, context, &contexts, session, &closes);
+        // Waking this future happens partway through the foreign dispatch, so
+        // the thread is joined before teardown delivers HANDLE_CLOSING: that
+        // notification reclaims the context and may not overlap another
+        // notification for the handle.
+        completer
+            .lock()
+            .unwrap()
+            .take()
+            .expect("the submission closure runs before submit returns and always stores its thread")
+            .join()
+            .expect("the dispatching thread asserts nothing and so cannot panic");
+        // SAFETY: finish requires an installed, not-yet-reclaimed context and
+        // no overlapping notification. Nothing reclaimed the context, and the
+        // join above proves the foreign delivery has returned, so this
+        // notification overlaps none; consuming the guard discharges the
+        // obligation forbidding later use of it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
@@ -489,8 +607,24 @@ mod tests {
         };
         assert_eq!(error.code(), 12029);
         assert!(buffer.is_none());
-        complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
-        finish(guard, context, &contexts, session, &closes);
+        // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+        // payload matching the notification, no overlapping notification, no
+        // outstanding exclusive borrow, and no use of the context after the
+        // reclaiming notification. `installed` returned the recorded pointer
+        // and only `finish` below reclaims it; a send completion carries no
+        // payload; the failed submission left nothing in flight and this test
+        // delivers from its own thread; and the guard borrows the context only
+        // sharedly.
+        unsafe {
+            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+        }
+        // SAFETY: finish requires an installed, not-yet-reclaimed context and
+        // no overlapping notification. The delivery above left the context
+        // installed and has returned; consuming the guard discharges the
+        // obligation forbidding later use of it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
@@ -498,7 +632,18 @@ mod tests {
         let (mut guard, context, contexts, session, closes) = installed();
 
         let send = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| {
-            complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. `installed` returned
+            // the recorded pointer and only `finish` at the end of this test
+            // reclaims it; a send completion carries no payload; each
+            // submission below is awaited before the next begins, so no two
+            // notifications overlap; and a submission runs with no exclusive
+            // borrow of the context outstanding.
+            unsafe {
+                complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
+            }
             Ok(())
         });
         assert!(matches!(
@@ -507,7 +652,11 @@ mod tests {
         ));
 
         let headers = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, _| {
-            complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+            // SAFETY: as for the send completion above; a headers-available
+            // completion likewise carries no payload.
+            unsafe {
+                complete(context, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, std::ptr::null_mut(), 0);
+            }
             Ok(())
         });
         assert!(matches!(
@@ -517,12 +666,18 @@ mod tests {
 
         let mut available = 17_u32;
         let data = guard.submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
-            complete(
-                context,
-                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                (&raw mut available).cast(),
-                status_info_len::<u32>(),
-            );
+            // SAFETY: as for the send completion above, except that this
+            // notification carries a payload: the initialized local
+            // `available`, which outlives the call and which nothing else can
+            // reach while the closure borrows it.
+            unsafe {
+                complete(
+                    context,
+                    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                    (&raw mut available).cast(),
+                    status_info_len::<u32>(),
+                );
+            }
             Ok(())
         });
         assert!(matches!(
@@ -536,7 +691,14 @@ mod tests {
             OperationKind::Read,
             OperationBuffer::read(GlobalPool::new().reserve(8), read_address, 8),
             |_, _| {
-                complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, read_memory.as_mut_ptr().cast(), 5);
+                // SAFETY: as for the send completion above, except that this
+                // notification carries a payload: the address and filled length
+                // of the local `read_memory`, which the submission reported as
+                // the read buffer and which is initialized and readable for its
+                // whole length.
+                unsafe {
+                    complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, read_memory.as_mut_ptr().cast(), 5);
+                }
                 Ok(())
             },
         );
@@ -550,12 +712,18 @@ mod tests {
             OperationKind::Write,
             OperationBuffer::write(BytesView::copied_from_slice(b"data", &GlobalPool::new()), 4),
             |_, _| {
-                complete(
-                    context,
-                    WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
-                    (&raw mut written).cast(),
-                    status_info_len::<u32>(),
-                );
+                // SAFETY: as for the send completion above, except that this
+                // notification carries a payload: the initialized local
+                // `written`, which outlives the call and which nothing else can
+                // reach while the closure borrows it.
+                unsafe {
+                    complete(
+                        context,
+                        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+                        (&raw mut written).cast(),
+                        status_info_len::<u32>(),
+                    );
+                }
                 Ok(())
             },
         );
@@ -563,7 +731,14 @@ mod tests {
             futures::executor::block_on(write).unwrap(),
             CompletionResult::WriteComplete { len: 4, .. }
         ));
-        finish(guard, context, &contexts, session, &closes);
+        // SAFETY: finish requires an installed, not-yet-reclaimed context and
+        // no overlapping notification. None of the deliveries above reclaimed
+        // the context, and every one of them ran inline within a submission
+        // that has since been awaited; consuming the guard discharges the
+        // obligation forbidding later use of it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
     }
 
     #[test]
@@ -596,7 +771,17 @@ mod tests {
             assert_eq!(closes.session.load(Ordering::SeqCst), 0);
             assert_eq!(contexts.lock().unwrap().len(), 1);
 
-            closing(context);
+            // SAFETY: closing requires an installed, not-yet-reclaimed context,
+            // no overlapping notification, no outstanding exclusive borrow, and
+            // no dereference of the pointer or of a guard holding it
+            // afterwards. `installed` returned the recorded pointer and nothing
+            // reclaimed it; dropping the future closed the request handle, so
+            // the cancelled operation can raise no further notification; the
+            // guard borrows the context only sharedly; and the guard is dropped
+            // above, so neither it nor the pointer is used again.
+            unsafe {
+                closing(context);
+            }
 
             assert_eq!(contexts.lock().unwrap().len(), 0);
             assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
@@ -617,13 +802,24 @@ mod tests {
         )
         .install()
         .unwrap();
-        let context = guard.context_ptr();
+        let context = installed_context(&guard);
 
         drop(contexts);
 
         drop(session);
         drop(guard);
-        closing(context);
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no
+        // dereference of the pointer or of a guard holding it afterwards.
+        // `installed_context` recorded the pointer at installation and nothing
+        // reclaimed it; this test submits no operation, so nothing is in
+        // flight; nothing borrows the context exclusively; and the guard is
+        // dropped above, so neither it nor the pointer is used again. Dropping
+        // the pool first does not invalidate the context, whose allocation the
+        // installation keeps alive until this notification reclaims it.
+        unsafe {
+            closing(context);
+        }
         assert_eq!(closes.request.load(Ordering::SeqCst), 1);
         assert_eq!(closes.connect.load(Ordering::SeqCst), 1);
         assert_eq!(closes.session.load(Ordering::SeqCst), 1);

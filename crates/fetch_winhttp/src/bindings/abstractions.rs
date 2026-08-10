@@ -26,8 +26,11 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 ///   is installed before the first asynchronous submission.
 /// - Every session is opened with `WINHTTP_FLAG_ASYNC`, and all child handles
 ///   inherit that asynchronous callback behavior.
-/// - Every context borrow is released before submission because WinHTTP may
-///   complete inline and reenter the callback on the submitting thread.
+/// - No exclusive borrow of the request context is outstanding across a
+///   submission, because WinHTTP may complete inline and reenter the callback
+///   on the submitting thread, where the callback takes its own shared borrow.
+///   Shared borrows may be held across a submission; interior mutability
+///   carries every state change the callback and the submitter share.
 /// - At most one asynchronous operation is outstanding per request handle.
 /// - Buffers remain retained until the matching completion, request error,
 ///   final handle-closing callback, or failing submitting call ends the

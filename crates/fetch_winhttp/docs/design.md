@@ -133,7 +133,7 @@ approximate, and some ignored:
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
 | `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored, raised to a minimum of 5 seconds for HTTP/2 and 1 millisecond for HTTP/3. The generic `timeout` is ignored; HTTP/1.1 has no equivalent behavior. |
-| `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | Behaves like `ActiveConnections`; Windows does not distinguish the two modes. |
+| `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | Behaves like `ActiveConnections`; Windows does not distinguish these modes. |
 | `Http2Options::initial_max_send_streams` | Ignored; Windows owns HTTP/2 stream concurrency. |
 | `Http2Options::adaptive_window` | Ignored; Windows owns HTTP/2 flow control. |
 | `TransportOptions::extra` | Ignored; no v1 WinHTTP extension types are defined in the generic extension map. |
@@ -213,7 +213,7 @@ configured version set above, plus negotiation, does:
   excludes HTTP/2; it is sent over whatever the configured set and negotiation produce.
 
 The version set and the request message's version are reported as separate conditions, so
-an operator can tell from the error which of the two needs correcting: the version set is
+an operator can tell from the error which of them needs correcting: the version set is
 fixed on the client, the message version on the request.
 
 ## 4. TLS
@@ -269,11 +269,14 @@ behaves consistently with the rest of `fetch`:
   HTTP/2 and HTTP/3. Outgoing trailer frames are unsupported and fail the request rather
   than being silently dropped.
 - **Caller-supplied request framing headers.** A `Content-Length` supplied by the caller
-  must be a single well-formed value - repeated fields must agree with each other - and
-  must equal the actual length of the request body. A violation fails the request locally,
-  before anything is sent; a `Content-Length` that survives is transmitted in normalized
-  decimal form. A `Transfer-Encoding` supplied by the caller is rejected, because the
-  transport performs request framing itself.
+  must be a single well-formed value, and repeated fields must agree with each other. A
+  body that reports its own length is authoritative: the header must equal that length,
+  and a disagreement fails the request locally, before anything is sent. A body that
+  cannot report a length - a stream of unknown size - takes its declared length from the
+  header instead, which the transport frames against on the caller's word and does not
+  check against the bytes the body goes on to produce. A `Content-Length` that survives is
+  transmitted in normalized decimal form. A `Transfer-Encoding` supplied by the caller is
+  rejected, because the transport performs request framing itself.
 - **Divergence from `fetch_hyper`: a caller-supplied `Transfer-Encoding` is rejected
   rather than honored.** `fetch_hyper` honors `Transfer-Encoding: chunked` on a body of
   unknown length and sends the request; this transport fails such a request instead,
@@ -348,7 +351,7 @@ transport's; the transport only reports the timeout.
   it is not programmatically accessible, so callers branch on the label and the recovery
   classification, never on a code.
 
-  Three families state no code, because no WinHTTP call produced them:
+  The families that state no code, because no WinHTTP call produced them, are:
   - a request rejected locally before any WinHTTP call, whose message states what the
     caller must change (`invalid_request`);
   - response metadata that a successful WinHTTP call returned but that cannot be parsed
@@ -356,9 +359,9 @@ transport's; the transport only reports the timeout.
   - an error raised by the caller's own request body stream, which is surfaced exactly as
     the caller's body produced it, with its own label and classification.
 
-  The transport's connect deadline (§6.2) likewise carries no code: it states the elapsed
-  interval and is labeled `response_timeout`, the same expiry that a `ResponseTimeout`
-  reports (§6.1).
+  The transport's connect deadline (§6.2) likewise carries no code: it states the
+  configured deadline and is labeled `response_timeout`, the same expiry that a
+  `ResponseTimeout` reports (§6.1).
 - **Labels** (mirroring `fetch`'s own error labels):
 
   | Condition | `ErrorLabel` |
@@ -428,7 +431,7 @@ Counters:
 | `fetch.winhttp.request.count` | `{request}` | none |
 | `fetch.winhttp.request.error.count` | `{error}` | none |
 
-Both counters are deliberately zero-dimensional. No per-request, per-connection, or
+The counters are deliberately zero-dimensional. No per-request, per-connection, or
 per-endpoint attribute is ever attached to a metric, so metric cardinality does not grow
 with traffic, and the error counter divided by the request counter is a whole-transport
 failure rate.

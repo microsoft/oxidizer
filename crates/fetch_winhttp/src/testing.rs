@@ -24,13 +24,23 @@
 //! lets a test assert the exactly-once closure and the ordered release of the
 //! session before the connect handle that `HANDLE_CLOSING` performs
 //! (implementation.md section 4.3).
+//!
+//! Delivering a notification is an `unsafe` operation here, exactly as it is
+//! in [`dispatch_completion`]: the payload the caller describes and the absence
+//! of an overlapping notification are properties no harness can inspect. The
+//! harness does record which contexts are installed, so that a pointer no
+//! installation produced, or one that `HANDLE_CLOSING` already reclaimed, is a
+//! panic rather than the undefined behavior it would otherwise be. That check
+//! narrows the caller's obligations, it does not discharge them.
 
 use std::ffi::c_void;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use plurality::Pool;
-use windows::Win32::Networking::WinHttp::WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING;
+use windows::Win32::Networking::WinHttp::{
+    WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+};
 
 use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
 use crate::callback::dispatch_completion;
@@ -92,9 +102,55 @@ pub(crate) fn installed() -> (
     )
     .install()
     .unwrap();
-    let context = guard.context_ptr();
+    let context = installed_context(&guard);
 
     (guard, context, contexts, session, closes)
+}
+
+/// Records a guard's context as installed and returns its raw pointer.
+///
+/// A test that builds its own [`ContextInstallation`] rather than calling
+/// [`installed`] must take the pointer from here, because the record is what
+/// permits [`complete`] and [`closing`] to dispatch to it.
+pub(crate) fn installed_context(guard: &RequestGuard) -> *mut RequestContext {
+    record_installed(guard.context_ptr())
+}
+
+/// Records a context observed through `WINHTTP_OPTION_CONTEXT_VALUE`.
+///
+/// A harness whose mock bindings drive a request pipeline it does not own sees
+/// the installation only as the pointer-sized value `WinHTTP` is handed, so it
+/// registers the context from that value. Call this where the installation is
+/// observed rather than where a notification is delivered: registering at
+/// delivery would admit every address a caller names and cost the record its
+/// purpose.
+pub(crate) fn installed_context_value(value: usize) -> *mut RequestContext {
+    record_installed(context_pointer(value))
+}
+
+/// Rebuilds a context pointer from the address `WinHTTP` was handed.
+///
+/// A harness that stores what its mock bindings observed holds the context as a
+/// plain address and must reconstruct the pointer to dispatch to it. The
+/// address round-trips the provenance `RequestGuard` exposed for the context,
+/// so the result addresses that allocation rather than carrying no provenance
+/// at all.
+///
+/// This reconstruction alone does not admit a context for dispatch: it must
+/// also have been registered, which [`installed_context`] and
+/// [`installed_context_value`] do where the installation is observed.
+pub(crate) fn context_pointer(value: usize) -> *mut RequestContext {
+    std::ptr::with_exposed_provenance_mut(value)
+}
+
+fn record_installed(context: *mut RequestContext) -> *mut RequestContext {
+    let mut installed = installed_contexts();
+
+    if !installed.contains(&context.addr()) {
+        installed.push(context.addr());
+    }
+
+    context
 }
 
 /// Runs the terminal half of the ownership protocol and asserts it completed.
@@ -103,7 +159,13 @@ pub(crate) fn installed() -> (
 /// subsequent `HANDLE_CLOSING` dispatch is what returns the context to the pool
 /// and releases the retained connect and session parents
 /// (implementation.md section 4.3). Every handle must be closed exactly once.
-pub(crate) fn finish(
+///
+/// # Safety
+///
+/// The obligations of [`closing`] apply to the notification this delivers,
+/// except that consuming `guard` discharges the one forbidding later use of a
+/// guard that still holds the reclaimed context.
+pub(crate) unsafe fn finish(
     guard: RequestGuard,
     context: *mut RequestContext,
     contexts: &ContextPool,
@@ -112,7 +174,15 @@ pub(crate) fn finish(
 ) {
     drop(session);
     drop(guard);
-    closing(context);
+    // SAFETY: closing requires the pointer of an installed context whose
+    // reclaiming notification has not been delivered, no overlapping
+    // notification, no outstanding exclusive borrow, and no later use of the
+    // pointer or of a guard holding it. This function's contract demands the
+    // first three of its own caller. The guard is dropped above and the pointer
+    // is not touched again here, so the last one holds for this call site.
+    unsafe {
+        closing(context);
+    }
 
     assert_eq!(contexts.lock().unwrap().len(), 0);
     assert_eq!(closes.request.load(Ordering::SeqCst), 1);
@@ -121,12 +191,87 @@ pub(crate) fn finish(
 }
 
 /// Delivers one status notification exactly as the `WinHTTP` callback would.
-pub(crate) fn complete(context: *mut RequestContext, status: u32, info: *mut c_void, len: u32) {
-    // SAFETY: every test passes a live installed context and preserves each
-    // status-info object for the duration of the synchronous dispatch.
+///
+/// The pointer is checked against the record of installed contexts before it
+/// reaches [`dispatch_completion`], so an address no installation produced, or
+/// one a `HANDLE_CLOSING` notification already reclaimed, panics here instead
+/// of reconstructing the pooled box twice or reading released storage. The
+/// record holds addresses, which say nothing about provenance, so that check
+/// narrows the contract below rather than replacing it.
+///
+/// # Safety
+///
+/// - `context` must be the pointer [`installed`], [`installed_context`] or
+///   [`installed_context_value`] produced, and the `HANDLE_CLOSING`
+///   notification for it must not have been delivered yet.
+/// - `info` must be null, or readable and initialized for `len` bytes that stay
+///   valid and unmodified until this function returns.
+///   `WINHTTP_CALLBACK_STATUS_READ_COMPLETE` is exempt: its payload states the
+///   address and byte count of the buffer the read filled and is compared
+///   against the submitted buffer rather than dereferenced, which is what lets
+///   a caller describe bytes no read wrote.
+/// - No other notification for the same context may overlap this one, so a
+///   caller that dispatches from another thread must join that thread before
+///   delivering the next notification.
+/// - No exclusive borrow of the request context may be outstanding, because the
+///   callback takes its own shared borrow. Shared borrows may be held across
+///   the call.
+/// - `WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING` reclaims the context allocation,
+///   so afterwards neither `context` nor a [`RequestGuard`] that still holds it
+///   may be dereferenced. Dropping such a guard remains permitted, because that
+///   closes the request handle without reaching the context.
+pub(crate) unsafe fn complete(context: *mut RequestContext, status: u32, info: *mut c_void, len: u32) {
+    assert!(
+        claim(context, status == WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING),
+        "the harness delivers notifications only to a context it installed and has not yet reclaimed: \
+         take the pointer from `installed`, `installed_context` or `installed_context_value`, and deliver `HANDLE_CLOSING` once"
+    );
+
+    // SAFETY: dispatch_completion requires the exact pointer of an installed,
+    // not-yet-reclaimed context, a payload matching the notification, a final
+    // `HANDLE_CLOSING` that is delivered once and overlaps no other
+    // notification for the handle, and no exclusive borrow of the context.
+    // Every one of those is demanded of this function's own caller in the same
+    // terms, so they hold here unchanged; the claim above additionally proves
+    // that the address is one this module saw installed and has not since
+    // reclaimed.
     unsafe {
         dispatch_completion(context, status, info, len);
     }
+}
+
+/// Claims one dispatch to `context`, releasing the record when it reclaims.
+///
+/// Reports whether `context` is a context this harness installed and has not
+/// yet reclaimed.
+fn claim(context: *mut RequestContext, reclaims: bool) -> bool {
+    let mut installed = installed_contexts();
+    let Some(index) = installed.iter().position(|address| *address == context.addr()) else {
+        return false;
+    };
+
+    if reclaims {
+        installed.swap_remove(index);
+    }
+
+    true
+}
+
+/// Borrows the record of installed, not-yet-reclaimed request contexts.
+///
+/// Addresses are recorded rather than pointers because the record outlives the
+/// allocations it names, and an address is all a claim needs to compare.
+fn installed_contexts() -> MutexGuard<'static, Vec<usize>> {
+    /// The dispatch helpers cannot verify a raw context pointer, so they check
+    /// it against this record and turn the misuse a test is most likely to
+    /// commit into a panic. It is process-wide because a context pointer
+    /// travels to callback threads and into mock bindings that hold no harness
+    /// state.
+    static INSTALLED_CONTEXTS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+    INSTALLED_CONTEXTS
+        .lock()
+        .expect("the harness runs nothing that can panic while this lock is held, so it cannot be poisoned")
 }
 
 /// Reports the native status-info length for a status payload of type `T`.
@@ -135,8 +280,56 @@ pub(crate) fn status_info_len<T>() -> u32 {
 }
 
 /// Delivers the final `HANDLE_CLOSING` notification for an installed context.
-pub(crate) fn closing(context: *mut RequestContext) {
-    complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+///
+/// # Safety
+///
+/// The obligations of [`complete`] apply, except the one describing the
+/// payload: this notification carries none. It is the notification that
+/// reclaims the pooled allocation, so afterwards neither `context` nor a
+/// [`RequestGuard`] that still holds it may be dereferenced.
+pub(crate) unsafe fn closing(context: *mut RequestContext) {
+    // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+    // payload matching the notification, no overlapping notification, no
+    // outstanding exclusive borrow, and no use of the context after the
+    // reclaiming notification. All but the payload are demanded of this
+    // function's own caller in the same terms. `HANDLE_CLOSING` carries no
+    // payload, and a null pointer of zero length is how `WinHTTP` states that.
+    unsafe {
+        complete(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+    }
+}
+
+/// Delivers a `REQUEST_ERROR` notification carrying `code`.
+///
+/// The payload lives on this function's own stack frame for the duration of the
+/// dispatch, which is how the notification's payload obligation is discharged
+/// for every caller at once.
+///
+/// # Safety
+///
+/// The obligations of [`complete`] apply, except the one describing the
+/// payload, which this function supplies.
+pub(crate) unsafe fn complete_request_error(context: *mut RequestContext, code: u32) {
+    let mut result = WINHTTP_ASYNC_RESULT {
+        dwResult: 0,
+        dwError: code,
+    };
+
+    // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+    // payload readable and unmodified for the call, no overlapping
+    // notification, no outstanding exclusive borrow, and no use of the context
+    // after the reclaiming notification. All but the payload are demanded of
+    // this function's own caller in the same terms. The payload is the local
+    // above, which `WINHTTP_ASYNC_RESULT` initializes in full, lives until this
+    // function returns, and nothing else can reach.
+    unsafe {
+        complete(
+            context,
+            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+            (&raw mut result).cast(),
+            status_info_len::<WINHTTP_ASYNC_RESULT>(),
+        );
+    }
 }
 
 /// Wraps a mock session handle in the owner that installed contexts retain.

@@ -23,16 +23,21 @@ use crate::operation::RequestGuard;
 ///
 /// Known lengths that fit a `DWORD` are passed directly to
 /// `WinHttpSendRequest`. Larger known bodies use the ignore-total sentinel and
-/// require an exact normalized 64-bit `Content-Length` header. Unknown lengths
-/// enable `WinHTTP` automatic chunking and require a final zero-length write
-/// (implementation.md section 6.1).
+/// carry their length in a normalized 64-bit `Content-Length` header. Unknown
+/// lengths enable `WinHTTP` automatic chunking and require a final zero-length
+/// write (implementation.md section 6.1).
 ///
 /// Constructing the framing strategy is also the single point where the
 /// caller's framing metadata is reconciled with the framing `WinHTTP` will
-/// actually perform, before any handle is opened: every `Content-Length` header
-/// must agree with the true body length and is collapsed into one canonical
-/// decimal value, and a caller-supplied `Transfer-Encoding` is rejected. This
-/// keeps exactly one framing directive on the wire.
+/// actually perform, before any handle is opened. A body that reports its own
+/// length is authoritative: every `Content-Length` header must equal that
+/// length, and a disagreement fails the request locally. A body that cannot
+/// report one takes its declared length from the header instead, which the
+/// transport frames against on the caller's word and does not check against the
+/// bytes the body goes on to produce. Either way the surviving header is
+/// collapsed into one canonical decimal value and a caller-supplied
+/// `Transfer-Encoding` is rejected, so exactly one framing directive reaches
+/// the wire.
 pub(crate) struct RequestBodyFraming {
     total_length: u32,
     automatic_chunking: bool,
@@ -96,11 +101,13 @@ impl RequestBodyFraming {
 
     /// Reads the body length declared by a `Content-Length` header.
     ///
-    /// This is the fallback for bodies that cannot report their own length.
-    /// Duplicate headers must all decode to the same value; otherwise the
-    /// declared length is ambiguous and no framing strategy can be chosen.
-    /// Normalization is left to [`reconcile_content_length`], which runs for
-    /// every known length regardless of where that length came from.
+    /// This is the fallback for bodies that cannot report their own length, so
+    /// the value it returns is the caller's word and becomes the length
+    /// `WinHTTP` frames against. Duplicate headers must all decode to the same
+    /// value; otherwise the declared length is ambiguous and no framing
+    /// strategy can be chosen. Normalization is left to
+    /// [`reconcile_content_length`], which runs for every known length
+    /// regardless of where that length came from.
     fn declared_content_length(headers: &HeaderMap) -> Result<Option<u64>, RequestBodyFramingError> {
         let mut values = headers.get_all(CONTENT_LENGTH).iter();
         let Some(first) = values.next() else {
@@ -126,13 +133,17 @@ impl RequestBodyFraming {
     }
 }
 
-/// Reconciles caller-supplied `Content-Length` headers with the body length.
+/// Reconciles caller-supplied `Content-Length` headers with the length
+/// `WinHTTP` frames against.
 ///
 /// Any header value that disagrees with `expected` fails the request with the
 /// error `mismatch` produces, because the caller would otherwise put a framing
-/// directive on the wire that contradicts what `WinHTTP` sends. The error is
-/// built lazily because an `ohno` error allocates its source chain, and the
-/// overwhelmingly common case is a header that agrees.
+/// directive on the wire that contradicts what `WinHTTP` sends. That comparison
+/// discriminates where `expected` came from the body itself; where a header
+/// supplied it, the values already agree and this call only collapses them into
+/// the canonical form. The error is built lazily because an `ohno` error
+/// allocates its source chain, and the overwhelmingly common case is a header
+/// that agrees.
 ///
 /// A header that survives is rewritten as one canonical decimal value, so a set
 /// of duplicate or non-canonical values (`007`, repeated values) collapses into
@@ -217,11 +228,12 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
 /// Identifies request framing metadata that cannot define safe upload framing.
 ///
 /// The writer must know whether `WinHTTP` receives an exact `DWORD` total, an
-/// explicit 64-bit length, or an unknown-length stream. Inconsistent, malformed
-/// or untruthful `Content-Length` values make that choice ambiguous, and a
-/// caller-supplied `Transfer-Encoding` contradicts the framing `WinHTTP`
-/// performs. Both are rejected before any handle is opened, so a request never
-/// reaches the wire carrying two framing directives.
+/// explicit 64-bit length, or an unknown-length stream. Inconsistent or
+/// malformed `Content-Length` values, and values that contradict a body which
+/// knows its own length, make that choice ambiguous, and a caller-supplied
+/// `Transfer-Encoding` contradicts the framing `WinHTTP` performs. Both are
+/// rejected before any handle is opened, so a request never reaches the wire
+/// carrying two framing directives.
 ///
 /// One `ohno` source type per condition is rolled into this aggregate
 /// (implementation.md section 1.1), so the framing code propagates a single
@@ -251,7 +263,8 @@ struct MismatchedContentLengthError {
 /// Reports a `Content-Length` header that cannot frame an oversized body.
 ///
 /// Bodies larger than `u32::MAX` cannot use `dwTotalLength`, so the header is
-/// the only framing source and must state the exact 64-bit length.
+/// the only framing source. Where the body reports its own length, every header
+/// value must equal that exact 64-bit length.
 #[ohno::error]
 #[display("a request body larger than u32::MAX requires Content-Length to equal its exact 64-bit length ({expected})")]
 struct LargeContentLengthMismatchError {
@@ -295,11 +308,32 @@ impl<'guard> WinHttpBodyWriter<'guard> {
             let write = self
                 .guard
                 .submit(OperationKind::Write, OperationBuffer::write(data, len), move |request, _context| {
-                    // SAFETY: submit() armed the write operation and
-                    // transferred the live request handle into its future. The
-                    // exact BytesView and contiguous span identified by
-                    // buffer/len remain in the active operation until
-                    // completion, and no operation overlaps this write.
+                    // SAFETY: the writer borrows a RequestGuard, which exists
+                    // only where ContextInstallation::install accepted the fully
+                    // initialized context on a request opened under the
+                    // session's WINHTTP_FLAG_ASYNC handle, whose status callback
+                    // was registered with the full notification mask before any
+                    // request handle existed. submit() armed the slot for Write
+                    // and moved the live request handle into the returned
+                    // future, so the handle stays open for this call, the armed
+                    // kind matches it, and the emptied guard admits no second
+                    // operation while this one is outstanding. `buffer`
+                    // addresses the start of the view's first span and `len` is
+                    // bounded by that span's length, so the span is readable and
+                    // initialized for `len` bytes. The view moves into the
+                    // operation buffer in this same call, and a view is
+                    // immutable, so nothing can change or free those bytes until
+                    // a completion, a request error, or HANDLE_CLOSING hands the
+                    // view back; moving the view value does not move the pooled
+                    // block its span lives in. A synchronous failure reclaims the
+                    // view through submit()'s claim of the slot, which
+                    // write_data's contract permits by starting no write and
+                    // keeping no reference when it reports failure. No exclusive
+                    // borrow of the context is outstanding across this call: the
+                    // closure captures only a cloned facade and the span it
+                    // lends, so a completion delivered inline reenters the
+                    // callback on this thread with nothing but shared access in
+                    // flight.
                     unsafe { bindings.write_data(request, Some(buffer), len) }
                 });
             let completion = write
@@ -318,10 +352,20 @@ impl<'guard> WinHttpBodyWriter<'guard> {
             OperationKind::Write,
             OperationBuffer::write(BytesView::new(), 0),
             move |request, _context| {
-                // SAFETY: submit() armed the sole write operation and
-                // transferred the live request handle into its future. WinHTTP
-                // accepts a null buffer only for this zero-length end-of-body
-                // write, whose completion is awaited before response receipt.
+                // SAFETY: the guard, the slot armed for Write and the live
+                // request handle moved into the returned future establish the
+                // same preconditions as the span write above, and the emptied
+                // guard again admits no overlapping operation. An absent buffer
+                // is permitted only for the zero-length write that ends
+                // automatic chunking, which is the only thing this method
+                // performs: the request driver calls it once for a request
+                // opened with WINHTTP_FLAG_AUTOMATIC_CHUNKING, after the body
+                // reached end-of-stream, and awaits its completion before
+                // response reception begins. No buffer is lent, and no exclusive
+                // borrow of the context is outstanding across this call: the
+                // closure captures only a cloned facade, so a completion
+                // delivered inline reenters the callback on this thread with
+                // nothing but shared access in flight.
                 unsafe { bindings.write_data(request, None, 0) }
             },
         );
@@ -599,6 +643,20 @@ mod tests {
         assert_eq!(split(u64::from(u32::MAX)), [u32::MAX]);
         assert_eq!(split(u64::from(u32::MAX) + 1), [u32::MAX, 1]);
         assert_eq!(split(u64::from(u32::MAX) * 2), [u32::MAX, u32::MAX]);
+    }
+
+    #[test]
+    fn a_successful_write_completion_advances_the_view_past_the_written_bytes() {
+        let buffer = BytesView::copied_from_slice(b"abcdef", &GlobalPool::new());
+
+        let remaining = write_completion(CompletionResult::WriteComplete {
+            buffer: buffer.clone(),
+            len: 2,
+        })
+        .unwrap();
+
+        assert_eq!(remaining.len(), buffer.len() - 2);
+        assert_eq!(remaining, b"cdef");
     }
 
     #[test]

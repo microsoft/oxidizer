@@ -167,7 +167,7 @@ impl RefUnwindSafe for RequestHandle {}
 mod tests {
     use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -185,13 +185,27 @@ mod tests {
 
     #[test]
     fn each_wrapper_closes_its_handle_once() {
+        // Distinct nonzero addresses let the recording mock attribute each
+        // close to the wrapper that owns that handle. They are never
+        // dereferenced.
+        const SESSION: usize = 1;
+        const CONNECT: usize = 2;
+        const REQUEST: usize = 3;
+
+        let closed = Arc::new(Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&closed);
         let mut bindings = MockBindings::new();
-        bindings.expect_close_handle().times(3).returning(|_| Ok(()));
+        bindings.expect_close_handle().times(3).returning(move |handle| {
+            recorder.lock().unwrap().push(handle.as_ptr().addr());
+            Ok(())
+        });
         let facade = BindingsFacade::mock(Arc::new(bindings));
 
-        drop(SessionHandle::new(raw_handle(1), facade.clone()));
-        drop(ConnectHandle::new(raw_handle(2), facade.clone()));
-        drop(RequestHandle::new(raw_handle(3), facade));
+        drop(SessionHandle::new(raw_handle(SESSION), facade.clone()));
+        drop(ConnectHandle::new(raw_handle(CONNECT), facade.clone()));
+        drop(RequestHandle::new(raw_handle(REQUEST), facade));
+
+        assert_eq!(*closed.lock().unwrap(), [SESSION, CONNECT, REQUEST]);
     }
 
     #[test]

@@ -84,10 +84,21 @@ impl WinHttpBodyReader {
             let query = self
                 .guard_mut()?
                 .submit(OperationKind::DataAvailable, OperationBuffer::none(), move |request, _context| {
-                    // SAFETY: submit() armed the data-available operation and
-                    // transferred the live request handle into its future. The
-                    // installed callback context remains valid and no operation
-                    // overlaps this query.
+                    // SAFETY: the reader owns a RequestGuard, which exists only
+                    // where ContextInstallation::install accepted the fully
+                    // initialized context on a request opened under the
+                    // session's WINHTTP_FLAG_ASYNC handle, whose status callback
+                    // was registered with the full notification mask before any
+                    // request handle existed. submit() armed the slot for
+                    // DataAvailable and moved the live request handle into the
+                    // returned future, so the handle stays open for this call,
+                    // the armed kind matches it, and the emptied guard admits no
+                    // second operation while this one is outstanding. The query
+                    // lends no buffer. No exclusive borrow of the context is
+                    // outstanding across this call: the closure captures only a
+                    // cloned facade, so a completion delivered inline reenters
+                    // the callback on this thread with nothing but shared access
+                    // in flight.
                     unsafe { bindings.query_data_available(request) }
                 });
             let completion = query
@@ -117,10 +128,28 @@ impl WinHttpBodyReader {
             OperationKind::Read,
             OperationBuffer::read(into, address, capacity),
             move |request, _context| {
-                // SAFETY: submit() armed the read operation and transferred the
-                // live request handle into its future. The active operation
-                // owns the same BytesBuf and contiguous writable tail until
-                // completion, and no operation overlaps this read.
+                // SAFETY: the guard establishes the asynchronous session, the
+                // registered status callback and the installed context exactly
+                // as for the availability query above. submit() armed the slot
+                // for Read and moved the live request handle into the returned
+                // future, so the handle stays open for this call, the armed kind
+                // matches it, and the emptied guard admits no second operation
+                // while this one is outstanding. `buffer` addresses the start of
+                // the writable tail obtained above, and `capacity` is bounded by
+                // that tail's length, so the span is writable for `capacity`
+                // bytes. The BytesBuf owning that tail moves into the operation
+                // buffer in this same call, so the request task can neither read
+                // nor free the span until a completion, a request error, or
+                // HANDLE_CLOSING hands the buffer back; moving the BytesBuf
+                // value does not move the pooled block the tail lives in. A
+                // synchronous failure reclaims the buffer through submit()'s
+                // claim of the slot, which read_data's contract permits by
+                // starting no read and keeping no reference when it reports
+                // failure. No exclusive borrow of the context is outstanding
+                // across this call: the closure captures only a cloned facade
+                // and the span it lends, so a completion delivered inline
+                // reenters the callback on this thread with nothing but shared
+                // access in flight.
                 unsafe { bindings.read_data(request, buffer, capacity) }
             },
         );
@@ -138,8 +167,14 @@ impl WinHttpBodyReader {
             self.eof = true;
             drop(self.guard.take());
         } else {
-            // SAFETY: callback validation established that exactly `read`
-            // bytes at the start of the exposed writable tail were initialized.
+            // SAFETY: advance() requires `read` initialized bytes at the start
+            // of the current first unfilled slice. Nothing touched this buffer
+            // between the submission and this completion, so that slice still
+            // begins at the address lent to WinHTTP, and the callback accepted
+            // the completion only after checking that WinHTTP reported that same
+            // address and a length within the lent capacity, which is itself
+            // bounded by the slice length. WinHttpReadData initializes exactly
+            // that many bytes at the start of the buffer it was given.
             unsafe {
                 into.advance(read);
             }
@@ -306,12 +341,10 @@ fn next_read_capacity(tail_len: usize, desired: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::ffi::c_void;
     use std::future::poll_fn;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::pin::Pin;
     use std::ptr::NonNull;
-    use std::slice;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Waker};
@@ -325,18 +358,17 @@ mod tests {
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
     use windows::Win32::Networking::WinHttp::{
-        ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-        WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+        ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
     };
 
     use super::{PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, next_read_capacity};
     use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
-    use crate::callback::dispatch_completion;
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
-    use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
+    use crate::handle::{ConnectHandle, RequestHandle, SessionHandle};
     use crate::operation::{ContextInstallation, ContextPool};
     use crate::session::WinHttpSession;
+    use crate::testing::{closing, complete, complete_request_error, context_pointer, installed_context, raw_handle, status_info_len};
 
     const SESSION: usize = 101;
     const CONNECT: usize = 102;
@@ -368,6 +400,7 @@ mod tests {
     #[derive(Clone)]
     enum ReadBehavior {
         Data(Vec<u8>),
+        MismatchedAddress,
         SyncError,
         CallbackError,
         Malformed,
@@ -673,6 +706,24 @@ mod tests {
     }
 
     #[test]
+    fn a_read_completion_reporting_a_foreign_buffer_address_is_rejected() {
+        let mut harness = reader(
+            [ReadStep {
+                query: QueryBehavior::Available(1),
+                read: ReadBehavior::MismatchedAddress,
+            }],
+            TrailerBehavior::None,
+        );
+
+        let error = futures::executor::block_on(harness.reader.read_any()).unwrap_err();
+
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("invalid status information"), "{error}");
+        assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
+        harness.finish();
+    }
+
+    #[test]
     fn a_mid_stream_error_terminates_the_body() {
         let harness = reader(
             [
@@ -738,6 +789,16 @@ mod tests {
         poll_fn(|cx| body.as_mut().poll_frame(cx)).await
     }
 
+    /// Builds a body reader over a mock `WinHTTP` that follows `steps`.
+    ///
+    /// The script this installs is what discharges the obligations of
+    /// [`complete`] for every notification it delivers. Each notification is
+    /// raised from inside a binding the reader itself called, so it runs on the
+    /// submitting thread and can overlap no other notification for the context;
+    /// the context is the one recorded here at installation, and only
+    /// [`finish_context`] reclaims it, after the harness and the guard it owns
+    /// are dropped; and the harness reaches the context solely through the
+    /// reader, which holds only a shared borrow of it.
     #[expect(
         clippy::too_many_lines,
         reason = "the body-reader harness keeps one complete WinHTTP script visible in one place"
@@ -761,25 +822,53 @@ mod tests {
         bindings.expect_query_data_available().returning(move |_| {
             query_record.query_calls.fetch_add(1, Ordering::SeqCst);
             let query = query_steps.lock().unwrap().front().unwrap().query.clone();
-            let context = query_record.context.load(Ordering::SeqCst);
+            let context = recorded_context(&query_record);
 
             match query {
                 QueryBehavior::Available(mut available) => {
-                    complete(
-                        context,
-                        WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                        (&raw mut available).cast(),
-                        status_info_len::<u32>(),
-                    );
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload readable and unmodified for the call,
+                    // no overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The mock script (`reader`) establishes all
+                    // of them; the payload here is the initialized local
+                    // `available`, which outlives the call and nothing else can
+                    // reach.
+                    unsafe {
+                        complete(
+                            context,
+                            WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                            (&raw mut available).cast(),
+                            status_info_len::<u32>(),
+                        );
+                    }
                     Ok(())
                 }
                 QueryBehavior::SyncError => Err(WinHttpError::new(12030, WinHttpOperation::QueryDataAvailable)),
                 QueryBehavior::CallbackError => {
-                    complete_request_error(context, 12030);
+                    // SAFETY: complete_request_error requires an installed,
+                    // not-yet-reclaimed context, no overlapping notification,
+                    // no outstanding exclusive borrow, and no use of the
+                    // context after the reclaiming notification, and it
+                    // supplies the payload itself. The mock script (`reader`)
+                    // establishes all of them.
+                    unsafe {
+                        complete_request_error(context, 12030);
+                    }
                     Ok(())
                 }
                 QueryBehavior::Malformed => {
-                    complete(context, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, std::ptr::null_mut(), 0);
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload matching the notification, no
+                    // overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The mock script (`reader`) establishes all
+                    // of them; a null pointer of zero length is admitted for
+                    // any status, which is what makes this completion malformed
+                    // for one that must carry a `DWORD`.
+                    unsafe {
+                        complete(context, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, std::ptr::null_mut(), 0);
+                    }
                     Ok(())
                 }
                 QueryBehavior::Pending => Ok(()),
@@ -792,40 +881,115 @@ mod tests {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
             read_record.requested.lock().unwrap().push(len);
             let step = read_steps.lock().unwrap().pop_front().unwrap();
-            let context = read_record.context.load(Ordering::SeqCst);
+            let context = recorded_context(&read_record);
 
             match step.read {
                 ReadBehavior::Data(data) => {
                     assert!(data.len() <= len as usize);
-                    // SAFETY: the active operation exposes this exact writable
-                    // contiguous tail for `len` bytes.
+                    // SAFETY: the reader lent this pointer as the start of a
+                    // writable tail of `len` bytes that the active operation
+                    // retains, so the destination is valid for the bytes copied
+                    // here and no other reference to it exists while this mock
+                    // stands in for WinHTTP. The source is a separate allocation,
+                    // so the regions cannot overlap, and `u8` imposes no
+                    // alignment requirement. The tail is uninitialized memory,
+                    // which is why it is filled through the raw pointer instead
+                    // of through a slice reference.
                     unsafe {
-                        slice::from_raw_parts_mut(buffer.as_ptr(), len as usize)[..data.len()].copy_from_slice(&data);
+                        buffer.as_ptr().copy_from_nonoverlapping(data.as_ptr(), data.len());
                     }
                     if data.is_empty() {
-                        complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, std::ptr::null_mut(), 0);
+                        // SAFETY: complete requires an installed,
+                        // not-yet-reclaimed context, a payload matching the
+                        // notification, no overlapping notification, no
+                        // outstanding exclusive borrow, and no use of the
+                        // context after the reclaiming notification. The mock
+                        // script (`reader`) establishes all of them; a read
+                        // that returned nothing reports a null address and a
+                        // zero count, which `WinHTTP` uses to signal the end of
+                        // the response body.
+                        unsafe {
+                            complete(context, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, std::ptr::null_mut(), 0);
+                        }
                     } else {
+                        // SAFETY: complete requires an installed,
+                        // not-yet-reclaimed context, a payload matching the
+                        // notification, no overlapping notification, no
+                        // outstanding exclusive borrow, and no use of the
+                        // context after the reclaiming notification. The mock
+                        // script (`reader`) establishes all of them. This
+                        // notification reports the lent buffer and the count of
+                        // bytes written into it, and the copy above initialized
+                        // exactly that many bytes there.
+                        unsafe {
+                            complete(
+                                context,
+                                WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+                                buffer.as_ptr().cast(),
+                                u32::try_from(data.len()).unwrap(),
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                ReadBehavior::MismatchedAddress => {
+                    // A completion reporting an address other than the submitted
+                    // buffer cannot describe bytes written into that buffer. The
+                    // reported length stays within the submitted capacity so the
+                    // address is the only reason to reject this completion.
+                    //
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload matching the notification, no
+                    // overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The mock script (`reader`) establishes all
+                    // of them, and the payload obligation exempts
+                    // `READ_COMPLETE`, whose status info states an address and
+                    // byte count that are compared against the submitted buffer
+                    // rather than dereferenced, which is what lets this one
+                    // describe bytes no read wrote.
+                    unsafe {
                         complete(
                             context,
                             WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-                            buffer.as_ptr().cast(),
-                            u32::try_from(data.len()).unwrap(),
+                            buffer.as_ptr().wrapping_add(1).cast(),
+                            1,
                         );
                     }
                     Ok(())
                 }
                 ReadBehavior::SyncError => Err(WinHttpError::new(12030, WinHttpOperation::ReadData)),
                 ReadBehavior::CallbackError => {
-                    complete_request_error(context, 12030);
+                    // SAFETY: complete_request_error requires an installed,
+                    // not-yet-reclaimed context, no overlapping notification,
+                    // no outstanding exclusive borrow, and no use of the
+                    // context after the reclaiming notification, and it
+                    // supplies the payload itself. The mock script (`reader`)
+                    // establishes all of them.
+                    unsafe {
+                        complete_request_error(context, 12030);
+                    }
                     Ok(())
                 }
                 ReadBehavior::Malformed => {
-                    complete(
-                        context,
-                        WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-                        buffer.as_ptr().cast(),
-                        len.saturating_add(1),
-                    );
+                    // SAFETY: complete requires an installed, not-yet-reclaimed
+                    // context, a payload matching the notification, no
+                    // overlapping notification, no outstanding exclusive
+                    // borrow, and no use of the context after the reclaiming
+                    // notification. The mock script (`reader`) establishes all
+                    // of them, and the payload obligation exempts
+                    // `READ_COMPLETE`, whose status info states an address and
+                    // byte count that are compared against the submitted buffer
+                    // rather than dereferenced, which is what lets this one
+                    // claim more bytes than the lent buffer holds.
+                    unsafe {
+                        complete(
+                            context,
+                            WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
+                            buffer.as_ptr().cast(),
+                            len.saturating_add(1),
+                        );
+                    }
                     Ok(())
                 }
                 ReadBehavior::Pending => Ok(()),
@@ -865,7 +1029,7 @@ mod tests {
         )
         .install()
         .unwrap();
-        let context = guard.context_ptr();
+        let context = installed_context(&guard);
         drop((session, contexts));
 
         ReaderHarness {
@@ -880,35 +1044,24 @@ mod tests {
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 0);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 0);
 
-        // SAFETY: this is the live installed context pointer, and the synthetic
-        // HANDLE_CLOSING callback is its final use.
+        // SAFETY: closing requires an installed, not-yet-reclaimed context, no
+        // overlapping notification, no outstanding exclusive borrow, and no use
+        // of the pointer or of a guard holding it afterwards. `reader` recorded
+        // this pointer at installation and nothing has reclaimed it; every
+        // caller drops the harness, and with it the guard the reader owns,
+        // before calling here, so no notification is in flight and none can
+        // follow; and the harness borrows the context only sharedly.
         unsafe {
-            dispatch_completion(context, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, std::ptr::null_mut(), 0);
+            closing(context);
         }
 
         assert_eq!(record.connect_closes.load(Ordering::SeqCst), 1);
         assert_eq!(record.session_closes.load(Ordering::SeqCst), 1);
     }
 
-    fn complete(context: usize, status: u32, status_info: *mut c_void, status_info_len: u32) {
-        // SAFETY: the harness stores the live installed context and follows the
-        // callback protocol for every synthetic completion.
-        unsafe {
-            dispatch_completion(std::ptr::with_exposed_provenance_mut(context), status, status_info, status_info_len);
-        }
-    }
-
-    fn complete_request_error(context: usize, code: u32) {
-        let mut result = WINHTTP_ASYNC_RESULT {
-            dwResult: 0,
-            dwError: code,
-        };
-        complete(
-            context,
-            WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-            (&raw mut result).cast(),
-            status_info_len::<WINHTTP_ASYNC_RESULT>(),
-        );
+    /// Reads the context pointer the mock bindings recorded at installation.
+    fn recorded_context(record: &Record) -> *mut RequestContext {
+        context_pointer(record.context.load(Ordering::SeqCst))
     }
 
     fn write_byte_query(bytes: &[u8], buffer: Option<NonNull<u8>>, byte_len: &mut u32) -> crate::error::Result<()> {
@@ -919,21 +1072,17 @@ mod tests {
         };
 
         assert!(*byte_len >= required);
-        // SAFETY: the sizing query reserved `required` writable bytes.
+        // SAFETY: the sizing query reported `required` and the caller asserted
+        // at least that much writable space, so the destination holds the copied
+        // content. It is a separate allocation from `bytes`, so the regions
+        // cannot overlap, and `u8` imposes no alignment requirement.
         unsafe { output.as_ptr().copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
-        // SAFETY: `required` includes one writable byte after the copied data.
+        // SAFETY: `required` counts one writable byte beyond the copied content,
+        // so this offset stays inside the same allocation.
         let terminator = unsafe { output.as_ptr().add(bytes.len()) };
-        // SAFETY: `terminator` points to the final writable byte.
+        // SAFETY: `terminator` addresses that final writable byte.
         unsafe { terminator.write(0) };
         *byte_len = u32::try_from(bytes.len()).unwrap();
         Ok(())
-    }
-
-    fn status_info_len<T>() -> u32 {
-        u32::try_from(size_of::<T>()).unwrap()
-    }
-
-    fn raw_handle(value: usize) -> RawHandle {
-        RawHandle::new(value as *mut c_void).unwrap()
     }
 }
