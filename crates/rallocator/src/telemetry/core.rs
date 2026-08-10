@@ -2209,6 +2209,7 @@ mod tests {
 
     #[test]
     fn caller_tracking_configuration_rejects_invalid_shapes() {
+        validate_config::<TestCallerConfig>();
         std::hint::black_box((
             ZeroCapacityConfig,
             NonPowerOfTwoCapacityConfig,
