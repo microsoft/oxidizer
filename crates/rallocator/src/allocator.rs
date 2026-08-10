@@ -117,7 +117,7 @@ fn fail_next_test_remote_push_cas() {
     TEST_FAIL_REMOTE_PUSH_CAS.with(|fail| fail.set(true));
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 fn force_next_test_remote_refill_contention() {
     TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| fail.set(true));
     TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| clear.set(true));
