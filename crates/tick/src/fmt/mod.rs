@@ -127,9 +127,6 @@
 //! // Output: Time: 1970-01-01T01:00:00.000Z
 //! ```
 
-use std::fmt::{self, Display};
-use std::marker::PhantomData;
-use std::str::FromStr;
 use std::time::SystemTime;
 
 use jiff::Timestamp;
@@ -145,6 +142,13 @@ pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
+
+#[cfg(any(feature = "serde", test))]
+use std::fmt::{self, Display};
+#[cfg(any(feature = "serde", test))]
+use std::marker::PhantomData;
+#[cfg(any(feature = "serde", test))]
+use std::str::FromStr;
 
 #[cfg(any(feature = "serde", test))]
 fn deserialize_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
