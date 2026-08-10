@@ -997,7 +997,6 @@ mod tests {
     fn unsupported_generic_options_do_not_add_native_request_configuration() {
         let mut options = TransportOptions::default();
         options.connection_pool = ConnectionPoolOptions::default()
-            .connection_idle_timeout(Duration::from_secs(1))
             .max_connections(1)
             .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(2)));
         options.http_2 = Http2Options::default().initial_max_send_streams(1).adaptive_window(true);

@@ -128,7 +128,7 @@ approximate, and some ignored:
 | `multiple_pools` | Accepted; its behavior remains defined by the generic `fetch` client contract. |
 | `max_connections = usize::MAX` (default) | Honored as no caller-imposed limit. |
 | finite `max_connections` | Ignored. |
-| `connection_idle_timeout` | Ignored; Windows manages idle connection retention. |
+| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. `Unlimited` requests the longest window the platform can express rather than an unbounded one. |
 | `connection_lifetime = Unlimited` (default) | Honored. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
@@ -147,9 +147,9 @@ approximate, and some ignored:
 (The option mapping and the reasoning behind each floor are implementation.md §10.3.)
 
 `ConnectionInfo` (age, `is_expired`, poisoning) that `fetch_hyper` attaches to
-responses cannot be reproduced: WinHTTP hides individual connections, so per
-connection age is not observable and no per-connection identity is exposed.
-A response from this transport carries no `ConnectionInfo`.
+responses is not reproduced: this transport does not track the identity, age, or
+health of individual connections, so a response from it carries no
+`ConnectionInfo`.
 
 ### 2.2 Connection lifetime (bounded connection age)
 
@@ -160,9 +160,16 @@ to bound how long any single TCP/TLS connection stays in service so long-lived
 clients periodically re-establish connections (load-balancer rebalancing, cert
 rotation, routing changes).
 
-WinHTTP does not expose individual connections, so no available mechanism bounds
-connection age faithfully. **v1 therefore ignores `connection_lifetime` for
-`Fixed` and `PerConnection`.**
+Honoring it requires the transport to track individual connections and retire
+them on a schedule, and to stagger that schedule so that a set of connections
+established together does not expire together - the synchronized reconnect
+`PerConnection` exists to prevent. **v1 therefore ignores `connection_lifetime`
+for `Fixed` and `PerConnection`.**
+
+`connection_idle_timeout` is honored and bounds how long an unused connection stays
+eligible for reuse. It does not bound the age of a continuously busy connection,
+which is the gap a caller setting `connection_lifetime` should expect to remain
+open.
 
 Unsupported generic connection options are ignored without runtime diagnostics. Their
 fidelity is documented here so callers can select transport-specific configuration

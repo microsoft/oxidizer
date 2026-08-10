@@ -354,7 +354,7 @@ cross-core coordination.
 **Future exploration.** The per-core session baseline is open to revision after
 performance analysis: a future design could consolidate to one session shared across a
 client's cores - recovering cross-core connection reuse and enabling session-granularity
-connection recycling (the connection-lifetime control WinHTTP otherwise denies us,
+connection recycling (the connection-lifetime control the transport does not offer today,
 design.md §2.2) - but doing so cleanly needs a `fetch` per-built-client shared-state hook
 (or accepting `Isolation::Shared` at the cost of core-local object pools). It is not
 obvious either beats per-core sessions with warmer, core-local pools, so v2 may revisit
@@ -1010,7 +1010,7 @@ after the table.
 | Protocol negotiation (design.md §3) | protocol-flag bitmask + `HTTP_PROTOCOL_REQUIRED` per `supported_http_versions` (empty -> `fetch` default; h2/h3-only -> required); response `Version` from the queried negotiated protocol | unmappable requested version (`HTTP/1.0`, `HTTP/0.9`) rejected as `invalid_request` |
 | TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`, each flag setting only its own `SECURITY_FLAGS` bit (the two are independent, not coupled); WinHTTP secure error code -> `tls` label, with deterministic validation failures non-retryable and revocation-server unavailability retryable; `SECURE_FAILURE` flags are optional diagnostics | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
-| Connection management (design.md §2) | connect handle opened per request and retained until the request's final close callback; finite `max_connections` causes no max-conns option call; `ConnectionKeepAlive` maps to `HTTP2/3_KEEPALIVE`, with the 5000 ms floor applied to HTTP/2 (§10.3); `DISABLE_GLOBAL_POOLING` on the session | generic idle/lifetime settings are accepted and ignored without diagnostics |
+| Connection management (design.md §2) | connect handle opened per request and retained until the request's final close callback; finite `max_connections` causes no max-conns option call; `ConnectionKeepAlive` maps to `HTTP2/3_KEEPALIVE`, with the 5000 ms floor applied to HTTP/2 (§10.3); `connection_idle_timeout` maps to `CONNECTION_IDLE_TIMEOUT` on the session, with the same 5000 ms floor and `Unlimited` encoded as the largest `DWORD`; `DISABLE_GLOBAL_POOLING` on the session | generic lifetime settings are accepted and ignored without diagnostics |
 | Timeouts (design.md §6) | native timers initialize to unlimited; only explicit `WinHttpOptions::resolve_timeout` changes a native timer; mock-clock connect deadline (design.md §6.2); `ResponseTimeout` remains owned by `fetch`; `BodyTimeout` is passed to `HttpBodyBuilder` | a connect completing first drops its timer unfired; request body options override client body defaults through the existing merge rules |
 
 - **Inline / reentrant completion.** `MockBindings` is configured so an async call
@@ -1303,11 +1303,13 @@ For draining, WinHTTP exposes only coarse controls:
 - Per request, `WINHTTP_OPTION_DISABLE_FEATURE | WINHTTP_DISABLE_KEEP_ALIVE`
   prevents that request from keeping or reusing a pooled connection.
 
-Individual pooled connections are opaque to us: WinHTTP exposes no per-connection
-handle, age, or close, so a graceful drain of a single connection is not
-expressible. The v1 transport keeps exactly one session for its whole lifetime
-and does not recycle it. Connection-lifetime handling under that constraint is
-covered in design.md §2.2.
+Individual pooled connections are largely opaque to us: WinHTTP exposes no
+per-connection handle, age, or close, so a graceful drain of a single connection
+is not expressible with the controls this transport uses today. It does expose
+per-connection *identity*, which §14 records as an unexploited opportunity, but
+identity alone does not make a single connection closable. The v1 transport keeps
+exactly one session for its whole lifetime and does not recycle it.
+Connection-lifetime handling under those controls is covered in design.md §2.2.
 
 **Deferred (v2): stale-connection retry.** WinHTTP offers
 `WINHTTP_OPTION_FAILED_CONNECTION_RETRIES` scoped to
@@ -1406,6 +1408,30 @@ The behaviors in design.md §5 are configured through these options.
   stores `Set-Cookie` nor auto-attaches `Cookie`) and
   `WINHTTP_OPTION_DISABLE_FEATURE` with `WINHTTP_DISABLE_AUTHENTICATION` (WinHTTP
   does not intercept 401/407 or attach credentials).
+- **Idle connection reuse window.** `fetch`'s `connection_idle_timeout` (design.md §2.1)
+  maps to the session-scoped `WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`, applied during
+  transport materialization before any connect or request handle is created, because
+  WinHTTP rejects the option once a session has children. This option is absent from the
+  public SDK, so the generated `windows` bindings do not define it and `bindings/mod.rs`
+  declares it directly - the only constant in the crate that is not re-exported from
+  those bindings. Its documentation there carries the contract the SDK does not publish,
+  and is the reference for everything asserted in this bullet. One connection-manager
+  field backs the idle sweep for HTTP/1.1, HTTP/2, and HTTP/3 alike, so this single value
+  governs reuse eligibility for every protocol the transport negotiates; no per-protocol
+  qualification applies. `Limited(d)` sets `d` rounded up to whole milliseconds, raised
+  to WinHTTP's 5000 ms minimum when shorter - WinHTTP rejects a shorter window outright
+  rather than clamping it, and a rejected option would fail session construction, so an
+  aggressive idle policy must not become an unbuildable transport. `Unlimited` sets the
+  largest representable `DWORD`, because the option's value is a plain unsigned
+  millisecond count with no reserved "never expire" encoding. Setting the option also
+  disables the process-wide keep-alive pool, which the session disables explicitly in
+  any case, so the two settings agree rather than conflict. The window bounds *reuse*:
+  a connection past it is never selected again, because the lookup path re-checks the
+  window. Sockets are released either by that same lookup, which tears down the expired
+  connections it walks past, or by a periodic sweep for connections no lookup reaches -
+  neither of which is prompt, so this is not a promise of timely socket release. Failure
+  to apply the option leaves the materialized transport in its initialization-failure
+  state, like every other required session option.
 - **Keep-alive probes.** `fetch`'s `ConnectionKeepAlive` (design.md §2.1) maps to
   session-scoped `WINHTTP_OPTION_HTTP2_KEEPALIVE` /
   `WINHTTP_OPTION_HTTP3_KEEPALIVE` settings applied during transport
@@ -1463,9 +1489,12 @@ not use a native WinHTTP timer.
 
 Time conversions are option-specific because WinHTTP mixes signed and unsigned
 millisecond fields with different unlimited sentinels. Configured finite timeouts and
-probe intervals, including zero, clamp to at least 1 ms. Positive sub-millisecond values
+probe intervals, including zero, clamp to at least 1 ms, except where a specific option
+states a higher minimum. Positive sub-millisecond values
 therefore round up to 1 ms. Values beyond a field's finite range clamp to its largest finite value.
-HTTP/2 keep-alive intervals below WinHTTP's 5000 ms minimum round up to 5000 ms.
+HTTP/2 keep-alive intervals and the connection idle window both round up to WinHTTP's
+5000 ms minimum when shorter, because WinHTTP rejects a shorter value for either rather
+than clamping it.
 These mechanical conversions do not warn or reject. Body lengths are never narrowed: each
 `WinHttpWriteData` call is bounded to a `DWORD`, and larger bodies use multiple writes.
 Other DWORD-valued options are handled individually when introduced rather than through a
@@ -1476,10 +1505,10 @@ generic lossy count conversion.
 `fetch`'s options arrive through its generic configuration surface, and callers set
 them transport-agnostically, so the transport routinely receives settings it cannot
 faithfully honor on WinHTTP - a `connection_lifetime` of `Fixed`/`PerConnection`
-(design.md §2.2), an idle timeout WinHTTP ignores (design.md §2.1), and so on.
+(design.md §2.2), a finite `max_connections` (design.md §2.1), and so on.
 
 Unsupported generic options are ignored without warnings, counters, or build failures.
-This includes generic `TlsOptions`, finite `max_connections`, connection idle/lifetime
+This includes generic `TlsOptions`, finite `max_connections`, connection lifetime
 settings, and unrepresentable keep-alive semantics. Their behavior is documented in
 design.md so callers can choose configuration appropriate to this transport.
 
@@ -1502,9 +1531,10 @@ deliberate:
 
 **Session setup step identifiers.** The `winhttp.operation` field on the
 initialization-failure event carries one of `open`, `set_timeouts`,
-`disable_global_pooling`, `assured_non_blocking_callbacks`, `http2_keep_alive`,
-`http3_keep_alive`, or `set_status_callback`. These name the session setup calls made
-when a session is opened (§3.2) one for one, so adding or removing a setup call changes
+`disable_global_pooling`, `connection_idle_timeout`, `assured_non_blocking_callbacks`,
+`http2_keep_alive`, `http3_keep_alive`, or `set_status_callback`. These name the session
+setup calls made when a session is opened (§3.2) one for one, so adding or removing a
+setup call changes
 the set. That is why design.md §8 declares the field but not its values: pinning the
 value set would freeze the internal sequence of setup calls into the crate's contract.
 
@@ -1578,7 +1608,7 @@ the `fetch` API or profiling data makes them actionable:
   current `fetch` custom-transport API expresses while still isolating independently built
   clients (§3.2). This diverges from a single-session-per-client model: it trades
   cross-core connection reuse and session-granularity connection recycling (the
-  connection-lifetime control WinHTTP otherwise denies us, design.md §2.2) for warmer,
+  connection-lifetime control the transport does not offer today, design.md §2.2) for warmer,
   uncontended core-local pools. Once `fetch` grows a per-built-client shared-state hook -
   or once profiling justifies `Isolation::Shared` despite core-local object pools -
   revisit whether one shared session per client is the better default. Tracked as `fetch`
@@ -1596,3 +1626,41 @@ the `fetch` API or profiling data makes them actionable:
   ownership stays a transport concern after the v2 sessions/pools discussion, revisit
   whether to interpret `PoolIndex` explicitly (../../fetch/docs/stabilization.md,
   connection-management item).
+- **Per-connection identity through connection GUIDs.** WinHTTP exposes a pair of
+  public request-scoped options, `WINHTTP_OPTION_CONNECTION_GUID` and
+  `WINHTTP_OPTION_MATCH_CONNECTION_GUID`, that together give a connection an identity
+  the transport currently assumes it cannot have: the first tags the connection serving
+  a request with a caller-supplied GUID and reads back the GUID of the connection that
+  served it, and the second steers a request onto a connection bearing a given tag,
+  optionally forcing a new connection when no tagged match exists. Three deferred design
+  points become reachable with them, and each is a separate decision:
+  - **`connection_lifetime` for `Fixed`/`PerConnection`** (design.md §2.2). Tagging
+    connections with a generation GUID and rotating that generation on a schedule
+    retires connections by age: requests demand the current generation, so a rotation
+    forces fresh connections and the previous generation ages out through the idle
+    timeout. A single rotating generation retires the whole pool at once, which is the
+    synchronized-reconnect behavior `PerConnection` exists to prevent, so a faithful
+    implementation needs several staggered generations rather than one.
+  - **Cold-connect attribution on success.** §12 records connection establishment only
+    on the failure path, so a client that silently reconnects on every request - the
+    pathology an idle window that is too short produces - looks healthy in telemetry.
+    Counting distinct connection GUIDs across requests measures it directly.
+  - **`ConnectionInfo` on responses** (design.md §2.1). Recording when each GUID was
+    first seen yields connection age, which is the input `fetch_hyper`'s
+    `ConnectionInfo` reports and which this transport currently declares it does not
+    track.
+- **Distinguishing a near-zero idle window from "do not pool".** The idle window's
+  5000 ms floor means a caller asking for a very short window gets five seconds, which is
+  the mapping's largest semantic stretch: such a caller most plausibly means "do not pool
+  at all", and §9.3 already documents the per-request
+  `WINHTTP_OPTION_DISABLE_FEATURE | WINHTTP_DISABLE_KEEP_ALIVE` that expresses exactly
+  that. Treating a sub-floor window as pooling-off would honor the intent more closely
+  than raising it, but it reads intent into a duration rather than taking it at face
+  value, so it needs a deliberate decision rather than an inference.
+- **Native performance knobs.** WinHTTP carries further options covering socket send
+  buffer sizing, TCP autotuning and initial retransmission timeout, allocation
+  lookasides and heap extension, and response-body fast-forwarding that may bear on the
+  read path in §6.2. None maps onto a generic `fetch` option, so adopting any would mean
+  either a `WinHttpOptions` knob or an unconditional transport policy, and a knob earns
+  its place only with demonstrated value. Recorded here so the option surface is known
+  the next time profiling identifies a bottleneck rather than rediscovered then.

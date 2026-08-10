@@ -36,7 +36,7 @@ pub(crate) struct WinHttpTransport {
 impl WinHttpTransport {
     pub(crate) fn new(inputs: TransportInputs, bindings: BindingsFacade) -> Self {
         let telemetry = Telemetry::new(inputs.sink);
-        let state = match WinHttpSession::new(bindings, &inputs.session_options, &inputs.options.connection_keep_alive) {
+        let state = match WinHttpSession::new(bindings, &inputs.session_options, &inputs.options) {
             Ok(session) => TransportState::Ready(Box::new(ReadyTransport {
                 session: Arc::new(session),
                 body_builder: inputs.body_builder,
@@ -193,6 +193,7 @@ mod tests {
     use crate::context::RequestContext;
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::operation::ContextPool;
+    use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
@@ -550,7 +551,10 @@ mod tests {
         let mut bindings = MockBindings::new();
         bindings.expect_open().once().returning(|_, _| Ok(raw_handle()));
         bindings.expect_set_timeouts().once().returning(|_, _, _, _, _| Ok(()));
-        bindings.expect_set_option().times(2).returning(|_, _, _| Ok(()));
+        bindings
+            .expect_set_option()
+            .times(SESSION_OPTIONS_WITHOUT_KEEP_ALIVE)
+            .returning(|_, _, _| Ok(()));
         bindings.expect_set_status_callback().once().returning(|_, _, _| Ok(()));
         bindings.expect_close_handle().once().returning(|_| Ok(()));
         bindings

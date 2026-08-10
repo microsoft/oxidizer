@@ -27,6 +27,7 @@
 
 use std::time::Duration;
 
+use fetch::options::ConnectionIdleTimeout;
 use http::{HeaderMap, Method, Version};
 use widestring::U16CString;
 use windows::Win32::Networking::WinHttp::{
@@ -56,6 +57,17 @@ const HTTP2_KEEP_ALIVE_MINIMUM_MS: u32 = 5_000;
 /// nonzero caller interval already rounds up to at least that.
 /// Ref: <https://learn.microsoft.com/windows/win32/winhttp/option-flags>
 const HTTP3_KEEP_ALIVE_MINIMUM_MS: u32 = 1;
+/// Smallest idle-reuse window WinHTTP accepts.
+///
+/// WinHTTP rejects a shorter window outright rather than clamping it, so a
+/// caller asking for one would otherwise fail session construction. Raising
+/// instead of rejecting matches how [`http2_keep_alive_millis`] treats an
+/// interval WinHTTP cannot represent, and keeps an aggressive idle policy from
+/// turning into a transport that cannot be built at all. The floor is not
+/// published alongside the option; it is one of the bounds recorded on
+/// [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`], which stands in
+/// for that option's missing documentation.
+const CONNECTION_IDLE_TIMEOUT_MINIMUM_MS: u32 = 5_000;
 /// Native sentinel that disables one `WinHttpSetTimeouts` deadline.
 ///
 /// `WinHttpSetTimeouts` takes four signed millisecond parameters and reads -1
@@ -178,6 +190,23 @@ pub(crate) fn http2_keep_alive_millis(duration: Duration) -> u32 {
 
 pub(crate) fn http3_keep_alive_millis(duration: Duration) -> u32 {
     dword_millis(duration).max(HTTP3_KEEP_ALIVE_MINIMUM_MS)
+}
+
+/// Encodes a caller's idle-reuse policy as the native option value.
+///
+/// `Unlimited` asks that pooled connections never be evicted for idleness, but
+/// the option has no sentinel for that: its value is an unsigned millisecond
+/// count with no reserved encoding, unlike the signed `WinHttpSetTimeouts`
+/// fields where [`UNLIMITED_TIMEOUT`] means "no deadline". The largest
+/// representable window is therefore the closest faithful encoding. It is safe
+/// to use and it is genuinely long: the sweep compares a 64-bit elapsed-time
+/// delta against this value, so the maximum neither overflows nor inverts, and
+/// the window it describes exceeds forty-nine days.
+pub(crate) fn connection_idle_timeout_millis(idle_timeout: &ConnectionIdleTimeout) -> u32 {
+    match idle_timeout {
+        ConnectionIdleTimeout::Unlimited => u32::MAX,
+        ConnectionIdleTimeout::Limited(duration) => dword_millis(*duration).max(CONNECTION_IDLE_TIMEOUT_MINIMUM_MS),
+    }
 }
 
 fn ceil_millis(duration: Duration) -> u128 {
@@ -356,13 +385,14 @@ mod tests {
     use static_assertions::assert_not_impl_any;
 
     use super::{
-        ConversionError, EmbeddedNulError, HeaderByteLengthIsOddError, InteriorZeroCodeUnitError, InvalidProtocolMaskError,
-        InvalidProtocolVersionError, InvalidUtf16Error, RequestHeadersTooLargeError, ReturnedLengthOutOfBoundsError,
-        UnexpectedByteLengthError, UnsupportedHttpVersionError, WINHTTP_DECOMPRESSION_FLAG_DEFLATE, WINHTTP_DECOMPRESSION_FLAG_GZIP,
-        WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_FLAG_AUTOMATIC_CHUNKING, WINHTTP_FLAG_SECURE, context_bytes,
-        decompression_mask, disable_feature_mask, dword_bytes, dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16,
-        http2_keep_alive_millis, http3_keep_alive_millis, method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16,
-        protocol_options, request_open_flags, timeout_millis, validate_request_header_unit_count,
+        CONNECTION_IDLE_TIMEOUT_MINIMUM_MS, ConnectionIdleTimeout, ConversionError, EmbeddedNulError, HeaderByteLengthIsOddError,
+        InteriorZeroCodeUnitError, InvalidProtocolMaskError, InvalidProtocolVersionError, InvalidUtf16Error, RequestHeadersTooLargeError,
+        ReturnedLengthOutOfBoundsError, UnexpectedByteLengthError, UnsupportedHttpVersionError, WINHTTP_DECOMPRESSION_FLAG_DEFLATE,
+        WINHTTP_DECOMPRESSION_FLAG_GZIP, WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_FLAG_AUTOMATIC_CHUNKING,
+        WINHTTP_FLAG_SECURE, connection_idle_timeout_millis, context_bytes, decompression_mask, disable_feature_mask, dword_bytes,
+        dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16, http2_keep_alive_millis, http3_keep_alive_millis,
+        method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options, request_open_flags, timeout_millis,
+        validate_request_header_unit_count,
     };
 
     // The generated error wrappers retain user-erased source error state.
@@ -402,6 +432,40 @@ mod tests {
         assert_eq!(http2_keep_alive_millis(Duration::from_millis(5_001)), 5_001);
         assert_eq!(http3_keep_alive_millis(Duration::ZERO), 1);
         assert_eq!(http3_keep_alive_millis(Duration::from_millis(1)), 1);
+    }
+
+    #[test]
+    fn idle_timeout_conversion_floors_saturates_and_encodes_unlimited() {
+        assert_eq!(connection_idle_timeout_millis(&ConnectionIdleTimeout::Unlimited), u32::MAX);
+        assert_eq!(
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::ZERO)),
+            CONNECTION_IDLE_TIMEOUT_MINIMUM_MS
+        );
+        assert_eq!(
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_millis(
+                u64::from(CONNECTION_IDLE_TIMEOUT_MINIMUM_MS) - 1
+            ))),
+            CONNECTION_IDLE_TIMEOUT_MINIMUM_MS
+        );
+        assert_eq!(
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::from_mins(1))),
+            60_000
+        );
+        assert_eq!(
+            connection_idle_timeout_millis(&ConnectionIdleTimeout::Limited(Duration::MAX)),
+            u32::MAX
+        );
+    }
+
+    /// Pins the claim on [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`] that
+    /// configuring nothing produces identical behavior whether or not the option is set.
+    /// That claim holds only while `fetch`'s default equals `WinHTTP`'s own one-minute
+    /// default, and nothing else in the crate would notice the two drifting apart: the
+    /// session tests derive their expected value from this same conversion, so both sides
+    /// would move together.
+    #[test]
+    fn default_idle_timeout_matches_the_native_default() {
+        assert_eq!(connection_idle_timeout_millis(&ConnectionIdleTimeout::default()), 60_000);
     }
 
     #[test]

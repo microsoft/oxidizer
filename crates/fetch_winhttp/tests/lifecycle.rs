@@ -22,6 +22,7 @@ mod common;
 
 use std::future::Future as _;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytes::Bytes;
 use bytesbuf::BytesView;
@@ -69,6 +70,30 @@ fn clients_reuse_only_their_own_connection_pools() {
         futures::executor::block_on(client.get(pools_server.url(path)).fetch_text_body()).unwrap();
     }
     assert_eq!(pools_server.finish().connections, 2);
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn extreme_idle_windows_are_accepted_and_still_pool() {
+    // The idle window is applied through an option WinHTTP rejects outright for
+    // an out-of-range value, and a rejected session option permanently fails the
+    // transport. Only a real platform can show that the two extremes of the
+    // generic option survive that check; mock-based tests establish which value
+    // the transport sends, not whether Windows takes it. Reusing a connection
+    // additionally shows the option did not disable pooling as a side effect.
+    for idle_timeout in [None, Some(Duration::ZERO)] {
+        let server = TestServer::http([ResponsePlan::ok("one"), ResponsePlan::ok("two")]);
+        let (builder, _body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default());
+        let client = builder
+            .connection_pool_options(ConnectionPoolOptions::default().connection_idle_timeout(idle_timeout))
+            .build();
+
+        for path in ["/one", "/two"] {
+            futures::executor::block_on(client.get(server.url(path)).fetch_text_body()).unwrap();
+        }
+
+        assert_eq!(server.finish().connections, 1);
+    }
 }
 
 #[cfg_attr(miri, ignore)]

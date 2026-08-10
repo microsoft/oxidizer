@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::fmt;
 
-use fetch::options::ConnectionKeepAlive;
+use fetch::options::{ConnectionKeepAlive, TransportOptions};
 use widestring::U16CString;
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE, WINHTTP_CALLBACK_FLAG_GETPROXYFORURL_COMPLETE, WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE,
@@ -15,9 +15,14 @@ use windows::Win32::Networking::WinHttp::{
 };
 
 use crate::WinHttpOptions;
-use crate::bindings::{Bindings as _, BindingsFacade, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE};
+use crate::bindings::{
+    Bindings as _, BindingsFacade, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT, WINHTTP_OPTION_HTTP2_KEEPALIVE,
+    WINHTTP_OPTION_HTTP3_KEEPALIVE,
+};
 use crate::callback::status_callback;
-use crate::convert::{UNLIMITED_TIMEOUT, dword_bytes, http2_keep_alive_millis, http3_keep_alive_millis, timeout_millis};
+use crate::convert::{
+    UNLIMITED_TIMEOUT, connection_idle_timeout_millis, dword_bytes, http2_keep_alive_millis, http3_keep_alive_millis, timeout_millis,
+};
 use crate::error::WinHttpError;
 use crate::handle::SessionHandle;
 
@@ -36,6 +41,15 @@ const HANDLES: u32 = WINHTTP_CALLBACK_STATUS_HANDLE_CREATED | WINHTTP_CALLBACK_S
 const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
 
 pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
+
+/// Count of `set_option` calls one session performs with keep-alive disabled.
+///
+/// Tests elsewhere in the crate assert only that a session was constructed, not
+/// what it configured, so they count calls against this instead of repeating a
+/// bare number. Adding or removing a session option therefore stays a one-line
+/// co-edit here rather than a hunt through unrelated modules.
+#[cfg(test)]
+pub(crate) const SESSION_OPTIONS_WITHOUT_KEEP_ALIVE: usize = 3;
 
 #[derive(Debug)]
 /// Defines the OS connection-pool boundary for one transport instance.
@@ -56,8 +70,8 @@ pub(crate) struct WinHttpSession {
 impl WinHttpSession {
     pub(crate) fn new(
         bindings: BindingsFacade,
-        options: &WinHttpOptions,
-        keep_alive: &ConnectionKeepAlive,
+        session_options: &WinHttpOptions,
+        transport_options: &TransportOptions,
     ) -> Result<Self, SessionInitializationFailure> {
         let user_agent = U16CString::from_str(USER_AGENT).expect("the static WinHTTP user agent contains no NUL characters");
         // SAFETY: no WinHTTP handles exist yet. WINHTTP_FLAG_ASYNC establishes
@@ -73,7 +87,7 @@ impl WinHttpSession {
         unsafe {
             handle.bindings().set_timeouts(
                 handle.raw(),
-                timeout_millis(options.resolve_timeout()),
+                timeout_millis(session_options.resolve_timeout()),
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
@@ -88,6 +102,19 @@ impl WinHttpSession {
                 .set_option(handle.raw(), WINHTTP_OPTION_DISABLE_GLOBAL_POOLING, &TRUE_BYTES)
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::DisableGlobalPooling, error))?;
+        // SAFETY: the owned session is live and has no children, which this
+        // option additionally requires. The byte array is the exact DWORD
+        // representation required by this option.
+        unsafe {
+            handle.bindings().set_option(
+                handle.raw(),
+                WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT,
+                &dword_bytes(connection_idle_timeout_millis(
+                    &transport_options.connection_pool.connection_idle_timeout,
+                )),
+            )
+        }
+        .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::ConnectionIdleTimeout, error))?;
         // SAFETY: the owned session is live and has no children. TRUE_BYTES is
         // the required native BOOL representation for this session option.
         unsafe {
@@ -96,7 +123,7 @@ impl WinHttpSession {
                 .set_option(handle.raw(), WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS, &TRUE_BYTES)
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::AssuredNonBlockingCallbacks, error))?;
-        if let Some(interval) = Self::keep_alive_interval(keep_alive) {
+        if let Some(interval) = Self::keep_alive_interval(&transport_options.connection_keep_alive) {
             // SAFETY: the owned session is live and has no children. The byte
             // array is the exact DWORD representation required by this option.
             unsafe {
@@ -188,6 +215,7 @@ pub(crate) enum SessionInitializationOperation {
     Open,
     SetTimeouts,
     DisableGlobalPooling,
+    ConnectionIdleTimeout,
     AssuredNonBlockingCallbacks,
     Http2KeepAlive,
     Http3KeepAlive,
@@ -200,6 +228,7 @@ impl fmt::Display for SessionInitializationOperation {
             Self::Open => "opening the WinHTTP session",
             Self::SetTimeouts => "configuring WinHTTP session timeouts",
             Self::DisableGlobalPooling => "disabling WinHTTP global connection pooling",
+            Self::ConnectionIdleTimeout => "configuring the WinHTTP connection idle timeout",
             Self::AssuredNonBlockingCallbacks => "enabling assured non-blocking WinHTTP callbacks",
             Self::Http2KeepAlive => "configuring WinHTTP HTTP/2 keep-alive",
             Self::Http3KeepAlive => "configuring WinHTTP HTTP/3 keep-alive",
@@ -227,7 +256,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use fetch::options::ConnectionKeepAlive;
+    use fetch::options::{ConnectionIdleTimeout, ConnectionKeepAlive, TransportOptions};
     use mockall::Sequence;
     use static_assertions::assert_impl_all;
     use windows::Win32::Networking::WinHttp::{
@@ -242,11 +271,12 @@ mod tests {
     };
     use crate::WinHttpOptions;
     use crate::bindings::{
-        BindingsFacade, MockBindings, StatusCallback, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE,
+        BindingsFacade, MockBindings, StatusCallback, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT,
+        WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE,
     };
     use crate::callback::status_callback;
     use crate::context::OperationKind;
-    use crate::convert::{dword_bytes, timeout_millis};
+    use crate::convert::{connection_idle_timeout_millis, dword_bytes, timeout_millis};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
 
@@ -256,24 +286,78 @@ mod tests {
     );
     assert_impl_all!(SessionInitializationOperation: UnwindSafe, RefUnwindSafe);
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    /// One native call in the session setup sequence, in the order performed.
+    ///
+    /// The ordering is meaningful: [`SetupScript::reaches`] uses it to decide
+    /// which calls a given failure point stops short of, so variants must stay
+    /// declared in setup order.
     enum FailurePoint {
         Open,
         SetTimeouts,
         DisableGlobalPooling,
+        ConnectionIdleTimeout,
         AssuredNonBlockingCallbacks,
         Http2KeepAlive,
         Http3KeepAlive,
         SetStatusCallback,
     }
 
+    #[derive(Clone, Copy)]
+    /// Describes the native call script one session construction should produce.
+    struct SetupScript {
+        failure: Option<FailurePoint>,
+        resolve_timeout: i32,
+        idle_timeout_millis: u32,
+        keep_alive: bool,
+    }
+
+    impl SetupScript {
+        fn new() -> Self {
+            Self {
+                failure: None,
+                resolve_timeout: UNLIMITED_TIMEOUT,
+                idle_timeout_millis: default_idle_timeout_millis(),
+                keep_alive: true,
+            }
+        }
+
+        /// Whether construction reaches `step`.
+        ///
+        /// Setup is a straight-line sequence, so every step up to and including
+        /// the failing one runs and every later step does not.
+        fn reaches(self, step: FailurePoint) -> bool {
+            self.failure.is_none_or(|point| point >= step)
+        }
+
+        fn result(self, step: FailurePoint) -> crate::error::Result<()> {
+            if self.failure == Some(step) {
+                Err(WinHttpError::new(error_code(step), operation(step)))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Millisecond encoding of `ConnectionIdleTimeout::default()`.
+    ///
+    /// Derived rather than written out so that a change to `fetch`'s default
+    /// surfaces as a conversion result here instead of as an opaque mock
+    /// argument mismatch.
+    fn default_idle_timeout_millis() -> u32 {
+        connection_idle_timeout_millis(&ConnectionIdleTimeout::default())
+    }
+
     #[test]
     fn session_setup_succeeds_in_exact_order_with_expected_values() {
-        let bindings = configured_bindings(None, timeout_millis(Some(Duration::from_micros(1_500))), true);
+        let script = SetupScript {
+            resolve_timeout: timeout_millis(Some(Duration::from_micros(1_500))),
+            ..SetupScript::new()
+        };
+        let bindings = configured_bindings(script);
         let options = WinHttpOptions::builder().resolve_timeout(Duration::from_micros(1_500)).build();
-        let keep_alive = active_keep_alive();
 
-        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options, &keep_alive).unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options, &active_transport_options()).unwrap();
 
         assert_eq!(session.handle().raw(), raw_handle());
         drop(session);
@@ -281,14 +365,45 @@ mod tests {
 
     #[test]
     fn disabled_keep_alive_leaves_session_probe_options_unset() {
-        let bindings = configured_bindings(None, UNLIMITED_TIMEOUT, false);
+        let bindings = configured_bindings(SetupScript {
+            keep_alive: false,
+            ..SetupScript::new()
+        });
 
         let session = WinHttpSession::new(
             BindingsFacade::mock(Arc::new(bindings)),
             &WinHttpOptions::default(),
-            &ConnectionKeepAlive::Disabled,
+            &TransportOptions::default(),
         )
         .unwrap();
+
+        drop(session);
+    }
+
+    #[test]
+    fn unlimited_idle_timeout_requests_the_largest_representable_window() {
+        let bindings = configured_bindings(SetupScript {
+            idle_timeout_millis: u32::MAX,
+            ..SetupScript::new()
+        });
+        let mut options = active_transport_options();
+        options.connection_pool.connection_idle_timeout = ConnectionIdleTimeout::Unlimited;
+
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &options).unwrap();
+
+        drop(session);
+    }
+
+    #[test]
+    fn idle_timeout_below_the_native_minimum_is_raised_to_it() {
+        let bindings = configured_bindings(SetupScript {
+            idle_timeout_millis: 5_000,
+            ..SetupScript::new()
+        });
+        let mut options = active_transport_options();
+        options.connection_pool.connection_idle_timeout = ConnectionIdleTimeout::Limited(Duration::from_millis(1));
+
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &options).unwrap();
 
         drop(session);
     }
@@ -373,6 +488,11 @@ mod tests {
     }
 
     #[test]
+    fn connection_idle_timeout_failure_closes_the_session_once() {
+        assert_failure(FailurePoint::ConnectionIdleTimeout);
+    }
+
+    #[test]
     fn callback_assurance_failure_closes_the_session_once() {
         assert_failure(FailurePoint::AssuredNonBlockingCallbacks);
     }
@@ -393,11 +513,14 @@ mod tests {
     }
 
     fn assert_failure(point: FailurePoint) {
-        let bindings = configured_bindings(Some(point), UNLIMITED_TIMEOUT, true);
+        let bindings = configured_bindings(SetupScript {
+            failure: Some(point),
+            ..SetupScript::new()
+        });
         let error = WinHttpSession::new(
             BindingsFacade::mock(Arc::new(bindings)),
             &WinHttpOptions::default(),
-            &active_keep_alive(),
+            &active_transport_options(),
         )
         .unwrap_err();
 
@@ -405,11 +528,7 @@ mod tests {
         assert_eq!(error.operation(), initialization_operation(point));
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the helper keeps the complete ordered WinHTTP session setup script visible in one place"
-    )]
-    fn configured_bindings(failure: Option<FailurePoint>, expected_resolve_timeout: i32, configure_keep_alive: bool) -> MockBindings {
+    fn configured_bindings(script: SetupScript) -> MockBindings {
         let mut bindings = MockBindings::new();
         let mut sequence = Sequence::new();
         let raw = raw_handle();
@@ -419,100 +538,69 @@ mod tests {
             .withf(|user_agent, flags| user_agent.to_string_lossy() == USER_AGENT && *flags == WINHTTP_FLAG_ASYNC)
             .once()
             .in_sequence(&mut sequence)
-            .return_once(move |_, _| setup_result(failure, FailurePoint::Open, raw));
+            .return_once(move |_, _| script.result(FailurePoint::Open).map(|()| raw));
 
-        if failure != Some(FailurePoint::Open) {
+        if script.reaches(FailurePoint::SetTimeouts) {
+            let resolve_timeout = script.resolve_timeout;
             bindings
                 .expect_set_timeouts()
                 .withf(move |handle, resolve, connect, send, receive| {
                     *handle == raw
-                        && *resolve == expected_resolve_timeout
+                        && *resolve == resolve_timeout
                         && *connect == UNLIMITED_TIMEOUT
                         && *send == UNLIMITED_TIMEOUT
                         && *receive == UNLIMITED_TIMEOUT
                 })
                 .once()
                 .in_sequence(&mut sequence)
-                .return_once(move |_, _, _, _, _| setup_unit_result(failure, FailurePoint::SetTimeouts));
+                .return_once(move |_, _, _, _, _| script.result(FailurePoint::SetTimeouts));
         }
 
-        if !matches!(failure, Some(FailurePoint::Open | FailurePoint::SetTimeouts)) {
-            bindings
-                .expect_set_option()
-                .withf(move |handle, option, value| {
-                    *handle == raw && *option == WINHTTP_OPTION_DISABLE_GLOBAL_POOLING && value == TRUE_BYTES
-                })
-                .once()
-                .in_sequence(&mut sequence)
-                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::DisableGlobalPooling));
+        expect_option(
+            &mut bindings,
+            &mut sequence,
+            script,
+            FailurePoint::DisableGlobalPooling,
+            WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
+            TRUE_BYTES.to_vec(),
+        );
+        expect_option(
+            &mut bindings,
+            &mut sequence,
+            script,
+            FailurePoint::ConnectionIdleTimeout,
+            WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT,
+            dword_bytes(script.idle_timeout_millis).to_vec(),
+        );
+        expect_option(
+            &mut bindings,
+            &mut sequence,
+            script,
+            FailurePoint::AssuredNonBlockingCallbacks,
+            WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS,
+            TRUE_BYTES.to_vec(),
+        );
+
+        if script.keep_alive {
+            expect_option(
+                &mut bindings,
+                &mut sequence,
+                script,
+                FailurePoint::Http2KeepAlive,
+                WINHTTP_OPTION_HTTP2_KEEPALIVE,
+                dword_bytes(5_000).to_vec(),
+            );
+            expect_option(
+                &mut bindings,
+                &mut sequence,
+                script,
+                FailurePoint::Http3KeepAlive,
+                WINHTTP_OPTION_HTTP3_KEEPALIVE,
+                dword_bytes(1).to_vec(),
+            );
         }
 
-        if !matches!(
-            failure,
-            Some(FailurePoint::Open | FailurePoint::SetTimeouts | FailurePoint::DisableGlobalPooling)
-        ) {
-            bindings
-                .expect_set_option()
-                .withf(move |handle, option, value| {
-                    *handle == raw && *option == WINHTTP_OPTION_ASSURED_NON_BLOCKING_CALLBACKS && value == TRUE_BYTES
-                })
-                .once()
-                .in_sequence(&mut sequence)
-                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::AssuredNonBlockingCallbacks));
-        }
-
-        if configure_keep_alive
-            && !matches!(
-                failure,
-                Some(
-                    FailurePoint::Open
-                        | FailurePoint::SetTimeouts
-                        | FailurePoint::DisableGlobalPooling
-                        | FailurePoint::AssuredNonBlockingCallbacks
-                )
-            )
-        {
-            bindings
-                .expect_set_option()
-                .withf(move |handle, option, value| {
-                    *handle == raw && *option == WINHTTP_OPTION_HTTP2_KEEPALIVE && value == dword_bytes(5_000)
-                })
-                .once()
-                .in_sequence(&mut sequence)
-                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::Http2KeepAlive));
-        }
-
-        if configure_keep_alive
-            && !matches!(
-                failure,
-                Some(
-                    FailurePoint::Open
-                        | FailurePoint::SetTimeouts
-                        | FailurePoint::DisableGlobalPooling
-                        | FailurePoint::AssuredNonBlockingCallbacks
-                        | FailurePoint::Http2KeepAlive
-                )
-            )
-        {
-            bindings
-                .expect_set_option()
-                .withf(move |handle, option, value| *handle == raw && *option == WINHTTP_OPTION_HTTP3_KEEPALIVE && value == dword_bytes(1))
-                .once()
-                .in_sequence(&mut sequence)
-                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::Http3KeepAlive));
-        }
-
-        if !matches!(
-            failure,
-            Some(
-                FailurePoint::Open
-                    | FailurePoint::SetTimeouts
-                    | FailurePoint::DisableGlobalPooling
-                    | FailurePoint::AssuredNonBlockingCallbacks
-                    | FailurePoint::Http2KeepAlive
-                    | FailurePoint::Http3KeepAlive
-            )
-        ) {
+        if script.reaches(FailurePoint::SetStatusCallback) {
             let expected_callback: StatusCallback = Some(status_callback);
             bindings
                 .expect_set_status_callback()
@@ -521,10 +609,10 @@ mod tests {
                 })
                 .once()
                 .in_sequence(&mut sequence)
-                .return_once(move |_, _, _| setup_unit_result(failure, FailurePoint::SetStatusCallback));
+                .return_once(move |_, _, _| script.result(FailurePoint::SetStatusCallback));
         }
 
-        if failure != Some(FailurePoint::Open) {
+        if script.failure != Some(FailurePoint::Open) {
             bindings
                 .expect_close_handle()
                 .withf(move |handle| *handle == raw)
@@ -534,6 +622,27 @@ mod tests {
         }
 
         bindings
+    }
+
+    fn expect_option(
+        bindings: &mut MockBindings,
+        sequence: &mut Sequence,
+        script: SetupScript,
+        step: FailurePoint,
+        option: u32,
+        expected: Vec<u8>,
+    ) {
+        if !script.reaches(step) {
+            return;
+        }
+
+        let raw = raw_handle();
+        bindings
+            .expect_set_option()
+            .withf(move |handle, actual_option, value| *handle == raw && *actual_option == option && value == expected)
+            .once()
+            .in_sequence(sequence)
+            .return_once(move |_, _, _| script.result(step));
     }
 
     fn status_callback_matches(actual: StatusCallback, expected: StatusCallback) -> bool {
@@ -554,27 +663,16 @@ mod tests {
         }
     }
 
-    fn setup_result(failure: Option<FailurePoint>, point: FailurePoint, raw: RawHandle) -> crate::error::Result<RawHandle> {
-        setup_unit_result(failure, point).map(|()| raw)
-    }
-
-    fn setup_unit_result(failure: Option<FailurePoint>, point: FailurePoint) -> crate::error::Result<()> {
-        if failure == Some(point) {
-            Err(WinHttpError::new(error_code(point), operation(point)))
-        } else {
-            Ok(())
-        }
-    }
-
     const fn error_code(point: FailurePoint) -> u32 {
         match point {
             FailurePoint::Open => 12_000,
             FailurePoint::SetTimeouts => 12_001,
             FailurePoint::DisableGlobalPooling => 12_002,
-            FailurePoint::AssuredNonBlockingCallbacks => 12_003,
-            FailurePoint::Http2KeepAlive => 12_004,
-            FailurePoint::Http3KeepAlive => 12_005,
-            FailurePoint::SetStatusCallback => 12_006,
+            FailurePoint::ConnectionIdleTimeout => 12_003,
+            FailurePoint::AssuredNonBlockingCallbacks => 12_004,
+            FailurePoint::Http2KeepAlive => 12_005,
+            FailurePoint::Http3KeepAlive => 12_006,
+            FailurePoint::SetStatusCallback => 12_007,
         }
     }
 
@@ -583,6 +681,7 @@ mod tests {
             FailurePoint::Open => WinHttpOperation::Open,
             FailurePoint::SetTimeouts => WinHttpOperation::SetTimeouts,
             FailurePoint::DisableGlobalPooling
+            | FailurePoint::ConnectionIdleTimeout
             | FailurePoint::AssuredNonBlockingCallbacks
             | FailurePoint::Http2KeepAlive
             | FailurePoint::Http3KeepAlive => WinHttpOperation::SetOption,
@@ -595,6 +694,7 @@ mod tests {
             FailurePoint::Open => SessionInitializationOperation::Open,
             FailurePoint::SetTimeouts => SessionInitializationOperation::SetTimeouts,
             FailurePoint::DisableGlobalPooling => SessionInitializationOperation::DisableGlobalPooling,
+            FailurePoint::ConnectionIdleTimeout => SessionInitializationOperation::ConnectionIdleTimeout,
             FailurePoint::AssuredNonBlockingCallbacks => SessionInitializationOperation::AssuredNonBlockingCallbacks,
             FailurePoint::Http2KeepAlive => SessionInitializationOperation::Http2KeepAlive,
             FailurePoint::Http3KeepAlive => SessionInitializationOperation::Http3KeepAlive,
@@ -602,8 +702,11 @@ mod tests {
         }
     }
 
-    fn active_keep_alive() -> ConnectionKeepAlive {
-        ConnectionKeepAlive::active_connections(Duration::from_nanos(1), Duration::from_secs(30))
+    /// Transport options whose keep-alive policy exercises the probe options.
+    fn active_transport_options() -> TransportOptions {
+        let mut options = TransportOptions::default();
+        options.connection_keep_alive = ConnectionKeepAlive::active_connections(Duration::from_nanos(1), Duration::from_secs(30));
+        options
     }
 
     fn raw_handle() -> RawHandle {

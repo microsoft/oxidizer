@@ -185,6 +185,7 @@ mod tests {
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
     use crate::bindings::{BindingsFacade, MockBindings};
     use crate::handle::RawHandle;
+    use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
     use crate::{WinHttpOptions, WinHttpTlsConfig};
 
     assert_impl_all!(WinHttpDeps: Send, Sync, Clone, Debug, ThreadAware);
@@ -307,7 +308,6 @@ mod tests {
             .minimal_pipeline()
             .connection_pool_options(
                 ConnectionPoolOptions::default()
-                    .connection_idle_timeout(Duration::from_secs(1))
                     .max_connections(1)
                     .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(2))),
             )
@@ -342,7 +342,10 @@ mod tests {
             .expect_set_timeouts()
             .times(session_count)
             .returning(|_, _, _, _, _| Ok(()));
-        bindings.expect_set_option().times(session_count * 2).returning(|_, _, _| Ok(()));
+        bindings
+            .expect_set_option()
+            .times(session_count * SESSION_OPTIONS_WITHOUT_KEEP_ALIVE)
+            .returning(|_, _, _| Ok(()));
         bindings
             .expect_set_status_callback()
             .times(session_count)
