@@ -136,19 +136,19 @@ mod iso_8601;
 mod rfc_2822;
 mod unix_seconds;
 
-pub use ecmascript::EcmaScript;
-pub use iso_8601::Iso8601;
-pub use rfc_2822::Rfc2822;
-pub use unix_seconds::UnixSeconds;
-
-use crate::Error;
-
 #[cfg(any(feature = "serde", test))]
 use std::fmt::{self, Display};
 #[cfg(any(feature = "serde", test))]
 use std::marker::PhantomData;
 #[cfg(any(feature = "serde", test))]
 use std::str::FromStr;
+
+pub use ecmascript::EcmaScript;
+pub use iso_8601::Iso8601;
+pub use rfc_2822::Rfc2822;
+pub use unix_seconds::UnixSeconds;
+
+use crate::Error;
 
 #[cfg(any(feature = "serde", test))]
 fn deserialize_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
