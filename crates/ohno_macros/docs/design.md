@@ -1,10 +1,8 @@
 # Design
 
-How `ohno_macros` is built. This is a proposal; nothing here is implemented yet.
-
-`requirements.md` says what the crate has to deliver. This document says how the
-crate is arranged to deliver it. Every decision below is argued from a
-requirement, and the requirement is named.
+How `ohno_macros` is built. `requirements.md` says what the crate has to
+deliver; this document says how the crate is arranged to deliver it. Every
+decision below is argued from a requirement, and the requirement is named.
 
 ## The pipeline
 
@@ -142,10 +140,10 @@ struct Ast {
     display: Option<DisplayAttr>,
     /// One per `#[from(...)]`; several accumulate (R1.6)
     conversions: Vec<FromAttr>,
-    /// The span of `#[no_debug]`, if written
-    no_debug: Option<Span>,
-    /// The span of `#[no_constructors]`, if written
-    no_constructors: Option<Span>,
+    /// Whether `#[no_debug]` was written
+    no_debug: bool,
+    /// Whether `#[no_constructors]` was written
+    no_constructors: bool,
 }
 
 /// Whether fields are named or positional. A unit struct never reaches `Ast`:
@@ -223,6 +221,11 @@ struct Shape {
 }
 
 impl Shape {
+    /// Refuses a core index that is out of range, which is the last point at
+    /// which that is representable
+    fn new(fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self>;
+    /// The field holding the core
+    fn core(&self) -> &ModelField;
     /// Every field, in declaration order. What `Debug` prints (R1.3)
     fn all(&self) -> impl Iterator<Item = &ModelField>;
     /// Every field but the core, in declaration order. What constructors take
@@ -257,19 +260,29 @@ struct and `debug_tuple` for a tuple one (R1.3).
 
 ```rust
 /// A lowered `format!` call
-struct Message {
-    /// A `format!` string. Every placeholder that named a field has become
-    /// positional; a format spec is kept, so `{name:?}` becomes `{:?}`
-    template: String,
-    /// One expression per placeholder, in order
-    arguments: Vec<TokenStream>,
+enum Message {
+    /// Rendered as a string literal, with `{{` and `}}` escapes already resolved
+    Literal(String),
+    /// Rendered as `format!(template, arguments...)`
+    Formatted {
+        /// A `format!` string. Every placeholder that named a field has become
+        /// positional; a format spec is kept, so `{name:?}` becomes `{:?}`
+        template: String,
+        /// One expression per placeholder that consumes an argument, in order
+        arguments: Vec<TokenStream>,
+    },
 }
 
 impl Message {
-    /// `format!(#template, #(#arguments),*)`
+    /// A `&'static str` or a `String`; both satisfy the `Into<Cow<_, str>>`
+    /// bound the runtime asks for
     fn render(&self) -> TokenStream;
 }
 ```
+
+The two cases are not cosmetic. A message with no arguments is rendered as a
+literal rather than as a one-argument `format!`, so a static `#[display("...")]`
+costs no allocation at run time.
 
 By the time a `Message` built by the derive exists, every field it names has
 been checked to exist and every argument has been checked to be rooted in a
@@ -307,7 +320,7 @@ heavier than the check it replaces. It is held by a module boundary instead:
 impl Conversion {
     /// Distributes `overrides` over `shape.data()`, defaulting the rest.
     /// Reports an override whose key names no non-core field
-    fn new(shape: &Shape, from: &FromAttr, errors: &mut Errors) -> Option<Self>;
+    fn new(shape: &Shape, source: Type, overrides: &[(Member, Expr)], errors: &mut Errors) -> Option<Self>;
 }
 ```
 
@@ -376,6 +389,11 @@ including the core, so it iterates `shape.all()` and branches once on
 `shape.style`: `f.debug_struct(#name).field("path", &self.path)…` or
 `f.debug_tuple(#name).field(&self.0)…`.
 
+It is the one generated item that is **not** `#[automatically_derived]`.
+Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
+one would make every field that only `Debug` reads look unused in the user's own
+crate.
+
 **Constructors** are emitted unless `model.constructors` is false. Both iterate
 `shape.data()`, so the core is skipped and declaration order is kept:
 
@@ -397,15 +415,19 @@ pub(crate) fn caused_by(
 `pub(crate)` is fixed by R1.4 and is not reopened here.
 
 **`From<T>`** is emitted once per `Conversion`, zipping `shape.data()` with
-`conversion.initializers`, and building the core with `OhnoCore::from(error)`.
-The binding is named `error`, which is the name a field expression refers to:
+`conversion.initializers()`, and building the core with `OhnoCore::from(error)`.
+The binding is named `error`, which is the name a field expression refers to.
+Each data initializer is bound to a local first, because it may borrow `error`
+while the core consumes it, and a struct literal evaluates its fields in the
+order they are written:
 
 ```rust
 impl #impl_generics ::core::convert::From<#source>
     for #ident #ty_generics #where_clause
 {
     fn from(error: #source) -> Self {
-        Self { #(#member: #initializer,)* #core: ::ohno::OhnoCore::from(error) }
+        #(let #binding = #initializer;)*
+        Self { #(#member: #binding,)* #core: ::ohno::OhnoCore::from(error) }
     }
 }
 ```
@@ -445,21 +467,36 @@ body:
 
 ```rust
 {
-    use ::ohno::Enrichable as _;
-    let mut result = (move || #output #block)();          // sync
-    let mut result = (async move #block).await;           // async
-    result.add_enrichment(::ohno::EnrichmentEntry::new(#message, file!(), line!()));
-    result
+    let __ohno_result = (|| #output #block)();          // sync
+    let __ohno_result: #ty = async #block.await;        // async
+    __ohno_result.map_err(|mut error| {
+        ::ohno::Enrichable::add_enrichment(
+            &mut error,
+            ::ohno::EnrichmentEntry::new(#message, file!(), line!()),
+        );
+        error
+    })
 }
 ```
 
-Enrichment lands through `Enrichable for Result<T, E>`, which is a no-op on
-`Ok`, so the wrapper does not have to match on the result.
+The message is applied through `map_err` rather than through `Enrichable` on the
+result directly, because the return type is not always a `Result`: an
+implemented `Future::poll` returns `Poll<Result<..>>`, which carries `map_err`
+but is not itself `Enrichable`.
+
+The closure is not `move`. Capture is left to inference, so a body that consumes
+`self` takes it by value while a body that only reads it borrows, and the
+message can still name a parameter the body did not consume.
 
 Everything else in the signature — visibility, `const`, `unsafe`, `extern` ABI,
 generics, bounds, where clauses, `impl Trait` and `dyn Trait` parameters, every
 form of `self` receiver, doc comments, other attributes — is re-emitted
 untouched, because the macro reads only the return type and the body.
+
+**Diagnostics re-emit the function.** A rejected input still emits the original
+function beside the `compile_error!`, so `rustc` reports the one fault the macro
+found rather than that fault plus every call site of a function that no longer
+exists.
 
 **Limit.** The closure rewrite is not usable in a `const fn`. `const` is
 re-emitted faithfully, so such a function is rejected by `rustc` rather than by
@@ -480,7 +517,8 @@ impl Errors {
     fn add(&mut self, tokens: impl ToTokens, message: impl Display);
     fn combine(&mut self, error: syn::Error);
     fn is_empty(&self) -> bool;
-    fn finish(self) -> Result<(), syn::Error>;
+    /// One `compile_error!` per fault; empty when nothing was recorded
+    fn into_compile_error(self) -> TokenStream;
 }
 ```
 
@@ -527,42 +565,45 @@ anchored at the struct's `ident`.
 ### Every rejection, its message and its anchor
 
 Messages already pinned by a `.stderr` snapshot are quoted exactly and must not
-drift. Messages marked *new* have no snapshot yet; adding one is part of
-implementing that rule.
+drift. The rest are quoted as implemented; they have no snapshot, so a `.stderr`
+fixture may be added for any of them without changing the text.
 
 | Req | Rejection | Message | Anchor |
 | --- | --- | --- | --- |
-| R1.1 | derive on an enum | *new* | `ident` |
-| R1.1 | derive on a unit struct | *new* | `ident` |
+| R1.1 | derive on an enum | ``` `#[derive(ohno::Error)]` supports structs only. An enum has no single field to hold the OhnoCore ``` | `ident` |
+| R1.1 | derive on a union | ``` `#[derive(ohno::Error)]` supports structs only ``` | `ident` |
+| R1.1 | derive on a unit struct | ``` `#[derive(ohno::Error)]` needs a field to hold the OhnoCore, and a unit struct has none. Declare one, or use `#[ohno::error]`, which adds it ``` | `ident` |
 | R1.2 | `#[error]` with an argument | `` `#[error]` takes no arguments `` | attribute `Meta` |
-| R1.2 | two fields marked | `Multiple fields marked with #[error]. Mark only the field holding the OhnoCore` | each marking `Attribute` |
+| R1.2 | two fields marked | ``Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore`` | the second marking `Attribute` |
 | R1.2 | one field marked twice | ``Duplicate `#[error]` on the same field. Mark it once`` | the second `Attribute` |
 | R1.2 | `#[error]` beside the generated marker | as the two-marked-fields message | the marking `Attribute` |
-| R1.2 | no marker, no `OhnoCore` field | *new* | `ident` |
-| R1.2 | no marker, several `OhnoCore` fields | *new*, naming the candidates | `ident` |
+| R1.2 | no marker, no `OhnoCore` field | ``No field holds the OhnoCore. Declare one, mark it with `#[error]` if its type is spelled through an alias, or use `#[ohno::error]`, which adds the field itself`` | `ident` |
+| R1.2 | no marker, several `OhnoCore` fields | ``Several fields hold an OhnoCore and none is marked. Mark the one holding the error representation with `#[error]``` | `ident` |
 | R1.5 | placeholder names no field | ``unknown field `pth` in `#[display(...)]`, available fields: `path`, `code``` | template literal |
 | R1.5 | argument root names no field | the same message | the root term |
-| R1.5 | `{}` with no argument left | *new* | template literal |
-| R1.5 | an argument no `{}` consumes | *new* | the argument |
+| R1.5 | `{}` with no argument left | ``` `#[display(...)]` template has more `{}` placeholders than arguments ``` | template literal |
+| R1.5 | an argument no `{}` consumes | ``` `#[display(...)]` argument is not consumed by any `{}` placeholder ``` | the argument |
 | R1.5 | argument written `self.x` | `` `#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix `` | the `self` token |
 | R1.5 | argument rooted elsewhere | `` `#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self` `` | the whole argument |
 | R1.5 | `{` with no `}` | `` `#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace `` | template literal |
 | R1.5 | `}` with no `{` | `` `#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace `` | template literal |
-| R1.6 | `#[from]`, `#[from()]`, `#[from = "…"]` | *new* | attribute `Meta` |
-| R1.6 | a key naming no non-core field | *new* | the key |
-| R1.6 | a non-integer key on a tuple struct | *new* | the key |
+| R1.6 | `#[from]`, `#[from = "…"]` | ``` `#[from(...)]` takes a parenthesized list of types, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
+| R1.6 | `#[from()]` | ``` `#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
+| R1.6 | a key naming no non-core field | ``unknown field `missing` in `#[from(...)]`, available fields: `kind`` | the key |
+| R1.6 | a key naming the core | ``` `#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error ``` | the key |
+| R1.6 | a non-integer key on a tuple struct | ``` `#[from(...)]` field keys for a tuple struct are field indexes, not names, so `kind:` names no field ``` | the key |
 | R1.7 | `#[no_constructors]` under `#[ohno::error]` | `` `#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` is an implementation detail with no stable name or position, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly `` | the whole `Attribute` |
-| R2 | `#[ohno::error]` on a non-struct | *new* | `ident` |
+| R2 | `#[ohno::error]` on a non-struct | ``` `#[ohno::error]` supports structs only. A struct is what can hold the OhnoCore field it adds ``` | the item |
 | R2 | `#[error]` under `#[ohno::error]` | `` `#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly `` | the whole `Attribute` |
 | R2 | a hand-written reserved marker | `` This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]` `` | the whole `Field` |
-| R3 | first token is not a string literal | *new* | the first token |
-| R3 | function with no return type | *new* | the signature |
-| R3 | input is not a function | *new* | the input |
+| R3 | first token is not a string literal | `syn`'s own `expected string literal` | the offending token |
+| R3 | function with no return type | ``` `#[enrich_err(...)]` needs a return type to enrich. A function returning `()` has no error to carry the message ``` | the signature |
+| R3 | input is not a function | ``` `#[enrich_err(...)]` applies to functions only ``` | the item |
 
-Accumulation changes the snapshots under `crates/ohno/tests/ui/` that today show
-one error where the fixture breaks several rules. Regenerating them to show all
-of the errors is part of the work, and the messages above do not change when
-they are regenerated.
+Accumulation does not change the snapshots under `crates/ohno/tests/ui/`. Each
+fixture struct there breaks exactly one rule, and separate structs are separate
+macro invocations, so the errors were already reported together. A future
+fixture that breaks several rules in one struct will report all of them.
 
 ## Testing
 
@@ -593,12 +634,20 @@ is the one thing these tests exist to hold.
 `cargo mutants` runs on `validate.rs` and `display/`, where the rules live and
 where a surviving mutant means a rule is unenforced (R5).
 
+Two classes of mutant survive there by construction, and neither means a rule is
+unenforced. The three `#[proc_macro]` entry points in `lib.rs` cannot be called
+from a unit test at all — a proc-macro crate's own tests do not get the bridge —
+so only `crates/ohno/tests/` kills them. And a mutant that corrupts the index
+arithmetic in the template scanner turns the scan into an infinite loop, which
+is reported as a timeout rather than as a failed assertion; the mutant is
+detected, but by hanging.
+
 **The tests under `crates/ohno/tests/` remain the only proof that the generated
-code works.** Nothing in this crate's own tree compiles an expansion. Unit tests assert the
-shape of tokens; only the integration tests and the `ui/*.rs` compile-fail pairs
-run `rustc` over what the macros produce, and only the `.stderr` snapshots pin
-where a diagnostic points. A change that keeps every unit test green and breaks
-the tests under `crates/ohno/tests/` is a broken change.
+code works.** Nothing in this crate's own tree compiles an expansion. Unit tests
+assert the shape of tokens; only the integration tests and the `ui/*.rs`
+compile-fail pairs run `rustc` over what the macros produce, and only the
+`.stderr` snapshots pin where a diagnostic points. A change that keeps every unit
+test green and breaks the tests under `crates/ohno/tests/` is a broken change.
 
 ## Decided
 
@@ -609,7 +658,7 @@ the tests under `crates/ohno/tests/` is a broken change.
   failed to decode instead of reporting cascading noise, and it is the only
   value holding decoded payloads together with their spans.
 - **Diagnostics accumulate.** `validate` reports every rule violation it finds,
-  not the first. The `.stderr` snapshots are regenerated to match.
+  not the first.
 - **`enrich_err` stays simple.** One module, no `Ast`/`Model` pair, sharing
   `Message` with the derive.
 - **`pub(crate)` constructors stay.** Settled by ADO 7675155 as designed; the
