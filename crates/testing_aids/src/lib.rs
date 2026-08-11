@@ -20,11 +20,13 @@ use std::{env, process, thread};
 mod io;
 mod macros;
 mod metrics;
+mod poll;
 pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;
 pub use metrics::*;
+pub use poll::*;
 pub use yielding::*;
 
 /// If something (whatever) does not happen in a test within this time, the test will fail.
