@@ -423,8 +423,7 @@ function Get-PublishedDependentsExposingTarget {
             $Resolved.Contains($_.Folder) -and
             $(
                 if ($_.Deps -contains $targetCargoName) {
-                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name `
-                        -TargetCrateRoot $TargetPackage.CrateRoot
+                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name
                 } else {
                     $reachable.Contains($_.Folder) -and
                     (Test-PackageAllowlistNamesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name `

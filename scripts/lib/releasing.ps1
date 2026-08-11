@@ -708,6 +708,15 @@ function Get-WorkspacePackages {
 #     $TargetCrateRoot, which is a property of the target rather than of any
 #     edge, and so is available whether or not the dependency is declared.
 #
+# $TargetCrateRoot belongs to the third case ONLY, and the caller must withhold
+# it for the first two. On a declared edge DepAliases is already the complete
+# and *authoritative* answer, because a `package = "..."` rename shadows the
+# lib name entirely: a dependent that imports the crate as `aliased_dep` cannot
+# write `dep_core::Handle` no matter what the target's manifest says. Adding
+# the target's global root back on such an edge re-accepts a name the dependent
+# provably cannot use, turning an unrelated allowlist entry that happens to
+# collide with it into a false exposure and a spurious breaking bump.
+#
 # Any of them is the root an allowed_external_types entry may carry. Matching
 # solely on the real package name would find nothing and report "not exposed"
 # -- a fail-open that ships a break as compatible.
@@ -715,8 +724,9 @@ function Get-AcceptedExposureRoots {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
-        # The target's own crate root, from its package record. Optional so
-        # callers that only have a name still get the package-name behaviour.
+        # The target's own crate root, from its package record. Supplied only
+        # for an undeclared (indirect) edge -- see the note above on why a
+        # declared edge must rely on DepAliases instead.
         [string]$TargetCrateRoot
     )
 
@@ -737,11 +747,15 @@ function Get-AcceptedExposureRoots {
 # positive evidence that its public API cannot name types rooted at the target
 # package. Anything short of that evidence counts as exposure: an unknown must
 # not permit a breaking dependency bump to ship as a compatible release.
+#
+# This predicate is for DECLARED edges only, so it deliberately takes no
+# TargetCrateRoot: the dependent's own DepAliases entry already records the
+# name the target is reachable under on this edge, rename included, and is
+# authoritative over the target's global crate root.
 function Test-PackageExposesTarget {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
-        [Parameter(Mandatory = $true)][string]$TargetPackageName,
-        [string]$TargetCrateRoot
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
     )
 
     # `$null` here means the crate declares no allowed_external_types policy at
@@ -766,7 +780,7 @@ function Test-PackageExposesTarget {
     }
 
     $acceptedRoots = Get-AcceptedExposureRoots -Dependent $Dependent `
-        -TargetPackageName $TargetPackageName -TargetCrateRoot $TargetCrateRoot
+        -TargetPackageName $TargetPackageName
 
     foreach ($entry in $Dependent.AllowedExternalTypes) {
         # An entry that is not a usable non-empty string carries no information

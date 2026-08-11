@@ -226,6 +226,33 @@ Describe 'Renamed crate root via [lib] name (via cargo metadata)' {
         Test-PackageExposesTarget -Dependent $dependent -TargetPackageName 'dependency' | Should -BeTrue
     }
 
+    It 'does not accept the lib name on an edge where a rename shadows it' {
+        # The other half of the precedence rule, and the half that actually
+        # bites. The test above pins what DepAliases *contains*; this one pins
+        # what the predicate *does*, which is what a regression breaks. A
+        # dependent importing the crate as `aliased_dep` cannot write
+        # `dep_core::Handle` -- the rename shadows the lib name completely -- so
+        # such an entry must be some unrelated crate and must not count as
+        # exposure here. Reintroducing the target's global crate root on a
+        # declared edge turns that collision into a spurious breaking bump.
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-rename-shadows') `
+            -Rename 'aliased-dep' -AllowedExternalTypes @('dep_core::Handle')
+        $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependent = $baseline | Where-Object { $_.Folder -eq 'dependent' }
+
+        Test-PackageExposesTarget -Dependent $dependent -TargetPackageName 'dependency' | Should -BeFalse
+
+        $stub = { param([string]$Folder, [string]$CargoName) 'none' }
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('dependency@breaking')) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType $stub
+        $resolvedDependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+        $resolvedDependent.EffectiveChangeType    | Should -Be 'patch'
+        $resolvedDependent.EffectiveTargetVersion | Should -Be '1.0.1'
+    }
+
     It 'cascades a breaking dependency through the lib-name exposure edge' {
         $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-cascade')
         $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
