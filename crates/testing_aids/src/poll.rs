@@ -47,6 +47,7 @@ pub trait FutureTestExt: Future + Sized {
     /// # Panics
     ///
     /// Panics if the future returns [`Poll::Pending`].
+    #[track_caller]
     fn unwrap_ready(self) -> Self::Output {
         let mut fut = std::pin::pin!(self);
         match poll_once(&mut fut) {
@@ -60,6 +61,7 @@ pub trait FutureTestExt: Future + Sized {
     /// # Panics
     ///
     /// Panics if the future returns [`Poll::Ready`].
+    #[track_caller]
     fn unwrap_pending(self) {
         let mut fut = std::pin::pin!(self);
         assert!(
@@ -73,6 +75,7 @@ pub trait FutureTestExt: Future + Sized {
     /// # Panics
     ///
     /// Panics with `timeout_msg` if the future never completes within `max_polls` polls.
+    #[track_caller]
     fn unwrap_ready_within(self, max_polls: usize, timeout_msg: &str) -> Self::Output {
         let mut fut = std::pin::pin!(self);
         for _ in 0..max_polls {
@@ -93,6 +96,7 @@ pub trait FutureTestExt: Future + Sized {
     ///
     /// Panics (using `message_if_not_pending`) if any of the first `n_pending`
     /// polls returns `Ready`, or if the final poll is still `Pending`.
+    #[track_caller]
     fn unwrap_ready_after(self, n_pending: usize, message_if_not_pending: &str) -> Self::Output
     where
         Self::Output: Debug,
@@ -110,7 +114,10 @@ pub trait FutureTestExt: Future + Sized {
 
         match poll_once(&mut fut) {
             Poll::Ready(value) => value,
-            Poll::Pending => panic!("expected Ready after {} polls, but got Pending", n_pending + 1),
+            Poll::Pending => panic!(
+                "{message_if_not_pending}: expected Ready after {} polls, but got Pending",
+                n_pending + 1
+            ),
         }
     }
 
@@ -118,8 +125,11 @@ pub trait FutureTestExt: Future + Sized {
     ///
     /// # Panics
     ///
-    /// Panics (using `message`) if any poll returns `Ready`.
+    /// Panics (using `message`) if any poll returns `Ready`, and panics if `n`
+    /// is zero, because zero polls would assert nothing.
+    #[track_caller]
     fn unwrap_pending_for(self, n: usize, message: &str) {
+        assert!(n > 0, "unwrap_pending_for requires n > 0; zero polls would assert nothing");
         let mut fut = std::pin::pin!(self);
         for _ in 0..n {
             assert!(poll_once(&mut fut).is_pending(), "{message}");
@@ -131,22 +141,38 @@ impl<F: Future> FutureTestExt for F {}
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::VecDeque;
     use std::pin::Pin;
+    use std::rc::Rc;
 
     use super::*;
 
-    /// A future returning a scripted sequence of polls, defaulting to `Pending`
-    /// once the script is exhausted.
+    /// A future returning a scripted sequence of polls.
+    ///
+    /// It counts every poll it receives and panics once the script is
+    /// exhausted, so a helper that polls more times than it documents fails
+    /// loudly instead of silently observing `Pending` forever.
     struct ScriptedFuture {
         steps: VecDeque<Poll<u32>>,
+        polls: Rc<Cell<usize>>,
     }
 
     impl ScriptedFuture {
         fn new(steps: Vec<Poll<u32>>) -> Self {
             Self {
                 steps: VecDeque::from(steps),
+                polls: Rc::new(Cell::new(0)),
             }
+        }
+
+        /// Returns the future together with a handle that observes how many
+        /// times it has been polled, so a test can assert the exact poll count
+        /// after the helper has consumed the future.
+        fn with_poll_count(steps: Vec<Poll<u32>>) -> (Self, Rc<Cell<usize>>) {
+            let future = Self::new(steps);
+            let polls = Rc::clone(&future.polls);
+            (future, polls)
         }
     }
 
@@ -154,7 +180,10 @@ mod tests {
         type Output = u32;
 
         fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<u32> {
-            self.steps.pop_front().unwrap_or(Poll::Pending)
+            self.polls.set(self.polls.get() + 1);
+            self.steps
+                .pop_front()
+                .unwrap_or_else(|| panic!("ScriptedFuture polled after its script was exhausted"))
         }
     }
 
@@ -165,8 +194,23 @@ mod tests {
     }
 
     #[test]
+    fn poll_once_returns_pending_and_can_be_repeated() {
+        let (mut fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending, Poll::Ready(5)]);
+        assert_eq!(poll_once(&mut fut), Poll::Pending);
+        assert_eq!(poll_once(&mut fut), Poll::Ready(5));
+        assert_eq!(polls.get(), 2, "each call must poll the future exactly once");
+    }
+
+    #[test]
     fn unwrap_ready_returns_value() {
         assert_eq!(ScriptedFuture::new(vec![Poll::Ready(42)]).unwrap_ready(), 42);
+    }
+
+    #[test]
+    fn unwrap_ready_polls_exactly_once() {
+        let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Ready(42)]);
+        assert_eq!(fut.unwrap_ready(), 42);
+        assert_eq!(polls.get(), 1);
     }
 
     #[test]
@@ -187,6 +231,13 @@ mod tests {
     }
 
     #[test]
+    fn unwrap_pending_polls_exactly_once() {
+        let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending]);
+        fut.unwrap_pending();
+        assert_eq!(polls.get(), 1);
+    }
+
+    #[test]
     #[should_panic(expected = "Pending after one poll")]
     fn unwrap_pending_panics_when_ready() {
         ScriptedFuture::new(vec![Poll::Ready(3)]).unwrap_pending();
@@ -196,6 +247,13 @@ mod tests {
     fn unwrap_ready_within_drives_to_completion() {
         let fut = ScriptedFuture::new(vec![Poll::Pending, Poll::Pending, Poll::Ready(7)]);
         assert_eq!(fut.unwrap_ready_within(10, "never finished"), 7);
+    }
+
+    #[test]
+    fn unwrap_ready_within_stops_polling_once_ready() {
+        let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending, Poll::Pending, Poll::Ready(7)]);
+        assert_eq!(fut.unwrap_ready_within(10, "never finished"), 7);
+        assert_eq!(polls.get(), 3, "must stop at the first Ready, not exhaust max_polls");
     }
 
     #[test]
@@ -212,6 +270,13 @@ mod tests {
     }
 
     #[test]
+    fn unwrap_ready_after_polls_exactly_n_plus_one_times() {
+        let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending, Poll::Pending, Poll::Ready(9)]);
+        assert_eq!(fut.unwrap_ready_after(2, "should be pending"), 9);
+        assert_eq!(polls.get(), 3);
+    }
+
+    #[test]
     #[should_panic(expected = "expected Pending")]
     fn unwrap_ready_after_panics_when_early_ready() {
         let fut = ScriptedFuture::new(vec![Poll::Ready(1)]);
@@ -219,10 +284,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "but got Pending")]
+    #[should_panic(expected = "custom context: expected Ready after 2 polls, but got Pending")]
     fn unwrap_ready_after_panics_when_never_ready() {
         let fut = ScriptedFuture::new(vec![Poll::Pending, Poll::Pending]);
-        let _ = fut.unwrap_ready_after(1, "should be pending");
+        let _ = fut.unwrap_ready_after(1, "custom context");
     }
 
     #[test]
@@ -231,8 +296,21 @@ mod tests {
     }
 
     #[test]
+    fn unwrap_pending_for_polls_exactly_n_times() {
+        let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending, Poll::Pending]);
+        fut.unwrap_pending_for(2, "should stay pending");
+        assert_eq!(polls.get(), 2);
+    }
+
+    #[test]
     #[should_panic(expected = "should stay pending")]
     fn unwrap_pending_for_panics_on_ready() {
         ScriptedFuture::new(vec![Poll::Ready(0)]).unwrap_pending_for(1, "should stay pending");
+    }
+
+    #[test]
+    #[should_panic(expected = "requires n > 0")]
+    fn unwrap_pending_for_panics_on_zero_polls() {
+        std::future::ready(1_u32).unwrap_pending_for(0, "should stay pending");
     }
 }
