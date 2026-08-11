@@ -127,3 +127,83 @@ Describe 'Exposed-dependency cascade over the live workspace' {
         }
     }
 }
+
+Describe 'Re-exported type edges in the live workspace' {
+    # cargo-check-external-types attributes a re-exported type to its DEFINING
+    # crate, so a crate can allowlist a workspace crate it does not directly
+    # depend on. These edges exist today and were invisible to a direct-edge
+    # scan. Pinning them against real manifests, because the whole failure mode
+    # is a mismatch between what manifests say and what the planner assumed.
+
+    BeforeAll {
+        # Every (crate, allowlisted workspace crate) pair where the crate does
+        # not depend on that workspace crate directly. Self-references are
+        # excluded: a crate cannot cascade from itself.
+        $script:IndirectPairs = @()
+        $byName = @{}
+        foreach ($p in $script:LiveBaseline) { $byName[$p.Name.Replace('-', '_')] = $p }
+
+        foreach ($pkg in $script:LiveBaseline) {
+            if ($null -eq $pkg.AllowedExternalTypes) { continue }
+            $self = $pkg.Name.Replace('-', '_')
+            $roots = @($pkg.AllowedExternalTypes |
+                    Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) } |
+                    ForEach-Object { ($_ -split '::', 2)[0] } | Sort-Object -Unique)
+            foreach ($root in $roots) {
+                if (-not $byName.ContainsKey($root)) { continue }
+                if ($root -eq $self) { continue }
+                if ($pkg.Deps -contains $root) { continue }
+                $script:IndirectPairs += [pscustomobject]@{ Dependent = $pkg; TargetName = $byName[$root].Name }
+            }
+        }
+    }
+
+    It 'still contains at least one indirect allowlist edge to pin' {
+        # If this ever fails the workspace changed shape; the tests below would
+        # then be silently vacuous, so fail loudly instead.
+        @($script:IndirectPairs).Count | Should -BeGreaterThan 0
+    }
+
+    It 'treats every indirect allowlist edge as exposure of the defining crate' {
+        foreach ($pair in $script:IndirectPairs) {
+            Test-PackageAllowlistNamesTarget -Dependent $pair.Dependent -TargetPackageName $pair.TargetName |
+                Should -BeTrue -Because "$($pair.Dependent.Folder) allowlists $($pair.TargetName) without depending on it directly"
+        }
+    }
+
+    It 'selects those crates as dependents of the defining crate' {
+        # The direct-edge scan could not: none of these appear in the target's
+        # direct dependent list at all.
+        foreach ($pair in $script:IndirectPairs) {
+            $target = $script:LiveBaseline | Where-Object { $_.Name -eq $pair.TargetName }
+            $resolvedStub = [ordered]@{}
+            foreach ($p in $script:LiveBaseline) { $resolvedStub[$p.Folder] = $true }
+
+            $selected = @(Get-PublishedDependentsExposingTarget -TargetPackage $target `
+                    -WorkspaceBaseline $script:LiveBaseline -Resolved $resolvedStub)
+
+            @($selected | Where-Object { $_.Folder -eq $pair.Dependent.Folder }).Count |
+                Should -Be 1 -Because "$($pair.Dependent.Folder) reaches $($pair.TargetName) and names its types"
+        }
+    }
+
+    It 'cascades a breaking bump of each defining crate into those dependents' {
+        $targets = @($script:IndirectPairs | ForEach-Object { $_.TargetName } | Sort-Object -Unique)
+        foreach ($targetName in $targets) {
+            $resolved = Resolve-ReleaseSet `
+                -ParsedTokens (Parse-ReleaseTokens -Tokens @("$targetName@breaking")) `
+                -WorkspaceBaseline $script:LiveBaseline `
+                -GetRequiredChangeType $script:NoSelfChangeClassifier
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $expected = @($script:IndirectPairs | Where-Object { $_.TargetName -eq $targetName })
+            foreach ($pair in $expected) {
+                $folder = $pair.Dependent.Folder
+                $byFolder.ContainsKey($folder) | Should -BeTrue -Because "$folder depends on $targetName transitively"
+                $byFolder[$folder].EffectiveChangeType |
+                    Should -Be 'breaking' -Because "$folder names $targetName's types in its public API"
+            }
+        }
+    }
+}

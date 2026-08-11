@@ -667,3 +667,81 @@ Describe 'Test-PackageExposesTarget' {
         }
     }
 }
+Describe 'Test-PackageAllowlistNamesTarget' {
+    BeforeAll {
+        function New-Dependent {
+            param($Allowed, $DepAliases = @{})
+            [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
+        }
+    }
+
+    It 'reports a match when an entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('recoverable::Recovery', 'std::io::Error')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in the target package name' {
+        $dep = New-Dependent -Allowed @('data_privacy_core::Sensitive')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'data-privacy-core' | Should -BeTrue
+    }
+
+    It 'reports a match when an entry is rooted at a rename alias' {
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'reports no match when no entry is rooted at the target' {
+        $dep = New-Dependent -Allowed @('std::io::Error', 'core::fmt::Debug')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeFalse
+    }
+
+    Context 'divergence from Test-PackageExposesTarget' {
+        # These are the cases the two functions answer differently, and the
+        # difference is the whole point: this predicate gates the INDIRECT
+        # dependency edge, where "no evidence" must not be read as exposure.
+        # Treating absent metadata as a match there would force every transitive
+        # dependent in the graph to breaking.
+
+        It 'reports no match for absent metadata, where exposure fails closed' {
+            $dep = New-Dependent -Allowed $null
+            Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeFalse
+            # Contrast: the direct-edge predicate must fail closed on the same input.
+            Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+        }
+
+        It 'skips malformed entries instead of failing closed on them' {
+            foreach ($bad in @($null, '', '   ', 42, @{ a = 1 })) {
+                $dep = New-Dependent -Allowed @($bad)
+                Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' |
+                    Should -BeFalse -Because 'a malformed entry is not positive evidence'
+                Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'recoverable' |
+                    Should -BeTrue -Because 'the direct edge still fails closed'
+            }
+        }
+
+        It 'still finds a valid entry that follows a malformed one' {
+            # Skipping malformed entries must not abandon the rest of the list.
+            $dep = New-Dependent -Allowed @($null, 'recoverable::Recovery')
+            Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+        }
+
+        It 'treats a wildcard root as a match, unlike other unknowns' {
+            # A wildcard is a deliberate declaration that can expand to the
+            # target, not an absence of information.
+            foreach ($pattern in @('*', 'recover?ble::Recovery', '[rs]ecoverable::Recovery')) {
+                Test-PackageAllowlistNamesTarget -Dependent (New-Dependent -Allowed @($pattern)) `
+                    -TargetPackageName 'recoverable' | Should -BeTrue -Because "'$pattern' may expand to the target"
+            }
+        }
+    }
+
+    It 'reports no match for an explicit empty allowlist' {
+        Test-PackageAllowlistNamesTarget -Dependent (New-Dependent -Allowed @()) `
+            -TargetPackageName 'recoverable' | Should -BeFalse
+    }
+
+    It 'tolerates a package record that predates the DepAliases field' {
+        $dep = [pscustomobject]@{ AllowedExternalTypes = @('recoverable::Recovery') }
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+    }
+}

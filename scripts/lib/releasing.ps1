@@ -646,6 +646,30 @@ function Get-WorkspacePackages {
     return $packages
 }
 
+# Returns the allowlist roots that count as naming $TargetPackageName in the
+# dependent's public API: the target's own normalized name, plus any alias it is
+# declared under.
+#
+# A dependency declared with `package = "..."` is nameable in Rust source only
+# under its alias, so that is the root an allowed_external_types entry will
+# carry. Matching solely on the real package name would find nothing and report
+# "not exposed" -- a fail-open that ships a break as compatible.
+function Get-AcceptedExposureRoots {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    $normalizedTarget = $TargetPackageName.Replace('-', '_')
+
+    $roots = @($normalizedTarget)
+    if ($Dependent.PSObject.Properties['DepAliases'] -and $null -ne $Dependent.DepAliases) {
+        $roots += @($Dependent.DepAliases[$normalizedTarget])
+    }
+
+    return @($roots | Where-Object { $_ })
+}
+
 # Returns $true unless the package's cargo-check-external-types allowlist is
 # positive evidence that its public API cannot name types rooted at the target
 # package. Anything short of that evidence counts as exposure: an unknown must
@@ -679,15 +703,7 @@ function Test-PackageExposesTarget {
 
     $normalizedTarget = $TargetPackageName.Replace('-', '_')
 
-    # A dependency declared with `package = "..."` is nameable in Rust source
-    # only under its alias, so that is the root an allowed_external_types entry
-    # will carry. Matching solely on the real package name would find nothing
-    # and report "not exposed" -- a fail-open that ships a break as compatible.
-    $acceptedRoots = @($normalizedTarget)
-    if ($Dependent.PSObject.Properties['DepAliases'] -and $null -ne $Dependent.DepAliases) {
-        $acceptedRoots += @($Dependent.DepAliases[$normalizedTarget])
-    }
-    $acceptedRoots = @($acceptedRoots | Where-Object { $_ })
+    $acceptedRoots = Get-AcceptedExposureRoots -Dependent $Dependent -TargetPackageName $TargetPackageName
 
     foreach ($entry in $Dependent.AllowedExternalTypes) {
         # An entry that is not a usable non-empty string carries no information
@@ -698,6 +714,61 @@ function Test-PackageExposesTarget {
         # it silently collapses to '' and matches nothing, which is worse.)
         if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
             return $true
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            return $true
+        }
+        if ($acceptedRoots -contains $root) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# Returns $true when the dependent's allowlist is positive evidence that its
+# public API names types rooted at $TargetPackageName.
+#
+# This is the affirmative half of Test-PackageExposesTarget with none of its
+# fail-closed branches: absent or malformed metadata answers $false here.
+# The two are used for different edges, and the difference is deliberate.
+#
+# Test-PackageExposesTarget answers "may this crate expose the target?" for a
+# DIRECT dependency, where absent metadata is a genuine unknown that must fail
+# closed.
+#
+# This function answers "does this crate claim to name the target's types?" for
+# an INDIRECT dependency. cargo-check-external-types attributes a re-exported
+# type to its DEFINING crate, so a crate that reaches `a::T` through `b`
+# allowlists `a` while depending only on `b` (fetch_azure documents exactly this
+# for typespec_client_core). Such an edge is invisible to a direct-dependency
+# scan, so it needs its own check.
+#
+# It must not inherit the fail-closed branches, because "no allowlist" would
+# then match every transitive dependency in the graph and force unrelated
+# crates breaking. A crate with no allowlist that truly does expose the target
+# is still caught: it fails closed on its direct edge to whichever intermediate
+# carries the type, and the fixpoint walks that up the graph.
+#
+# A wildcard root is the one unknown still treated as a match: it can expand to
+# the target, and unlike absent metadata it is a deliberate, rare declaration.
+function Test-PackageAllowlistNamesTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $false
+    }
+
+    $acceptedRoots = Get-AcceptedExposureRoots -Dependent $Dependent -TargetPackageName $TargetPackageName
+
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            continue
         }
 
         $root = ($entry -split '::', 2)[0]

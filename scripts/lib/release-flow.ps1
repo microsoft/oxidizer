@@ -346,8 +346,21 @@ function Test-EntryPlansBreakingRelease {
 }
 
 # Returns the baseline packages that must inherit a breaking bump from
-# $TargetPackage: those already in the release set that depend on it directly
-# and name its types in their own public API.
+# $TargetPackage: those already in the release set that reach it and name its
+# types in their own public API.
+#
+# Two kinds of edge qualify:
+#
+#   * A DIRECT dependency that may expose the target. "May" is the operative
+#     word: an absent or malformed allowlist fails closed here, because an
+#     unknown must not ship a break as compatible.
+#   * An INDIRECT dependency whose allowlist explicitly names the target.
+#     cargo-check-external-types attributes a re-exported type to its defining
+#     crate, so a crate reaching `a::T` through `b` allowlists `a` while
+#     depending only on `b`. Requiring a direct edge missed these entirely.
+#     This branch demands positive evidence rather than failing closed, so it
+#     cannot drag in transitive dependents that merely lack metadata -- those
+#     are already covered by their own direct edges, walked up by the fixpoint.
 #
 # Proc-macro-only dependents are excluded because they have no rustdoc API to
 # expose anything through; they reach the release set via the manual-review
@@ -360,18 +373,41 @@ function Get-PublishedDependentsExposingTarget {
         # IDictionary rather than [hashtable] because the caller's dictionary is
         # [ordered], which is not a Hashtable -- PowerShell would satisfy a
         # [hashtable] annotation by silently substituting a converted copy.
-        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Resolved
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Resolved,
+        # Optional memo of target cargo name -> reachable published dependent
+        # folders. The baseline is fixed for the duration of a resolve, so the
+        # BFS answer is stable; the fixpoint would otherwise recompute it for
+        # every breaking source on every pass.
+        [System.Collections.IDictionary]$TransitiveDependentCache
     )
 
     # Cargo dependency names use underscores; package names may use hyphens.
     $targetCargoName = $TargetPackage.Name.Replace('-', '_')
 
+    if ($null -ne $TransitiveDependentCache -and $TransitiveDependentCache.Contains($targetCargoName)) {
+        $reachable = $TransitiveDependentCache[$targetCargoName]
+    } else {
+        $reachable = [System.Collections.Generic.HashSet[string]]::new(
+            [string[]]@(Get-TransitivePublishedDependentsFromBaseline `
+                    -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoName),
+            [System.StringComparer]::Ordinal)
+        if ($null -ne $TransitiveDependentCache) {
+            $TransitiveDependentCache[$targetCargoName] = $reachable
+        }
+    }
+
     return @($WorkspaceBaseline | Where-Object {
             $_.Published -and
             -not $_.IsProcMacroOnly -and
-            $_.Deps -contains $targetCargoName -and
             $Resolved.Contains($_.Folder) -and
-            (Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name)
+            $(
+                if ($_.Deps -contains $targetCargoName) {
+                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name
+                } else {
+                    $reachable.Contains($_.Folder) -and
+                    (Test-PackageAllowlistNamesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name)
+                }
+            )
         })
 }
 
@@ -644,10 +680,12 @@ function Resolve-ReleaseSet {
 
     # cargo-semver-checks compares one crate's rustdoc API and cannot identify
     # that an unchanged signature now names a type from an incompatible version
-    # of an external crate. Propagate that condition over direct dependency edges
-    # until no dependent is strengthened. Use the version that will actually be
-    # written, not EffectiveChangeType, so -Force pins do not create a fictitious
-    # breaking transition farther up the graph.
+    # of an external crate. Propagate that condition over dependency edges --
+    # direct, plus indirect edges where a re-exported type is allowlisted under
+    # its defining crate -- until no dependent is strengthened. Use the version
+    # that will actually be written, not EffectiveChangeType, so -Force pins do
+    # not create a fictitious breaking transition farther up the graph.
+    $transitiveDependentCache = @{}
     $exposureChanged = $true
     while ($exposureChanged) {
         $exposureChanged = $false
@@ -658,7 +696,8 @@ function Resolve-ReleaseSet {
             if (-not (Test-EntryPlansBreakingRelease -Entry $sourceEntry)) { continue }
 
             $dependentPkgs = Get-PublishedDependentsExposingTarget -TargetPackage $sourcePkg `
-                -WorkspaceBaseline $WorkspaceBaseline -Resolved $resolved
+                -WorkspaceBaseline $WorkspaceBaseline -Resolved $resolved `
+                -TransitiveDependentCache $transitiveDependentCache
 
             foreach ($dependentPkg in $dependentPkgs) {
                 $strengthened = Update-EntryForExposedDependency `
