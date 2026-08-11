@@ -11,7 +11,7 @@ const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark
 const ERROR_ATTRIBUTE_ARGUMENTS: &str = "`#[error]` takes no arguments";
 const MULTIPLE_MARKED_FIELDS: &str = "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore";
 const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it once";
-const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the field holding the OhnoCore and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` on its own to place the OhnoCore yourself";
+const MARKED_FIELD_WITH_GENERATED: &str = "`#[ohno::error]` already added the field holding the OhnoCore and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` on its own to place the OhnoCore explicitly";
 
 /// A field of the struct, with the facts the derive needs about it
 struct ParsedField<'a> {

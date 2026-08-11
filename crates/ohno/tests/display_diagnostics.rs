@@ -36,6 +36,10 @@ fn display_diagnostics() {
     // was written by hand.
     t.compile_fail("tests/ui/ohno_error_reserved_marker.rs");
 
+    // `#[ohno::error]` adds the OhnoCore field, so a hand-written constructor would have to name
+    // a field the attribute chose; opting out of the generated ones is rejected.
+    t.compile_fail("tests/ui/ohno_error_no_constructors.rs");
+
     // A tuple index reaching the `OhnoCore` appended by `#[ohno::error]` is unknown, while the
     // index of the declared field in the same fixture resolves.
     t.compile_fail("tests/ui/display_tuple_index_reaching_injected_core.rs");

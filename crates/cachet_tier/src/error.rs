@@ -40,11 +40,12 @@ use recoverable::{Recovery, RecoveryInfo};
 ///     Ok(v) => // Success
 /// }
 /// ```
-#[ohno::error]
+#[derive(ohno::Error, Clone)]
 #[no_constructors]
-#[derive(Clone)]
 pub struct Error {
     recovery_info: RecoveryInfo,
+    #[error]
+    ohno_core: OhnoCore,
 }
 
 impl Error {
