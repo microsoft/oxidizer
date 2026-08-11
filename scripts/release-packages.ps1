@@ -65,7 +65,11 @@
     dependency type, the planner also consults each dependent's
     `[package.metadata.cargo_check_external_types].allowed_external_types`.
     Exposing a dependency whose planned version transition is breaking floors
-    the dependent at `breaking`, recursively through direct dependency edges.
+    the dependent at `breaking`, recursively. This applies to direct dependency
+    edges, and also to a transitive dependency whose types the dependent
+    explicitly allowlists — cargo-check-external-types attributes a re-exported
+    type to the crate that defines it, so `fetch_azure` allowlists
+    `typespec_client_core` while depending on `azure_core`.
     Other unaffected dependents cascade as `patch` so they still pick up the new
     dependency version. Dev-only dependents are skipped — they automatically
     pick up the new workspace version.

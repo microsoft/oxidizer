@@ -228,8 +228,8 @@ next change is measured against.
 
 `cargo semver-checks` is combined with an exposed-dependency cascade.
 Rustdoc comparison cannot detect that an otherwise-unchanged signature
-now names a type from an incompatible version of an external crate. For
-each direct dependency edge, the planner therefore also consults
+now names a type from an incompatible version of an external crate. The
+planner therefore also consults
 `[package.metadata.cargo_check_external_types].allowed_external_types`.
 If the dependency's planned version transition is breaking and the
 dependent allows that dependency's types in its public API, the dependent
@@ -237,11 +237,31 @@ is floored at `breaking`. The planner repeats this check to a fixpoint so
 the result propagates through chains such as `bytesbuf` → `bytesbuf_io` →
 another facade.
 
-Missing external-type metadata and wildcard roots are handled
-conservatively as possible exposure. The policy must remain validated by
-`cargo-check-external-types`: an extra allowlist entry can cause an
-unnecessary breaking bump, while omitting an actually exposed type is a
-policy-validation failure.
+Two kinds of edge are considered, and they treat missing evidence
+differently:
+
+- **Direct dependency edges** fail closed. Absent metadata, a malformed
+  entry, or a wildcard root all count as possible exposure, because an
+  unknown must not ship a break as compatible.
+
+- **Indirect edges to a transitive dependency** require the dependent's
+  allowlist to explicitly name that dependency (or a rename alias of it).
+  This exists because `cargo-check-external-types` attributes a
+  re-exported type to the crate that *defines* it: `fetch_azure`
+  allowlists `typespec_client_core::*` for a trait `azure_core`
+  re-exports, while depending only on `azure_core`. Such an edge is
+  invisible to a direct-dependency scan.
+
+  Here absent or malformed metadata is *not* read as exposure. Failing
+  closed on an indirect edge would match every transitive dependency of
+  every crate that declares no allowlist, forcing unrelated crates to
+  breaking. Nothing is missed: a crate with no allowlist that really does
+  expose the type still fails closed on its direct edge to whichever
+  intermediate carries it, and the fixpoint propagates that upward.
+
+The policy must remain validated by `cargo-check-external-types`: an
+extra allowlist entry can cause an unnecessary breaking bump, while
+omitting an actually exposed type is a policy-validation failure.
 
 **How the change type is determined.** `cargo semver-checks` is invoked
 as a CLI (not as a library) and its textual result is parsed into one of

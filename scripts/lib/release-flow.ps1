@@ -495,9 +495,14 @@ function Update-EntryForExposedDependency {
 #          bump only the change-type tag.
 #        - or create a new cascade-source entry.
 #      Ordinary library dependents use their own cargo-semver-checks result,
-#      floored at patch. A second direct-edge pass raises a dependent to breaking
-#      when it exposes a dependency whose planned version transition is
-#      incompatible. The pass repeats to a fixpoint so exposure chains cascade.
+#      floored at patch. A second pass raises a dependent to breaking when it
+#      exposes a dependency whose planned version transition is incompatible.
+#      That pass considers direct dependency edges (failing closed on absent or
+#      malformed allowlist metadata) plus indirect edges to a transitive
+#      dependency whose types the dependent explicitly allowlists, which is how
+#      a re-exported type -- attributed by cargo-check-external-types to its
+#      defining crate -- is caught. The pass repeats to a fixpoint so exposure
+#      chains cascade.
 #      Proc-macro-only dependents use a provisional patch floor and are explicitly
 #      classified in the interactive review.
 #      Cascade reasons are recorded per (target → dep) edge with dedup by
