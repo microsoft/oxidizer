@@ -2226,7 +2226,7 @@ mod tests {
         assert_eq!(sample.delta(), &StatsDelta::between(sampler.previous, sampler.previous));
 
         let mut session = Session::start_at(started_at).unwrap();
-        assert!(session.sampler.sample_at(started_at + Duration::from_millis(10)).is_some());
+        assert!(session.sample().is_some());
         let report = session.finish_at(started_at + Duration::from_millis(40)).unwrap();
         assert_eq!(report.elapsed(), Duration::from_millis(40));
         assert_eq!(report.initial(), report.final_stats());

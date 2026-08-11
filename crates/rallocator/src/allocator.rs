@@ -4048,7 +4048,10 @@ mod tests {
             (*context_header).recycled_summary = 0;
             (*context_header).remote_free.store(ptr::null_mut(), Ordering::Relaxed);
         }
-        heap.context_classes[0].active = ptr::null_mut();
+        heap.context_classes[0].active = context_header;
+        heap.context_class_lists[0].partial = ptr::null_mut();
+        hal::fail_next_commit_locality_segment();
+        assert!(allocator.pop_or_refill_context(0, &mut heap).is_null());
         heap.context_class_lists[0].partial = context_header;
         hal::fail_next_commit_locality_segment();
         assert!(allocator.pop_or_refill_context_slow(0, &mut heap).is_null());
