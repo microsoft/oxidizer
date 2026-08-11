@@ -283,8 +283,10 @@ mod tests {
         assert_eq!(polls.get(), 3);
     }
 
-    /// An output type deliberately without a [`Debug`](std::fmt::Debug) impl,
-    /// pinning that the helpers stay usable with opaque outputs.
+    /// An output type deliberately without a [`Debug`](std::fmt::Debug) impl.
+    ///
+    /// Any helper that requires one would fail to compile against this type,
+    /// so it keeps the assertions usable with opaque outputs.
     struct NotDebug(u32);
 
     /// Returns `Pending` on its first poll, then `Ready`.
