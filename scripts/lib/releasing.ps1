@@ -572,8 +572,9 @@ function Get-CrateRequiredChangeType {
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
 #   DepAliases            - hashtable mapping a normalized dependency name to the normalized
-#                           aliases it is renamed to, for the deps that declare `package = "..."`;
-#                           empty when nothing is renamed
+#                           crate roots it is reachable under when those differ from the
+#                           package name -- the `package = "..."` alias, or the dependency's
+#                           own `[lib] name`; empty when every dep is nameable by its own name
 #   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
 #                           or $null if the package does not declare them
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
@@ -585,6 +586,27 @@ function Get-WorkspacePackages {
     $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
 
     $packages = @()
+
+    # A dependency is nameable in Rust source -- and so in an
+    # allowed_external_types entry -- by its *crate root*, which is not always
+    # its package name: `[lib] name = "..."` renames the crate root while the
+    # package keeps its own name. Map each workspace package to its crate root
+    # so the dependency loop below can resolve the name an allowlist will
+    # actually carry.
+    #
+    # Only workspace members are covered, because `cargo metadata --no-deps`
+    # reports targets for nothing else. That is sufficient here: the exposure
+    # cascade only ever asks about workspace packages, since a registry crate
+    # is never a release target.
+    $crateRootByPackage = @{}
+    foreach ($package in $metadata.packages) {
+        $libTarget = $package.targets |
+            Where-Object { @($_.kind) -contains 'lib' -or @($_.kind) -contains 'proc-macro' } |
+            Select-Object -First 1
+        if ($null -eq $libTarget) { continue }
+        $crateRootByPackage[$package.name.Replace('-', '_')] = ([string]$libTarget.name).Replace('-', '_')
+    }
+
     foreach ($package in $metadata.packages) {
         $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -612,6 +634,22 @@ function Get-WorkspacePackages {
                 # aliases (per-target or per-feature), so collect them all.
                 $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $alias |
                         Where-Object { $_ } | Sort-Object -Unique)
+            }
+            else {
+                # No `package = "..."`, so the crate root is whatever the
+                # dependency's own manifest calls its lib target. A crate whose
+                # `[lib] name` differs from its package name is nameable only
+                # under the lib name, so that -- not the package name -- is what
+                # an allowlist entry carries.
+                #
+                # Only reached when `rename` is absent, because `rename` wins:
+                # `foo = { package = "bar" }` makes the crate nameable as `foo`
+                # regardless of what bar calls its lib target.
+                $crateRoot = $crateRootByPackage[$depCargoName]
+                if ($crateRoot -and $crateRoot -ne $depCargoName) {
+                    $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $crateRoot |
+                            Where-Object { $_ } | Sort-Object -Unique)
+                }
             }
         }
 
@@ -647,12 +685,17 @@ function Get-WorkspacePackages {
 }
 
 # Returns the allowlist roots that count as naming $TargetPackageName in the
-# dependent's public API: the target's own normalized name, plus any alias it is
-# declared under.
+# dependent's public API: the target's own normalized name, plus any crate root
+# it is reachable under.
 #
-# A dependency declared with `package = "..."` is nameable in Rust source only
-# under its alias, so that is the root an allowed_external_types entry will
-# carry. Matching solely on the real package name would find nothing and report
+# A package name is not always the name its types are written under. Two things
+# divert it, both recorded in DepAliases by Get-WorkspacePackages:
+#   - `package = "..."` on the dependency, which makes the crate nameable only
+#     under the alias; and
+#   - `[lib] name = "..."` in the dependency's own manifest, which renames the
+#     crate root for every consumer.
+# Either way that is the root an allowed_external_types entry will carry.
+# Matching solely on the real package name would find nothing and report
 # "not exposed" -- a fail-open that ships a break as compatible.
 function Get-AcceptedExposureRoots {
     param(

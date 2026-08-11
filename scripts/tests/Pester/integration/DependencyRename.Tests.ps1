@@ -1,15 +1,17 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# Covers the renamed-dependency exposure path end-to-end, from a real Cargo
-# manifest through `cargo metadata` to the cascade decision.
+# Covers the exposure paths where a dependency's crate root differs from its
+# package name, end-to-end from a real Cargo manifest through `cargo metadata`
+# to the cascade decision. Two constructs do this: `package = "..."` on the
+# dependency (rename) and `[lib] name = "..."` in the dependency's own manifest.
 #
 # The unit tests for this construct DepAliases by hand, already normalized, so
 # they prove the matching logic but not the extraction that feeds it. A
-# regression in reading `dependency.rename`, or in converting `aliased-dep` to
-# `aliased_dep`, would restore the original fail-open with every unit test
-# still green. These tests close that gap by building an actual workspace with
-# `package = "..."` and loading it through Get-WorkspacePackages.
+# regression in reading `dependency.rename` or the lib target name, or in
+# converting `aliased-dep` to `aliased_dep`, would restore the original
+# fail-open with every unit test still green. These tests close that gap by
+# building actual workspaces and loading them through Get-WorkspacePackages.
 
 BeforeAll {
     . (Join-Path $PSScriptRoot '..\_common\TestHelpers.ps1')
@@ -32,6 +34,30 @@ BeforeAll {
                     AllowedExternalTypes = $AllowedExternalTypes
                 }
                 @{ Name = 'dependency'; Version = '1.0.0' }
+            )
+        }
+        return New-SyntheticWorkspace -Spec $spec -Path $Path
+    }
+
+    # `dependency` renames its own crate root with `[lib] name = "dep_core"`.
+    # The package is still depended on as `dependency`, but Rust source -- and
+    # therefore the allowlist -- can only name it as `dep_core`.
+    function New-LibNameWorkspace {
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [string[]]$AllowedExternalTypes = @('dep_core::Handle'),
+            [string]$Rename = $null
+        )
+        $dep = @{ Name = 'dependency' }
+        if (-not [string]::IsNullOrWhiteSpace($Rename)) { $dep['Rename'] = $Rename }
+        $spec = @{
+            Packages = @(
+                @{
+                    Name = 'dependent'; Version = '1.0.0'
+                    Deps = @($dep)
+                    AllowedExternalTypes = $AllowedExternalTypes
+                }
+                @{ Name = 'dependency'; Version = '1.0.0'; LibName = 'dep_core' }
             )
         }
         return New-SyntheticWorkspace -Spec $spec -Path $Path
@@ -99,6 +125,98 @@ Describe 'Renamed dependency exposure (via cargo metadata)' {
 
     It 'does not cascade when the aliased dependency is absent from the allowlist' {
         $ws = New-RenamedDepWorkspace -Path (Join-Path $TestDrive 'rename-nocascade') `
+            -AllowedExternalTypes @('unrelated_crate::Handle')
+        $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $stub = { param([string]$Folder, [string]$CargoName) 'none' }
+
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('dependency@breaking')) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType $stub
+        $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+        $dependent.EffectiveChangeType    | Should -Be 'patch'
+        $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+    }
+}
+
+Describe 'Renamed crate root via [lib] name (via cargo metadata)' {
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+    }
+
+    It 'records the dependency''s lib target name as an alias' {
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-extract')
+        $pkgs = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependent = $pkgs | Where-Object { $_.Folder -eq 'dependent' }
+
+        # The edge is still keyed by the package name; the crate root is extra.
+        $dependent.Deps | Should -Contain 'dependency'
+        $dependent.DepAliases.ContainsKey('dependency') | Should -BeTrue
+        @($dependent.DepAliases['dependency']) | Should -Contain 'dep_core'
+    }
+
+    It 'records no alias when the lib target name matches the package name' {
+        # Negative control for the extraction: the alias must come from a real
+        # divergence, not be manufactured for every dependency.
+        $ws = New-RenamedDepWorkspace -Path (Join-Path $TestDrive 'libname-matching')
+        $pkgs = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependency = $pkgs | Where-Object { $_.Folder -eq 'dependency' }
+
+        $dependency.DepAliases.Count | Should -Be 0
+    }
+
+    It 'reports exposure for an allowlist entry rooted at the lib name' {
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-exposes')
+        $pkgs = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependent = $pkgs | Where-Object { $_.Folder -eq 'dependent' }
+
+        Test-PackageExposesTarget -Dependent $dependent -TargetPackageName 'dependency' | Should -BeTrue
+    }
+
+    It 'reports no exposure when the allowlist names neither the lib name nor the package' {
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-unrelated') `
+            -AllowedExternalTypes @('unrelated_crate::Handle')
+        $pkgs = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependent = $pkgs | Where-Object { $_.Folder -eq 'dependent' }
+
+        Test-PackageExposesTarget -Dependent $dependent -TargetPackageName 'dependency' | Should -BeFalse
+    }
+
+    It 'prefers the rename over the lib name when the dependency declares both' {
+        # `aliased-dep = { package = "dependency" }` against a dependency whose
+        # lib target is `dep_core`. Rust names it `aliased_dep`: the rename is
+        # applied to the dependency edge, so the lib name never surfaces in the
+        # consumer. Recording `dep_core` here would be inert at best and, for a
+        # crate that allowlists `dep_core` through some *other* path, a false
+        # exposure on this edge.
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-rename-wins') `
+            -Rename 'aliased-dep' -AllowedExternalTypes @('aliased_dep::Handle')
+        $pkgs = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $dependent = $pkgs | Where-Object { $_.Folder -eq 'dependent' }
+
+        @($dependent.DepAliases['dependency']) | Should -Contain 'aliased_dep'
+        @($dependent.DepAliases['dependency']) | Should -Not -Contain 'dep_core'
+        Test-PackageExposesTarget -Dependent $dependent -TargetPackageName 'dependency' | Should -BeTrue
+    }
+
+    It 'cascades a breaking dependency through the lib-name exposure edge' {
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-cascade')
+        $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $stub = { param([string]$Folder, [string]$CargoName) 'none' }
+
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('dependency@breaking')) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType $stub
+        $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+        $dependent.EffectiveChangeType    | Should -Be 'breaking'
+        $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+    }
+
+    It 'does not cascade when the lib-name root is absent from the allowlist' {
+        $ws = New-LibNameWorkspace -Path (Join-Path $TestDrive 'libname-nocascade') `
             -AllowedExternalTypes @('unrelated_crate::Handle')
         $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
         $stub = { param([string]$Folder, [string]$CargoName) 'none' }

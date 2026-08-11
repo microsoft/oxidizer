@@ -191,6 +191,17 @@ function Write-PackageCargoToml {
         $lines += ''
         $lines += '[lib]'
         $lines += 'proc-macro = true'
+        if ($Package.ContainsKey('LibName') -and -not [string]::IsNullOrWhiteSpace($Package.LibName)) {
+            $lines += "name = `"$($Package.LibName)`""
+        }
+    }
+    elseif ($Package.ContainsKey('LibName') -and -not [string]::IsNullOrWhiteSpace($Package.LibName)) {
+        # `[lib] name` renames the crate root without renaming the package, so
+        # consumers must `use <LibName>::...` while still depending on Name.
+        # src/lib.rs stays where it is; cargo only needs the target name.
+        $lines += ''
+        $lines += '[lib]'
+        $lines += "name = `"$($Package.LibName)`""
     }
 
     $allDeps = @()

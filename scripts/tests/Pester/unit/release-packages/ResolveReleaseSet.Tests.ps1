@@ -8,6 +8,15 @@ BeforeAll {
     # Helper that builds a baseline package record. Underscore-only cargo
     # names by default so the test stays focused on the cascade/resolve logic
     # rather than name normalization.
+    #
+    # AllowedExternalTypes defaults to @() -- "this crate's public API names
+    # nothing foreign" -- and NOT to $null. $null is the fail-closed branch
+    # (absent metadata => assume exposure), so defaulting to it would make
+    # every package in every baseline expose every dependency for free. That
+    # masks the signal under test: a cascade assertion would pass on the
+    # fallback even when the behaviour it is meant to pin is broken. @() is
+    # inert, so a test that needs exposure has to ask for it -- either with a
+    # real allowlist entry or by passing $null explicitly.
     function New-BaselinePackage {
         param(
             [string]   $Folder,
@@ -17,7 +26,7 @@ BeforeAll {
             [bool]     $Published = $true,
             [bool]     $IsProcMacroOnly = $false,
             [hashtable] $DepAliases = @{},
-            [AllowNull()][string[]] $AllowedExternalTypes = $null
+            [AllowNull()][string[]] $AllowedExternalTypes = @()
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
         return [pscustomobject]@{
@@ -480,9 +489,14 @@ Describe 'Resolve-ReleaseSet' {
         }
 
         It 'treats missing external-type metadata conservatively' {
+            # $null is passed explicitly: this test is *about* absent metadata,
+            # so the signal must come from the arguments and not from a helper
+            # default. New-BaselinePackage defaults to @() precisely so that no
+            # other test silently depends on the fail-closed branch.
             $baseline = @(
                 (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
-                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency'))
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes $null)
             )
             $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
 
