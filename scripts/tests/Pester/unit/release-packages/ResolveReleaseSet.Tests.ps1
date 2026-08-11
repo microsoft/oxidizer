@@ -26,9 +26,16 @@ BeforeAll {
             [bool]     $Published = $true,
             [bool]     $IsProcMacroOnly = $false,
             [hashtable] $DepAliases = @{},
+            # The crate's rustdoc name -- its [lib] name, which defaults to the
+            # normalized package name. Allowlists of INDIRECT dependents are
+            # rooted at this, never at a rename alias: a rename only exists on
+            # an edge the renaming crate declares, and an indirect dependent
+            # declares no such edge.
+            [string]   $CrateRoot = $null,
             [AllowNull()][string[]] $AllowedExternalTypes = @()
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
+        if ([string]::IsNullOrEmpty($CrateRoot)) { $CrateRoot = $Name.Replace('-', '_') }
         return [pscustomobject]@{
             Folder    = $Folder
             Name      = $Name
@@ -36,6 +43,7 @@ BeforeAll {
             Published = $Published
             Deps      = $Deps
             DepAliases = $DepAliases
+            CrateRoot = $CrateRoot
             IsProcMacroOnly = $IsProcMacroOnly
             AllowedExternalTypes = $AllowedExternalTypes
         }
@@ -963,13 +971,18 @@ Describe 'Resolve-ReleaseSet exposure cascade over re-exported types' {
         ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'breaking'
     }
 
-    It 'matches an indirect allowlist entry rooted at a rename alias' {
+    It "matches an indirect allowlist entry rooted at the target's [lib] name" {
+        # facade names def_v1::Handle because that is what rustdoc calls the
+        # type: the crate root follows defining's [lib] name, not its package
+        # name. facade cannot learn this from a rename alias -- it has no edge
+        # to defining to rename -- so the root has to come from the target.
         $baseline = @(
-            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                -AllowedExternalTypes @()
             New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
                 -AllowedExternalTypes @()
             New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
-                -DepAliases @{ defining = @('def_v1') } -AllowedExternalTypes @('def_v1::Handle')
+                -AllowedExternalTypes @('def_v1::Handle')
         )
         $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
 

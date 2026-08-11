@@ -376,6 +376,9 @@ function Test-EntryPlansBreakingRelease {
 #     cargo-check-external-types attributes a re-exported type to its defining
 #     crate, so a crate reaching `a::T` through `b` allowlists `a` while
 #     depending only on `b`. Requiring a direct edge missed these entirely.
+#     The root matched here is the target's own crate root (its [lib] name),
+#     not a rename alias: renames live on edges, and an indirect dependent
+#     declares no edge to the target to rename.
 #     This branch demands positive evidence rather than failing closed, so it
 #     cannot drag in transitive dependents that merely lack metadata -- those
 #     are already covered by their own direct edges, walked up by the fixpoint.
@@ -420,10 +423,12 @@ function Get-PublishedDependentsExposingTarget {
             $Resolved.Contains($_.Folder) -and
             $(
                 if ($_.Deps -contains $targetCargoName) {
-                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name
+                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name `
+                        -TargetCrateRoot $TargetPackage.CrateRoot
                 } else {
                     $reachable.Contains($_.Folder) -and
-                    (Test-PackageAllowlistNamesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name)
+                    (Test-PackageAllowlistNamesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name `
+                        -TargetCrateRoot $TargetPackage.CrateRoot)
                 }
             )
         })

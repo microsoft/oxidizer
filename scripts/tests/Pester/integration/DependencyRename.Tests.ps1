@@ -62,6 +62,32 @@ BeforeAll {
         }
         return New-SyntheticWorkspace -Spec $spec -Path $Path
     }
+    # defining -> relay -> facade, where defining's crate root is `def_core`
+    # and facade reaches a def_core type re-exported through relay. facade
+    # declares no edge to defining, so nothing on any edge it owns can tell it
+    # what defining's crate root is -- the root has to come from the target.
+    function New-IndirectLibNameWorkspace {
+        param(
+            [Parameter(Mandatory = $true)][string]$Path,
+            [string[]]$FacadeAllowedExternalTypes = @('def_core::Handle')
+        )
+        $spec = @{
+            Packages = @(
+                @{
+                    Name = 'facade'; Version = '1.0.0'
+                    Deps = @(@{ Name = 'relay' })
+                    AllowedExternalTypes = $FacadeAllowedExternalTypes
+                }
+                @{
+                    Name = 'relay'; Version = '1.0.0'
+                    Deps = @(@{ Name = 'defining' })
+                    AllowedExternalTypes = @()
+                }
+                @{ Name = 'defining'; Version = '1.0.0'; LibName = 'def_core'; AllowedExternalTypes = @() }
+            )
+        }
+        return New-SyntheticWorkspace -Spec $spec -Path $Path
+    }
 }
 
 Describe 'Renamed dependency exposure (via cargo metadata)' {
@@ -229,5 +255,47 @@ Describe 'Renamed crate root via [lib] name (via cargo metadata)' {
 
         $dependent.EffectiveChangeType    | Should -Be 'patch'
         $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+    }
+}
+
+Describe 'Indirect exposure of a diverted crate root (via cargo metadata)' {
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+    }
+
+    It 'cascades to an indirect dependent whose allowlist is rooted at the lib name' {
+        $ws = New-IndirectLibNameWorkspace -Path (Join-Path $TestDrive 'indirect-libname-cascade')
+        $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $stub = { param([string]$Folder, [string]$CargoName) 'none' }
+
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('defining@breaking')) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType $stub
+        $facade = $resolved | Where-Object { $_.Folder -eq 'facade' }
+
+        $facade.EffectiveChangeType    | Should -Be 'breaking'
+        $facade.EffectiveTargetVersion | Should -Be '2.0.0'
+        # relay claims to expose nothing, so it correctly stays at its floor --
+        # facade is reached on its own allowlist evidence, not through relay.
+        ($resolved | Where-Object { $_.Folder -eq 'relay' }).EffectiveChangeType | Should -Be 'patch'
+    }
+
+    It 'does not cascade to an indirect dependent that names an unrelated root' {
+        # Negative control: proves the test above passes because the allowlist
+        # names defining's crate root, not because the indirect branch fails open.
+        $ws = New-IndirectLibNameWorkspace -Path (Join-Path $TestDrive 'indirect-libname-nocascade') `
+            -FacadeAllowedExternalTypes @('unrelated_crate::Handle')
+        $baseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $stub = { param([string]$Folder, [string]$CargoName) 'none' }
+
+        $resolved = Resolve-ReleaseSet `
+            -ParsedTokens (Parse-ReleaseTokens -Tokens @('defining@breaking')) `
+            -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType $stub
+        $facade = $resolved | Where-Object { $_.Folder -eq 'facade' }
+
+        $facade.EffectiveChangeType    | Should -Be 'patch'
+        $facade.EffectiveTargetVersion | Should -Be '1.0.1'
     }
 }
