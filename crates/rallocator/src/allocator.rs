@@ -68,9 +68,9 @@ thread_local! {
     static TEST_FAIL_REMOTE_POP_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     #[cfg(test)]
     static TEST_FAIL_REMOTE_PUSH_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    #[cfg(test)]
+    #[cfg(all(test, not(miri)))]
     static TEST_FAIL_REMOTE_REFILL_CAS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    #[cfg(test)]
+    #[cfg(all(test, not(miri)))]
     static TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     // Production region metadata is retained for the process lifetime. Tests that unmap synthetic
     // regions clear this cache before releasing their metadata.
@@ -845,7 +845,7 @@ where
                 record_class_event(class_index, ClassEventKind::Allocation);
                 return block;
             }
-            #[cfg(test)]
+            #[cfg(all(test, not(miri)))]
             let refill = TEST_FAIL_REMOTE_REFILL_CAS.with(|fail| {
                 if fail.replace(false) {
                     class.refilling.store(true, Ordering::Relaxed);
@@ -854,12 +854,12 @@ where
                     class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
                 }
             });
-            #[cfg(not(test))]
+            #[cfg(any(not(test), miri))]
             let refill = class.refilling.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed);
             if refill.is_err() {
                 while class.refilling.load(Ordering::Acquire) {
                     spin_loop();
-                    #[cfg(test)]
+                    #[cfg(all(test, not(miri)))]
                     TEST_CLEAR_REMOTE_REFILL_AFTER_SPIN.with(|clear| {
                         if clear.replace(false) {
                             class.refilling.store(false, Ordering::Release);

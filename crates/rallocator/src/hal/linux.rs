@@ -45,6 +45,7 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
 }
 
 pub(crate) unsafe fn unmap(address: *mut u8, size: usize) {
+    // Linux accepts an unaligned length and unmaps every page intersecting the range.
     let released = unsafe { munmap(address.cast(), size) };
     abort_on_failure(released);
 }

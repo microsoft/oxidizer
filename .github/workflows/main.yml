@@ -397,7 +397,10 @@ jobs:
         run: just bolero 60s
 
   mutation-testing:
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    # Pull requests are covered by the diff-scoped, cross-platform anvil-pr
+    # mutation matrix. Keep this legacy job for merge-group validation without
+    # duplicating hours of mutation work on unusually large pull requests.
+    if: github.event_name == 'merge_group'
     needs: [testing]
     runs-on: ubuntu-latest
     steps:

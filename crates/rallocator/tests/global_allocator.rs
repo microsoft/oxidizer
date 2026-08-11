@@ -169,23 +169,31 @@ fn zeroed_allocation_and_reallocation_cover_general_routes() {
     for layout in [
         Layout::from_size_align(64, 16).unwrap(),
         Layout::from_size_align(128 * 1024, 64).unwrap(),
-        Layout::from_size_align(20 * 1024 * 1024, 4096).unwrap(),
     ] {
-        let address = unsafe { alloc_zeroed(layout) };
-        assert!(!address.is_null());
-        assert_eq!(address.addr() % layout.align(), 0);
-        assert!(
-            unsafe { std::slice::from_raw_parts(address, layout.size()) }
-                .iter()
-                .all(|byte| *byte == 0)
-        );
-        unsafe { dealloc(address, layout) };
+        unsafe { assert_zeroed_allocation(layout) };
+    }
+    #[cfg(not(miri))]
+    unsafe {
+        assert_zeroed_allocation(Layout::from_size_align(20 * 1024 * 1024, 4096).unwrap());
     }
 
     unsafe {
         assert_reallocation_preserves_prefix(64, 128 * 1024);
+        #[cfg(not(miri))]
         assert_reallocation_preserves_prefix(128 * 1024, 20 * 1024 * 1024);
     }
+}
+
+unsafe fn assert_zeroed_allocation(layout: Layout) {
+    let address = unsafe { alloc_zeroed(layout) };
+    assert!(!address.is_null());
+    assert_eq!(address.addr() % layout.align(), 0);
+    assert!(
+        unsafe { std::slice::from_raw_parts(address, layout.size()) }
+            .iter()
+            .all(|byte| *byte == 0)
+    );
+    unsafe { dealloc(address, layout) };
 }
 
 unsafe fn assert_reallocation_preserves_prefix(original_size: usize, new_size: usize) {
