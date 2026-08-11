@@ -15,6 +15,12 @@ use std::task::{Context, Poll, Waker};
 
 /// Polls a future exactly once with a no-op waker.
 ///
+/// The future must be [`Unpin`], because it is polled through a mutable
+/// reference the caller keeps across polls. Futures produced by `async fn` and
+/// `async {}` blocks are `!Unpin`, so either pin them first (for example with
+/// [`std::pin::pin!`]) or use the [`FutureTestExt`] methods, which take the
+/// future by value and pin it internally.
+///
 /// Use this when a test needs to inspect external state between polls, or poll
 /// the same future from several places. For the common
 /// "drive to a known outcome" case, prefer [`FutureTestExt`].
@@ -199,6 +205,14 @@ mod tests {
         assert_eq!(poll_once(&mut fut), Poll::Pending);
         assert_eq!(poll_once(&mut fut), Poll::Ready(5));
         assert_eq!(polls.get(), 2, "each call must poll the future exactly once");
+    }
+
+    #[test]
+    fn poll_once_accepts_a_pinned_async_block() {
+        // `async {}` futures are `!Unpin`; pinning first satisfies `poll_once`,
+        // as its doc comment instructs.
+        let mut fut = std::pin::pin!(async { 3_u32 });
+        assert_eq!(poll_once(&mut fut), Poll::Ready(3));
     }
 
     #[test]
