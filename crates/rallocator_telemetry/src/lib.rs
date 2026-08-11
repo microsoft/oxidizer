@@ -30,10 +30,32 @@
 //!
 //! Snapshot data is organized into [`snapshot`], [`topology`], and
 //! [`callers`]. The root exports encoding functions and their shared error.
+//!
+//! # Compatibility contract
+//!
+//! A snapshot has three independently versioned layers:
+//!
+//! - `rallocator_wire` owns the little-endian container header and
+//!   length-prefixed section framing. A framing change increments the wire
+//!   version, and readers reject unknown wire versions.
+//! - This crate owns the telemetry schema named by the header. A change that
+//!   reinterprets the snapshot as a whole increments that schema; readers
+//!   reject unsupported schema versions.
+//! - Each section owns its payload version. Compatible extensions increment
+//!   only that section version. Unknown sections and unsupported optional
+//!   section versions are skipped and reported through
+//!   [`snapshot::Snapshot::skipped_sections`].
+//!
+//! Metadata and statistics sections are required. Historical section versions
+//! accepted by the decoder receive documented neutral defaults for fields that
+//! did not yet exist. Producers must not change the meaning or byte order of an
+//! existing version.
 
 pub mod callers;
 pub mod snapshot;
 pub mod topology;
+
+use std::collections::{HashMap, HashSet};
 
 use callers::{AddressLookup, Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
 use rallocator_wire::format::{Header, Section};
@@ -56,7 +78,9 @@ const SECTION_HISTOGRAMS: u16 = 9;
 const SECTION_VERSION: u16 = 1;
 const TOPOLOGY_SECTION_VERSION: u16 = 2;
 const CALLERS_DIAGNOSTICS_VERSION: u16 = 2;
-const CALLERS_SECTION_VERSION: u16 = 3;
+const CALLERS_THREAD_NAMES_VERSION: u16 = 3;
+const CALLERS_STACK_TABLE_VERSION: u16 = 4;
+const CALLERS_SECTION_VERSION: u16 = CALLERS_STACK_TABLE_VERSION;
 const STATS_PAYLOAD_LEN: usize = 13 * 8;
 
 /// An error reported while encoding or decoding a telemetry snapshot.
@@ -753,18 +777,32 @@ fn callers_encoded_len(callers: Option<&Callers>) -> Result<usize, Error> {
         length = checked_add(length, 3 * 8 + 4 + checked_mul(thread.allocated_histogram.len(), 8)?)?;
         length = checked_add(length, 4 + checked_mul(thread.live_histogram.len(), 8)?)?;
     }
+    let stacks = unique_call_stacks(callers);
+    count(stacks.len())?;
     length = checked_add(length, 4)?;
-    for event in &callers.events {
-        count(event.call_stack.len())?;
-        length = checked_add(length, 8 * 8 + 4 + 3)?;
-        length = checked_add(length, checked_mul(event.call_stack.len(), 8)?)?;
+    for stack in stacks {
+        count(stack.len())?;
+        length = checked_add(length, 4 + checked_mul(stack.len(), 8)?)?;
     }
+    length = checked_add(length, 4)?;
+    length = checked_add(length, checked_mul(callers.events.len(), 8 * 8 + 4 + 3)?)?;
     length = checked_add(length, 4)?;
     for thread in &callers.thread_names {
         count(thread.name.len())?;
         length = checked_add(length, 8 + 4 + thread.name.len())?;
     }
     Ok(length)
+}
+
+fn unique_call_stacks(callers: &Callers) -> Vec<&[u64]> {
+    let mut stacks = Vec::new();
+    let mut seen = HashSet::new();
+    for event in &callers.events {
+        if seen.insert(event.call_stack.as_slice()) {
+            stacks.push(event.call_stack.as_slice());
+        }
+    }
+    stacks
 }
 
 fn write_callers(writer: &mut Writer<'_>, callers: Option<&Callers>) -> Result<(), Error> {
@@ -783,6 +821,19 @@ fn write_callers(writer: &mut Writer<'_>, callers: Option<&Callers>) -> Result<(
         writer.write_u64(thread.lost_events)?;
         write_histogram(writer, &thread.allocated_histogram)?;
         write_histogram(writer, &thread.live_histogram)?;
+    }
+    let stacks = unique_call_stacks(callers);
+    let stack_indexes = stacks
+        .iter()
+        .enumerate()
+        .map(|(index, &stack)| (stack, index))
+        .collect::<HashMap<_, _>>();
+    writer.write_u32(count(stacks.len())?)?;
+    for stack in &stacks {
+        writer.write_u32(count(stack.len())?)?;
+        for &instruction_pointer in *stack {
+            writer.write_u64(instruction_pointer)?;
+        }
     }
     writer.write_u32(count(callers.events.len())?)?;
     for event in &callers.events {
@@ -804,10 +855,8 @@ fn write_callers(writer: &mut Writer<'_>, callers: Option<&Callers>) -> Result<(
         writer.write_u64(event.address)?;
         writer.write_u64(event.size)?;
         writer.write_u64(event.align)?;
-        writer.write_u32(count(event.call_stack.len())?)?;
-        for &instruction_pointer in &event.call_stack {
-            writer.write_u64(instruction_pointer)?;
-        }
+        let stack_index = stack_indexes[event.call_stack.as_slice()];
+        writer.write_u32(count(stack_index)?)?;
     }
     writer.write_u32(count(callers.thread_names.len())?)?;
     for thread in &callers.thread_names {
@@ -818,6 +867,8 @@ fn write_callers(writer: &mut Writer<'_>, callers: Option<&Callers>) -> Result<(
 }
 
 fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>, Error> {
+    let expanded_frame_limit = reader.remaining() / 4;
+    let mut expanded_frames = 0_usize;
     match reader.read_u8()? {
         0 => return Ok(None),
         1 => {}
@@ -848,6 +899,27 @@ fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>
             },
         });
     }
+    let stacks = if version >= CALLERS_STACK_TABLE_VERSION {
+        let stack_count = usize_count(reader.read_u32()?)?;
+        if stack_count > reader.remaining() / 4 {
+            return Err(Error::malformed_section(SECTION_CALLERS));
+        }
+        let mut stacks = Vec::with_capacity(stack_count);
+        for _ in 0..stack_count {
+            let frame_count = usize_count(reader.read_u32()?)?;
+            if frame_count > reader.remaining() / 8 {
+                return Err(Error::malformed_section(SECTION_CALLERS));
+            }
+            let mut stack = Vec::with_capacity(frame_count);
+            for _ in 0..frame_count {
+                stack.push(reader.read_u64()?);
+            }
+            stacks.push(stack);
+        }
+        stacks
+    } else {
+        Vec::new()
+    };
     let event_count = usize_count(reader.read_u32()?)?;
     let minimum_event_bytes = if version >= CALLERS_DIAGNOSTICS_VERSION {
         8 * 8 + 4 + 3
@@ -898,13 +970,26 @@ fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>
         if address == 0 || align == 0 || !align.is_power_of_two() {
             return Err(Error::malformed_section(SECTION_CALLERS));
         }
-        let frame_count = usize_count(reader.read_u32()?)?;
-        if frame_count > reader.remaining() / 8 {
+        let call_stack = if version >= CALLERS_STACK_TABLE_VERSION {
+            let stack_index = usize_count(reader.read_u32()?)?;
+            stacks
+                .get(stack_index)
+                .cloned()
+                .ok_or_else(|| Error::malformed_section(SECTION_CALLERS))?
+        } else {
+            let frame_count = usize_count(reader.read_u32()?)?;
+            if frame_count > reader.remaining() / 8 {
+                return Err(Error::malformed_section(SECTION_CALLERS));
+            }
+            let mut call_stack = Vec::with_capacity(frame_count);
+            for _ in 0..frame_count {
+                call_stack.push(reader.read_u64()?);
+            }
+            call_stack
+        };
+        expanded_frames = expanded_frames.saturating_add(call_stack.len());
+        if expanded_frames > expanded_frame_limit {
             return Err(Error::malformed_section(SECTION_CALLERS));
-        }
-        let mut call_stack = Vec::with_capacity(frame_count);
-        for _ in 0..frame_count {
-            call_stack.push(reader.read_u64()?);
         }
         events.push(Event {
             thread_log_id,
@@ -921,7 +1006,7 @@ fn read_callers(reader: &mut Reader<'_>, version: u16) -> Result<Option<Callers>
             call_stack,
         });
     }
-    let thread_names = if version >= CALLERS_SECTION_VERSION {
+    let thread_names = if version >= CALLERS_THREAD_NAMES_VERSION {
         let count = usize_count(reader.read_u32()?)?;
         if count > reader.remaining() / (8 + 4) {
             return Err(Error::malformed_section(SECTION_CALLERS));
@@ -1155,7 +1240,135 @@ mod tests {
             events: vec![Event::default()],
             ..Callers::default()
         };
-        let mut bytes = [0_u8; 1 + 3 * 8 + 4 + 4 + 4 * 8 + 1 + 8];
+        let mut bytes = [0_u8; 82];
         write_callers(&mut Writer::new(&mut bytes), Some(&callers)).unwrap_err();
+    }
+
+    #[test]
+    fn caller_stack_table_deduplicates_equal_stacks() {
+        let callers = Callers {
+            events: vec![
+                Event {
+                    call_stack: vec![1, 2, 3],
+                    ..Event::default()
+                },
+                Event {
+                    call_stack: vec![1, 2, 3],
+                    ..Event::default()
+                },
+                Event {
+                    call_stack: vec![4, 5],
+                    ..Event::default()
+                },
+            ],
+            ..Callers::default()
+        };
+
+        assert_eq!(unique_call_stacks(&callers), [&[1, 2, 3][..], &[4, 5][..]]);
+    }
+
+    #[test]
+    fn caller_stack_references_cannot_amplify_without_bound() {
+        let mut payload = Vec::new();
+        payload.push(1);
+        payload.extend_from_slice(&1_u64.to_le_bytes());
+        payload.extend_from_slice(&100_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u64.to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+        payload.extend_from_slice(&1_u32.to_le_bytes());
+        payload.extend_from_slice(&64_u32.to_le_bytes());
+        for frame in 0..64_u64 {
+            payload.extend_from_slice(&frame.to_le_bytes());
+        }
+        payload.extend_from_slice(&100_u32.to_le_bytes());
+        for sequence in 0..100_u64 {
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.extend_from_slice(&sequence.to_le_bytes());
+            payload.extend_from_slice(&sequence.to_le_bytes());
+            payload.push(1);
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.push(1);
+            payload.push(0);
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.extend_from_slice(&1_u64.to_le_bytes());
+            payload.extend_from_slice(&0_u32.to_le_bytes());
+        }
+
+        let error = read_callers(&mut Reader::new(&payload), CALLERS_STACK_TABLE_VERSION).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::MalformedSection(SECTION_CALLERS));
+    }
+
+    #[test]
+    fn caller_stack_table_rejects_malformed_counts_and_references() {
+        fn prefix() -> Vec<u8> {
+            let mut payload = Vec::new();
+            payload.push(1);
+            payload.extend_from_slice(&0_u64.to_le_bytes());
+            payload.extend_from_slice(&0_u64.to_le_bytes());
+            payload.extend_from_slice(&0_u64.to_le_bytes());
+            payload.extend_from_slice(&0_u32.to_le_bytes());
+            payload
+        }
+
+        let mut excessive_stacks = prefix();
+        excessive_stacks.extend_from_slice(&1_u32.to_le_bytes());
+
+        let mut incomplete_stack = prefix();
+        incomplete_stack.extend_from_slice(&1_u32.to_le_bytes());
+        incomplete_stack.extend_from_slice(&1_u32.to_le_bytes());
+
+        let mut excessive_events = prefix();
+        excessive_events.extend_from_slice(&0_u32.to_le_bytes());
+        excessive_events.extend_from_slice(&1_u32.to_le_bytes());
+
+        let mut invalid_stack = prefix();
+        invalid_stack.extend_from_slice(&0_u32.to_le_bytes());
+        invalid_stack.extend_from_slice(&1_u32.to_le_bytes());
+        invalid_stack.extend_from_slice(&1_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&1_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&0_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&0_u64.to_le_bytes());
+        invalid_stack.push(1);
+        invalid_stack.extend_from_slice(&0_u64.to_le_bytes());
+        invalid_stack.push(1);
+        invalid_stack.push(0);
+        invalid_stack.extend_from_slice(&1_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&1_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&1_u64.to_le_bytes());
+        invalid_stack.extend_from_slice(&0_u32.to_le_bytes());
+
+        let mut incomplete_legacy_stack = prefix();
+        incomplete_legacy_stack.extend_from_slice(&1_u32.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&1_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&1_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&0_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&0_u64.to_le_bytes());
+        incomplete_legacy_stack.push(1);
+        incomplete_legacy_stack.extend_from_slice(&0_u64.to_le_bytes());
+        incomplete_legacy_stack.push(1);
+        incomplete_legacy_stack.push(0);
+        incomplete_legacy_stack.extend_from_slice(&1_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&1_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&1_u64.to_le_bytes());
+        incomplete_legacy_stack.extend_from_slice(&1_u32.to_le_bytes());
+
+        let mut excessive_thread_names = prefix();
+        excessive_thread_names.extend_from_slice(&0_u32.to_le_bytes());
+        excessive_thread_names.extend_from_slice(&0_u32.to_le_bytes());
+        excessive_thread_names.extend_from_slice(&1_u32.to_le_bytes());
+
+        for (payload, version) in [
+            (excessive_stacks, CALLERS_STACK_TABLE_VERSION),
+            (incomplete_stack, CALLERS_STACK_TABLE_VERSION),
+            (excessive_events, CALLERS_STACK_TABLE_VERSION),
+            (invalid_stack, CALLERS_STACK_TABLE_VERSION),
+            (incomplete_legacy_stack, CALLERS_THREAD_NAMES_VERSION),
+            (excessive_thread_names, CALLERS_STACK_TABLE_VERSION),
+        ] {
+            let error = read_callers(&mut Reader::new(&payload), version).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::MalformedSection(SECTION_CALLERS));
+        }
     }
 }

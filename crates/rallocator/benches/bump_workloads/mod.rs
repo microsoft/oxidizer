@@ -16,28 +16,27 @@ pub(crate) struct Workloads {
     pub vectors: fn(usize, usize),
     pub hash_maps: fn(usize, usize),
     pub arcs_4: fn(usize),
-    pub arcs_32: fn(usize),
     pub arcs_256: fn(usize),
     pub mixed_lifecycle: fn(usize, usize),
 }
 
-pub(crate) fn run(workloads: Workloads) {
+pub(crate) fn run(file_basename: &str, workloads: Workloads) {
     let mut criterion = Criterion::default()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
         .sample_size(20)
         .configure_from_args();
 
-    vector_workloads(&mut criterion, workloads.vectors);
-    hash_map_workloads(&mut criterion, workloads.hash_maps);
-    arc_workloads(&mut criterion, workloads);
-    mixed_lifecycle_workloads(&mut criterion, workloads.mixed_lifecycle);
+    vector_workloads(&mut criterion, file_basename, workloads.vectors);
+    hash_map_workloads(&mut criterion, file_basename, workloads.hash_maps);
+    arc_workloads(&mut criterion, file_basename, workloads);
+    mixed_lifecycle_workloads(&mut criterion, file_basename, workloads.mixed_lifecycle);
     criterion.final_summary();
 }
 
-fn vector_workloads(criterion: &mut Criterion, workload: fn(usize, usize)) {
-    let mut group = criterion.benchmark_group("container_vec");
-    for (count, length) in [(256, 8), (128, 64), (32, 1_024)] {
+fn vector_workloads(criterion: &mut Criterion, file_basename: &str, workload: fn(usize, usize)) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/container_vec"));
+    for (count, length) in [(256, 8), (32, 1_024)] {
         group.throughput(Throughput::Elements((count * length) as u64));
         group.bench_with_input(
             BenchmarkId::new("vectors_x_elements", format!("{count}x{length}")),
@@ -50,9 +49,9 @@ fn vector_workloads(criterion: &mut Criterion, workload: fn(usize, usize)) {
     group.finish();
 }
 
-fn hash_map_workloads(criterion: &mut Criterion, workload: fn(usize, usize)) {
-    let mut group = criterion.benchmark_group("container_hash_map");
-    for (count, entries) in [(128, 8), (64, 64), (32, 512)] {
+fn hash_map_workloads(criterion: &mut Criterion, file_basename: &str, workload: fn(usize, usize)) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/container_hash_map"));
+    for (count, entries) in [(128, 8), (32, 512)] {
         group.throughput(Throughput::Elements((count * entries) as u64));
         group.bench_with_input(
             BenchmarkId::new("maps_x_entries", format!("{count}x{entries}")),
@@ -65,13 +64,9 @@ fn hash_map_workloads(criterion: &mut Criterion, workload: fn(usize, usize)) {
     group.finish();
 }
 
-fn arc_workloads(criterion: &mut Criterion, workloads: Workloads) {
-    let mut group = criterion.benchmark_group("container_arc");
-    for (count, elements, workload) in [
-        (1_024, 4, workloads.arcs_4),
-        (512, 32, workloads.arcs_32),
-        (128, 256, workloads.arcs_256),
-    ] {
+fn arc_workloads(criterion: &mut Criterion, file_basename: &str, workloads: Workloads) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/container_arc"));
+    for (count, elements, workload) in [(1_024, 4, workloads.arcs_4), (128, 256, workloads.arcs_256)] {
         group.throughput(Throughput::Elements((count * elements) as u64));
         group.bench_with_input(
             BenchmarkId::new("arcs_x_elements", format!("{count}x{elements}")),
@@ -84,8 +79,8 @@ fn arc_workloads(criterion: &mut Criterion, workloads: Workloads) {
     group.finish();
 }
 
-fn mixed_lifecycle_workloads(criterion: &mut Criterion, workload: fn(usize, usize)) {
-    let mut group = criterion.benchmark_group("mixed_lifecycle");
+fn mixed_lifecycle_workloads(criterion: &mut Criterion, file_basename: &str, workload: fn(usize, usize)) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/mixed_lifecycle"));
     for (rounds, noise_allocations) in [(200, 64), (500, 32)] {
         group.throughput(Throughput::Elements(rounds as u64));
         group.bench_with_input(

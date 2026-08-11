@@ -50,6 +50,9 @@ These are the primary crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`rallocator`](./crates/rallocator/README.md) - A high-performance global allocator with scoped heap hints and telemetry.
+  - [Supported platforms](./crates/rallocator/README.md#supported-platforms)
+  - [Design guide](./crates/rallocator/README.md#design-guide)
+  - [Implementation guide](./crates/rallocator/README.md#implementation-guide)
 - [`rallocator_cli`](./crates/rallocator_cli/README.md) - Command-line tools for rallocator telemetry snapshots.
 - [`rallocator_telemetry`](./crates/rallocator_telemetry/README.md) - Owned rallocator snapshot schema and binary encoding.
 - [`rallocator_wire`](./crates/rallocator_wire/README.md) - Allocation-free wire primitives for rallocator telemetry.

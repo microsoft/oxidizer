@@ -17,14 +17,16 @@ thread_local! {
 }
 
 fn main() {
-    bump_workloads::run(bump_workloads::Workloads {
-        vectors,
-        hash_maps,
-        arcs_4: arcs::<4>,
-        arcs_32: arcs::<32>,
-        arcs_256: arcs::<256>,
-        mixed_lifecycle,
-    });
+    bump_workloads::run(
+        "bump_multitude",
+        bump_workloads::Workloads {
+            vectors,
+            hash_maps,
+            arcs_4: arcs::<4>,
+            arcs_256: arcs::<256>,
+            mixed_lifecycle,
+        },
+    );
 }
 
 fn vectors(count: usize, length: usize) {

@@ -11,5 +11,5 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-    workloads::run();
+    workloads::run("mimalloc");
 }

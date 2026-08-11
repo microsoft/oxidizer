@@ -335,10 +335,10 @@ fn unsupported_schemas_and_section_versions_are_handled() {
 
     let mut bytes = encoded(&fixture());
     let (callers, _) = section(&bytes, SECTION_CALLERS);
-    bytes[callers + 2..callers + 4].copy_from_slice(&4_u16.to_le_bytes());
+    bytes[callers + 2..callers + 4].copy_from_slice(&5_u16.to_le_bytes());
     let decoded = decode(&bytes).unwrap();
     assert!(decoded.callers.is_none());
-    assert_eq!(decoded.skipped_sections, vec![skipped_section(SECTION_CALLERS, 4)]);
+    assert_eq!(decoded.skipped_sections, vec![skipped_section(SECTION_CALLERS, 5)]);
 }
 
 #[test]
@@ -399,12 +399,61 @@ fn legacy_caller_events_decode_with_compatible_defaults() {
 fn callers_v2_diagnostics_decode_without_thread_names() {
     let mut expected = fixture();
     expected.callers.as_mut().unwrap().thread_names.clear();
+    let callers = expected.callers.as_ref().unwrap();
+    let mut payload = Vec::new();
+    payload.push(1);
+    payload.extend_from_slice(&callers.session_id.to_le_bytes());
+    payload.extend_from_slice(&callers.total_events.to_le_bytes());
+    payload.extend_from_slice(&callers.lost_events.to_le_bytes());
+    payload.extend_from_slice(&(callers.threads.len() as u32).to_le_bytes());
+    for thread in &callers.threads {
+        payload.extend_from_slice(&thread.thread_log_id.to_le_bytes());
+        payload.extend_from_slice(&thread.total_events.to_le_bytes());
+        payload.extend_from_slice(&thread.lost_events.to_le_bytes());
+        for histogram in [&thread.allocated_histogram, &thread.live_histogram] {
+            payload.extend_from_slice(&(histogram.len() as u32).to_le_bytes());
+            for &value in histogram {
+                payload.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+    payload.extend_from_slice(&(callers.events.len() as u32).to_le_bytes());
+    for event in &callers.events {
+        payload.extend_from_slice(&event.thread_log_id.to_le_bytes());
+        payload.extend_from_slice(&event.event_thread_id.to_le_bytes());
+        payload.extend_from_slice(&event.sequence.to_le_bytes());
+        payload.extend_from_slice(&event.allocation_id.to_le_bytes());
+        payload.push(match event.kind {
+            EventKind::Allocated => 1,
+            EventKind::Deallocated => 2,
+            _ => panic!("fixture contains an unsupported event kind"),
+        });
+        payload.extend_from_slice(&event.heap_id.to_le_bytes());
+        payload.push(match event.heap_kind {
+            HeapKind::General => 1,
+            HeapKind::Bump => 2,
+            HeapKind::Thread => 3,
+            _ => panic!("fixture contains an unsupported heap kind"),
+        });
+        payload.push(u8::from(event.freed_after_heap_release));
+        payload.extend_from_slice(&event.address.to_le_bytes());
+        payload.extend_from_slice(&event.size.to_le_bytes());
+        payload.extend_from_slice(&event.align.to_le_bytes());
+        payload.extend_from_slice(&(event.call_stack.len() as u32).to_le_bytes());
+        for &frame in &event.call_stack {
+            payload.extend_from_slice(&frame.to_le_bytes());
+        }
+    }
+
     let mut bytes = encoded(&expected);
-    let (header, payload) = section(&bytes, SECTION_CALLERS);
+    let (header, section_payload) = section(&bytes, SECTION_CALLERS);
     let old_length = u32::from_le_bytes(bytes[header + 4..header + 8].try_into().unwrap()) as usize;
-    bytes[header + 2..header + 4].copy_from_slice(&2_u16.to_le_bytes());
-    bytes.drain(payload + old_length - 4..payload + old_length);
-    write_u32(&mut bytes, header + 4, (old_length - 4) as u32);
+    let mut replacement = Vec::with_capacity(Section::encoded_len(payload.len()));
+    replacement.extend_from_slice(&SECTION_CALLERS.to_le_bytes());
+    replacement.extend_from_slice(&2_u16.to_le_bytes());
+    replacement.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    replacement.extend_from_slice(&payload);
+    bytes.splice(header..section_payload + old_length, replacement);
 
     assert_eq!(decode(&bytes).unwrap().callers, expected.callers);
 }
@@ -482,17 +531,17 @@ fn invalid_enum_discriminants_and_address_data_are_rejected() {
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
-    bytes[callers + 129] = 3;
+    bytes[callers + 157] = 3;
     decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
-    bytes[callers + 138] = u8::MAX;
+    bytes[callers + 166] = u8::MAX;
     decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());
     let (_, callers) = section(&bytes, SECTION_CALLERS);
-    write_u64(&mut bytes, callers + 140, 0);
+    write_u64(&mut bytes, callers + 168, 0);
     decode(&bytes).unwrap_err();
 
     let mut bytes = encoded(&fixture());

@@ -6,7 +6,11 @@
 use crate::Error;
 use crate::format::{self, Header, Section, Version};
 
-/// Allocation-free writer for a fixed output buffer.
+/// Allocation-free writer for an exactly sized output buffer.
+///
+/// Each section must consume exactly the payload length declared by
+/// [`Writer::begin_section`], and [`Writer::finish`] succeeds only after the
+/// entire output slice has been consumed.
 #[derive(Debug)]
 pub struct Writer<'a> {
     bytes: &'a mut [u8],
@@ -31,6 +35,11 @@ impl<'a> Writer<'a> {
     }
 
     /// Completes the current section and output buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the current section is underfilled or if any bytes
+    /// remain unused in the output slice.
     pub fn finish(self) -> Result<usize, Error> {
         if self.section_end.is_some_and(|end| end != self.position) {
             Err(Error::SECTION_LENGTH_MISMATCH)
@@ -54,6 +63,12 @@ impl<'a> Writer<'a> {
     }
 
     /// Starts a section with a declared payload length.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the previous section was not filled exactly, the
+    /// payload length cannot be encoded, or the section exceeds the output
+    /// buffer. Subsequent writes may not cross the declared section boundary.
     pub fn begin_section(&mut self, section_id: u16, section_version: u16, payload_len: usize) -> Result<(), Error> {
         self.finish_section()?;
         let payload_len = u32::try_from(payload_len).map_err(|_error| Error::LENGTH_OVERFLOW)?;

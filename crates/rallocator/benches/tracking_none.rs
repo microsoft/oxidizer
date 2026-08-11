@@ -8,5 +8,5 @@ mod workloads;
 rallocator::rallocator!();
 
 fn main() {
-    workloads::run();
+    workloads::run("tracking_none");
 }

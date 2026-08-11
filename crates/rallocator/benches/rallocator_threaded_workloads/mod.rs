@@ -18,13 +18,16 @@ use std::time::{Duration, Instant};
 use criterion::{BenchmarkId, Criterion, Throughput};
 
 const CROSS_THREAD_BATCH_SIZE: usize = 1_024;
-const CROSS_THREAD_SIZES: [usize; 6] = [16, 64, 256, 1_024, 4_096, 16_384];
+const CROSS_THREAD_SIZES: [usize; 3] = [
+    16, 4_096, // Retain the 4 KiB page boundary for remote frees.
+    16_384,
+];
 const MIXED_LIVE_ALLOCATIONS: usize = 256;
 const MIXED_OPERATIONS_PER_THREAD: usize = 100_000;
 const MIXED_SMALL_SIZES: [usize; 12] = [8, 16, 24, 42, 64, 96, 256, 1_003, 4_096, 8_192, 12_288, 16_384];
 const MIXED_MEDIUM_SIZES: [usize; 6] = [64 * 1_024, 96 * 1_024, 256 * 1_024, 512 * 1_024, 1_024 * 1_024, 2 * 1_024 * 1_024];
 const MIXED_LARGE_SIZES: [usize; 2] = [4 * 1_024 * 1_024, 8 * 1_024 * 1_024];
-const THREAD_COUNTS: [usize; 4] = [1, 2, 4, 8];
+const THREAD_COUNTS: [usize; 2] = [1, 8];
 
 struct OwnedAllocation {
     address: NonNull<u8>,

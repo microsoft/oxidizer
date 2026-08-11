@@ -12,5 +12,5 @@ rallocator::config!(AllTrackingConfig {
 rallocator::rallocator!(AllTrackingConfig);
 
 fn main() {
-    workloads::run();
+    workloads::run("tracking_all");
 }

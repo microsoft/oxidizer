@@ -121,7 +121,7 @@ pub(crate) fn usage(state: &BumpState) -> (usize, usize, usize, usize, usize, us
 
 // The exclusive heap claim serializes allocation and inspection. The seqcount
 // only stabilizes the non-atomic accounting fields against cross-thread frees.
-fn usage_with_retry_hook(state: &BumpState, retry_hook: fn(&BumpState)) -> (usize, usize, usize, usize, usize, usize) {
+fn usage_with_retry_hook(state: &BumpState, mut retry_hook: impl FnMut(&BumpState)) -> (usize, usize, usize, usize, usize, usize) {
     loop {
         let sequence = state.usage_sequence.load(Ordering::Acquire);
         if sequence & 1 != 0 {
@@ -267,6 +267,20 @@ unsafe fn finish_deallocation(
     rewind_to: *mut u8,
     reclaim_tail: bool,
 ) {
+    unsafe {
+        finish_deallocation_with_retry_hook(state, requested_bytes, used_bytes, allocation_end, rewind_to, reclaim_tail, || {});
+    }
+}
+
+unsafe fn finish_deallocation_with_retry_hook(
+    state: *mut BumpState,
+    requested_bytes: usize,
+    used_bytes: usize,
+    allocation_end: *mut u8,
+    rewind_to: *mut u8,
+    reclaim_tail: bool,
+    mut retry_hook: impl FnMut(),
+) {
     let sequence = loop {
         let sequence = unsafe { (*state).usage_sequence.load(Ordering::Acquire) };
         if sequence & 1 == 0
@@ -280,6 +294,7 @@ unsafe fn finish_deallocation(
             break sequence;
         }
         std::hint::spin_loop();
+        retry_hook();
     };
     unsafe { (*state).live_requested_bytes.fetch_sub(requested_bytes, Ordering::Relaxed) };
     let reclaimed = reclaim_tail && unsafe { (*state).cursor == allocation_end };
@@ -673,19 +688,22 @@ fn inject_failure(failure: &std::sync::Mutex<Option<std::thread::ThreadId>>) {
 }
 
 fn lock_global_pool() {
+    lock_global_pool_with_retry_hook(|| {});
+}
+
+fn lock_global_pool_with_retry_hook(mut retry_hook: impl FnMut()) {
     while GLOBAL_POOL
         .locked
         .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
     {
         std::hint::spin_loop();
+        retry_hook();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use allocation_hints::domain::Domain;
 
     use super::*;
@@ -696,17 +714,6 @@ mod tests {
     }
 
     static USAGE_RETRY_HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-    #[derive(Clone, Copy)]
-    struct SendState(*mut BumpState);
-
-    unsafe impl Send for SendState {}
-
-    impl SendState {
-        unsafe fn finish_usage_update(self) {
-            unsafe { (*self.0).usage_sequence.store(2, Ordering::Release) };
-        }
-    }
 
     fn state(options: Options) -> *mut BumpState {
         let state = create_state(options, default_domain_state()).unwrap();
@@ -724,6 +731,7 @@ mod tests {
         USAGE_RETRY_HOOK_CALLS.store(0, Ordering::Relaxed);
         let snapshot = usage_with_retry_hook(state_ref, |state| {
             let call = USAGE_RETRY_HOOK_CALLS.fetch_add(1, Ordering::Relaxed);
+            assert!(call < 4, "usage retry loop did not converge");
             state.usage_sequence.store(if call == 0 { 2 } else { 4 }, Ordering::Release);
         });
         assert_eq!(snapshot.0, BUMP_CHUNK_SIZE);
@@ -778,14 +786,24 @@ mod tests {
         let address = unsafe { allocate(state, layout) };
         assert!(!address.is_null());
         unsafe { (*state).usage_sequence.store(1, Ordering::Release) };
-        let state = SendState(state);
-        let release = std::thread::spawn(move || {
-            std::thread::yield_now();
-            unsafe { state.finish_usage_update() };
-        });
-        unsafe { deallocate(state.0, address, layout, false) };
-        release.join().unwrap();
-        unsafe { release_handle(state.0) };
+        let mut retries = 0;
+        unsafe {
+            finish_deallocation_with_retry_hook(
+                state,
+                layout.size(),
+                layout.size(),
+                address.add(layout.size()),
+                address,
+                false,
+                || {
+                    retries += 1;
+                    assert!(retries <= 2, "deallocation retry loop did not converge");
+                    (*state).usage_sequence.store(2, Ordering::Release);
+                },
+            );
+        }
+        assert_eq!(retries, 1);
+        unsafe { release_handle(state) };
     }
 
     #[test]
@@ -1013,18 +1031,13 @@ mod tests {
     fn global_pool_lock_spins_until_the_owner_releases_it() {
         crate::initialize();
         GLOBAL_POOL.locked.store(true, Ordering::Relaxed);
-        let started = Arc::new(AtomicBool::new(false));
-        let worker_started = Arc::clone(&started);
-        let worker = std::thread::spawn(move || {
-            worker_started.store(true, Ordering::Release);
-            lock_global_pool();
+        let mut retries = 0;
+        lock_global_pool_with_retry_hook(|| {
+            retries += 1;
+            assert!(retries <= 64, "global-pool retry loop did not converge");
             GLOBAL_POOL.locked.store(false, Ordering::Release);
         });
-        while !started.load(Ordering::Acquire) {
-            std::hint::spin_loop();
-        }
-        std::thread::yield_now();
+        assert!(retries >= 1);
         GLOBAL_POOL.locked.store(false, Ordering::Release);
-        worker.join().unwrap();
     }
 }

@@ -13,5 +13,5 @@ rallocator::rallocator!(AllTrackingWithCallersConfig);
 
 fn main() {
     rallocator::telemetry::track_callers(true);
-    workloads::run();
+    workloads::run("tracking_all_callers");
 }

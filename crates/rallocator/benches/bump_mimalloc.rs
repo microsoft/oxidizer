@@ -12,5 +12,5 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
-    bump_workloads::run(ordinary_workloads::WORKLOADS);
+    bump_workloads::run("bump_mimalloc", ordinary_workloads::WORKLOADS);
 }

@@ -15,7 +15,12 @@ pub trait Config {
     /// Whether caller tracking can be enabled at runtime.
     const TRACK_CALLERS: bool;
 
-    /// Number of caller events retained per thread.
+    /// Number of caller events retained per participating thread.
+    ///
+    /// Enabling caller tracking lazily allocates a fixed-capacity event ring and
+    /// stack-interning table for each thread that records an event. A completed
+    /// session remains registered until the next session starts. A thread keeps
+    /// its current session state until it exits or observes a later session.
     const CALLER_EVENT_CAPACITY: usize;
 
     /// Maximum allocation stack depth retained in caller events.
@@ -27,7 +32,9 @@ pub trait Config {
     /// Whether caller events identify the thread performing each operation.
     const CALLER_TRACK_THREADS: bool;
 
-    /// Whether caller events identify heap kind and post-release frees.
+    /// Whether caller events retain heap identity and post-release free state.
+    ///
+    /// Heap kind is always recorded.
     const CALLER_TRACK_HEAP_LIFETIMES: bool;
 }
 
@@ -58,7 +65,7 @@ impl Config for Standard {
 /// | `caller_allocation_stack_frames` | `16` | Captured allocation stack frames, through 24. |
 /// | `caller_deallocation_stack_frames` | `16` | Captured deallocation stack frames, through 24. |
 /// | `caller_track_threads` | `true` | Records allocation and deallocation thread identities. |
-/// | `caller_track_heap_lifetimes` | `true` | Records heap identity, kind, and post-release frees. |
+/// | `caller_track_heap_lifetimes` | `true` | Retains heap identity and whether a free occurred after release; heap kind is always recorded. |
 /// | `tunables` | [`crate::tunables::Standard`] | Selects allocator tunables. |
 ///
 /// ```

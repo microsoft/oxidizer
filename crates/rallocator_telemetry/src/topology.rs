@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Physical allocator topology model types.
+//! Allocator virtual-address topology model types.
 
 /// Classifies an allocator slice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -71,7 +71,7 @@ impl Segment {
     }
 }
 
-/// A physical allocator slice.
+/// A slice of an allocator-managed virtual-address region.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Slice {

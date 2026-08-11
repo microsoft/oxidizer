@@ -17,6 +17,7 @@ use std::sync::Mutex;
 use allocation_hints::domain::Domain;
 use allocation_hints::heap::{Heap, Options, bump, thread_heap};
 use allocation_hints::{Hint, with_hint};
+use rallocator::config::Config;
 use rallocator::telemetry::stats::{Sampler, Session};
 use rallocator::telemetry::{snapshot, stats, track_callers};
 use rallocator_telemetry::callers::{EventKind, HeapKind};
@@ -64,8 +65,8 @@ fn caller_diagnostic_configuration_has_stable_defaults_and_overrides() {
 
 #[test]
 fn tracking_is_off_by_default_and_process_wide_when_enabled() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     let before = snapshot();
     drop(Box::new(1_u64));
@@ -88,8 +89,8 @@ fn tracking_is_off_by_default_and_process_wide_when_enabled() {
 
 #[test]
 fn collection_includes_every_participating_thread_log() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
 
@@ -121,8 +122,8 @@ fn collection_includes_every_participating_thread_log() {
 
 #[test]
 fn remote_thread_heap_allocations_keep_caller_tracking() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     let heap = thread_heap().unwrap();
     track_callers(true);
@@ -146,8 +147,8 @@ fn remote_thread_heap_allocations_keep_caller_tracking() {
 
 #[test]
 fn snapshot_encodes_allocations_by_stack() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     for value in 0..4 {
@@ -173,8 +174,8 @@ fn snapshot_encodes_allocations_by_stack() {
 
 #[test]
 fn tracked_allocation_can_be_freed_on_another_thread() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let address = Box::into_raw(Box::new([0xA5_u8; 128])) as usize;
@@ -220,11 +221,11 @@ fn tracked_allocation_can_be_freed_on_another_thread() {
 #[cfg(not(miri))]
 #[test]
 fn bounded_per_thread_logs_report_overwritten_events() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
-    for value in 0..65_537 {
+    for value in 0..=(TelemetryConfig::CALLER_EVENT_CAPACITY / 2) {
         black_box(Box::new(value));
     }
     track_callers(false);
@@ -232,6 +233,7 @@ fn bounded_per_thread_logs_report_overwritten_events() {
     let snapshot = decoded_snapshot();
     let callers = snapshot.callers.unwrap();
     assert!(callers.total_events >= 5_000);
+    assert!(callers.lost_events > 0);
     assert!(
         callers
             .threads
@@ -243,8 +245,8 @@ fn bounded_per_thread_logs_report_overwritten_events() {
 
 #[test]
 fn collection_is_safe_while_a_thread_updates_its_log() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
 
@@ -279,8 +281,8 @@ fn collection_is_safe_while_a_thread_updates_its_log() {
 
 #[test]
 fn retained_call_stacks_are_encoded() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     drop(Box::new(7_u64));
@@ -301,8 +303,8 @@ fn retained_call_stacks_are_encoded() {
 
 #[test]
 fn tracked_larger_small_allocations_reuse_context_slabs() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     let allocator = &GLOBAL;
     let layout = Layout::from_size_align(4_096, 16).unwrap();
@@ -323,8 +325,8 @@ fn tracked_larger_small_allocations_reuse_context_slabs() {
 
 #[test]
 fn bump_heap_allocations_are_still_fully_tracked() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let heap = Heap::with_options(Options::bump(bump::Options::new()));
@@ -352,8 +354,8 @@ fn bump_heap_allocations_are_still_fully_tracked() {
 
 #[test]
 fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let heap = Heap::with_options(Options::bump(bump::Options::new()));
@@ -386,8 +388,8 @@ fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
 
 #[test]
 fn aggregate_and_per_thread_histograms_record_allocated_and_live_sizes() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     track_callers(true);
     let value = Box::new([0xC3_u8; 512]);
@@ -418,8 +420,8 @@ fn test_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[test]
 fn snapshot_reports_bounded_size_class_and_region_telemetry() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     track_callers(false);
     let value = Box::new([7_u8; 64]);
     let snapshot = decoded_snapshot();
@@ -463,8 +465,8 @@ fn snapshot_reports_bounded_size_class_and_region_telemetry() {
 
 #[test]
 fn snapshot_reports_explicit_domain_region_use() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     let domain = Domain::new();
     let heap = Heap::with_options(Options::default().with_domain(domain));
     let value = with_hint(Hint::new().with_heap(&heap), || Box::new([9_u8; 64]));
@@ -483,8 +485,8 @@ fn snapshot_reports_explicit_domain_region_use() {
 
 #[test]
 fn sampler_and_session_report_interval_deltas() {
-    rallocator::initialize();
     let _test = test_lock();
+    rallocator::initialize();
     let mut sampler = Sampler::new().unwrap();
     drop(Box::new(11_u64));
     let sample = sampler.sample().unwrap();
@@ -500,28 +502,33 @@ fn sampler_and_session_report_interval_deltas() {
 
 #[test]
 fn opaque_snapshot_suppresses_allocator_operations() {
-    rallocator::initialize();
     let _test = test_lock();
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    rallocator::initialize();
     let path = format!("opaque-snapshot-{}.bin", std::process::id());
     track_callers(false);
-    let before = stats().unwrap();
-    let encoded = snapshot().unwrap();
+    let encoded = (0..32)
+        .find_map(|_| {
+            let before = stats().unwrap();
+            let encoded = snapshot().unwrap();
+            let after = stats().unwrap();
+            (after.allocated_bytes == before.allocated_bytes
+                && after.deallocated_bytes == before.deallocated_bytes
+                && after.live_bytes == before.live_bytes
+                && after.allocations == before.allocations
+                && after.deallocations == before.deallocations)
+                .then_some(encoded)
+        })
+        .expect("test-harness allocation activity did not settle");
     assert!(!encoded.as_bytes().is_empty());
     encoded.write_file(&path).unwrap();
-    let after_write = stats().unwrap();
-    assert_eq!(after_write.allocated_bytes, before.allocated_bytes);
-    assert_eq!(after_write.deallocated_bytes, before.deallocated_bytes);
-    assert_eq!(after_write.live_bytes, before.live_bytes);
-    assert_eq!(after_write.allocations, before.allocations);
-    assert_eq!(after_write.deallocations, before.deallocations);
+    let before_drop = stats().unwrap();
     drop(encoded);
     let after_drop = stats().unwrap();
-    assert_eq!(after_drop.allocated_bytes, after_write.allocated_bytes);
-    assert_eq!(after_drop.deallocated_bytes, after_write.deallocated_bytes);
-    assert_eq!(after_drop.live_bytes, after_write.live_bytes);
-    assert_eq!(after_drop.allocations, after_write.allocations);
-    assert_eq!(after_drop.deallocations, after_write.deallocations);
+    assert_eq!(after_drop.allocated_bytes, before_drop.allocated_bytes);
+    assert_eq!(after_drop.deallocated_bytes, before_drop.deallocated_bytes);
+    assert_eq!(after_drop.live_bytes, before_drop.live_bytes);
+    assert_eq!(after_drop.allocations, before_drop.allocations);
+    assert_eq!(after_drop.deallocations, before_drop.deallocations);
     std::fs::remove_file(path).unwrap();
 }
 

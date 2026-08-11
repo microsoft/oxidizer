@@ -30,7 +30,7 @@ const MEDIUM_SIZES: [usize; 8] = [
     8 * 1024 * 1024,
     16 * 1024 * 1024,
 ];
-const VERY_LARGE_SIZES: [usize; 3] = [128 * 1024 * 1024, 256 * 1024 * 1024, 384 * 1024 * 1024];
+const LARGE_MEDIUM_SPAN_SIZES: [usize; 3] = [128 * 1024 * 1024, 256 * 1024 * 1024, 384 * 1024 * 1024];
 
 #[derive(Clone, Copy)]
 struct LiveAllocation {
@@ -38,26 +38,30 @@ struct LiveAllocation {
     layout: Layout,
 }
 
-pub(crate) fn run() {
+pub(crate) fn run(file_basename: &str) {
     let mut criterion = Criterion::default()
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(3))
         .sample_size(20)
         .configure_from_args();
 
-    single_allocations(&mut criterion);
-    odd_sized_allocations(&mut criterion);
-    large_allocations(&mut criterion);
-    aligned_allocations(&mut criterion);
-    allocation_bursts(&mut criterion);
-    mixed_scale_bursts(&mut criterion);
+    single_allocations(&mut criterion, file_basename);
+    odd_sized_allocations(&mut criterion, file_basename);
+    medium_span_allocations(&mut criterion, file_basename);
+    aligned_allocations(&mut criterion, file_basename);
+    allocation_bursts(&mut criterion, file_basename);
+    mixed_scale_bursts(&mut criterion, file_basename);
     criterion.final_summary();
 }
 
-fn single_allocations(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("single_allocation");
+fn single_allocations(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/single_allocation"));
 
-    for size in [16, 64, 256, 4_096, 16_384, 65_536, 262_144, 524_288, 1_048_576] {
+    for size in [
+        16, 4_096,  // Retain the 4 KiB page boundary.
+        65_536, // Retain the 64 KiB OS-granularity boundary.
+        1_048_576,
+    ] {
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, &size| {
             let layout = Layout::from_size_align(size, 8).unwrap();
@@ -68,10 +72,14 @@ fn single_allocations(criterion: &mut Criterion) {
     group.finish();
 }
 
-fn odd_sized_allocations(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("odd_sized_allocation");
+fn odd_sized_allocations(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/odd_sized_allocation"));
 
-    for size in [17, 255, 1_003, 4_097, 16_385, 65_537, 100_003, 524_289, 1_048_583, 3_145_745] {
+    for size in [
+        17, 4_097,  // Just over the 4 KiB page boundary.
+        65_537, // Just over the 64 KiB OS-granularity boundary.
+        3_145_745,
+    ] {
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, &size| {
             let layout = Layout::from_size_align(size, 8).unwrap();
@@ -82,10 +90,10 @@ fn odd_sized_allocations(criterion: &mut Criterion) {
     group.finish();
 }
 
-fn large_allocations(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("large_allocation");
+fn medium_span_allocations(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/medium_span_allocation"));
 
-    for size in [16 * 1024 * 1024, 32 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024] {
+    for size in [16 * 1024 * 1024, 128 * 1024 * 1024] {
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, &size| {
             let layout = Layout::from_size_align(size, 8).unwrap();
@@ -96,10 +104,13 @@ fn large_allocations(criterion: &mut Criterion) {
     group.finish();
 }
 
-fn aligned_allocations(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("aligned_allocation");
+fn aligned_allocations(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/aligned_allocation"));
 
-    for alignment in [8, 64, 4_096, 65_536] {
+    for alignment in [
+        8, 4_096, // Retain the page-aligned case.
+        65_536,
+    ] {
         group.bench_with_input(BenchmarkId::from_parameter(alignment), &alignment, |bencher, &alignment| {
             let layout = Layout::from_size_align(256, alignment).unwrap();
             bencher.iter(|| allocate_then_deallocate(black_box(layout)));
@@ -109,10 +120,14 @@ fn aligned_allocations(criterion: &mut Criterion) {
     group.finish();
 }
 
-fn allocation_bursts(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("allocation_burst");
+fn allocation_bursts(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/allocation_burst"));
 
-    for size in [32, 256, 4_096, 65_536, 262_144, 524_288] {
+    for size in [
+        32, 4_096,  // Retain the 4 KiB page boundary.
+        65_536, // Retain the 64 KiB OS-granularity boundary.
+        524_288,
+    ] {
         group.throughput(Throughput::Elements(BURST_SIZE as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |bencher, &size| {
             let layout = Layout::from_size_align(size, 8).unwrap();
@@ -123,8 +138,8 @@ fn allocation_bursts(criterion: &mut Criterion) {
     group.finish();
 }
 
-fn mixed_scale_bursts(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("mixed_scale_burst");
+fn mixed_scale_bursts(criterion: &mut Criterion, file_basename: &str) {
+    let mut group = criterion.benchmark_group(format!("{file_basename}/mixed_scale_burst"));
     group.throughput(Throughput::Elements(MIXED_OPERATIONS as u64));
     group.bench_function("4m_operations", |bencher| bencher.iter(|| black_box(run_mixed_scale_burst())));
     group.finish();
@@ -144,7 +159,7 @@ fn run_mixed_scale_burst() -> usize {
         random = xorshift64(random);
 
         if operation % 1_000_000 == 999_999 {
-            let size = VERY_LARGE_SIZES[(random as usize) % VERY_LARGE_SIZES.len()];
+            let size = LARGE_MEDIUM_SPAN_SIZES[(random as usize) % LARGE_MEDIUM_SPAN_SIZES.len()];
             let layout = Layout::from_size_align(size, 64 * 1024).unwrap();
             let allocation = allocate(layout);
             checksum ^= allocation.address.addr().rotate_left((operation % usize::BITS as usize) as u32);

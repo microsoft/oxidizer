@@ -167,7 +167,7 @@ pub(crate) fn render_html(snapshot: &Snapshot) -> String {
         "<section><details><summary>{}</summary>",
         concept(
             "Retained caller stacks",
-            "Call stacks grouped by allocation site for allocations still live in the retained event log."
+            "Call stacks grouped by allocation site for unmatched allocations retained in the bounded event log."
         )
     )
     .unwrap();
@@ -194,7 +194,7 @@ fn render_domains(html: &mut String, snapshot: &Snapshot) {
     )
     .unwrap();
     if snapshot.domains.is_empty() {
-        html.push_str("<p class=\"section-note\">This snapshot predates domain telemetry. Its regions belonged to the allocator's former single process-wide region pool.</p></section>");
+        html.push_str("<p class=\"section-note\">Domain telemetry is unavailable in this snapshot.</p></section>");
         return;
     }
 
@@ -271,15 +271,15 @@ fn render_physical_topology(html: &mut String, snapshot: &Snapshot) {
         html,
         "<section id=\"physical-topology\" class=\"topology-kind\"><h2>{}</h2>",
         concept(
-            "Physical regions",
-            "Large virtual-address reservations from which rallocator assigns 64 KiB slices."
+            "Virtual regions",
+            "Large virtual-address reservations from which rallocator assigns equal-sized slices."
         )
     )
     .unwrap();
     if snapshot.topology.is_empty() {
         write!(
             html,
-            "<p class=\"section-note\">This snapshot predates physical slice metadata.</p><table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>",
+            "<p class=\"section-note\">Detailed slice topology is unavailable in this snapshot.</p><table><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>",
             concept("Region", "A large reserved virtual-address range managed as equal-sized slices."),
             concept("Reserved", "Virtual address space reserved for this region."),
             concept("Used slices", "Slices currently assigned to allocator structures."),
@@ -517,9 +517,9 @@ fn render_region(html: &mut String, region: &TopologyRegion, domain: Option<&Dom
 }
 
 fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
-    let mut segments = BTreeMap::<(u32, bool, u64), u64>::new();
+    let mut segments = BTreeMap::<(u32, bool, u64, u64), u64>::new();
     let mut medium = Vec::new();
-    let mut bumps = BTreeMap::<u64, u64>::new();
+    let mut bumps = BTreeMap::<(u64, u64), u64>::new();
     let mut owners = BTreeMap::<u64, [u64; 3]>::new();
     let block_sizes = snapshot
         .size_classes
@@ -530,7 +530,10 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
     for region in &snapshot.topology {
         for slice in &region.slices {
             for segment in &slice.segments {
-                *segments.entry((segment.class_index, segment.context, slice.owner)).or_default() += 1;
+                let segment_bytes = region.slice_bytes / 2;
+                *segments
+                    .entry((segment.class_index, segment.context, slice.owner, segment_bytes))
+                    .or_default() += 1;
                 if slice.owner != 0 {
                     owners.entry(slice.owner).or_default()[0] += 1;
                 }
@@ -541,7 +544,7 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
                     owners.entry(slice.owner).or_default()[1] += 1;
                 }
             } else if slice.kind == SliceKind::Bump {
-                *bumps.entry(slice.owner).or_default() += 1;
+                *bumps.entry((slice.owner, region.slice_bytes)).or_default() += 1;
                 if slice.owner != 0 {
                     owners.entry(slice.owner).or_default()[2] += 1;
                 }
@@ -552,17 +555,17 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
     write!(
         html,
         "<section><details><summary>{}</summary><h3>{}</h3><table class=\"compact\"><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>",
-        concept("Segments, spans, bumps, and owners", "The allocator structures layered on top of physical region slices."),
-        concept("Small-allocation slab segments", "32 KiB slab halves divided into fixed-size blocks for one size class."),
+        concept("Segments, spans, bumps, and owners", "The allocator structures layered on top of virtual-address region slices."),
+        concept("Small-allocation slab segments", "Slab halves divided into fixed-size blocks for one size class."),
         concept("Class", "The size-class index selecting a fixed block size."),
         concept("Block size", "Usable bytes provided by every allocation block housed in this slab segment."),
         concept("Role", "General slabs serve ordinary allocations; context slabs support allocator context metadata and special paths."),
         concept("Owner", "Opaque identity associated with the heap or remote owner managing these segments."),
-        concept("32 KiB segments", "Count of physical 32 KiB slab halves in this group."),
-        concept("Physical bytes", "Total backing bytes occupied by these slab segments."),
+        concept("Segments", "Count of slab halves in this group."),
+        concept("Backing bytes", "Total virtual-region backing capacity occupied by these slab segments."),
     )
     .unwrap();
-    for ((class_index, context, owner), count) in &segments {
+    for ((class_index, context, owner, segment_bytes), count) in &segments {
         write!(
             html,
             "<tr><td>#{class_index}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
@@ -573,7 +576,7 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
             if *context { "Context" } else { "General" },
             format_owner(*owner),
             format_count(*count),
-            format_bytes(*count * 32 * 1024),
+            format_bytes(count.saturating_mul(*segment_bytes)),
         )
         .unwrap();
     }
@@ -586,14 +589,14 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
         "</table><h3>{}</h3><table class=\"compact\"><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr>",
         concept(
             "Medium spans",
-            "Contiguous 64 KiB slices used for allocations too large for small slabs but below direct-mapping thresholds."
+            "Contiguous region slices used for allocations too large for small slabs but below direct-mapping thresholds."
         ),
-        concept("Region / slice", "Physical region and starting slice of the span."),
+        concept("Region / slice", "Virtual-address region and starting slice of the span."),
         concept(
             "State",
             "Whether the span backs a live allocation or is retained in a medium cache/free list."
         ),
-        concept("Span", "Number of contiguous 64 KiB slices in the medium extent."),
+        concept("Span", "Number of contiguous region slices in the medium extent."),
         concept("Requested", "Bytes requested by the live medium allocation."),
         concept("Usable", "Capacity provided by the complete slice span."),
         concept(
@@ -629,23 +632,23 @@ fn render_allocator_structures(html: &mut String, snapshot: &Snapshot) {
         "</table><h3>{}</h3><table class=\"compact\"><tr><th>{}</th><th>{}</th><th>{}</th></tr>",
         concept(
             "Bump backing",
-            "Physical chunks retained by bump heaps for fast sequential allocation and bulk reuse."
+            "Region slices retained by bump heaps for fast sequential allocation and bulk reuse."
         ),
         concept(
             "Bump state",
             "Opaque identity of one bump heap state shared by its chunks and escaped allocations."
         ),
-        concept("64 KiB chunks", "Number of region slices assigned as chunks to this bump state."),
-        concept("Backing bytes", "Total physical slice capacity retained by the bump state."),
+        concept("Chunks", "Number of region slices assigned as chunks to this bump state."),
+        concept("Backing bytes", "Total slice capacity retained by the bump state."),
     )
     .unwrap();
-    for (owner, chunks) in &bumps {
+    for ((owner, slice_bytes), chunks) in &bumps {
         write!(
             html,
             "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
             format_owner(*owner),
             format_count(*chunks),
-            format_bytes(*chunks * 64 * 1024),
+            format_bytes(chunks.saturating_mul(*slice_bytes)),
         )
         .unwrap();
     }
@@ -903,7 +906,15 @@ fn render_hotspot_group(html: &mut String, title: &str, hotspots: &HashMap<(Vec<
     let mut hotspots = hotspots.iter().collect::<Vec<_>>();
     hotspots.sort_unstable_by(|(_, left), (_, right)| right.bytes.cmp(&left.bytes).then_with(|| right.count.cmp(&left.count)));
     let empty = hotspots.is_empty();
-    write!(html, "<details><summary>{}</summary><ol>", escape_html(title)).unwrap();
+    let total = hotspots.len();
+    write!(
+        html,
+        "<details><summary>{} (showing {} of {})</summary><ol>",
+        escape_html(title),
+        total.min(16),
+        total
+    )
+    .unwrap();
     for ((allocation_stack, deallocation_stack), hotspot) in hotspots.into_iter().take(16) {
         write!(
             html,
@@ -1183,18 +1194,31 @@ fn render_callers(html: &mut String, callers: &Callers, addresses: &[AddressLook
 
     write!(
         html,
-        "<details><summary>General live-allocation hotspots</summary><p class=\"muted\">Session {} · {} events · {} lost · {} thread logs</p><ol>",
+        "<details><summary>{} (showing {} of {})</summary><p class=\"muted\">Session {} · {} events · {} lost · {} thread logs{}</p><ol>",
+        if callers.lost_events == 0 {
+            "General live-allocation hotspots"
+        } else {
+            "Uncertain retained-allocation candidates"
+        },
+        totals.len().min(8),
+        totals.len(),
         callers.session_id,
         format_count(callers.total_events),
         format_count(callers.lost_events),
-        callers.threads.len()
+        callers.threads.len(),
+        if callers.lost_events == 0 {
+            ""
+        } else {
+            " · lost events can hide matching deallocations"
+        }
     )
     .unwrap();
     for total in totals.iter().take(8) {
         write!(
             html,
-            "<li><strong>{} live in {} allocations</strong> <span class=\"muted\">({} allocated in {}, {} freed)</span>",
+            "<li><strong>{} {} in {} allocations</strong> <span class=\"muted\">({} allocated in {}, {} freed)</span>",
             format_bytes(total.live_bytes),
+            if callers.lost_events == 0 { "live" } else { "unmatched" },
             format_count(total.live_allocations),
             format_bytes(total.allocated_bytes),
             format_count(total.allocations),

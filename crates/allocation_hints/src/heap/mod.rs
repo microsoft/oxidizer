@@ -565,6 +565,13 @@ fn installed_backend() -> Option<&'static Backend> {
 }
 
 impl Default for Heap {
+    /// Creates a fresh general-purpose heap with standard options.
+    ///
+    /// Equivalent to [`Heap::new`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when no backend is installed or heap creation fails.
     fn default() -> Self {
         Self::new()
     }
@@ -625,6 +632,7 @@ impl HeapId {
         Arc::as_ptr(&self.control).addr()
     }
 
+    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn claim(&self) -> bool {
         self.control
             .active

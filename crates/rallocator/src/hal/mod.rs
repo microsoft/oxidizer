@@ -26,7 +26,7 @@ pub(crate) use native::{
     MEDIUM_MAX_SLICES, MEDIUM_REGION_SIZE, initialize_storage, peek_free_requested, read_free_next, read_free_requested,
     release_free_metadata, release_storage, write_free_next, write_free_requested,
 };
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) use platform::{capture_stack, monotonic_millis, unmap};
 #[cfg(all(not(miri), target_os = "windows"))]
 use win64 as platform;
@@ -61,7 +61,7 @@ mod faults {
     }
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) fn map(size: usize) -> *mut u8 {
     #[cfg(test)]
     if faults::take(faults::MAP) {
@@ -70,7 +70,7 @@ pub(crate) fn map(size: usize) -> *mut u8 {
     platform::map(size)
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) fn reserve(size: usize) -> *mut u8 {
     #[cfg(test)]
     if faults::take(faults::RESERVE) {
@@ -79,7 +79,7 @@ pub(crate) fn reserve(size: usize) -> *mut u8 {
     platform::reserve(size)
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
     if faults::take(faults::COMMIT) {
@@ -88,7 +88,7 @@ pub(crate) unsafe fn commit(address: *mut u8, size: usize) -> bool {
     unsafe { platform::commit(address, size) }
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn commit_locality_segment(address: *mut u8, segment_size: usize, slab_size: usize) -> Option<usize> {
     #[cfg(test)]
     if faults::take(faults::COMMIT_LOCALITY_SEGMENT) {
@@ -97,7 +97,7 @@ pub(crate) unsafe fn commit_locality_segment(address: *mut u8, segment_size: usi
     unsafe { platform::commit_locality_segment(address, segment_size, slab_size) }
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn commit_locality_slab(address: *mut u8, slab_size: usize) -> Option<usize> {
     #[cfg(test)]
     if faults::take(faults::COMMIT_LOCALITY_SLAB) {
@@ -114,7 +114,7 @@ pub(crate) unsafe fn commit_locality_slab(address: *mut u8, slab_size: usize) ->
     unsafe { platform::commit_locality_slab(address, slab_size) }
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     #[cfg(test)]
     if faults::take(faults::DECOMMIT) {
@@ -123,7 +123,7 @@ pub(crate) unsafe fn decommit(address: *mut u8, size: usize) -> bool {
     unsafe { platform::decommit(address, size) }
 }
 
-#[cfg(not(miri))]
+#[cfg(all(not(miri), any(target_os = "linux", target_os = "windows")))]
 pub(crate) fn align_offset(address: *mut u8, alignment: usize) -> usize {
     #[cfg(test)]
     if faults::take(faults::ALIGN_OFFSET) {

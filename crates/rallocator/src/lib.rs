@@ -68,6 +68,13 @@
 
 //! A pure-Rust, high-performance allocator integrated with [`allocation_hints`].
 //!
+//! # Supported platforms
+//!
+//! `rallocator` currently supports Windows and Linux. Other operating systems
+//! are outside the crate's public support contract and intentionally fail to
+//! compile. Miri uses an internal test backend and is not a production support
+//! target.
+//!
 //! # Usage
 //!
 //! ## General use
@@ -118,7 +125,10 @@
 //! fn main() -> std::io::Result<()> {
 //!     rallocator::initialize();
 //!     track_callers(true);
-//!     let values = vec![1, 2, 3];
+//!     let mut values = vec![1, 2, 3];
+//!     values[0] += 1;
+//!     std::hint::black_box(&values);
+//!     drop(values);
 //!     track_callers(false);
 //!
 //!     snapshot()
@@ -138,6 +148,31 @@
 //! pointers through the optional `backtrace` dependency. Disabling default
 //! features retains caller tracking and raw addresses without in-process symbol
 //! resolution.
+//!
+//! # Design guide
+//!
+//! Use the implicit thread-local general heap for ordinary allocations.
+//! Introduce explicit general heaps when you want locality boundaries without
+//! changing the mixed-size allocation model. Use bump heaps for phase-bounded
+//! work where individual frees are rare and bulk reclamation matters more than
+//! per-allocation reuse. Use separate [`Domain`](allocation_hints::domain::Domain)
+//! values only when heaps must stop sharing allocator-managed regions.
+//!
+//! # Implementation guide
+//!
+//! 1. Choose a [`config::Config`] and, if needed, custom
+//!    [`tunables::Tunables`].
+//! 2. Install [`rallocator!`] exactly once as the process-global allocator.
+//! 3. Call [`initialize`] near the start of `main` before creating
+//!    allocation-hint heaps or domains.
+//! 4. Route special-purpose allocations with
+//!    [`allocation_hints::with_hint`] and [`allocation_hints::heap::Heap`].
+//! 5. Enable telemetry only when you need it: aggregate counters are a
+//!    compile-time choice, while caller tracking is also runtime-gated.
+//!
+//! Invalid tunables fail early when [`Rallocator::new`] is instantiated: the
+//! size-class layout must be well-formed and the partial-slab scan limit must
+//! be non-zero.
 //!
 //! # Internals
 //!

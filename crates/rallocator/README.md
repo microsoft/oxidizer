@@ -15,6 +15,13 @@
 
 A pure-Rust, high-performance allocator integrated with [`allocation_hints`][__link0].
 
+## Supported platforms
+
+`rallocator` currently supports Windows and Linux. Other operating systems
+are outside the crate’s public support contract and intentionally fail to
+compile. Miri uses an internal test backend and is not a production support
+target.
+
 ## Usage
 
 ### General use
@@ -65,7 +72,10 @@ rallocator::rallocator!(Telemetry);
 fn main() -> std::io::Result<()> {
     rallocator::initialize();
     track_callers(true);
-    let values = vec![1, 2, 3];
+    let mut values = vec![1, 2, 3];
+    values[0] += 1;
+    std::hint::black_box(&values);
+    drop(values);
     track_callers(false);
 
     snapshot()
@@ -86,13 +96,38 @@ pointers through the optional `backtrace` dependency. Disabling default
 features retains caller tracking and raw addresses without in-process symbol
 resolution.
 
+## Design guide
+
+Use the implicit thread-local general heap for ordinary allocations.
+Introduce explicit general heaps when you want locality boundaries without
+changing the mixed-size allocation model. Use bump heaps for phase-bounded
+work where individual frees are rare and bulk reclamation matters more than
+per-allocation reuse. Use separate [`Domain`][__link7]
+values only when heaps must stop sharing allocator-managed regions.
+
+## Implementation guide
+
+1. Choose a [`config::Config`][__link8] and, if needed, custom
+   [`tunables::Tunables`][__link9].
+1. Install [`rallocator!`][__link10] exactly once as the process-global allocator.
+1. Call [`initialize`][__link11] near the start of `main` before creating
+   allocation-hint heaps or domains.
+1. Route special-purpose allocations with
+   [`allocation_hints::with_hint`][__link12] and [`allocation_hints::heap::Heap`][__link13].
+1. Enable telemetry only when you need it: aggregate counters are a
+   compile-time choice, while caller tracking is also runtime-gated.
+
+Invalid tunables fail early when [`Rallocator::new`][__link14] is instantiated: the
+size-class layout must be well-formed and the partial-slab scan limit must
+be non-zero.
+
 ## Internals
 
 Rallocator is organized as a hierarchy:
 
-* A [`Domain`][__link7] owns one or more 1 GiB virtual-memory
+* A [`Domain`][__link15] owns one or more 1 GiB virtual-memory
   **regions**, divided into 64 KiB **slices**.
-* A domain can serve multiple [`Heap`][__link8] instances.
+* A domain can serve multiple [`Heap`][__link16] instances.
   Each heap keeps its own allocation state while drawing backing memory from
   its domain.
 * General heaps use slices for **locality segments** containing 32 KiB
@@ -176,7 +211,7 @@ Rallocator is organized as a hierarchy:
 </svg>
 </div>
 
-Each thread has an implicit general heap. [`with_hint`][__link9] can
+Each thread has an implicit general heap. [`with_hint`][__link17] can
 temporarily route allocations to an explicit general or bump heap instead;
 leaving the scope restores the previous heap. This keeps the common
 allocation path thread-local while allowing runtimes and data structures to
@@ -202,14 +237,22 @@ allocations that escaped its lifetime.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG_nqrMyc21GuGxCn1WUpIA7NG_Tp19Vm32c3GzZwhcJvN3fCYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG9pHOqVApzhFG7NChVEi3M3DG_Olw3Fh_nbAG3s8iqavN9PSYWSCgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4wgmpyYWxsb2NhdG9yZTAuMS4w
  [__link0]: https://crates.io/crates/allocation_hints/0.1.0
  [__link1]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
+ [__link10]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
+ [__link11]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
+ [__link12]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__link13]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
+ [__link14]: https://docs.rs/rallocator/0.1.0/rallocator/?search=Rallocator::new
+ [__link15]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
+ [__link16]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
+ [__link17]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
  [__link2]: https://docs.rs/rallocator/0.1.0/rallocator/fn.initialize.html
  [__link3]: https://crates.io/crates/allocation_hints/0.1.0
  [__link4]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
  [__link5]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
  [__link6]: https://docs.rs/rallocator/0.1.0/rallocator/macro.rallocator.html
  [__link7]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=domain::Domain
- [__link8]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=heap::Heap
- [__link9]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/?search=with_hint
+ [__link8]: https://docs.rs/rallocator/0.1.0/rallocator/?search=config::Config
+ [__link9]: https://docs.rs/rallocator/0.1.0/rallocator/?search=tunables::Tunables

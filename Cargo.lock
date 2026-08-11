@@ -62,6 +62,7 @@ dependencies = [
 name = "allocation_hints"
 version = "0.1.0"
 dependencies = [
+ "mutants",
  "static_assertions",
 ]
 

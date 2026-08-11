@@ -9,5 +9,5 @@ mod ordinary_workloads;
 rallocator::rallocator!();
 
 fn main() {
-    bump_workloads::run(ordinary_workloads::WORKLOADS);
+    bump_workloads::run("bump_rallocator_global", ordinary_workloads::WORKLOADS);
 }

@@ -7,7 +7,6 @@ pub(crate) const WORKLOADS: crate::bump_workloads::Workloads = crate::bump_workl
     vectors,
     hash_maps,
     arcs_4: arcs::<4>,
-    arcs_32: arcs::<32>,
     arcs_256: arcs::<256>,
     mixed_lifecycle,
 };

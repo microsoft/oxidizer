@@ -9,5 +9,5 @@ rallocator::rallocator!();
 
 fn main() {
     rallocator::initialize();
-    workloads::run();
+    workloads::run("rallocator");
 }

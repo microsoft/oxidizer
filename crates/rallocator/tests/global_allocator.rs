@@ -174,13 +174,13 @@ fn zeroed_allocation_and_reallocation_cover_general_routes() {
     }
     #[cfg(not(miri))]
     unsafe {
-        assert_zeroed_allocation(Layout::from_size_align(20 * 1024 * 1024, 4096).unwrap());
+        assert_zeroed_allocation(Layout::from_size_align(64, 128 * 1024).unwrap());
     }
 
     unsafe {
-        assert_reallocation_preserves_prefix(64, 128 * 1024);
+        assert_reallocation_preserves_prefix(64, 16, 128 * 1024);
         #[cfg(not(miri))]
-        assert_reallocation_preserves_prefix(128 * 1024, 20 * 1024 * 1024);
+        assert_reallocation_preserves_prefix(128 * 1024, 128 * 1024, 20 * 1024 * 1024);
     }
 }
 
@@ -196,8 +196,8 @@ unsafe fn assert_zeroed_allocation(layout: Layout) {
     unsafe { dealloc(address, layout) };
 }
 
-unsafe fn assert_reallocation_preserves_prefix(original_size: usize, new_size: usize) {
-    let original = Layout::from_size_align(original_size, 16).unwrap();
+unsafe fn assert_reallocation_preserves_prefix(original_size: usize, alignment: usize, new_size: usize) {
+    let original = Layout::from_size_align(original_size, alignment).unwrap();
     let address = unsafe { alloc(original) };
     assert!(!address.is_null());
     unsafe { ptr::write_bytes(address, 0xA5, original_size) };

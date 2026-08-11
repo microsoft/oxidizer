@@ -86,6 +86,9 @@ impl<T: Copy> Estimate<T> {
 }
 
 /// Cheap aggregate statistics collected by a telemetry-enabled allocator.
+///
+/// Fields are read from independent atomic counters. A value is memory-safe
+/// and individually valid, but it is not a transactional process-wide snapshot.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Stats {
     pub allocated_bytes: usize,
@@ -159,6 +162,8 @@ pub struct Sample {
 }
 
 /// Converts cumulative telemetry counters into interval samples.
+///
+/// Samples inherit [`Stats`]'s non-transactional consistency contract.
 #[derive(Clone, Copy, Debug)]
 pub struct Sampler {
     sampled_at: Instant,
@@ -166,6 +171,8 @@ pub struct Sampler {
 }
 
 /// A time-bounded telemetry collection.
+///
+/// Reports inherit [`Stats`]'s non-transactional consistency contract.
 #[derive(Debug)]
 pub struct Session {
     started_at: Instant,
@@ -467,14 +474,21 @@ impl Sample {
 impl Sampler {
     #[must_use]
     pub fn new() -> Option<Self> {
+        Self::new_at(Instant::now())
+    }
+
+    fn new_at(sampled_at: Instant) -> Option<Self> {
         Some(Self {
-            sampled_at: Instant::now(),
+            sampled_at,
             previous: stats()?,
         })
     }
 
     pub fn sample(&mut self) -> Option<Sample> {
-        let sampled_at = Instant::now();
+        self.sample_at(Instant::now())
+    }
+
+    fn sample_at(&mut self, sampled_at: Instant) -> Option<Sample> {
         let current = stats()?;
         let sample = Sample {
             elapsed: sampled_at.duration_since(self.sampled_at),
@@ -490,7 +504,10 @@ impl Sampler {
 impl Session {
     #[must_use]
     pub fn start() -> Option<Self> {
-        let started_at = Instant::now();
+        Self::start_at(Instant::now())
+    }
+
+    fn start_at(started_at: Instant) -> Option<Self> {
         let baseline = stats()?;
         Some(Self {
             started_at,
@@ -508,7 +525,10 @@ impl Session {
 
     #[must_use]
     pub fn finish(self) -> Option<SessionReport> {
-        let finished_at = Instant::now();
+        self.finish_at(Instant::now())
+    }
+
+    fn finish_at(self, finished_at: Instant) -> Option<SessionReport> {
         let final_stats = stats()?;
         Some(SessionReport {
             elapsed: finished_at.duration_since(self.started_at),
@@ -1448,12 +1468,16 @@ impl Drop for MappedBytes {
 
 impl Snapshot {
     /// Returns the complete encoded snapshot.
+    ///
+    /// Decode these bytes with [`rallocator_telemetry::decode`].
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         self.mapping.as_slice()
     }
 
     /// Writes the complete encoded snapshot to a file.
+    ///
+    /// Decode the resulting file contents with [`rallocator_telemetry::decode`].
     pub fn write_file(&self, path: impl AsRef<Path>) -> io::Result<()> {
         with_telemetry_suppressed(|| std::fs::write(path, self.as_bytes()))
     }
@@ -2194,16 +2218,17 @@ mod tests {
         assert_eq!(delta.drained_remote_blocks(), 0);
 
         AGGREGATES_AVAILABLE.store(true, Ordering::Release);
-        let mut sampler = Sampler::new().unwrap();
-        let sample = sampler.sample().unwrap();
-        assert!(sample.elapsed() <= Duration::from_secs(1));
+        let started_at = Instant::now();
+        let mut sampler = Sampler::new_at(started_at).unwrap();
+        let sample = sampler.sample_at(started_at + Duration::from_millis(25)).unwrap();
+        assert_eq!(sample.elapsed(), Duration::from_millis(25));
         assert_eq!(sample.current(), &stats().unwrap());
         assert_eq!(sample.delta(), &StatsDelta::between(sampler.previous, sampler.previous));
 
-        let mut session = Session::start().unwrap();
-        assert!(session.sample().is_some());
-        let report = session.finish().unwrap();
-        assert!(report.elapsed() <= Duration::from_secs(1));
+        let mut session = Session::start_at(started_at).unwrap();
+        assert!(session.sampler.sample_at(started_at + Duration::from_millis(10)).is_some());
+        let report = session.finish_at(started_at + Duration::from_millis(40)).unwrap();
+        assert_eq!(report.elapsed(), Duration::from_millis(40));
         assert_eq!(report.initial(), report.final_stats());
         assert_eq!(report.delta(), &StatsDelta::between(*report.initial(), *report.final_stats()));
     }

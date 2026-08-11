@@ -357,7 +357,8 @@ unsafe impl Send for MediumState {}
 // each region's mutable allocator metadata is protected by its SpinLock.
 unsafe impl Send for DomainState {}
 unsafe impl Sync for DomainState {}
-// SAFETY: DirectAllocationState is immutable after publication.
+// SAFETY: list mutation is serialized by DIRECT_ALLOCATIONS, and next_direct
+// is only accessed while its allocation remains registered in that list.
 unsafe impl Send for DirectAllocationState {}
 // SAFETY: RegionState is only accessed through the owning region lock, except
 // for immutable identity and atomic publication fields.
@@ -1198,8 +1199,10 @@ where
     }
 
     fn purge_medium_locked(&self, state: &mut MediumState, force: bool) {
-        let now = if force { u64::MAX } else { hal::monotonic_millis() };
+        self.purge_medium_locked_at(state, force, hal::monotonic_millis());
+    }
 
+    fn purge_medium_locked_at(&self, state: &mut MediumState, force: bool, now: u64) {
         let mut region = state.regions;
         while !region.is_null() {
             let base = unsafe { (*region).base };
@@ -4449,14 +4452,17 @@ mod tests {
 
         let regions = unsafe { domain_regions(crate::domain::state(domain)) };
         let mut state = regions.state.lock();
-        allocator.purge_medium_locked(&mut state, false);
+        allocator.purge_medium_locked_at(&mut state, false, 0);
         assert!(!unsafe { (*state.regions).bins[0].free_list }.is_null());
         assert!(!unsafe { (*state.regions).large_free }.is_null());
         unsafe {
-            (*state.regions).bins[0].purge_after = 1;
-            (*state.regions).large_purge_after = 1;
+            (*state.regions).bins[0].purge_after = 2;
+            (*state.regions).large_purge_after = 2;
         }
-        allocator.purge_medium_locked(&mut state, false);
+        allocator.purge_medium_locked_at(&mut state, false, 1);
+        assert!(!unsafe { (*state.regions).bins[0].free_list }.is_null());
+        assert!(!unsafe { (*state.regions).large_free }.is_null());
+        allocator.purge_medium_locked_at(&mut state, false, 2);
         assert!(unsafe { (*state.regions).bins[0].free_list }.is_null());
         assert!(unsafe { (*state.regions).large_free }.is_null());
         allocator.purge_medium_locked(&mut state, true);

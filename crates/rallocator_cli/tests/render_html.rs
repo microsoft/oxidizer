@@ -191,7 +191,7 @@ fn html_report_contains_required_sections() {
 
     let html = support::render_html(&snapshot, "required-sections");
     for heading in [
-        "Physical regions",
+        "Virtual regions",
         "Allocation domains",
         "Allocation size histograms",
         "Segments, spans, bumps, and owners",
@@ -227,7 +227,7 @@ fn html_report_contains_required_sections() {
     assert!(!html.contains("width:1600px"));
     assert!(html.contains("Allocated and freed on different threads"));
     assert!(html.contains("Freed after a bump heap handle was released"));
-    assert!(html.contains("<details><summary>General live-allocation hotspots</summary>"));
+    assert!(html.contains("<details><summary>General live-allocation hotspots (showing"));
     assert!(html.contains("<details class=\"stack-details\"><summary>Stack trace"));
     let cross_thread = html.find("Cross-thread and escaped-lifetime hotspots").unwrap();
     let thread_sizes = html.find("<details><summary>Allocation sizes by thread</summary>").unwrap();

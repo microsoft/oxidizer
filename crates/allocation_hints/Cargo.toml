@@ -19,6 +19,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_
 links = "allocation_hints_backend"
 
 [dev-dependencies]
+mutants.workspace = true
 static_assertions.workspace = true
 
 [lints]

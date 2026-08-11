@@ -157,7 +157,7 @@ fn callers_render_live_and_empty_stack_summaries() {
     ));
 
     let html = support::render_html(&snapshot, "callers-live");
-    assert!(html.contains("64 B live in 1 allocations"));
+    assert!(html.contains("64 B unmatched in 1 allocations"));
     assert!(html.contains("0x0000000000001234"));
 
     snapshot.callers = Some(Callers::default());
@@ -170,8 +170,8 @@ fn legacy_empty_snapshot_renders_unavailable_sections() {
     let html = support::render_html(&Snapshot::new(Version::new(1, 0, 0)), "legacy-empty");
 
     for expected in [
-        "predates domain telemetry",
-        "predates physical slice metadata",
+        "Domain telemetry is unavailable",
+        "Detailed slice topology is unavailable",
         "Caller tracking was not available",
         "No classified small segments.",
         "No medium spans.",

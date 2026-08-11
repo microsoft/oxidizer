@@ -155,6 +155,9 @@ mod tests {
     #[test]
     fn aligned_mapping_works_with_large_page_granularities() {
         let host_page_size = page_size();
+        // Simulated granularities exercise rounding and alignment independently
+        // of the host. The real syscalls still run against host pages, including
+        // unmapping the deliberately unrounded logical size below.
         for simulated_page_size in [16_usize * 1024, 64 * 1024]
             .into_iter()
             .filter(|page_size| (*page_size).is_multiple_of(host_page_size))
