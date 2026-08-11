@@ -10,7 +10,6 @@
 //! lower-level [`poll_once`] primitive performs exactly one poll of an unpinned
 //! future.
 
-use std::fmt::Debug;
 use std::task::{Context, Poll, Waker};
 
 /// Polls a future exactly once with a no-op waker.
@@ -103,18 +102,12 @@ pub trait FutureTestExt: Future + Sized {
     /// Panics (using `message_if_not_pending`) if any of the first `n_pending`
     /// polls returns `Ready`, or if the final poll is still `Pending`.
     #[track_caller]
-    fn unwrap_ready_after(self, n_pending: usize, message_if_not_pending: &str) -> Self::Output
-    where
-        Self::Output: Debug,
-    {
+    fn unwrap_ready_after(self, n_pending: usize, message_if_not_pending: &str) -> Self::Output {
         let mut fut = std::pin::pin!(self);
         for i in 0..n_pending {
             match poll_once(&mut fut) {
                 Poll::Pending => {}
-                Poll::Ready(value) => panic!(
-                    "{message_if_not_pending}: got Ready({value:?}) after {} polls, expected Pending",
-                    i + 1
-                ),
+                Poll::Ready(_) => panic!("{message_if_not_pending}: got Ready after {} polls, expected Pending", i + 1),
             }
         }
 
@@ -288,6 +281,34 @@ mod tests {
         let (fut, polls) = ScriptedFuture::with_poll_count(vec![Poll::Pending, Poll::Pending, Poll::Ready(9)]);
         assert_eq!(fut.unwrap_ready_after(2, "should be pending"), 9);
         assert_eq!(polls.get(), 3);
+    }
+
+    /// An output type deliberately without a [`Debug`](std::fmt::Debug) impl,
+    /// pinning that the helpers stay usable with opaque outputs.
+    struct NotDebug(u32);
+
+    /// Returns `Pending` on its first poll, then `Ready`.
+    struct PendingOnce {
+        polled: bool,
+    }
+
+    impl Future for PendingOnce {
+        type Output = NotDebug;
+
+        fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<NotDebug> {
+            if self.polled {
+                Poll::Ready(NotDebug(4))
+            } else {
+                self.polled = true;
+                Poll::Pending
+            }
+        }
+    }
+
+    #[test]
+    fn unwrap_ready_after_accepts_non_debug_output() {
+        let value = PendingOnce { polled: false }.unwrap_ready_after(1, "should be pending once");
+        assert_eq!(value.0, 4);
     }
 
     #[test]
