@@ -2535,10 +2535,14 @@ function Invoke-ReleasePackagesMain {
     # the targeted flow.
     $planReviewMode = if ($Mode -eq 'targeted') { 'targeted' } else { 'all-changed' }
 
-    # Classifier passed to the planner: decides every change type in the plan
-    # (user-source and cascade) from each crate's real API diff vs its previous
-    # version-bump commit in git history — no allowed_external_types heuristic,
-    # no registry, no fallback. $script:DefaultSemverClassifier is a module-scope
+    # Classifier passed to the planner: decides each crate's OWN change-type
+    # floor (user-source and cascade alike) from its real API diff vs its
+    # previous version-bump commit in git history — no registry, no fallback.
+    # This is only half the verdict: Resolve-ReleaseSet's exposed-dependency
+    # cascade can raise an entry above this floor, using
+    # allowed_external_types to decide exposure (a dependency version bump
+    # changes type identity without changing any rustdoc, so no API diff can
+    # surface it). $script:DefaultSemverClassifier is a module-scope
     # scriptblock (defined below Resolve-ReleaseSet) so it resolves
     # Get-CrateRequiredChangeType and $script:ReleaseRepoRoot in the module
     # session state; that also lets the test suites Mock Get-CrateRequiredChangeType.

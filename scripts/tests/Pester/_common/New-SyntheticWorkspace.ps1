@@ -203,25 +203,43 @@ function Write-PackageCargoToml {
         $lines += ''
         $lines += '[dependencies]'
         foreach ($d in $deps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
     if ($buildDeps.Count -gt 0) {
         $lines += ''
         $lines += '[build-dependencies]'
         foreach ($d in $buildDeps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
     if ($devDeps.Count -gt 0) {
         $lines += ''
         $lines += '[dev-dependencies]'
         foreach ($d in $devDeps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
 
     Set-Content -Path $Path -Value ($lines -join "`n") -NoNewline
+}
+
+# Renders one dependency line for a member manifest.
+#
+# Ordinary deps use workspace inheritance (`bar.workspace = true`), matching the
+# real repo. A dep carrying `Rename` is emitted in the inline `package = "..."`
+# form instead, mirroring production (see multitude's `allocator-api2-02`):
+# workspace inheritance keys the [workspace.dependencies] table by real name, so
+# it cannot express an alias without also rewriting that table. Path-only is
+# sufficient here because these fixtures are read via `cargo metadata` and never
+# packaged.
+function Format-DependencyLine {
+    param([Parameter(Mandatory = $true)][hashtable]$Dep)
+
+    if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
+        return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../$($Dep.Name)`" }"
+    }
+    return "$($Dep.Name).workspace = true"
 }
 
 function Write-RootCargoToml {

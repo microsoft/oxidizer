@@ -214,8 +214,9 @@ rebuilds the baseline rustdoc from the crate's source at that commit, so
 **no registry access is required** and the check behaves identically for
 open-source (crates.io) and enterprise/offline consumers. The current
 working-tree API is analysed, so a coordinated release's in-progress
-edits — including a dependency whose public types a dependent re-exports
-— are reflected in the dependent's own API diff.
+edits are reflected rather than only what has been committed. That is
+necessary but not sufficient on its own — see the exposed-dependency
+cascade below, which covers the breaks a rustdoc diff cannot show.
 
 Versioning is treated as a **source-level** concern: the baseline is the
 version the repository last *declared*, regardless of whether it was ever
