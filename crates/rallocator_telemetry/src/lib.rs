@@ -33,7 +33,7 @@
 //!
 //! # Compatibility contract
 //!
-//! A snapshot has three independently versioned layers:
+//! A snapshot has three layers with independent versions:
 //!
 //! - `rallocator_wire` owns the little-endian container header and
 //!   length-prefixed section framing. A framing change increments the wire

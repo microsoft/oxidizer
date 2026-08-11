@@ -38,7 +38,7 @@ impl<'a> Writer<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the current section is underfilled or if any bytes
+    /// Returns an error if the current section is incomplete or if any bytes
     /// remain unused in the output slice.
     pub fn finish(self) -> Result<usize, Error> {
         if self.section_end.is_some_and(|end| end != self.position) {

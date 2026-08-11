@@ -20,7 +20,7 @@ Snapshot data is organized into [`snapshot`][__link0], [`topology`][__link1], an
 
 ## Compatibility contract
 
-A snapshot has three independently versioned layers:
+A snapshot has three layers with independent versions:
 
 * `rallocator_wire` owns the little-endian container header and
   length-prefixed section framing. A framing change increments the wire
@@ -44,7 +44,7 @@ existing version.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG-XaQUwAdShkG90lnCn-HRc5G16Jvguj1ShmG9vmvY-NxV1CYWSBgnRyYWxsb2NhdG9yX3RlbGVtZXRyeWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEGwPQQXNyCVBGG3c-s5ms2QrDG0dPhZqssdErGxdmlUoTzhhHYWSBgnRyYWxsb2NhdG9yX3RlbGVtZXRyeWUwLjEuMA
  [__link0]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/snapshot/index.html
  [__link1]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/topology/index.html
  [__link2]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/callers/index.html

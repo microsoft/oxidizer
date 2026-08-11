@@ -3,9 +3,10 @@
 
 //! Types that describe the snapshot wire container.
 //!
-//! The container uses a fixed little-endian header followed by skippable
-//! length-prefixed sections. This crate versions framing only; telemetry-wide
-//! and section-payload compatibility are owned by `rallocator_telemetry`.
+//! The container uses a fixed little-endian header followed by length-prefixed
+//! sections that decoders can skip. This crate versions framing only;
+//! telemetry-wide and section-payload compatibility are owned by
+//! `rallocator_telemetry`.
 
 const WIRE_FORMAT_VERSION: u16 = 1;
 const HEADER_LEN: usize = 20;

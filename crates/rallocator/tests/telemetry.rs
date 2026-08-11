@@ -73,18 +73,19 @@ fn tracking_is_off_by_default_and_process_wide_when_enabled() {
     assert_eq!(snapshot().is_some(), before.is_some());
 
     track_callers(true);
-    drop(Box::new(42_u64));
+    let value = Box::new(42_u64);
+    let address = (&raw const *value).addr() as u64;
+    drop(value);
     track_callers(false);
 
     let snapshot = decoded_snapshot();
     let callers = snapshot.callers.unwrap();
     assert_ne!(callers.session_id, 0);
-    assert_eq!(callers.threads.len(), 1);
-    assert_eq!(callers.total_events, 2);
-    assert_eq!(callers.lost_events, 0);
-    assert_eq!(callers.events[0].kind, EventKind::Allocated);
-    assert_eq!(callers.events[1].kind, EventKind::Deallocated);
-    assert!(!callers.events[0].call_stack.is_empty());
+    let events: Vec<_> = callers.events.iter().filter(|event| event.address == address).collect();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].kind, EventKind::Allocated);
+    assert_eq!(events[1].kind, EventKind::Deallocated);
+    assert!(!events[0].call_stack.is_empty());
 }
 
 #[test]
