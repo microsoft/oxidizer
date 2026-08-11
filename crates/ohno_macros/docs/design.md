@@ -67,13 +67,19 @@ src/
   error_attr/
     mod.rs            reject -> inject core -> re-emit with the derive
   enrich_err/
-    mod.rs            parse -> validate -> generate
-    ast.rs
-    model.rs
+    mod.rs            one file: Message, its parse, and the body rewrite
 ```
+
+Only the derive carries the full pipeline, because only the derive has enough
+input to warrant it.
 
 `error_attr` keeps no `Model`: it rewrites its input and hands the result to the
 derive, so its whole job is three rejections and one field injection.
+
+`enrich_err` keeps no `Ast`. Its whole input is a message and a signature, and
+the signature is re-emitted rather than read, so a parse and a check fold into
+one step that yields a `Message` — the same type the derive lowers `#[display]`
+into. Splitting it further would be symmetry for its own sake.
 
 ## The types
 
@@ -125,10 +131,10 @@ argument has been checked to be rooted in a field. Rendering it is one `quote!`.
 The old code returned on the first problem, so a struct with three bad
 placeholders took three compile cycles to fix. The rewrite accumulates:
 `validate` collects into a `syn::Error` built with `combine`, and reports them
-together.
+together. The compile-fail snapshots under `crates/ohno/tests/ui/` that
+currently show one error are regenerated to show all of them.
 
-Two rules carry over unchanged, because `crates/ohno/tests/ui/*.stderr` pins
-them:
+Two rules carry over unchanged, because those snapshots pin them:
 
 - a diagnostic covering more than one token is built with
   `syn::Error::new_spanned`, never from a node span;
@@ -152,16 +158,18 @@ out of a real parse can still be covered.
 Above all of it, `crates/ohno/tests/**` stays the spec: it compiles the macros
 for real and is the only thing that proves the generated code works.
 
-## Open questions
+## Decided
 
-1. **One `Ast` type or two phases sharing `DeriveInput`?** The proposal parses
-   into an owned `Ast`. The cheaper alternative is to let `validate` read
-   `DeriveInput` directly and drop `Ast`, which removes a type but puts
-   `syn::Attribute` back in the validating code.
-2. **Does `enrich_err` earn the full pipeline?** Its model is a message and a
-   signature. Two phases may be enough.
-3. **Accumulated diagnostics vs. the pinned `.stderr` files.** Reporting several
-   errors at once changes the compile-fail snapshots that currently show one.
-   The snapshots would be regenerated; worth confirming that is wanted.
-4. **`pub(crate)` constructors.** Kept as-is by R1.4, and settled by ADO 7675155
-   as designed. The rewrite is not the place to reopen it.
+- **Diagnostics accumulate.** `validate` reports every rule violation it finds,
+  not the first. The `.stderr` snapshots are regenerated to match.
+- **`enrich_err` stays simple.** One module, no `Ast`/`Model` pair.
+- **`pub(crate)` constructors stay.** Settled by ADO 7675155 as designed; the
+  rewrite is not the place to reopen it.
+
+## Open question
+
+**One `Ast` type, or `validate` reading `DeriveInput` directly?** The proposal
+parses into an owned `Ast`. The cheaper alternative drops that type and lets
+`validate` read `DeriveInput`, which removes a layer but puts `syn::Attribute`
+back into the validating code. Worth deciding once the first generator exists
+and the real size of `Ast` is visible.

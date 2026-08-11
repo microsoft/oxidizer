@@ -192,6 +192,9 @@ A macro reports what it can rather than emitting code that fails to compile.
 Errors reach the user as `compile_error!` at a span in their own source, never
 as a panic and never as a `rustc` error pointing into generated code.
 
+Where an input breaks several rules, all of them are reported at once rather
+than one per compile cycle.
+
 Wherever a diagnostic covers more than one token it is spanned with
 `syn::Error::new_spanned`.
 
