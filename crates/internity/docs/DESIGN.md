@@ -26,8 +26,8 @@ flowchart LR
         TL[ThreadedLexicon<br/>concurrent, sharded]
     end
     subgraph Read["Read phase (immutable, Send + Sync)"]
-        FR[FlatReader]
-        SR[ShardedReader]
+        FR[LocalReader]
+        SR[ThreadedReader]
     end
     LL -- freeze --> FR
     TL -- freeze --> SR
@@ -248,9 +248,9 @@ outstanding until freeze.
 that the CSR blobs are handed over as-is, so **no strings are re-walked or
 re-validated**, and existing handles keep working.
 
-- **`LocalLexicon::freeze`** moves its `offsets` and buffer into a **`FlatReader`**
+- **`LocalLexicon::freeze`** moves its `offsets` and buffer into a **`LocalReader`**
   — one dense-indexed CSR blob, no shards, no atomics.
-- **`ThreadedLexicon::freeze`** produces a **`ShardedReader`** — one flat
+- **`ThreadedLexicon::freeze`** produces a **`ThreadedReader`** — one flat
   per-shard CSR blob, addressed by the handle's `[shard | local]` split.
 
 The concurrent freeze has two paths depending on whether the caller holds the
@@ -261,7 +261,7 @@ flowchart TB
     F["ThreadedLexicon::freeze"] --> TRY{"sole Arc owner?"}
     TRY -- yes --> MOVE["move each shard's (offsets, bytes) out<br/>— zero copy"]
     TRY -- no --> COPY["read-guard all shards up front,<br/>then copy each (offsets, bytes)"]
-    MOVE --> SRr["ShardedReader"]
+    MOVE --> SRr["ThreadedReader"]
     COPY --> SRr
 ```
 
@@ -283,7 +283,7 @@ crate add methods without a breaking change. Its core operations are
 `(Sym, &str)` pairs).
 
 Resolution is a pure CSR lookup with a range check, so it needs no locks or
-atomics. `FlatReader` resolves a dense index directly; `ShardedReader` first
+atomics. `LocalReader` resolves a dense index directly; `ThreadedReader` first
 indexes the shard (always in range, since the shard bits can't exceed the shard
 count) then does a checked local lookup within that shard. Iteration order is
 handle order for the flat reader and shard-grouped for the sharded reader.
@@ -351,8 +351,8 @@ A quick orientation to how the concepts map onto the source layout:
 |---|---|
 | Handle | `Sym` encoding (dense + sharded), niche, packing/decoding |
 | Storage | CSR helpers; the crate's single `unsafe` module |
-| Local engine | `LocalLexicon` + its `FlatReader` |
-| Concurrent engine | `ThreadedLexicon`, its inner state, `Shard`, `ShardWrite`, and `ShardReader` / `ShardedReader` |
+| Local engine | `LocalLexicon` + its `LocalReader` |
+| Concurrent engine | `ThreadedLexicon`, its inner state, `Shard`, `ShardWrite`, and `ShardReader` / `ThreadedReader` |
 | Traits | `Lexicon` (fill, generic/dyn) and `Reader` (read, sealed) |
 | Maps | `SymHasher` / `SymBuildHasher` and the `SymMap` / `SymSet` aliases |
 | Serde | string-based, interner-aware (de)serialization (`SerializeIn` / `DeserializeIn` / `SerializeReader`) |

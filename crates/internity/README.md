@@ -61,6 +61,10 @@ intern during a build phase, then [`freeze`][__link4] into a
 [`Reader`][__link5] for the read phase. A `Reader` is immutable, `Send + Sync`, and its
 lookups are lock-free — ideal for sharing across threads.
 
+Freezing returns a concrete, nameable type — [`LocalReader`][__link6] or
+[`ThreadedReader`][__link7] — so a frozen table can be stored in a struct by value,
+without boxing or virtual dispatch.
+
 ```rust
 use internity::{LocalLexicon, Reader};
 
@@ -80,45 +84,65 @@ assert_eq!(reader.resolve(world), "world");
 ## Custom hashers
 
 Both interners default to a fast, non-cryptographic hasher and are generic over
-the [`BuildHasher`][__link6], like
+the [`BuildHasher`][__link8], like
 `HashMap`. Use `with_hasher` to supply your own — for
 example a DoS-resistant hasher when interning untrusted input.
 
+The default is **not** collision-attack resistant, and this differs from
+`lasso`, which defaults to a collision-resistant hasher. Migrating by swapping
+the type therefore needs a deliberate hasher choice, or it silently loses that
+protection. See [`LocalLexicon`][__link9] for the full warning.
+
+## Dense handles
+
+[`LocalLexicon`][__link10] numbers its handles consecutively from zero in insertion
+order, and [`freeze`][__link11] preserves that numbering. Use
+[`index_of`][__link12] and [`sym_at`][__link13] to
+move between a handle and its position, which makes a `Vec<T>` side table
+indexed by symbol possible — cheaper than a hash map keyed by the handle.
+
+[`ThreadedLexicon`][__link14] handles pack a shard index into their high bits and are
+**not** consecutive, so it offers no such conversion.
+
 ## Production guidance
 
-* A [`Sym`][__link7] is local to the interner that created it. A foreign handle is
+* A [`Sym`][__link15] is local to the interner that created it. A foreign handle is
   range-checked, but an in-range numeric value can resolve to an unrelated
   string. Persist or transmit handles together with the matching interner.
 * The default Fx hasher is fast but not collision-attack resistant. Supply a
   defensive `BuildHasher` when strings can be selected by an attacker.
 * Interners do not remove individual strings. Memory grows during the fill
   phase until the interner is dropped or frozen.
-* A [`Sym`][__link8] does not implement [`serde::Serialize`][__link9]/`Deserialize` on its own:
+* Freezing drops the dedup hash map, which is where its memory saving comes
+  from — so a frozen reader resolves handles but cannot look strings up by
+  value. Keep the lexicon live if you need that, or rebuild a smaller index;
+  see [`freeze`][__link16] for a worked example.
+* A [`Sym`][__link17] does not implement [`serde::Serialize`][__link18]/`Deserialize` on its own:
   a bare handle is a meaningless integer without its interner. Serialize
-  handles with the reader-aware [`se::SerializeIn`][__link10] derive (which resolves
-  each handle to its string) and read them back with the [`de::DeserializeIn`][__link11]
+  handles with the reader-aware [`se::SerializeIn`][__link19] derive (which resolves
+  each handle to its string) and read them back with the [`de::DeserializeIn`][__link20]
   derive, so a value round-trips through a self-describing encoding. Serialize
-  a whole corpus by freezing the interner and wrapping the [`Reader`][__link12] in
-  [`se::SerializeReader`][__link13].
+  a whole corpus by freezing the interner and wrapping the [`Reader`][__link21] in
+  [`se::SerializeReader`][__link22].
 * Exceeding the documented byte or handle limits panics. Applications that
   accept untrusted strings should enforce count and byte quotas before
   interning.
 
 ## Capacity
 
-A single [`LocalLexicon`][__link14] holds up to approximately 4 GiB of string bytes; a
-[`ThreadedLexicon`][__link15] up to approximately 256 GiB (across its shards). Either way
+A single [`LocalLexicon`][__link23] holds up to approximately 4 GiB of string bytes; a
+[`ThreadedLexicon`][__link24] up to approximately 256 GiB (across its shards). Either way
 the number of distinct strings is bounded by the 4-byte handle (approximately
 4.29 billion). Exceeding these limits panics rather than corrupting data.
 
 ## Cargo features
 
-* `std` *(default)* — enables the concurrent [`ThreadedLexicon`][__link16]. Without it the
-  crate is `no_std` + `alloc`: [`LocalLexicon`][__link17], [`Lexicon`][__link18], [`Sym`][__link19], and
-  [`Reader`][__link20] still work.
-* `serde` — reader-aware serialization: the [`se::SerializeIn`][__link21] /
-  [`de::DeserializeIn`][__link22] derives, [`se::SerializeReader`][__link23] for a whole corpus,
-  and `DeserializeIn` on the interners. [`ThreadedLexicon`][__link24] deserialization
+* `std` *(default)* — enables the concurrent [`ThreadedLexicon`][__link25]. Without it the
+  crate is `no_std` + `alloc`: [`LocalLexicon`][__link26], [`Lexicon`][__link27], [`Sym`][__link28], and
+  [`Reader`][__link29] still work.
+* `serde` — reader-aware serialization: the [`se::SerializeIn`][__link30] /
+  [`de::DeserializeIn`][__link31] derives, [`se::SerializeReader`][__link32] for a whole corpus,
+  and `DeserializeIn` on the interners. [`ThreadedLexicon`][__link33] deserialization
   requires its default hasher so deserialization can reproduce identical
   handles.
 
@@ -128,29 +152,38 @@ the number of distinct strings is bounded by the 4-byte handle (approximately
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/internity">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb2G7EdP2hZtcblfzsjF5fRG4bjHbu2fkr7Ysb3M2rIQy6E39hZIKCaWludGVybml0eWUwLjEuMIJlc2VyZGVnMS4wLjIyOA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbS7jmI2RgDfcb1aHUj9cfOekboBKfgtqQXdIbcWjFJWhgz1thZIKCaWludGVybml0eWUwLjEuMIJlc2VyZGVnMS4wLjIyOA
  [__link0]: https://docs.rs/internity/0.1.0/internity/?search=Sym
  [__link1]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
- [__link10]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeIn
- [__link11]: https://docs.rs/internity/0.1.0/internity/?search=de::DeserializeIn
- [__link12]: https://docs.rs/internity/0.1.0/internity/?search=Reader
- [__link13]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeReader
- [__link14]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
- [__link15]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
- [__link16]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
- [__link17]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
- [__link18]: https://docs.rs/internity/0.1.0/internity/?search=Lexicon
- [__link19]: https://docs.rs/internity/0.1.0/internity/?search=Sym
+ [__link10]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
+ [__link11]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon::freeze
+ [__link12]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon::index_of
+ [__link13]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon::sym_at
+ [__link14]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
+ [__link15]: https://docs.rs/internity/0.1.0/internity/?search=Sym
+ [__link16]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon::freeze
+ [__link17]: https://docs.rs/internity/0.1.0/internity/?search=Sym
+ [__link18]: https://docs.rs/serde/1.0.228/serde/?search=Serialize
+ [__link19]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeIn
  [__link2]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
- [__link20]: https://docs.rs/internity/0.1.0/internity/?search=Reader
- [__link21]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeIn
- [__link22]: https://docs.rs/internity/0.1.0/internity/?search=de::DeserializeIn
- [__link23]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeReader
+ [__link20]: https://docs.rs/internity/0.1.0/internity/?search=de::DeserializeIn
+ [__link21]: https://docs.rs/internity/0.1.0/internity/?search=Reader
+ [__link22]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeReader
+ [__link23]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
  [__link24]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
+ [__link25]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
+ [__link26]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon
+ [__link27]: https://docs.rs/internity/0.1.0/internity/?search=Lexicon
+ [__link28]: https://docs.rs/internity/0.1.0/internity/?search=Sym
+ [__link29]: https://docs.rs/internity/0.1.0/internity/?search=Reader
  [__link3]: https://docs.rs/internity/0.1.0/internity/?search=Lexicon
+ [__link30]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeIn
+ [__link31]: https://docs.rs/internity/0.1.0/internity/?search=de::DeserializeIn
+ [__link32]: https://docs.rs/internity/0.1.0/internity/?search=se::SerializeReader
+ [__link33]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedLexicon
  [__link4]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon::freeze
  [__link5]: https://docs.rs/internity/0.1.0/internity/?search=Reader
- [__link6]: https://doc.rust-lang.org/stable/core/?search=hash::BuildHasher
- [__link7]: https://docs.rs/internity/0.1.0/internity/?search=Sym
- [__link8]: https://docs.rs/internity/0.1.0/internity/?search=Sym
- [__link9]: https://docs.rs/serde/1.0.228/serde/?search=Serialize
+ [__link6]: https://docs.rs/internity/0.1.0/internity/?search=LocalReader
+ [__link7]: https://docs.rs/internity/0.1.0/internity/?search=ThreadedReader
+ [__link8]: https://doc.rust-lang.org/stable/core/?search=hash::BuildHasher
+ [__link9]: https://docs.rs/internity/0.1.0/internity/?search=LocalLexicon

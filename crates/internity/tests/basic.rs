@@ -841,3 +841,119 @@ fn threaded_intern_bytes_walks_collision_chain_by_byte_comparison() {
     assert_eq!(reader.resolve(gamma), "gamma");
     assert_eq!(reader.resolve(delta), "δ");
 }
+
+#[test]
+fn dense_index_round_trips_through_lexicon_and_reader() {
+    let mut lexicon = LocalLexicon::new();
+    let syms: Vec<Sym> = (0..64).map(|i| lexicon.intern(format!("name{i}"))).collect();
+
+    for (expected, &sym) in syms.iter().enumerate() {
+        let expected = u32::try_from(expected).unwrap();
+        assert_eq!(lexicon.index_of(sym), Some(expected));
+        assert_eq!(lexicon.sym_at(expected), Some(sym));
+    }
+
+    // Freezing preserves the numbering.
+    let reader = lexicon.freeze();
+    for (expected, &sym) in syms.iter().enumerate() {
+        let expected = u32::try_from(expected).unwrap();
+        assert_eq!(reader.index_of(sym), Some(expected));
+        assert_eq!(reader.sym_at(expected), Some(sym));
+        assert_eq!(reader.resolve(sym), format!("name{expected}"));
+    }
+}
+
+#[test]
+fn dense_index_is_none_out_of_range() {
+    let mut lexicon = LocalLexicon::new();
+    let only = lexicon.intern("only");
+
+    assert_eq!(lexicon.index_of(only), Some(0));
+    assert_eq!(lexicon.sym_at(1), None);
+    assert_eq!(lexicon.sym_at(u32::MAX), None);
+
+    // A handle past the end is rejected rather than yielding a bogus index.
+    let past_end = Sym::from_u32(u32::MAX).unwrap();
+    assert_eq!(lexicon.index_of(past_end), None);
+
+    let reader = lexicon.freeze();
+    assert_eq!(reader.index_of(past_end), None);
+    assert_eq!(reader.sym_at(1), None);
+    assert_eq!(reader.sym_at(u32::MAX), None);
+}
+
+#[test]
+fn dense_index_supports_a_side_table() {
+    let mut lexicon = LocalLexicon::new();
+    for name in ["alpha", "beta", "gamma"] {
+        let _ = lexicon.intern(name);
+    }
+
+    // One slot per symbol, indexed directly — no hashing.
+    let mut lengths = vec![0usize; lexicon.len()];
+    for (sym, s) in lexicon.iter() {
+        let i = lexicon.index_of(sym).unwrap();
+        lengths[i as usize] = s.len();
+    }
+    assert_eq!(lengths, vec![5, 4, 5]);
+}
+
+#[test]
+fn frozen_readers_can_be_stored_by_value() {
+    // The point of exporting the concrete types: a struct can name the field.
+    struct LocalStore {
+        names: internity::LocalReader,
+    }
+    struct ThreadedStore {
+        names: internity::ThreadedReader,
+    }
+
+    let mut lexicon = LocalLexicon::new();
+    let a = lexicon.intern("a");
+    let local = LocalStore { names: lexicon.freeze() };
+    assert_eq!(local.names.resolve(a), "a");
+
+    let lexicon = ThreadedLexicon::new();
+    let b = lexicon.intern("b");
+    let threaded = ThreadedStore { names: lexicon.freeze() };
+    assert_eq!(threaded.names.resolve(b), "b");
+}
+
+#[test]
+fn frozen_reader_supports_an_external_string_lookup() {
+    // The pattern documented on `LocalLexicon::freeze`, exercised end to end.
+    let mut lexicon = LocalLexicon::new();
+    let names: Vec<String> = (0..256).map(|i| format!("name{i}")).collect();
+    let syms: Vec<Sym> = names.iter().map(|n| lexicon.intern(n)).collect();
+
+    let reader = lexicon.freeze();
+    let mut by_string: Vec<Sym> = reader.iter().map(|(sym, _)| sym).collect();
+    by_string.sort_unstable_by(|&a, &b| reader.resolve(a).cmp(reader.resolve(b)));
+
+    let get = |needle: &str| {
+        by_string
+            .binary_search_by(|&sym| reader.resolve(sym).cmp(needle))
+            .ok()
+            .map(|i| by_string[i])
+    };
+
+    for (name, &want) in names.iter().zip(&syms) {
+        assert_eq!(get(name), Some(want));
+    }
+    assert_eq!(get("absent"), None);
+}
+
+#[test]
+fn reader_debug_reports_length() {
+    let mut lexicon = LocalLexicon::new();
+    let _ = lexicon.intern("a");
+    let reader = lexicon.freeze();
+    let text = format!("{reader:?}");
+    assert!(text.contains("LocalReader"), "{text}");
+    assert!(text.contains("len"), "{text}");
+
+    let lexicon = ThreadedLexicon::new();
+    let _ = lexicon.intern("a");
+    let text = format!("{:?}", lexicon.freeze());
+    assert!(text.contains("ThreadedReader"), "{text}");
+}

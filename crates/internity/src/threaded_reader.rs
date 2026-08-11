@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The [`ShardedReader`]: a frozen [`ThreadedLexicon`](crate::ThreadedLexicon), one flat blob per shard.
+//! The [`ThreadedReader`]: a frozen [`ThreadedLexicon`](crate::ThreadedLexicon), one flat blob per shard.
 
 use alloc::boxed::Box;
 
@@ -9,22 +9,35 @@ use crate::reader::Reader;
 use crate::shard_reader::ShardReader;
 use crate::sym::{NUM_SHARDS, Sym};
 
-/// A frozen concurrent interner: one flat [`ShardReader`] per shard, addressed by
-/// the `Sym`'s `[shard|local]` partition. Returned as `impl Reader` from
-/// [`ThreadedLexicon::freeze`](crate::ThreadedLexicon::freeze).
-pub(crate) struct ShardedReader {
+/// A frozen [`ThreadedLexicon`](crate::ThreadedLexicon): one flat
+/// [`ShardReader`] per shard, addressed by the `Sym`'s `[shard|local]` partition.
+///
+/// Returned by [`ThreadedLexicon::freeze`](crate::ThreadedLexicon::freeze).
+///
+/// Unlike [`LocalReader`](crate::LocalReader), handles here are **not** densely
+/// numbered — they encode a shard index in their high bits — so this reader offers
+/// no index conversions.
+pub struct ThreadedReader {
     shards: Box<[ShardReader; NUM_SHARDS]>,
 }
 
-impl ShardedReader {
+impl ThreadedReader {
     pub(crate) fn new(shards: Box<[ShardReader; NUM_SHARDS]>) -> Self {
         Self { shards }
     }
 }
 
-impl crate::reader::Sealed for ShardedReader {}
+impl core::fmt::Debug for ThreadedReader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ThreadedReader")
+            .field("len", &Reader::len(self))
+            .finish_non_exhaustive()
+    }
+}
 
-impl Reader for ShardedReader {
+impl crate::reader::Sealed for ThreadedReader {}
+
+impl Reader for ThreadedReader {
     #[inline]
     fn try_resolve(&self, sym: Sym) -> Option<&str> {
         // `sym.shard()` is always in `0..NUM_SHARDS`, so the shard index needs no

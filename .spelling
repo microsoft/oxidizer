@@ -228,6 +228,7 @@ backtrace
 backtraces
 bincode
 bitflag
+bitset
 bitwise
 blazingly
 bool
