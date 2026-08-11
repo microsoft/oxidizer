@@ -595,6 +595,12 @@ fn freeze_races_writer_and_stays_prefix_consistent() {
     use std::collections::BTreeSet;
     use std::sync::mpsc;
 
+    // Miri checks every allocation and lock operation, so the ordinary stress
+    // volume obscures the synchronization property this test targets. This
+    // still interns well beyond the shard count and races hundreds of writes.
+    #[cfg(miri)]
+    const COUNT: usize = 512;
+    #[cfg(not(miri))]
     const COUNT: usize = 4096;
     const MID: usize = COUNT / 2;
 

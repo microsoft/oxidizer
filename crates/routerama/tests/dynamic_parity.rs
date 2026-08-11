@@ -295,10 +295,16 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
     let segments = ["books", "featured", "rust", "reviews", "42", "search", "files", "x", ""];
     let methods = ["GET", "POST", "DELETE"];
     let verbs = ["", ":archive", ":other"];
+    // Miri interprets each resolution step. Depth three still checks 7,380
+    // generated requests; ordinary tests retain the full 66,429-case sweep.
+    #[cfg(miri)]
+    const MAX_DEPTH: usize = 3;
+    #[cfg(not(miri))]
+    const MAX_DEPTH: usize = 4;
 
     let mut checked = 0_u64;
     for method in methods {
-        for depth in 0..=4 {
+        for depth in 0..=MAX_DEPTH {
             let mut indices = vec![0_usize; depth];
             loop {
                 let mut path = String::new();
@@ -355,6 +361,9 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
             }
         }
     }
+    #[cfg(miri)]
+    assert!(checked > 5_000, "expected a representative path space, checked {checked}");
+    #[cfg(not(miri))]
     assert!(checked > 50_000, "expected a large path space, checked {checked}");
 }
 
