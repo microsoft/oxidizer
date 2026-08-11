@@ -70,7 +70,10 @@ flowchart TB
 ```
 
 Storing indices **1-based** guarantees the raw value is non-zero (satisfying the
-`NonZeroU32` niche). Decoding subtracts one to recover the physical index.
+`NonZeroU32` niche). Decoding subtracts one to recover the physical index. That
+offset is why `Sym::as_u32` must not be used as a side-table index; see
+[Dense numbering](#dense-numbering-index_of--sym_at) for the supported
+conversions.
 Because the two encodings are different, a handle produced by one engine
 resolved on the other is caught by range checks — it can never cause undefined
 behavior, though an in-range foreign value may resolve to an unrelated string.
@@ -286,7 +289,58 @@ Resolution is a pure CSR lookup with a range check, so it needs no locks or
 atomics. `LocalReader` resolves a dense index directly; `ThreadedReader` first
 indexes the shard (always in range, since the shard bits can't exceed the shard
 count) then does a checked local lookup within that shard. Iteration order is
-handle order for the flat reader and shard-grouped for the sharded reader.
+handle order for `LocalReader` and shard-grouped for `ThreadedReader`.
+
+## Dense numbering: `index_of` / `sym_at`
+
+`LocalLexicon` assigns positions consecutively in insertion order, so at any
+point the live handles occupy exactly `0..len`. `index_of` maps a handle to its
+position and `sym_at` maps back; both are exposed on `LocalLexicon` and, because
+`freeze` preserves the numbering, on `LocalReader`.
+
+This lets callers key per-symbol data by a `Vec<T>` index rather than a hash map,
+which is the point of the pair — it replaces a downstream `as_u32() - 1`
+workaround that depended on the encoding by accident. Note that the raw handle is
+1-based (the `NonZeroU32` niche), so `as_u32` is *not* a position; the two
+accessors are the supported conversions.
+
+Both types delegate to `dense_index_of` / `dense_sym_at` in `sym.rs`. The mapping
+is correctness-critical and must stay identical across the live and frozen forms,
+so it has one definition rather than a copy per type.
+
+`ThreadedLexicon` is deliberately excluded. Its handles pack a shard index into
+the high bits, so live values are scattered across the handle space and no dense
+position exists to return.
+
+### What the guarantee costs
+
+Density is a strong commitment, and stating it publicly forecloses several
+options that would otherwise remain open:
+
+- **Removal or tombstoning** of individual entries, which would leave holes.
+- **Compaction or GC** of unreferenced strings, which would renumber survivors.
+- **Dedup-merging two lexicons**, since both number from zero.
+- **Making `LocalLexicon` internally sharded** for larger capacity — precisely
+  what costs `ThreadedLexicon` its density.
+
+Once callers persist `Vec<T>` side tables keyed by position, changing any of
+these becomes a silent breaking change behind an unchanged signature. This cost
+was accepted knowingly: a hedged guarantee would not support the side tables the
+API exists to enable. Any future work in the list above needs a new type or a
+major version, not a quiet relaxation.
+
+### Frozen string lookup: considered and declined
+
+`freeze` drops the dedup hash map, which is where most of the memory saving comes
+from, so a frozen reader resolves handles but cannot look strings up. A helper to
+rebuild that lookup (`build_string_index()` or a `FrozenLookup` type) was
+considered and declined: it needs no primitives the crate does not already
+expose, since `iter` plus `resolve` are sufficient, and binary search over
+indirectly-stored strings costs `O(log n)` dependent loads per lookup, which may
+well lose to simply keeping the lexicon live. Adding permanent public API to save
+callers roughly 18 lines was not a good trade at this stage. The pattern ships as
+a worked example on `LocalLexicon::freeze` instead; revisit if field reports show
+it is both common and being got wrong.
 
 ## `Sym`-keyed maps: `SymMap` / `SymSet`
 

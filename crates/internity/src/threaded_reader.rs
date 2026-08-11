@@ -9,14 +9,24 @@ use crate::reader::Reader;
 use crate::shard_reader::ShardReader;
 use crate::sym::{NUM_SHARDS, Sym};
 
-/// A frozen [`ThreadedLexicon`](crate::ThreadedLexicon): one flat
-/// [`ShardReader`] per shard, addressed by the `Sym`'s `[shard|local]` partition.
+/// A frozen [`ThreadedLexicon`](crate::ThreadedLexicon): one flat blob per shard,
+/// addressed by the `Sym`'s `[shard|local]` partition.
 ///
 /// Returned by [`ThreadedLexicon::freeze`](crate::ThreadedLexicon::freeze).
 ///
-/// Unlike [`LocalReader`](crate::LocalReader), handles here are **not** densely
-/// numbered — they encode a shard index in their high bits — so this reader offers
-/// no index conversions.
+/// # No dense index conversions
+///
+/// This reader offers no `index_of`/`sym_at` pair. Handles are shard-partitioned —
+/// the high bits select one of the shards, so the values are spread across the
+/// handle space rather than running consecutively from zero — and a dense position
+/// cannot be recovered from one in constant time.
+///
+/// To read a corpus, use [`resolve`](Reader::resolve) for a single handle or
+/// [`iter`](Reader::iter) to walk every entry. If you need positions for a `Vec<T>`
+/// side table, intern with [`LocalLexicon`](crate::LocalLexicon) instead and use
+/// [`LocalReader::index_of`](crate::LocalReader::index_of); the numbering it
+/// guarantees is what makes those tables possible.
+#[derive(Clone)]
 pub struct ThreadedReader {
     shards: Box<[ShardReader; NUM_SHARDS]>,
 }

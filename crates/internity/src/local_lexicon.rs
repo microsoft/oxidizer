@@ -13,7 +13,7 @@ use rustc_hash::FxBuildHasher;
 
 use crate::local_reader::LocalReader;
 use crate::reader::Reader;
-use crate::sym::Sym;
+use crate::sym::{Sym, dense_index_of, dense_sym_at};
 
 /// A single-threaded string interner.
 ///
@@ -50,14 +50,16 @@ use crate::sym::Sym;
 ///
 /// Strings are stored as one contiguous buffer plus a table of `u32` boundaries,
 /// so each string costs **4 bytes** of index overhead. An interner built on
-/// `Vec<&str>` — `lasso`, for example — stores a 16-byte pointer-and-length pair
-/// per string instead.
+/// `Vec<&str>` — `lasso`, for example — stores a pointer-and-length pair per
+/// string instead, which is two machine words: 16 bytes on a 64-bit target, 8 on
+/// a 32-bit one.
 ///
 /// The trade is on the read side: resolving reconstructs the string from two
 /// adjacent boundaries, which is one extra dependent memory load compared with
 /// loading a ready-made pointer and length. Expect resolve to cost a few
 /// instructions more than a `Vec<&str>` design, in exchange for a quarter of the
-/// per-string overhead and far better locality. For resolve-heavy workloads,
+/// per-string overhead on a 64-bit target (half on a 32-bit one) and far better
+/// locality. For resolve-heavy workloads,
 /// [`freeze`](LocalLexicon::freeze) first — a [`LocalReader`] is faster than the
 /// live lexicon.
 ///
@@ -344,11 +346,16 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// Returns the 0-based position of `sym` in insertion order, or `None` if it
     /// is out of range for this lexicon.
     ///
-    /// Handles are assigned consecutively from zero, so this index is a *dense*
-    /// key: per-symbol data can live in a `Vec<T>` indexed by it, rather than a
-    /// hash map keyed by the handle. That avoids hashing and probing entirely, and
-    /// makes set membership a bitset. See [`SymMap`](crate::SymMap) for the hash
-    /// map alternative when a dense table would be too sparse.
+    /// Positions are assigned consecutively from zero in insertion order, so this
+    /// index is a *dense* key: per-symbol data can live in a `Vec<T>` indexed by
+    /// it, rather than a hash map keyed by the handle. That avoids hashing and
+    /// probing entirely, and makes set membership a bitset. See
+    /// [`SymMap`](crate::SymMap) for the hash map alternative when a dense table
+    /// would be too sparse.
+    ///
+    /// The raw handle value from [`Sym::as_u32`] is 1-based, so it is *not* a
+    /// side-table index; `index_of` and [`sym_at`](Self::sym_at) are the supported
+    /// conversions.
     ///
     /// This numbering is a guarantee, not an implementation detail, and
     /// [`freeze`](Self::freeze) preserves it — see
@@ -381,19 +388,14 @@ impl<S: BuildHasher> LocalLexicon<S> {
     ///     let i = lexicon
     ///         .index_of(sym)
     ///         .expect("handle came from this lexicon");
-    ///     lengths[i as usize] = s.len();
+    ///     lengths[i] = s.len();
     /// }
     /// assert_eq!(lengths, vec![1, 1]);
     /// ```
     #[inline]
     #[must_use]
-    pub fn index_of(&self, sym: Sym) -> Option<u32> {
-        let index = sym.dense();
-        if index >= self.len() {
-            return None;
-        }
-        // `dense` decodes a `u32` handle, so this conversion cannot fail.
-        u32::try_from(index).ok()
+    pub fn index_of(&self, sym: Sym) -> Option<usize> {
+        dense_index_of(self.len(), sym)
     }
 
     /// Returns the handle at 0-based position `index`, or `None` if fewer than
@@ -415,9 +417,8 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn sym_at(&self, index: u32) -> Option<Sym> {
-        let index = usize::try_from(index).ok()?;
-        (index < self.len()).then(|| Sym::pack_dense(index))
+    pub fn sym_at(&self, index: usize) -> Option<Sym> {
+        dense_sym_at(self.len(), index)
     }
 
     /// Returns `true` if nothing has been interned yet.
@@ -454,7 +455,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     ///
     /// If you need string lookup on a frozen table, keep the lexicon live instead,
     /// or rebuild a smaller index from [`iter`](Reader::iter). A sorted handle
-    /// list costs 4 bytes per string against the roughly 18 the hash map costs,
+    /// list costs 4 bytes per string against the roughly 7 the hash map costs,
     /// and answers lookups in `O(log n)`:
     ///
     /// ```
@@ -468,7 +469,7 @@ impl<S: BuildHasher> LocalLexicon<S> {
     /// impl Frozen {
     ///     fn new(reader: LocalReader) -> Self {
     ///         let mut by_string: Vec<Sym> = reader.iter().map(|(sym, _)| sym).collect();
-    ///         by_string.sort_unstable_by(|&a, &b| reader.resolve(a).cmp(reader.resolve(b)));
+    ///         by_string.sort_by_cached_key(|&sym| reader.resolve(sym));
     ///         Self {
     ///             by_string: by_string.into_boxed_slice(),
     ///             reader,

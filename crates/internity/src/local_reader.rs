@@ -10,7 +10,7 @@
 use alloc::boxed::Box;
 
 use crate::reader::Reader;
-use crate::sym::Sym;
+use crate::sym::{Sym, dense_index_of, dense_sym_at};
 
 /// A frozen [`LocalLexicon`](crate::LocalLexicon): every string in one contiguous
 /// buffer, addressed by a dense 0-based index.
@@ -37,6 +37,7 @@ use crate::sym::Sym;
 /// let reader: LocalReader = lexicon.freeze();
 /// assert_eq!(reader.resolve(hello), "hello");
 /// ```
+#[derive(Clone)]
 pub struct LocalReader {
     offsets: Box<[u32]>,
     buffer: Box<[u8]>,
@@ -65,13 +66,8 @@ impl LocalReader {
     /// ```
     #[inline]
     #[must_use]
-    pub fn index_of(&self, sym: Sym) -> Option<u32> {
-        let index = sym.dense();
-        if index >= self.len() {
-            return None;
-        }
-        // `dense` decodes a `u32` handle, so this conversion cannot fail.
-        u32::try_from(index).ok()
+    pub fn index_of(&self, sym: Sym) -> Option<usize> {
+        dense_index_of(self.len(), sym)
     }
 
     /// Returns the handle at 0-based position `index`, or `None` if this reader
@@ -92,16 +88,15 @@ impl LocalReader {
     /// ```
     #[inline]
     #[must_use]
-    pub fn sym_at(&self, index: u32) -> Option<Sym> {
-        let index = usize::try_from(index).ok()?;
-        (index < self.len()).then(|| Sym::pack_dense(index))
+    pub fn sym_at(&self, index: usize) -> Option<Sym> {
+        dense_sym_at(self.len(), index)
     }
 }
 
 impl core::fmt::Debug for LocalReader {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LocalReader")
-            .field("len", &(self.offsets.len() - 1))
+            .field("len", &Reader::len(self))
             .finish_non_exhaustive()
     }
 }

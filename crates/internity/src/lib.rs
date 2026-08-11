@@ -83,11 +83,14 @@
 //!
 //! # Dense handles
 //!
-//! [`LocalLexicon`] numbers its handles consecutively from zero in insertion
-//! order, and [`freeze`](LocalLexicon::freeze) preserves that numbering. Use
+//! [`LocalLexicon`] assigns its handles consecutively in insertion order, and
+//! [`freeze`](LocalLexicon::freeze) preserves that numbering, so every live string
+//! has a distinct position in `0..len`. Use
 //! [`index_of`](LocalLexicon::index_of) and [`sym_at`](LocalLexicon::sym_at) to
 //! move between a handle and its position, which makes a `Vec<T>` side table
 //! indexed by symbol possible — cheaper than a hash map keyed by the handle.
+//! The raw [`Sym::as_u32`] value is 1-based and must not be used as an index
+//! directly.
 //!
 //! [`ThreadedLexicon`] handles pack a shard index into their high bits and are
 //! **not** consecutive, so it offers no such conversion.
@@ -125,8 +128,9 @@
 //!
 //! # Cargo features
 //!
-//! * `std` *(default)* — enables the concurrent [`ThreadedLexicon`]. Without it the
-//!   crate is `no_std` + `alloc`: [`LocalLexicon`], [`Lexicon`], [`Sym`], and
+//! * `std` *(default)* — enables the concurrent [`ThreadedLexicon`] and its frozen
+//!   [`ThreadedReader`]. Without it the crate is `no_std` + `alloc`:
+//!   [`LocalLexicon`], its frozen [`LocalReader`], [`Lexicon`], [`Sym`], and
 //!   [`Reader`] still work.
 //! * `serde` — reader-aware serialization: the [`se::SerializeIn`] /
 //!   [`de::DeserializeIn`] derives, [`se::SerializeReader`] for a whole corpus,
