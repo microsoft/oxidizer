@@ -727,10 +727,23 @@ function Test-PackageExposesTarget {
 # or 'none' when there is no prior version-bump commit to compare against (a
 # brand-new crate).
 #
-# The current API is analysed from the working tree, so a coordinated release's
-# in-progress source edits (including a dependency whose public types this crate
-# re-exports) are reflected — this is what lets an exposed-dependency breaking
-# change cascade correctly, without the old allowed_external_types heuristic.
+# The current API is analysed from the working tree, not from HEAD, so a
+# coordinated release's in-progress source edits are reflected rather than only
+# what has been committed.
+#
+# That is necessary but NOT sufficient for exposed-dependency breaks, and this
+# function must not be read as covering them. When a dependency's version bump
+# is incompatible without its type *shapes* changing, this crate's rustdoc is
+# identical on both sides of the comparison, so semver-checks correctly reports
+# no required bump — yet releasing this crate compatibly is still wrong, because
+# type identity in Rust is per-version: a consumer cannot hand a `dep 0.7` type
+# to an API expecting `dep 0.8`. Nothing in a rustdoc diff can show that.
+#
+# Exposure is therefore decided separately, from the crate's declared
+# allowed_external_types (Test-PackageExposesTarget), and propagated to a
+# fixpoint by Resolve-ReleaseSet. The two are complementary: semver-checks
+# supplies each crate's own floor, the exposure cascade supplies the floor its
+# dependencies impose on it.
 function Invoke-CrateSemverCheck {
     [CmdletBinding()]
     param(
