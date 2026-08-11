@@ -629,11 +629,14 @@ Describe 'Test-PackageExposesTarget' {
         # &BytesBuf`, plus BytesView/Memory/HasMemory in trait signatures. A
         # breaking bytesbuf release is therefore a breaking bytesbuf_io release.
         #
-        # The allowlist below is copied verbatim from
-        # crates/bytesbuf_io/Cargo.toml. ExposureCascade-RealWorkspace.Tests.ps1
-        # asserts the real manifest still matches it, so this stays honest.
+        # The allowlist comes from Get-BytesBufIoAllowlist (_common), which
+        # holds the literal copied from crates/bytesbuf_io/Cargo.toml.
+        # ExposureCascade-RealWorkspace.Tests.ps1 asserts the real manifest
+        # still equals that literal exactly, so this stays honest: if the
+        # manifest gains or loses an entry, that test fails rather than this
+        # one quietly asserting against a stale copy.
         BeforeAll {
-            $script:BytesBufIoAllowed = @('bytesbuf::*', 'ohno::*', 'futures_core::stream::Stream')
+            $script:BytesBufIoAllowed = Get-BytesBufIoAllowlist
         }
 
         It 'reports exposure of bytesbuf' {

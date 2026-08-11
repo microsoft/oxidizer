@@ -306,9 +306,27 @@ function Update-EntryForRequiredChangeType {
 }
 
 # Records one cascade reason on an entry, keyed by target package name.
-# Re-encountering the same (target -> dependent) edge on a later strengthening
-# pass overwrites the prior reason in place instead of appending a duplicate, so
-# the list stays one-per-edge however many fixpoint iterations run.
+# Re-recording the same target on a later strengthening pass overwrites the
+# prior reason in place instead of appending a duplicate, so the list stays
+# one-per-target however many fixpoint iterations run.
+#
+# The key is a package, not a graph edge. CascadeReasons answers "which
+# released packages forced this entry into the set, and did any of them force
+# it breaking?", and its entries arrive from two different relationships:
+#
+#   * MEMBERSHIP -- the target this entry was reached from during the
+#     Get-TransitivePublishedDependentsFromBaseline walk. That walk is
+#     transitive, so the target need not be a direct dependency; it can sit
+#     several crates away, possibly behind unpublished conduits.
+#   * EXPOSURE -- a target whose types this entry names in its own public API,
+#     recorded by Update-EntryForExposedDependency. Since re-exported types are
+#     attributed to their defining crate, this too can name a package the entry
+#     does not depend on directly.
+#
+# So a reason means "this package caused that release", not "this package is a
+# direct dependency". Changelog attribution needs the narrower direct-dependency
+# relation and must derive it from the dependency graph rather than reading it
+# out of this collection.
 function Set-CascadeReason {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Entry,
@@ -427,7 +445,7 @@ function Update-EntryForExposedDependency {
 
     Update-EntryForRequiredChangeType -Entry $Entry -RequiredChangeType 'breaking' `
         -RequirementLabel 'exposed-dependency cascade' `
-        -RequirementDetail "the incompatible planned version of '$TargetPackageName' exposed in its public API" `
+        -RequirementDetail "this crate's own public API naming types from the incompatible planned version of '$TargetPackageName'" `
         -Force:$Force
 
     Set-CascadeReason -Entry $Entry -Reason ([pscustomobject]@{ Target = $TargetPackageName; Breaking = $true })
@@ -653,8 +671,10 @@ function Resolve-ReleaseSet {
                 $existing = $resolved[$depFolder]
 
                 # Dedup cascade reasons by target name (re-encountering the
-                # same edge after a strengthening pass overwrites the prior
-                # reason in place rather than adding a duplicate).
+                # same target after a strengthening pass overwrites the prior
+                # reason in place rather than adding a duplicate). This target
+                # was reached transitively, so it is not necessarily a direct
+                # dependency of $depFolder -- see Set-CascadeReason.
                 Set-CascadeReason -Entry $existing -Reason $cascadeReason
 
                 $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '

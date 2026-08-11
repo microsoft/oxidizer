@@ -54,7 +54,7 @@ Describe 'Exposed-dependency cascade over the live workspace' {
         }
 
         It 'still declares a bytesbuf-rooted entry in the real bytesbuf_io allowlist' {
-            # Pins the manifest against the literal allowlist asserted in
+            # Pins the manifest against the literal asserted in
             # PureFunctions.Tests.ps1. Deleting `bytesbuf::*` here is precisely
             # how the fail-open would be reintroduced.
             $allowed = @((Get-LivePackage -Folder 'bytesbuf_io').AllowedExternalTypes)
@@ -62,6 +62,22 @@ Describe 'Exposed-dependency cascade over the live workspace' {
 
             $roots = @($allowed | ForEach-Object { ($_ -split '::', 2)[0] })
             $roots | Should -Contain 'bytesbuf'
+        }
+
+        It 'still matches the shared allowlist literal entry for entry' {
+            # The unit tests assert exposure of `ohno` and `futures_core` too,
+            # using the same literal. Checking only the bytesbuf root would
+            # leave those two asserted against a copy nothing pins, so the unit
+            # tests could keep passing on entries the manifest had dropped.
+            # Compare the whole set, which is what makes the "copied verbatim"
+            # comment in _common a fact rather than an intention.
+            $allowed = @((Get-LivePackage -Folder 'bytesbuf_io').AllowedExternalTypes)
+
+            # Order is irrelevant -- this pins the contents of the allowlist,
+            # not how the manifest happens to sort them.
+            ($allowed | Sort-Object) -join '|' |
+                Should -Be ((Get-BytesBufIoAllowlist | Sort-Object) -join '|') `
+                -Because 'crates/bytesbuf_io/Cargo.toml and Get-BytesBufIoAllowlist must not drift apart'
         }
 
         It 'reports bytesbuf_io as exposing bytesbuf using the real package records' {
