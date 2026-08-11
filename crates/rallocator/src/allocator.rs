@@ -1628,7 +1628,7 @@ where
                     block: ptr::null_mut(),
                     kind: FastAllocationKind::Context,
                 }
-            } else if !unsafe { (*state).active_bump }.is_null() {
+            } else if !C::TRACK_CALLERS && !unsafe { (*state).active_bump }.is_null() {
                 let block = unsafe { bump::allocate((*state).active_bump, layout) };
                 if !block.is_null() {
                     FastAllocation {

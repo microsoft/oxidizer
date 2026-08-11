@@ -12,7 +12,8 @@
 use std::alloc::{GlobalAlloc, Layout};
 use std::sync::Mutex;
 
-use allocation_hints::heap::{Heap, thread_heap};
+use allocation_hints::heap::bump::Options as BumpOptions;
+use allocation_hints::heap::{Heap, Options as HeapOptions, thread_heap};
 use allocation_hints::{Hint, with_hint};
 use rallocator::Rallocator;
 use rallocator::config::Config;
@@ -163,6 +164,23 @@ fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
         .join()
         .unwrap();
     track_callers(false);
+}
+
+#[test]
+fn caller_capable_bump_heap_falls_back_when_tracking_header_does_not_fit() {
+    rallocator::initialize();
+    let _test = test_lock();
+    track_callers(false);
+    let layout = Layout::from_size_align(32 * 1024 - 32, 16).unwrap();
+    let heap = Heap::with_options(HeapOptions::bump(BumpOptions::new().with_max_allocation_bytes(layout.size())));
+
+    let address = with_hint(Hint::new().with_heap(&heap), || unsafe { ALLOCATOR.alloc(layout) });
+    assert!(!address.is_null());
+    assert_eq!(heap.usage().unwrap().bump().unwrap().allocation_count(), 0);
+    unsafe {
+        address.write_bytes(0xA5, layout.size());
+        ALLOCATOR.dealloc(address, layout);
+    }
 }
 
 #[test]
