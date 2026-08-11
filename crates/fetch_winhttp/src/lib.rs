@@ -20,8 +20,10 @@
 //! - Proxy selection follows automatic Windows proxy policy, including
 //!   automatic discovery and proxy auto-configuration scripts; no proxy
 //!   override or direct-connection fallback is exposed.
-//! - The connection idle timeout is honored, subject to a platform minimum
-//!   window.
+//! - The connection idle timeout is honored, raised to a platform minimum when
+//!   the caller asks for a shorter window. An unlimited idle timeout is
+//!   approximated by the longest window the platform can express, which exceeds
+//!   forty-nine days.
 //! - Generic TLS configuration and the generic transport options WinHTTP
 //!   cannot represent, including finite connection limits and bounded
 //!   connection lifetimes, are accepted but ignored.
@@ -47,7 +49,9 @@
 //!   delivered still encoded, with their headers intact.
 //! - Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
 //!   HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
-//!   Request trailers are rejected.
+//!   Request trailers are rejected, and because a trailer frame is reached only
+//!   once the body yields it, that rejection arrives after the headers and any
+//!   preceding body data have been sent.
 //!
 //! Requests are serviced through the operating system's
 //! [WinHTTP](https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp)

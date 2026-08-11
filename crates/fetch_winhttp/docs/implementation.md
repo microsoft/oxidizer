@@ -883,8 +883,9 @@ The ordering matters because a rented pool block stays rented for as long as the
 holds a view cut from it: reserving a fixed `PREFERRED_READ_SIZE` up front would pin a
 whole 64 KiB block for every emitted frame regardless of its payload, so a body delivered
 in small chunks would amplify retained memory by up to the ratio of block size to chunk
-size. Only the speculative zero-availability path reserves the full
-`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block - because a zero
+size. Only the speculative zero-availability path reserves up to the full
+`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block, and still bounded
+by the caller's limit - because a zero
 availability figure carries no size information. `read_any` reserves nothing of its own
 and inherits the same availability-proportional reservation.
 
@@ -906,9 +907,10 @@ let body = builder.body(body, &body_options);
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
-there is no unbounded buffering; retained pool memory additionally tracks the delivered
-payload, because each frame's block is sized from the reported availability rather than
-from a fixed maximum. The request's body idle timeout
+there is no unbounded buffering; wherever availability is reported, retained pool memory
+additionally tracks the delivered payload, because each frame's block is sized from that
+figure rather than from a fixed maximum. The speculative zero-availability read is the
+exception described above. The request's body idle timeout
 (`http_extensions::BodyTimeout`) is copied into `body_options`.
 `HttpBodyBuilder::body` merges it with the client's response-body defaults and applies
 the Rust-side idle-timeout wrapper (§10.4). Native WinHTTP receive timers remain
@@ -1573,10 +1575,13 @@ value set would freeze the internal sequence of setup calls into the crate's con
 `CONNECTING_TO_SERVER` when a request establishes a *new* physical connection
 rather than reusing a pooled one. When a request then fails (connect timeout,
 `REQUEST_ERROR`, `SECURE_FAILURE`), the transport annotates the failure's log event
-with a marker that the failure occurred on a freshly-established connection, plus the
-measured connect duration. This lets an operator distinguish "the server/pool is
-unhealthy" from "cold-connection establishment is slow or failing" - these have
-different remediations. This attribution is attached only to the log event; it is
+with a marker that the failure occurred during a new connection attempt, plus the duration
+measured from context installation to the point where the request headers were sent or
+their send failed. Attribution turns on `CONNECTING_TO_SERVER` rather than
+`CONNECTED_TO_SERVER`, so a request that fails while still connecting is attributed too;
+that is the case an operator most needs to see. This lets an operator distinguish "the
+server/pool is unhealthy" from "cold-connection establishment is slow or failing" - these
+have different remediations. This attribution is attached only to the log event; it is
 **not** promoted to a metric label, to keep connection-establishment noise out of the
 metric cardinality.
 

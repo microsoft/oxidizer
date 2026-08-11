@@ -29,8 +29,10 @@ not share connections.
 * Proxy selection follows automatic Windows proxy policy, including
   automatic discovery and proxy auto-configuration scripts; no proxy
   override or direct-connection fallback is exposed.
-* The connection idle timeout is honored, subject to a platform minimum
-  window.
+* The connection idle timeout is honored, raised to a platform minimum when
+  the caller asks for a shorter window. An unlimited idle timeout is
+  approximated by the longest window the platform can express, which exceeds
+  forty-nine days.
 * Generic TLS configuration and the generic transport options WinHTTP
   cannot represent, including finite connection limits and bounded
   connection lifetimes, are accepted but ignored.
@@ -56,7 +58,9 @@ not share connections.
   delivered still encoded, with their headers intact.
 * Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
   HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
-  Request trailers are rejected.
+  Request trailers are rejected, and because a trailer frame is reached only
+  once the body yields it, that rejection arrives after the headers and any
+  preceding body data have been sent.
 
 Requests are serviced through the operating system’s
 [WinHTTP][__link5]
@@ -68,7 +72,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbTWICn8cvqaIbviUj-UDG9V8bUN_2uW0wD1AbQIZGg40Oq7thZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb05Y4yz2EhSUb_WUj-fedRzMbJzzLIW6JSRUbChzaHWEeGElhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps

@@ -202,10 +202,12 @@ impl ErrorClass {
 }
 
 #[derive(Clone, Copy)]
-/// Associates one documented native code with its transport error semantics.
+/// Associates one recognized native code with its transport error semantics.
 ///
 /// The table keeps code recognition separate from the label and recovery policy
-/// centralized in [`ErrorClass`].
+/// centralized in [`ErrorClass`]. Which codes appear here is not contractual
+/// (design.md section 7): the conditions each label covers are the promise, and
+/// a code absent from the table is classified as unknown.
 struct ErrorMapping {
     code: u32,
     class: ErrorClass,
@@ -263,13 +265,18 @@ fn classify(code: u32) -> ErrorClass {
         .map_or(ErrorClass::RequestUnknown, |mapping| mapping.class)
 }
 
-/// Reports a request this transport rejects locally, before `WinHTTP` sees it.
+/// Reports a request this transport rejects itself rather than `WinHTTP`.
 ///
 /// This is the `invalid_request` row of the error-surface table in design.md
 /// section 7: an unusable HTTP version, an unusable target, or request body
-/// framing the transport cannot honor. Nothing reaches the network, and the
-/// same request would be rejected identically on every attempt, so design.md
-/// section 7.1 classifies it as deterministic rather than unknown.
+/// framing the transport cannot honor. The same request would be rejected
+/// identically on every attempt, so design.md section 7.1 classifies it as
+/// deterministic rather than unknown.
+///
+/// A rejection decided from request metadata happens before any `WinHTTP`
+/// call, but one decided from a body frame is reached only once that frame is
+/// polled, after the headers and every preceding data frame have been sent.
+/// This label therefore does not imply the request had no remote effect.
 pub(crate) fn invalid_request(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> HttpError {
     HttpError::other(error, RecoveryInfo::never(), error_labels::INVALID_REQUEST)
 }

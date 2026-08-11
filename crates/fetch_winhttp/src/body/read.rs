@@ -33,9 +33,11 @@ const PREFERRED_READ_SIZE: usize = 64 * 1024;
 ///
 /// Each caller-driven read first queries available data and then lends one
 /// contiguous writable span from a pooled `BytesBuf` to WinHTTP. Capacity is
-/// reserved only after that query, so the rented pool block matches the bytes
-/// actually readable instead of a fixed maximum; a trickling peer therefore
-/// cannot amplify a small response into many large rented blocks. The retained
+/// reserved only after that query, so the rented pool block is sized from the
+/// bytes actually readable instead of a fixed maximum. A zero availability
+/// figure carries no size information and is the exception: the read is then
+/// speculative and reserves `PREFERRED_READ_SIZE`, bounded by the caller's
+/// limit, however few bytes come back. The retained
 /// [`RequestGuard`] keeps callback state and handles alive, so dropping the
 /// reader cancels the request without reading ahead. A zero-length
 /// `READ_COMPLETE`, rather than a zero availability query, is authoritative

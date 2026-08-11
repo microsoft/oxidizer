@@ -267,7 +267,9 @@ behaves consistently with the rest of `fetch`:
   frames rather than discarded. HTTP/1.1 supports trailer fields after a chunked body,
   but WinHTTP does not expose them; response trailers are therefore available only for
   HTTP/2 and HTTP/3. Outgoing trailer frames are unsupported and fail the request rather
-  than being silently dropped.
+  than being silently dropped. A trailer frame is reached only once the body yields it,
+  so that failure arrives after the headers and every preceding data frame have been
+  sent (§7).
 - **Caller-supplied request framing headers.** A `Content-Length` supplied by the caller
   must be a single well-formed value, and repeated fields must agree with each other. A
   body that reports its own length is authoritative: the header must equal that length,
@@ -352,8 +354,8 @@ transport's; the transport only reports the timeout.
   classification, never on a code.
 
   The families that state no code, because no WinHTTP call produced them, are:
-  - a request rejected locally before any WinHTTP call, whose message states what the
-    caller must change (`invalid_request`);
+  - a request the transport rejects itself, whose message states what the caller must
+    change (`invalid_request`);
   - response metadata that a successful WinHTTP call returned but that cannot be parsed
     or represented, whose message describes the malformed value (`request_winhttp`);
   - an error raised by the caller's own request body stream, which is surfaced exactly as
@@ -366,14 +368,26 @@ transport's; the transport only reports the timeout.
 
   | Condition | `ErrorLabel` |
   |-----------|--------------|
-  | `ERROR_WINHTTP_CANNOT_CONNECT`, `NAME_NOT_RESOLVED` | `connect` |
-  | `ERROR_WINHTTP_TIMEOUT` | `timeout` |
-  | `ERROR_WINHTTP_SECURE_FAILURE` | `tls` |
-  | `ERROR_WINHTTP_OPERATION_CANCELLED` | `abandoned` |
-  | send/receive/protocol failures, and response metadata the transport cannot use | `request_winhttp` |
-  | a request rejected locally before it is sent: an unusable HTTP version (§3, §3.1), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
+  | the connection could not be established: the name did not resolve, or the peer refused the connection or could not be reached | `connect` |
+  | a WinHTTP operation exceeded its own time limit | `timeout` |
+  | TLS failed: certificate validation, revocation checking, secure-channel negotiation, or a client identity this transport cannot supply | `tls` |
+  | the operation was cancelled, aborted, or shut down rather than allowed to fail | `abandoned` |
+  | a send, receive, or protocol failure; a response exceeding a limit WinHTTP enforces; response metadata the transport cannot use; and any WinHTTP code the transport does not recognize | `request_winhttp` |
+  | a request the transport rejects itself: an unusable HTTP version (§3, §3.1), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
   | the WinHTTP session could not be opened | `winhttp_initialization` |
   | the connect deadline expired (§6.2) | `response_timeout` |
+
+  The table states which condition each label covers. The exact set of native codes
+  recognized for a condition is not contractual; a code outside that set is labeled
+  `request_winhttp` and carries unknown recovery guidance. A label follows the code
+  WinHTTP reports rather than the underlying cause, so where one code spans several
+  conditions the label reflects the code: a TLS incompatibility reported as a generic
+  connection failure is labeled `request_winhttp`, not `tls`.
+- **Transmission on `invalid_request`.** A rejection decided from request metadata
+  happens before any WinHTTP call, so the server saw nothing. A body frame the transport
+  cannot send is discovered only when the body yields it, by which point the headers and
+  every preceding data frame have gone out. An `invalid_request` therefore does not on
+  its own promise that the request had no remote effect.
 
 - **Permanently failed initialization.** A transport that cannot open its WinHTTP session
   latches that failure instead of retrying it. Every request it subsequently serves returns
@@ -389,20 +403,21 @@ without the caller changing anything. Idempotency and retry budgets are
 transport noise, a deterministic condition, or a code we do not recognize well enough
 to say.
 
-- **Retryable** (transient transport/connection faults): connection reset or
-  closed mid-flight, `NAME_NOT_RESOLVED` (DNS can be flaky), `CANNOT_CONNECT`
-  (transient server/pool state), `TIMEOUT` and `CONNECTION_ERROR` (transient
-  load), and certificate-revocation checks that fail because the revocation
-  server is unavailable. Re-issuing may land on a healthy connection or reach
-  the external revocation service.
-- **Never** (deterministic failures): TLS/certificate validation failures (given
-  a fixed trust configuration and a completed revocation check, a retry yields
-  the same verdict) and
-  `OPERATION_CANCELLED` (the caller initiated teardown; retrying would contradict
-  intent). Malformed-response/protocol violations that indicate a stable server
-  or configuration problem are also non-retryable.
-- **Unknown** (everything else): the recognized codes are a documented subset of the
-  many codes WinHTTP can return, so an unrecognized code is the ordinary case rather
+- **Retryable** (transient transport/connection faults): a connection reset, aborted, or
+  closed mid-flight; a name that did not resolve (DNS can be flaky); a peer that refused
+  the connection or could not be reached (transient server/pool state); an operation that
+  exceeded its time limit (transient load); a request WinHTTP asks to be resent; and a
+  certificate-revocation check WinHTTP reports as unable to complete, which a retry may
+  find the revocation service able to answer.
+- **Never** (deterministic failures): TLS failures other than that incomplete revocation
+  check, because a fixed trust configuration yields the same verdict on a retry, and
+  because a client identity this transport cannot supply will still be missing; and
+  cancellation, abortion, and shutdown, which stop an operation rather than fail it, so
+  re-issuing would work against whatever stopped it. Malformed responses, protocol
+  violations, and responses exceeding a limit WinHTTP enforces are also non-retryable:
+  each indicates a stable server or configuration problem.
+- **Unknown** (everything else): the recognized codes are a small subset of the many
+  codes WinHTTP can return, so an unrecognized code is the ordinary case rather
   than an exception. Such a failure carries unknown recovery guidance instead of being
   asserted retryable or never, leaving the decision to the policy layers above.
 
@@ -442,8 +457,8 @@ Log fields carry the higher-cardinality context instead, and appear on log recor
 |-------|-------|-------|
 | `fetch.winhttp.session.initialization.failure` | `winhttp.operation` | An identifier naming which step of session setup failed. The identifiers name internal setup steps and are diagnostic only; the set of them is not contractual. |
 | `fetch.winhttp.session.initialization.failure` | `winhttp.error_code` | The Win32/`WINHTTP_*` code that step returned. |
-| `fetch.winhttp.request.error` | `winhttp.connection.fresh` | Present and `true` only when the failed request established a new physical connection rather than reusing a pooled one. Absent otherwise. |
-| `fetch.winhttp.request.error` | `winhttp.connect.duration` | Seconds spent establishing that new connection. Present under the same condition as `winhttp.connection.fresh`. |
+| `fetch.winhttp.request.error` | `winhttp.connection.fresh` | Present and `true` only when the failed request began establishing a new physical connection rather than reusing a pooled one. A request that failed while still connecting carries the field, since that is the case the attribution most needs to identify. Absent otherwise. |
+| `fetch.winhttp.request.error` | `winhttp.connect.duration` | Seconds spent on that connection attempt, measured until the request headers were sent or the send failed. Present under the same condition as `winhttp.connection.fresh`. |
 
 Cold-connect attribution distinguishes "the server or pool is unhealthy" from
 "establishing new connections is slow or failing", which have different remediations. It
