@@ -620,4 +620,50 @@ Describe 'Test-PackageExposesTarget' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('std::io::Error') }
         Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
     }
+
+    Context 'bytesbuf_io -> bytesbuf (real workspace topology)' {
+        # The production instance this whole cascade exists for. bytesbuf_io
+        # describes itself as "Asynchronous I/O abstractions expressed via
+        # `bytesbuf` types" and its public API says so literally --
+        # `pub fn reserve(&self, ...) -> BytesBuf`, `pub fn contents(&self) ->
+        # &BytesBuf`, plus BytesView/Memory/HasMemory in trait signatures. A
+        # breaking bytesbuf release is therefore a breaking bytesbuf_io release.
+        #
+        # The allowlist below is copied verbatim from
+        # crates/bytesbuf_io/Cargo.toml. ExposureCascade-RealWorkspace.Tests.ps1
+        # asserts the real manifest still matches it, so this stays honest.
+        BeforeAll {
+            $script:BytesBufIoAllowed = @('bytesbuf::*', 'ohno::*', 'futures_core::stream::Stream')
+        }
+
+        It 'reports exposure of bytesbuf' {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue
+        }
+
+        It 'reports exposure of the other allowlisted roots' {
+            foreach ($target in @('ohno', 'futures_core')) {
+                Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                    -TargetPackageName $target | Should -BeTrue -Because "'$target' is an allowlisted root"
+            }
+        }
+
+        It 'does not report exposure of a dependency that is absent from the allowlist' {
+            # bytesbuf_io depends on trait-variant, but it is a macro crate that
+            # never surfaces in the public API, so it is deliberately not
+            # allowlisted. This is the branch that must stay $false -- if it ever
+            # returns $true the cascade degenerates into "bump everything".
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                -TargetPackageName 'trait-variant' | Should -BeFalse
+        }
+
+        It 'is not fooled by a crate whose name merely prefixes an allowlisted root' {
+            # 'bytesbuf' is a strict prefix of 'bytesbuf_io'. Root comparison is
+            # exact, so an allowlist naming one must not report the other.
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @('bytesbuf::BytesBuf')) `
+                -TargetPackageName 'bytesbuf_io' | Should -BeFalse
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @('bytesbuf_io::Read')) `
+                -TargetPackageName 'bytesbuf' | Should -BeFalse
+        }
+    }
 }
