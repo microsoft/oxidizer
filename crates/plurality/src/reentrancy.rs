@@ -53,7 +53,8 @@ impl ReentrancyLatch {
     /// In debug builds, if the region is entered while already claimed.
     #[inline]
     pub(crate) fn hold(&self) -> LatchToken<'_> {
-        debug_assert!(!self.held.replace(true), "a latched region was entered from inside itself");
+        let was_held = self.held.replace(true);
+        debug_assert!(!was_held, "a latched region was entered from inside itself");
         LatchToken { latch: self }
     }
 
