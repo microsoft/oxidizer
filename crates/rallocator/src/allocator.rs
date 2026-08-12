@@ -1714,21 +1714,25 @@ where
     }
 
     unsafe fn dealloc(&self, address: *mut u8, layout: Layout) {
+        let region = region_containing(address);
         let segment = allocation_segment(address);
         // Allocations entering this branch are preceded within their segment by
         // allocator-owned metadata. Segment-base allocations are excluded above,
         // so user payload can never own the marker or bump-state prefix.
-        if address != segment {
+        let marker = if region.is_some() && address != segment {
             let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
             if let Some(state) = unsafe { bump::state_for_allocation(segment, marker) } {
                 unsafe { self.deallocate_bump(address, layout, state) };
                 return;
             }
-        }
+            marker
+        } else {
+            0
+        };
 
         // Layouts without a small class are either region-backed medium spans or direct mappings.
         if default_class::<C::Tunables>(layout).is_none() {
-            if region_containing(address).is_some() && medium_slice_count(layout).is_some() {
+            if region.is_some() && medium_slice_count(layout).is_some() {
                 let state = unsafe { thread_state() };
                 let heap = unsafe { current_initialized_reusable_heap(state) };
                 unsafe { self.deallocate_medium(address, layout, heap) };
@@ -1740,10 +1744,8 @@ where
             unsafe { self.deallocate_direct(address, layout, extra) };
             return;
         }
-
         // Ordinary layouts can still use a direct mapping after a slab fallback. A valid slab
         // marker is therefore required before the address is treated as a small allocation.
-        let marker = unsafe { (*segment.cast::<AtomicUsize>()).load(Ordering::Acquire) };
         if let Some(class_index) = slab_class_from_marker::<C::Tunables>(marker) {
             if C::TRACK_AGGREGATES {
                 record_physical_small_deallocation(address);
@@ -1756,7 +1758,7 @@ where
 
         // A region-owned ordinary layout may be a medium allocation; otherwise its tagged header
         // distinguishes direct mappings from context allocations.
-        if !is_context_marker::<C::Tunables>(marker) && region_containing(address).is_some() && medium_slice_count(layout).is_some() {
+        if !is_context_marker::<C::Tunables>(marker) && region.is_some() && medium_slice_count(layout).is_some() {
             let state = unsafe { thread_state() };
             let heap = unsafe { current_initialized_reusable_heap(state) };
             unsafe { self.deallocate_medium(address, layout, heap) };
@@ -3788,11 +3790,13 @@ unsafe fn current_remote_heap(state: *mut ThreadState) -> *mut RemoteHeapState {
 }
 
 unsafe fn write_header(address: *mut u8, header: *mut ExtraHeader) {
-    unsafe { address.sub(HEADER_OFFSET).cast::<*mut ExtraHeader>().write(header) };
+    let header_address = unsafe { hal::allocation_prefix_for_write::<*mut ExtraHeader>(address, HEADER_OFFSET) };
+    unsafe { header_address.cast::<*mut ExtraHeader>().write(header) };
 }
 
 unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
-    unsafe { address.sub(HEADER_OFFSET).cast::<*mut ExtraHeader>().read() }
+    let header_address = unsafe { hal::allocation_prefix_for_read::<*mut ExtraHeader>(address, HEADER_OFFSET) };
+    unsafe { header_address.read() }
 }
 
 #[cfg(test)]

@@ -11,12 +11,14 @@
 )]
 
 use std::alloc::{GlobalAlloc, Layout};
+#[cfg(not(miri))]
 use std::hint::black_box;
 use std::sync::Mutex;
 
 use allocation_hints::domain::Domain;
 use allocation_hints::heap::{Heap, Options, bump, thread_heap};
 use allocation_hints::{Hint, with_hint};
+#[cfg(not(miri))]
 use rallocator::config::Config;
 use rallocator::telemetry::stats::{Sampler, Session};
 use rallocator::telemetry::{snapshot, stats, track_callers};
@@ -26,10 +28,15 @@ use rallocator_telemetry::topology::SliceKind;
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+const TEST_CALLER_EVENT_CAPACITY: usize = if cfg!(miri) { 128 } else { 128 * 1024 };
+
 rallocator::config!(TelemetryConfig {
     track_aggregates: true,
     track_callers: true,
+    caller_event_capacity: TEST_CALLER_EVENT_CAPACITY,
 });
+
+rallocator::config!(DefaultCallerConfig { track_callers: true });
 
 rallocator::config!(CustomCallerConfig {
     track_callers: true,
@@ -49,11 +56,11 @@ fn caller_diagnostic_configuration_has_stable_defaults_and_overrides() {
     rallocator::initialize();
 
     const {
-        assert!(TelemetryConfig::CALLER_EVENT_CAPACITY == 128 * 1024);
-        assert!(TelemetryConfig::CALLER_ALLOCATION_STACK_FRAMES == 16);
-        assert!(TelemetryConfig::CALLER_DEALLOCATION_STACK_FRAMES == 16);
-        assert!(TelemetryConfig::CALLER_TRACK_THREADS);
-        assert!(TelemetryConfig::CALLER_TRACK_HEAP_LIFETIMES);
+        assert!(DefaultCallerConfig::CALLER_EVENT_CAPACITY == 128 * 1024);
+        assert!(DefaultCallerConfig::CALLER_ALLOCATION_STACK_FRAMES == 16);
+        assert!(DefaultCallerConfig::CALLER_DEALLOCATION_STACK_FRAMES == 16);
+        assert!(DefaultCallerConfig::CALLER_TRACK_THREADS);
+        assert!(DefaultCallerConfig::CALLER_TRACK_HEAP_LIFETIMES);
 
         assert!(CustomCallerConfig::CALLER_EVENT_CAPACITY == 8);
         assert!(CustomCallerConfig::CALLER_ALLOCATION_STACK_FRAMES == 3);
@@ -85,10 +92,12 @@ fn tracking_is_off_by_default_and_process_wide_when_enabled() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].kind, EventKind::Allocated);
     assert_eq!(events[1].kind, EventKind::Deallocated);
+    #[cfg(not(miri))]
     assert!(!events[0].call_stack.is_empty());
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn collection_includes_every_participating_thread_log() {
     let _test = test_lock();
     rallocator::initialize();
@@ -122,6 +131,7 @@ fn collection_includes_every_participating_thread_log() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn remote_thread_heap_allocations_keep_caller_tracking() {
     let _test = test_lock();
     rallocator::initialize();
@@ -174,6 +184,7 @@ fn snapshot_encodes_allocations_by_stack() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn tracked_allocation_can_be_freed_on_another_thread() {
     let _test = test_lock();
     rallocator::initialize();
@@ -245,6 +256,7 @@ fn bounded_per_thread_logs_report_overwritten_events() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "cross-thread tracking-log/TLS lifecycle coverage is exercised by native tests")]
 fn collection_is_safe_while_a_thread_updates_its_log() {
     let _test = test_lock();
     rallocator::initialize();
@@ -281,6 +293,7 @@ fn collection_is_safe_while_a_thread_updates_its_log() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn retained_call_stacks_are_encoded() {
     let _test = test_lock();
     rallocator::initialize();
@@ -384,6 +397,7 @@ fn escaped_bump_free_records_heap_lifetime_and_free_stack() {
     assert_eq!(allocation.heap_kind, HeapKind::Bump);
     assert_eq!(allocation.heap_id, deallocation.heap_id);
     assert!(deallocation.freed_after_heap_release);
+    #[cfg(not(miri))]
     assert!(!deallocation.call_stack.is_empty());
 }
 
@@ -505,6 +519,7 @@ fn sampler_and_session_report_interval_deltas() {
 fn opaque_snapshot_suppresses_allocator_operations() {
     let _test = test_lock();
     rallocator::initialize();
+    #[cfg(not(miri))]
     let path = format!("opaque-snapshot-{}.bin", std::process::id());
     track_callers(false);
     let encoded = (0..32)
@@ -521,6 +536,7 @@ fn opaque_snapshot_suppresses_allocator_operations() {
         })
         .expect("test-harness allocation activity did not settle");
     assert!(!encoded.as_bytes().is_empty());
+    #[cfg(not(miri))]
     encoded.write_file(&path).unwrap();
     let before_drop = stats().unwrap();
     drop(encoded);
@@ -530,6 +546,7 @@ fn opaque_snapshot_suppresses_allocator_operations() {
     assert_eq!(after_drop.live_bytes, before_drop.live_bytes);
     assert_eq!(after_drop.allocations, before_drop.allocations);
     assert_eq!(after_drop.deallocations, before_drop.deallocations);
+    #[cfg(not(miri))]
     std::fs::remove_file(path).unwrap();
 }
 

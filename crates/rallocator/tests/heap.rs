@@ -21,6 +21,11 @@ use allocation_hints::{ErrorKind, Hint, with_hint};
 
 rallocator::rallocator!();
 
+struct SendAllocation(*mut u8);
+
+// SAFETY: the producing thread relinquishes the allocation before the pointer is joined and freed.
+unsafe impl Send for SendAllocation {}
+
 #[test]
 fn hints_compare_and_format_by_heap_identity() {
     rallocator::initialize();
@@ -250,6 +255,7 @@ fn thread_heap_usage_requires_its_owner_thread() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "remote thread-heap/TLS lifecycle coverage is exercised by native tests")]
 fn thread_heap_usage_includes_remote_allocations() {
     rallocator::initialize();
     let heap = thread_heap().unwrap();
@@ -268,6 +274,7 @@ fn thread_heap_usage_includes_remote_allocations() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "remote thread-heap/TLS lifecycle coverage is exercised by native tests")]
 fn thread_heap_usage_is_consistent_during_remote_medium_free() {
     rallocator::initialize();
     let heap = thread_heap().unwrap();
@@ -521,32 +528,37 @@ fn remote_allocation_returns_to_the_owner_thread_heap() {
         with_hint(Hint::new().with_heap(&heap), || {
             let address = unsafe { alloc(layout) };
             assert!(!address.is_null());
-            address.addr()
+            SendAllocation(address)
         })
     })
     .join()
     .unwrap();
 
-    unsafe { dealloc(address as *mut u8, layout) };
+    unsafe { dealloc(address.0, layout) };
     let reused = unsafe { alloc(layout) };
-    assert_eq!(reused.addr(), address);
+    assert_eq!(reused.addr(), address.0.addr());
     unsafe { dealloc(reused, layout) };
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "concurrent thread-heap/TLS lifecycle coverage is exercised by native tests")]
 #[expect(
     clippy::needless_collect,
     reason = "collecting all join handles keeps every producer concurrent before any join"
 )]
 fn remote_thread_heap_handles_support_concurrent_producers() {
     rallocator::initialize();
-    let workers = (0..8)
+    let worker_count: usize = if cfg!(miri) { 2 } else { 8 };
+    let allocation_count: usize = if cfg!(miri) { 16 } else { 1_000 };
+    let workers = (0..worker_count)
         .map(|_| thread_heap().unwrap())
         .enumerate()
         .map(|(worker, heap)| {
             std::thread::spawn(move || {
                 with_hint(Hint::new().with_heap(&heap), || {
-                    (0..1_000).map(|index| Box::new([worker as u64, index])).collect::<Vec<_>>()
+                    (0..allocation_count)
+                        .map(|index| Box::new([worker as u64, index as u64]))
+                        .collect::<Vec<_>>()
                 })
             })
         })
@@ -554,9 +566,9 @@ fn remote_thread_heap_handles_support_concurrent_producers() {
 
     for (worker, values) in workers.into_iter().enumerate() {
         let values = values.join().unwrap();
-        assert_eq!(values.len(), 1_000);
-        assert_eq!(values[999][0], worker as u64);
-        assert_eq!(values[999][1], 999);
+        assert_eq!(values.len(), allocation_count);
+        assert_eq!(values[allocation_count - 1][0], worker as u64);
+        assert_eq!(values[allocation_count - 1][1], (allocation_count - 1) as u64);
     }
 }
 

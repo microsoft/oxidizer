@@ -4,6 +4,16 @@
 pub(crate) const MEDIUM_MAX_SLICES: usize = 512;
 pub(crate) const MEDIUM_REGION_SIZE: usize = 1024 * 1024 * 1024;
 
+#[inline(always)]
+pub(crate) unsafe fn allocation_prefix_for_write<T>(address: *mut u8, offset: usize) -> *mut T {
+    unsafe { address.sub(offset).cast() }
+}
+
+#[inline(always)]
+pub(crate) unsafe fn allocation_prefix_for_read<T>(address: *mut u8, offset: usize) -> *mut T {
+    unsafe { address.sub(offset).cast() }
+}
+
 pub(crate) unsafe fn initialize_storage<T>(embedded: *mut T, value: T) -> *mut T {
     unsafe { embedded.write(value) };
     embedded

@@ -2,20 +2,48 @@
 // Licensed under the MIT License.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::hint::spin_loop;
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
 const ALLOCATION_ALIGNMENT: usize = 2 * 1024 * 1024;
 const FREE_METADATA_CAPACITY: usize = 1 << 12;
+const PREFIX_METADATA_CAPACITY: usize = 1 << 12;
+const PREFIX_EMPTY: usize = 0;
+const PREFIX_TOMBSTONE: usize = 1;
 pub(crate) const MEDIUM_MAX_SLICES: usize = 8;
 pub(crate) const MEDIUM_REGION_SIZE: usize = 2 * 1024 * 1024;
 static MONOTONIC_MILLIS: AtomicU64 = AtomicU64::new(0);
 static FREE_METADATA: [FreeMetadata; FREE_METADATA_CAPACITY] = [const { FreeMetadata::new() }; FREE_METADATA_CAPACITY];
+static PREFIX_METADATA_LOCK: AtomicBool = AtomicBool::new(false);
+static PREFIX_METADATA: [PrefixMetadata; PREFIX_METADATA_CAPACITY] = [const { PrefixMetadata::new() }; PREFIX_METADATA_CAPACITY];
 
 struct FreeMetadata {
     block: AtomicPtr<u8>,
     next: AtomicPtr<u8>,
     requested_bytes: AtomicUsize,
+}
+
+struct PrefixMetadata {
+    payload: AtomicUsize,
+    prefix: AtomicPtr<u8>,
+}
+
+impl PrefixMetadata {
+    const fn new() -> Self {
+        Self {
+            payload: AtomicUsize::new(PREFIX_EMPTY),
+            prefix: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
+}
+
+struct PrefixMetadataGuard;
+
+impl Drop for PrefixMetadataGuard {
+    fn drop(&mut self) {
+        PREFIX_METADATA_LOCK.store(false, Ordering::Release);
+    }
 }
 
 impl FreeMetadata {
@@ -70,6 +98,71 @@ pub(crate) fn monotonic_millis() -> u64 {
 
 pub(crate) fn capture_stack(_frames: &mut [usize], _limit: usize) -> usize {
     0
+}
+
+#[inline(always)]
+pub(crate) unsafe fn allocation_prefix_for_write<T>(address: *mut u8, offset: usize) -> *mut T {
+    let prefix = unsafe { address.sub(offset).cast::<T>() };
+    let _guard = lock_prefix_metadata();
+    let payload = address.addr();
+    let start = prefix_metadata_index(payload);
+    let mut tombstone = None;
+    for distance in 0..PREFIX_METADATA_CAPACITY {
+        let entry = &PREFIX_METADATA[(start + distance) & (PREFIX_METADATA_CAPACITY - 1)];
+        match entry.payload.load(Ordering::Relaxed) {
+            PREFIX_EMPTY => {
+                let entry = tombstone.unwrap_or(entry);
+                entry.prefix.store(prefix.cast(), Ordering::Relaxed);
+                entry.payload.store(payload, Ordering::Relaxed);
+                return prefix;
+            }
+            PREFIX_TOMBSTONE => {
+                tombstone.get_or_insert(entry);
+            }
+            existing => assert_ne!(existing, payload, "allocation prefix metadata must be registered once"),
+        }
+    }
+    if let Some(entry) = tombstone {
+        entry.prefix.store(prefix.cast(), Ordering::Relaxed);
+        entry.payload.store(payload, Ordering::Relaxed);
+        return prefix;
+    }
+    panic!("Miri allocation prefix metadata capacity exhausted");
+}
+
+#[inline(always)]
+pub(crate) unsafe fn allocation_prefix_for_read<T>(address: *mut u8, offset: usize) -> *mut T {
+    let _guard = lock_prefix_metadata();
+    let payload = address.addr();
+    let start = prefix_metadata_index(payload);
+    for distance in 0..PREFIX_METADATA_CAPACITY {
+        let entry = &PREFIX_METADATA[(start + distance) & (PREFIX_METADATA_CAPACITY - 1)];
+        match entry.payload.load(Ordering::Relaxed) {
+            PREFIX_EMPTY => break,
+            existing if existing == payload => {
+                let prefix = entry.prefix.swap(ptr::null_mut(), Ordering::Relaxed).cast::<T>();
+                entry.payload.store(PREFIX_TOMBSTONE, Ordering::Relaxed);
+                debug_assert_eq!(prefix.addr().checked_add(offset), Some(payload));
+                return prefix;
+            }
+            _ => {}
+        }
+    }
+    panic!("allocator metadata prefix must remain registered until deallocation");
+}
+
+fn lock_prefix_metadata() -> PrefixMetadataGuard {
+    while PREFIX_METADATA_LOCK
+        .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        spin_loop();
+    }
+    PrefixMetadataGuard
+}
+
+fn prefix_metadata_index(payload: usize) -> usize {
+    (payload >> 4) & (PREFIX_METADATA_CAPACITY - 1)
 }
 
 #[inline]

@@ -132,6 +132,7 @@ fn application_defined_layout_builds_derived_lookup_tables() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "thread/TLS lifecycle coverage is exercised by native tests")]
 fn application_defined_layout_supports_context_and_remote_slab_lifecycles() {
     rallocator::initialize();
     let _test = test_lock();

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering, fence};
 use allocation_hints::heap::bump::Options;
 
 use crate::allocator::{DomainState, ReusableHeapState};
+use crate::hal;
 use crate::telemetry::{self, TrackingAllocation};
 
 pub(crate) const BUMP_CHUNK_SIZE: usize = 64 * 1024;
@@ -199,7 +200,7 @@ pub(crate) unsafe fn allocate_tracked(state: *mut BumpState, layout: Layout) -> 
         let end = unsafe { (*state).end };
         if user <= end.addr() && end.addr() - user >= size {
             let address = cursor.with_addr(user);
-            let header = unsafe { address.sub(size_of::<TrackingHeader>()).cast::<TrackingHeader>() };
+            let header = unsafe { hal::allocation_prefix_for_write::<TrackingHeader>(address, size_of::<TrackingHeader>()) };
             unsafe {
                 header.write(TrackingHeader {
                     allocation: TrackingAllocation::NONE,
@@ -322,7 +323,7 @@ unsafe fn finish_deallocation_with_retry_hook(
 
 #[inline(always)]
 pub(crate) unsafe fn deallocate_tracked(state: *mut BumpState, address: *mut u8, layout: Layout, reclaim_tail: bool) {
-    let header = unsafe { address.sub(size_of::<TrackingHeader>()).cast::<TrackingHeader>() };
+    let header = unsafe { hal::allocation_prefix_for_read::<TrackingHeader>(address, size_of::<TrackingHeader>()) };
     let allocation = unsafe { (*header).allocation };
     let previous_cursor = unsafe { (*header).previous_cursor };
     let released = unsafe { (*state).handle_released.load(Ordering::Acquire) };

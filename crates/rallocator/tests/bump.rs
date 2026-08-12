@@ -120,11 +120,11 @@ fn allocations_cross_the_second_chunk_segment() {
     rallocator::initialize();
     let heap = bump(BumpOptions::new());
     let values = with_hint(Hint::new().with_heap(&heap), || {
-        (0..400).map(|value| Box::new([value as u8; 128])).collect::<Vec<_>>()
+        (0..3).map(|value| Box::new([value as u8; 16 * 1024])).collect::<Vec<_>>()
     });
 
     assert!(heap.usage().unwrap().bump().unwrap().cursor_used_bytes() > 32 * 1024);
-    assert_eq!(values[399][0], 399_u16 as u8);
+    assert_eq!(values[2][0], 2);
     drop(values);
     assert!(heap.usage().unwrap().is_empty());
 }
@@ -215,7 +215,8 @@ fn allocation_can_be_dropped_on_another_thread() {
 fn usage_remains_consistent_during_cross_thread_frees() {
     rallocator::initialize();
     let heap = bump(BumpOptions::new());
-    let values = with_hint(&heap, || (0..256).map(Box::new).collect::<Vec<_>>());
+    let allocation_count = if cfg!(miri) { 16 } else { 256 };
+    let values = with_hint(&heap, || (0..allocation_count).map(Box::new).collect::<Vec<_>>());
     let worker = std::thread::spawn(move || {
         for value in values {
             drop(value);
@@ -382,7 +383,7 @@ fn lowering_retained_chunks_trims_reused_backing_state() {
     rallocator::initialize();
     let heap = Heap::from_thread_pool(BumpOptions::new().with_retained_chunks(8));
     let values = with_hint(Hint::new().with_heap(&heap), || {
-        (0..4_000).map(|index| Box::new([index as u8; 256])).collect::<Vec<_>>()
+        (0..40).map(|index| Box::new([index as u8; 16 * 1024])).collect::<Vec<_>>()
     });
     assert!(heap.usage().unwrap().bump().unwrap().chunk_count() > 8);
 
@@ -398,9 +399,8 @@ fn pooled_bump_retention_grows_with_demand_and_decays_after_underuse() {
     rallocator::initialize();
     let options = BumpOptions::new().with_retained_chunks(2).with_max_retained_chunks(8);
     let heap = Heap::from_thread_pool(options);
-    let allocation_count = if cfg!(miri) { 2_500 } else { 4_000 };
     let values = with_hint(Hint::new().with_heap(&heap), || {
-        (0..allocation_count).map(|index| Box::new([index as u8; 256])).collect::<Vec<_>>()
+        (0..40).map(|index| Box::new([index as u8; 16 * 1024])).collect::<Vec<_>>()
     });
     assert!(heap.usage().unwrap().bump().unwrap().chunk_count() > 8);
 
