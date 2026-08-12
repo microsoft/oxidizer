@@ -166,6 +166,17 @@ only by the single allocator thread (notably the directory of chunks) needs no
 synchronization at all; its confinement to that one thread is itself the
 soundness argument.
 
+"Single-threaded allocation" is a rule about the pool object, not a prescription
+for how programs are written. Serving several threads from one pool is ordinary
+and expected: the caller wraps the pool in a `Mutex` — or any other exclusion it
+prefers — and the critical section covers allocation only. Handle drops stay
+outside it, because reclamation reaches the free list by arithmetic and never
+touches the directory. Externalising the lock this way is a deliberate division
+of labour: the pool declines to choose a synchronization primitive, an
+allocation batching policy, or a poisoning story on the caller's behalf, and in
+exchange the caller gets a lock whose scope is the allocation call rather than
+the value's whole lifetime.
+
 ## Memory layout
 
 Memory is acquired in **chunks** — power-of-two-sized batches of slots. Each
@@ -399,14 +410,24 @@ A blind pool routes a value only to the pool whose layout is *exactly*
 together, or imposes size classes.
 
 The rule that actually has to hold is narrower: the allocating pool and the
-reclaiming handle must agree on **slot geometry**. The reclaiming handle
-recomputes stride and offsets from the value it holds, so if a value were
-placed in a pool whose stride came from a different geometry, the handle would
-walk to the wrong address. Geometry is a pure function of layout, but not an
-injective one — several small layouts share a geometry once the counter and
-index are accounted for — so bucketing would be sound within a geometry
-equivalence class. Routing on the exact layout is simply the cheapest rule that
-is always sufficient, and it needs no table of classes to stay correct.
+reclaiming handle must agree on **slot geometry** — the stride and the offsets
+of the counter and index. The reclaiming handle recomputes those from the value
+it holds, so if a value were placed in a pool whose stride came from a
+different geometry, the handle would walk to the wrong address.
+
+Geometry is a pure function of layout, but not an injective one. Padding a
+value out to make room for the counter and index collapses neighbouring
+layouts together: `u8`, `u16`, `u32` and `[u8; 4]` are four distinct layouts
+with one geometry between them. Bucketing would therefore be sound *within* a
+geometry equivalence class. Routing on the exact layout is simply the cheapest
+rule that is always sufficient, and it needs no table of classes to stay
+correct.
+
+The consequence to keep in mind when reading the rest of this chapter is that
+**pool identity follows layout, not geometry**. Those four types get four
+layout pools, not one, and each has its own chunks, its own free list and its
+own share of any cap. Geometry appears only in the soundness argument above; it
+never partitions anything.
 
 The rule pays for itself: a blind pool has no internal fragmentation from
 rounding, and a value occupies exactly the space a typed pool would give it.
@@ -443,8 +464,11 @@ predictability, and applies uniformly to every layout.
 
 ### Bounding growth
 
-The chunk cap is **per layout**. Each layout pool independently refuses to grow
-past it and reports capacity exhaustion, exactly as a typed pool does.
+The chunk cap is **per layout pool**, and because routing is by exact layout,
+that means per distinct layout — not per geometry. Types that share a geometry
+but differ in layout hold separate pools and separate allowances. Each layout
+pool independently refuses to grow past the cap and reports capacity
+exhaustion, exactly as a typed pool does.
 
 A per-layout cap alone does not bound the pool, because the number of distinct
 layouts is a property of the whole program's type set — including types from
@@ -492,14 +516,19 @@ must not overlap with itself, while frees never touch the directory at all. The
 pool object may be moved between threads but not shared, and its handles carry
 their own thread-mobility rules.
 
-One bound is weaker than the typed pool's. A typed pool is `Send` only when its
-element type is, because its type parameter names the values it serves. A blind
-pool has no such parameter, and needs none: no pool object ever owns a value.
-Every value is owned by a handle, and the pool-level reference count guarantees
-that teardown finds no live values. A blind pool is therefore `Send` whenever
-its allocator is, and thread mobility for values is governed entirely by the
-handles — a handle to a non-`Send` value is itself non-`Send` and stays on its
-thread regardless of where the pool goes.
+A blind pool is `Send` whenever its allocator is. There is no bound on the
+values it serves, and none is needed. A pool object never owns a value: every
+value is owned by a handle, the pool offers no iteration, and the pool-level
+reference count guarantees that teardown finds no live values. A thread that
+receives a pool object therefore has no route to a value another thread placed
+in it. Thread mobility for values is governed entirely by the handles — a
+handle to a non-`Send` value is itself non-`Send` and stays on its thread
+regardless of where the pool goes.
+
+The typed pool's `Send` bound additionally requires `T: Send`. That bound is
+not what makes the pool sound; the argument above applies to it unchanged. It
+is a deliberately conservative choice, and it is stated here so the asymmetry
+does not read as an oversight.
 
 Because each layout pool owns its own clone of the allocator, and because
 layout pools tear down independently, two clones of the allocator may be in use
@@ -584,16 +613,28 @@ specifically.
 
 The reference design for this feature is `infinity_pool`'s blind pool family.
 The capability sets are close; the structural difference is where the
-type-to-pool mapping is consulted.
+type-to-pool mapping is consulted, and who owns the lock.
+
+Both designs need mutual exclusion to serve several threads, and neither
+escapes that. The difference is that `infinity_pool` embeds a lock in the pool
+and takes it on every operation including every handle drop, while plurality
+hands the choice to the caller: a pool used from several threads is wrapped in
+whatever the caller prefers, and only allocation needs to be inside it.
+Reclamation stays outside, because a handle can find its own pool without
+consulting the directory. The common deployment is therefore a `Mutex<Pool>`
+whose critical section covers allocation only, with drops running unlocked and
+in parallel — not a single-threaded pool.
 
 | | `infinity_pool` | plurality |
 |---|---|---|
 | Pool types | Three, by lifetime discipline | One |
 | Handle types | Two per pool type | Four, shared with the typed pool |
 | Handle width (sized value) | Three to five words | One word |
-| Free path | Locked directory lookup per drop | Pointer recovery, no lookup |
-| Directory | `BTreeMap` behind a mutex or cell | Contiguous scan, allocator thread only |
-| Directory synchronization | Mutex held across value destructors | None on the free path |
+| Free path | Locked directory lookup per drop | Pointer recovery, no lookup, no lock |
+| Directory | `BTreeMap` behind a mutex or cell | Contiguous scan, allocation path only |
+| Locking | Embedded in the pool | Caller's choice, and only around allocation |
+| Multithreaded use | Lock taken on allocate and on every drop | Lock taken on allocate; drops run unlocked |
+| Destructor reentrancy | Deadlocks or panics | Unrestricted |
 | Fallible allocation | Not offered | Full `try_` family |
 | Zero-sized values | Rejected at run time | Supported |
 | Unsizing to trait objects | Per-trait macro, invoked per crate | Coercion token, no per-trait setup |
@@ -604,7 +645,10 @@ type-to-pool mapping is consulted.
 The single-word handle and the lookup-free drop are direct consequences of the
 pointer-recovery architecture the typed pool already rests on. Because a handle
 can find its own pool, it does not need to carry a key to it, and the directory
-never has to be reachable — or lockable — from a destructor.
+never has to be reachable — or lockable — from a destructor. That is also what
+makes externalising the lock viable: a design whose free path needed the
+directory could not let the caller hold the lock, because every drop would have
+to reacquire it.
 
 ## `no_std` and allocator integration
 
