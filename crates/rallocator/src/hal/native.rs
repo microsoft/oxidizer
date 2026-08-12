@@ -9,11 +9,6 @@ pub(crate) unsafe fn allocation_prefix_for_write<T>(address: *mut u8, offset: us
     unsafe { address.sub(offset).cast() }
 }
 
-#[inline(always)]
-pub(crate) unsafe fn allocation_prefix_for_read<T>(address: *mut u8, offset: usize) -> *mut T {
-    unsafe { address.sub(offset).cast() }
-}
-
 pub(crate) unsafe fn initialize_storage<T>(embedded: *mut T, value: T) -> *mut T {
     unsafe { embedded.write(value) };
     embedded

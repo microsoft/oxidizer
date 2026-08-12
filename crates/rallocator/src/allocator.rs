@@ -3795,8 +3795,15 @@ unsafe fn write_header(address: *mut u8, header: *mut ExtraHeader) {
 }
 
 unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
-    let header_address = unsafe { hal::allocation_prefix_for_read::<*mut ExtraHeader>(address, HEADER_OFFSET) };
-    unsafe { header_address.read() }
+    #[cfg(miri)]
+    {
+        let header_address = unsafe { hal::allocation_prefix_for_read::<*mut ExtraHeader>(address, HEADER_OFFSET) };
+        unsafe { header_address.read() }
+    }
+    #[cfg(not(miri))]
+    unsafe {
+        address.sub(HEADER_OFFSET).cast::<*mut ExtraHeader>().read()
+    }
 }
 
 #[cfg(test)]

@@ -323,7 +323,10 @@ unsafe fn finish_deallocation_with_retry_hook(
 
 #[inline(always)]
 pub(crate) unsafe fn deallocate_tracked(state: *mut BumpState, address: *mut u8, layout: Layout, reclaim_tail: bool) {
+    #[cfg(miri)]
     let header = unsafe { hal::allocation_prefix_for_read::<TrackingHeader>(address, size_of::<TrackingHeader>()) };
+    #[cfg(not(miri))]
+    let header = unsafe { address.sub(size_of::<TrackingHeader>()).cast::<TrackingHeader>() };
     let allocation = unsafe { (*header).allocation };
     let previous_cursor = unsafe { (*header).previous_cursor };
     let released = unsafe { (*state).handle_released.load(Ordering::Acquire) };

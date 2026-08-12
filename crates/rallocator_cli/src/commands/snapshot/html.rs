@@ -111,6 +111,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem path identity is exercised by native tests")]
     fn explicit_output_must_not_refer_to_input() {
         let directory = directory("same-explicit");
         fs::create_dir_all(&directory).unwrap();
@@ -129,6 +130,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem path identity is exercised by native tests")]
     fn default_output_must_not_overwrite_input() {
         let directory = directory("same-default");
         fs::create_dir_all(&directory).unwrap();
@@ -146,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem overwrite protection is exercised by native tests")]
     fn explicit_output_must_not_be_overwritten() {
         let directory = directory("existing-explicit");
         fs::create_dir_all(&directory).unwrap();
@@ -166,6 +169,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem overwrite protection is exercised by native tests")]
     fn default_output_must_not_be_overwritten() {
         let directory = directory("existing-default");
         fs::create_dir_all(&directory).unwrap();
@@ -186,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem replacement is exercised by native tests")]
     fn force_replaces_existing_output() {
         let directory = directory("force");
         fs::create_dir_all(&directory).unwrap();
@@ -206,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem hard-link identity is exercised by native tests")]
     fn force_must_not_overwrite_input_through_hard_link() {
         let directory = directory("hard-link");
         fs::create_dir_all(&directory).unwrap();
@@ -237,6 +243,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem error propagation is exercised by native tests")]
     fn same_file_errors_are_propagated() {
         let error = paths_refer_to_same_file(Path::new("\0"), Path::new("report.html")).unwrap_err();
         assert_ne!(error.kind(), io::ErrorKind::NotFound);

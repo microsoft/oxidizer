@@ -31,6 +31,7 @@ fn directory(name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "filesystem and subprocess behavior is exercised by native tests")]
 fn snapshot_html_writes_default_output_beside_input() {
     let directory = directory("default");
     fs::create_dir_all(&directory).unwrap();
@@ -51,6 +52,7 @@ fn snapshot_html_writes_default_output_beside_input() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "filesystem and subprocess errors are exercised by native tests")]
 fn snapshot_html_reports_parse_and_io_errors() {
     let binary = env!("CARGO_BIN_EXE_rallocator_cli");
     assert_eq!(Command::new(binary).arg("unknown").status().unwrap().code(), Some(2));
@@ -86,6 +88,7 @@ fn snapshot_html_reports_parse_and_io_errors() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "filesystem and subprocess replacement is exercised by native tests")]
 fn snapshot_html_requires_force_to_replace_output() {
     let directory = directory("force");
     fs::create_dir_all(&directory).unwrap();
@@ -115,6 +118,7 @@ fn snapshot_html_requires_force_to_replace_output() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "filesystem and subprocess rendering is exercised by native tests")]
 fn snapshot_html_renders_skipped_section_warning() {
     let directory = directory("skipped");
     fs::create_dir_all(&directory).unwrap();

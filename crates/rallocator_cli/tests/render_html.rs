@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 //! End-to-end tests for HTML report rendering.
+#![cfg(not(miri))]
 #![expect(clippy::too_many_lines, reason = "Large fixtures are intentionally assembled inline")]
 
 use rallocator_telemetry::callers::{Callers, Event, EventKind, HeapKind, ThreadLog, ThreadName};
