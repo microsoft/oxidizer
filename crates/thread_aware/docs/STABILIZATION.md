@@ -15,9 +15,10 @@ work. In particular, `thread_aware::ThreadAware` and
 `thread_aware::affinity::Affinity` remain the preferred paths for users of the
 full library.
 
-The core crate has no Cargo features or dependencies. It provides
-implementations only for types available from `core` and `alloc`. Implementations
-for types from external crates are intentionally outside the stable boundary.
+The core crate has no dependencies. Its opt-in `std` feature adds implementations
+for standard-library types such as `HashMap`, `Path`, and `PathBuf`; otherwise it
+uses only `core` and `alloc`. Implementations for types from external crates are
+intentionally outside the stable boundary.
 
 ## Unstable utilities
 

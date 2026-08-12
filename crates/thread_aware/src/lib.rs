@@ -9,8 +9,8 @@
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-//!   hosted-only closure support.
+//! * The **`std` Cargo feature** *(enabled by default)* enables standard-library
+//!   implementations, the per-affinity `Arc`, and hosted-only closure support.
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * **`threads`** enables the `registry` module and implies `std`.
 //! * Disable default features for `#![no_std]` environments. The [`ThreadAware`] trait, affinity
@@ -101,9 +101,9 @@
 //!
 //! # Features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-//!   hosted-only closure support. Disable it for `#![no_std]` environments; the crate then
-//!   requires `alloc` and pointer-width atomics.
+//! * The **`std` Cargo feature** *(enabled by default)* enables standard-library
+//!   implementations, the per-affinity [`Arc`], and hosted-only closure support. Disable it
+//!   for `#![no_std]` environments; the crate then requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments. For derive support without `std`, use

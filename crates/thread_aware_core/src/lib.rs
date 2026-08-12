@@ -15,11 +15,12 @@
 //! boundary. Implementations must remain correct if a relocation notification is
 //! omitted, repeated, or reports the same source and destination.
 //!
-//! The crate has no Cargo features or dependencies. It is always `no_std` and
-//! provides implementations only for types available from `core` and `alloc`.
+//! The crate has no dependencies and is always `no_std`. Its opt-in `std`
+//! feature adds implementations for standard-library types such as `HashMap`
+//! and `Path`.
 
 extern crate alloc;
-#[cfg(test)]
+#[cfg(any(feature = "std", test))]
 extern crate std;
 
 mod impls;

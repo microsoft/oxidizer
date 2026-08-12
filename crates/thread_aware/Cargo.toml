@@ -29,9 +29,10 @@ all-features = true
 
 [features]
 default = ["std", "derive"]
-# Enables the per-affinity Arc and hosted-only closure support. Disable for `#![no_std]`
-# environments; the crate then requires only `alloc`.
-std = []
+# Enables standard-library implementations, per-affinity Arc, and hosted-only
+# closure support. Disable for `#![no_std]` environments; the crate then requires
+# only `alloc`.
+std = ["thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
 threads = ["std", "dep:many_cpus"]
 

@@ -5,6 +5,10 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+#[cfg(feature = "std")]
+use std::path::{Path, PathBuf};
 
 use crate::{Affinity, ThreadAware};
 
@@ -33,7 +37,11 @@ impl_transfer!(f64);
 impl_transfer!(char);
 
 impl_transfer!(String);
+#[cfg(feature = "std")]
+impl_transfer!(PathBuf);
 impl_transfer!(Duration);
+#[cfg(feature = "std")]
+impl_transfer!(&Path);
 
 impl_transfer!(&'static str);
 
@@ -130,6 +138,26 @@ where
     }
 }
 
+#[cfg(feature = "std")]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "This implementation preserves the existing API for the default hasher."
+)]
+impl<K, V> ThreadAware for HashMap<K, V>
+where
+    K: ThreadAware + Eq + core::hash::Hash,
+    V: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        let old = core::mem::take(self);
+        for (mut key, mut value) in old {
+            key.relocate(source, destination);
+            value.relocate(source, destination);
+            self.insert(key, value);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::boxed::Box;
@@ -141,6 +169,29 @@ mod tests {
 
     fn pinned_affinities() -> [Affinity; 2] {
         [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)]
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_hashmap() {
+        use std::collections::HashMap;
+
+        let affinities = pinned_affinities();
+        let source = Some(affinities[0]);
+        let destination = affinities[1];
+
+        let mut value: HashMap<i32, String> = HashMap::new();
+        value.insert(1, "one".to_string());
+        value.insert(2, "two".to_string());
+
+        value.relocate(source, destination);
+
+        assert_eq!(value.get(&1), Some(&"one".to_string()));
+        assert_eq!(value.get(&2), Some(&"two".to_string()));
+
+        let mut empty_value: HashMap<i32, String> = HashMap::new();
+        empty_value.relocate(source, destination);
+        assert!(empty_value.is_empty());
     }
 
     #[test]
@@ -353,5 +404,20 @@ mod tests {
         let mut val: Box<Tracker> = Box::new(Tracker(false));
         val.relocate(src, dst);
         assert!(val.0, "Box must forward relocate to inner value");
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn hashmap_forwards_relocate_to_keys_and_values() {
+        use std::collections::HashMap;
+
+        let (src, dst) = affinities();
+        let mut map = HashMap::new();
+        map.insert(Tracker(false), Tracker(false));
+        map.relocate(src, dst);
+        for (key, value) in &map {
+            assert!(key.0, "key must be relocated");
+            assert!(value.0, "value must be relocated");
+        }
     }
 }
