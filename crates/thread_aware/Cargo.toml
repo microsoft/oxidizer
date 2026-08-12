@@ -37,9 +37,9 @@ threads = ["std", "dep:many_cpus"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
+thread_aware_core = { workspace = true }
 
 thread_aware_macros = { workspace = true, optional = true }
-thread_aware_core = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
