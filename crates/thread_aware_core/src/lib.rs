@@ -142,10 +142,12 @@ mod tests {
 
     #[test]
     fn affinity_exposes_topology() {
-        let affinity = Affinity::new(2, 1, 4, 2);
+        let affinity = Affinity::new(2, 0, 4, 2);
+        let other_memory_region = Affinity::new(3, 1, 4, 2);
 
         assert_eq!(affinity.processor_index(), 2);
-        assert_eq!(affinity.memory_region_index(), 1);
+        assert_eq!(affinity.memory_region_index(), 0);
+        assert_eq!(other_memory_region.memory_region_index(), 1);
         assert_eq!(affinity.processor_count(), 4);
         assert_eq!(affinity.memory_region_count(), 2);
     }
