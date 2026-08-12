@@ -35,6 +35,48 @@ This document is the reference for the human-driven release tooling in
   atomic application of all version-number increments, changelog
   updates, README regeneration, and `Cargo.toml` rewrites.
 
+## AI-agentic release path (recommended)
+
+`.github/prompts/release-packages.prompt.md` is an AI-agentic replacement
+for the interactive driver. It encodes the same planning algorithm --
+token parsing, `cargo semver-checks` classification, proc-macro manual
+review, cascade toward dependents (floor at `patch`, raised to the
+stronger of that floor and the crate's own API verdict), the elevation
+invariants, explicit-pin rules, and the version-bump table -- as precise,
+model-independent instructions. An agent runs the reasoning (which
+packages, which bumps) and makes the diff-based judgment calls a human
+used to make at the terminal, then applies the plan.
+
+Two design properties make it trustworthy:
+
+- **Determinism by construction.** The mechanical, error-prone sub-tasks
+  are forwarded to small deterministic helper scripts rather than being
+  re-derived by hand: `scripts/release-facts.ps1` (emits the workspace
+  graph, versions, published/proc-macro flags, dependency edges, baseline
+  commit shas, and the modified-package set as JSON) and
+  `scripts/release-changelog.ps1` (regenerates one changelog via the
+  existing tested `Write-Changelog`). Both are thin shells over the
+  `scripts/lib` release library and add no new release logic.
+- **Multi-model consensus.** Before writing anything, the skill dispatches
+  the frozen plan inputs to at least two additional reasoning models from
+  different families and requires an identical affected-package set and
+  version-bump sequence. A divergence stops the run instead of guessing.
+
+The skill also corrects a few shortcomings of the current scripts (they
+are deliberate improvements, listed in the skill's "Corrections" section):
+all-or-nothing apply gated by `cargo check` with rollback on failure; an
+already-released crate whose baseline cannot be resolved gets a `patch`
+floor plus mandatory manual review instead of silently dropping to "no
+constraint"; and dependency-requirement edits are validated with
+`cargo check` / `cargo metadata` rather than trusted. The intentional
+Cargo `0.x` / `0.0.x` conservatism in the version-bump table is preserved
+exactly.
+
+The PowerShell driver and `scripts/ci/semver-report.ps1` remain in place:
+CI still consumes the report, and the tested library is the source of the
+helpers' behavior. The rest of this document (glossary, invariants,
+version-component rules) is the shared specification both paths implement.
+
 Maintainers SHOULD read the **Glossary** below before making changes to
 the release tooling; the rest of the codebase, the PR comments, the
 script output, and the unit tests all use these terms with the precise
