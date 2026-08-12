@@ -126,6 +126,8 @@ extern crate alloc;
 
 mod alloced;
 mod atomic;
+mod blind_builder;
+mod blind_pool;
 mod boxed;
 mod builder;
 mod chunk;
@@ -142,6 +144,8 @@ mod slot;
 mod sync;
 
 pub use alloced::Alloc;
+pub use blind_builder::BlindPoolBuilder;
+pub use blind_pool::BlindPool;
 pub use boxed::Box;
 pub use builder::PoolBuilder;
 pub use coerce::Coercion;

@@ -1319,6 +1319,6 @@ pub(crate) unsafe fn occupy_local<T>(slot: NonNull<SlotCell<T>>, value: T) {
 #[cold]
 #[expect(clippy::panic, reason = "the panicking `alloc_*` methods document that they panic on exhaustion")]
 #[inline(never)]
-fn pool_full(err: AllocError) -> ! {
+pub(crate) fn pool_full(err: AllocError) -> ! {
     panic!("plurality: {err}");
 }

@@ -10,7 +10,7 @@ and `BlindPool`, the directory that routes each allocation to one. Back to the
 
 ```rust
 pub(crate) struct LayoutPool<A: Allocator = Global> {
-    inner: NonNull<PoolInner<RuntimeGeometry, A>>,
+    inner: NonNull<PoolInner<A, RuntimeGeometry>>,
 }
 ```
 
@@ -18,34 +18,49 @@ One pointer, like the typed pool. It is constructed from a value `Layout` plus
 the chunk-sizing configuration, and it is crate-private: the blind pool is its
 only user.
 
-Its allocation surface mirrors the typed pool's, differing in where the element
-type sits and in the safety contract. The element type is a method parameter,
-and every entry point is `unsafe` with the precondition that the element type's
-layout equals the pool's layout:
+It owns the pool it points at: dropping it releases the pool's reference, so
+outstanding handles keep the body alive exactly as they do for a typed pool.
+
+The wide allocation surface lives on `BlindPool`, not here. A layout pool
+exposes one allocation primitive — claim a slot — and the blind pool layers the
+handle flavours and construction forms over it. Putting the ~40 methods in one
+place keeps a single set of doc comments and a single translation of "claimed
+slot" into "handle", which is the only logic those methods contain.
+
+That primitive is reached through a **non-owning view**:
 
 ```rust
+#[derive(Clone, Copy)]
+pub(crate) struct LayoutPoolRef<A: Allocator> {
+    inner: NonNull<PoolInner<A, RuntimeGeometry>>,
+}
+
 impl<A: Allocator> LayoutPool<A> {
-    pub(crate) fn layout(&self) -> Layout;
+    pub(crate) fn as_ref(&self) -> LayoutPoolRef<A>;
+}
+
+impl<A: Allocator> LayoutPoolRef<A> {
+    pub(crate) fn core(&self) -> &PoolCore;
 
     /// # Safety
-    /// `Layout::new::<T>()` must equal `self.layout()`.
-    pub(crate) unsafe fn try_alloc_box_unchecked<T>(&self, value: T)
-        -> Result<Box<T, A>, AllocError>;
-    // ... one per handle flavour and construction form
+    /// `Layout::new::<T>()` must equal the pool's layout.
+    pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError>;
 }
 ```
 
-The precondition exists because it is the invariant that keeps allocation and
-reclamation in agreement, and because the router establishes it by construction
-— it selected this pool *because* the layouts matched. Re-checking it on every
-allocation would pay for a fact the caller already proved. A debug assertion
-restates the precondition so that violations surface in testing; it documents
-intent more than it verifies anything, since the only caller establishes the
-precondition structurally.
+The view exists so that the router can drop its borrow of the directory before
+running any user code. It carries no lifetime and copies freely, which is what
+lets the allocation path hold nothing borrowed while a value's constructor —
+which may itself allocate into the same blind pool — runs.
 
-Each of these methods is a one-line forward to the same crate-private
-primitives the typed pool uses to turn a claimed slot into a handle, so the
-surface is wide but has no logic of its own.
+`alloc_slot` is `unsafe` with the precondition that the element type's layout
+equals the pool's layout. The precondition exists because it is the invariant
+that keeps allocation and reclamation in agreement, and because the router
+establishes it by construction — it selected this pool *because* the layouts
+matched. Re-checking it on every allocation would pay for a fact the caller
+already proved. A debug assertion restates the precondition so that violations
+surface in testing; it documents intent more than it verifies anything, since
+the only caller establishes the precondition structurally.
 
 ### Clamping the sizing configuration
 
@@ -76,14 +91,18 @@ disagree with the layout computation it is protecting.
 ### State
 
 ```rust
-pub struct BlindPool<A: Allocator = Global> {
+pub struct BlindPool<A: Allocator + Clone = Global> {
     layouts: UnsafeCell<Vec<Layout>>,
     pools: UnsafeCell<Vec<LayoutPool<A>>>,
     sizing: ChunkSizing,
-    max_layouts: usize,
+    max_chunks: Option<u32>,
+    max_layouts: Option<usize>,
     allocator: A,
 }
 ```
+
+Each layout pool owns a clone of the allocator, which is why `A: Clone` is a
+bound of the pool rather than of individual methods.
 
 The two vectors are parallel: `layouts[i]` is served by `pools[i]`. Keys are
 kept in their own contiguous vector so that a lookup scans keys only, without

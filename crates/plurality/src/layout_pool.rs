@@ -14,11 +14,6 @@
 //! allocation would pay for a fact the caller already proved. See
 //! `docs/implementation/blind-pool.md`.
 
-#![expect(
-    dead_code,
-    reason = "scaffolding: `BlindPool`, the only user, lands in the following commit"
-)]
-
 use alloc::alloc::alloc as global_alloc;
 use alloc::vec::Vec;
 use core::alloc::Layout;
@@ -102,34 +97,16 @@ impl<A: Allocator> LayoutPool<A> {
         unsafe { self.inner.as_ref() }
     }
 
-    /// The value layout this pool serves.
-    #[inline]
-    pub(crate) fn layout(&self) -> Layout {
-        self.inner().geometry.layout()
-    }
-
-    /// The pool's shared core, through which handles are constructed.
-    #[inline]
-    pub(crate) fn core(&self) -> &PoolCore {
-        &self.inner().core
-    }
-
-    /// Pops a free slot, growing the pool if necessary.
+    /// A copyable view of this pool.
     ///
-    /// # Safety
-    /// `Layout::new::<T>()` must equal [`self.layout()`](Self::layout). The
-    /// router establishes this by construction — it selected this pool because
-    /// the layouts matched.
-    ///
-    /// # Errors
-    /// Returns [`AllocError`] if the pool is full and cannot grow.
+    /// The router copies one of these out of its directory and releases the
+    /// borrow before allocating, so that reentrant user code is free to grow
+    /// the directory. The view stays valid because the `PoolInner` it addresses
+    /// is heap-allocated and never moves, and because layout pools are never
+    /// retired. Ref: docs/implementation/blind-pool.md, "Reentrancy".
     #[inline]
-    pub(crate) unsafe fn alloc_slot<T>(&self) -> Result<NonNull<SlotCell<T>>, AllocError> {
-        debug_assert_eq!(Layout::new::<T>(), self.layout(), "layout pool served a mismatched type");
-        match self.inner().alloc_slot() {
-            Ok(slot) => Ok(slot.cast::<SlotCell<T>>()),
-            Err(err) => Err(err),
-        }
+    pub(crate) fn as_ref(&self) -> LayoutPoolRef<A> {
+        LayoutPoolRef { inner: self.inner }
     }
 
     /// Effective slots per chunk, after clamping.
@@ -177,6 +154,57 @@ impl<A: Allocator> Drop for LayoutPool<A> {
     }
 }
 
+/// A copyable, non-owning view of a [`LayoutPool`].
+///
+/// Holds no reference count: it is only ever used while the [`BlindPool`] that
+/// owns the pool is borrowed, and layout pools are never retired.
+///
+/// [`BlindPool`]: crate::BlindPool
+pub(crate) struct LayoutPoolRef<A: Allocator> {
+    inner: NonNull<PoolInner<A, RuntimeGeometry>>,
+}
+
+impl<A: Allocator> Clone for LayoutPoolRef<A> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<A: Allocator> Copy for LayoutPoolRef<A> {}
+
+impl<A: Allocator> LayoutPoolRef<A> {
+    /// The pool's shared core, through which handles are constructed.
+    #[inline]
+    pub(crate) fn core(&self) -> &PoolCore {
+        // SAFETY: the owning `LayoutPool` outlives every view of it.
+        unsafe { &self.inner.as_ref().core }
+    }
+
+    /// Pops a free slot, growing the pool if necessary.
+    ///
+    /// # Safety
+    /// `Layout::new::<T>()` must equal the layout this pool serves. The router
+    /// establishes this by construction — it selected this pool because the
+    /// layouts matched.
+    ///
+    /// # Errors
+    /// Returns [`AllocError`] if the pool is full and cannot grow.
+    #[inline]
+    pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError> {
+        // SAFETY: the owning `LayoutPool` outlives every view of it.
+        let inner = unsafe { self.inner.as_ref() };
+        debug_assert_eq!(
+            Layout::new::<T>(),
+            inner.geometry.layout(),
+            "layout pool served a mismatched type"
+        );
+        match inner.alloc_slot() {
+            Ok(slot) => Ok(slot.cast::<SlotCell<T>>()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
 // SAFETY: identical to `Pool`'s argument — all cross-thread state is atomic,
 // the directory is reached only from the single allocator thread, and the pool
 // object owns no values. Ref: docs/DESIGN.md, invariant 7.
@@ -197,6 +225,18 @@ fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout)
         debug_assert!(slots > 1, "a one-slot chunk must always have a representable layout");
         slots /= 2;
     }
+}
+
+/// The slot count [`LayoutPool::new`] would settle on for `layout`, without
+/// building a pool. Lets the blind pool report effective sizing for a layout it
+/// has not yet seen.
+pub(crate) fn effective_chunk_size(layout: Layout, requested: u32) -> u32 {
+    clamp_chunk_size(RuntimeGeometry::new(layout), requested).0
+}
+
+/// The chunk cap [`LayoutPool::new`] would settle on, without building a pool.
+pub(crate) fn effective_max_chunks(chunk_size: u32, requested: Option<u32>) -> u32 {
+    clamp_max_chunks(chunk_size, requested)
 }
 
 /// Clamps the chunk cap to what the slot-index ceiling permits at `chunk_size`,
