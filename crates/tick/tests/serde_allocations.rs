@@ -8,8 +8,8 @@
 
 use alloc_tracker::{Allocator, Session};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde::de::value::{BytesDeserializer, Error as ValueError, StrDeserializer};
+use serde::de::{DeserializeOwned, Visitor};
 use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 
 #[global_allocator]
@@ -78,4 +78,37 @@ fn textual_format_rejects_invalid_utf8_bytes() {
     let error = Iso8601::deserialize(deserializer).unwrap_err();
 
     assert!(error.to_string().contains("invalid utf-8 sequence"));
+}
+
+#[test]
+fn textual_format_requests_string_deserialization() {
+    struct StringOnlyDeserializer;
+
+    impl<'de> serde::Deserializer<'de> for StringOnlyDeserializer {
+        type Error = ValueError;
+
+        fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: Visitor<'de>,
+        {
+            Err(serde::de::Error::custom("only string deserialization is supported"))
+        }
+
+        fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where
+            V: Visitor<'de>,
+        {
+            visitor.visit_borrowed_str("2024-08-06T21:30:00Z")
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str bytes
+            byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
+            map struct enum identifier ignored_any
+        }
+    }
+
+    let iso = Iso8601::deserialize(StringOnlyDeserializer).unwrap();
+
+    assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
 }
