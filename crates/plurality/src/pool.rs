@@ -133,6 +133,11 @@ pub struct Pool<T, A: Allocator = Global> {
 // thread placed here; it can only obtain free slots, which hold no live value.
 // Teardown deallocates chunks without ever reading or dropping element
 // storage, so it cannot touch a `T` either.
+//
+// This argument only holds while the pool object stays value-free, so it binds
+// future API: no method may yield or drop a pooled value through the pool, and
+// the pool may not become `Sync`. Ref: docs/DESIGN.md, invariant 7 ("The pool
+// object neither yields nor drops pooled values").
 unsafe impl<T, A: Allocator + Send> Send for Pool<T, A> {}
 
 // Pool state transitions leave the pool usable when they unwind. The allocator

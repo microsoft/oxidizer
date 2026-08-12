@@ -30,7 +30,7 @@ use plurality::Pool;
 /// Moves anything across a thread boundary, including the values that make the
 /// scenarios below thread-bound.
 ///
-/// The pool itself no longer needs this — it is `Send` regardless of `T` — but
+/// The pool itself does not need this — it is `Send` regardless of `T` — but
 /// the closure passed to a scoped thread captures the `StdRc` handles and drop
 /// observers alongside it, and those are genuinely `!Send`.
 struct AssertSend<T>(T);
@@ -259,11 +259,14 @@ fn teardown_on_far_thread_via_last_handle() {
     handle.join().unwrap();
 }
 
-/// The strongest case: one thread allocates from the pool while another
-/// concurrently drops handles to non-`Send` values into the same free list.
+/// The strongest case: the pool moves to a thread that allocates from it, while
+/// the originating thread concurrently drops handles to non-`Send` values into
+/// the same free list.
 ///
 /// This exercises the single-producer / multi-consumer hand-off with values
-/// whose types would forbid the pool from moving at all.
+/// whose types would forbid the pool from moving at all under a `T: Send`
+/// bound. Allocation stays on one thread throughout — it simply is not the
+/// thread that built the pool.
 ///
 /// A caveat on what this proves. A barrier releases both threads together, but
 /// nothing forces a free push to overlap a pop, and Miri explores the schedule
@@ -291,15 +294,18 @@ fn concurrent_free_and_alloc_with_non_send_values() {
 
     let barrier = std::sync::Barrier::new(2);
     let barrier = &barrier;
-    let moved = AssertSend((&pool, StdArc::clone(&far_drops)));
+    let far_drops_moved = StdArc::clone(&far_drops);
     std::thread::scope(|scope| {
+        // The pool crosses the boundary by value, which is the relaxation under
+        // test: `ThreadBound` is `!Send`, and the pool moves anyway. Sharing a
+        // `&Pool` instead would assert `Sync`, which the crate withholds.
         scope.spawn(move || {
-            let (pool, far_drops) = moved.into_inner();
             barrier.wait();
             // Allocate and free continuously on the far thread, popping slots
             // the originating thread is concurrently pushing.
             for _ in 0_i32..256_i32 {
-                let owned = pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops));
+                let owned =
+                    pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops_moved));
                 owned.bump();
             }
         });
