@@ -212,7 +212,7 @@ impl<'de> serde_core::Deserialize<'de> for Rfc2822 {
     where
         D: serde_core::Deserializer<'de>,
     {
-        super::deserialize_from_str(deserializer)
+        super::serde::deserialize_from_str(deserializer)
     }
 }
 

@@ -164,7 +164,7 @@ impl<'de> serde_core::Deserialize<'de> for Iso8601 {
     where
         D: serde_core::Deserializer<'de>,
     {
-        super::deserialize_from_str(deserializer)
+        super::serde::deserialize_from_str(deserializer)
     }
 }
 

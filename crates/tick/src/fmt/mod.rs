@@ -134,14 +134,9 @@ use jiff::Timestamp;
 mod ecmascript;
 mod iso_8601;
 mod rfc_2822;
+#[cfg(any(feature = "serde", test))]
+mod serde;
 mod unix_seconds;
-
-#[cfg(any(feature = "serde", test))]
-use std::fmt::{self, Display};
-#[cfg(any(feature = "serde", test))]
-use std::marker::PhantomData;
-#[cfg(any(feature = "serde", test))]
-use std::str::FromStr;
 
 pub use ecmascript::EcmaScript;
 pub use iso_8601::Iso8601;
@@ -149,51 +144,6 @@ pub use rfc_2822::Rfc2822;
 pub use unix_seconds::UnixSeconds;
 
 use crate::Error;
-
-#[cfg(any(feature = "serde", test))]
-fn deserialize_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde_core::Deserializer<'de>,
-    T: FromStr,
-    T::Err: Display,
-{
-    struct FromStrVisitor<T>(PhantomData<T>);
-
-    impl<'de, T> serde_core::de::Visitor<'de> for FromStrVisitor<T>
-    where
-        T: FromStr,
-        T::Err: Display,
-    {
-        type Value = T;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a timestamp string")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde_core::de::Error,
-        {
-            v.parse().map_err(E::custom)
-        }
-
-        fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-        where
-            E: serde_core::de::Error,
-        {
-            v.parse().map_err(E::custom)
-        }
-
-        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-        where
-            E: serde_core::de::Error,
-        {
-            std::str::from_utf8(v).map_err(E::custom)?.parse().map_err(E::custom)
-        }
-    }
-
-    deserializer.deserialize_str(FromStrVisitor(PhantomData))
-}
 
 /// Converts `timestamp` to `SystemTime` if the platform can represent it.
 ///
@@ -239,8 +189,8 @@ fn system_time_out_of_range() -> Error {
 mod tests {
     use std::time::Duration;
 
+    use ::serde::{Deserialize, Serialize};
     use jiff::SignedDuration;
-    use serde::{Deserialize, Serialize};
 
     use super::*;
     use crate::Clock;
