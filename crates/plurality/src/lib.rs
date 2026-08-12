@@ -132,6 +132,7 @@ mod chunk;
 mod coerce;
 mod common;
 mod error;
+mod geometry;
 mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;

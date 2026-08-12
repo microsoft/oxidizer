@@ -9,6 +9,7 @@
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
+use crate::geometry::{SlotGeometry, TypedGeometry};
 use crate::pool::PoolCore;
 use crate::slot::SlotCell;
 
@@ -27,30 +28,13 @@ pub(crate) struct ChunkHeader {
 
 /// Byte offset of the slot payload within a chunk allocation. Independent of
 /// the chunk size, so recovery (and slot addressing) is pure arithmetic.
-const fn slots_offset<T>() -> usize {
-    let header = size_of::<ChunkHeader>();
-    let align = align_of::<SlotCell<T>>();
-    header.next_multiple_of(align)
-}
-
-/// Alignment of a whole chunk allocation.
-#[cfg_attr(test, mutants::skip)] // `>` vs `>=` is equivalent here: when `ha == sa` both arms return the same value.
-const fn chunk_align<T>() -> usize {
-    let ha = align_of::<ChunkHeader>();
-    let sa = align_of::<SlotCell<T>>();
-    if ha > sa { ha } else { sa }
+fn slots_offset<T>() -> usize {
+    TypedGeometry::<T>::new().slots_offset()
 }
 
 /// Computes the [`Layout`] of a chunk holding `n` slots, or `None` on overflow.
 pub(crate) fn chunk_layout<T>(n: usize) -> Option<Layout> {
-    let align = chunk_align::<T>();
-    debug_assert!(
-        align >= align_of::<ChunkHeader>() && align >= align_of::<SlotCell<T>>(),
-        "chunk alignment must cover the header and the slots",
-    );
-    let slots = size_of::<SlotCell<T>>().checked_mul(n)?;
-    let size = slots_offset::<T>().checked_add(slots)?;
-    Layout::from_size_align(size, align).ok().map(|l| l.pad_to_align())
+    TypedGeometry::<T>::new().chunk_layout(n)
 }
 
 /// Returns the slot at `offset` within the chunk whose header is `chunk`.

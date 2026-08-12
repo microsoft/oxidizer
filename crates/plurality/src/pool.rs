@@ -25,6 +25,7 @@ use crate::boxed::Box;
 use crate::builder::PoolBuilder;
 use crate::chunk::{ChunkHeader, header_of, slot_at};
 use crate::error::AllocError;
+use crate::geometry::{self, RuntimeGeometry, SlotGeometry};
 #[cfg(feature = "stats")]
 use crate::pool_stats::PoolStats;
 use crate::rc::Rc;
@@ -1012,12 +1013,6 @@ unsafe fn free_slot_local<T>(slot: NonNull<SlotCell<T>>) {
     }
 }
 
-/// Rounds `x` up to a multiple of `align` (a power of two).
-#[inline]
-const fn round_up(x: usize, align: usize) -> usize {
-    (x + (align - 1)) & !(align - 1)
-}
-
 struct ErasedSlotGuard {
     value: NonNull<u8>,
     size: usize,
@@ -1091,25 +1086,22 @@ pub(crate) unsafe fn drop_and_free_val<T: ?Sized>(value: NonNull<T>) {
     reason = "the reconstructed `SlotCell` fields sit at their natural alignments within the chunk allocation by construction"
 )]
 unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
-    // Reconstruct the `#[repr(C)] SlotCell<T>` layout: `{ value, refcount: u32,
-    // index: u32 }`, aligned to `max(align, align_of::<u32>())`.
-    let refcount_align = align_of::<AtomicU32>();
-    let refcount_size = size_of::<AtomicU32>();
-    let index_align = align_of::<u32>();
-    let index_size = size_of::<u32>();
-    let cell_align = align.max(refcount_align).max(index_align);
-    let refcount_off = round_up(size, refcount_align);
-    let index_off = round_up(refcount_off + refcount_size, index_align);
-    let stride = round_up(index_off + index_size, cell_align);
-    let slots_off = round_up(size_of::<ChunkHeader>(), cell_align);
+    let geometry = RuntimeGeometry::new(
+        // SAFETY: the caller guarantees these are a live value's true size and
+        // alignment, which therefore already satisfy the `Layout` invariants.
+        unsafe { Layout::from_size_align_unchecked(size, align) },
+    );
 
-    // SAFETY: the addresses below are the same ones `header_of`/`push_free`
-    // compute for the concrete `T`; see the layout reconstruction above.
+    // SAFETY: the addresses below come from the same formulas `header_of`/
+    // `push_free` evaluate for the concrete `T`, over the same size and
+    // alignment, so they resolve to the same locations.
     unsafe {
         let base = value.as_ptr();
-        let index = base.add(index_off).cast::<u32>().read();
-        let refcount = &*base.add(refcount_off).cast::<AtomicU32>();
-        let header = &*base.sub(index as usize * stride + slots_off).cast::<ChunkHeader>();
+        let index = base.add(geometry.index_offset()).cast::<u32>().read();
+        let refcount = &*base.add(geometry.refcount_offset()).cast::<AtomicU32>();
+        let header = &*base
+            .sub(index as usize * geometry.stride() + geometry.slots_offset())
+            .cast::<ChunkHeader>();
         let pool = header.pool;
         let global = header.base_index + index;
         let inner = pool.as_ref();
@@ -1130,7 +1122,7 @@ unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
 
 /// Returns a raw pointer to the slot's refcount, given a pointer to its value.
 ///
-/// The refcount sits at `round_up(size_of_val, align_of::<u32>())` within the
+/// The refcount sits at the geometry's refcount offset within the
 /// `#[repr(C)] SlotCell<T>` (the value is field 0). For a `Sized` `T` this folds
 /// to a constant offset, matching the monomorphized field access.
 ///
@@ -1148,7 +1140,7 @@ pub(crate) unsafe fn refcount_ptr<T: ?Sized>(value: NonNull<T>) -> *mut AtomicU3
     // `size_of_val` then reads only the pointer metadata (length or vtable),
     // not the value's bytes.
     unsafe {
-        let refcount_off = round_up(size_of_val(value.as_ref()), align_of::<AtomicU32>());
+        let refcount_off = geometry::refcount_offset(size_of_val(value.as_ref()));
         value.as_ptr().cast::<u8>().add(refcount_off).cast::<AtomicU32>()
     }
 }
