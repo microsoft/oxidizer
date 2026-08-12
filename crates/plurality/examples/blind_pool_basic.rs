@@ -35,7 +35,7 @@ fn main() {
     });
 
     println!("count      = {}", *count);
-    println!("label      = {}", &*label);
+    println!("label      = {}", *label);
     println!("flags      = {:?}", *flags);
     println!("connection = {connection:?}");
 
@@ -69,5 +69,5 @@ fn main() {
     println!("after dropping the String: {} live", pool.len_of::<String>());
 
     let reused = pool.alloc_box(String::from("recycled"));
-    println!("{:?} took over the slot just freed: {}", &*reused, &raw const *reused == freed);
+    println!("{:?} took over the slot just freed: {}", *reused, &raw const *reused == freed);
 }

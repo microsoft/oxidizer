@@ -82,7 +82,7 @@ fn main() {
     let observers: Vec<_> = (0..3)
         .map(|worker| {
             let config = Arc::clone(&config);
-            thread::spawn(move || format!("worker {worker} read {:?}", &*config))
+            thread::spawn(move || format!("worker {worker} read {:?}", *config))
         })
         .collect();
 
