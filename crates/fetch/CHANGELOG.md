@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - Now requires `0.7.0` of `anyspawn`
+  - Now requires `0.8.0` of `bytesbuf`
+  - Now requires `0.6.0` of `fetch_hyper`
+  - Now requires `0.3.0` of `fetch_tls`
+  - Now requires `0.9.0` of `http_extensions`
+  - Now requires `0.4.0` of `ohno`
+  - Now requires `0.7.0` of `seatbelt`
+  - Now requires `0.7.0` of `seatbelt_http`
+  - Now requires `0.4.0` of `templated_uri`
+  - Now requires `0.9.0` of `thread_aware`
+  - Now requires `0.5.0` of `tick`
+
 ## [0.14.0] - 2026-07-24
 
 - 🔧 Maintenance

@@ -59,8 +59,17 @@
 //! # `ohno::error`
 //!
 //! The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-//! field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+//! field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 //! without manually managing the error infrastructure.
+//!
+//! The attribute always adds that field and always generates the error representation from it, so
+//! no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use
+//! `#[derive(Error)]` directly to place the core by hand.
+//!
+//! A field of type `OhnoCore` may still be declared, and is then treated as data rather than as the
+//! error: it is passed to the generated constructors like any other field, appears in the generated
+//! `Debug`, and can be referenced from a `#[display(...)]` template — but it is never read for
+//! `source()`, the backtrace, or enrichment, which all come from the injected field.
 //!
 //! ```rust
 //! // Simple error without extra fields
@@ -77,7 +86,7 @@
 //!
 //! # Display Error Override
 //!
-//! The `#[display("...")]` attribute allows you to customize the main error message
+//! The `#[display("...")]` attribute customizes the main error message
 //! while preserving the underlying error as a cause in the error chain.
 //!
 //! ```rust
@@ -99,6 +108,32 @@
 //! error (if any) is automatically shown as "Caused by:" in the error chain. If the inner error
 //! has no source, only the custom message is displayed.
 //!
+//! Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
+//!
+//! ## Format Arguments
+//!
+//! Anything that is not a plain field reference is passed as a positional argument, with
+//! `format!`'s placeholder and argument-counting semantics:
+//!
+//! ```rust
+//! use std::path::PathBuf;
+//!
+//! #[ohno::error]
+//! #[display("failed to read config: {}", path.display())]
+//! pub struct ConfigError {
+//!     pub path: PathBuf,
+//! }
+//! ```
+//!
+//! Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
+//! name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+//!
+//! | Argument | Accepted |
+//! | --- | --- |
+//! | `path.display()` | yes |
+//! | `self.path.display()` | no, the `self.` prefix is implicit |
+//! | `.path.display()` | no, not a valid expression |
+//!
 //! # Automatic Constructors
 //!
 //! By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:
@@ -110,16 +145,29 @@
 //! }
 //!
 //! // The derive macro automatically generates:
-//! // - ConfigError::new(path: String) -> Self
-//! // - ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+//! //
+//! // impl ConfigError {
+//! //     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//! //     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//! // }
 //!
 //! let error = ConfigError::new("/etc/config.toml");
 //! let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
 //! ```
 //!
+//! **The generated constructors are `pub(crate)`, regardless of the visibility of the error type
+//! itself.** They are an implementation convenience for the crate that defines the error, not part
+//! of its public API, so a `pub struct` error exported from a library cannot be constructed with
+//! `new()` or `caused_by()` by a downstream crate. This is deliberate: it keeps the set of ways an
+//! error can be built under the control of the crate that owns it, so adding a field is not a
+//! breaking change for callers.
+//!
 //! **Disabling Automatic Constructors:**
 //!
-//! Use `#[no_constructors]` to disable automatic generation when you need custom constructors:
+//! `#[no_constructors]` disables the generated constructors, leaving the names `new` and
+//! `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+//! requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+//! hand-written constructor has to initialize:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};
@@ -132,7 +180,7 @@
 //!
 //! impl CustomError {
 //!     pub fn new(custom_logic: bool) -> Self {
-//!         // Your custom constructor logic here
+//!         // Custom constructor logic here
 //!         Self {
 //!             inner_error: OhnoCore::default(),
 //!         }

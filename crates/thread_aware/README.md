@@ -195,7 +195,7 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbziMip5ExkKkbROtDHabkUj4blubaufU_GeYbpkp3mFVHCQJhZIOCbHRocmVhZF9hd2FyZWUwLjguMIJxdGhyZWFkX2F3YXJlX2NvcmVlMS4wLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbziMip5ExkKkbROtDHabkUj4blubaufU_GeYbpkp3mFVHCQJhZIOCbHRocmVhZF9hd2FyZWUwLjkuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMS4wLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
  [__link0]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link10]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
@@ -203,8 +203,8 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link12]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link13]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link14]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
- [__link15]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=Unaware
- [__link16]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=Unaware
+ [__link15]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Unaware
+ [__link16]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Unaware
  [__link17]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link18]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link19]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
@@ -220,11 +220,11 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link28]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link29]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
- [__link30]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=Arc
- [__link31]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=Arc
+ [__link30]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
+ [__link31]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
  [__link4]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link5]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
- [__link6]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=Arc
+ [__link6]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
  [__link7]: https://doc.rust-lang.org/stable/alloc/?search=sync::Arc
- [__link8]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=storage::Strategy
+ [__link8]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=storage::Strategy
  [__link9]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware

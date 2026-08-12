@@ -121,27 +121,27 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfDTXi-1ZvacbMobUHdvAIBsbUJBXGCRAkM0b9PGuxFO4xL1hZIGCaXBsdXJhbGl0eWUwLjIuMA
- [__link0]: https://docs.rs/plurality/0.2.0/plurality/?search=Pool
- [__link1]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
- [__link10]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
- [__link11]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
- [__link12]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfDTXi-1ZvacbMobUHdvAIBsbUJBXGCRAkM0b9PGuxFO4xL1hZIGCaXBsdXJhbGl0eWUwLjIuMQ
+ [__link0]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link1]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link11]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link12]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
  [__link13]: https://crates.io/crates/allocator-api2
  [__link14]: https://doc.rust-lang.org/stable/alloc
- [__link15]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
- [__link16]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
- [__link17]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
- [__link18]: https://docs.rs/plurality/0.2.0/plurality/?search=Box::unsize
- [__link19]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc::unsize
- [__link2]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
- [__link20]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc::unsize
+ [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link16]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link17]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link18]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
+ [__link19]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
+ [__link2]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link20]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
  [__link21]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
  [__link22]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
- [__link3]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
- [__link4]: https://docs.rs/plurality/0.2.0/plurality/?search=Rc
- [__link5]: https://docs.rs/plurality/0.2.0/plurality/?search=Arc
- [__link6]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
- [__link7]: https://docs.rs/plurality/0.2.0/plurality/?search=Alloc
- [__link8]: https://docs.rs/plurality/0.2.0/plurality/?search=Pool
- [__link9]: https://docs.rs/plurality/0.2.0/plurality/?search=Box
+ [__link3]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link4]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link5]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link6]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link7]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link8]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link9]: https://docs.rs/plurality/0.2.1/plurality/?search=Box

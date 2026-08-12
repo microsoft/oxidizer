@@ -1,0 +1,17 @@
+error: Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore
+  --> tests/ui/error_attribute_on_several_fields.rs:11:5
+   |
+11 |     #[error]
+   |     ^^^^^^^^
+
+error: Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore
+  --> tests/ui/error_attribute_on_several_fields.rs:16:58
+   |
+16 | pub struct TwoMarkedTupleFields(#[error] ohno::OhnoCore, #[error] ohno::OhnoCore);
+   |                                                          ^^^^^^^^
+
+error: Duplicate `#[error]` on the same field. Mark it once
+  --> tests/ui/error_attribute_on_several_fields.rs:22:5
+   |
+22 |     #[error]
+   |     ^^^^^^^^

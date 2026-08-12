@@ -1,0 +1,11 @@
+error: `#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix
+  --> tests/ui/display_self_prefixed_argument.rs:10:27
+   |
+10 | #[display("bad path: {}", self.path.display())]
+   |                           ^^^^
+
+error: `#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix
+  --> tests/ui/display_self_prefixed_argument.rs:16:27
+   |
+16 | #[display("bad path: {}", self)]
+   |                           ^^^^
