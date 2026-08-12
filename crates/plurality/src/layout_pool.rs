@@ -31,8 +31,8 @@ use crate::slot::{FREE_END, MAX_POOL_SLOTS, SlotCell};
 
 /// A pool serving one fixed value [`Layout`].
 ///
-/// One pointer wide, like the typed pool, and holding one unit of its own
-/// pool-level reference count.
+/// One pointer wide, and holding one unit of its own pool-level reference
+/// count.
 pub(crate) struct LayoutPool<A: Allocator> {
     inner: NonNull<PoolInner<A, RuntimeGeometry>>,
 }

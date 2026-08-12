@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
-)]
-
 use core::marker::PhantomData;
 use core::mem::{MaybeUninit, forget};
 use core::ops::Deref;
@@ -59,6 +54,10 @@ impl<T: ?Sized + core::panic::RefUnwindSafe, A: Allocator + core::panic::RefUnwi
 #[cfg(not(loom))]
 #[inline]
 unsafe fn inc_count(refcount: *mut AtomicU32) -> u32 {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the pointer recovery, read, and write form one non-atomic refcount update under the single-thread invariant"
+    )]
     // SAFETY: exclusive single-thread access to an occupied slot's refcount.
     unsafe {
         let p = (*refcount).as_ptr();
@@ -79,6 +78,10 @@ unsafe fn inc_count(refcount: *mut AtomicU32) -> u32 {
 #[cfg(not(loom))]
 #[inline]
 unsafe fn dec_count(refcount: *mut AtomicU32) -> u32 {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the pointer recovery, read, and write form one non-atomic refcount update under the single-thread invariant"
+    )]
     // SAFETY: exclusive single-thread access to an occupied slot's refcount.
     unsafe {
         let p = (*refcount).as_ptr();
@@ -99,8 +102,14 @@ unsafe fn dec_count(refcount: *mut AtomicU32) -> u32 {
 #[cfg(not(loom))]
 #[inline]
 unsafe fn read_count(refcount: *mut AtomicU32) -> u32 {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the pointer recovery and read form one non-atomic refcount observation under the single-thread invariant"
+    )]
     // SAFETY: exclusive single-thread access to an occupied slot's refcount.
-    unsafe { *(*refcount).as_ptr() }
+    unsafe {
+        *(*refcount).as_ptr()
+    }
 }
 
 #[cfg(loom)]
@@ -155,6 +164,10 @@ impl<T, A: Allocator> Rc<T, A> {
     /// The allocation stays fixed and no ordinary owner is exposed.
     #[must_use]
     pub fn unsize_pin<U: ?Sized>(this: Pin<Self>, coercion: Coercion<T, U, impl FnOnce(*const T) -> *const U>) -> Pin<Rc<U, A>> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the temporary unpinning and immediate repinning form one metadata-only owner conversion, so splitting would expose an ordinary owner between steps"
+        )]
         // SAFETY: the ordinary owner exists only inside this method. `unsize`
         // changes pointer metadata without moving or exposing the value, and
         // the resulting owner is re-pinned before it can escape.
@@ -196,6 +209,10 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         reason = "the unsafe deref must stay lazy: materializing `&mut T` when the handle is not unique would alias existing shared references"
     )]
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the refcount pointer recovery and read form one uniqueness check under the occupied-slot invariant"
+        )]
         // SAFETY: occupied slot; `Rc` is single-threaded.
         let unique = unsafe { read_count(refcount_ptr(this.slot)) == 1 };
         // SAFETY: a unique handle, so `&mut` to the slot value is exclusive.
@@ -235,6 +252,10 @@ impl<T, A: Allocator> Rc<MaybeUninit<T>, A> {
 impl<T: ?Sized, A: Allocator> Clone for Rc<T, A> {
     #[inline]
     fn clone(&self) -> Self {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the refcount pointer recovery and increment form one clone-accounting step under the occupied-slot invariant"
+        )]
         // SAFETY: `Rc` is `!Send + !Sync`, so this occupied slot's refcount is
         // exclusive to this thread; the non-atomic increment is sound.
         let old = unsafe { inc_count(refcount_ptr(self.slot)) };
@@ -256,6 +277,10 @@ impl<T: ?Sized, A: Allocator> Deref for Rc<T, A> {
 impl<T: ?Sized, A: Allocator> Drop for Rc<T, A> {
     #[inline]
     fn drop(&mut self) {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the refcount pointer recovery and decrement form one drop-accounting step under the occupied-slot invariant"
+        )]
         // SAFETY: exclusive single-thread access; non-atomic decrement is sound.
         let prev = unsafe { dec_count(refcount_ptr(self.slot)) };
         if prev != 1 {

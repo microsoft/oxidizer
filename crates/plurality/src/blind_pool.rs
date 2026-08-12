@@ -9,11 +9,6 @@
 //! `docs/implementation/blind-pool.md` for the reentrancy ordering the cold
 //! path follows.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "the router's directory accesses share one safety invariant — `!Sync` confines them to a single thread — which one block per dereference would only duplicate"
-)]
-
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::any::type_name;
@@ -37,8 +32,8 @@ use crate::sync::Arc;
 /// Chunk sizing shared by every layout pool a [`BlindPool`] creates.
 ///
 /// A byte target lets layouts of very different sizes commit comparable memory
-/// per growth step; a fixed slot count reproduces the typed pool's
-/// predictability. Ref: docs/design/blind-pool.md, "Sizing chunks by bytes".
+/// per growth step; a fixed slot count gives every layout equal increments of
+/// capacity. Ref: docs/design/blind-pool.md, "Sizing chunks by bytes".
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ChunkSizing {
     /// Each layout pool takes as many slots as fit in this many bytes.
@@ -74,25 +69,26 @@ impl ChunkSizing {
 /// One pool object backs a heterogeneous working set: the type parameter
 /// travels with the allocation rather than with the pool. Values are routed to
 /// the internal pool serving their exact [`Layout`], so a value occupies
-/// exactly the space a [`Pool`](crate::Pool) would give it.
+/// exactly the space its layout requires and nothing more.
 ///
-/// Handles are the same four flavors the typed pool produces, with the same
-/// guarantees — address stability, detachable lifetime, one-pointer width for
-/// sized values, and coercion to trait objects and slices. Freeing costs
-/// exactly what it costs in a typed pool, because a handle finds its own pool
-/// by pointer recovery and never consults the router.
+/// Allocation hands back one of four handles — owned or shared, detachable or
+/// bound to the pool's borrow. Each keeps its value at a stable address for as
+/// long as it lives, is one pointer wide for a sized value, and coerces to
+/// trait objects and slices. Freeing costs no more than it would from a pool
+/// dedicated to that one type, because a handle finds its own pool by pointer
+/// recovery and never consults the router.
 ///
-/// Like the typed pool, a blind pool is `Send` when its allocator is, but not
-/// `Sync`: one thread allocates at a time, while frees may happen anywhere.
+/// A blind pool is `Send` when its allocator is, and is not `Sync`: one thread
+/// allocates at a time, while frees may happen anywhere. Values of types with
+/// different thread affinities may share one pool, because the pool owns no
+/// values — each handle carries its own bound.
 ///
 /// # Exhaustion and allocator failure
 ///
-/// The allocation surface mirrors [`Pool`](crate::Pool)'s method for method,
-/// with the type parameter on the method rather than on the pool. Capacity
-/// exhaustion covers two cases: the layout pool serving the request cannot
-/// grow further, or the request is for an unseen layout and the pool already
-/// holds its maximum number of layouts. Allocator failure additionally covers
-/// the metadata of a layout pool created on first sight of a layout. The
+/// Capacity exhaustion covers two cases: the layout pool serving the request
+/// cannot grow further, or the request is for an unseen layout and the pool
+/// already holds its maximum number of layouts. Allocator failure additionally
+/// covers the metadata of a layout pool created on first sight of a layout. The
 /// `alloc_*` methods panic in either case; the `try_alloc_*` methods report an
 /// [`AllocError`]. Where the wording below says "the pool is full", it means
 /// both cases.
@@ -241,6 +237,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
         // its pool. Both push into capacity reserved in step 4, so neither
         // reallocates and neither can fail.
         //
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the two pushes must stay in one block to keep the ordering invariant visible as a unit"
+        )]
         // SAFETY: `!Sync` confines the allocation path to one thread, and no
         // borrow of either vector outlives this block. The two vectors live in
         // distinct cells, so the borrows taken here do not alias.
@@ -260,6 +260,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// code immediately.
     #[inline]
     fn lookup(&self, layout: Layout) -> Option<LayoutPoolRef<A>> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "both cell reads rest on the one invariant stated below, which a block per read would only duplicate"
+        )]
         // SAFETY: `!Sync` confines directory access to the allocation path on
         // one thread; the borrows end with this block.
         unsafe {
@@ -285,6 +289,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// `try_reserve`, which also covers the capacity overflow `reserve` would
     /// panic on.
     fn try_reserve_one(&self) -> Result<(), AllocError> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "both reservations must succeed together, so splitting the block would obscure that they form one step"
+        )]
         // SAFETY: as for `lookup`. `try_reserve` holds `&mut` across a call
         // into the global allocator, which the design invariants require not to
         // re-enter a plurality pool.
@@ -429,6 +437,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
     #[inline]
     fn with_layout_of<T, R>(&self, found: impl FnOnce(&LayoutPool<A>) -> R, absent: impl FnOnce() -> R) -> R {
         let layout = Layout::new::<T>();
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "both cell reads rest on the one invariant stated below, which a block per read would only duplicate"
+        )]
         // SAFETY: as for `lookup`.
         unsafe {
             let layouts = &*self.layouts.get();

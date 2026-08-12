@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
-)]
-
 use alloc::boxed::Box as AllocBox;
 use alloc::vec::Vec;
 use core::alloc::Layout;
@@ -858,6 +853,10 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             }
             // SAFETY: `head` is a valid global index currently on the free list.
             let slot = unsafe { self.slot_for_global(head) };
+            #[expect(
+                clippy::multiple_unsafe_ops_per_block,
+                reason = "the refcount pointer recovery and free-link load are one free-list read under the valid-head invariant"
+            )]
             // SAFETY: a free slot's refcount field holds the next-free link.
             let next = unsafe { (*refcount_of(geometry, slot)).load(Relaxed) };
             if self.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
@@ -885,6 +884,10 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
     unsafe fn slot_for_global(&self, g: u32) -> NonNull<u8> {
         let chunk_no = (g >> self.shift) as usize;
         let offset = (g & self.mask) as usize;
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the directory borrow and unchecked lookup share the validated global-index invariant, so a block per operation would duplicate it"
+        )]
         // SAFETY: single-thread directory access; `chunk_no = g / chunk_size` is
         // `< chunks_allocated == directory.len()` for any valid free-list index.
         let chunk = unsafe {
@@ -918,6 +921,10 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             Err(_) => return Err(AllocError::ALLOCATOR_FAILED),
         };
 
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the header initialization, slot metadata initialization, and directory publication form one chunk-construction transaction"
+        )]
         // SAFETY: `ptr` is a fresh, exclusively owned allocation sized for one
         // chunk; the header and all slots are initialized before publishing.
         // Each slot links to `i + 1`; the last link and slot 0 are fixed up by
@@ -959,8 +966,14 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
         if n > 1 {
             // SAFETY: `ptr` chunk is live; its last slot is index n-1.
             let last = unsafe { self.geometry.slot_at(ptr, (n - 1) as usize) };
+            #[expect(
+                clippy::multiple_unsafe_ops_per_block,
+                reason = "the last-link recovery and chain splice are one publication step for the newly private free chain"
+            )]
             // SAFETY: `last` is the new chunk's (still-private) final slot.
-            unsafe { splice_chain(self.refcount_at(last), &self.core.free_head, base_index + 1) };
+            unsafe {
+                splice_chain(self.refcount_at(last), &self.core.free_head, base_index + 1);
+            };
         }
         // SAFETY: slot 0 of the new chunk; never published, so exclusively ours.
         Ok(unsafe { self.geometry.slot_at(ptr, 0) })
@@ -1041,6 +1054,10 @@ impl<T, A: Allocator> Drop for Pool<T, A> {
 #[inline]
 #[cfg_attr(coverage_nightly, coverage(off))]
 unsafe fn push_free<T>(slot: NonNull<SlotCell<T>>) -> NonNull<PoolCore> {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the slot-to-pool recovery, link store, and free-list publish form one free operation under the dropped-value invariant"
+    )]
     // SAFETY: recovery is valid for any live slot from this crate.
     unsafe {
         let index = (*slot.as_ptr()).index;
@@ -1114,6 +1131,10 @@ impl<T> Drop for LocalSlotGuard<T> {
 /// handle is being released; the value must not be accessed afterwards.
 #[inline]
 pub(crate) unsafe fn drop_and_free_val<T: ?Sized>(value: NonNull<T>) {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the metadata reads, conditional erase, guard setup, and destructor call are one final-owner release under the caller's slot invariant"
+    )]
     // SAFETY: `value` refers to an occupied, initialized slot (caller contract).
     unsafe {
         // Read the pointer metadata (size/align) before running the destructor.
@@ -1153,6 +1174,10 @@ unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
         unsafe { Layout::from_size_align_unchecked(size, align) },
     );
 
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the erased field recovery, free-list publish, and possible teardown use one reconstructed slot layout, so splitting would duplicate it"
+    )]
     // SAFETY: the addresses below come from the same formulas the geometry
     // evaluates for the concrete `T`, over the same size and alignment, so they
     // resolve to the same locations.
@@ -1193,6 +1218,10 @@ unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
     reason = "the refcount follows the value at its natural `AtomicU32` alignment within the `#[repr(C)]` slot"
 )]
 pub(crate) unsafe fn refcount_ptr<T: ?Sized>(value: NonNull<T>) -> *mut AtomicU32 {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the metadata read and offset arithmetic reconstruct one refcount address from a value pointer"
+    )]
     // SAFETY: `value` is field 0 of the slot, so the refcount follows it.
     // `value.as_ref()` forms a `&T` to the slot's value, which the caller
     // guarantees is a valid, live value for the duration of this call;
@@ -1227,6 +1256,10 @@ pub(crate) unsafe fn drop_and_free_local<T>(slot: NonNull<SlotCell<T>>) {
 #[cold]
 #[inline(never)]
 pub(crate) unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolInner<A, G>>) {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the directory traversal, chunk deallocation, and inner reclamation are one teardown pass under exclusive pool ownership"
+    )]
     // SAFETY: exclusive ownership; chunks were allocated with `chunk_layout`.
     unsafe {
         let inner = pool.as_ref();
@@ -1285,6 +1318,10 @@ impl PoolCore {
     /// reference to it exists) and must be laid out for `T`.
     #[inline]
     pub(crate) unsafe fn occupy<T>(&self, slot: NonNull<SlotCell<T>>, value: T) {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the refcount mark and value initialization are one slot-occupation step that must not be observed halfway"
+        )]
         // SAFETY: exclusive ownership of the freshly popped slot.
         unsafe {
             self.mark_occupied(slot);

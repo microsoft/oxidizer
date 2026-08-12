@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
-)]
-
 use core::marker::PhantomData;
 use core::mem::{MaybeUninit, forget};
 use core::ops::{Deref, DerefMut};
@@ -154,9 +149,15 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[must_use]
     #[inline]
     pub fn as_pin_mut(&mut self) -> Pin<&mut T> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the mutable borrow and unchecked pin construction share the same stable-unique-owner invariant, so splitting would duplicate it"
+        )]
         // SAFETY: the slot is uniquely owned and stable, and `DerefMut`/`AsMut`
         // are implemented only when `T: Unpin`.
-        unsafe { Pin::new_unchecked(self.slot.as_mut()) }
+        unsafe {
+            Pin::new_unchecked(self.slot.as_mut())
+        }
     }
 }
 
@@ -195,6 +196,10 @@ impl<T, A: Allocator> Box<MaybeUninit<T>, A> {
     /// The value must have been fully initialized before calling.
     #[must_use]
     pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Box<T, A>> {
+        #[expect(
+            clippy::multiple_unsafe_ops_per_block,
+            reason = "the unpinning, initialization cast, and repinning form one pin-preserving conversion, so splitting would expose an ordinary owner between steps"
+        )]
         // SAFETY: the caller guarantees the value is initialized; the slot
         // address is unchanged, so re-pinning is sound.
         unsafe {
