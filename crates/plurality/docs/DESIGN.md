@@ -38,7 +38,7 @@ self-contained; this page carries the shape of the whole and the invariants
 that bind the areas together.
 
 **[Handles](./design/handles.md)** — the smart-pointer family that is the
-pool's entire public surface: the four flavours and the two axes they span, the
+pool's entire public surface: the four flavors and the two axes they span, the
 pinning rules that follow from ownership, one-pointer width and coercion to
 trait objects and slices, the pointer-recovery walk that lets a bare value
 pointer find its way home, and the two reference counts that give a value and
@@ -80,13 +80,14 @@ invariants:
    overlap in time.
 2. **Chunks are immortal until teardown.** They never move and are never freed
    individually, so back-references from chunks to pool state can never dangle.
-3. **The slot counter is context-typed.** Occupied slots read it as a count,
-   free slots as a link; the two never overlap in time.
+3. **The slot counter is context-typed.** Occupied shared slots read it as a
+   count, unique-owner slots leave it unused, and free slots read it as a link;
+   the count and link roles never overlap in time.
 4. **Recovery is arithmetic and type-agnostic.** A value pointer reconstructs its
    slot, chunk, and pool state by fixed offsets, reaching only a type-erased core.
-5. **Two counts, two lifetimes.** The per-slot count owns the value; the
-   pool-level count owns the memory. Every detachable handle holds one unit of
-   the latter, so teardown finds no live values.
+5. **Two counts, two lifetimes.** For shared handles, the per-slot count owns
+   the value; the pool-level count owns the memory. Every detachable
+   allocation holds one unit of the latter, so teardown finds no live values.
 6. **A value is destroyed exactly once**, on its own handle's final drop, never
    during pool teardown.
 7. **The pool object neither yields nor drops pooled values.** Nothing

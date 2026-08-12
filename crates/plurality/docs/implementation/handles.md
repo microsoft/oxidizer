@@ -1,12 +1,12 @@
 # Handles
 
-This document covers the four owning handle flavours: how each is represented,
+This document covers the four owning handle flavors: how each is represented,
 what its drop path does, how its auto-trait and variance behaviour arises, and
 the shared surface they are generated from. Back to the
 [implementation hub](../IMPLEMENTATION.md). For the user-visible model see
 [the handle design](../design/handles.md).
 
-## The four flavours
+## The four flavors
 
 | | `Box<T: ?Sized, A>` | `Arc<T: ?Sized, A>` | `Rc<T: ?Sized, A>` | `Alloc<'pool, T, A>` |
 |---|---|---|---|---|
@@ -17,7 +17,7 @@ the shared surface they are generated from. Back to the
 | `?Sized` | Yes | Yes | Yes | No |
 | Pinning | Full | At construction | At construction | None |
 
-The three detachable flavours store a pointer to the **value**, not to the
+The three detachable flavors store a pointer to the **value**, not to the
 slot. That is possible because the value is field 0 of a `#[repr(C)]` slot, so
 the two addresses coincide, and it is what keeps a handle to a sized value one
 pointer wide: everything else the handle needs is recovered by arithmetic (see
@@ -131,11 +131,12 @@ and the bound owner is invariant, as described above. No handle declares an
 explicit variance marker; variance follows from the fields, and the tests pin
 the resulting behaviour rather than the mechanism.
 
-Unwind safety is hand-implemented per handle rather than derived, because the
-derived answer would follow the allocator type parameter, which no handle
-exposes a path to. The implementations bound only on `T`, since dropping a
-handle destroys a `T` and returns a slot through atomics that cannot be left in
-a broken state by an unwind.
+Unwind safety is hand-implemented per handle rather than derived. `Alloc`
+exposes no path to the allocator, so its implementations bound only on `T`.
+The detachable handles may share the allocator with the pool and with other
+detached handles, so their implementations also require the allocator to be
+reference-unwind-safe. Dropping a handle destroys a `T` and returns a slot
+through atomics that cannot be left in a broken state by an unwind.
 
 ## The shared surface
 
@@ -148,7 +149,7 @@ that adds the mutable half for the unique owners. The unsized mutable variant
 additionally requires `T: Unpin`, matching the `DerefMut` rule above.
 
 Writing this surface by hand would be four opportunities to omit an impl from
-one flavour; generating it makes the surface uniform by construction and makes
+one flavor; generating it makes the surface uniform by construction and makes
 adding an impl a single edit.
 
 ## Coercion
@@ -172,7 +173,7 @@ would from the original.
 
 ## Uninitialized placement
 
-Every handle flavour has an uninitialized tier: an allocation returning a
+Every handle flavor has an uninitialized tier: an allocation returning a
 handle over `MaybeUninit<T>`, and an `unsafe` conversion to the initialized
 handle once the caller has written the value. This lets a caller construct in
 place rather than constructing on the stack and moving.

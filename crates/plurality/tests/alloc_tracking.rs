@@ -24,7 +24,7 @@ mod dyn_box_ops {
     use std::hint::black_box;
 
     use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-    use plurality::{Box as PoolBox, Pool, coerce};
+    use plurality::{BlindPool as PluralityBlindPool, Box as PoolBox, Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
     pub(crate) const CAP: usize = 1024;
@@ -68,6 +68,19 @@ mod dyn_box_ops {
         let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
         drop(warm);
         assert!(pool.capacity() >= n as u64);
+        assert!(pool.is_empty());
+        let handle = pool.alloc_box(Obj::new(n as u64));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+        assert_eq!(handle.tag(), 0xFF);
+        drop(handle);
+        pool
+    }
+
+    pub(crate) fn setup_plurality_blind(n: usize) -> PluralityBlindPool {
+        let pool = PluralityBlindPool::new();
+        let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+        drop(warm);
+        assert!(pool.capacity_of::<Obj>() >= n as u64);
         assert!(pool.is_empty());
         let handle = pool.alloc_box(Obj::new(n as u64));
         let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
@@ -139,6 +152,14 @@ mod dyn_box_ops {
 
     #[inline]
     pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
+        let handle = pool.alloc_box(black_box(Obj::new(i)));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+        invoke_dyn(&*handle);
+        drop(black_box(handle));
+    }
+
+    #[inline]
+    pub(crate) fn plurality_blind_box(pool: &PluralityBlindPool, i: u64) {
         let handle = pool.alloc_box(black_box(Obj::new(i)));
         let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
         invoke_dyn(&*handle);
@@ -221,6 +242,7 @@ fn assert_no_system_allocations(session: &Session, name: &str, mut f: impl FnMut
 #[test]
 fn dyn_box_benchmark_allocation_behavior_matches_design() {
     let plurality = dyn_box_ops::setup_plurality(dyn_box_ops::CAP);
+    let plurality_blind = dyn_box_ops::setup_plurality_blind(dyn_box_ops::CAP);
     let infinity = dyn_box_ops::setup_infinity_pinned(dyn_box_ops::CAP);
     let infinity_local = dyn_box_ops::setup_infinity_local_pinned(dyn_box_ops::CAP);
     let infinity_blind = dyn_box_ops::setup_infinity_blind(dyn_box_ops::CAP);
@@ -229,6 +251,9 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
 
     assert_no_system_allocations(&session, "plurality_dyn_box", || {
         dyn_box_ops::plurality_box(&plurality, 0);
+    });
+    assert_no_system_allocations(&session, "plurality_blind_dyn_box", || {
+        dyn_box_ops::plurality_blind_box(&plurality_blind, 0);
     });
     assert_no_system_allocations(&session, "infinity_pinned_dyn_box", || {
         dyn_box_ops::infinity_pinned(&infinity, 0);

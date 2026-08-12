@@ -22,9 +22,7 @@ compile-time trait behaviour, and no single technique covers all three.
 ## Test targets
 
 Tests are external integration targets, with one exception. That is a
-deliberate constraint: it keeps the tests honest about the public surface, and
-the few internals worth exercising directly are reached through a gated
-re-export rather than by testing from the inside.
+deliberate constraint: it keeps the tests honest about the public surface.
 
 The exception is `src/geometry.rs`, which carries a unit test module. The
 geometry formulas take a size and an alignment, not a type, and the property
@@ -75,20 +73,18 @@ which is exercised over a spread of layouts precisely because a divergence
 between the two geometry providers surfaces there as an out-of-bounds or
 misaligned access rather than as a wrong answer.
 
-Two targets opt out of Miri: the fuzz target, which needs filesystem isolation
-Miri does not provide, and the allocation-tracking target, whose global
-allocator is not meaningful under Miri's own allocator.
+The Bolero targets opt out of Miri because they need filesystem isolation Miri
+does not provide. The allocation-tracking target also opts out, because its
+global allocator is not meaningful under Miri's own allocator.
 
 ## Interleaving exploration
 
-Loom exhaustively explores the orderings of the free-list protocol and the
-teardown handover. The models cover two shared handles on one slot, teardown
-running on a worker thread after the pool object is gone, concurrent frees of
-distinct slots, a free racing the splice at the end of growth — driven by an
-allocator that stalls the second chunk allocation to force the race — and the
-exactly-once destruction of a value. The blind pool adds teardown of one layout
-pool on a non-allocator thread after the router is gone, and concurrent frees
-across two layout pools.
+Loom exhaustively explores the orderings of the typed pool's free-list protocol
+and teardown handover. The models cover two shared handles on one slot,
+teardown running on a worker thread after the pool object is gone, concurrent
+frees of distinct slots, a free racing the splice at the end of growth — driven
+by an allocator that stalls the second chunk allocation to force the race —
+and the exactly-once destruction of a value.
 
 Loom's atomics are substituted for the crate's own through the `atomic` module,
 and the instrumented objects must be dropped rather than merely deallocated,
@@ -107,11 +103,11 @@ crossed layouts.
 ## Allocation tracking
 
 A tracking global allocator asserts that steady-state operation performs no
-system allocations: fill-and-drop and rolling churn for each handle flavour, a
+system allocations: fill-and-drop and rolling churn for each handle flavor, a
 warmed blind pool across a mix of layouts, and the benchmark bodies behind the
 published fat-pointer comparison, so that the claim in
-[`PERF.md`](../PERF.md) is enforced rather than asserted. The target carries its
-own copy of those bodies so that it pulls in no cross-target files.
+[`PERF.md`](../PERF.md) is enforced rather than asserted. The target carries
+its own copy of those bodies so that it pulls in no cross-target files.
 
 Leak assertions belong here too: teardown returns the pool's metadata
 allocation to the global allocator, and the drop glue it runs by hand — the
@@ -143,8 +139,8 @@ justification.
 ## Running it
 
 A single script drives the correctness suites — Miri in its several
-configurations, loom, the fuzz target, an arithmetic-checked build, and
-doctests — with a flag per suite so that any one of them can be run alone. A
-second script runs the benchmark suites and regenerates
+configurations, loom, the configured Bolero target, an arithmetic-checked
+build, and doctests — with a flag per suite so that any one of them can be run
+alone. A second script runs the benchmark suites and regenerates
 [`PERF.md`](../PERF.md); its loop count must match the wall-clock harness's, or
 the per-operation numbers it derives are wrong.

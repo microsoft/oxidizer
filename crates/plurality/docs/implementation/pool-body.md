@@ -14,7 +14,7 @@ a reclaiming handle reaches, and it carries exactly what reclamation needs:
 #[repr(C)]
 pub(crate) struct PoolCore {
     pub(crate) free_head: AtomicU32,        // FREE_END when the pool must grow
-    pub(crate) pool_refcount: AtomicUsize,  // pool object + live detachable handles
+    pub(crate) pool_refcount: AtomicUsize,  // pool object + detached allocations
     pub(crate) teardown: unsafe fn(NonNull<Self>),
 }
 ```
@@ -86,7 +86,7 @@ pub(crate) struct SlotCell<T> {
 The value is field 0, so the slot's address and the value's address are the
 same number. Every detachable handle stores the value pointer and recovers the
 other two fields by offset. The `index` field is written once during chunk
-initialisation and never mutated, which is what makes the walk back to the
+initialization and never mutated, which is what makes the walk back to the
 chunk header a pure subtraction.
 
 The counter is context-typed. While the slot is occupied it is the shared
@@ -111,7 +111,7 @@ paths are expressed in terms of it:
   geometry the stride and the offset are constants and the emitted code is what
   pointer arithmetic over a typed slot pointer produces.
 - **Growth.** Growth writes the two metadata words at their computed offsets
-  and leaves the value storage uninitialised, without naming a value type.
+  and leaves the value storage uninitialized, without naming a value type.
 - **Teardown.** The teardown hook monomorphises over the geometry provider and
   the allocator. Under `loom`, where teardown must drop the instrumented atomic
   in each slot, it finds that atomic at the geometry's reference-count offset.
@@ -130,7 +130,7 @@ loop with no ABA tag, which is sound because pops happen only on the allocator
 thread; pushes are the multi-producer side and can only ever install a
 different head, which the loop retries.
 
-**Occupying a claimed slot** differs by handle flavour, and the differences are
+**Occupying a claimed slot** differs by handle flavor, and the differences are
 deliberate:
 
 | Handle | Slot counter | Pool refcount | Value |
@@ -139,7 +139,7 @@ deliberate:
 | `Box` | left as-is | incremented | written |
 | `Alloc` | left as-is | untouched | written |
 
-`Box` and `Alloc` never read the slot counter, so initialising it would be
+`Box` and `Alloc` never read the slot counter, so initializing it would be
 wasted work; the stale free-list link stays in the word until the slot is
 pushed back onto the free list, which overwrites it. `Alloc` skips the pool
 reference count because its `'pool` borrow already proves the pool outlives it.
@@ -201,7 +201,7 @@ The chunk cap is the caller's `max_chunks`, or, for an unbounded pool, the
 chunk count that keeps every global index below the sentinel. Reaching it
 reports capacity exhaustion; a failing allocator reports allocator failure.
 
-A new chunk is fully initialised before it is published. The header is written
+A new chunk is fully initialized before it is published. The header is written
 first, then every slot's counter is set to the *next* global index, which
 pre-threads the whole chunk as a free chain. The chunk is then pushed into the
 directory, and only afterwards is the chunk count published with a `Release`
@@ -231,16 +231,15 @@ index to a chunk and an offset is shift-and-mask arithmetic on the hot
 allocation path. Because the lower clamp bound is itself a power of two,
 rounding cannot push the result below it.
 
-The lower bound exists so that even a value large enough to dominate the target
-amortises the growth path over several allocations. The upper bound exists so
-that a very large target cannot make the first use of a layout commit an
-unreasonable amount of memory. The default target is a small multiple of a
-page: large enough that small values grow rarely, small enough that a layout
-touched once does not cost much.
+The lower bound keeps every chunk usable even when one value is larger than the
+byte target. The upper bound keeps power-of-two rounding representable and the
+slot-index arithmetic within its supported range. The default target is a
+small multiple of a page: large enough that small values grow rarely, small
+enough that a layout touched once does not cost much.
 
-A caller may instead fix the slot count, which applies uniformly to every
-layout and reproduces the typed pool's sizing behaviour. The per-layout clamps
-that keep a derived size legal are described in
+A caller may instead request a slot count, which every layout starts from
+uniformly before power-of-two rounding and per-layout clamping. The per-layout
+clamps that keep a derived size legal are described in
 [the blind pool](./blind-pool.md).
 
 ## Pointer recovery
@@ -293,24 +292,24 @@ information to any of them.
 
 ## The two reference counts
 
-**The slot counter** owns the value. `Arc` increments it with `Relaxed`, since
-a clone requires an existing reference, and decrements with `Release`; the
-handle that observes the previous value `1` issues an `Acquire` fence and then
-destroys the value, which is the standard pattern that makes every prior write
-to the value visible to the destructor. `Rc` performs the same protocol
-non-atomically through the atomic's raw pointer, which is sound because `Rc` is
-unconditionally `!Send` and `!Sync`, and needs no fence for the same reason.
-Under `loom` those accesses go through instrumented atomic operations instead,
-because the model checker cannot see raw-pointer traffic. The counter is
-guarded against overflow at the same ceiling `alloc::sync::Arc` uses; exceeding
-it aborts.
+**The slot counter** owns the value for shared handles. `Arc` increments it
+with `Relaxed`, since a clone requires an existing reference, and decrements
+with `Release`; the handle that observes the previous value `1` issues an
+`Acquire` fence and then destroys the value, which is the standard pattern
+that makes every prior write to the value visible to the destructor. `Rc`
+performs the same protocol non-atomically through the atomic's raw pointer,
+which is sound because `Rc` is unconditionally `!Send` and `!Sync`, and needs
+no fence for the same reason. Under `loom` those accesses go through
+instrumented atomic operations instead, because the model checker cannot see
+raw-pointer traffic. The counter is guarded against overflow at the same
+ceiling `alloc::sync::Arc` uses; exceeding it aborts.
 
 **The pool-level reference count** owns the memory. It starts at one for the
-pool object and gains one unit per live detachable handle. `Alloc` handles are
-deliberately excluded: their borrow already proves the pool outlives them, so
-counting them would pay for a fact the type system has established. Releasing a
-unit uses `Release`, and the thread that observes the previous value `1` issues
-an `Acquire` fence and runs teardown.
+pool object and gains one unit per live detachable allocation. `Alloc` handles
+are deliberately excluded: their borrow already proves the pool outlives them,
+so counting them would pay for a fact the type system has established.
+Releasing a unit uses `Release`, and the thread that observes the previous
+value `1` issues an `Acquire` fence and runs teardown.
 
 The live-value query reads this counter and subtracts the pool object's own
 unit, which is why it is documented as approximate under concurrent frees and
@@ -320,11 +319,11 @@ as excluding bound owners.
 
 `PoolCore` stores teardown as an `unsafe fn(NonNull<PoolCore>)`, populated at
 construction with the callback monomorphized for this pool's geometry and
-allocator. Whichever reference — the pool object or the last detachable handle
-— drops the count to zero calls it through that pointer. A handle therefore
-tears the pool down without naming the geometry, without naming the allocator,
-and without reaching the pool object, which may have been dropped long before
-and on another thread.
+allocator. Whichever owner of a pool-level unit — the pool object or the final
+handle of a detachable allocation — drops the count to zero calls it through
+that pointer. A handle therefore tears the pool down without naming the
+geometry, without naming the allocator, and without reaching the pool object,
+which may have been dropped long before and on another thread.
 
 Teardown itself begins by loading the chunk count with `Acquire`, pairing with
 the `Release` store in growth; the pool-level reference count's increments are
@@ -382,13 +381,12 @@ allocator type is inferred rather than annotated. The builder is reached from
 the pool type rather than constructed directly, per the workspace's builder
 convention.
 
-`build()` validates by assertion, because every input is a program constant
-that a caller can fix at the call site rather than a runtime condition to be
-handled: the chunk size must be at least one and small enough that rounding it
-up to a power of two cannot overflow, and the product of the rounded chunk size
-and the chunk cap must fit the addressable slot ceiling. The chunk layout is
-computed here too, so a layout that cannot exist is rejected at construction
-rather than at first use.
+`build()` validates by assertion, treating invalid sizing as caller error: the
+chunk size must be at least one and small enough that rounding it up to a power
+of two cannot overflow, and the product of the rounded chunk size and the chunk
+cap must fit the addressable slot ceiling. The chunk layout is computed here
+too, so a layout that cannot exist is rejected at construction rather than at
+first use.
 
 The rounded chunk size yields `shift` and `mask`. The free list starts at the
 sentinel, the pool reference count starts at one, and the directory starts
@@ -414,16 +412,17 @@ through predicate methods:
   pool it also covers a request for an unseen layout when the layout cap is
   reached.
 - **Allocator failure** — memory for the pool's own use could not be obtained.
-  That covers a chunk and, on the blind pool's cold path, the metadata of a new
-  layout pool. The two share a case because the caller's recourse is identical,
-  and because a third case would be a breaking change to an error type callers
-  match on.
+  That covers a chunk and, on the blind pool's cold path, directory capacity
+  and the metadata of a new layout pool. These allocator failures share a case
+  because the caller's recourse is identical, and because a third case would be
+  a breaking change to an error type callers match on.
 
 Failures are handled in three ways. The fallible allocation family returns
 `Result`. The panicking family routes the same error through one cold function
 that panics, so the panic site is shared and the allocation paths stay small.
-Only reference-count overflow aborts, which it does through a deliberate double
-panic so that it works without `std`.
+Reference-count overflow aborts through a deliberate double panic so that it
+works without `std`. Global-allocator out-of-memory handling on paths that are
+not represented as `AllocError` follows the global allocator's own behavior.
 
 Panic safety on the allocation path comes from ordering: the fallible
 `_with` constructors obtain an uninitialized handle first and run the caller's

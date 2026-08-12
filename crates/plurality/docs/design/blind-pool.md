@@ -126,14 +126,15 @@ pool of small integers and many megabytes for a pool of large aggregates.
 
 A blind pool therefore sizes chunks by a **byte target**. Each layout pool
 derives its own slot count by dividing the target by its slot stride, clamped
-to a sensible range and rounded down to a power of two (chunk sizes must remain
-powers of two so that slot addressing stays shift-and-mask arithmetic). Small
-values get many slots per chunk, large values get few, and every layout commits
-a comparable amount of memory per growth step.
+to the representable slot-count range and rounded down to a power of two
+(chunk sizes must remain powers of two so that slot addressing stays
+shift-and-mask arithmetic). Small values get many slots per chunk, large values
+get few, and every layout commits a comparable amount of memory per growth
+step.
 
 A fixed slot count is available for callers who want the typed pool's
-predictability. It is a request that every layout starts from, subject to the
-clamping below.
+predictability. It is a request that every layout starts from, rounded to a
+power of two and subject to the clamping below.
 
 ## Clamping and effective sizing
 
@@ -249,9 +250,9 @@ both at more points than a typed pool does.
 ## Allocation surface
 
 The blind pool mirrors the typed pool's allocation surface method for method
-([allocation](./allocation.md)). Every handle flavour offers the by-value,
+([allocation](./allocation.md)). Every handle flavor offers the by-value,
 closure, and uninitialized-then-initialize forms, each with a panicking and a
-fallible variant, and the shared flavours additionally offer their pinned
+fallible variant, and the shared flavors additionally offer their pinned
 constructors. The only change is where the type parameter sits:
 
 ```rust
@@ -280,7 +281,7 @@ control-flow inputs.
 | Aspect | Typed pool | Blind pool |
 |---|---|---|
 | Type parameter | On the pool | On the allocation |
-| Handles | Four flavours | The same four |
+| Handles | Four flavors | The same four |
 | Chunk sizing | Slot count | Byte target, or a slot count, clamped per layout |
 | Chunk cap | Per pool | Per layout, clamped, plus a cap on layouts |
 | Capacity queries | Single tier, constant time | Two tiers; aggregates scale with layouts |
@@ -303,7 +304,7 @@ derive the same slot geometry from the same layout, which is the property the
 whole design rests on. It is that a typed pool and a layout pool are distinct
 instantiations with their own teardown hooks and their own sizing and capping
 policies, so neither can adopt the other's slots without adopting its
-configuration and its type-restoring teardown as well.
+configuration and its pool-metadata teardown as well.
 
 ## Failure
 
@@ -315,11 +316,11 @@ cannot grow further, or the request is for an unseen layout and the pool
 already holds its maximum number of layouts.
 
 Allocator failure additionally covers the cold path where a previously unseen
-layout is encountered and its pool metadata must be allocated. That path is
-fallible end to end, so a failure there is reported rather than aborting. The
-error therefore means memory could not be obtained for the pool's own use — a
-chunk or the metadata of a new layout pool — rather than naming chunks
-specifically.
+layout is encountered and router or layout-pool metadata must be allocated.
+That path is fallible end to end, so a failure there is reported rather than
+aborting. The error therefore means memory could not be obtained for the
+pool's own use — a chunk, directory capacity, or the metadata of a new layout
+pool — rather than naming chunks specifically.
 
 ## Comparison with `infinity_pool::BlindPool`
 
@@ -371,4 +372,3 @@ to reacquire it.
 The router, the layout pools, and the ordering that keeps the directory
 consistent are described in
 [`implementation/blind-pool.md`](../implementation/blind-pool.md).
-

@@ -23,7 +23,7 @@ chunk_bytes  = pad_to_align(slots_off + stride * slot_count, chunk_align)
 
 These formulas have two independent consumers that must agree exactly:
 
-- the **pool**, when it lays out a chunk, addresses a slot, and initialises
+- the **pool**, when it lays out a chunk, addresses a slot, and initializes
   slot metadata during growth;
 - the **handle**, when it walks from a value pointer back to the slot, the
   chunk header, and the pool core.
@@ -77,9 +77,7 @@ typed path folds to a constant. Storing it in `PoolInner` costs nothing.
 
 `RuntimeGeometry` is a small `Copy` struct holding the precomputed offsets. It
 is built once, when a layout pool is constructed, and stored in `PoolInner`, so
-the hot path loads values rather than recomputing them. Its fields sit
-alongside `chunk_size`, `shift` and `mask`, which the allocation path already
-loads, so the extra reads land on lines that are already warm.
+the hot path loads values rather than recomputing them.
 
 ## One derivation, two shapes
 
@@ -90,9 +88,10 @@ structural, not negotiated. What differs is *when* they are evaluated.
 `TypedGeometry<T>` evaluates them in `const` context over `size_of::<T>()` and
 `align_of::<T>()`. `RuntimeGeometry` evaluates them once, at layout pool
 construction, over a `Layout` known only at run time, and stores the results.
-The free path evaluates them again, from a value's runtime size and alignment,
-without either provider — reclamation must not depend on reaching the pool
-before it knows where the pool is.
+The erased free path derives a fresh runtime geometry from the value's runtime
+size and alignment instead of reading the provider stored in the pool —
+reclamation must not depend on reaching the pool before it knows where the pool
+is.
 
 The formulas are hand-rolled rather than delegated to `Layout::extend`, which
 *is* `core`'s `repr(C)` field-placement algorithm: `extend` is not usable in

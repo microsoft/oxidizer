@@ -27,8 +27,9 @@ single decision shapes the whole design.
   happen on exactly one thread at a time. The pool object can be *moved* between
   threads, but only one thread ever holds it, so these operations are
   uncontended and need no locking among themselves.
-- **Frees are concurrent.** The owning and shared handles are thread-mobile, so
-  many threads may drop handles — and thus return slots — simultaneously.
+- **Frees are concurrent.** Handles whose `Send` bounds are satisfied may be
+  dropped on many threads simultaneously; non-`Send` handles remain local to
+  their thread.
 
 The consequence is an asymmetric design: one thread pushes new capacity and pops
 slots without contention, while any number of threads concurrently return slots.
@@ -78,4 +79,3 @@ neither may allocate from, or free into, a plurality pool from within
 those calls are outstanding. The
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) states this in
 full.
-

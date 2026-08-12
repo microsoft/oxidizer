@@ -38,13 +38,15 @@ Each slot holds three things: storage for the value, a small counter, and its
 own immutable index within the chunk. The counter is **contextual** — it means
 different things depending on whether the slot is occupied or free:
 
-- **Occupied:** it is the value's reference count (how many shared handles point
-  at it).
+- **Occupied by a shared handle:** it is the value's reference count (how many
+  shared handles point at it).
+- **Occupied by a unique handle:** it is not read; the stale free-list link is
+  overwritten when the slot is freed.
 - **Free:** it is a link — the index of the next free slot in the free list.
 
-These two roles never collide because an occupied slot is only ever read as a
-count (by live handles) and a free slot is only ever read as a link (by the free
-list). The slot's stored in-chunk index is what makes single-pointer recovery
+The count and link roles never collide because a shared slot is only read as a
+count and a free slot is only read as a link. The slot's stored in-chunk index
+is what makes single-pointer recovery
 possible: from a bare value pointer, the pool can find the index, step back to
 the chunk header, and from there reach the shared pool state — all without the
 handle carrying any extra data. The walk that exploits this is described in
@@ -79,4 +81,3 @@ stride and chunk layout are given in
 [`implementation/geometry.md`](../implementation/geometry.md), and the
 structures themselves in
 [`implementation/pool-body.md`](../implementation/pool-body.md).
-

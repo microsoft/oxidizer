@@ -10,7 +10,7 @@ The pool's public surface is a family of **smart-pointer handles**, not a
 container you index into. Allocation hands back a handle; dropping the handle
 runs the value's destructor and returns its slot to the pool. The same four
 handles serve both the typed pool and the [blind pool](./blind-pool.md). There
-are four flavours, spanning two axes — *owned vs. shared* and *pool-bound vs.
+are four flavors, spanning two axes — *owned vs. shared* and *pool-bound vs.
 detachable*:
 
 | Handle  | Ownership | Lifetime            | Thread mobility            | Relative cost      |
@@ -36,12 +36,13 @@ The design rationale behind the split:
   non-atomic counting and is confined to a single thread. They are otherwise
   interchangeable.
 
-Unique handles expose mutable access to the value; shared handles are read-only,
-except when uniqueness-checked mutable access proves that only one shared owner
-remains. All four dereference to the value and support comparison, hashing, and
-formatting so they substitute cleanly for the standard smart pointers. Pinning
-depends on the ownership form rather than being uniform across all four. The
-entry points that produce them are described in
+Unique handles expose mutable access when their pinning rules permit it:
+`Alloc` always does, while `Box` does so for `Unpin` values. Shared handles are
+read-only, except when uniqueness-checked mutable access proves that only one
+shared owner remains. All four dereference to the value and support comparison,
+hashing, and formatting so they substitute cleanly for the standard smart
+pointers. Pinning depends on the ownership form rather than being uniform
+across all four. The entry points that produce them are described in
 [allocation](./allocation.md), and their representation in
 [`implementation/handles.md`](../implementation/handles.md).
 
@@ -123,11 +124,12 @@ The slot and chunk structures this walk traverses are described in
 A crucial architectural choice makes this safe across type erasure: the shared
 pool state that recovery reaches is a **type-agnostic core** — it contains only
 what reclamation needs (the free-list head, the pool-level reference count, and a
-type-restoring teardown hook). Recovery therefore never has to guess the concrete
-value type. The exact original type is restored only by the teardown hook, and
-only once the pool is truly finished. This is what lets an erased trait-object
-handle return its slot correctly even though its concrete type was forgotten at
-the type level.
+pool-metadata teardown hook). Recovery therefore never has to guess the
+concrete value type. Value destruction is driven by the handle's own type or
+fat-pointer metadata before reclamation; the teardown hook restores only the
+concrete pool metadata type, and only once the pool is truly finished. This is
+what lets an erased trait-object handle return its slot correctly even though
+its concrete type was forgotten at the type level.
 
 ## Two reference counts, two lifetimes
 
@@ -138,8 +140,8 @@ resources:
   it. When it reaches zero, the value's destructor runs and the slot returns to
   the free list.
 - A **pool-level count** governs the pool's memory as a whole — every chunk plus
-  the shared state. Each detachable handle holds one unit of it, which is exactly
-  what allows handles to outlive the pool object.
+  the shared state. Each detachable allocation holds one unit of it, which is
+  exactly what allows handles to outlive the pool object.
 
 The interplay yields a clean teardown story:
 
@@ -147,8 +149,10 @@ The interplay yields a clean teardown story:
  build ................. pool-level count = 1  (the pool object holds it)
  allocate detachable ... +1 pool-level     (bound owner does NOT take one)
  share (clone) ......... +1 per-slot only
- drop handle ........... -1 per-slot; at zero: run destructor, return slot,
-                          then -1 pool-level (bound owner skips the pool step)
+ drop shared handle .... -1 per-slot; at zero: run destructor, return slot,
+                         then -1 pool-level
+ drop unique handle .... run destructor, return slot, then -1 pool-level
+ drop bound owner ...... run destructor and return slot without pool-level work
  drop pool object ...... -1 pool-level
  pool-level hits 0 ..... free all chunks and shared state
 ```
@@ -169,4 +173,3 @@ discipline on the counts and on the published chunk directory guarantees the
 teardown thread observes a complete, frozen set of chunks to reclaim. The
 threading rules that make this well defined are described in
 [concurrency](./concurrency.md).
-

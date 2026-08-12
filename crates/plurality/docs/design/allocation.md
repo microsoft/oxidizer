@@ -6,7 +6,7 @@ allocator abstraction it draws memory through. Part of the
 
 ## Allocation surface and failure
 
-Each handle flavour ([handles](./handles.md)) offers the same shape of
+Each handle flavor ([handles](./handles.md)) offers the same shape of
 allocation entry points:
 
 - a **by-value** form for convenience,
@@ -15,10 +15,10 @@ allocation entry points:
 - an **uninitialized-then-initialize** form, the guaranteed zero-copy path,
   mirroring the standard library's `new_uninit` idioms.
 
-Every form has an infallible variant that panics when the pool cannot satisfy the
-request, and a **fallible** sibling that reports the failure instead. A pool
-"fails" for one of two architecturally distinct reasons, and the error
-distinguishes them:
+Every form has an infallible variant and a **fallible** sibling. The
+infallible variant panics for failures represented as `AllocError`; the
+fallible sibling returns them. A pool reports one of two architecturally
+distinct reasons, and the error distinguishes them:
 
 - **Capacity exhausted** — a configured chunk cap (or the intrinsic index
   ceiling of an unbounded pool) is reached and no slot is free.
@@ -29,7 +29,9 @@ On failure the rejected value is dropped and no construction closure is invoked,
 matching the standard fallible-allocation convention.
 
 A [blind pool](./blind-pool.md) reports the same two failures, widened to cover
-its layout cap and its own metadata; it adds no third.
+its layout cap, directory capacity and its own metadata; it adds no third.
+Global-allocator out-of-memory handling on paths that are not represented as
+`AllocError` follows the global allocator's own behavior.
 
 ## `no_std` and allocator integration
 
@@ -45,4 +47,3 @@ plurality pool from within `allocate` or `deallocate`. The
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) states the rule and
 its scope; it constrains allocator callbacks only, and never pooled values'
 destructors or construction closures.
-

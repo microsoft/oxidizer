@@ -22,7 +22,7 @@ picture and goes deeper.
   the slot lifecycle and the intrusive free list, the chunk directory and its
   index arithmetic, growth, pointer recovery, the two reference counts,
   teardown, construction, failure and statistics.
-- [Handles](./implementation/handles.md) — the four owning handle flavours:
+- [Handles](./implementation/handles.md) — the four owning handle flavors:
   their representation, drop paths, auto-trait and variance behaviour, the
   shared macro-generated surface, coercion and pinning.
 - [The blind pool](./implementation/blind-pool.md) — the crate-private layout
@@ -37,9 +37,10 @@ picture and goes deeper.
 ## Module map
 
 Every module is private; the public surface is a set of re-exports from the
-crate root. The crate is `no_std` and depends on `alloc`. The allocator
-abstraction comes from a single runtime dependency and appears in the public
-API, so its two types are declared as permitted external types.
+crate root plus the exported `coerce!` macro. The crate is `no_std` and depends
+on `alloc`. The allocator abstraction comes from a single runtime dependency
+and appears in the public API, so its two types are declared as permitted
+external types.
 
 | Module | Contents |
 |---|---|
@@ -106,19 +107,20 @@ needs to know which pool object produced it, which is what keeps handles one
 pointer wide and what lets the blind pool put its router on the allocation path
 alone.
 
-**Two reference counts express two lifetimes.** The per-slot count owns the
-value and is manipulated by the shared handles. The pool-level count in
-`PoolCore` owns the memory: one unit for the pool object and one for each live
-detachable handle. Whichever of them drops last runs the teardown hook stored
-in `PoolCore`, so teardown works without ever naming the element type and
-without reaching the pool object.
+**Two reference counts express two lifetimes.** For shared handles, the
+per-slot count owns the value. The pool-level count in `PoolCore` owns the
+memory: one unit for the pool object and one for each live detachable
+allocation. When the pool object or an allocation's final detachable handle
+releases the last unit, it runs the teardown hook stored in `PoolCore`, so
+teardown works without ever naming the element type and without reaching the
+pool object.
 
 **One thread allocates at a time.** `Pool` is `Send` and not `Sync`, so a
 shared reference to it cannot be shared across threads; the chunk directory and
 the free-list pop are therefore single-threaded by construction, while frees
 run concurrently from anywhere.
 
-**Handles are thin and their shared surface is generated.** Four flavours cover
+**Handles are thin and their shared surface is generated.** Four flavors cover
 detached unique ownership, atomic and non-atomic shared ownership, and bound
 unique ownership. Their common forwarding impls come from a small set of
 macros in two variants, one for sized values and one that admits `?Sized`.

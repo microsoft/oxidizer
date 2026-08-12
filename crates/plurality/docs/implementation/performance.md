@@ -8,7 +8,7 @@ numbers live in [`PERF.md`](../PERF.md).
 ## Cost model
 
 - **Allocate, typed pool:** pop the free list, write the value, and — for the
-  shared handles — initialise the slot counter and increment the pool
+  shared handles — initialize the slot counter and increment the pool
   reference count.
 - **Allocate, blind pool:** the above, plus a scan of the key vector, a load of
   the layout pool's pointer, and a slot address computed from a loaded stride
@@ -17,11 +17,13 @@ numbers live in [`PERF.md`](../PERF.md).
   suits the handful of distinct layouts a program actually presents.
 - **Free:** the same erased reclamation path in both forms. The router is not
   involved, and the arithmetic is what a typed pool's handle runs.
-- **First use of a layout:** cold, and outlined so that it costs an allocation
-  whose layout is already known nothing beyond the scan. One global allocation
-  for the pool metadata, two vector pushes, then the ordinary growth path.
+- **First use of a layout:** cold, and outlined so that an allocation whose
+  layout is already known costs nothing beyond the scan. A miss clones the
+  allocator, allocates the layout-pool metadata, reserves directory capacity
+  when needed, pushes the two directory entries, then enters the ordinary
+  growth path.
 - **Growth:** cold and never inlined, so it costs one allocation plus the
-  initialisation of a whole chunk, amortised over the chunk's slots.
+  initialization of a whole chunk, amortised over the chunk's slots.
 
 ## What must not regress
 
@@ -32,8 +34,7 @@ every geometry expression on that path folds to a constant. The gate is
 instruction counts: the typed rows in [`PERF.md`](../PERF.md) must hold.
 
 The one genuinely new cost on the runtime path is that slot addressing
-multiplies by a loaded stride. The stride shares a cache line with fields the
-same code already loads, so the expected cost is one multiply plus an L1 hit.
+multiplies by a loaded stride from the pool body.
 Where a typed pool's stride is a power of two the compiler emits a shift or
 folds the scaling into an addressing mode, so this is a real addition rather
 than a relocation of work the compiler was going to do anyway. It is confined
@@ -72,7 +73,7 @@ linear scan remains the right structure.
 Reclamation is the same code on both paths and contributes equally to every
 row, so it cancels in the differences. That also gives the design's claim that
 reclamation costs what it costs in a typed pool a way to fail — a divergence
-would show up as a delta larger than the modelled addition explains.
+would show up as a delta larger than the modeled addition explains.
 
 ### Scenarios
 

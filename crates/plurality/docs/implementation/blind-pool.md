@@ -9,7 +9,7 @@ and `BlindPool`, the directory that routes each allocation to one. Back to the
 ## `LayoutPool`
 
 ```rust
-pub(crate) struct LayoutPool<A: Allocator = Global> {
+pub(crate) struct LayoutPool<A: Allocator> {
     inner: NonNull<PoolInner<A, RuntimeGeometry>>,
 }
 ```
@@ -23,7 +23,7 @@ outstanding handles keep the body alive exactly as they do for a typed pool.
 
 The wide allocation surface lives on `BlindPool`, not here. A layout pool
 exposes one allocation primitive — claim a slot — and the blind pool layers the
-handle flavours and construction forms over it. Putting the ~40 methods in one
+handle flavors and construction forms over it. Putting the ~40 methods in one
 place keeps a single set of doc comments and a single translation of "claimed
 slot" into "handle", which is the only logic those methods contain.
 
@@ -144,9 +144,10 @@ touched only while allocating. Reclamation never reaches it.
 The discipline that keeps this sound is that no borrow of either vector is held
 across *pool* user code — construction closures and destructors. A lookup
 copies the layout pool's inner pointer to a local and releases the borrow
-before anything else happens. `Vec::try_reserve` and `Vec::push` do hold `&mut`
-across a call into the *global* allocator, which is the same exposure the chunk
-directory has in the typed pool's growth path.
+before anything else happens. `Vec::try_reserve` holds `&mut` across a call
+into the *global* allocator, which is the same exposure the chunk directory has
+in the typed pool's growth path. `Vec::push` runs only into capacity that was
+already reserved.
 
 ### Reentrancy
 
@@ -156,7 +157,7 @@ obvious. All of them must be accounted for:
 - the construction closure;
 - the destructor of a value rejected by a failed fallible allocation;
 - `A::clone()`, when a new layout pool is being built;
-- the global allocator, during vector reservation, pushes, and the metadata
+- the global allocator, during vector reservation and the metadata
   allocation for a new layout pool;
 - the pool's own allocator, `A::allocate` on the growth path and
   `A::deallocate` at teardown.
