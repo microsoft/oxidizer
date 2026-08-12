@@ -355,6 +355,45 @@ fn alloc_reads_back_a_spread_of_layouts() {
     assert_eq!(pool.len(), 0);
 }
 
+// ── the rest of the allocation surface ───────────────────────────────────
+
+/// Every closure, uninitialized and pinned entry point serves the layout it is
+/// given, so that no method reaches its layout pool by a path of its own.
+#[test]
+fn closure_uninit_and_pinned_entry_points_serve_their_layout() {
+    let pool = BlindPool::new();
+
+    assert_eq!(*pool.alloc_with(|| 1_u32), 1);
+
+    let mut ub = pool.alloc_uninit_box::<u32>();
+    ub.write(2);
+    // SAFETY: written just above.
+    assert_eq!(*unsafe { ub.assume_init() }, 2);
+
+    let mut ua = pool.alloc_uninit_arc::<u32>();
+    PoolArc::get_mut(&mut ua).unwrap().write(3);
+    // SAFETY: written just above.
+    assert_eq!(*unsafe { ua.assume_init() }, 3);
+
+    let mut ur = pool.alloc_uninit_rc::<u32>();
+    PoolRc::get_mut(&mut ur).unwrap().write(4);
+    // SAFETY: written just above.
+    assert_eq!(*unsafe { ur.assume_init() }, 4);
+
+    assert_eq!(*pool.alloc_arc_pin(5_u32), 5);
+    assert_eq!(*pool.alloc_arc_pin_with(|| 6_u32), 6);
+    assert_eq!(*pool.try_alloc_arc_pin(7_u32).unwrap(), 7);
+    assert_eq!(*pool.try_alloc_arc_pin_with(|| 8_u32).unwrap(), 8);
+
+    assert_eq!(*pool.alloc_rc_pin(9_u32), 9);
+    assert_eq!(*pool.alloc_rc_pin_with(|| 10_u32), 10);
+    assert_eq!(*pool.try_alloc_rc_pin(11_u32).unwrap(), 11);
+    assert_eq!(*pool.try_alloc_rc_pin_with(|| 12_u32).unwrap(), 12);
+
+    // One layout served every one of them.
+    assert_eq!(pool.layouts(), 1);
+}
+
 // ── coercion ─────────────────────────────────────────────────────────────
 
 trait Shape {
@@ -1197,30 +1236,5 @@ fn a_pool_moved_to_another_thread_serves_allocations_there() {
 
 // ── statistics ───────────────────────────────────────────────────────────
 
-#[cfg(feature = "stats")]
-#[test]
-fn stats_sum_across_layouts() {
-    use plurality::PoolStats;
-
-    let pool = BlindPool::builder().chunk_size(2).build();
-    assert_eq!(pool.stats(), PoolStats::default());
-
-    let a = pool.alloc_box(1_u8);
-    let b = pool.alloc_box(2_u64);
-    let two_layouts = pool.stats();
-    assert_eq!(two_layouts.total_chunks_allocated, 2);
-    assert_eq!(two_layouts.total_chunks_allocated, pool.chunks_allocated());
-    assert!(two_layouts.total_bytes_allocated > 0);
-
-    // A third chunk for a layout already in play adds to the same totals.
-    let c = pool.alloc_box(3_u8);
-    let d = pool.alloc_box(4_u8);
-    let grown = pool.stats();
-    assert_eq!(grown.total_chunks_allocated, 3);
-    assert_eq!(grown.total_chunks_allocated, pool.chunks_allocated());
-    assert!(grown.total_bytes_allocated > two_layouts.total_bytes_allocated);
-
-    // Freeing returns slots but not chunks, so the lifetime totals hold.
-    drop((a, b, c, d));
-    assert_eq!(pool.stats(), grown);
-}
+// Blind-pool statistics live in `tests/stats.rs` alongside the typed-pool
+// statistics, because the `stats` feature owns that file.

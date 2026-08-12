@@ -1151,16 +1151,14 @@ unsafe fn free_slot_erased(value: NonNull<u8>, size: usize, align: usize) {
         unsafe { Layout::from_size_align_unchecked(size, align) },
     );
 
-    // SAFETY: the addresses below come from the same formulas `header_of`/
-    // `push_free` evaluate for the concrete `T`, over the same size and
-    // alignment, so they resolve to the same locations.
+    // SAFETY: the addresses below come from the same formulas the geometry
+    // evaluates for the concrete `T`, over the same size and alignment, so they
+    // resolve to the same locations.
     unsafe {
         let base = value.as_ptr();
         let index = base.add(geometry.index_offset()).cast::<u32>().read();
         let refcount = &*base.add(geometry.refcount_offset()).cast::<AtomicU32>();
-        let header = &*base
-            .sub(index as usize * geometry.stride() + geometry.slots_offset())
-            .cast::<ChunkHeader>();
+        let header = geometry.header_of(value, index).as_ref();
         let pool = header.pool;
         let global = header.base_index + index;
         let inner = pool.as_ref();

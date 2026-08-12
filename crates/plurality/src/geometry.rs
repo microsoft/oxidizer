@@ -177,6 +177,9 @@ impl<T> TypedGeometry<T> {
 }
 
 impl<T> Clone for TypedGeometry<T> {
+    // Required by `Copy`, which is how the geometry is actually passed around.
+    // Written out rather than derived, because `derive` would demand `T: Clone`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn clone(&self) -> Self {
         *self
     }

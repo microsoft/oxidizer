@@ -169,6 +169,8 @@ pub(crate) struct LayoutPoolRef<A: Allocator> {
 }
 
 impl<A: Allocator> Clone for LayoutPoolRef<A> {
+    // Required by `Copy`, which is how the view is actually passed around.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn clone(&self) -> Self {
         *self
     }
