@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - Now requires `0.3.0` of `cachet_tier`
+
 ## [0.2.9] - 2026-07-24
 
 - 🔧 Maintenance

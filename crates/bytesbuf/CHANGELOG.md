@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0] - 2026-08-09
+
+- ⚠️ Breaking
+
+  - support `no_std`; the hosted API moved behind a new `std` feature ([#615](https://github.com/microsoft/oxidizer/pull/615))
+
+    The crate itself now requires only `alloc`. The global memory pool, the standard I/O adapters, and metrics need the `std` feature, which is enabled by default. Builds using `default-features = false` must add `std` to keep `mem::GlobalPool`, `BytesBufWriter`, and the `std::io` integrations.
+
+  - Now requires `0.9.0` of `thread_aware`
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+  - Now requires `0.2.1` of `plurality`
+
+- 🐛 Bug Fixes
+
+  - guard total capacity against overflow at growth sites ([#593](https://github.com/microsoft/oxidizer/pull/593))
+
 ## [0.7.0] - 2026-07-24
 
 - ⚠️ Breaking

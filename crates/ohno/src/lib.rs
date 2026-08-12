@@ -59,7 +59,7 @@
 //! # `ohno::error`
 //!
 //! The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-//! field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+//! field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 //! without manually managing the error infrastructure.
 //!
 //! The attribute always adds that field and always generates the error representation from it, so
@@ -86,7 +86,7 @@
 //!
 //! # Display Error Override
 //!
-//! The `#[display("...")]` attribute allows you to customize the main error message
+//! The `#[display("...")]` attribute customizes the main error message
 //! while preserving the underlying error as a cause in the error chain.
 //!
 //! ```rust
@@ -145,16 +145,29 @@
 //! }
 //!
 //! // The derive macro automatically generates:
-//! // - ConfigError::new(path: String) -> Self
-//! // - ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+//! //
+//! // impl ConfigError {
+//! //     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//! //     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//! // }
 //!
 //! let error = ConfigError::new("/etc/config.toml");
 //! let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
 //! ```
 //!
+//! **The generated constructors are `pub(crate)`, regardless of the visibility of the error type
+//! itself.** They are an implementation convenience for the crate that defines the error, not part
+//! of its public API, so a `pub struct` error exported from a library cannot be constructed with
+//! `new()` or `caused_by()` by a downstream crate. This is deliberate: it keeps the set of ways an
+//! error can be built under the control of the crate that owns it, so adding a field is not a
+//! breaking change for callers.
+//!
 //! **Disabling Automatic Constructors:**
 //!
-//! Use `#[no_constructors]` to disable automatic generation when you need custom constructors:
+//! `#[no_constructors]` disables the generated constructors, leaving the names `new` and
+//! `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+//! requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+//! hand-written constructor has to initialize:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};
@@ -167,7 +180,7 @@
 //!
 //! impl CustomError {
 //!     pub fn new(custom_logic: bool) -> Self {
-//!         // Your custom constructor logic here
+//!         // Custom constructor logic here
 //!         Self {
 //!             inner_error: OhnoCore::default(),
 //!         }

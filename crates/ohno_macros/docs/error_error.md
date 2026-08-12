@@ -65,7 +65,7 @@ step 3 finds it.
 ## `#[ohno::error]`
 
 This attribute always adds the `OhnoCore` field itself. It always builds the
-error from the field it adds. Two things follow.
+error from the field it adds. Three things follow.
 
 **No field may be marked with `#[error]`.** A marker asks for a different field,
 and the attribute cannot do that. To place the core by hand, use
@@ -87,6 +87,26 @@ struct DeclaredCoreError {
 On a unit struct, the attribute rewrites the struct as a tuple struct holding
 the added field. `#[derive(ohno::Error)]` alone rejects a unit struct, because
 there is no room for a core.
+
+**`#[no_constructors]` is not accepted.** Opting out of the generated
+constructors means writing the struct literal by hand, and that has to reach the
+field this attribute adds. That field is an implementation detail rather than
+part of the type's source-level contract, so nothing about it — its name on a
+named struct, its position on a tuple or unit struct — is the author's to rely
+on.
+
+Declaring the core gives a hand-written constructor a field the author owns, so
+that is the supported path:
+
+```rust
+#[derive(ohno::Error)]
+#[no_constructors]
+struct MyError {
+    path: String,
+    #[error]
+    ohno_core: ohno::OhnoCore,
+}
+```
 
 ## Why the added field uses a doc marker
 
@@ -114,6 +134,7 @@ field lookup takes the first marked field it sees.
 - `#[error]` in a struct that already has the added field.
 - A hand-written reserved doc marker under `#[ohno::error]`.
 - `#[error]` under `#[ohno::error]`.
+- `#[no_constructors]` under `#[ohno::error]`.
 - No marker and no `OhnoCore` field, or no marker and several of them.
 - An enum, or a unit struct under the derive alone.
 
