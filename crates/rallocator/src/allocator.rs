@@ -3799,8 +3799,19 @@ unsafe fn read_header(address: *mut u8) -> *mut ExtraHeader {
     let header_address = unsafe { hal::allocation_prefix_for_read::<*mut ExtraHeader>(address, HEADER_OFFSET) };
     #[cfg(not(miri))]
     let header_address = unsafe { address.sub(HEADER_OFFSET).cast::<*mut ExtraHeader>() };
-    debug_assert!(!header_address.is_null());
-    unsafe { header_address.read() }
+    #[cfg(all(debug_assertions, not(coverage_nightly)))]
+    {
+        if header_address.is_null() {
+            // SAFETY: GlobalAlloc::dealloc requires a non-null pointer previously returned by this allocator.
+            unsafe { std::hint::unreachable_unchecked() }
+        } else {
+            unsafe { header_address.read() }
+        }
+    }
+    #[cfg(any(not(debug_assertions), coverage_nightly))]
+    unsafe {
+        header_address.read()
+    }
 }
 
 #[cfg(test)]
