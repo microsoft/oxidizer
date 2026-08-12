@@ -133,6 +133,7 @@ mod coerce;
 mod common;
 mod error;
 mod geometry;
+mod layout_pool;
 mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;

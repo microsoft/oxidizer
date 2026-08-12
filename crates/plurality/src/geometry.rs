@@ -271,6 +271,14 @@ impl RuntimeGeometry {
             slots_offset: slots_offset(align),
         }
     }
+
+    /// The value layout this geometry serves.
+    #[inline]
+    #[must_use]
+    pub(crate) fn layout(self) -> Layout {
+        // SAFETY: the size and alignment were taken from a valid `Layout`.
+        unsafe { Layout::from_size_align_unchecked(self.size, self.align) }
+    }
 }
 
 impl SlotGeometry for RuntimeGeometry {

@@ -773,10 +773,7 @@ impl<T, A: Allocator> Pool<T, A> {
     #[inline]
     unsafe fn occupy(&self, slot: NonNull<SlotCell<T>>, value: T) {
         // SAFETY: exclusive ownership of the freshly popped slot.
-        unsafe {
-            self.mark_occupied(slot);
-            SlotCell::write_value(slot, value);
-        }
+        unsafe { self.inner().core.occupy(slot, value) };
     }
 
     /// Occupies a slot for a `Box` without initializing its unused slot
@@ -786,9 +783,8 @@ impl<T, A: Allocator> Pool<T, A> {
     /// `slot` must have just been popped off the free list.
     #[inline]
     unsafe fn occupy_box(&self, slot: NonNull<SlotCell<T>>, value: T) {
-        self.bump_pool_ref();
         // SAFETY: exclusive ownership of the freshly popped slot.
-        unsafe { SlotCell::write_value(slot, value) };
+        unsafe { self.inner().core.occupy_box(slot, value) };
     }
 
     /// Marks a freshly popped slot occupied (refcount = 1) and bumps the pool
@@ -799,15 +795,14 @@ impl<T, A: Allocator> Pool<T, A> {
     #[inline]
     unsafe fn mark_occupied(&self, slot: NonNull<SlotCell<T>>) {
         // SAFETY: exclusive ownership of the freshly popped slot.
-        unsafe { (*slot.as_ptr()).refcount.store(1, Relaxed) };
-        self.bump_pool_ref();
+        unsafe { self.inner().core.mark_occupied(slot) };
     }
 
     /// Bumps the pool refcount for one new refcounted allocation
     /// (`Box`/`Arc`/`Rc`).
     #[inline]
     fn bump_pool_ref(&self) {
-        let _ = self.inner().core.pool_refcount.fetch_add(1, Relaxed);
+        self.inner().core.bump_pool_ref();
     }
 
     /// Occupies a slot for an `Alloc` without touching either refcount. Its
@@ -823,16 +818,28 @@ impl<T, A: Allocator> Pool<T, A> {
     )]
     unsafe fn occupy_local(&self, slot: NonNull<SlotCell<T>>, value: T) {
         // SAFETY: exclusive ownership of the freshly popped slot.
-        unsafe { SlotCell::write_value(slot, value) };
+        unsafe { occupy_local(slot, value) };
     }
 
     /// Pops a free slot, growing the pool if necessary. Returns `Err` only if
     /// the pool is full and cannot grow (see [`AllocError`] for the cause).
     #[inline]
     fn alloc_slot(&self) -> Result<NonNull<SlotCell<T>>, AllocError> {
-        let inner = self.inner();
-        loop {
-            let head = inner.core.free_head.load(Acquire);
+        match self.inner().alloc_slot() {
+            Ok(slot) => Ok(slot.cast::<SlotCell<T>>()),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
+    /// Pops a free slot, growing the pool if necessary. Returns the slot's
+    /// address, which is also its value's address. Returns `Err` only if the
+    /// pool is full and cannot grow (see [`AllocError`] for the cause).
+    #[inline]
+    pub(crate) fn alloc_slot(&self) -> Result<NonNull<u8>, AllocError> {
+        let geometry = self.geometry;        loop {
+            let head = self.core.free_head.load(Acquire);
             if head == FREE_END {
                 // `grow` reserves and returns the first slot of the new chunk
                 // (or an `AllocError` if the pool can't grow).
@@ -841,11 +848,21 @@ impl<T, A: Allocator> Pool<T, A> {
             // SAFETY: `head` is a valid global index currently on the free list.
             let slot = unsafe { self.slot_for_global(head) };
             // SAFETY: a free slot's refcount field holds the next-free link.
-            let next = unsafe { (*slot.as_ptr()).refcount.load(Relaxed) };
-            if inner.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
+            let next = unsafe { (*refcount_of(geometry, slot)).load(Relaxed) };
+            if self.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
                 return Ok(slot);
             }
         }
+    }
+
+    /// Returns a pointer to a slot's reference count.
+    ///
+    /// # Safety
+    /// `slot` must address a live slot of this pool.
+    #[inline]
+    unsafe fn refcount_at(&self, slot: NonNull<u8>) -> *mut AtomicU32 {
+        // SAFETY: the caller guarantees `slot` belongs to this pool.
+        unsafe { refcount_of(self.geometry, slot) }
     }
 
     /// Maps a global slot index to its slot pointer via the directory. Only
@@ -854,19 +871,18 @@ impl<T, A: Allocator> Pool<T, A> {
     /// # Safety
     /// `g` must be a valid global index for an allocated chunk.
     #[inline]
-    unsafe fn slot_for_global(&self, g: u32) -> NonNull<SlotCell<T>> {
-        let inner = self.inner();
-        let chunk_no = (g >> inner.shift) as usize;
-        let offset = (g & inner.mask) as usize;
+    unsafe fn slot_for_global(&self, g: u32) -> NonNull<u8> {
+        let chunk_no = (g >> self.shift) as usize;
+        let offset = (g & self.mask) as usize;
         // SAFETY: single-thread directory access; `chunk_no = g / chunk_size` is
         // `< chunks_allocated == directory.len()` for any valid free-list index.
         let chunk = unsafe {
-            let dir = &*inner.directory.get();
+            let dir = &*self.directory.get();
             *dir.get_unchecked(chunk_no)
         };
         // SAFETY: `offset < chunk_size`. The slot's value is field 0, so the
         // slot address and the value address coincide.
-        unsafe { inner.geometry.slot_at(chunk, offset).cast::<SlotCell<T>>() }
+        unsafe { self.geometry.slot_at(chunk, offset) }
     }
 
     /// Allocates and installs one new chunk, reserves its first slot for the
@@ -875,19 +891,18 @@ impl<T, A: Allocator> Pool<T, A> {
     /// limit vs. allocator failure). Runs only on the allocator thread.
     #[cold]
     #[inline(never)]
-    fn grow(&self) -> Result<NonNull<SlotCell<T>>, AllocError> {
-        let inner = self.inner();
-        let chunks = inner.chunks_allocated.load(Relaxed);
-        let n = inner.chunk_size;
+    fn grow(&self) -> Result<NonNull<u8>, AllocError> {
+        let chunks = self.chunks_allocated.load(Relaxed);
+        let n = self.chunk_size;
         // Cap = the user's `max_chunks`, or for an unbounded pool the chunk count
         // that keeps every global index below the `FREE_END` sentinel.
-        let cap = inner.max_chunks.map_or_else(|| unbounded_chunk_cap(n), u64::from);
+        let cap = self.max_chunks.map_or_else(|| unbounded_chunk_cap(n), u64::from);
         if u64::from(chunks) >= cap {
             return Err(AllocError::CAPACITY_EXHAUSTED);
         }
         let base_index = chunks * n;
 
-        let ptr = match inner.allocator.allocate(inner.chunk_layout) {
+        let ptr = match self.allocator.allocate(self.chunk_layout) {
             Ok(p) => p.cast::<ChunkHeader>(),
             Err(_) => return Err(AllocError::ALLOCATOR_FAILED),
         };
@@ -895,68 +910,65 @@ impl<T, A: Allocator> Pool<T, A> {
         // SAFETY: `ptr` is a fresh, exclusively owned allocation sized for one
         // chunk; the header and all slots are initialized before publishing.
         // Each slot links to `i + 1`; the last link and slot 0 are fixed up by
-        // the splice and caller below.
+        // the splice and caller below. Value storage is deliberately left
+        // uninitialized.
         unsafe {
             ptr.as_ptr().write(ChunkHeader {
-                // `core` is the first `#[repr(C)]` field. Cast the full inner
-                // pointer rather than borrowing the field so provenance still
-                // covers the complete pool allocation for concrete teardown.
-                pool: self.inner.cast::<PoolCore>(),
+                // `core` is the first `#[repr(C)]` field, so this cast keeps
+                // provenance over the complete pool allocation for concrete
+                // teardown.
+                pool: NonNull::from(self).cast::<PoolCore>(),
                 base_index,
                 chunk_index: chunks,
             });
             for i in 0..n {
-                let slot = inner.geometry.slot_at(ptr, i as usize).cast::<SlotCell<T>>();
-                slot.as_ptr().write(SlotCell {
-                    value: UnsafeCell::new(MaybeUninit::uninit()),
-                    refcount: AtomicU32::new(base_index + i + 1),
-                    index: i,
-                });
+                let slot = self.geometry.slot_at(ptr, i as usize);
+                self.refcount_at(slot).write(AtomicU32::new(base_index + i + 1));
+                self.index_at(slot).write(i);
             }
-            let guard = ChunkAllocationGuard::<A, TypedGeometry<T>> {
+            let guard = ChunkAllocationGuard::<A, G> {
                 chunk: ptr,
                 #[cfg(loom)]
                 slots: n,
-                geometry: inner.geometry,
-                layout: inner.chunk_layout,
-                allocator: &inner.allocator,
+                geometry: self.geometry,
+                layout: self.chunk_layout,
+                allocator: &self.allocator,
             };
-            (&mut *inner.directory.get()).push(ptr);
+            (&mut *self.directory.get()).push(ptr);
             // Directory publication transferred ownership to the pool.
             forget(guard);
         }
-        inner.chunks_allocated.store(chunks + 1, Release);
+        self.chunks_allocated.store(chunks + 1, Release);
         // `Relaxed` suffices: the counter is only read via `stats()`, never to
         // establish a happens-before relationship.
         #[cfg(feature = "stats")]
-        inner.bytes_allocated.fetch_add(inner.chunk_layout.size(), Relaxed);
+        self.bytes_allocated.fetch_add(self.chunk_layout.size(), Relaxed);
 
         // Splice the free slots (base_index+1 .. base_index+n-1) onto the head;
         // slot `base_index` is returned to the caller.
         if n > 1 {
             // SAFETY: `ptr` chunk is live; its last slot is index n-1.
-            let last = unsafe { inner.geometry.slot_at(ptr, (n - 1) as usize).cast::<SlotCell<T>>() };
+            let last = unsafe { self.geometry.slot_at(ptr, (n - 1) as usize) };
             // SAFETY: `last` is the new chunk's (still-private) final slot.
-            unsafe { splice_chain(&inner.core.free_head, last, base_index + 1) };
+            unsafe { splice_chain(self.refcount_at(last), &self.core.free_head, base_index + 1) };
         }
         // SAFETY: slot 0 of the new chunk; never published, so exclusively ours.
-        Ok(unsafe { inner.geometry.slot_at(ptr, 0).cast::<SlotCell<T>>() })
+        Ok(unsafe { self.geometry.slot_at(ptr, 0) })
     }
-}
 
-/// Returns a raw pointer to a slot's refcount, given the slot's address.
-///
-/// # Safety
-/// `slot` must address a live slot laid out by `geometry`.
-#[inline]
-#[cfg_attr(not(loom), expect(dead_code, reason = "scaffolding: only the loom teardown paths need this until `LayoutPool` lands"))]
-#[expect(
-    clippy::cast_ptr_alignment,
-    reason = "the refcount sits at its natural `AtomicU32` alignment within the `#[repr(C)]` slot"
-)]
-unsafe fn refcount_of<G: SlotGeometry>(geometry: G, slot: NonNull<u8>) -> *mut AtomicU32 {
-    // SAFETY: the refcount follows the value within the slot.
-    unsafe { slot.as_ptr().add(geometry.refcount_offset()).cast::<AtomicU32>() }
+    /// Returns a pointer to a slot's in-chunk index.
+    ///
+    /// # Safety
+    /// `slot` must address a live slot of this pool.
+    #[inline]
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "the index sits at its natural `u32` alignment within the `#[repr(C)]` slot"
+    )]
+    unsafe fn index_at(&self, slot: NonNull<u8>) -> *mut u32 {
+        // SAFETY: the index follows the refcount within the slot.
+        unsafe { slot.as_ptr().add(self.geometry.index_offset()).cast::<u32>() }
+    }
 }
 
 /// Splices a freshly built chunk's free chain onto the global free list by
@@ -970,15 +982,29 @@ unsafe fn refcount_of<G: SlotGeometry>(geometry: G, slot: NonNull<u8>) -> *mut A
 /// `last` must be the final slot of a fully-initialized, not-yet-published
 /// chunk whose first global index is `base_index`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-unsafe fn splice_chain<T>(free_head: &AtomicU32, last: NonNull<SlotCell<T>>, base_index: u32) {
+unsafe fn splice_chain(last_link: *mut AtomicU32, free_head: &AtomicU32, base_index: u32) {
     loop {
         let head = free_head.load(Acquire);
         // SAFETY: the new chain is private until the CAS publishes it.
-        unsafe { (*last.as_ptr()).refcount.store(head, Relaxed) };
+        unsafe { (*last_link).store(head, Relaxed) };
         if free_head.compare_exchange_weak(head, base_index, AcqRel, Acquire).is_ok() {
             break;
         }
     }
+}
+
+/// Returns a raw pointer to a slot's refcount, given the slot's address.
+///
+/// # Safety
+/// `slot` must address a live slot laid out by `geometry`.
+#[inline]
+#[expect(
+    clippy::cast_ptr_alignment,
+    reason = "the refcount sits at its natural `AtomicU32` alignment within the `#[repr(C)]` slot"
+)]
+unsafe fn refcount_of<G: SlotGeometry>(geometry: G, slot: NonNull<u8>) -> *mut AtomicU32 {
+    // SAFETY: the refcount follows the value within the slot.
+    unsafe { slot.as_ptr().add(geometry.refcount_offset()).cast::<AtomicU32>() }
 }
 
 impl<T, A: Allocator> Drop for Pool<T, A> {
@@ -1192,7 +1218,7 @@ pub(crate) unsafe fn drop_and_free_local<T>(slot: NonNull<SlotCell<T>>) {
 /// The pool refcount must have just reached zero; the pool is quiescent.
 #[cold]
 #[inline(never)]
-unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolInner<A, G>>) {
+pub(crate) unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolInner<A, G>>) {
     // SAFETY: exclusive ownership; chunks were allocated with `chunk_layout`.
     unsafe {
         let inner = pool.as_ref();
@@ -1227,6 +1253,67 @@ pub(crate) unsafe fn teardown_erased<A: Allocator, G: SlotGeometry>(core: NonNul
     // SAFETY: `PoolInner` is `#[repr(C)]` with `core` as its first field, and
     // this monomorphized callback was stored by that exact pool allocation.
     unsafe { teardown::<A, G>(core.cast::<PoolInner<A, G>>()) };
+}
+
+impl PoolCore {
+    /// Writes `value` into a freshly popped slot, marks it occupied, and bumps
+    /// the pool refcount.
+    ///
+    /// # Safety
+    /// `slot` must have just been popped off this pool's free list (no other
+    /// reference to it exists) and must be laid out for `T`.
+    #[inline]
+    pub(crate) unsafe fn occupy<T>(&self, slot: NonNull<SlotCell<T>>, value: T) {
+        // SAFETY: exclusive ownership of the freshly popped slot.
+        unsafe {
+            self.mark_occupied(slot);
+            SlotCell::write_value(slot, value);
+        }
+    }
+
+    /// Occupies a slot for a `Box` without initializing its unused slot
+    /// refcount; `push_free` overwrites that field on drop.
+    ///
+    /// # Safety
+    /// As for [`occupy`](Self::occupy).
+    #[inline]
+    pub(crate) unsafe fn occupy_box<T>(&self, slot: NonNull<SlotCell<T>>, value: T) {
+        self.bump_pool_ref();
+        // SAFETY: exclusive ownership of the freshly popped slot.
+        unsafe { SlotCell::write_value(slot, value) };
+    }
+
+    /// Marks a freshly popped slot occupied (refcount = 1) and bumps the pool
+    /// refcount, without writing a value. Used by the shared `Arc`/`Rc` paths.
+    ///
+    /// # Safety
+    /// As for [`occupy`](Self::occupy).
+    #[inline]
+    pub(crate) unsafe fn mark_occupied<T>(&self, slot: NonNull<SlotCell<T>>) {
+        // SAFETY: exclusive ownership of the freshly popped slot.
+        unsafe { (*slot.as_ptr()).refcount.store(1, Relaxed) };
+        self.bump_pool_ref();
+    }
+
+    /// Bumps the pool refcount for one new refcounted allocation
+    /// (`Box`/`Arc`/`Rc`).
+    #[inline]
+    pub(crate) fn bump_pool_ref(&self) {
+        let _ = self.pool_refcount.fetch_add(1, Relaxed);
+    }
+}
+
+/// Occupies a slot for an `Alloc` without touching either refcount. Its borrow
+/// keeps the pool alive, and `push_free` overwrites the unused slot refcount on
+/// drop.
+///
+/// # Safety
+/// `slot` must have just been popped off a pool's free list and be laid out
+/// for `T`.
+#[inline]
+pub(crate) unsafe fn occupy_local<T>(slot: NonNull<SlotCell<T>>, value: T) {
+    // SAFETY: exclusive ownership of the freshly popped slot.
+    unsafe { SlotCell::write_value(slot, value) };
 }
 
 #[cold]
