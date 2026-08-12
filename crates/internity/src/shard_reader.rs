@@ -9,6 +9,7 @@ use alloc::boxed::Box;
 /// concatenated in `bytes`, with CSR-style `offsets` — `offsets[i]` the start and
 /// `offsets[i+1]` the end of the `i`-th string (leading `0` sentinel,
 /// `len() + 1` entries). Immutable — no locks, no atomics, no per-index branch.
+#[derive(Clone)]
 pub(crate) struct ShardReader {
     offsets: Box<[u32]>,
     bytes: Box<[u8]>,
