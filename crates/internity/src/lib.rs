@@ -21,6 +21,14 @@
 //! gets added only once to the data store, and you get back the same handle. Later, you can
 //! use the handle to retrieve the actual string.
 //!
+//! # Performance
+//!
+//! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/PERF.md)
+//! for wall-clock timings and memory footprint measured head-to-head against the
+//! other main Rust interners, and
+//! [`COMPARISON.md`](https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/COMPARISON.md)
+//! for a design-level comparison of the Rust string-interning ecosystem.
+//!
 //! # Handles
 //!
 //! Interning yields a [`Sym`] — a 4-byte, `Copy` handle. It's cheap to store and
