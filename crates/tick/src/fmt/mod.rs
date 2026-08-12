@@ -183,6 +183,13 @@ where
         {
             v.parse().map_err(E::custom)
         }
+
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: serde_core::de::Error,
+        {
+            std::str::from_utf8(v).map_err(E::custom)?.parse().map_err(E::custom)
+        }
     }
 
     deserializer.deserialize_str(FromStrVisitor(PhantomData))

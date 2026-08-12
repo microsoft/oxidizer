@@ -9,7 +9,7 @@
 use alloc_tracker::{Allocator, Session};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde::de::value::{Error as ValueError, StrDeserializer};
+use serde::de::value::{BytesDeserializer, Error as ValueError, StrDeserializer};
 use tick::fmt::{EcmaScript, Iso8601, Rfc2822, UnixSeconds};
 
 #[global_allocator]
@@ -62,4 +62,20 @@ fn textual_format_deserializes_transient_string() {
     let iso = Iso8601::deserialize(deserializer).unwrap();
 
     assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
+}
+
+#[test]
+fn textual_format_deserializes_utf8_bytes() {
+    let deserializer = BytesDeserializer::<ValueError>::new(b"2024-08-06T21:30:00Z");
+    let iso = Iso8601::deserialize(deserializer).unwrap();
+
+    assert_eq!(iso.to_string(), "2024-08-06T21:30:00Z");
+}
+
+#[test]
+fn textual_format_rejects_invalid_utf8_bytes() {
+    let deserializer = BytesDeserializer::<ValueError>::new(b"\xFF");
+    let error = Iso8601::deserialize(deserializer).unwrap_err();
+
+    assert!(error.to_string().contains("invalid utf-8 sequence"));
 }
