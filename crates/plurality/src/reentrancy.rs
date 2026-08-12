@@ -41,6 +41,22 @@ impl ReentrancyLatch {
         }
     }
 
+    /// Claims a region whose caller has already established non-reentrancy.
+    ///
+    /// Some regions are unreachable from inside themselves because an earlier
+    /// check on the only path in has already refused the nested caller. Such a
+    /// region latches to publish itself to readers, not to arbitrate entry, so
+    /// it has no rejection to report.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if the region is entered while already claimed.
+    #[inline]
+    pub(crate) fn hold(&self) -> LatchToken<'_> {
+        debug_assert!(!self.held.replace(true), "a latched region was entered from inside itself");
+        LatchToken { latch: self }
+    }
+
     /// `true` while a latched region is in progress.
     #[inline]
     pub(crate) fn is_held(&self) -> bool {
@@ -48,7 +64,8 @@ impl ReentrancyLatch {
     }
 }
 
-/// Releases the claim taken by [`ReentrancyLatch::enter`].
+/// Releases the claim taken by [`ReentrancyLatch::enter`] or
+/// [`ReentrancyLatch::hold`].
 pub(crate) struct LatchToken<'a> {
     latch: &'a ReentrancyLatch,
 }

@@ -28,16 +28,24 @@ freed memory.
 ## The latch
 
 `ReentrancyLatch` (`reentrancy.rs`) is a single cell holding whether a protected
-window is in progress. `enter` claims the window and yields a token whose `Drop`
-releases the claim, so an unwinding panic cannot leave the latch stuck. The
-pool's `!Sync` bound confines each window to one thread at a time, so no atomic
-is needed and the cost is a predictable branch on a path that already allocates.
+window is in progress. Claiming it yields a token whose `Drop` releases the
+claim, so an unwinding panic cannot leave the latch stuck. The pool's `!Sync`
+bound confines each window to one thread at a time, so no atomic is needed and
+the cost is a predictable branch on a path that already allocates.
 
 Each protected window has its own latch, held by the state it protects: growth
 by `PoolInner`, reservation by `BlindPool`. Two layout pools of a blind pool
 therefore never contend, and routing between layouts is unaffected.
 
-An entry that finds the latch held is refused:
+The two windows claim their latch differently, because they are reachable
+differently. Growth uses `enter`, which arbitrates: `grow` is reachable from
+inside itself, so a nested entry has to be refused. Reservation uses `hold`,
+which cannot fail: `pool_for` is the only path into `try_reserve_one` and
+refuses a nested caller before its first directory read, so the claim is
+uncontested by construction and the latch serves only to publish the window to
+readers.
+
+An entry that finds a latch held is refused:
 
 - A fallible allocation returns `AllocError::ALLOCATOR_FAILED`. The pool cannot
   serve the request, and the caller's existing failure handling applies.

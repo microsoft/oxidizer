@@ -307,10 +307,11 @@ impl<A: Allocator + Clone> BlindPool<A> {
         // Held across both reservations. Each holds `&mut` over a vector while
         // it calls the global allocator, so an allocator that re-entered the
         // router would alias that borrow — or read a buffer it has just freed.
+        // `pool_for` is the only path here and refuses a nested caller before
+        // its first directory read, so this claim cannot be contested; it
+        // publishes the window to readers rather than arbitrating entry.
         // Ref: docs/implementation/reentrancy.md.
-        let Some(_reserving) = self.reserving.enter() else {
-            return Err(AllocError::ALLOCATOR_FAILED);
-        };
+        let _reserving = self.reserving.hold();
         #[expect(
             clippy::multiple_unsafe_ops_per_block,
             reason = "both reservations must succeed together, so splitting the block would obscure that they form one step"
