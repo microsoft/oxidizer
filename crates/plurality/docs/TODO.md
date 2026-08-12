@@ -5,6 +5,31 @@ These are designs and ideas carried over from the original design plan that are
 [`DESIGN.md`](./DESIGN.md). Items here range from a fully settled design
 (`KeyedPool`) to smaller follow-ups.
 
+## Blind-pool delivery sequence
+
+The blind pool described in [`DESIGN.md`](./DESIGN.md) and
+[`IMPLEMENTATION.md`](./IMPLEMENTATION.md) is built in stages that are
+individually reviewable. The first three stages preserve behaviour and are
+gated on the instruction counts in [`PERF.md`](./PERF.md) holding at their
+published values; the public surface arrives in the fourth.
+
+1. **Extract the geometry.** Introduce the geometry abstraction and the typed
+   provider, express the erased reclamation path in terms of the shared
+   formulas, and add the compile-time cross-checks against the slot type's
+   layout.
+2. **Parameterise the pool body.** Make the pool's internal state generic over
+   the geometry provider, add the runtime provider built from `Layout::extend`,
+   and drive growth, slot addressing and teardown from the geometry. Leave the
+   bound owner's drop path on the compiler's layout, so that one consumer of
+   the slot layout remains independently derived.
+3. **Add `LayoutPool`.** The runtime-geometry façade with its unchecked
+   surface, the sizing clamps, and fallible metadata allocation, with the typed
+   builder routing a metadata failure to the global out-of-memory handler.
+   Teardown drops the pool's own state in place before deallocating it.
+4. **Add `BlindPool`.** The router, its builder, the public surface, the
+   broadened allocator-failure documentation, and the test suite.
+5. **Measure.** Benchmarks, performance-report wiring, and regenerated numbers.
+
 ## 0. Aggregate byte budget for `BlindPool`
 
 `BlindPool` bounds growth with a **per-layout** chunk cap and a cap on the
