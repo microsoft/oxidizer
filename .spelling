@@ -641,6 +641,15 @@ zerocopy
 ≤
 ≥
 ≪
+backend's
+deallocated
+decommit
+filename
+hoc
+rallocator
+subregions
+tunables
+unmappings
 allowlist
 autodiscovers
 denylist

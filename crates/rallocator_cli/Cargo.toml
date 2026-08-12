@@ -1,0 +1,30 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rallocator_cli"
+version = "0.1.0"
+description = "Command-line tools for inspecting rallocator telemetry."
+readme = "README.md"
+keywords = ["allocator", "memory", "telemetry", "diagnostics"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_cli"
+
+[[bin]]
+name = "rallocator_cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
+rallocator_telemetry.workspace = true
+same-file.workspace = true
+
+[lints]
+workspace = true

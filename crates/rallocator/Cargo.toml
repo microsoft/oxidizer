@@ -1,0 +1,103 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rallocator"
+version = "0.1.0"
+description = "A high-performance global allocator with scoped heap hints and telemetry."
+readme = "README.md"
+keywords = ["allocator", "memory", "performance", "telemetry"]
+categories = ["memory-management"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[features]
+default = ["caller-symbolization"]
+caller-symbolization = ["dep:backtrace"]
+tuning-telemetry = []
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+] }
+
+[dependencies]
+allocation_hints.workspace = true
+backtrace = { workspace = true, features = ["std"], optional = true }
+rallocator_telemetry.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+hashbrown = { workspace = true, features = ["default-hasher"] }
+mimalloc.workspace = true
+multitude = { workspace = true, features = ["hashbrown"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "mimalloc"
+harness = false
+
+[[bench]]
+name = "rallocator"
+harness = false
+
+[[bench]]
+name = "rallocator_threaded"
+harness = false
+
+[[bench]]
+name = "rallocator_threaded_mimalloc"
+harness = false
+
+[[bench]]
+name = "bump_multitude"
+harness = false
+
+[[bench]]
+name = "bump_rallocator"
+harness = false
+
+[[bench]]
+name = "bump_system"
+harness = false
+
+[[bench]]
+name = "bump_mimalloc"
+harness = false
+
+[[bench]]
+name = "bump_rallocator_global"
+harness = false
+
+[[bench]]
+name = "tracking_none"
+harness = false
+
+[[bench]]
+name = "tracking_aggregates"
+harness = false
+
+[[bench]]
+name = "tracking_callers_capable"
+harness = false
+
+[[bench]]
+name = "tracking_all"
+harness = false
+
+[[bench]]
+name = "tracking_all_callers"
+harness = false

@@ -18,8 +18,11 @@
 anvil-fmt: anvil-fmt-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_MODIFIED -eq '--skip') { exit 0 }
-    cargo '+{{ rust_nightly }}' fmt --all --check
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $packages = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages.name
+    foreach ($package in $packages) {
+        cargo '+{{ rust_nightly }}' fmt --package $package --check
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 
 # Per-check setup + validate-prereqs
 #
