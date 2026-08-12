@@ -71,7 +71,6 @@ fn platform_time() -> Duration {
 }
 
 #[must_use]
-#[inline]
 pub(crate) fn now() -> Instant {
     #[cfg(all(any(target_os = "linux", windows), not(miri)))]
     {
