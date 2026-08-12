@@ -54,6 +54,8 @@ bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 mutants = { workspace = true }
 new_zealand = { workspace = true }
+nm = { workspace = true }
+plurality = { path = "../plurality" }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
