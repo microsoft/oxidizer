@@ -143,8 +143,12 @@ never substitute a guess for a `cargo semver-checks` run.
 ### Step 4 -- Cascade toward dependents
 For each user-source release, walk the dependency graph FORWARD to its transitive
 published dependents (reverse edges of `deps`; `deps` already excludes
-dev-dependencies, so dev-only dependents never cascade). For each such dependent
-that is published:
+dev-dependencies, so dev-only dependents never cascade). "Transitive" means a full
+closure, not one hop: after you add a cascade entry, continue walking ITS own
+published dependents too, and repeat until no new dependent appears. For the chain
+`bottom <- middle <- top` (top depends on middle depends on bottom), releasing
+`bottom` adds BOTH `middle` (direct dependent) AND `top` (dependent of the newly
+added `middle`). For each such dependent that is published:
 
 - Compute its cascade change type as the STRONGER of `patch` and its own
   objective floor from Step 3. Rank: `none < patch < nonbreaking < breaking`.
@@ -160,9 +164,12 @@ that is published:
   cascade type breaking for its own version line>}`.
 - Otherwise add a new `source = cascade` entry with that change type and reason.
 
-Cascade is one level per user-source seed but iterated across all user-source
-seeds, so a chain A->B->C fully propagates when each edge is walked. Recompute
-target versions with the Version-bump table after every strengthening.
+Implement the closure as a work-list: seed it with the user-source releases, and
+whenever you add or strengthen an entry, enqueue its published dependents so they
+are processed in turn. Recompute target versions with the Version-bump table after
+every strengthening. Iterate to a fixed point so a chain A->B->C->... fully
+propagates (this is what makes `top` appear in the `bottom -> middle -> top`
+example and in golden case S16).
 
 Do NOT auto-add modified dependencies of the released packages. Those are surfaced
 for your decision in Step 5 (cascade toward dependencies is caller-driven).
@@ -170,17 +177,31 @@ for your decision in Step 5 (cascade toward dependencies is caller-driven).
 ### Step 5 -- Elevation / dependency review (replaces the interactive loop)
 Snapshot the set of published+modified packages FROM THE FACTS BEFORE any cascade
 (so cascade-added members with no modifications of their own are never surfaced --
-Invariant A). Then build the review queue:
+Invariant A). Then build the review queue.
 
-Surface a package only if it is published AND modified AND either:
+First, the INITIAL review roots depend on mode (this is the only thing that
+differs between modes; the surfacing rule below is identical for all three):
+- Targeted: roots = the published+modified snapshot (packages with real edits the
+  caller may have forgotten to list). Packages with no modifications are never
+  force-walked in this mode.
+- Changed: roots = the published+modified snapshot (same as targeted's, but here
+  it is also the seed for the whole plan, since there were no `-Packages` tokens).
+- All: roots = EVERY published package, modified or not. In this mode the
+  published+modified gate below does NOT apply to the initial roots -- you walk
+  every publishable package exactly as `docs/releasing.md` specifies for `-All`
+  (an unmodified package is offered too; its diff is simply empty). The
+  published+modified gate still governs which packages become NEW findings on
+  later iterations.
+
+Then, on every iteration, surface a package as a finding only if it is published
+AND (in All mode: always; in Targeted/Changed mode: modified) AND either:
 - it is NOT in the release set (category: "modifications not part of this
   release"), or
 - it is in the release set as a `source = cascade` entry whose
   `effectiveChangeType` is not yet `breaking` (category: "elevation candidate").
 
 Never surface a `source = user` entry (your decision is final for it), and never
-surface a cascade entry already at `breaking` (nothing higher to elevate to). In
-Changed/All mode, also treat every seeded candidate as a review root.
+surface a cascade entry already at `breaking` (nothing higher to elevate to).
 
 For each surfaced package, make the decision the human used to make, deterministically:
 1. Get its diff since its baseline: `git diff <baselineSha>..HEAD --

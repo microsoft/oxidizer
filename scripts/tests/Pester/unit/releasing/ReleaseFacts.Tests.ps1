@@ -43,6 +43,12 @@ Describe 'release-facts.ps1' {
         # Leave an uncommitted source edit on 'alpha' so it registers as modified.
         $script:Ws.ModifySource('alpha')
 
+        # Also modify the UNPUBLISHED 'priv_pkg'. This makes the "publish=false is
+        # never surfaced" assertion meaningful: priv_pkg now has a real working-tree
+        # change, so modified=false can only hold because the published filter
+        # suppresses it -- not merely because nothing changed.
+        $script:Ws.ModifySource('priv_pkg')
+
         $script:Facts = Invoke-ReleaseFacts -RepoRoot $script:WsRoot
         $script:ByFolder = @{}
         foreach ($p in $script:Facts.packages) { $script:ByFolder[$p.folder] = $p }
@@ -89,7 +95,14 @@ Describe 'release-facts.ps1' {
     }
 
     It 'never surfaces publish=false packages as modified' {
-        # priv_pkg is unpublished; Get-PackagesWithUnreleasedChanges skips it.
+        # priv_pkg HAS an uncommitted source edit (see BeforeAll), yet
+        # Get-PackagesWithUnreleasedChanges skips it because it is unpublished. If
+        # the published filter were removed, this assertion would fail.
         $script:ByFolder['priv_pkg'].modified | Should -BeFalse
+    }
+
+    It 'fails loudly for an unresolvable base ref instead of reporting no baseline' {
+        { & $script:FactsScript -RepoRoot $script:WsRoot -BaseRef 'refs/heads/no-such-ref-xyz' } |
+            Should -Throw '*could not be resolved*'
     }
 }

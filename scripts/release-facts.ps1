@@ -62,20 +62,28 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 # never read stale cargo-metadata or git results.
 Reset-ReleaseScriptCaches
 
+# Validate BaseRef once, loudly. An unresolvable or un-fetched ref must fail here
+# rather than being swallowed per-package and disguised as "no baseline", which
+# would silently drop each crate's cargo-semver-checks floor and let an
+# under-incremented release pass. Test-GitRef is the same check
+# Get-PreviousVersionBumpCommit uses internally; doing it once up front gives a
+# single clear failure instead of one per package.
+if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
+    throw "Base ref '$BaseRef' could not be resolved in '$RepoRoot'. Ensure it is fetched (CI should checkout with fetch-depth: 0) and spelled correctly."
+}
+
 $packages = @(Get-WorkspacePackages -repoRoot $RepoRoot)
 $modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
 
 $factPackages = foreach ($package in $packages) {
     $baselineSha = $null
-    # A brand-new crate (no prior version-bump commit) has no baseline and imposes
-    # no change-type floor. Root-commit-only history can make the lookup throw; a
-    # missing baseline is a fact, not a failure, so it degrades to $null.
-    try {
-        $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
-        if ($null -ne $bump) { $baselineSha = $bump.Sha }
-    } catch {
-        $baselineSha = $null
-    }
+    # A brand-new crate (no prior version-bump commit) legitimately has no baseline
+    # and imposes no change-type floor, so baselineSha stays null. BaseRef was
+    # validated above, so Get-PreviousVersionBumpCommit returns null ONLY for that
+    # genuine case; any real error it raises is allowed to propagate (not disguised
+    # as "no baseline").
+    $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
+    if ($null -ne $bump) { $baselineSha = $bump.Sha }
 
     [ordered]@{
         folder            = $package.Folder
