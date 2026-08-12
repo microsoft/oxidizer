@@ -18,8 +18,7 @@ A growable, fixed-slot object pool that hands out thin smart pointers.
 A [`Pool<T>`][__link0] allocates `T` values from reusable slots and returns
 single-pointer-wide smart pointers that deref to `&T`. It grows on demand and
 never moves a value once allocated, so the pointers stay valid until they are
-dropped. There are four handle types, covering owned vs. shared and bound vs.
-`'static`:
+dropped. The handle types cover owned vs. shared and bound vs. `'static`:
 
 * [`Box<T>`][__link1] — unique owner, `Send` when `T: Send` and `A: Send + Sync`, may
   outlive the pool.
@@ -30,12 +29,12 @@ dropped. There are four handle types, covering owned vs. shared and bound vs.
 * [`Rc<T>`][__link4] — shared, non-atomically reference-counted, `!Send` (cheaper
   clone/drop than [`Arc`][__link5] for single-threaded sharing).
 
-All four deref to `&T`; [`Box`][__link6] and [`Alloc`][__link7] also give `&mut T`. Dropping a
+Every handle derefs to `&T`; [`Box`][__link6] and [`Alloc`][__link7] also give `&mut T`. Dropping a
 handle runs `T`’s destructor and returns the slot to the pool.
 
 A [`BlindPool`][__link8] moves the element type from the pool to the allocation, so
-one pool object backs values of any type. It hands out the same four
-handles with the same guarantees, routing each value to the internal pool
+one pool object backs values of any type. It hands out the same handles
+with the same guarantees, routing each value to the internal pool
 serving its layout.
 
 Pools suit frequently recycled values of one type, stable-address data
@@ -133,13 +132,21 @@ let _held = pool.alloc_box(1);
 assert!(pool.try_alloc_box(2).is_err());
 ```
 
+Runnable programs covering larger scenarios:
+
+* [`pool_basic`][__link30]: The handle flavors, address stability, and slot reuse.
+* [`pool_across_threads`][__link31]: Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
+* [`blind_pool_basic`][__link32]: Values of unrelated types in one pool, and per-layout capacity.
+* [`blind_pool_dyn_dispatch`][__link33]: A pipeline of differently sized trait objects backed by one pool.
+* [`blind_pool_tuning`][__link34]: Chunk sizing, capacity bounds, and graceful exhaustion.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbtlcZo7-lZvobWmhHW7M5AVgbyk5BRmUDLiYb-r0Q02M8_kdhZIGCaXBsdXJhbGl0eWUwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbABfbmu2JW4sbw3BhGiJfo3obBiTigPMW6t4bTHX2S_MFUUxhZIGCaXBsdXJhbGl0eWUwLjIuMQ
  [__link0]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
@@ -164,6 +171,11 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link28]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
  [__link29]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
  [__link3]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs
+ [__link31]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs
+ [__link32]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs
+ [__link33]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs
+ [__link34]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs
  [__link4]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
  [__link5]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link6]: https://docs.rs/plurality/0.2.1/plurality/?search=Box

@@ -65,6 +65,21 @@ sharded-slab = { workspace = true }
 slab = { workspace = true, features = ["std"] }
 slotmap = { workspace = true, features = ["std"] }
 
+[[example]]
+name = "pool_basic"
+
+[[example]]
+name = "pool_across_threads"
+
+[[example]]
+name = "blind_pool_basic"
+
+[[example]]
+name = "blind_pool_dyn_dispatch"
+
+[[example]]
+name = "blind_pool_tuning"
+
 [[bench]]
 name = "criterion"
 harness = false

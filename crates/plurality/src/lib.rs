@@ -12,8 +12,7 @@
 //! A [`Pool<T>`] allocates `T` values from reusable slots and returns
 //! single-pointer-wide smart pointers that deref to `&T`. It grows on demand and
 //! never moves a value once allocated, so the pointers stay valid until they are
-//! dropped. There are four handle types, covering owned vs. shared and bound vs.
-//! `'static`:
+//! dropped. The handle types cover owned vs. shared and bound vs. `'static`:
 //!
 //! - [`Box<T>`] — unique owner, `Send` when `T: Send` and `A: Send + Sync`, may
 //!   outlive the pool.
@@ -24,12 +23,12 @@
 //! - [`Rc<T>`] — shared, non-atomically reference-counted, `!Send` (cheaper
 //!   clone/drop than [`Arc`] for single-threaded sharing).
 //!
-//! All four deref to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
+//! Every handle derefs to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
 //! handle runs `T`'s destructor and returns the slot to the pool.
 //!
 //! A [`BlindPool`] moves the element type from the pool to the allocation, so
-//! one pool object backs values of any type. It hands out the same four
-//! handles with the same guarantees, routing each value to the internal pool
+//! one pool object backs values of any type. It hands out the same handles
+//! with the same guarantees, routing each value to the internal pool
 //! serving its layout.
 //!
 //! Pools suit frequently recycled values of one type, stable-address data
@@ -128,6 +127,14 @@
 //! // The single slot is taken, so this reports failure instead of panicking.
 //! assert!(pool.try_alloc_box(2).is_err());
 //! ```
+//!
+//! Runnable programs covering larger scenarios:
+//!
+//! - [`pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs): The handle flavors, address stability, and slot reuse.
+//! - [`pool_across_threads`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs): Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
+//! - [`blind_pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs): Values of unrelated types in one pool, and per-layout capacity.
+//! - [`blind_pool_dyn_dispatch`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs): A pipeline of differently sized trait objects backed by one pool.
+//! - [`blind_pool_tuning`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs): Chunk sizing, capacity bounds, and graceful exhaustion.
 
 extern crate alloc;
 

@@ -71,8 +71,8 @@ impl ChunkSizing {
 /// the internal pool serving their exact [`Layout`], so a value occupies
 /// exactly the space its layout requires and nothing more.
 ///
-/// Allocation hands back one of four handles — owned or shared, detachable or
-/// bound to the pool's borrow. Each keeps its value at a stable address for as
+/// Allocation hands back an owned or shared handle, either detachable or bound
+/// to the pool's borrow. Each keeps its value at a stable address for as
 /// long as it lives, is one pointer wide for a sized value, and coerces to
 /// trait objects and slices. Freeing costs no more than it would from a pool
 /// dedicated to that one type, because a handle finds its own pool by pointer
