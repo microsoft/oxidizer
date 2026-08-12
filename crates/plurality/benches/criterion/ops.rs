@@ -21,7 +21,7 @@ use std::boxed::Box as StdBox;
 use std::hint::black_box;
 
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-use plurality::{Arc, Box as PoolBox, Pool, Rc, coerce};
+use plurality::{Arc, BlindPool as PluralityBlindPool, Box as PoolBox, Pool, Rc, coerce};
 
 /// A small (~32-byte), `Drop`-free payload, so the benchmarks measure the
 /// pool's own allocate/free cost rather than user destructors.
@@ -73,6 +73,48 @@ pub(crate) fn setup_pool(n: usize) -> Pool<Obj> {
     let pool = Pool::<Obj>::builder().chunk_size(CAP as u32).build();
     let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
     drop(warm);
+    pool
+}
+
+/// Distinct layouts present in the high case of the directory-scan pair.
+///
+/// The scan is linear, so this count sets the scan length the measured
+/// allocation pays. It is high enough for the per-entry slope to clear
+/// measurement noise, yet stays in the range of layout counts real programs
+/// present, which is what the linear scan is chosen for.
+/// Ref: docs/implementation/blind-pool.md, "Lookup".
+const SPREAD_LAYOUTS: usize = 16;
+
+/// A blind pool serving a single layout, pre-warmed exactly as [`setup_pool`]
+/// warms the typed pool.
+pub(crate) fn setup_blind_pool(n: usize) -> PluralityBlindPool {
+    let pool = PluralityBlindPool::builder().chunk_size(CAP as u32).build();
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    pool
+}
+
+/// A blind pool serving [`SPREAD_LAYOUTS`] layouts, with `Obj` registered last.
+///
+/// Directory entries are held in first-seen order, so registering `Obj` after
+/// the fillers makes the measured allocation traverse the whole key vector.
+/// Ref: docs/implementation/blind-pool.md, "Lookup".
+pub(crate) fn setup_blind_pool_spread(n: usize) -> PluralityBlindPool {
+    let pool = PluralityBlindPool::builder().chunk_size(CAP as u32).build();
+
+    /// Registers one filler layout per byte length. Each length is a distinct
+    /// layout, and none of them collides with `Obj`, whose alignment differs.
+    macro_rules! fillers {
+        ($($len:literal),*) => {
+            $( drop(pool.alloc_box([0_u8; $len])); )*
+        };
+    }
+    fillers!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    assert_eq!(pool.layouts(), SPREAD_LAYOUTS - 1);
+
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    assert_eq!(pool.layouts(), SPREAD_LAYOUTS);
     pool
 }
 
@@ -170,6 +212,26 @@ pub(crate) fn rc_uninit(p: &Pool<Obj>, i: u64) {
     drop(black_box(unsafe { u.assume_init() }));
 }
 
+// ── BlindPool (routed allocation) ────────────────────────────────────────
+//
+// The pair below turns the typed `box_val` row into a three-rung ladder:
+// typed, blind with one layout, blind with a full directory. The first step
+// isolates the runtime slot stride plus a one-entry scan, the second gives the
+// per-entry scan slope, which a single blind row would report as one summed
+// number. Ref: docs/implementation/blind-pool.md, "Lookup".
+
+#[inline]
+pub(crate) fn blind_box_val(p: &PluralityBlindPool, i: u64) {
+    drop(black_box(p.alloc_box(black_box(Obj::new(i)))));
+}
+
+/// The body of [`blind_box_val`], measured against a pool whose directory holds
+/// [`SPREAD_LAYOUTS`] layouts, so the two rows differ only in scan length.
+#[inline]
+pub(crate) fn blind_box_val_spread(p: &PluralityBlindPool, i: u64) {
+    blind_box_val(p, i);
+}
+
 // ── clone + drop (shared handles) ────────────────────────────────────────
 
 #[inline]
@@ -189,6 +251,19 @@ pub(crate) fn setup_plurality(n: usize) -> Pool<Obj> {
     let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
     drop(warm);
     assert!(pool.capacity() >= n as u64);
+    assert!(pool.is_empty());
+    let handle = pool.alloc_box(Obj::new(n as u64));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+    assert_eq!(handle.tag(), 0xFF);
+    drop(handle);
+    pool
+}
+
+pub(crate) fn setup_plurality_blind(n: usize) -> PluralityBlindPool {
+    let pool = PluralityBlindPool::new();
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    assert!(pool.capacity_of::<Obj>() >= n as u64);
     assert!(pool.is_empty());
     let handle = pool.alloc_box(Obj::new(n as u64));
     let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
@@ -262,6 +337,14 @@ pub(crate) fn setup_std_box(n: usize) {
 
 #[inline]
 pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
+    let handle = pool.alloc_box(black_box(Obj::new(i)));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+    invoke_dyn(&*handle);
+    drop(black_box(handle));
+}
+
+#[inline]
+pub(crate) fn plurality_blind_box(pool: &PluralityBlindPool, i: u64) {
     let handle = pool.alloc_box(black_box(Obj::new(i)));
     let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
     invoke_dyn(&*handle);

@@ -182,18 +182,29 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// The returned view borrows nothing: the caller allocates through it after
     /// every directory borrow has been released, so reentrant user code is free
     /// to grow the directory in the meantime.
+    #[inline]
+    fn pool_for<T>(&self) -> Result<LayoutPoolRef<A>, AllocError> {
+        // Step 1: scan for an existing entry.
+        let layout = Layout::new::<T>();
+        match self.lookup(layout) {
+            Some(found) => Ok(found),
+            None => self.install(layout),
+        }
+    }
+
+    /// Creates the pool serving `layout` and installs it in the directory.
+    ///
+    /// Outlined and kept off the generic parameter so that an allocation whose
+    /// layout is already known costs a scan and nothing else, and so that the
+    /// directory-growth code is emitted once per allocator rather than once per
+    /// element type.
     ///
     /// The step ordering below is load-bearing and is derived in
     /// `docs/implementation/blind-pool.md`, "Reentrancy". Every step that
     /// releases control to code outside this module is marked.
-    fn pool_for<T>(&self) -> Result<LayoutPoolRef<A>, AllocError> {
-        let layout = Layout::new::<T>();
-
-        // Step 1: scan for an existing entry.
-        if let Some(found) = self.lookup(layout) {
-            return Ok(found);
-        }
-
+    #[cold]
+    #[inline(never)]
+    fn install(&self, layout: Layout) -> Result<LayoutPoolRef<A>, AllocError> {
         // Step 2: a miss against a reached layout cap is capacity exhaustion.
         // No borrow is held here, so the caller is free to drop a rejected
         // value — reentrant code — on the way out.

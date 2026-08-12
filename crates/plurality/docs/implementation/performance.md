@@ -13,11 +13,13 @@ numbers live in [`PERF.md`](../PERF.md).
 - **Allocate, blind pool:** the above, plus a scan of the key vector, a load of
   the layout pool's pointer, and a slot address computed from a loaded stride
   rather than a constant. With one layout present the scan is a single
-  comparison.
+  comparison; each further layout adds a few instructions, so the structure
+  suits the handful of distinct layouts a program actually presents.
 - **Free:** the same erased reclamation path in both forms. The router is not
   involved, and the arithmetic is what a typed pool's handle runs.
-- **First use of a layout:** cold. One global allocation for the pool metadata,
-  two vector pushes, then the ordinary growth path.
+- **First use of a layout:** cold, and outlined so that it costs an allocation
+  whose layout is already known nothing beyond the scan. One global allocation
+  for the pool metadata, two vector pushes, then the ordinary growth path.
 - **Growth:** cold and never inlined, so it costs one allocation plus the
   initialisation of a whole chunk, amortised over the chunk's slots.
 
@@ -44,51 +46,49 @@ bodies in the wall-clock and instruction-count harnesses, single-threaded,
 measuring elementary operations against a pre-warmed pool with growth and
 first-use effects outside the measured region.
 
-### The three-rung ladder
+### Attributing the routing cost
 
-The blind path adds a runtime stride on the addressing path and a directory
-scan, and a benchmark that compares only the typed and blind ends reports their
-sum as one number. Each operation is therefore measured on three rungs, each
-differing from the one below it by a single cost:
+The blind path adds two costs over the typed path — a runtime stride on the
+addressing path and a directory scan — and a benchmark comparing only the two
+ends reports their sum as one number. The scan is separated out by varying the
+directory size instead: the same operation runs against a pool holding one
+layout and against a pool holding sixteen, with the measured layout registered
+last so the scan runs its full length. The slope between them is the per-entry
+scan cost; the intercept is everything else the blind path adds.
 
-| Rung | Path under test | Delta from the rung below |
-|---|---|---|
-| `Pool<T, A>` | Typed geometry, no router | — |
-| `LayoutPool<A>` | Runtime geometry, no router | Runtime stride |
-| `BlindPool<A>` | Runtime geometry, routed | Directory scan |
+That pair of layout counts is the whole parameterisation. One low value and one
+high value make the per-entry cost legible, and further values would add rows
+without adding information.
 
-Each row measures one allocate-and-free pair, so its absolute count folds both
-halves of the operation together. The deltas are what carry the attribution:
-reclamation is the same code on all three rungs and contributes equally to each
-row, so it cancels in the differences, leaving each delta attributable to the
-one cost its rung adds. That also gives the design's claim that reclamation
-costs what it costs in a typed pool a way to fail — a divergence there would
-appear as a delta larger than the modelled addition explains.
+The intercept still folds the runtime stride together with the fixed part of
+the lookup — loading the two directory vectors and following the layout pool's
+pointer. Splitting those would need a benchmark rung between the two, against
+`LayoutPool` directly, which is crate-private and would have to be exposed to
+reach it. That is public-surface debt for a diagnostic, so it is recorded as
+available in [`TODO.md`](../TODO.md) rather than built: the shipped pair
+already bounds the cost that scales, which is the one that governs whether the
+linear scan remains the right structure.
 
-The middle rung is a crate-private type, reached by the benchmark targets
-through a `#[doc(hidden)]` re-export behind an internal feature. The workspace
-guidance prefers benchmarking public API and accepts benchmarking an internal
-step when the public chain is too coarse to localise a delta, which is exactly
-the situation here.
+Reclamation is the same code on both paths and contributes equally to every
+row, so it cancels in the differences. That also gives the design's claim that
+reclamation costs what it costs in a typed pool a way to fail — a divergence
+would show up as a delta larger than the modelled addition explains.
 
 ### Scenarios
 
-- **Allocate and free, one layout present** — the three rungs, for every handle
-  flavour. This is the low case for routing cost and the direct comparison
-  against the typed pool's corresponding rows.
-- **Allocate and free, many layouts present** — the high case, applied to the
-  routed rung, isolating how lookup scales with directory size. The pool is
-  pre-populated with distinct layouts and the measured allocation targets one
-  that is not first in the scan. The pair of layout counts is the whole
-  parameterisation of the scan: one low value and one high value make the
-  per-entry cost legible, and further values would add rows without adding
-  information.
+- **Allocate and free, one layout present** — the low case for routing cost and
+  the direct comparison against the typed pool's corresponding row.
+- **Allocate and free, sixteen layouts present** — the high case, isolating how
+  lookup scales with directory size.
 - **Allocate, coerce to a trait object, dispatch, and free** — the row that
   lines up with the owning fat-pointer comparison, where the reference
   implementation's blind pools already appear. This is where the architectural
   claim is expressed as a number.
-- **Churn against the cross-crate comparison set** — the blind pool alongside
-  the typed pool and the surveyed pool crates.
+
+The cross-crate comparison set stays typed. Every pool in it is generic over
+one element type, so the blind pool has no counterpart there; its cross-crate
+row is the fat-pointer comparison, which is where the surveyed crates expose
+their own heterogeneous pools.
 
 Allocation tracking asserts that a warmed blind pool performs no system
 allocations in steady state, including across a mix of layouts.

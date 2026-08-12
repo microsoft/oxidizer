@@ -27,11 +27,16 @@
 //! All four deref to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
 //! handle runs `T`'s destructor and returns the slot to the pool.
 //!
+//! A [`BlindPool`] moves the element type from the pool to the allocation, so
+//! one pool object backs values of any type. It hands out the same four
+//! handles with the same guarantees, routing each value to the internal pool
+//! serving its layout.
+//!
 //! Pools suit frequently recycled values of one type, stable-address data
 //! structures, and workloads that need a capacity limit. Slots are reused
 //! without a backing-allocator call, and `max_chunks` bounds growth. Prefer a
-//! general allocator for heterogeneous, long-lived values or an arena when
-//! values can all be reclaimed together.
+//! general allocator for long-lived values or an arena when values can all be
+//! reclaimed together.
 //!
 //! # Concurrency model
 //!
@@ -43,7 +48,8 @@
 //! Moving a pool is independent of moving its values: [`Pool<T>`] is `Send`
 //! when the allocator is, whatever `T` is, because a pool owns no values and
 //! offers no way to reach one. Thread mobility for values is carried entirely
-//! by the handles.
+//! by the handles. [`BlindPool`] follows the same rule, which is what lets one
+//! pool hold values of types with different thread affinities at once.
 //!
 //! Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
 //! keep only allocation inside the critical section. Dropping a detachable
@@ -63,9 +69,10 @@
 //!   `no_std` (it needs only [`alloc`]); disable default features to build for
 //!   a `no_std` target.
 //! - **`stats`** *(disabled by default)* — enables runtime allocation
-//!   statistics: the `PoolStats` type and the `Pool::stats` method. The
-//!   accounting counters are compiled in only when this feature is active, so
-//!   leaving it off keeps the pool free of any tracking overhead.
+//!   statistics: the `PoolStats` type and the `Pool::stats` and
+//!   `BlindPool::stats` methods. The accounting counters are compiled in only
+//!   when this feature is active, so leaving it off keeps the pool free of any
+//!   tracking overhead.
 //!
 //! [`allocator-api2`]: https://crates.io/crates/allocator-api2
 //!

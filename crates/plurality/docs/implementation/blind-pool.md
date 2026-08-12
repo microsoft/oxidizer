@@ -122,6 +122,11 @@ so a linear scan over a contiguous array is the right shape: it is
 branch-predictable, prefetch-friendly, and beats a tree or a hash for the sizes
 that actually occur. Entries are held in first-seen order.
 
+A hit is the only thing the allocation path pays for. Creating and installing a
+layout pool is outlined behind `#[cold]` and takes the layout as a value rather
+than a type parameter, so it is emitted once per allocator instead of once per
+element type and never occupies registers on the path that finds its pool.
+
 Refinements are available if measurement justifies them: packing each key
 into a single word so that more of them fit per cache line, and reordering
 entries by use. Neither is adopted speculatively — the benchmark that would

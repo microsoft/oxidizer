@@ -14,7 +14,7 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use plurality::{Arc as PoolArc, Box as PoolBox, Pool, Rc as PoolRc};
+use plurality::{Arc as PoolArc, BlindPool, Box as PoolBox, Pool, Rc as PoolRc};
 
 /// Single-operation bodies for the pooled fat-pointer comparison. Kept as a
 /// self-contained copy (rather than an include shared with the benches) so this
@@ -431,5 +431,50 @@ fn steady_state_rolling_churn_does_not_allocate() {
         total_bytes_allocated(&session, "rolling_churn"),
         0,
         "steady-state rolling churn must reuse the just-freed slot, not allocate from the system"
+    );
+}
+
+/// One value of each layout the blind-pool workload presents. Holding them in a
+/// tuple keeps every layout live simultaneously and makes each cycle alternate
+/// between layout pools, so every allocation runs a directory scan.
+type MixedRow = (PoolBox<u8>, PoolBox<u32>, PoolBox<u64>, PoolBox<[u64; 4]>);
+
+fn fill_mixed(pool: &BlindPool, hold: &mut Vec<MixedRow>) {
+    for i in 0..WORKLOAD {
+        let wide = i as u64;
+        hold.push((
+            u8::try_from(i % 256).map(|v| pool.alloc_box(v)).unwrap(),
+            u32::try_from(i).map(|v| pool.alloc_box(v)).unwrap(),
+            pool.alloc_box(wide),
+            pool.alloc_box([wide; 4]),
+        ));
+    }
+}
+
+/// A warmed blind pool must reuse slots exactly as a typed pool does, including
+/// when the workload spans several layouts.
+#[test]
+fn steady_state_blind_mix_does_not_allocate() {
+    let pool = BlindPool::new();
+    let session = quiet_session();
+    let mut hold: Vec<MixedRow> = Vec::with_capacity(WORKLOAD);
+
+    for _ in 0..WARMUP_CYCLES {
+        fill_mixed(&pool, &mut hold);
+        hold.clear();
+    }
+
+    let steady = session.operation("blind_mix_steady_state");
+    {
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
+        for _ in 0..STEADY_CYCLES {
+            fill_mixed(&pool, &mut hold);
+            hold.clear();
+        }
+    }
+    assert_eq!(
+        total_bytes_allocated(&session, "blind_mix_steady_state"),
+        0,
+        "steady-state blind fill/drop cycles must reuse slots across every layout, not allocate from the system"
     );
 }

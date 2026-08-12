@@ -47,6 +47,8 @@ const ALLOC_OPS: &[(&str, &str)] = &[
     ("rc_val", "`Rc` — `alloc_rc`"),
     ("rc_with", "`Rc` — `alloc_rc_with`"),
     ("rc_uninit", "`Rc` — `alloc_uninit_rc`"),
+    ("blind_box_val", "`BlindPool` — `alloc_box`, one layout"),
+    ("blind_box_val_spread", "`BlindPool` — `alloc_box`, 16 layouts"),
 ];
 
 /// The aligned clone operations (criterion group `clone`, gungraun group `clone`).
@@ -57,6 +59,10 @@ const CLONE_OPS: &[(&str, &str)] = &[
 
 /// Comparable owning handles that erase a concrete pooled value to `dyn Marker`.
 const DYN_BOX_OPS: &[(&str, &str)] = &[
+    (
+        "plurality_blind_box",
+        "plurality — `BlindPool` / `Box<dyn Trait>` (heterogeneous)",
+    ),
     ("plurality_box", "plurality — `Box<dyn Trait>`"),
     (
         "infinity_pinned",

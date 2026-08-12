@@ -15,27 +15,29 @@ Every allocation function, measured as one allocate-then-free against a pre-warm
 
 | Operation | Time / op | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|
-| `Box` — `alloc_box` | 14.67 ns | 57 | 89 | 233 |
-| `Box` — `alloc_box_with` | 23.09 ns | 57 | 89 | 267 |
-| `Box` — `alloc_uninit_box` | 16.84 ns | 57 | 89 | 267 |
-| `Box` — allocate, unsize, and free | 15.82 ns | 85 | 129 | 345 |
-| `Arc` — `alloc_arc` | 15.09 ns | 61 | 96 | 274 |
-| `Arc` — `alloc_arc_with` | 19.74 ns | 61 | 96 | 274 |
-| `Arc` — `alloc_uninit_arc` | 19.80 ns | 65 | 103 | 281 |
-| `Arc` — allocate, unsize, and free | 16.26 ns | 89 | 136 | 352 |
-| `Alloc` — `alloc` | 13.29 ns | 51 | 79 | 223 |
-| `Alloc` — `alloc_with` | 14.25 ns | 51 | 79 | 223 |
-| `Alloc` — `alloc_uninit` | 13.97 ns | 51 | 79 | 223 |
-| `Rc` — `alloc_rc` | 14.84 ns | 60 | 94 | 272 |
-| `Rc` — `alloc_rc_with` | 17.60 ns | 60 | 94 | 272 |
-| `Rc` — `alloc_uninit_rc` | 17.24 ns | 63 | 100 | 278 |
+| `Box` — `alloc_box` | 13.21 ns | 57 | 89 | 233 |
+| `Box` — `alloc_box_with` | 15.94 ns | 57 | 89 | 267 |
+| `Box` — `alloc_uninit_box` | 15.93 ns | 57 | 89 | 233 |
+| `Box` — allocate, unsize, and free | 14.40 ns | 85 | 129 | 379 |
+| `Arc` — `alloc_arc` | 13.93 ns | 61 | 96 | 274 |
+| `Arc` — `alloc_arc_with` | 18.47 ns | 61 | 96 | 274 |
+| `Arc` — `alloc_uninit_arc` | 18.41 ns | 65 | 103 | 281 |
+| `Arc` — allocate, unsize, and free | 15.04 ns | 89 | 136 | 352 |
+| `Alloc` — `alloc` | 12.36 ns | 51 | 79 | 223 |
+| `Alloc` — `alloc_with` | 13.21 ns | 51 | 79 | 223 |
+| `Alloc` — `alloc_uninit` | 13.24 ns | 51 | 79 | 223 |
+| `Rc` — `alloc_rc` | 13.13 ns | 60 | 94 | 272 |
+| `Rc` — `alloc_rc_with` | 16.08 ns | 60 | 94 | 272 |
+| `Rc` — `alloc_uninit_rc` | 16.30 ns | 63 | 100 | 278 |
+| `BlindPool` — `alloc_box`, one layout | 14.20 ns | 106 | 171 | 327 |
+| `BlindPool` — `alloc_box`, 16 layouts | 14.83 ns | 196 | 276 | 440 |
 
 ### Clone + drop (shared handles)
 
 | Operation | Time / op | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|
-| `Arc` clone + drop | 5.16 ns | 25 | 41 | 177 |
-| `Rc` clone + drop | 1.45 ns | 26 | 41 | 143 |
+| `Arc` clone + drop | 4.73 ns | 25 | 41 | 143 |
+| `Rc` clone + drop | 1.28 ns | 26 | 41 | 143 |
 
 ## Cross-crate comparison (allocate + free)
 
@@ -43,16 +45,16 @@ From `cargo bench --bench pool_comparison`: 10,000 allocate+free iterations agai
 
 | Pool | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|
-| plurality — `Box` | 490,025 | 740,039 | 740,251 |
-| plurality — `Alloc` | 430,026 | 640,040 | 640,218 |
+| plurality — `Box` | 480,024 | 730,037 | 730,249 |
+| plurality — `Alloc` | 430,022 | 640,033 | 640,211 |
 | slab | 390,035 | 590,061 | 590,265 |
-| sharded-slab | 2,090,026 | 2,910,043 | 2,910,191 |
-| slotmap | 500,028 | 800,047 | 800,285 |
-| object-pool | 640,027 | 980,044 | 980,294 |
-| opool | 1,080,090 | 1,620,137 | 1,645,445 |
-| deadpool | 2,360,021 | 3,300,034 | 3,300,866 |
-| infinity-pool — `PinnedPool` | 1,940,023 | 3,030,036 | 3,030,154 |
-| infinity-pool — `RawPinnedPool` | 1,140,035 | 1,870,060 | 1,870,208 |
+| sharded-slab | 2,130,026 | 2,970,043 | 2,970,165 |
+| slotmap | 500,028 | 800,047 | 800,251 |
+| object-pool | 640,027 | 980,044 | 980,324 |
+| opool | 1,080,090 | 1,620,137 | 1,645,443 |
+| deadpool | 2,360,021 | 3,300,034 | 3,300,998 |
+| infinity-pool — `PinnedPool` | 1,940,023 | 3,030,036 | 3,030,120 |
+| infinity-pool — `RawPinnedPool` | 1,140,035 | 1,870,060 | 1,870,246 |
 
 ## Graph churn throughput (wall-clock)
 
@@ -60,10 +62,10 @@ From `cargo bench --bench graph_churn`: 1,000,000 node allocations with a realis
 
 | Backend | Total | ns / alloc | Malloc/s |
 |---|---:|---:|---:|
-| std::Box + mimalloc | 0.2454 s | 245.41 | 4.07 |
-| plurality::Pool | 0.1075 s | 107.48 | 9.30 |
+| std::Box + mimalloc | 0.2355 s | 235.54 | 4.25 |
+| plurality::Pool | 0.0935 s | 93.47 | 10.70 |
 
-**plurality::Pool is 2.28x faster than std::Box + mimalloc.**
+**plurality::Pool is 2.52x faster than std::Box + mimalloc.**
 
 ## Owning fat-pointer comparison
 
@@ -71,11 +73,12 @@ Each row allocates the same concrete 32-byte value, converts its owning handle t
 
 | Handle | Time / op | Time vs plurality | Instructions | Instructions vs plurality | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|---:|---:|
-| plurality — `Box<dyn Trait>` | 16.98 ns | 1.00× | 95 | 1.00× | 149 | 391 |
-| infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 35.60 ns | 2.10× | 220 | 2.32× | 355 | 537 |
-| infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 28.58 ns | 1.68× | 156 | 1.64× | 262 | 478 |
-| infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous) | 42.72 ns | 2.52× | 292 | 3.07× | 449 | 631 |
-| infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous) | 34.52 ns | 2.03× | 227 | 2.39× | 357 | 573 |
-| standard library — `Box<dyn Trait>` | 17.60 ns | 1.04× | 109 | 1.15× | 163 | 265 |
+| plurality — `BlindPool` / `Box<dyn Trait>` (heterogeneous) | 15.91 ns | 1.02× | 145 | 1.53× | 234 | 514 |
+| plurality — `Box<dyn Trait>` | 15.59 ns | 1.00× | 95 | 1.00× | 149 | 391 |
+| infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 32.83 ns | 2.11× | 220 | 2.32× | 355 | 533 |
+| infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 26.42 ns | 1.70× | 156 | 1.64× | 262 | 444 |
+| infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous) | 39.51 ns | 2.53× | 294 | 3.09× | 451 | 637 |
+| infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous) | 31.75 ns | 2.04× | 229 | 2.41× | 359 | 579 |
+| standard library — `Box<dyn Trait>` | 15.11 ns | 0.97× | 176 | 1.85× | 266 | 406 |
 
 The standard-library row is an allocator best case: every allocation is the same size and is immediately freed, so allocator thread caches are maximally effective. The graph-churn benchmark above measures a broader live set and locality effects.
