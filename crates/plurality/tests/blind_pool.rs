@@ -37,7 +37,7 @@ use std::thread;
 
 use allocator_api2::alloc::{AllocError as BackingAllocError, Allocator, Global};
 use common::DropCounter;
-use plurality::{Arc as PoolArc, BlindPool, Box as PoolBox, Coercion, Rc as PoolRc, coerce};
+use plurality::{Arc as PoolArc, BlindPool, Box as PoolBox, Coercion, Pool, Rc as PoolRc, coerce};
 
 // ── the layout spread ────────────────────────────────────────────────────
 //
@@ -728,7 +728,64 @@ fn a_chunk_cap_beyond_the_slot_ceiling_is_clamped_down() {
     assert_eq!(pool.layouts(), 0, "a query must not create a layout pool");
 }
 
+#[test]
+fn a_chunk_cap_of_zero_serves_nothing() {
+    // A cap of zero means a pool that can never allocate, exactly as it does
+    // for the typed pool. Ref: docs/design/blind-pool.md, "Bounding growth".
+    let pool = BlindPool::builder().max_chunks(0).build();
+    assert_eq!(pool.max_chunks_of::<u64>(), 0);
+    assert_eq!(pool.capacity_of::<u64>(), 0);
+
+    let Err(err) = pool.try_alloc_box(1_u64) else {
+        panic!("a zero chunk cap leaves no room for a chunk");
+    };
+    assert!(err.is_capacity_exhausted());
+    assert_eq!(pool.chunks_allocated_of::<u64>(), 0);
+
+    let typed = Pool::<u64>::builder().max_chunks(0).build();
+    assert_eq!(typed.max_capacity(), Some(0));
+    assert!(typed.try_alloc_box(1_u64).is_err_and(plurality::AllocError::is_capacity_exhausted));
+}
+
 // ── allocator failure ────────────────────────────────────────────────────
+
+/// An allocator that tracks live bytes, to prove memory is freed.
+#[derive(Clone)]
+struct CountingAllocator(StdArc<AtomicUsize>);
+
+// SAFETY: forwards to `Global` and only adjusts a counter by the same `layout`.
+unsafe impl Allocator for CountingAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BackingAllocError> {
+        let ptr = Global.allocate(layout)?;
+        self.0.fetch_add(layout.size(), Ordering::SeqCst);
+        Ok(ptr)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: same contract as `Global::deallocate`.
+        unsafe { Global.deallocate(ptr, layout) };
+        self.0.fetch_sub(layout.size(), Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn dropping_the_pool_frees_every_layouts_chunks() {
+    let live = StdArc::new(AtomicUsize::new(0));
+    {
+        let pool = BlindPool::builder().chunk_size(2).allocator(CountingAllocator(live.clone())).build();
+        let a = pool.alloc_box(1_u8);
+        let b = pool.alloc_box(2_u64);
+        let c = pool.alloc_box([3_u64; 4]);
+        assert_eq!(pool.layouts(), 3);
+        assert!(live.load(Ordering::SeqCst) > 0, "each layout must have taken a chunk");
+
+        // Freeing slots returns them to their layout's free list; the chunks
+        // stay until the pool itself goes away.
+        drop((a, b, c));
+        assert!(live.load(Ordering::SeqCst) > 0);
+    }
+    assert_eq!(live.load(Ordering::SeqCst), 0, "every layout pool must free its chunks");
+}
 
 /// A custom allocator that always fails, exercising the chunk path.
 #[derive(Clone)]
@@ -784,12 +841,28 @@ use core::ptr::null_mut;
 #[cfg(not(miri))]
 use std::alloc::{GlobalAlloc, System};
 
-// Whether this thread's global allocations are being refused. Thread-local so
-// that a deny window covers only the test that opened it, while the rest of the
-// target's tests run in parallel unaffected.
+// Whether this thread's global allocations are being refused, and how many
+// more may pass before the refusals start. Thread-local so that a deny window
+// covers only the test that opened it, while the rest of the target's tests run
+// in parallel unaffected.
 #[cfg(not(miri))]
 thread_local! {
     static DENY_GLOBAL: Cell<bool> = const { Cell::new(false) };
+    static DENY_ALLOWANCE: Cell<usize> = const { Cell::new(0) };
+}
+
+/// `true` if this allocation is to be refused, consuming the allowance if not.
+#[cfg(not(miri))]
+fn refuse_allocation() -> bool {
+    if !DENY_GLOBAL.get() {
+        return false;
+    }
+    let allowance = DENY_ALLOWANCE.get();
+    if allowance == 0 {
+        return true;
+    }
+    DENY_ALLOWANCE.set(allowance - 1);
+    false
 }
 
 /// A global allocator that can be made to fail on one thread.
@@ -810,7 +883,7 @@ static GLOBAL: DenyableGlobal = DenyableGlobal;
 #[cfg(not(miri))]
 unsafe impl GlobalAlloc for DenyableGlobal {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if DENY_GLOBAL.get() {
+        if refuse_allocation() {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -818,7 +891,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        if DENY_GLOBAL.get() {
+        if refuse_allocation() {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -826,7 +899,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if DENY_GLOBAL.get() {
+        if refuse_allocation() {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -846,6 +919,12 @@ struct DenyGlobal;
 #[cfg(not(miri))]
 impl DenyGlobal {
     fn engaged() -> Self {
+        Self::after(0)
+    }
+
+    /// Lets `allowance` further allocations through before refusing.
+    fn after(allowance: usize) -> Self {
+        DENY_ALLOWANCE.set(allowance);
         DENY_GLOBAL.set(true);
         Self
     }
@@ -884,6 +963,34 @@ fn allocator_failure_on_the_metadata_path() {
     assert_eq!(*pool.alloc_box(2_u32), 2);
     assert_eq!(pool.layouts(), 2);
     drop(held);
+}
+
+#[cfg(not(miri))]
+#[test]
+fn allocator_failure_while_growing_the_directory() {
+    let pool = BlindPool::new();
+
+    // The directory is reserved before a key is published, so the reservation
+    // is a fallible step of its own. Letting the layout pool's metadata block
+    // through — the one global allocation that precedes the reservation, since
+    // the chunk is only requested once the key is in place — puts the failure
+    // on the reservation.
+    // Ref: docs/design/blind-pool.md, "Failure".
+    let outcome = {
+        let _deny = DenyGlobal::after(1);
+        pool.try_alloc_box(1_u64)
+    };
+    let Err(err) = outcome else {
+        panic!("the directory reservation was expected to fail");
+    };
+    assert!(err.is_allocator_failure());
+    assert!(!err.is_capacity_exhausted());
+    // Nothing was published, so the layout is still unseen.
+    assert_eq!(pool.layouts(), 0);
+
+    // The pool serves the layout once the allocator recovers.
+    assert_eq!(*pool.alloc_box(1_u64), 1);
+    assert_eq!(pool.layouts(), 1);
 }
 
 // ── panic safety ─────────────────────────────────────────────────────────
@@ -1183,6 +1290,33 @@ fn reentry_while_building_a_layout_pool_does_not_overshoot_the_layout_cap() {
 
     // The layout the reentrant allocation created serves ordinary requests.
     assert_eq!(*pool.alloc_box(2_u64), 2);
+}
+
+#[test]
+fn reentry_that_grows_the_directory_leaves_room_for_the_outer_push() {
+    let state = StdRc::new(ReentryState::new(ReentryTarget::OtherLayout));
+    let pool = reentrant_pool(&state, None);
+
+    // The reentrant miss pushes its own layout into the directory between the
+    // outer call's reservation and its push. The outer push must still find the
+    // room it reserved, and must not reallocate a vector the reentrant call
+    // could have been holding.
+    // Ref: docs/implementation/blind-pool.md, "Reentrancy", step 4.
+    let value = pool.alloc_box(1_u8);
+
+    assert_eq!(*value, 1);
+    assert_eq!(state.reentries.get(), 1, "the allocator's Clone must have re-entered the pool");
+    assert_eq!(pool.layouts(), 2, "both the reentrant layout and the outer one must be present");
+    assert_eq!(pool.len_of::<u8>(), 1);
+    assert_eq!(pool.len_of::<u64>(), 0, "the reentrant allocation was dropped again");
+
+    // Both layouts serve further requests, so neither directory entry is stale.
+    let more = (pool.alloc_box(2_u8), pool.alloc_box(3_u64));
+    assert_eq!((*more.0, *more.1), (2, 3));
+    assert_eq!(pool.layouts(), 2);
+
+    drop((value, more));
+    assert!(pool.is_empty());
 }
 
 // ── thread mobility ──────────────────────────────────────────────────────

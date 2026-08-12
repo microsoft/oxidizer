@@ -219,16 +219,17 @@ unsafe impl<A: Allocator + Send> Send for LayoutPool<A> {}
 /// Rounds `chunk_size` up to a power of two, then halves it until a chunk of
 /// that many slots has a representable [`Layout`]. Returns the effective slot
 /// count together with that layout.
-///
-/// A single-slot chunk always has a representable layout for any value layout
-/// the caller could have constructed, so the loop terminates.
 fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout) {
     let mut slots = chunk_size.clamp(1, 1 << 31).next_power_of_two();
     loop {
         if let Some(layout) = geometry.chunk_layout(slots as usize) {
             return (slots, layout);
         }
-        debug_assert!(slots > 1, "a one-slot chunk must always have a representable layout");
+        // A zero-slot chunk would divide by zero in `clamp_max_chunks` and
+        // underflow the index mask, so the floor is stated rather than trusted.
+        // It holds for every value layout `Layout::new::<T>()` can produce,
+        // because a single slot leaves the address space room to spare.
+        assert!(slots > 1, "a one-slot chunk must always have a representable layout");
         slots /= 2;
     }
 }
@@ -247,9 +248,13 @@ pub(crate) fn effective_max_chunks(chunk_size: u32, requested: Option<u32>) -> u
 
 /// Clamps the chunk cap to what the slot-index ceiling permits at `chunk_size`,
 /// defaulting an absent cap to that ceiling.
+///
+/// A cap of zero is a pool that can never allocate, exactly as it is for
+/// [`Pool`](crate::Pool), so only the upper bound is applied.
 fn clamp_max_chunks(chunk_size: u32, max_chunks: Option<u32>) -> u32 {
+    // `chunk_size` is at most `2^31` and `MAX_POOL_SLOTS` exceeds `2^32`, so
+    // the ceiling is at least one.
     let ceiling = MAX_POOL_SLOTS / u64::from(chunk_size);
     let requested = max_chunks.map_or(ceiling, u64::from);
-    let clamped = requested.clamp(1, ceiling.max(1));
-    u32::try_from(clamped).unwrap_or(u32::MAX)
+    u32::try_from(requested.min(ceiling)).unwrap_or(u32::MAX)
 }

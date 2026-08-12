@@ -19,14 +19,14 @@ pub(crate) struct PoolCore {
 }
 ```
 
-**`PoolInner<G, A>`** is the concrete heap state, generic over the geometry
-provider `G` and the allocator `A`:
+**`PoolInner<A, G>`** is the concrete heap state, generic over the allocator `A`
+and the geometry provider `G`:
 
 ```rust
 #[repr(C)]
-pub(crate) struct PoolInner<G, A> {
+pub(crate) struct PoolInner<A, G> {
     pub(crate) core: PoolCore,        // first field — see below
-    pub(crate) geometry: G,
+    pub(crate) me: NonNull<PoolCore>, // this allocation's own address
     pub(crate) chunk_size: u32,       // slots per chunk, a power of two
     pub(crate) shift: u32,            // log2(chunk_size)
     pub(crate) mask: u32,             // chunk_size - 1
@@ -37,6 +37,7 @@ pub(crate) struct PoolInner<G, A> {
     pub(crate) chunk_layout: Layout,
     pub(crate) directory: UnsafeCell<Vec<NonNull<ChunkHeader>>>,
     pub(crate) allocator: A,
+    pub(crate) geometry: G,
 }
 ```
 
@@ -45,13 +46,14 @@ header stores a `NonNull<PoolCore>` obtained by casting the *full* inner
 pointer, so the pointer's provenance covers the whole allocation; the teardown
 callback stored inside `core` casts it back to the concrete `PoolInner` it was
 monomorphized for. Neither cast is valid without the guaranteed field order.
+`me` is where that pointer comes from; see "Pointer recovery" below.
 
 `chunk_layout` is the layout of one whole chunk, computed once at construction
 from the geometry and the chunk size and stored rather than recomputed, because
 it is needed on the growth path and again at teardown, which may run on a
 thread that never held the pool object.
 
-**`Pool<T, A>`** is one pointer, `NonNull<PoolInner<TypedGeometry<T>, A>>`.
+**`Pool<T, A>`** is one pointer, `NonNull<PoolInner<A, TypedGeometry<T>>>`.
 `BlindPool` and `LayoutPool` are described in
 [the blind pool](./blind-pool.md).
 

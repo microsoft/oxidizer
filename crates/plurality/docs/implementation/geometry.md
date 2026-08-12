@@ -52,18 +52,27 @@ are used.
 
 ```rust
 pub(crate) trait SlotGeometry: Copy {
-    fn value_size(self) -> usize;
-    fn value_align(self) -> usize;
     fn stride(self) -> usize;
     fn refcount_offset(self) -> usize;
     fn index_offset(self) -> usize;
     fn slots_offset(self) -> usize;
     fn chunk_layout(self, slots: usize) -> Option<Layout>;
+
+    unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8>;
+    unsafe fn header_of(self, slot: NonNull<u8>, index: u32) -> NonNull<ChunkHeader>;
 }
 ```
 
-`TypedGeometry<T>` is zero-sized. Its methods return `size_of::<T>()`,
-`align_of::<T>()` and the formulas above, so every geometry expression on the
+The first five methods answer with numbers. The last two are the addressing
+directions built on them, and they are where the two providers differ. Both
+have default bodies that multiply the stride, which is what `RuntimeGeometry`
+uses. `TypedGeometry<T>` overrides them with typed pointer arithmetic over
+`SlotCell<T>`, so the typed path emits an indexed address rather than a
+multiply — the reason the typed pool's instruction count is unchanged by having
+a provider at all.
+
+`TypedGeometry<T>` is zero-sized. Its methods return the formulas above over
+`size_of::<T>()` and `align_of::<T>()`, so every geometry expression on the
 typed path folds to a constant. Storing it in `PoolInner` costs nothing.
 
 `RuntimeGeometry` is a small `Copy` struct holding the precomputed offsets. It
@@ -72,20 +81,30 @@ the hot path loads values rather than recomputing them. Its fields sit
 alongside `chunk_size`, `shift` and `mask`, which the allocation path already
 loads, so the extra reads land on lines that are already warm.
 
-It is built with `Layout::extend` and `pad_to_align` rather than with
-hand-rolled arithmetic. `Layout::extend` *is* the `repr(C)` field-placement
-algorithm, taken from `core`, so extending the value layout by the counter and
-then by the index yields the offsets and the stride by construction. This
-matters because a hand-rolled runtime formula would have no ground truth to be
-checked against, whereas this one is checked against `core` by definition. The
-`const` typed path carries its own arithmetic because `Layout::extend` is not
-usable in `const` context, and the two are cross-checked against each other for
-every layout that both paths see.
+## One derivation, two shapes
 
-The free path uses neither provider. It derives its own geometry from the
-value's runtime size and alignment. That asymmetry is deliberate and
-load-bearing: reclamation must not depend on reaching the pool before it knows
-where the pool is.
+Both providers evaluate the same formulas, which is the point: agreement
+between a pool addressing a slot and a handle walking back from one is
+structural, not negotiated. What differs is *when* they are evaluated.
+
+`TypedGeometry<T>` evaluates them in `const` context over `size_of::<T>()` and
+`align_of::<T>()`. `RuntimeGeometry` evaluates them once, at layout pool
+construction, over a `Layout` known only at run time, and stores the results.
+The free path evaluates them again, from a value's runtime size and alignment,
+without either provider — reclamation must not depend on reaching the pool
+before it knows where the pool is.
+
+The formulas are hand-rolled rather than delegated to `Layout::extend`, which
+*is* `core`'s `repr(C)` field-placement algorithm: `extend` is not usable in
+`const` context, and its `Result` plumbing costs measurable instructions on the
+free path, which runs per deallocation. `extend` is instead used as the
+independent oracle the formulas are proven against (see below).
+
+`Layout::repeat` is likewise unstable, so the chunk layout is sized by checked
+multiplication and the header offset added by checked addition. Overflow is
+therefore reported by `Option` rather than by `core`, and a chunk sizing that
+overflows is clamped rather than propagated (see
+[the blind pool](./blind-pool.md)).
 
 ## Proving the formulas
 
@@ -93,8 +112,9 @@ The typed geometry is cross-checked against the compiler's own layout of the
 slot type: a `const` block asserts that each computed offset equals the
 corresponding `offset_of!` on the slot struct, and that the computed stride and
 alignment equal the slot struct's `size_of` and `align_of`. Every element type
-the crate is instantiated with therefore re-verifies the formula against ground
-truth, and a divergence is a build error rather than a corrupted free list.
+a `TypedGeometry` is instantiated for therefore re-verifies the formula against
+ground truth, and a divergence is a build error rather than a corrupted free
+list.
 
 The check must be *forced* from a path every instantiation reaches — an
 associated `const` is only evaluated where it is used, so the geometry
@@ -103,6 +123,12 @@ dedicated entry point means no instantiation can route around it. These are
 post-monomorphization errors, so the diagnostic is poor and the check cannot be
 tested negatively; that is acceptable for an assertion whose only job is to
 fail a build that would otherwise ship a corrupted free list.
+
+A value allocated from a blind pool need not instantiate `TypedGeometry<T>` at
+all: allocation goes through `RuntimeGeometry` and reclamation through the free
+path. The bound owner is what pulls the typed provider in, so the blind pool's
+tests deliberately drive their layout spread through it as well as through the
+handles.
 
 This check is the primary guard on the formulas, which is why it asserts stride
 and alignment and not only offsets. Both halves of the pool evaluate the same
@@ -117,10 +143,13 @@ slot struct rather than through a geometry provider (see
 [handles](./handles.md)), so a formula bug shared by both providers is
 observable as a test failure.
 
-The runtime geometry is checked differently, because it has no slot struct to
-compare against: it is *built* from `Layout::extend`, which is `core`'s own
-`repr(C)` algorithm, and the hand-rolled formula is asserted against it in
-debug builds. Between them, neither derivation is trusted alone.
+Because both providers share the formulas, comparing them against each other
+proves only that neither corrupted the other's inputs. The formulas themselves
+are therefore also asserted against `Layout::extend` and `pad_to_align` — a
+second, `core`-owned implementation of the same `repr(C)` placement rules —
+over the same spread of types. `extend` cannot be used to *build* the geometry
+without paying for it on the free path, but it costs nothing to use as an
+oracle in a test.
 
 The formulas are validated against the compiler's layout for the full spread
 the pool must handle: zero-sized types, sub-word and odd sizes, word-sized and

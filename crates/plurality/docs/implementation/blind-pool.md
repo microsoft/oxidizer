@@ -79,12 +79,13 @@ The resulting effective values are part of the blind pool's contract and are
 exposed through its per-layout queries; see
 [the blind pool's design](../design/blind-pool.md).
 
-The overflow check comes from `core` rather than from hand-rolled arithmetic:
-extending `Layout::new::<ChunkHeader>()` by the slot array yields the chunk
-layout and the slots offset together, and returns an error on overflow instead
-of requiring a separate `checked_mul`. The clamp is driven by that error rather
-than by a reimplementation of the same bounds, which means the clamp cannot
-disagree with the layout computation it is protecting.
+The clamp is driven by the chunk-layout computation itself rather than by a
+reimplementation of the same bounds: `chunk_layout` reports overflow as `None`
+— its slot array is sized by checked multiplication, since `Layout::repeat` is
+unstable — and the clamp simply halves the slot count until that call succeeds.
+The clamp therefore cannot disagree with the layout computation it is
+protecting. A one-slot chunk is the floor, and it is representable for every
+layout `Layout::new::<T>()` can produce.
 
 ## The router
 

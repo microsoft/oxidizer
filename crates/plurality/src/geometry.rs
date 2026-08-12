@@ -39,6 +39,7 @@ pub(crate) const fn round_up(x: usize, align: usize) -> usize {
 /// `u32` metadata words.
 #[inline]
 #[must_use]
+#[cfg_attr(test, mutants::skip)] // The first comparison is between two equal alignments; the second differs from `>=` only when its operands are equal. Both arms then return the same value.
 pub(crate) const fn cell_align(align: usize) -> usize {
     let refcount = align_of::<AtomicU32>();
     let index = align_of::<u32>();
@@ -315,11 +316,13 @@ impl SlotGeometry for RuntimeGeometry {
 mod tests {
     use super::*;
 
-    /// Checks both providers against the compiler's own layout of `SlotCell<$t>`.
+    /// Checks both providers against the compiler's own layout of `SlotCell<$t>`,
+    /// and the formulas against `core`'s own `repr(C)` field placement.
     ///
-    /// The `const CHECK` already does this for every instantiated element type,
-    /// but only where an accessor is called; running it as a test states the
-    /// property explicitly and covers types the crate is never instantiated with.
+    /// The `const CHECK` already checks the providers for every instantiated
+    /// element type, but only where an accessor is called; running it as a test
+    /// states the property explicitly and covers types the crate is never
+    /// instantiated with.
     macro_rules! check_type {
         ($t:ty) => {{
             let size = size_of::<$t>();
@@ -342,15 +345,34 @@ mod tests {
                 stringify!($t),
             );
 
-            // The two providers are separate code paths reaching the same
-            // numbers; a blind pool addressing a layout must land exactly where
-            // a typed pool for that layout would.
-            assert_eq!(runtime.stride(), typed.stride());
-            assert_eq!(runtime.refcount_offset(), typed.refcount_offset());
-            assert_eq!(runtime.index_offset(), typed.index_offset());
+            // A blind pool addressing a layout must land exactly where a typed
+            // pool for that layout would.
+            assert_eq!(runtime.stride(), typed.stride(), "runtime stride for {}", stringify!($t));
+            assert_eq!(
+                runtime.refcount_offset(),
+                typed.refcount_offset(),
+                "runtime refcount offset for {}",
+                stringify!($t),
+            );
+            assert_eq!(runtime.index_offset(), typed.index_offset(), "runtime index offset for {}", stringify!($t));
             assert_eq!(runtime.slots_offset(), typed.slots_offset());
             assert_eq!(runtime.chunk_layout(7), typed.chunk_layout(7));
             assert_eq!(typed.chunk_layout(7), chunk_layout(size, align, 7));
+
+            // The formulas are hand-rolled for speed; `Layout::extend` is
+            // `core`'s own `repr(C)` field-placement algorithm and reaches the
+            // same numbers from an independent implementation.
+            let value = Layout::new::<$t>();
+            let (with_refcount, extend_refcount) = value.extend(Layout::new::<AtomicU32>()).unwrap();
+            let (with_index, extend_index) = with_refcount.extend(Layout::new::<u32>()).unwrap();
+            let slot = with_index.pad_to_align();
+            let (_, extend_slots) = Layout::new::<ChunkHeader>().extend(slot).unwrap();
+
+            assert_eq!(typed.refcount_offset(), extend_refcount, "extend refcount offset for {}", stringify!($t));
+            assert_eq!(typed.index_offset(), extend_index, "extend index offset for {}", stringify!($t));
+            assert_eq!(typed.stride(), slot.size(), "extend stride for {}", stringify!($t));
+            assert_eq!(typed.slots_offset(), extend_slots, "extend slots offset for {}", stringify!($t));
+            assert_eq!(cell_align(align), slot.align(), "extend cell alignment for {}", stringify!($t));
         }};
     }
 

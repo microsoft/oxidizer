@@ -37,6 +37,7 @@ through a gated re-export rather than by testing from the inside.
 | `send_bound_probe` | The argument that `Pool: Send` needs no `T: Send`, by moving pools of a deliberately thread-bound element type across threads. Interesting only under Miri, since the failures it looks for are aliasing and data-race violations. |
 | `stats` | The counters, compiled only with the `stats` feature. |
 | `bolero_pool` | Randomised operation streams. |
+| `bolero_blind_pool` | Randomised operation streams over a spread of layouts. |
 | `loom_pool` | Interleaving models, compiled only under `--cfg loom`. |
 | `alloc_tracking` | Steady-state allocation behaviour under a tracking global allocator. |
 
@@ -46,10 +47,10 @@ satisfy vacuously, so they are called out.
 **The layout spread must be exercised through `Alloc` specifically**, not only
 through the detachable handles. The bound owner is the sole consumer that reads
 slots through the compiler's layout of the slot type (see
-[handles](./handles.md)), so it is the only runtime check that the compiler's
-placement and the geometry built from `Layout::extend` agree. Covering the
-spread only through `Box`, `Arc` and `Rc` would exercise the geometry against
-itself.
+[handles](./handles.md)), and it is also what instantiates the typed geometry
+provider for a type a blind pool would otherwise serve entirely through the
+runtime one. Covering the spread only through `Box`, `Arc` and `Rc` would
+exercise one geometry derivation against itself.
 
 **Reentrancy is tested at each point the cold path releases control.**
 Allocating from, and freeing into, a blind pool from inside a pooled value's
@@ -92,8 +93,10 @@ which is why teardown and the chunk guard carry loom-only drop loops.
 Bolero drives a byte stream interpreted as a sequence of allocate, clone and
 drop operations, asserting that every value is destroyed exactly once and that
 releasing every handle empties the pool. For the blind pool the stream ranges
-over a set of layouts, and the assertions add that a slot is only ever reused
-within its own layout.
+over a spread of layouts, and the assertions add that a slot address is never
+served for two different layouts — layout pools neither share chunks nor
+release them, so an address that appears under two layouts is a slot that
+crossed layouts.
 
 ## Allocation tracking
 
