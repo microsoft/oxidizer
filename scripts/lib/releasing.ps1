@@ -709,13 +709,24 @@ function Get-WorkspacePackages {
 #     edge, and so is available whether or not the dependency is declared.
 #
 # $TargetCrateRoot belongs to the third case ONLY, and the caller must withhold
-# it for the first two. On a declared edge DepAliases is already the complete
-# and *authoritative* answer, because a `package = "..."` rename shadows the
-# lib name entirely: a dependent that imports the crate as `aliased_dep` cannot
-# write `dep_core::Handle` no matter what the target's manifest says. Adding
-# the target's global root back on such an edge re-accepts a name the dependent
+# it for the first two. On a declared edge DepAliases already records the name
+# the target is reachable under, and it is authoritative *over the target's
+# global crate root*, because a `package = "..."` rename shadows the lib name
+# entirely: a dependent that imports the crate as `aliased_dep` cannot write
+# `dep_core::Handle` no matter what the target's manifest says. Adding the
+# target's global root back on such an edge re-accepts a name the dependent
 # provably cannot use, turning an unrelated allowlist entry that happens to
 # collide with it into a false exposure and a spurious breaking bump.
+#
+# The real package name below is a known over-acceptance, not a considered
+# exception to that rule: a rename shadows the package name exactly as it
+# shadows the lib name, so `dependency::*` is equally unwritable on an edge
+# reachable only as `aliased_dep`. Narrowing it needs data this record does not
+# carry -- whether an *unrenamed* edge to the target also exists, since a
+# package may be depended on twice, once aliased and once not. Dropping the
+# name without that would fail open on the ordinary unrenamed edge, which is
+# the far worse direction, so it stays until the edge data can distinguish the
+# two. It errs toward a spurious bump, never toward a missed break.
 #
 # Any of them is the root an allowed_external_types entry may carry. Matching
 # solely on the real package name would find nothing and report "not exposed"

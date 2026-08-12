@@ -245,10 +245,12 @@ differently:
   unknown must not ship a break as compatible.
 
 - **Indirect edges to a transitive dependency** require the dependent's
-  allowlist to explicitly name that dependency, under whichever name its
-  crate root actually carries: a `package = "..."` alias on the
-  dependency, or a `[lib] name = "..."` set by the dependency itself, in
-  preference to the package name. This exists because `cargo-check-external-types` attributes a
+  allowlist to explicitly name that dependency, under the crate root the
+  dependency itself defines: its `[lib] name = "..."` when it sets one,
+  otherwise its package name. A `package = "..."` alias cannot apply
+  here -- only a crate that *declares* a dependency can rename it, and an
+  indirect dependent declares no edge to the target at all. This exists
+  because `cargo-check-external-types` attributes a
   re-exported type to the crate that *defines* it: `fetch_azure`
   allowlists `typespec_client_core::*` for a trait `azure_core`
   re-exports, while depending only on `azure_core`. Such an edge is
