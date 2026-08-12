@@ -40,67 +40,47 @@ mod tests {
 
     use super::*;
 
+    /// Expands the derive and pretty-prints the result.
+    fn rendered(input: DeriveInput) -> String {
+        let expanded = expand(input);
+        let file: syn::File = syn::parse2(expanded).expect("the expansion parses as a file");
+        prettyplease::unparse(&file)
+    }
+
     #[test]
     fn a_valid_input_expands_to_every_item() {
-        let expanded = expand(parse_quote! {
+        insta::assert_snapshot!(rendered(parse_quote! {
             #[display("failed for {path}")]
             #[from(std::io::Error)]
             struct T { path: String, inner: ohno::OhnoCore }
-        })
-        .to_string();
-
-        for expected in [
-            "Display",
-            "Error",
-            "Enrichable",
-            "ErrorExt",
-            "Debug",
-            "fn new",
-            "fn caused_by",
-            "From < std :: io :: Error >",
-            "Infallible",
-        ] {
-            assert!(expanded.contains(expected), "missing {expected} in {expanded}");
-        }
-        assert!(!expanded.contains("compile_error"), "{expanded}");
-    }
-
-    #[test]
-    fn a_rejected_input_expands_to_diagnostics_only() {
-        let expanded = expand(parse_quote!(
-            enum T {
-                A,
-            }
-        ))
-        .to_string();
-
-        assert!(expanded.contains("compile_error"), "{expanded}");
-        assert!(!expanded.contains("impl"), "{expanded}");
-    }
-
-    #[test]
-    fn a_valid_shape_with_an_invalid_template_generates_nothing() {
-        let expanded = expand(parse_quote! {
-            #[display("bad path: {pth}")]
-            struct T { path: String, inner: ohno::OhnoCore }
-        })
-        .to_string();
-
-        assert!(expanded.contains("compile_error"), "{expanded}");
-        assert!(!expanded.contains("impl"), "{expanded}");
+        }));
     }
 
     #[test]
     fn the_suppressing_flags_remove_their_items() {
-        let expanded = expand(parse_quote! {
+        insta::assert_snapshot!(rendered(parse_quote! {
             #[no_debug]
             #[no_constructors]
             struct T { inner: ohno::OhnoCore }
-        })
-        .to_string();
+        }));
+    }
 
-        assert!(!expanded.contains("Debug"), "{expanded}");
-        assert!(!expanded.contains("fn new"), "{expanded}");
-        assert!(expanded.contains("Display"), "{expanded}");
+    #[test]
+    fn a_rejected_input_expands_to_diagnostics_only() {
+        insta::assert_snapshot!(rendered(parse_quote!(
+            enum T {
+                A,
+            }
+        )));
+    }
+
+    #[test]
+    fn a_valid_shape_with_an_invalid_template_generates_nothing() {
+        // Generation is all-or-nothing: a fault anywhere means no items are emitted, so `rustc`
+        // reports the fault rather than the fault plus every use of a type that never appeared.
+        insta::assert_snapshot!(rendered(parse_quote! {
+            #[display("bad path: {pth}")]
+            struct T { path: String, inner: ohno::OhnoCore }
+        }));
     }
 }

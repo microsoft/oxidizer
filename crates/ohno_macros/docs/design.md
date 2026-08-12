@@ -615,11 +615,26 @@ proc-macro bridge:
 | parse | `parse_quote!` in, `Ast` asserted, or the decoding fault asserted |
 | validate | `Ast` in, `Model` asserted, or the exact set of diagnostics asserted |
 | generate | a hand-built `Model` in, an `insta` snapshot of the `prettyplease` output |
-| `error_attr` | `parse_quote!` in, the rewritten struct asserted |
+| `display` | `parse_quote!` in, an `insta` snapshot of the message and its diagnostics |
+| `error_attr` | `parse_quote!` in, an `insta` snapshot of the rewritten struct |
 | `enrich_err` | `parse_quote!` in, an `insta` snapshot of the rewritten function |
 
 This needs no new dependency: `insta` and `prettyplease` are already dev
 dependencies of the crate.
+
+Everything that produces tokens is snapshotted whole rather than searched for
+substrings. What these macros have to get right is the *shape* of what they emit
+— which body runs where, which field lands in which position, what survives
+beside it — and a substring assertion cannot see shape. It confirms that one
+token appears somewhere and passes on an expansion that is wrong everywhere it
+did not look. Snapshotting the pretty-printed output also keeps the expected
+value readable as Rust, instead of as the space-separated token soup a
+`TokenStream` renders to.
+
+For the same reason the `display` snapshots carry the message and its
+diagnostics together: a template either lowers to a message or reports why it
+cannot, and showing one half alone cannot tell "lowered cleanly" apart from
+"lowered and also complained".
 
 Two properties come out of the split. Generator snapshots do not depend on the
 parser, so a change to attribute syntax moves parse tests and leaves expansion
@@ -648,6 +663,12 @@ assert the shape of tokens; only the integration tests and the `ui/*.rs`
 compile-fail pairs run `rustc` over what the macros produce, and only the
 `.stderr` snapshots pin where a diagnostic points. A change that keeps every unit
 test green and breaks the tests under `crates/ohno/tests/` is a broken change.
+
+`just trybuild` runs those compile-fail tests alone while iterating on a
+diagnostic, and `just trybuild-overwrite` rewrites the `.stderr` snapshots when a
+message or a span changes on purpose. Always read the resulting diff: a snapshot
+that changed for a reason you cannot name is a regression in a diagnostic, not a
+refresh.
 
 ## Decided
 

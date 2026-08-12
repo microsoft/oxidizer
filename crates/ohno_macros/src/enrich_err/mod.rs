@@ -119,116 +119,104 @@ mod tests {
 
     use super::*;
 
-    fn expand_of(args: TokenStream, item: Item) -> String {
-        expand(args, item).to_string()
+    /// Expands the attribute and pretty-prints the result.
+    ///
+    /// The whole expansion is snapshotted rather than searched for substrings, because what the
+    /// wrapper has to get right is the shape of the code it emits: which body runs where, what the
+    /// message is built from, and which parts of the signature survive. A substring assertion can
+    /// only confirm that some token is present somewhere, so it passes on an expansion that is
+    /// wrong everywhere else.
+    fn rendered(args: TokenStream, item: Item) -> String {
+        let expanded = expand(args, item);
+        let file: syn::File = syn::parse2(expanded).expect("the expansion parses as a file");
+        prettyplease::unparse(&file)
     }
 
     #[test]
     fn a_bare_attribute_names_the_function() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             TokenStream::new(),
             parse_quote! {
                 fn load() -> Result<(), MyError> { Err(MyError::new()) }
-            },
-        );
-
-        assert!(expanded.contains(r#""error in function load""#), "{expanded}");
-        assert!(!expanded.contains("compile_error"), "{expanded}");
+            }
+        ));
     }
 
     #[test]
     fn a_literal_message_renders_without_format() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("operation failed"),
             parse_quote!(
                 fn load() -> Result<(), MyError> {
                     todo!()
                 }
-            ),
-        );
-
-        assert!(expanded.contains(r#""operation failed""#), "{expanded}");
-        assert!(!expanded.contains("format"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn an_inline_capture_goes_through_format() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed for {path}"),
             parse_quote!(
                 fn load(path: &str) -> Result<(), MyError> {
                     todo!()
                 }
-            ),
-        );
-
-        assert!(expanded.contains("format"), "{expanded}");
-        assert!(expanded.contains(r#""failed for {path}""#), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn arguments_are_passed_through_unchanged() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("read {} bytes", data.len()),
             parse_quote!(
                 fn load(data: &[u8]) -> Result<(), MyError> {
                     todo!()
                 }
-            ),
-        );
-
-        assert!(expanded.contains("data . len ()"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn a_self_prefixed_argument_is_left_alone() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("counter {}", self.counter),
             parse_quote!(
                 fn load(&self) -> Result<(), MyError> {
                     todo!()
                 }
-            ),
-        );
-
-        assert!(expanded.contains("self . counter"), "{expanded}");
-        assert!(!expanded.contains("compile_error"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn the_body_runs_inside_a_closure() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed"),
             parse_quote!(
                 fn load() -> Result<(), MyError> {
                     Err(MyError::new())
                 }
-            ),
-        );
-
-        assert!(expanded.contains("(| | -> Result < () , MyError >"), "{expanded}");
-        assert!(expanded.contains("map_err"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn an_async_function_awaits_an_async_block() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed"),
             parse_quote!(
                 async fn load() -> Result<(), MyError> {
                     Err(MyError::new())
                 }
-            ),
-        );
-
-        assert!(expanded.contains("async"), "{expanded}");
-        assert!(expanded.contains(". await"), "{expanded}");
-        assert!(expanded.contains("__ohno_result : Result < () , MyError >"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn the_signature_survives_untouched() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed"),
             parse_quote! {
                 /// Documented.
@@ -236,51 +224,39 @@ mod tests {
                 where
                     T: Send,
                 { todo!() }
-            },
-        );
-
-        for expected in ["Documented.", "pub unsafe extern \"C\" fn load", "< T : Clone >", "where T : Send"] {
-            assert!(expanded.contains(expected), "missing {expected} in {expanded}");
-        }
+            }
+        ));
     }
 
     #[test]
     fn a_missing_return_type_is_rejected() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed"),
             parse_quote!(
                 fn load() {}
-            ),
-        );
-
-        assert!(expanded.contains("needs a return type"), "{expanded}");
-        assert!(expanded.contains("fn load"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn a_non_literal_first_argument_is_rejected() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!(not_a_literal),
             parse_quote!(
                 fn load() -> Result<(), MyError> {
                     todo!()
                 }
-            ),
-        );
-
-        assert!(expanded.contains("compile_error"), "{expanded}");
-        assert!(expanded.contains("fn load"), "{expanded}");
+            )
+        ));
     }
 
     #[test]
     fn a_non_function_is_rejected() {
-        let expanded = expand_of(
+        insta::assert_snapshot!(rendered(
             quote!("failed"),
             parse_quote!(
                 struct T;
-            ),
-        );
-
-        assert!(expanded.contains("applies to functions only"), "{expanded}");
+            )
+        ));
     }
 }
