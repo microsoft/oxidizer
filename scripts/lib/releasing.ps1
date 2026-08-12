@@ -1120,6 +1120,10 @@ function New-ResolvedReleaseSetFromBaseRef {
 #                       with below-breaking change type); $false otherwise.
 #                       The caller uses this to distinguish "needs review for
 #                       elevation" from "needs review for primary release".
+#   PlannedCurrentVersion    - release plan's starting version, or $null when
+#                              the package is not yet in the release set
+#   EffectiveChangeType      - release level already in the plan, or $null
+#   EffectiveTargetVersion   - target version already in the plan, or $null
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
 #                       - chains rooted in release-set members (or, in
@@ -1267,6 +1271,9 @@ function Get-UnreleasedModifiedDependencies {
                             PackageName                = $depPackage.Name
                             CurrentVersion             = $depPackage.Version
                             InReleaseSet               = $isInReleaseSet
+                            PlannedCurrentVersion      = if ($isInReleaseSet) { $depEntry.CurrentVersion } else { $null }
+                            EffectiveChangeType        = if ($isInReleaseSet) { $depEntry.EffectiveChangeType } else { $null }
+                            EffectiveTargetVersion     = if ($isInReleaseSet) { $depEntry.EffectiveTargetVersion } else { $null }
                             ChangedFileCount           = $modifiedMap[$depFolder]
                             DependencyChains           = @(, $depChain)
                             RequiresManualSemverReview = [bool]$depPackage.IsProcMacroOnly
@@ -1313,11 +1320,15 @@ function Get-UnreleasedModifiedDependencies {
         if ($findings.Contains($folder)) { continue }
         if (-not (& $shouldSurface $folder)) { continue }
         $pkg = $byFolder[$folder]
+        $entry = $ResolvedReleaseSet[$folder]
         $findings[$folder] = [pscustomobject]@{
             Folder                     = $folder
             PackageName                = $pkg.Name
             CurrentVersion             = $pkg.Version
-            InReleaseSet               = $ResolvedReleaseSet.ContainsKey($folder)
+            InReleaseSet               = $null -ne $entry
+            PlannedCurrentVersion      = if ($null -ne $entry) { $entry.CurrentVersion } else { $null }
+            EffectiveChangeType        = if ($null -ne $entry) { $entry.EffectiveChangeType } else { $null }
+            EffectiveTargetVersion     = if ($null -ne $entry) { $entry.EffectiveTargetVersion } else { $null }
             ChangedFileCount           = $modifiedMap[$folder]
             DependencyChains           = @()
             RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
