@@ -62,34 +62,40 @@ impl Fault {
 /// would honor `"{path"` as `"{path}"`, so a typo would render as a working message and never
 /// surface. A stray `}` would otherwise be copied into the generated `format!` string, where
 /// `rustc` reports it against code the user cannot see.
+///
+/// The scan is driven by an iterator rather than by an index it increments. An index the scan
+/// computes can be wrong, but an iterator always moves forward, so a wrong computation shows up as
+/// a wrong segment a test can assert on rather than as a scan that never ends.
 pub(crate) fn split(template: &str) -> Result<Vec<Segment<'_>>, Fault> {
     let bytes = template.as_bytes();
     let mut segments = Vec::new();
     let mut literal_start = 0;
-    let mut index = 0;
+    let mut cursor = bytes.iter().enumerate();
 
-    while index < bytes.len() {
-        match bytes[index] {
-            b'{' if bytes.get(index + 1) == Some(&b'{') => index += 2,
-            b'}' if bytes.get(index + 1) == Some(&b'}') => index += 2,
+    while let Some((index, &byte)) = cursor.next() {
+        match byte {
+            // Both braces of an escape are consumed together, so the second one cannot read as
+            // opening or closing a placeholder.
+            b'{' | b'}' if bytes.get(index + 1) == Some(&byte) => _ = cursor.next(),
             b'}' => return Err(Fault::StrayClosingBrace),
             b'{' => {
-                let close = index
-                    + 1
-                    + bytes[index + 1..]
-                        .iter()
-                        .position(|&b| b == b'}')
-                        .ok_or(Fault::UnclosedPlaceholder)?;
+                let length = bytes[index + 1..]
+                    .iter()
+                    .position(|&b| b == b'}')
+                    .ok_or(Fault::UnclosedPlaceholder)?;
+                let close = index + 1 + length;
 
                 if literal_start < index {
                     segments.push(Segment::Literal(&template[literal_start..index]));
                 }
                 segments.push(Segment::Placeholder(placeholder(&template[index + 1..close])));
 
-                index = close + 1;
-                literal_start = index;
+                literal_start = close + 1;
+                // `nth` consumes one more than it skips, which lands the scan on the byte after
+                // the closing brace.
+                _ = cursor.nth(length);
             }
-            _ => index += 1,
+            _ => {}
         }
     }
 

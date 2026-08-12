@@ -649,13 +649,17 @@ is the one thing these tests exist to hold.
 `cargo mutants` runs on `validate.rs` and `display/`, where the rules live and
 where a surviving mutant means a rule is unenforced (R5).
 
-Two classes of mutant survive there by construction, and neither means a rule is
-unenforced. The three `#[proc_macro]` entry points in `lib.rs` cannot be called
-from a unit test at all — a proc-macro crate's own tests do not get the bridge —
-so only `crates/ohno/tests/` kills them. And a mutant that corrupts the index
-arithmetic in the template scanner turns the scan into an infinite loop, which
-is reported as a timeout rather than as a failed assertion; the mutant is
-detected, but by hanging.
+One class of mutant survives there by construction, and it does not mean a rule
+is unenforced. The three `#[proc_macro]` entry points in `lib.rs` cannot be
+called from a unit test at all — a proc-macro crate's own tests do not get the
+bridge — so only `crates/ohno/tests/` kills them, and they carry
+`#[cfg_attr(test, mutants::skip)]`.
+
+The template scanner is driven by an iterator rather than by an index it
+increments, so a mutant that corrupts its arithmetic produces a wrong segment a
+test asserts on instead of a scan that never ends. A hanging mutant is reported
+as a timeout rather than as a failed assertion, which reads as an unenforced
+rule when it is not one.
 
 **The tests under `crates/ohno/tests/` remain the only proof that the generated
 code works.** Nothing in this crate's own tree compiles an expansion. Unit tests
