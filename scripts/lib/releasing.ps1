@@ -695,29 +695,31 @@ function Get-WorkspacePackages {
 # dependent's public API: the target's own normalized name, plus any crate root
 # it is reachable under.
 #
-# A package name is not always the name its types are written under. Three
-# things divert it:
+# This is for DECLARED edges only -- it is called solely by
+# Test-PackageExposesTarget. A package name is not always the name its types
+# are written under, and on a declared edge two things divert it, both already
+# recorded in the dependent's DepAliases:
 #   - `package = "..."` on the dependency, which makes the crate nameable only
-#     under the alias (recorded per-edge in the dependent's DepAliases);
+#     under the alias; and
 #   - `[lib] name = "..."` in the dependency's own manifest, which renames the
-#     crate root for every consumer (recorded in DepAliases too, for the
-#     dependents that declare the edge); and
-#   - the same `[lib] name`, seen from a crate that does NOT declare the edge.
-#     A re-exported type is attributed to its defining crate, so a dependent
-#     several hops away names it without depending on it -- and having no edge,
-#     it has no DepAliases entry for it either. That case is covered by
-#     $TargetCrateRoot, which is a property of the target rather than of any
-#     edge, and so is available whether or not the dependency is declared.
+#     crate root for every consumer.
 #
-# $TargetCrateRoot belongs to the third case ONLY, and the caller must withhold
-# it for the first two. On a declared edge DepAliases already records the name
-# the target is reachable under, and it is authoritative *over the target's
-# global crate root*, because a `package = "..."` rename shadows the lib name
-# entirely: a dependent that imports the crate as `aliased_dep` cannot write
-# `dep_core::Handle` no matter what the target's manifest says. Adding the
-# target's global root back on such an edge re-accepts a name the dependent
-# provably cannot use, turning an unrelated allowlist entry that happens to
-# collide with it into a false exposure and a spurious breaking bump.
+# DepAliases is therefore the whole story here, and deliberately so. It is
+# authoritative *over the target's global crate root*, because a
+# `package = "..."` rename shadows the lib name entirely: a dependent that
+# imports the crate as `aliased_dep` cannot write `dep_core::Handle` no matter
+# what the target's manifest says. Adding the target's global root back on such
+# an edge would re-accept a name the dependent provably cannot use, turning an
+# unrelated allowlist entry that happens to collide with it into a false
+# exposure and a spurious breaking bump. That is why this function takes no
+# crate-root parameter.
+#
+# A third diversion exists but is not this function's problem: the same
+# `[lib] name` seen from a crate that does NOT declare the edge. A re-exported
+# type is attributed to its defining crate, so a dependent several hops away
+# names it without depending on it -- and having no edge, it has no DepAliases
+# entry for it either. Test-PackageAllowlistNamesTarget handles that case,
+# building its roots from the target's own record instead.
 #
 # The real package name below is a known over-acceptance, not a considered
 # exception to that rule: a rename shadows the package name exactly as it
@@ -729,17 +731,13 @@ function Get-WorkspacePackages {
 # the far worse direction, so it stays until the edge data can distinguish the
 # two. It errs toward a spurious bump, never toward a missed break.
 #
-# Any of them is the root an allowed_external_types entry may carry. Matching
+# Any of these roots is one an allowed_external_types entry may carry. Matching
 # solely on the real package name would find nothing and report "not exposed"
 # -- a fail-open that ships a break as compatible.
 function Get-AcceptedExposureRoots {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
-        [Parameter(Mandatory = $true)][string]$TargetPackageName,
-        # The target's own crate root, from its package record. Supplied only
-        # for an undeclared (indirect) edge -- see the note above on why a
-        # declared edge must rely on DepAliases instead.
-        [string]$TargetCrateRoot
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
     )
 
     $normalizedTarget = $TargetPackageName.Replace('-', '_')
@@ -747,9 +745,6 @@ function Get-AcceptedExposureRoots {
     $roots = @($normalizedTarget)
     if ($Dependent.PSObject.Properties['DepAliases'] -and $null -ne $Dependent.DepAliases) {
         $roots += @($Dependent.DepAliases[$normalizedTarget])
-    }
-    if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
-        $roots += $TargetCrateRoot.Replace('-', '_')
     }
 
     return @($roots | Where-Object { $_ } | Sort-Object -Unique)
