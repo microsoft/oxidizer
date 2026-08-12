@@ -94,8 +94,8 @@ hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"] 
 mimalloc = { workspace = true }
 multitude_macros = { path = "../multitude_macros" }
 mutants = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["raw_value"] }
+serde = { workspace = true, features = ["alloc", "derive"] }
+serde_json = { workspace = true, features = ["alloc", "raw_value"] }
 widestring = { workspace = true, features = ["alloc"] }
 zerocopy = { workspace = true }
 

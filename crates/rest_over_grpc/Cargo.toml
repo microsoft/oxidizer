@@ -123,7 +123,7 @@ protox = { workspace = true }
 quote = { workspace = true }
 routerama_build = { path = "../routerama_build" }
 serde = { workspace = true, features = ["std", "derive"] }
-serde_json = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std", "raw_value"] }
 syn = { workspace = true, features = ["full", "parsing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 tower-service = { workspace = true }

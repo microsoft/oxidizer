@@ -58,15 +58,22 @@ not weaken the feature gate for them.
 
 ## Dependency features are also mirrored
 
-A feature can activate features of a dependency as well as the dependency
-itself. The dev-dependency carries those features, otherwise the gated code
-compiles against a smaller API surface than a feature build gives it:
+Reproducing the dependency by name is not enough. The dev-dependency also
+carries every feature that a feature build would give it, otherwise the gated
+code compiles against a smaller API surface than the feature build provides.
+
+Two sources contribute. The `[dependencies]` entry declares features directly,
+and the `[features]` table activates further ones through `dep/feature` entries:
 
 ```toml
 [features]
-test-util = ["bytesbuf/test-util"]
+codegen = ["dep:syn", "bytesbuf/test-util"]
+
+[dependencies]
+syn = { workspace = true, optional = true, features = ["full", "parsing"] }
 
 [dev-dependencies]
+syn = { workspace = true, features = ["full", "parsing"] }
 bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
 ```
 
