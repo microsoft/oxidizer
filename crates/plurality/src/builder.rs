@@ -12,7 +12,7 @@ use allocator_api2::alloc::{Allocator, Global};
 use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
 use crate::geometry::TypedGeometry;
-use crate::pool::{Pool, PoolCore, PoolInner, teardown_erased};
+use crate::pool::{Pool, PoolCore, PoolInner, publish_address, teardown_erased};
 use crate::slot::{FREE_END, MAX_POOL_SLOTS};
 
 /// Default number of slots per chunk.
@@ -117,6 +117,7 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
                 pool_refcount: AtomicUsize::new(1),
                 teardown: teardown_erased::<A, TypedGeometry<T>>,
             },
+            me: NonNull::dangling(),
             chunk_size,
             shift: chunk_size.trailing_zeros(),
             mask: chunk_size - 1,
@@ -131,6 +132,9 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
         };
         let raw = AllocBox::into_raw(AllocBox::new(inner));
         let inner = NonNull::new(raw).expect("Box::into_raw never returns a null pointer");
+        // SAFETY: `inner` addresses the initialized pool nothing has borrowed
+        // yet, and carries the allocation's own provenance.
+        unsafe { publish_address(inner) };
         Pool::from_inner(inner)
     }
 }

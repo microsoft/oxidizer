@@ -11,12 +11,13 @@ enum ErrorKind {
     /// `max_chunks` cap, or, for an unbounded pool, the addressable
     /// slot-index ceiling.
     CapacityExhausted,
-    /// The backing allocator failed to provide memory for a new chunk.
+    /// The backing allocator failed to provide memory the pool needed for its
+    /// own use.
     AllocatorFailed,
 }
 
 /// The error returned by the fallible `try_alloc_*` methods of
-/// [`Pool`](crate::Pool).
+/// [`Pool`](crate::Pool) and [`BlindPool`](crate::BlindPool).
 ///
 /// Distinguish the two causes with
 /// [`is_capacity_exhausted`](Self::is_capacity_exhausted) and
@@ -53,7 +54,7 @@ impl AllocError {
     }
 
     /// Returns `true` if allocation failed because the backing allocator could
-    /// not provide memory for a new chunk.
+    /// not provide memory the pool needed for its own use.
     #[must_use]
     pub fn is_allocator_failure(self) -> bool {
         matches!(self.kind, ErrorKind::AllocatorFailed)
@@ -64,7 +65,7 @@ impl fmt::Display for AllocError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.kind {
             ErrorKind::CapacityExhausted => "the pool reached its maximum capacity",
-            ErrorKind::AllocatorFailed => "the backing allocator failed to allocate a new chunk",
+            ErrorKind::AllocatorFailed => "the backing allocator failed to provide memory for the pool",
         })
     }
 }

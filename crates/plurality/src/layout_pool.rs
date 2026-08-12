@@ -26,7 +26,7 @@ use crate::atomic::Ordering::{Acquire, Relaxed, Release};
 use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::error::AllocError;
 use crate::geometry::{RuntimeGeometry, SlotGeometry};
-use crate::pool::{PoolCore, PoolInner, teardown, teardown_erased};
+use crate::pool::{PoolCore, PoolInner, publish_address, teardown, teardown_erased};
 use crate::slot::{FREE_END, MAX_POOL_SLOTS, SlotCell};
 
 /// A pool serving one fixed value [`Layout`].
@@ -67,6 +67,7 @@ impl<A: Allocator> LayoutPool<A> {
                 pool_refcount: AtomicUsize::new(1),
                 teardown: teardown_erased::<A, RuntimeGeometry>,
             },
+            me: NonNull::dangling(),
             chunk_size,
             shift: chunk_size.trailing_zeros(),
             mask: chunk_size - 1,
@@ -88,6 +89,9 @@ impl<A: Allocator> LayoutPool<A> {
         };
         // SAFETY: `raw` is a fresh, exclusively owned, correctly sized block.
         unsafe { raw.as_ptr().write(inner) };
+        // SAFETY: `raw` addresses the initialized pool nothing has borrowed
+        // yet, and carries the allocation's own provenance.
+        unsafe { publish_address(raw) };
         Ok(Self { inner: raw })
     }
 

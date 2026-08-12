@@ -409,7 +409,7 @@ fn allocator_failure_surfaces_as_allocator_failure() {
     let err = pool.try_alloc_box(1).unwrap_err();
     assert!(err.is_allocator_failure());
     assert!(!err.is_capacity_exhausted());
-    assert_eq!(format!("{err}"), "the backing allocator failed to allocate a new chunk");
+    assert_eq!(format!("{err}"), "the backing allocator failed to provide memory for the pool");
 }
 
 // An allocator that tracks the number of live bytes, to prove memory is freed.

@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `BlindPool<A>` and `BlindPoolBuilder` — an object pool that accepts values of
+  any type. The element type moves from the pool to each allocation call, so one
+  pool serves a heterogeneous mix of values while every handle keeps the size,
+  handle flavors, and reclamation cost of the typed pool.
+
+### Changed
+
+- The allocator-failure `AllocError` message and predicate documentation no
+  longer name chunks specifically, because the same error covers a pool's other
+  internal allocations.
+
+### Fixed
+
+- Freeing a pool through the last surviving handle no longer deallocates through
+  a pointer derived from a shared borrow, which was undefined behaviour (caught
+  by Miri as a borrow-stack violation).
+
 ## [0.2.1] - 2026-08-09
 
 ### Added

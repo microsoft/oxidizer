@@ -275,6 +275,14 @@ The bound owner is the exception: it stores a `NonNull<SlotCell<T>>` and uses a
 monomorphized path that reads the slot through the compiler's layout. See
 [handles](./handles.md) for why that consumer is kept independent.
 
+The core pointer in a chunk header is the one link in that walk that cannot be
+derived on demand. It ends up freeing the pool allocation when the last handle
+outlives the pool object, and a pointer taken from a `&self` borrow permits
+only reads and interior-mutable writes — deallocating through one is undefined
+behaviour, which Miri reports as a borrow-stack violation at teardown. Each
+pool therefore records its own address once at construction, from the pointer
+its allocation was created with, and every chunk header copies that value.
+
 The modules carrying this arithmetic opt out of the lint against multiple
 unsafe operations per block, with the rationale recorded at each module head:
 one recovery step is not independently meaningful, and splitting the walk into
@@ -320,15 +328,16 @@ Teardown itself begins by loading the chunk count with `Acquire`, pairing with
 the `Release` store in growth; the pool-level reference count's increments are
 `Relaxed` and do not by themselves make the directory visible to a thread that
 did not allocate. It then walks the directory, deallocating each chunk with the
-stored chunk layout, and finally drops the pool's own state in place and
-returns its metadata allocation to the global allocator.
+stored chunk layout, and finally reconstitutes the metadata allocation as a box
+and drops it.
 
-Dropping in place before deallocating is required because the metadata
-allocation is raw rather than a `Box` (see [Failure](#failure)): the directory
-vector's buffer, the allocator instance, and under `loom` the instrumented
-atomics in the core all have drop glue that would otherwise be skipped. That
-leak would escape the allocation-tracking tests, which observe the pool's own
-allocator rather than the global one, so it is asserted separately.
+That last step runs the pool's own drop glue — the directory vector's buffer,
+the allocator instance, and under `loom` the instrumented atomics in the core —
+which a bare deallocation would skip. The leak would escape the
+allocation-tracking tests, which observe the pool's own allocator rather than
+the global one, so it is asserted separately. A metadata block obtained raw
+rather than from a box (see [Failure](#failure)) is reclaimed by the same step,
+because both come from the global allocator with the same layout.
 
 Teardown never reads or drops element storage. Every value was destroyed by its
 own handle before that handle released its unit of the count, so a pool that

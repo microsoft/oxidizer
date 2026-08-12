@@ -93,6 +93,15 @@ const fn unbounded_chunk_cap(chunk_size: u32) -> u64 {
 #[repr(C)]
 pub(crate) struct PoolInner<A, G> {
     pub(crate) core: PoolCore,
+    /// This pool's own address, captured from the pointer its allocation was
+    /// created with.
+    ///
+    /// Every chunk header carries a copy so that the last handle to be dropped
+    /// can free the pool. That pointer must be able to deallocate, so it cannot
+    /// be derived from a `&self` borrow — such a pointer only permits reads and
+    /// interior-mutable writes, and freeing through it is undefined behaviour.
+    /// Ref: docs/implementation/pool-body.md, "Pointer recovery".
+    pub(crate) me: NonNull<PoolCore>,
     /// Slots per chunk (a power of two).
     pub(crate) chunk_size: u32,
     /// `log2(chunk_size)`.
@@ -914,10 +923,9 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
         // uninitialized.
         unsafe {
             ptr.as_ptr().write(ChunkHeader {
-                // `core` is the first `#[repr(C)]` field, so this cast keeps
-                // provenance over the complete pool allocation for concrete
-                // teardown.
-                pool: NonNull::from(self).cast::<PoolCore>(),
+                // Carries the provenance the pool allocation was created with,
+                // so that a handle outliving the pool can free it.
+                pool: self.me,
                 base_index,
                 chunk_index: chunks,
             });
@@ -1253,6 +1261,19 @@ pub(crate) unsafe fn teardown_erased<A: Allocator, G: SlotGeometry>(core: NonNul
     // SAFETY: `PoolInner` is `#[repr(C)]` with `core` as its first field, and
     // this monomorphized callback was stored by that exact pool allocation.
     unsafe { teardown::<A, G>(core.cast::<PoolInner<A, G>>()) };
+}
+
+/// Records a freshly allocated pool's own address in its metadata.
+///
+/// # Safety
+/// `raw` must address an initialized `PoolInner` that nothing has borrowed yet,
+/// and must carry provenance over the whole pool allocation — it is the pointer
+/// teardown eventually frees.
+pub(crate) unsafe fn publish_address<A: Allocator, G: SlotGeometry>(raw: NonNull<PoolInner<A, G>>) {
+    // SAFETY: the caller guarantees an initialized, unshared pool allocation.
+    // `PoolInner` is `#[repr(C)]` with `core` first, so the cast addresses the
+    // core without changing the pointer's provenance.
+    unsafe { (*raw.as_ptr()).me = raw.cast::<PoolCore>() };
 }
 
 impl PoolCore {
