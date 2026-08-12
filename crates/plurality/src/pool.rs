@@ -847,7 +847,8 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
     /// pool is full and cannot grow (see [`AllocError`] for the cause).
     #[inline]
     pub(crate) fn alloc_slot(&self) -> Result<NonNull<u8>, AllocError> {
-        let geometry = self.geometry;        loop {
+        let geometry = self.geometry;
+        loop {
             let head = self.core.free_head.load(Acquire);
             if head == FREE_END {
                 // `grow` reserves and returns the first slot of the new chunk

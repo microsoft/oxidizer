@@ -51,12 +51,7 @@ impl<A: Allocator> LayoutPool<A> {
     /// # Errors
     /// Returns [`AllocError::ALLOCATOR_FAILED`] if the global allocator cannot
     /// supply the pool's metadata block.
-    pub(crate) fn new(
-        layout: Layout,
-        chunk_size: u32,
-        max_chunks: Option<u32>,
-        allocator: A,
-    ) -> Result<Self, AllocError> {
+    pub(crate) fn new(layout: Layout, chunk_size: u32, max_chunks: Option<u32>, allocator: A) -> Result<Self, AllocError> {
         let geometry = RuntimeGeometry::new(layout);
         let (chunk_size, chunk_layout) = clamp_chunk_size(geometry, chunk_size);
         let max_chunks = clamp_max_chunks(chunk_size, max_chunks);
@@ -101,7 +96,7 @@ impl<A: Allocator> LayoutPool<A> {
         unsafe { self.inner.as_ref() }
     }
 
-    /// A copyable view of this pool.
+    /// A [`Copy`] view of this pool.
     ///
     /// The router copies one of these out of its directory and releases the
     /// borrow before allocating, so that reentrant user code is free to grow
@@ -158,7 +153,7 @@ impl<A: Allocator> Drop for LayoutPool<A> {
     }
 }
 
-/// A copyable, non-owning view of a [`LayoutPool`].
+/// A [`Copy`], non-owning view of a [`LayoutPool`].
 ///
 /// Holds no reference count: it is only ever used while the [`BlindPool`] that
 /// owns the pool is borrowed, and layout pools are never retired.
@@ -199,11 +194,7 @@ impl<A: Allocator> LayoutPoolRef<A> {
     pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError> {
         // SAFETY: the owning `LayoutPool` outlives every view of it.
         let inner = unsafe { self.inner.as_ref() };
-        debug_assert_eq!(
-            Layout::new::<T>(),
-            inner.geometry.layout(),
-            "layout pool served a mismatched type"
-        );
+        debug_assert_eq!(Layout::new::<T>(), inner.geometry.layout(), "layout pool served a mismatched type");
         match inner.alloc_slot() {
             Ok(slot) => Ok(slot.cast::<SlotCell<T>>()),
             Err(err) => Err(err),

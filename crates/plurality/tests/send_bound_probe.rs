@@ -304,8 +304,7 @@ fn concurrent_free_and_alloc_with_non_send_values() {
             // Allocate and free continuously on the far thread, popping slots
             // the originating thread is concurrently pushing.
             for _ in 0_i32..256_i32 {
-                let owned =
-                    pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops_moved));
+                let owned = pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops_moved));
                 owned.bump();
             }
         });

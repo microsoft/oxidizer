@@ -75,7 +75,7 @@ impl ChunkSizing {
 /// the internal pool serving their exact [`Layout`], so a value occupies
 /// exactly the space a [`Pool`](crate::Pool) would give it.
 ///
-/// Handles are the same four flavours the typed pool produces, with the same
+/// Handles are the same four flavors the typed pool produces, with the same
 /// guarantees — address stability, detachable lifetime, one-pointer width for
 /// sized values, and coercion to trait objects and slices. Freeing costs
 /// exactly what it costs in a typed pool, because a handle finds its own pool
@@ -161,12 +161,7 @@ impl<A: Allocator + Clone> fmt::Debug for BlindPool<A> {
 }
 
 impl<A: Allocator + Clone> BlindPool<A> {
-    pub(crate) fn from_parts(
-        sizing: ChunkSizing,
-        max_chunks: Option<u32>,
-        max_layouts: Option<usize>,
-        allocator: A,
-    ) -> Self {
+    pub(crate) fn from_parts(sizing: ChunkSizing, max_chunks: Option<u32>, max_layouts: Option<usize>, allocator: A) -> Self {
         Self {
             layouts: UnsafeCell::new(Vec::new()),
             pools: UnsafeCell::new(Vec::new()),
@@ -217,12 +212,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
         // reentrant allocation reaching either sees a consistent — merely
         // incomplete — directory.
         let stride = crate::geometry::stride(layout.size(), layout.align());
-        let pool = LayoutPool::new(
-            layout,
-            self.sizing.slots_for(stride),
-            self.max_chunks,
-            self.allocator.clone(),
-        )?;
+        let pool = LayoutPool::new(layout, self.sizing.slots_for(stride), self.max_chunks, self.allocator.clone())?;
 
         // Step 4: reserve after construction, so the reservation cannot be
         // consumed by a reentrant miss that happened during step 3.
@@ -399,10 +389,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Total slots across allocated chunks of `T`'s layout.
     #[must_use]
     pub fn capacity_of<T>(&self) -> u64 {
-        self.with_layout_of::<T, _>(
-            |pool| u64::from(pool.chunks_allocated()) * u64::from(pool.chunk_size()),
-            || 0,
-        )
+        self.with_layout_of::<T, _>(|pool| u64::from(pool.chunks_allocated()) * u64::from(pool.chunk_size()), || 0)
     }
 
     /// Lifetime totals summed across every layout pool.

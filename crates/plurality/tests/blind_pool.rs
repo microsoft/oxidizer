@@ -189,7 +189,11 @@ fn per_layout_queries_report_an_unseen_layout_without_creating_one() {
 
     let _held = pool.alloc_box(1_u64);
     assert_eq!(pool.layouts(), 1);
-    assert_eq!(pool.chunk_size_of::<u64>(), chunk_size, "the built pool must use the reported sizing");
+    assert_eq!(
+        pool.chunk_size_of::<u64>(),
+        chunk_size,
+        "the built pool must use the reported sizing"
+    );
     assert_eq!(pool.max_chunks_of::<u64>(), 2);
     assert_eq!(pool.chunks_allocated_of::<u64>(), 1);
     assert_eq!(pool.capacity_of::<u64>(), u64::from(chunk_size));
@@ -454,8 +458,7 @@ fn erased_handles_run_the_concrete_destructor_and_reclaim_the_slot() {
 
     // `dyn Send` has no methods, so the destructor can only be reached through
     // the value's vtable.
-    let erased: PoolBox<dyn Send> =
-        PoolBox::unsize::<dyn Send>(pool.alloc_box(DropCounter(counter.clone())), coerce!(dyn Send));
+    let erased: PoolBox<dyn Send> = PoolBox::unsize::<dyn Send>(pool.alloc_box(DropCounter(counter.clone())), coerce!(dyn Send));
     assert_eq!(pool.len_of::<DropCounter>(), 1);
     drop(erased);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -689,7 +692,10 @@ fn a_huge_layout_clamps_the_requested_chunk_size_down() {
     // The effective cap is the smaller of the configured cap and the ceiling
     // the clamped chunk size permits. Ref: docs/design/blind-pool.md,
     // "Clamping and effective sizing".
-    assert!(pool.max_chunks_of::<Huge>() < u32::MAX, "the cap must be clamped alongside the chunk size");
+    assert!(
+        pool.max_chunks_of::<Huge>() < u32::MAX,
+        "the cap must be clamped alongside the chunk size"
+    );
     assert!(pool.max_chunks_of::<Huge>() >= 1);
     assert_eq!(pool.layouts(), 0, "a query must not create a layout pool");
 }
@@ -772,7 +778,10 @@ unsafe impl Allocator for CountingAllocator {
 fn dropping_the_pool_frees_every_layouts_chunks() {
     let live = StdArc::new(AtomicUsize::new(0));
     {
-        let pool = BlindPool::builder().chunk_size(2).allocator(CountingAllocator(live.clone())).build();
+        let pool = BlindPool::builder()
+            .chunk_size(2)
+            .allocator(CountingAllocator(live.clone()))
+            .build();
         let a = pool.alloc_box(1_u8);
         let b = pool.alloc_box(2_u64);
         let c = pool.alloc_box([3_u64; 4]);

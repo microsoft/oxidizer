@@ -162,10 +162,22 @@ impl<T> TypedGeometry<T> {
     const CHECK: () = {
         let size = size_of::<T>();
         let align = align_of::<T>();
-        assert!(stride(size, align) == size_of::<crate::slot::SlotCell<T>>(), "slot stride must equal the compiler's slot size");
-        assert!(cell_align(align) == align_of::<crate::slot::SlotCell<T>>(), "slot alignment must equal the compiler's slot alignment");
-        assert!(refcount_offset(size) == core::mem::offset_of!(crate::slot::SlotCell<T>, refcount), "refcount offset must equal the compiler's field offset");
-        assert!(index_offset(size) == core::mem::offset_of!(crate::slot::SlotCell<T>, index), "index offset must equal the compiler's field offset");
+        assert!(
+            stride(size, align) == size_of::<crate::slot::SlotCell<T>>(),
+            "slot stride must equal the compiler's slot size"
+        );
+        assert!(
+            cell_align(align) == align_of::<crate::slot::SlotCell<T>>(),
+            "slot alignment must equal the compiler's slot alignment"
+        );
+        assert!(
+            refcount_offset(size) == core::mem::offset_of!(crate::slot::SlotCell<T>, refcount),
+            "refcount offset must equal the compiler's field offset"
+        );
+        assert!(
+            index_offset(size) == core::mem::offset_of!(crate::slot::SlotCell<T>, index),
+            "index offset must equal the compiler's field offset"
+        );
     };
 
     /// Returns the geometry for `T`.
@@ -216,7 +228,7 @@ impl<T> SlotGeometry for TypedGeometry<T> {
 
     /// Addresses the slot as the compiler lays out `[SlotCell<T>]`, rather than
     /// by multiplying out the stride. `CHECK` proves the two agree, and the
-    /// typed form gives the optimiser the element type directly.
+    /// typed form gives the optimizer the element type directly.
     #[inline]
     unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8> {
         // SAFETY: the payload begins `slots_offset` bytes into the chunk and
@@ -330,7 +342,12 @@ mod tests {
             let typed = TypedGeometry::<$t>::new();
             let runtime = RuntimeGeometry::new(Layout::new::<$t>());
 
-            assert_eq!(cell_align(align), align_of::<SlotCell<$t>>(), "cell alignment for {}", stringify!($t));
+            assert_eq!(
+                cell_align(align),
+                align_of::<SlotCell<$t>>(),
+                "cell alignment for {}",
+                stringify!($t)
+            );
             assert_eq!(typed.stride(), size_of::<SlotCell<$t>>(), "stride for {}", stringify!($t));
             assert_eq!(
                 typed.refcount_offset(),
@@ -354,7 +371,12 @@ mod tests {
                 "runtime refcount offset for {}",
                 stringify!($t),
             );
-            assert_eq!(runtime.index_offset(), typed.index_offset(), "runtime index offset for {}", stringify!($t));
+            assert_eq!(
+                runtime.index_offset(),
+                typed.index_offset(),
+                "runtime index offset for {}",
+                stringify!($t)
+            );
             assert_eq!(runtime.slots_offset(), typed.slots_offset());
             assert_eq!(runtime.chunk_layout(7), typed.chunk_layout(7));
             assert_eq!(typed.chunk_layout(7), chunk_layout(size, align, 7));
@@ -368,7 +390,12 @@ mod tests {
             let slot = with_index.pad_to_align();
             let (_, extend_slots) = Layout::new::<ChunkHeader>().extend(slot).unwrap();
 
-            assert_eq!(typed.refcount_offset(), extend_refcount, "extend refcount offset for {}", stringify!($t));
+            assert_eq!(
+                typed.refcount_offset(),
+                extend_refcount,
+                "extend refcount offset for {}",
+                stringify!($t)
+            );
             assert_eq!(typed.index_offset(), extend_index, "extend index offset for {}", stringify!($t));
             assert_eq!(typed.stride(), slot.size(), "extend stride for {}", stringify!($t));
             assert_eq!(typed.slots_offset(), extend_slots, "extend slots offset for {}", stringify!($t));
