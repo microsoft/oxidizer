@@ -730,7 +730,8 @@ Describe 'Resolve-ReleaseSet' {
         It '-Force honors the explicit pin verbatim when a higher version is required' {
             # b's own API broke => normally requires 2.0.0; user pinned b at
             # 1.1.0. With -Force, b stays at 1.1.0 but the change-type tag is
-            # upgraded so any further cascade decisions for b would be correct.
+            # upgraded to record the unmet requirement. Further exposure
+            # propagation follows the actual 1.0.0 -> 1.1.0 transition.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
@@ -913,8 +914,9 @@ Describe 'Resolve-ReleaseSet exposure cascade over re-exported types' {
     # fail-open: a breaking bump of the defining crate shipped as compatible.
 
     It 'raises an indirect dependent whose allowlist names the defining crate' {
-        # relay does NOT expose defining, so it cannot carry the break upward on
-        # its own; the edge exists only because facade allowlists `defining`.
+        # relay is raised directly because it exposes defining. facade requires
+        # the indirect defining-crate path: it depends on relay, but its
+        # allowlist names defining rather than its declared dependency.
         $baseline = @(
             New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
             New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `

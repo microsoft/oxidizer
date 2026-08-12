@@ -244,10 +244,10 @@ differently:
   entry, or a wildcard root all count as possible exposure, because an
   unknown must not ship a break as compatible.
 
-- **Indirect edges to a transitive dependency** require the dependent's
-  allowlist to explicitly name that dependency, under the crate root the
-  dependency itself defines: its `[lib] name = "..."` when it sets one,
-  otherwise its package name. A `package = "..."` alias cannot apply
+- **Indirect edges to a transitive dependency** require positive allowlist
+  evidence: either a literal root naming the dependency under the crate root
+  it defines (`[lib] name = "..."` when set, otherwise its package name), or
+  a wildcard root that may expand to it. A `package = "..."` alias cannot apply
   here -- only a crate that *declares* a dependency can rename it, and an
   indirect dependent declares no edge to the target at all. This exists
   because `cargo-check-external-types` attributes a
@@ -394,9 +394,11 @@ suppress a change type the API analysis requires.
   semver token as a hard pin — if the explicit version is below what the
   analysis requires the planner errors instead of silently overriding
   the caller. Pass `-Force` to override: the pin is honored verbatim, the
-  package's effective change-type tag is still upgraded so further
-  cascade decisions are correct, and a warning is printed flagging that
-  consumers may break.)
+  package's effective change-type tag is still upgraded to record the
+  stronger unmet requirement and support warnings/bookkeeping. Exposure
+  propagation follows the actual current-to-pinned version transition: a
+  compatible forced pin stops propagation, while an incompatible forced pin
+  continues it. A warning is printed flagging that consumers may break.)
 
 ---
 

@@ -163,10 +163,11 @@
     version than an explicit `<name>@<major>.<minor>.<patch>` pin
     allows, the release plan is rejected (the script refuses to
     silently override an explicit pin). With -Force, the explicit pin
-    is honored verbatim, the package's EffectiveChangeType tag is
-    upgraded to match the cascade so any further cascade decisions are
-    correct, and a warning is printed flagging that consumers
-    may break.
+    is honored verbatim, and the package's EffectiveChangeType tag is
+    upgraded to record the stronger unmet requirement for warnings and
+    bookkeeping. Further exposure propagation is based on the actual
+    current-to-pinned version transition, not that tag. A warning is printed
+    flagging that consumers may break.
 
     -Force does NOT relax the always-fatal "pin is not strictly greater
     than the current on-disk version" check, and has no effect on

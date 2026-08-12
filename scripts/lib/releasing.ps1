@@ -571,10 +571,11 @@ function Get-CrateRequiredChangeType {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
-#   DepAliases            - hashtable mapping a normalized dependency name to the normalized
-#                           crate roots it is reachable under when those differ from the
-#                           package name -- the `package = "..."` alias, or the dependency's
-#                           own `[lib] name`; empty when every dep is nameable by its own name
+#   DepAliases            - hashtable mapping a normalized dependency name to additional
+#                           normalized crate roots observed for it -- a `package = "..."`
+#                           alias, or the dependency's own `[lib] name`. An entry does not say
+#                           whether a separate unrenamed declaration also exists, so this is
+#                           not a complete or exclusive set of reachable roots.
 #   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
 #                           sets one, else its normalized package name), or $null when the
 #                           package has no library target at all. This is the name a crate's
@@ -860,8 +861,15 @@ function Test-PackageAllowlistNamesTarget {
         return $false
     }
 
-    $acceptedRoots = Get-AcceptedExposureRoots -Dependent $Dependent `
-        -TargetPackageName $TargetPackageName -TargetCrateRoot $TargetCrateRoot
+    # This predicate is called only when no dependency edge to the target
+    # exists. DepAliases is therefore irrelevant: production can populate an
+    # alias only while processing a declared edge, which would take the direct
+    # branch instead. The only roots possible here belong to the target itself.
+    $acceptedRoots = @($TargetPackageName.Replace('-', '_'))
+    if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
+        $acceptedRoots += $TargetCrateRoot.Replace('-', '_')
+    }
+    $acceptedRoots = @($acceptedRoots | Sort-Object -Unique)
 
     foreach ($entry in $Dependent.AllowedExternalTypes) {
         if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {

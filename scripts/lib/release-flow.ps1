@@ -292,8 +292,8 @@ function Update-EntryForRequiredChangeType {
                 throw "Cannot release '$($Entry.Folder)' as v$($Entry.RequestedTargetVersion): $RequirementLabel requires at least v$requiredVersion because of $RequirementDetail. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (consumers may break)."
             }
         } else {
-            # Pin still satisfies. Bump the tag so downstream cascade decisions
-            # are correct, but keep the pinned version.
+            # Pin still satisfies. Bump the tag to record the stronger
+            # requirement for diagnostics, but keep the pinned version.
             $Entry.EffectiveChangeType = $RequiredChangeType
         }
     } else {
@@ -473,11 +473,12 @@ function Update-EntryForExposedDependency {
 #   -Force            : if set, an explicit version pin that numerically
 #                       undershoots the cascade-required version is honored
 #                       verbatim instead of throwing. EffectiveChangeType is
-#                       still upgraded so dependent cascade decisions are
-#                       correct; PinHonoredAgainstCascade is set so callers
-#                       (and Show-ReleasePlan) can warn the user. -Force does
-#                       NOT relax the always-fatal "pin is not strictly
-#                       greater than the current on-disk version" check.
+#                       still upgraded to record the stronger unmet requirement;
+#                       PinHonoredAgainstCascade lets callers warn the user.
+#                       Exposure propagation uses the actual CurrentVersion to
+#                       EffectiveTargetVersion transition, not the severity tag.
+#                       -Force does NOT relax the always-fatal "pin is not
+#                       strictly greater than the current on-disk version" check.
 #
 # Returns: an array of pscustomobject entries, one per resolved package:
 #
@@ -494,7 +495,7 @@ function Update-EntryForExposedDependency {
 #     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
 #     IsProcMacroOnly           = $true|$false   # cargo metadata target classification
 #     RequiresManualSemverReview = $true|$false  # proc-macro API cannot be checked automatically
-#     CascadeReasons            = [List<{Target,Breaking}>]                  # one per (target → dep) edge
+#     CascadeReasons            = [List<{Target,Breaking}>]                  # one per target package cause
 #     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
 #
@@ -512,9 +513,9 @@ function Update-EntryForExposedDependency {
 #          auto-upgrade silently and set AutoUpgraded=$true. For user-source
 #          entries with an explicit version pin, throw if the pin would
 #          numerically undershoot the cascade-required version (or, with
-#          -Force, honor the pin verbatim, upgrade the change-type tag, and
-#          set PinHonoredAgainstCascade=$true); otherwise honour the pin and
-#          bump only the change-type tag.
+#          -Force, honor the pin verbatim, record the unmet requirement in the
+#          change-type tag, and set PinHonoredAgainstCascade=$true); otherwise
+#          honour the pin and bump only the diagnostic change-type tag.
 #        - or create a new cascade-source entry.
 #      Ordinary library dependents use their own cargo-semver-checks result,
 #      floored at patch. A second pass raises a dependent to breaking when it
@@ -527,9 +528,10 @@ function Update-EntryForExposedDependency {
 #      chains cascade.
 #      Proc-macro-only dependents use a provisional patch floor and are explicitly
 #      classified in the interactive review.
-#      Cascade reasons are recorded per (target → dep) edge with dedup by
-#      target name (re-encountering an edge for an already-strengthened target
-#      overwrites the prior reason in place).
+#      Cascade reasons are package-level release causes, recorded once per
+#      target package name for membership or exposure strengthening. They do
+#      not assert a direct dependency edge; callers needing edges must query
+#      the dependency graph.
 #
 # The release-set membership walk starts from user targets and includes every
 # transitive published dependent. Severity is then resolved from two independent

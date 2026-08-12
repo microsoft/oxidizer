@@ -587,7 +587,7 @@ Describe 'Test-PackageExposesTarget' {
     }
 
     It 'reports exposure when the entry is rooted at the alias of a renamed dependency' {
-        # `bytesbuf = { package = "bytesbuf", ... }` renamed to `buf`: Rust
+        # `buf = { package = "bytesbuf", ... }`: Rust
         # source -- and therefore the allowlist -- can only name it as `buf`.
         $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
         Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
@@ -688,9 +688,18 @@ Describe 'Test-PackageAllowlistNamesTarget' {
         Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'data-privacy-core' | Should -BeTrue
     }
 
-    It 'reports a match when an entry is rooted at a rename alias' {
+    It "reports a match when an entry is rooted at the target's divergent crate root" {
+        $dep = New-Dependent -Allowed @('buf_core::Bytes')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' `
+            -TargetCrateRoot 'buf_core' | Should -BeTrue
+    }
+
+    It 'does not consult dependency-edge aliases for an indirect target' {
+        # An indirect dependent declares no edge to the target, so production
+        # can never populate this alias. Pin that the helper does not turn an
+        # impossible fixture state into supported behaviour.
         $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
-        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
     }
 
     It 'reports no match when no entry is rooted at the target' {
