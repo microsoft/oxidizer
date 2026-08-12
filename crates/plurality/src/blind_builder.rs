@@ -59,8 +59,8 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
         self
     }
 
-    /// Sizes chunks by a slot count, reproducing the typed pool's
-    /// predictability.
+    /// Sizes chunks by a slot count, so that every layout grows in equal
+    /// increments of capacity.
     ///
     /// Every layout starts from this count, subject to per-layout clamping.
     /// Replaces any previous [`chunk_bytes`](Self::chunk_bytes).

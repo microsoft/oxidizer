@@ -16,6 +16,7 @@
 
 use alloc::vec::Vec;
 use core::alloc::Layout;
+use core::any::type_name;
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -119,9 +120,12 @@ pub struct BlindPool<A: Allocator + Clone = Global> {
     allocator: A,
 }
 
-// SAFETY: the same argument as `Pool`. All cross-thread state is atomic; the
-// two directory vectors are touched only on the allocation path, which `!Sync`
-// confines to one thread at a time, and the pool object owns no values.
+// SAFETY: all cross-thread state is atomic; the two directory vectors are
+// touched only on the allocation path, which `!Sync` confines to one thread at
+// a time; and the pool object owns no values, so a thread that receives one has
+// no route to a value another thread placed in it — it can only draw free
+// slots, which hold nothing live. Thread mobility for values is carried by the
+// handles, each of which imposes its own bound.
 // Ref: docs/DESIGN.md, invariant 7.
 unsafe impl<A: Allocator + Clone + Send> Send for BlindPool<A> {}
 
@@ -151,7 +155,7 @@ impl Default for BlindPool<Global> {
 
 impl<A: Allocator + Clone> fmt::Debug for BlindPool<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BlindPool")
+        f.debug_struct(type_name::<Self>())
             .field("layouts", &self.layouts())
             .field("max_layouts", &self.max_layouts)
             .field("chunks_allocated", &self.chunks_allocated())

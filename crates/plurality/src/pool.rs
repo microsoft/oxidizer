@@ -9,6 +9,7 @@
 use alloc::boxed::Box as AllocBox;
 use alloc::vec::Vec;
 use core::alloc::Layout;
+use core::any::type_name;
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::mem::{MaybeUninit, forget, needs_drop};
@@ -167,7 +168,7 @@ impl<T, A: Allocator + core::panic::RefUnwindSafe> core::panic::UnwindSafe for P
 
 impl<T, A: Allocator> fmt::Debug for Pool<T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Pool")
+        f.debug_struct(type_name::<Self>())
             .field("chunk_size", &self.chunk_size())
             .field("max_chunks", &self.max_chunks())
             .field("chunks_allocated", &self.chunks_allocated())
