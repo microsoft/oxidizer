@@ -112,11 +112,12 @@ pub(crate) struct PoolInner<T, A> {
 /// A growable, fixed-slot object pool.
 ///
 /// See the [crate-level documentation](crate) for the concurrency model. The
-/// pool is `Send` (it can be moved between threads) but **not** `Sync` (only
-/// one thread allocates at a time). It produces four handle types — `Box`,
-/// `Alloc`, `Arc`, `Rc`. `Box` and `Arc` are `Send` (when `T` and the allocator
-/// `A` are), so they may be dropped from any thread; `Alloc` and `Rc` are
-/// `!Send` and stay on the allocating thread.
+/// pool is `Send` when the allocator `A` is — whatever `T` is — so it can be
+/// moved between threads, but it is **not** `Sync` (only one thread allocates
+/// at a time). It produces four handle types — `Box`, `Alloc`, `Arc`, `Rc`.
+/// `Box` and `Arc` are `Send` (when `T` and the allocator `A` are), so they may
+/// be dropped from any thread; `Alloc` and `Rc` are `!Send` and stay on the
+/// allocating thread.
 pub struct Pool<T, A: Allocator = Global> {
     inner: NonNull<PoolInner<T, A>>,
 }
@@ -124,7 +125,15 @@ pub struct Pool<T, A: Allocator = Global> {
 // SAFETY: all cross-thread state in `PoolInner` is atomic; the non-atomic
 // directory is only ever touched by the single allocator thread (guaranteed by
 // `!Sync`) or at teardown when the pool is quiescent.
-unsafe impl<T: Send, A: Allocator + Send> Send for Pool<T, A> {}
+//
+// There is deliberately no `T: Send` bound. A pool object owns no values:
+// every safely reachable value is owned through a handle, and a handle that
+// crosses threads carries its own `T: Send` requirement. The pool exposes no
+// iteration or drain, so a receiving thread has no route to a value some other
+// thread placed here; it can only obtain free slots, which hold no live value.
+// Teardown deallocates chunks without ever reading or dropping element
+// storage, so it cannot touch a `T` either.
+unsafe impl<T, A: Allocator + Send> Send for Pool<T, A> {}
 
 // Pool state transitions leave the pool usable when they unwind. The allocator
 // may also be shared with detached handles, so it must itself be safe through

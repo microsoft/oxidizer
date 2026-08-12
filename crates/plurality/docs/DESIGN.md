@@ -169,13 +169,24 @@ soundness argument.
 "Single-threaded allocation" is a rule about the pool object, not a prescription
 for how programs are written. Serving several threads from one pool is ordinary
 and expected: the caller wraps the pool in a `Mutex` — or any other exclusion it
-prefers — and the critical section covers allocation only. Handle drops stay
-outside it, because reclamation reaches the free list by arithmetic and never
-touches the directory. Externalising the lock this way is a deliberate division
-of labour: the pool declines to choose a synchronization primitive, an
-allocation batching policy, or a poisoning story on the caller's behalf, and in
-exchange the caller gets a lock whose scope is the allocation call rather than
-the value's whole lifetime.
+prefers — and the critical section covers allocation only. Drops of detachable
+handles stay outside it, because reclamation reaches the free list by arithmetic
+and never touches the directory. The pool-bound handle is the exception: it
+borrows the pool, so a guard it was allocated through must outlive it.
+Externalising the lock this way is a deliberate division of labour: the pool
+declines to choose a synchronization primitive, an allocation batching policy,
+or a poisoning story on the caller's behalf, and in exchange the caller gets a
+lock whose scope is the allocation call rather than the value's whole lifetime.
+
+Moving a pool is independent of moving its values, and a pool is `Send`
+whenever its allocator is — with no bound on the values it serves. A pool
+object owns no values: every safely reachable value is owned through a handle,
+the pool offers no iteration, and teardown reclaims chunk memory without ever
+reading or dropping element storage. A thread that receives a pool object
+therefore has no route to a value another thread placed in it, and can only
+draw free slots, which hold nothing live. Thread mobility for values is carried
+entirely by the handles — a handle to a non-`Send` value is itself non-`Send`
+and stays on its thread regardless of where the pool goes.
 
 ## Memory layout
 
@@ -516,27 +527,15 @@ must not overlap with itself, while frees never touch the directory at all. The
 pool object may be moved between threads but not shared, and its handles carry
 their own thread-mobility rules.
 
-A blind pool is `Send` whenever its allocator is. There is no bound on the
-values it serves, and none is needed. A pool object never owns a value: every
-value is owned by a handle, the pool offers no iteration, and the pool-level
-reference count guarantees that teardown finds no live values. A thread that
-receives a pool object therefore has no route to a value another thread placed
-in it. Thread mobility for values is governed entirely by the handles — a
-handle to a non-`Send` value is itself non-`Send` and stays on its thread
-regardless of where the pool goes.
-
-The typed pool's `Send` bound additionally requires `T: Send`. That bound is
-not what makes the pool sound; the argument above applies to it unchanged. It
-is a deliberately conservative choice, and it is stated here so the asymmetry
-does not read as an oversight.
-
-Because each layout pool owns its own clone of the allocator, and because
-layout pools tear down independently, two clones of the allocator may be in use
-on two threads at once — one tearing down a layout pool whose last handle just
-departed, another serving the pool object elsewhere. This is exactly what
-`Send` plus `Clone` already licenses for any type, so it imposes no new bound;
-it is stated because per-layout cloning makes the situation reachable in a way
-a typed pool's single allocator instance never is.
+A blind pool is `Send` whenever its allocator is, on the same terms as a typed
+pool and for the same reasons. The only bound specific to the blind pool is on
+the allocator: because each layout pool owns its own clone of it, and because
+layout pools tear down independently, two clones may be in use on two threads
+at once — one tearing down a layout pool whose last handle just departed,
+another serving the pool object elsewhere. This is exactly what `Send` plus
+`Clone` already licenses for any type, so it imposes no new bound; it is stated
+because per-layout cloning makes the situation reachable in a way a typed
+pool's single allocator instance never is.
 
 Because reclamation never enters the directory, a destructor running on a
 pooled value may freely allocate from, or free into, the same blind pool. There
@@ -579,12 +578,12 @@ control-flow inputs.
 | Chunk cap | Per pool | Per layout, plus a cap on layouts |
 | Capacity queries | Single tier, constant time | Two tiers; aggregates scale with layouts |
 | Allocator | Held once | Cloned per layout, so it must be cloneable |
-| `Send` | Requires a `Send` element type | Requires only a `Send` allocator |
 | First use of a layout | — | Cold path that allocates pool metadata |
 
 Everything else is common: the handle types and their guarantees, coercion to
-unsized values, pinning rules, the uninitialized tiers, the error currency, and
-the panic-versus-`Result` split.
+unsized values, pinning rules, the uninitialized tiers, the error currency, the
+panic-versus-`Result` split, and the `Send` rules for both the pool object and
+its handles.
 
 Two capabilities are deliberately absent, matching the typed pool. There is no
 iteration over pool contents — handles are the only way to reach a value. And

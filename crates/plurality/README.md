@@ -46,6 +46,17 @@ thread allocates at a time (the whole pool can still be *moved* between
 threads). The `Send` handles ([`Box`][__link9]/[`Arc`][__link10]) may be dropped from any thread;
 the `!Send` handles ([`Alloc`][__link11]/[`Rc`][__link12]) stay on their thread.
 
+Moving a pool is independent of moving its values: [`Pool<T>`][__link13] is `Send`
+when the allocator is, whatever `T` is, because a pool owns no values and
+offers no way to reach one. Thread mobility for values is carried entirely
+by the handles.
+
+Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
+keep only allocation inside the critical section. Dropping a detachable
+handle ([`Box`][__link14]/[`Arc`][__link15]/[`Rc`][__link16]) needs no lock, so reclamation runs unlocked
+and in parallel. [`Alloc`][__link17] is the exception: it borrows the pool, so the
+guard must outlive it.
+
 ## Memory allocation
 
 The pool allocates chunks from the supplied allocator and retains them until
@@ -54,8 +65,8 @@ teardown.
 ## Cargo features
 
 * **`std`** *(enabled by default)* — integrates with the standard library
-  through [`allocator-api2`][__link13]’s `std` feature. The crate is otherwise
-  `no_std` (it needs only [`alloc`][__link14]); disable default features to build for
+  through [`allocator-api2`][__link18]’s `std` feature. The crate is otherwise
+  `no_std` (it needs only [`alloc`][__link19]); disable default features to build for
   a `no_std` target.
 * **`stats`** *(disabled by default)* — enables runtime allocation
   statistics: the `PoolStats` type and the `Pool::stats` method. The
@@ -64,11 +75,11 @@ teardown.
 
 ## Type erasure
 
-[`Box<T>`][__link15], [`Arc<T>`][__link16], and [`Rc<T>`][__link17] are generic over `T: ?Sized`, so they can
+[`Box<T>`][__link20], [`Arc<T>`][__link21], and [`Rc<T>`][__link22] are generic over `T: ?Sized`, so they can
 hold an unsized value — a trait object or a slice — while the value stays in
-its pool slot. A sized handle is converted with [`Box::unsize`][__link18] /
-[`Arc::unsize`][__link19] / [`Rc::unsize`][__link20], which take a compiler-checked
-[`Coercion`][__link21]
+its pool slot. A sized handle is converted with [`Box::unsize`][__link23] /
+[`Arc::unsize`][__link24] / [`Rc::unsize`][__link25], which take a compiler-checked
+[`Coercion`][__link26]
 token:
 
 ```rust
@@ -83,7 +94,7 @@ assert_eq!(format!("{erased:?}"), "7");
 ```
 
 A sized handle stays exactly one pointer wide; the unsized forms carry the
-extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`][__link22], and
+extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`][__link27], and
 reclaim the slot from the value’s runtime size and alignment on drop.
 
 ## Examples
@@ -121,23 +132,28 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfDTXi-1ZvacbMobUHdvAIBsbUJBXGCRAkM0b9PGuxFO4xL1hZIGCaXBsdXJhbGl0eWUwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPO8ZrEx9V4UbpeI25o2QF6wbw8vtus90sKMbSTML--rkaP5hZIGCaXBsdXJhbGl0eWUwLjIuMQ
  [__link0]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link11]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
  [__link12]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link13]: https://crates.io/crates/allocator-api2
- [__link14]: https://doc.rust-lang.org/stable/alloc
- [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link16]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link17]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link18]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
- [__link19]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
+ [__link13]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link14]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link16]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link17]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link18]: https://crates.io/crates/allocator-api2
+ [__link19]: https://doc.rust-lang.org/stable/alloc
  [__link2]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link20]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
- [__link21]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
- [__link22]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
+ [__link20]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link21]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
+ [__link22]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link23]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
+ [__link24]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
+ [__link25]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
+ [__link26]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
+ [__link27]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
  [__link3]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link4]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
  [__link5]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc

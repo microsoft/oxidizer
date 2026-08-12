@@ -40,6 +40,17 @@
 //! threads). The `Send` handles ([`Box`]/[`Arc`]) may be dropped from any thread;
 //! the `!Send` handles ([`Alloc`]/[`Rc`]) stay on their thread.
 //!
+//! Moving a pool is independent of moving its values: [`Pool<T>`] is `Send`
+//! when the allocator is, whatever `T` is, because a pool owns no values and
+//! offers no way to reach one. Thread mobility for values is carried entirely
+//! by the handles.
+//!
+//! Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
+//! keep only allocation inside the critical section. Dropping a detachable
+//! handle ([`Box`]/[`Arc`]/[`Rc`]) needs no lock, so reclamation runs unlocked
+//! and in parallel. [`Alloc`] is the exception: it borrows the pool, so the
+//! guard must outlive it.
+//!
 //! # Memory allocation
 //!
 //! The pool allocates chunks from the supplied allocator and retains them until
