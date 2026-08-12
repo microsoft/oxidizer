@@ -1,12 +1,5 @@
 # Plurality — Architecture
 
-This document describes the architecture of the pool: the model it presents, the
-patterns that make it fast and safe, and the invariants that hold it together. It
-is intentionally implementation-agnostic — for the concrete API see the
-crate-level rustdoc, for the internals see
-[`IMPLEMENTATION.md`](./IMPLEMENTATION.md), and for forward-looking ideas see
-[`TODO.md`](./TODO.md).
-
 ## What plurality is
 
 Plurality is a **growable, fixed-slot object pool**. It front-loads memory in
