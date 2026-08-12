@@ -53,7 +53,6 @@ tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-benchmarking = { path = "../benchmarking" }
 ohno = { path = "../ohno", features = ["app-err"] }
 
 #external
@@ -70,9 +69,6 @@ serde_json = { workspace = true }
 static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
 
 [[example]]
 name = "tick_basic"
@@ -105,16 +101,6 @@ required-features = ["test-util"]
 [[bench]]
 name = "clock_bench"
 harness = false
-
-[[bench]]
-name = "tick_serde_deserialize"
-harness = false
-required-features = ["fmt", "serde"]
-
-[[bench]]
-name = "tick_serde_deserialize_cg"
-harness = false
-required-features = ["fmt", "serde"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
