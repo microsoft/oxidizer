@@ -18,8 +18,7 @@ use ::http::header::{HeaderMap, HeaderName, HeaderValue};
 use ::http::uri::{Authority, InvalidUri, PathAndQuery, Port, Scheme};
 use ::http::{Error, Method, Request, Response, StatusCode, Uri, Version};
 
-use crate::ThreadAware;
-use crate::affinity::Affinity;
+use crate::{Affinity, ThreadAware};
 
 impl_noop_thread_aware!(
     StatusCode,
@@ -71,13 +70,19 @@ impl<T: ThreadAware> ThreadAware for Response<T> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
+
     use ::http::header::{HeaderMap, HeaderName, HeaderValue};
     use ::http::uri::{Authority, InvalidUri, PathAndQuery, Port, Scheme};
     use ::http::{Error, Method, Request, Response, StatusCode, Uri, Version};
     use static_assertions::assert_impl_all;
 
-    use crate::ThreadAware;
-    use crate::affinity::{Affinity, pinned_affinities};
+    use crate::{Affinity, ThreadAware};
+
+    fn pinned_affinities() -> [Affinity; 2] {
+        [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)]
+    }
 
     /// Counts how many times `relocate` has been called.
     ///
@@ -113,7 +118,7 @@ mod tests {
 
     #[test]
     fn method_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut value = Method::POST;
         value.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(value, Method::POST);
@@ -121,7 +126,7 @@ mod tests {
 
     #[test]
     fn uri_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut uri: Uri = "https://example.com:8443/path?q=1".parse().unwrap();
         uri.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(uri.to_string(), "https://example.com:8443/path?q=1");
@@ -129,7 +134,7 @@ mod tests {
 
     #[test]
     fn authority_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut authority: Authority = "example.org:80".parse().unwrap();
         authority.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(authority.as_str(), "example.org:80");
@@ -137,7 +142,7 @@ mod tests {
 
     #[test]
     fn scheme_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut scheme: Scheme = "https".parse().unwrap();
         scheme.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(scheme.as_str(), "https");
@@ -145,7 +150,7 @@ mod tests {
 
     #[test]
     fn path_and_query_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut pq: PathAndQuery = "/foo/bar?baz=1".parse().unwrap();
         pq.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(pq.as_str(), "/foo/bar?baz=1");
@@ -153,7 +158,7 @@ mod tests {
 
     #[test]
     fn port_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let authority: Authority = "example.org:8080".parse().unwrap();
         let mut port = authority.port().unwrap();
         port.relocate(Some(affinities[0]), affinities[1]);
@@ -162,7 +167,7 @@ mod tests {
 
     #[test]
     fn error_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         // `http::Error` cannot be constructed directly; obtain one via a
         // failing conversion that bubbles up through `http::Error: From<_>`.
         let invalid: InvalidUri = "::not a uri::".parse::<Uri>().unwrap_err();
@@ -174,7 +179,7 @@ mod tests {
 
     #[test]
     fn invalid_uri_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut invalid: InvalidUri = "::not a uri::".parse::<Uri>().unwrap_err();
         invalid.relocate(Some(affinities[0]), affinities[1]);
         let _ = invalid.to_string();
@@ -182,7 +187,7 @@ mod tests {
 
     #[test]
     fn header_map_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut map: HeaderMap<HeaderValue> = HeaderMap::new();
         map.insert("x-one", HeaderValue::from_static("one"));
         map.insert("x-two", HeaderValue::from_static("two"));
@@ -193,7 +198,7 @@ mod tests {
 
     #[test]
     fn request_relocate_propagates_to_body() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut req = Request::new(Counter::default());
         req.headers_mut()
             .insert(HeaderName::from_static("x-trace"), HeaderValue::from_static("abc"));
@@ -204,7 +209,7 @@ mod tests {
 
     #[test]
     fn response_relocate_propagates_to_body() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let mut resp = Response::new(Counter::default());
         resp.headers_mut()
             .insert(HeaderName::from_static("x-trace"), HeaderValue::from_static("xyz"));

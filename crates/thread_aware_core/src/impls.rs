@@ -1,11 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(not(test))]
 use alloc::boxed::Box;
-#[cfg(not(test))]
 use alloc::string::String;
-#[cfg(not(test))]
 use alloc::vec::Vec;
 use core::time::Duration;
 #[cfg(feature = "std")]
@@ -13,8 +10,7 @@ use std::collections::HashMap;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use crate::affinity::Affinity;
-use crate::core::ThreadAware;
+use crate::{Affinity, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -165,17 +161,25 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ThreadAware;
-    use crate::affinity::{Affinity, pinned_affinities};
+    use alloc::boxed::Box;
+    use alloc::string::{String, ToString};
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use crate::{Affinity, ThreadAware};
+
+    fn pinned_affinities() -> [Affinity; 2] {
+        [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)]
+    }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn test_hashmap() {
         use std::collections::HashMap;
 
         use crate::ThreadAware;
 
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -194,10 +198,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn test_tuples() {
         use crate::ThreadAware;
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -242,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn test_function_pointers() {
         use crate::ThreadAware;
 
@@ -276,7 +280,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -319,7 +323,7 @@ mod tests {
     fn test_result() {
         use crate::ThreadAware;
 
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -362,7 +366,7 @@ mod tests {
     }
 
     fn affinities() -> (Option<Affinity>, Affinity) {
-        let a = pinned_affinities(&[2]);
+        let a = pinned_affinities();
         (Some(a[0]), a[1])
     }
 
@@ -415,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn hashmap_forwards_relocate_to_keys_and_values() {
         use std::collections::HashMap;
         let (src, dst) = affinities();

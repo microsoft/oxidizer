@@ -36,8 +36,8 @@ macro_rules! impl_noop_thread_aware {
             impl $crate::ThreadAware for $t {
                 fn relocate(
                     &mut self,
-                    _source: ::core::option::Option<$crate::affinity::Affinity>,
-                    _destination: $crate::affinity::Affinity,
+                    _source: ::core::option::Option<$crate::Affinity>,
+                    _destination: $crate::Affinity,
                 ) {}
             }
         )+

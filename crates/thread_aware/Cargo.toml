@@ -19,36 +19,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
+    "thread_aware_core::Affinity",
+    "thread_aware_core::ThreadAware",
     "thread_aware_macros::ThreadAware",
-    # `bytes` feature
-    "bytes::bytes::Bytes",
-    "bytes::bytes_mut::BytesMut",
-    # `http` feature
-    "http::error::Error",
-    "http::header::map::HeaderMap",
-    "http::header::name::HeaderName",
-    "http::header::value::HeaderValue",
-    "http::method::Method",
-    "http::request::Request",
-    "http::response::Response",
-    "http::status::StatusCode",
-    "http::uri::Uri",
-    "http::uri::authority::Authority",
-    "http::uri::path::PathAndQuery",
-    "http::uri::port::Port",
-    "http::uri::scheme::Scheme",
-    "http::uri::InvalidUri",
-    "http::version::Version",
-    # `jiff02` feature
-    "jiff::civil::date::Date",
-    "jiff::civil::datetime::DateTime",
-    "jiff::civil::iso_week_date::ISOWeekDate",
-    "jiff::civil::time::Time",
-    "jiff::signed_duration::SignedDuration",
-    "jiff::span::Span",
-    "jiff::timestamp::Timestamp",
-    # `uuid` feature
-    "uuid::Uuid",
 ]
 
 [package.metadata.docs.rs]
@@ -58,7 +31,7 @@ all-features = true
 default = ["std", "derive"]
 # Enables the per-affinity Arc and hosted-only type impls. Disable for `#![no_std]`
 # environments; the crate then requires only `alloc`.
-std = []
+std = ["thread_aware_core/std"]
 derive = ["dep:thread_aware_macros"]
 threads = ["std", "dep:many_cpus"]
 
@@ -80,20 +53,16 @@ threads = ["std", "dep:many_cpus"]
 # a breaking release of this crate.
 #
 # See the `third_party` module for the list of types each feature covers.
-bytes = ["dep:bytes"]
-http = ["std", "dep:http"]
-jiff02 = ["dep:jiff"]
-uuid = ["dep:uuid"]
+bytes = ["thread_aware_core/bytes"]
+http = ["std", "thread_aware_core/http"]
+jiff02 = ["thread_aware_core/jiff02"]
+uuid = ["thread_aware_core/uuid"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
 
 thread_aware_macros = { workspace = true, optional = true }
-
-bytes = { version = "1.11.1", default-features = false, optional = true }
-http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
-jiff = { version = "0.2.21", default-features = false, optional = true }
-uuid = { version = "1.21.0", default-features = false, optional = true }
+thread_aware_core = { workspace = true }
 
 [dev-dependencies]
 bytes = { version = "1.11.1", default-features = false }

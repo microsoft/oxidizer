@@ -12,4 +12,4 @@
 //! **Note**: This module is not part of the public API and may change without notice.
 
 #[doc(inline)]
-pub use crate::core::ThreadAware;
+pub use thread_aware_core::ThreadAware;

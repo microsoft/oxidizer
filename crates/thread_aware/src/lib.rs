@@ -188,7 +188,7 @@
 //! # }
 //! ```
 //!
-//! [`ThreadAware`]: crate::core::ThreadAware
+//! [`ThreadAware`]: thread_aware_core::ThreadAware
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
@@ -200,9 +200,6 @@ extern crate std;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod cell;
-mod core;
-mod impls;
-mod third_party;
 mod wrappers;
 
 pub mod closure;
@@ -215,7 +212,7 @@ pub mod __private;
 pub mod affinity;
 
 #[doc(inline)]
-pub use core::ThreadAware;
+pub use thread_aware_core::ThreadAware;
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the

@@ -20,8 +20,7 @@ mod tests {
     use ::jiff::{SignedDuration, Span, Timestamp};
     use static_assertions::assert_impl_all;
 
-    use crate::ThreadAware;
-    use crate::affinity::pinned_affinities;
+    use crate::{Affinity, ThreadAware};
 
     assert_impl_all!(Timestamp: ThreadAware, Send, Sync, Copy);
     assert_impl_all!(SignedDuration: ThreadAware, Send, Sync, Copy);
@@ -33,7 +32,7 @@ mod tests {
 
     #[test]
     fn timestamp_relocate_is_noop() {
-        let affinities = pinned_affinities(&[2]);
+        let affinities = [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)];
         let mut value = Timestamp::from_second(1_700_000_000).unwrap();
         let expected = value;
         value.relocate(Some(affinities[0]), affinities[1]);

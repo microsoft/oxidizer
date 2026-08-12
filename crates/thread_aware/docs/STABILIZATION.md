@@ -1,43 +1,34 @@
 # Stabilization Notes
 
-These notes capture the pending decisions for stabilizing `thread_aware`. They
-describe proposals under review, not a finalized stable API.
+These notes describe the stable boundary shared by the `thread_aware` crates.
 
-## Proposed stable boundary
+## Stable boundary
 
-- Stabilize the `ThreadAware` trait.
-- Stabilize the `Affinity` type needed at `ThreadAware` API boundaries.
-- Allow stable downstream crates to expose these core types in their public APIs.
+`thread_aware_core` 1.0 contains the `no_std` API that downstream crates may
+expose:
 
-## Deferred surface
+- `ThreadAware`
+- `Affinity`
 
-Keep implementation helpers, containers, callbacks, registry APIs, derive support,
-and other uncertain APIs outside the stable surface for now. Downstream stable
-crates must not expose deferred types in their public APIs.
+The `thread_aware` crate re-exports both types so existing imports continue to
+work. In particular, `thread_aware::ThreadAware` and
+`thread_aware::affinity::Affinity` remain the preferred paths for users of the
+full library.
 
-The exact deferred set must be verified against the complete public API before
-stabilization.
+The core crate has no required third-party dependencies. Its optional `bytes`,
+`http`, `jiff02`, and `uuid` features provide implementations for foreign types.
+These implementations must live with the trait because Rust's coherence rules
+prevent the higher-level `thread_aware` crate from implementing a foreign trait
+for foreign types. The `thread_aware` features of the same names forward to these
+core features.
 
-## Packaging boundary
+## Unstable utilities
 
-The packaging decision is still open:
+Implementation helpers, containers, callbacks, registry APIs, derive support,
+and integration helpers remain in the pre-1.0 `thread_aware` crate. Stable
+downstream crates should not expose those types in their public APIs. The
+feature-gated foreign-type implementations in `thread_aware_core` add trait
+implementations only; they do not add new public types to the stable core API.
 
-- Keep `ThreadAware` and `Affinity` in `thread_aware`, and move the deferred
-  surface to an unstable `thread_aware_utils` crate.
-- Alternatively, follow the common split where traits move to a
-  `thread_aware_core` crate while the remaining APIs stay in `thread_aware`.
-
-If the `thread_aware_utils` proposal is selected, rename the internal companion
-macro crates consistently with it. Their exact names remain pending because
-these crates are not intended for direct consumption.
-
-## Pending review
-
-- [ ] Explicitly list and review every API included in the stable surface.
-- [ ] Confirm stable downstream crates expose only stable `thread_aware` types.
-- [ ] Resolve naming feedback for the trait, affinity concepts, and crate split.
-- [ ] Confirm the public shape and semantics of `Affinity`.
-- [ ] Decide whether the stable trait belongs in `thread_aware` or a
-      `thread_aware_core` crate.
-- [ ] Identify all deferred APIs as unstable and document their package location.
-- [ ] Confirm the names of any renamed macro crates.
+This split allows the trait contract and its required affinity identifier to
+remain stable without prematurely stabilizing the larger utility surface.

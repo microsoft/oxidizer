@@ -50,7 +50,7 @@ allowed_external_types = [
     "templated_uri::base_uri::BaseUri",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
-    "thread_aware::core::ThreadAware",
+    "thread_aware_core::ThreadAware",
     "tick::clock::Clock",
 ]
 
