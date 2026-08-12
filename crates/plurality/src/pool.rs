@@ -24,6 +24,7 @@ use crate::geometry::{self, RuntimeGeometry, SlotGeometry, TypedGeometry};
 #[cfg(feature = "stats")]
 use crate::pool_stats::PoolStats;
 use crate::rc::Rc;
+use crate::reentrancy::ReentrancyLatch;
 use crate::slot::{FREE_END, MAX_POOL_SLOTS, SlotCell};
 use crate::sync::Arc;
 
@@ -35,7 +36,7 @@ pub(crate) struct PoolCore {
     pub(crate) free_head: AtomicU32,
     /// `1` for the live `Pool` handle plus one per live refcounted allocation.
     pub(crate) pool_refcount: AtomicUsize,
-    /// Returns the core to its concrete `PoolInner<T, A>` type for teardown.
+    /// Returns the core to its concrete `PoolInner<A, G>` type for teardown.
     pub(crate) teardown: unsafe fn(NonNull<Self>),
 }
 
@@ -118,6 +119,10 @@ pub(crate) struct PoolInner<A, G> {
     /// `chunk_index -> chunk base`. Written only on the allocator thread; read
     /// there on `pop` and (once quiescent) at teardown. `!Sync` is the gate.
     pub(crate) directory: UnsafeCell<Vec<NonNull<ChunkHeader>>>,
+    /// Rejects an allocator that allocates from this pool while a chunk's
+    /// slot-index range is derived but not yet published.
+    /// Ref: docs/implementation/reentrancy.md.
+    pub(crate) growing: ReentrancyLatch,
     /// Allocator used for chunk allocations.
     pub(crate) allocator: A,
     /// Supplies the slot offsets and stride this pool's chunks are laid out to.
@@ -295,26 +300,26 @@ impl<T, A: Allocator> Pool<T, A> {
     /// Allocates `value` and returns a unique [`Box`].
     ///
     /// # Panics
-    /// Panics if the pool is full. Use [`try_alloc_box`](Self::try_alloc_box)
-    /// to handle exhaustion.
+    /// Panics if allocation fails. Use [`try_alloc_box`](Self::try_alloc_box)
+    /// to handle capacity exhaustion and allocator failure.
     #[inline]
     pub fn alloc_box(&self, value: T) -> Box<T, A> {
         match self.try_alloc_box(value) {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns a unique [`Box`]. `f` is
-    /// not called if the pool is full.
+    /// not called if allocation fails.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_box_with<F: FnOnce() -> T>(&self, f: F) -> Box<T, A> {
         match self.try_alloc_box_with(f) {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -352,7 +357,7 @@ impl<T, A: Allocator> Pool<T, A> {
     /// Allocates `value` and returns a shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc(&self, value: T) -> Arc<T, A>
     where
@@ -360,14 +365,14 @@ impl<T, A: Allocator> Pool<T, A> {
     {
         match self.try_alloc_arc(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns a shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_with<F: FnOnce() -> T>(&self, f: F) -> Arc<T, A>
     where
@@ -375,7 +380,7 @@ impl<T, A: Allocator> Pool<T, A> {
     {
         match self.try_alloc_arc_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -420,7 +425,7 @@ impl<T, A: Allocator> Pool<T, A> {
     /// matching [`alloc::sync::Arc::pin`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_pin(&self, value: T) -> Pin<Arc<T, A>>
     where
@@ -428,7 +433,7 @@ impl<T, A: Allocator> Pool<T, A> {
     {
         match self.try_alloc_arc_pin(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -436,7 +441,7 @@ impl<T, A: Allocator> Pool<T, A> {
     /// shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_pin_with<F: FnOnce() -> T>(&self, f: F) -> Pin<Arc<T, A>>
     where
@@ -444,7 +449,7 @@ impl<T, A: Allocator> Pool<T, A> {
     {
         match self.try_alloc_arc_pin_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -482,25 +487,25 @@ impl<T, A: Allocator> Pool<T, A> {
     /// the pool. It cannot outlive the pool, but is the cheapest handle.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc(&self, value: T) -> Alloc<'_, T, A> {
         match self.try_alloc(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns an [`Alloc`]. `f` is not
-    /// called if the pool is full.
+    /// called if allocation fails.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_with<F: FnOnce() -> T>(&self, f: F) -> Alloc<'_, T, A> {
         match self.try_alloc_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -538,24 +543,24 @@ impl<T, A: Allocator> Pool<T, A> {
     /// Allocates `value` and returns a shared, non-atomically refcounted [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc(&self, value: T) -> Rc<T, A> {
         match self.try_alloc_rc(value) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns an [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_with<F: FnOnce() -> T>(&self, f: F) -> Rc<T, A> {
         match self.try_alloc_rc_with(f) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -594,12 +599,12 @@ impl<T, A: Allocator> Pool<T, A> {
     /// matching [`alloc::rc::Rc::pin`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_pin(&self, value: T) -> Pin<Rc<T, A>> {
         match self.try_alloc_rc_pin(value) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -607,12 +612,12 @@ impl<T, A: Allocator> Pool<T, A> {
     /// shared [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_pin_with<F: FnOnce() -> T>(&self, f: F) -> Pin<Rc<T, A>> {
         match self.try_alloc_rc_pin_with(f) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -645,13 +650,13 @@ impl<T, A: Allocator> Pool<T, A> {
     /// [`assume_init`](crate::Box::assume_init) once written.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit_box(&self) -> Box<MaybeUninit<T>, A> {
         match self.try_alloc_uninit_box() {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -676,7 +681,7 @@ impl<T, A: Allocator> Pool<T, A> {
     /// [`assume_init`](crate::Arc::assume_init) once written.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit_arc(&self) -> Arc<MaybeUninit<T>, A>
@@ -685,7 +690,7 @@ impl<T, A: Allocator> Pool<T, A> {
     {
         match self.try_alloc_uninit_arc() {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -711,13 +716,13 @@ impl<T, A: Allocator> Pool<T, A> {
     /// Reserves a slot and returns an uninitialized [`Alloc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit(&self) -> Alloc<'_, MaybeUninit<T>, A> {
         match self.try_alloc_uninit() {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -741,13 +746,13 @@ impl<T, A: Allocator> Pool<T, A> {
     /// Reserves a slot and returns an uninitialized [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit_rc(&self) -> Rc<MaybeUninit<T>, A> {
         match self.try_alloc_uninit_rc() {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -827,7 +832,7 @@ impl<T, A: Allocator> Pool<T, A> {
     }
 
     /// Pops a free slot, growing the pool if necessary. Returns `Err` only if
-    /// the pool is full and cannot grow (see [`AllocError`] for the cause).
+    /// allocation fails (see [`AllocError`] for the cause).
     #[inline]
     fn alloc_slot(&self) -> Result<NonNull<SlotCell<T>>, AllocError> {
         match self.inner().alloc_slot() {
@@ -840,7 +845,7 @@ impl<T, A: Allocator> Pool<T, A> {
 impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
     /// Pops a free slot, growing the pool if necessary. Returns the slot's
     /// address, which is also its value's address. Returns `Err` only if the
-    /// pool is full and cannot grow (see [`AllocError`] for the cause).
+    /// allocation fails (see [`AllocError`] for the cause).
     #[inline]
     pub(crate) fn alloc_slot(&self) -> Result<NonNull<u8>, AllocError> {
         let geometry = self.geometry;
@@ -906,6 +911,13 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
     #[cold]
     #[inline(never)]
     fn grow(&self) -> Result<NonNull<u8>, AllocError> {
+        // Held until the new chunk count is published. Everything between the
+        // load below and that store describes a chunk the pool does not yet
+        // admit to owning, so an allocator that re-enters here would derive the
+        // same slot-index range twice. Ref: docs/implementation/reentrancy.md.
+        let Some(_growing) = self.growing.enter() else {
+            return Err(AllocError::ALLOCATOR_FAILED);
+        };
         let chunks = self.chunks_allocated.load(Relaxed);
         let n = self.chunk_size;
         // Cap = the user's `max_chunks`, or for an unbounded pool the chunk count
@@ -1156,8 +1168,10 @@ pub(crate) unsafe fn drop_and_free_val<T: ?Sized>(value: NonNull<T>) {
 
 /// Pushes a freed slot back onto the free list and releases the pool refcount,
 /// working purely from the value pointer plus the value's `size`/`align` — no
-/// `SlotCell<T>` type needed. `PoolInner`/`ChunkHeader` layouts are independent
-/// of the element type, so the erased `<()>` views recover the same addresses.
+/// `SlotCell<T>` type needed. A [`RuntimeGeometry`] built from the value's exact
+/// layout derives the slot metadata offsets and the chunk-header address,
+/// yielding the same locations the allocating pool's own geometry evaluates.
+/// Ref: docs/implementation/geometry.md.
 ///
 /// # Safety
 /// `value` must point at field 0 of an occupied slot; `size`/`align` must be the
@@ -1375,8 +1389,11 @@ pub(crate) unsafe fn occupy_local<T>(slot: NonNull<SlotCell<T>>, value: T) {
 }
 
 #[cold]
-#[expect(clippy::panic, reason = "the panicking `alloc_*` methods document that they panic on exhaustion")]
+#[expect(
+    clippy::panic,
+    reason = "the panicking `alloc_*` methods document that they panic when allocation fails"
+)]
 #[inline(never)]
-pub(crate) fn pool_full(err: AllocError) -> ! {
+pub(crate) fn allocation_failed(err: AllocError) -> ! {
     panic!("plurality: {err}");
 }

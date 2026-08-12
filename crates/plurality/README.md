@@ -32,34 +32,38 @@ dropped. The handle types cover owned vs. shared and bound vs. `'static`:
 Every handle derefs to `&T`; [`Box`][__link6] and [`Alloc`][__link7] also give `&mut T`. Dropping a
 handle runs `T`’s destructor and returns the slot to the pool.
 
-A [`BlindPool`][__link8] moves the element type from the pool to the allocation, so
-one pool object backs values of any type. It hands out the same handles
-with the same guarantees, routing each value to the internal pool
-serving its layout.
+A [`BlindPool`][__link8] moves the element type from the pool to each allocation, so
+one pool object backs values of many types. It creates an internal layout
+pool for each distinct [`Layout`][__link9] it sees and routes
+each value to the pool serving that exact layout, while handing out the same
+handles with the same guarantees.
 
-Pools suit frequently recycled values of one type, stable-address data
-structures, and workloads that need a capacity limit. Slots are reused
-without a backing-allocator call, and `max_chunks` bounds growth. Prefer a
-general allocator for long-lived values or an arena when values can all be
-reclaimed together.
+Use [`Pool<T>`][__link10] for a working set that repeatedly allocates one value type,
+and [`BlindPool`][__link11] for heterogeneous recycled values. Both flavors suit
+stable-address data structures and workloads that need a capacity limit.
+Slots are reused without a chunk-allocation call. `max_chunks` bounds a
+[`Pool<T>`][__link12] or one [`BlindPool`][__link13] layout pool; bounding aggregate
+[`BlindPool`][__link14] growth also requires `max_layouts`, and total memory depends
+on the layouts and effective chunk sizes. Prefer a general allocator for
+long-lived values or an arena when values can all be reclaimed together.
 
 ## Concurrency model
 
-[`Pool<T>`][__link9] is `Send + !Sync`: allocating takes `&Pool`, so exactly one
+[`Pool<T>`][__link15] is `Send + !Sync`: allocating takes `&Pool`, so exactly one
 thread allocates at a time (the whole pool can still be *moved* between
-threads). The `Send` handles ([`Box`][__link10]/[`Arc`][__link11]) may be dropped from any thread;
-the `!Send` handles ([`Alloc`][__link12]/[`Rc`][__link13]) stay on their thread.
+threads). The `Send` handles ([`Box`][__link16]/[`Arc`][__link17]) may be dropped from any thread;
+the `!Send` handles ([`Alloc`][__link18]/[`Rc`][__link19]) stay on their thread.
 
-Moving a pool is independent of moving its values: [`Pool<T>`][__link14] is `Send`
+Moving a pool is independent of moving its values: [`Pool<T>`][__link20] is `Send`
 when the allocator is, whatever `T` is, because a pool owns no values and
 offers no way to reach one. Thread mobility for values is carried entirely
-by the handles. [`BlindPool`][__link15] follows the same rule, which is what lets one
+by the handles. [`BlindPool`][__link21] follows the same rule, which is what lets one
 pool hold values of types with different thread affinities at once.
 
 Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
 keep only allocation inside the critical section. Dropping a detachable
-handle ([`Box`][__link16]/[`Arc`][__link17]/[`Rc`][__link18]) needs no lock, so reclamation runs unlocked
-and in parallel. [`Alloc`][__link19] is the exception: it borrows the pool, so the
+handle ([`Box`][__link22]/[`Arc`][__link23]/[`Rc`][__link24]) needs no lock, so reclamation runs unlocked
+and in parallel. [`Alloc`][__link25] is the exception: it borrows the pool, so the
 guard must outlive it.
 
 ## Memory allocation
@@ -70,8 +74,8 @@ teardown.
 ## Cargo features
 
 * **`std`** *(enabled by default)* — integrates with the standard library
-  through [`allocator-api2`][__link20]’s `std` feature. The crate is otherwise
-  `no_std` (it needs only [`alloc`][__link21]); disable default features to build for
+  through [`allocator-api2`][__link26]’s `std` feature. The crate is otherwise
+  `no_std` (it needs only [`alloc`][__link27]); disable default features to build for
   a `no_std` target.
 * **`stats`** *(disabled by default)* — enables runtime allocation
   statistics: the `PoolStats` type and the `Pool::stats` and
@@ -81,11 +85,11 @@ teardown.
 
 ## Type erasure
 
-[`Box<T>`][__link22], [`Arc<T>`][__link23], and [`Rc<T>`][__link24] are generic over `T: ?Sized`, so they can
+[`Box<T>`][__link28], [`Arc<T>`][__link29], and [`Rc<T>`][__link30] are generic over `T: ?Sized`, so they can
 hold an unsized value — a trait object or a slice — while the value stays in
-its pool slot. A sized handle is converted with [`Box::unsize`][__link25] /
-[`Arc::unsize`][__link26] / [`Rc::unsize`][__link27], which take a compiler-checked
-[`Coercion`][__link28]
+its pool slot. A sized handle is converted with [`Box::unsize`][__link31] /
+[`Arc::unsize`][__link32] / [`Rc::unsize`][__link33], which take a compiler-checked
+[`Coercion`][__link34]
 token:
 
 ```rust
@@ -100,7 +104,7 @@ assert_eq!(format!("{erased:?}"), "7");
 ```
 
 A sized handle stays exactly one pointer wide; the unsized forms carry the
-extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`][__link29], and
+extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`][__link35], and
 reclaim the slot from the value’s runtime size and alignment on drop.
 
 ## Examples
@@ -134,11 +138,11 @@ assert!(pool.try_alloc_box(2).is_err());
 
 Runnable programs covering larger scenarios:
 
-* [`pool_basic`][__link30]: The handle flavors, address stability, and slot reuse.
-* [`pool_across_threads`][__link31]: Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
-* [`blind_pool_basic`][__link32]: Values of unrelated types in one pool, and per-layout capacity.
-* [`blind_pool_dyn_dispatch`][__link33]: A pipeline of differently sized trait objects backed by one pool.
-* [`blind_pool_tuning`][__link34]: Chunk sizing, capacity bounds, and graceful exhaustion.
+* [`pool_basic`][__link36]: The handle flavors, address stability, and slot reuse.
+* [`pool_across_threads`][__link37]: Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
+* [`blind_pool_basic`][__link38]: Values of unrelated types in one pool, and per-layout capacity.
+* [`blind_pool_dyn_dispatch`][__link39]: A pipeline of differently sized trait objects backed by one pool.
+* [`blind_pool_tuning`][__link40]: Chunk sizing, capacity bounds, and graceful exhaustion.
 
 
 <hr/>
@@ -146,39 +150,45 @@ Runnable programs covering larger scenarios:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbABfbmu2JW4sbw3BhGiJfo3obBiTigPMW6t4bTHX2S_MFUUxhZIGCaXBsdXJhbGl0eWUwLjIuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbf1IO_H8UfcAbb74QJsi5LZMbVrpVpy_GmfsbBUdYzIjymadhZIGCaXBsdXJhbGl0eWUwLjIuMQ
  [__link0]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link11]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link12]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link13]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link14]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
+ [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link11]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
+ [__link12]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link13]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
+ [__link14]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
+ [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
  [__link16]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
  [__link17]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link18]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link19]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link18]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link19]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
  [__link2]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link20]: https://crates.io/crates/allocator-api2
- [__link21]: https://doc.rust-lang.org/stable/alloc
+ [__link20]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link21]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
  [__link22]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
  [__link23]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link24]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link25]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
- [__link26]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
- [__link27]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
- [__link28]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
- [__link29]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
+ [__link25]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__link26]: https://crates.io/crates/allocator-api2
+ [__link27]: https://doc.rust-lang.org/stable/alloc
+ [__link28]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
+ [__link29]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link3]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs
- [__link31]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs
- [__link32]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs
- [__link33]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs
- [__link34]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs
+ [__link30]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link31]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
+ [__link32]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
+ [__link33]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
+ [__link34]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
+ [__link35]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
+ [__link36]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs
+ [__link37]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs
+ [__link38]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs
+ [__link39]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs
  [__link4]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
+ [__link40]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs
  [__link5]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
  [__link6]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
  [__link7]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
  [__link8]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
- [__link9]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
+ [__link9]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout

@@ -5,8 +5,8 @@ caller supplies. Part of the [architecture](../DESIGN.md).
 
 ## Concurrency model
 
-The pool follows a **single-producer / multi-consumer** discipline, and this
-single decision shapes the whole design.
+The pool follows a **single allocator, multiple reclaimers** discipline, and
+this discipline shapes the whole design.
 
 ```text
         ┌──────────────────────────────────────────────┐

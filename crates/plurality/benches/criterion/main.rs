@@ -25,9 +25,11 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
+// The shared module is compiled into each bench target, matching the multitude
+// benchmark pattern while keeping the optimizer's same-crate view of the hot
+// path. Ref: docs/callgrind-benchmarks.md, "Pairing with Criterion".
+#[path = "../plurality_ops_common/mod.rs"]
 mod ops;
-
-use ops::Obj;
 
 /// Operations performed per criterion iteration. Mirrors the "run once" of the
 /// gungraun suite, scaled up so wall-clock timing has signal.
@@ -72,7 +74,7 @@ fn alloc_benches(c: &mut Criterion) {
     g.finish();
 
     let mut g = c.benchmark_group("clone");
-    let arc_base = pool.alloc_arc(Obj::new(0));
+    let (_arc_pool, arc_base) = ops::setup_arc(ops::CAP);
     g.bench_function("arc_clone", |b| {
         b.iter(|| {
             for _ in 0..N {
@@ -80,7 +82,7 @@ fn alloc_benches(c: &mut Criterion) {
             }
         });
     });
-    let rc_base = pool.alloc_rc(Obj::new(0));
+    let (_rc_pool, rc_base) = ops::setup_rc(ops::CAP);
     g.bench_function("rc_clone", |b| {
         b.iter(|| {
             for _ in 0..N {

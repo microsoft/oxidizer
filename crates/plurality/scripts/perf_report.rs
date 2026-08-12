@@ -27,8 +27,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::str::from_utf8;
 
+#[path = "../benches/plurality_ops_common/metadata.rs"]
+mod benchmark_metadata;
+
 /// Operations per criterion iteration (must match `N` in `benches/criterion/main.rs`).
 const N: f64 = 1000.0;
+
+/// Benchmark identifier for the high directory-scan case.
+const BLIND_BOX_VAL_SPREAD: &str = "blind_box_val_spread";
 
 /// The aligned allocation operations: `(name, pretty label)`. `name` is both the
 /// criterion variant (`alloc/<name>`) and the gungraun fn (in group `alloc`).
@@ -48,7 +54,7 @@ const ALLOC_OPS: &[(&str, &str)] = &[
     ("rc_with", "`Rc` — `alloc_rc_with`"),
     ("rc_uninit", "`Rc` — `alloc_uninit_rc`"),
     ("blind_box_val", "`BlindPool` — `alloc_box`, one layout"),
-    ("blind_box_val_spread", "`BlindPool` — `alloc_box`, 16 layouts"),
+    (BLIND_BOX_VAL_SPREAD, "`BlindPool` — `alloc_box`"),
 ];
 
 /// The aligned clone operations (criterion group `clone`, gungraun group `clone`).
@@ -580,6 +586,7 @@ fn emit_aligned_table(
     out.push_str("| Operation | Time / op | Instructions | Mem accesses | Est. cycles |\n");
     out.push_str("|---|---:|---:|---:|---:|\n");
     for (name, label) in ops {
+        let label = aligned_label(name, label);
         let t = crit_per_op(crit, &format!("{group}/{name}"));
         let g = gung_for(gung, name);
         let _ = writeln!(
@@ -593,6 +600,14 @@ fn emit_aligned_table(
         );
     }
     out.push('\n');
+}
+
+fn aligned_label(name: &str, label: &str) -> String {
+    if name == BLIND_BOX_VAL_SPREAD {
+        format!("{label}, {} layouts", benchmark_metadata::SPREAD_LAYOUTS)
+    } else {
+        label.to_owned()
+    }
 }
 
 fn emit_dyn_box_table(out: &mut String, gung: &[Gung], crit: &[(String, f64)]) {

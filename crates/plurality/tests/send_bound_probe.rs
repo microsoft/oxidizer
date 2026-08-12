@@ -27,31 +27,6 @@ use std::thread::ThreadId;
 
 use plurality::Pool;
 
-/// Moves anything across a thread boundary, including the values that make the
-/// scenarios below thread-bound.
-///
-/// The pool itself does not need this — it is `Send` regardless of `T` — but
-/// the closure passed to a scoped thread captures the `StdRc` handles and drop
-/// observers alongside it, and those are genuinely `!Send`.
-struct AssertSend<T>(T);
-
-impl<T> AssertSend<T> {
-    /// Takes `self` by value so closures capture the whole shim rather than
-    /// reaching through it to the non-`Send` field.
-    fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-#[expect(
-    clippy::non_send_fields_in_send_ty,
-    reason = "asserting `Send` for a non-`Send` payload is the entire purpose of this shim"
-)]
-// SAFETY: the enclosing tests establish, per scenario, that the wrapped value
-// is never touched from two threads at once. This shim only defeats the
-// compiler's inability to see that argument; it does not weaken it.
-unsafe impl<T> Send for AssertSend<T> {}
-
 /// Counts destructor runs for one test, so a test can assert that every value
 /// it created was in fact destroyed.
 type DropLog = StdArc<AtomicUsize>;
@@ -122,16 +97,14 @@ fn pool_moves_while_non_send_value_stays_behind() {
     retained.bump();
 
     // The pool crosses the thread boundary; the value does not.
-    let moved = AssertSend((pool, StdArc::clone(&far_drops)));
+    let far_drops_moved = StdArc::clone(&far_drops);
     let handle = std::thread::spawn(move || {
-        let (pool, far_drops) = moved.into_inner();
-
         // The receiving thread allocates and frees freely. It never reaches
         // the value the originating thread still holds, because the pool
         // offers no iteration.
         let mut kept = Vec::new();
         for _ in 0_i32..64_i32 {
-            kept.push(pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops)));
+            kept.push(pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops_moved)));
         }
         for value in &kept {
             value.bump();
@@ -183,23 +156,21 @@ fn slot_reuse_across_threads_with_non_send_values() {
     drop(first);
     assert_eq!(origin_drops.load(Ordering::Relaxed), 16);
 
-    let moved = AssertSend((pool, StdArc::clone(&far_drops)));
+    let far_drops_moved = StdArc::clone(&far_drops);
     let handle = std::thread::spawn(move || {
-        let (pool, far_drops) = moved.into_inner();
-
         // These allocations reuse the slots freed above.
         let mut second = Vec::new();
         for _ in 0_i32..16_i32 {
-            second.push(pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops)));
+            second.push(pool.alloc_box(ThreadBound::new(StdRc::new(Cell::new(0)), &far_drops_moved)));
         }
         for value in &second {
             value.bump();
         }
         drop(second);
-        AssertSend(pool)
+        pool
     });
 
-    let pool = handle.join().unwrap().into_inner();
+    let pool = handle.join().unwrap();
 
     // The far thread destroyed exactly its own values, in slots this thread
     // had previously filled and released.
@@ -222,9 +193,7 @@ fn teardown_on_far_thread_with_non_send_values() {
 
     let retained = pool.alloc_box(ThreadBound::new(StdRc::clone(&shared), &drops));
 
-    let moved = AssertSend(pool);
     let handle = std::thread::spawn(move || {
-        let pool = moved.into_inner();
         // Drop the pool object; the retained handle still holds the memory.
         drop(pool);
     });
@@ -249,9 +218,7 @@ fn teardown_on_far_thread_via_last_handle() {
     let retained = pool.alloc_box(7_u64);
     drop(pool);
 
-    let moved = AssertSend(retained);
     let handle = std::thread::spawn(move || {
-        let retained = moved.into_inner();
         assert_eq!(*retained, 7);
         // Teardown of the whole pool runs here.
         drop(retained);

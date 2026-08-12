@@ -15,7 +15,7 @@ compile-time trait behaviour, and no single technique covers all three.
 | Undefined-behaviour checking | Aliasing and provenance errors in pointer recovery |
 | Interleaving exploration | Missing or misordered atomic synchronisation |
 | Property and fuzz testing | Invariant violations under sequences nobody thought to write |
-| Allocation tracking | Hidden allocations and leaks the type system does not catch |
+| Allocation tracking | Hidden steady-state allocations the type system does not catch |
 | Static assertions | Auto-trait and variance behaviour, which no runtime test observes |
 | Mutation testing and coverage | Assertions that do not constrain anything |
 
@@ -38,7 +38,8 @@ test sits beside the code.
 | `smart_ptr` | The shared macro-generated surface: pointer accessors, identity, uniqueness queries, construction-time pinning, `Unpin`, the auto-trait assertions and every forwarding impl. |
 | `unsize` | Type erasure end to end: trait objects, generic and borrowed trait arguments, array-to-slice, destructors through a vtable, slice element drops, `dyn Future` with a pinned view, slot reuse after an unsized drop, cross-thread frees of erased handles, pin-preserving coercion, leak behaviour when a coercion panics, zero-sized and over-aligned reclamation, and metadata preservation across a raw round trip. |
 | `unwind_safe` | The unwind-safety contracts, including negative probes that fail to compile if a bound is widened. |
-| `send_bound_probe` | The argument that `Pool: Send` needs no `T: Send`, by moving pools of a deliberately thread-bound element type across threads. Interesting only under Miri, since the failures it looks for are aliasing and data-race violations. |
+| `send_bound_probe` | Representative evidence for the argument that `Pool: Send` needs no `T: Send`, by moving pools of a deliberately thread-bound element type across threads. Interesting only under Miri, since the failures it looks for are aliasing and data-race violations. |
+| `reentrant_allocator` | The two latched windows, each probed by an allocator that re-enters the pool it serves. The directory half is excluded under Miri because it reaches its window through a custom global allocator. |
 | `stats` | The counters, compiled only with the `stats` feature. |
 | `bolero_pool` | Randomised operation streams. |
 | `bolero_blind_pool` | Randomised operation streams over a spread of layouts. |
@@ -61,21 +62,26 @@ Allocating from, and freeing into, a blind pool from inside a pooled value's
 destructor and from inside a construction closure covers the ordinary points.
 An allocator instrumented to re-enter the pool from `A::clone` covers the
 layout-pool construction window, which is where the duplicate re-scan and the
-cap re-check live and which no user-written closure can reach. Reentrancy from
-the global allocator and from the pool's own allocator is excluded by
-precondition (see [the blind pool](./blind-pool.md#reentrancy)).
+cap re-check live and which no user-written closure can reach. The two latched
+windows have their own probes: an allocator that allocates from the pool it
+serves covers chunk growth, and a global allocator that routes through a blind
+pool on every allocation covers directory reservation. Each asserts both that
+the nested request inside the window is refused and that the same request
+outside it is served, so the refusal is attributable to the window (see
+[reentrancy](./reentrancy.md)).
 
 ## Undefined-behaviour checking
 
-Miri runs the suite under several configurations mirroring CI, including
-stacked borrows. It is the primary check on the pointer-recovery arithmetic,
-which is exercised over a spread of layouts precisely because a divergence
-between the two geometry providers surfaces there as an out-of-bounds or
-misaligned access rather than as a wrong answer.
+Miri runs the non-Bolero, non-allocation-tracking suite under several
+configurations mirroring CI, including stacked borrows. It is the primary check
+on the pointer-recovery arithmetic, which is exercised over a spread of layouts
+precisely because a divergence between the two geometry providers surfaces
+there as an out-of-bounds or misaligned access rather than as a wrong answer.
 
-The Bolero targets opt out of Miri because they need filesystem isolation Miri
-does not provide. The allocation-tracking target also opts out, because its
-global allocator is not meaningful under Miri's own allocator.
+The mixed-layout property target runs under Bolero in native execution rather
+than under Miri, because Bolero needs filesystem isolation Miri does not
+provide. The allocation-tracking target also opts out, because its global
+allocator is not meaningful under Miri's own allocator.
 
 ## Interleaving exploration
 
@@ -93,26 +99,24 @@ which is why teardown and the chunk guard carry loom-only drop loops.
 ## Property and fuzz testing
 
 Bolero drives a byte stream interpreted as a sequence of allocate, clone and
-drop operations, asserting that every value is destroyed exactly once and that
-releasing every handle empties the pool. For the blind pool the stream ranges
-over a spread of layouts, and the assertions add that a slot address is never
-served for two different layouts — layout pools neither share chunks nor
-release them, so an address that appears under two layouts is a slot that
-crossed layouts.
+drop operations in native execution, asserting that every value is destroyed
+exactly once and that releasing every handle empties the pool. For the blind
+pool the stream ranges over a spread of layouts, and the assertions add that a
+slot address is never served for two different layouts — layout pools neither
+share chunks nor release them, so an address that appears under two layouts is
+a slot that crossed layouts.
 
 ## Allocation tracking
 
-A tracking global allocator asserts that steady-state operation performs no
-system allocations: fill-and-drop and rolling churn for each handle flavor, a
-warmed blind pool across a mix of layouts, and the benchmark bodies behind the
-published fat-pointer comparison, so that the claim in
+A tracking global allocator asserts that warmed steady-state operation spans
+perform no system allocations: fill-and-drop and rolling churn for each handle
+flavor, a warmed blind pool across a mix of layouts, and the benchmark bodies
+behind the published fat-pointer comparison, so that the claim in
 [`PERF.md`](../PERF.md) is enforced rather than asserted. The target carries
-its own copy of those bodies so that it pulls in no cross-target files.
-
-Leak assertions belong here too: teardown returns the pool's metadata
-allocation to the global allocator, and the drop glue it runs by hand — the
-directory vector's buffer above all — is observable only through the global
-allocator, not through the pool's own.
+its own copy of those bodies so that it pulls in no cross-target files. These
+assertions measure `total_bytes_allocated == 0` inside operation spans after
+construction, warm-up and holding-vector reservation; they do not balance
+outstanding global allocations across pool construction and teardown.
 
 ## Static assertions
 
@@ -123,14 +127,19 @@ respective bounds, and the blind pool's own `Send`-ness depending on its
 allocator alone. These assertions are what catch a marker field that silently
 stops denying a trait.
 
+The `send_bound_probe` target adds representative compile-time and Miri runtime
+evidence for the `Pool: Send` proof. Its scenarios are finite, and its
+concurrent test observes the schedule Miri runs, so it supports the proof
+rather than exhaustively enumerating every scenario or interleaving.
+
 ## Mutation testing and coverage
 
 Mutation testing guards the arithmetic that a weak suite would leave
 unconstrained — the geometry formulas and the routing decision above all.
-Individual sites are excluded with a recorded justification, and the exclusions
-are limited to branches a test cannot reach, such as the reference-count
-overflow guard, which requires a count no test can produce and aborts the
-process if it fires.
+Individual sites are excluded with a recorded, reproducible justification.
+Exclusions cover unreachable branches, demonstrably equivalent alternatives, or
+otherwise unviable mutations, such as the reference-count overflow guard, which
+requires a count no test can produce and aborts the process if it fires.
 
 Coverage instrumentation is likewise switched off for genuinely unreachable
 paths rather than left to report them as gaps, using the same per-site

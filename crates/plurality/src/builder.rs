@@ -13,7 +13,8 @@ use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
 use crate::geometry::TypedGeometry;
 use crate::pool::{Pool, PoolCore, PoolInner, publish_address, teardown_erased};
-use crate::slot::{FREE_END, MAX_POOL_SLOTS};
+use crate::reentrancy::ReentrancyLatch;
+use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS};
 
 /// Default number of slots per chunk.
 const DEFAULT_CHUNK_SIZE: u32 = 32;
@@ -98,7 +99,10 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
     #[cold]
     pub fn build(self) -> Pool<T, A> {
         assert!(self.chunk_size >= 1, "chunk_size must be >= 1");
-        assert!(self.chunk_size <= 1 << 31, "chunk_size must be <= 2^31");
+        assert!(
+            self.chunk_size <= MAX_CHUNK_SIZE,
+            "chunk_size exceeds the largest slot count with a representable next power of two"
+        );
         let chunk_size = self.chunk_size.next_power_of_two();
         if let Some(max) = self.max_chunks {
             let total = u64::from(chunk_size) * u64::from(max);
@@ -127,6 +131,7 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
             bytes_allocated: AtomicUsize::new(0),
             chunk_layout: layout,
             directory: UnsafeCell::new(Vec::new()),
+            growing: ReentrancyLatch::new(),
             allocator: self.allocator,
             geometry: TypedGeometry::<T>::new(),
         };

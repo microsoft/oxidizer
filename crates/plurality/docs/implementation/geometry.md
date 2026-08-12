@@ -156,7 +156,8 @@ double-word types, alignments up to a page, `MaybeUninit<T>` (which shares its
 layout with `T`, so it routes to the same layout pool), and the unsized views
 produced by coercing to a trait object or to a slice. In every case the
 geometry derived from a value's runtime size and alignment equals the geometry
-the pool was built with — which is the invariant the whole blind design rests
-on, and the reason the design treats geometry agreement rather than type
-identity as the routing rule (see
-[the blind pool's design](../design/blind-pool.md)).
+the pool was built with. That agreement is the allocation and reclamation
+safety invariant: a value is allocated and later recovered through matching
+stride and metadata offsets. The blind-pool directory uses exact Rust `Layout`
+as its key — value size and alignment — even when several layouts produce the
+same slot geometry (see [the blind pool's design](../design/blind-pool.md)).

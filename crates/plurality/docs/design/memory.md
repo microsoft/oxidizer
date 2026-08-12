@@ -59,15 +59,16 @@ inside the slots themselves (reusing the dual-purpose counter). This is the
 concurrency hand-off point:
 
 - **Popping** a slot happens only on the single allocator thread, so there is
-  exactly one consumer. This eliminates the classic ABA hazard by construction —
-  a free slot is never simultaneously popped by two threads or re-pushed while
-  still free.
-- **Pushing** a freed slot can happen on any thread. Producers race only on the
-  head of the stack, resolved with a compare-and-swap retry loop.
+  exactly one free-slot consumer. This eliminates the classic ABA hazard by
+  construction — a free slot is never simultaneously popped by two threads or
+  re-pushed while still free.
+- **Pushing** a freed slot can happen on any reclaimer thread. Free-slot
+  producers race only on the head of the stack, resolved with a compare-and-swap
+  retry loop.
 
 There is **no growth lock**: adding a chunk, extending the directory, and
 splicing the new slots onto the free list all run on the sole allocator thread,
-racing only against concurrent producer pushes at the head.
+racing only against concurrent free-slot producer pushes at the head.
 
 Growth is a **cold, rare path**. When the free list is empty, the allocator
 reserves one slot from a freshly acquired chunk for the immediate request and
@@ -75,9 +76,9 @@ splices the remainder onto the free list in one step. Handing back the reserved
 slot directly — rather than looping back to re-pop — keeps the grow-then-allocate
 path bounded, with no window where a lost race could re-empty the list.
 
-The threading rules that make one consumer and many producers the operative
-model are stated in [concurrency](./concurrency.md). The formulas behind slot
-stride and chunk layout are given in
+The threading rules that make one free-slot consumer and many free-slot
+producers the operative model are stated in [concurrency](./concurrency.md).
+The formulas behind slot stride and chunk layout are given in
 [`implementation/geometry.md`](../implementation/geometry.md), and the
 structures themselves in
 [`implementation/pool-body.md`](../implementation/pool-body.md).

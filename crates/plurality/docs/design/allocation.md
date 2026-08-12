@@ -42,8 +42,11 @@ lock-free stack, so only plain atomics are required. Chunk acquisition goes
 through the standard allocator abstraction, so custom and instrumented allocators
 compose naturally.
 
-An allocator supplied to a pool must not allocate from, or free into, a
-plurality pool from within `allocate` or `deallocate`. The
+An allocator supplied to a pool may not usefully allocate from, or free into,
+that same pool from within `allocate` or `deallocate`: the pool latches the
+windows in which its state is unfit to be observed and rejects such a nested
+request as an allocator failure. Introspection reaching the layout directory
+from inside such a callback panics, having no error to return. The
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) states the rule and
-its scope; it constrains allocator callbacks only, and never pooled values'
+its scope; it constrains allocator callbacks alone, and never pooled values'
 destructors or construction closures.

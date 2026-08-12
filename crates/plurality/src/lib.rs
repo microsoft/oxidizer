@@ -26,16 +26,20 @@
 //! Every handle derefs to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
 //! handle runs `T`'s destructor and returns the slot to the pool.
 //!
-//! A [`BlindPool`] moves the element type from the pool to the allocation, so
-//! one pool object backs values of any type. It hands out the same handles
-//! with the same guarantees, routing each value to the internal pool
-//! serving its layout.
+//! A [`BlindPool`] moves the element type from the pool to each allocation, so
+//! one pool object backs values of many types. It creates an internal layout
+//! pool for each distinct [`Layout`](core::alloc::Layout) it sees and routes
+//! each value to the pool serving that exact layout, while handing out the same
+//! handles with the same guarantees.
 //!
-//! Pools suit frequently recycled values of one type, stable-address data
-//! structures, and workloads that need a capacity limit. Slots are reused
-//! without a backing-allocator call, and `max_chunks` bounds growth. Prefer a
-//! general allocator for long-lived values or an arena when values can all be
-//! reclaimed together.
+//! Use [`Pool<T>`] for a working set that repeatedly allocates one value type,
+//! and [`BlindPool`] for heterogeneous recycled values. Both flavors suit
+//! stable-address data structures and workloads that need a capacity limit.
+//! Slots are reused without a chunk-allocation call. `max_chunks` bounds a
+//! [`Pool<T>`] or one [`BlindPool`] layout pool; bounding aggregate
+//! [`BlindPool`] growth also requires `max_layouts`, and total memory depends
+//! on the layouts and effective chunk sizes. Prefer a general allocator for
+//! long-lived values or an arena when values can all be reclaimed together.
 //!
 //! # Concurrency model
 //!
@@ -154,6 +158,7 @@ mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;
 mod rc;
+mod reentrancy;
 mod slot;
 mod sync;
 

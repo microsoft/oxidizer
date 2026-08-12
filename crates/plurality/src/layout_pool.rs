@@ -27,7 +27,8 @@ use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::error::AllocError;
 use crate::geometry::{RuntimeGeometry, SlotGeometry};
 use crate::pool::{PoolCore, PoolInner, publish_address, teardown, teardown_erased};
-use crate::slot::{FREE_END, MAX_POOL_SLOTS, SlotCell};
+use crate::reentrancy::ReentrancyLatch;
+use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS, SlotCell};
 
 /// A pool serving one fixed value [`Layout`].
 ///
@@ -72,6 +73,7 @@ impl<A: Allocator> LayoutPool<A> {
             bytes_allocated: AtomicUsize::new(0),
             chunk_layout,
             directory: UnsafeCell::new(Vec::new()),
+            growing: ReentrancyLatch::new(),
             allocator,
             geometry,
         };
@@ -106,39 +108,6 @@ impl<A: Allocator> LayoutPool<A> {
     #[inline]
     pub(crate) fn as_ref(&self) -> LayoutPoolRef<A> {
         LayoutPoolRef { inner: self.inner }
-    }
-
-    /// Effective slots per chunk, after clamping.
-    #[inline]
-    pub(crate) fn chunk_size(&self) -> u32 {
-        self.inner().chunk_size
-    }
-
-    /// Effective chunk cap, after clamping.
-    #[inline]
-    pub(crate) fn max_chunks(&self) -> u32 {
-        // The constructor always installs a cap.
-        self.inner().max_chunks.unwrap_or(u32::MAX)
-    }
-
-    /// Number of chunks allocated so far.
-    #[inline]
-    pub(crate) fn chunks_allocated(&self) -> u32 {
-        self.inner().chunks_allocated.load(Relaxed)
-    }
-
-    /// Total bytes taken from the pool's allocator over its lifetime.
-    #[cfg(feature = "stats")]
-    #[inline]
-    pub(crate) fn bytes_allocated(&self) -> u64 {
-        self.inner().bytes_allocated.load(Relaxed) as u64
-    }
-
-    /// Live refcounted allocations (`Box`/`Arc`/`Rc`), excluding `Alloc`.
-    #[inline]
-    pub(crate) fn len(&self) -> u64 {
-        // pool_refcount = 1 (this `LayoutPool`) + live refcounted allocations.
-        self.inner().core.pool_refcount.load(Relaxed).saturating_sub(1) as u64
     }
 }
 
@@ -181,6 +150,45 @@ impl<A: Allocator> LayoutPoolRef<A> {
         unsafe { &self.inner.as_ref().core }
     }
 
+    #[inline]
+    fn inner(&self) -> &PoolInner<A, RuntimeGeometry> {
+        // SAFETY: the owning `LayoutPool` outlives every view of it.
+        unsafe { self.inner.as_ref() }
+    }
+
+    /// Effective slots per chunk, after clamping.
+    #[inline]
+    pub(crate) fn chunk_size(self) -> u32 {
+        self.inner().chunk_size
+    }
+
+    /// Effective chunk cap, after clamping.
+    #[inline]
+    pub(crate) fn max_chunks(self) -> u32 {
+        // The constructor always installs a cap.
+        self.inner().max_chunks.unwrap_or(u32::MAX)
+    }
+
+    /// Number of chunks allocated so far.
+    #[inline]
+    pub(crate) fn chunks_allocated(self) -> u32 {
+        self.inner().chunks_allocated.load(Relaxed)
+    }
+
+    /// Total bytes taken from the pool's allocator over its lifetime.
+    #[cfg(feature = "stats")]
+    #[inline]
+    pub(crate) fn bytes_allocated(self) -> u64 {
+        self.inner().bytes_allocated.load(Relaxed) as u64
+    }
+
+    /// Live refcounted allocations (`Box`/`Arc`/`Rc`), excluding `Alloc`.
+    #[inline]
+    pub(crate) fn len(self) -> u64 {
+        // pool_refcount = 1 (the owning `LayoutPool`) + live refcounted allocations.
+        self.inner().core.pool_refcount.load(Relaxed).saturating_sub(1) as u64
+    }
+
     /// Pops a free slot, growing the pool if necessary.
     ///
     /// # Safety
@@ -189,7 +197,7 @@ impl<A: Allocator> LayoutPoolRef<A> {
     /// layouts matched.
     ///
     /// # Errors
-    /// Returns [`AllocError`] if the pool is full and cannot grow.
+    /// Returns [`AllocError`] if allocation fails.
     #[inline]
     pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError> {
         // SAFETY: the owning `LayoutPool` outlives every view of it.
@@ -211,7 +219,7 @@ unsafe impl<A: Allocator + Send> Send for LayoutPool<A> {}
 /// that many slots has a representable [`Layout`]. Returns the effective slot
 /// count together with that layout.
 fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout) {
-    let mut slots = chunk_size.clamp(1, 1 << 31).next_power_of_two();
+    let mut slots = chunk_size.clamp(1, MAX_CHUNK_SIZE).next_power_of_two();
     loop {
         if let Some(layout) = geometry.chunk_layout(slots as usize) {
             return (slots, layout);
@@ -243,8 +251,10 @@ pub(crate) fn effective_max_chunks(chunk_size: u32, requested: Option<u32>) -> u
 /// A cap of zero is a pool that can never allocate, exactly as it is for
 /// [`Pool`](crate::Pool), so only the upper bound is applied.
 fn clamp_max_chunks(chunk_size: u32, max_chunks: Option<u32>) -> u32 {
-    // `chunk_size` is at most `2^31` and `MAX_POOL_SLOTS` exceeds `2^32`, so
-    // the ceiling is at least one.
+    // `clamp_chunk_size` guarantees a nonzero divisor. The quotient can still
+    // be zero on a target whose addressable slot count is below the effective
+    // chunk size, which yields a pool that can never allocate — the same
+    // outcome an explicit zero cap produces, and not a new failure mode.
     let ceiling = MAX_POOL_SLOTS / u64::from(chunk_size);
     let requested = max_chunks.map_or(ceiling, u64::from);
     u32::try_from(requested.min(ceiling)).unwrap_or(u32::MAX)

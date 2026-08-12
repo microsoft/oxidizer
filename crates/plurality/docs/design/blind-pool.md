@@ -81,25 +81,20 @@ A blind pool routes a value only to the pool whose layout is *exactly*
 `Layout::new::<T>()`. It never rounds sizes up, buckets nearby layouts
 together, or imposes size classes.
 
-The rule that actually has to hold is narrower: the allocating pool and the
-reclaiming handle must agree on **slot geometry** — the stride and the offsets
-of the counter and index. The reclaiming handle recomputes those from the value
-it holds, so if a value were placed in a pool whose stride came from a
-different geometry, the handle would walk to the wrong address.
+Allocation and reclamation also rely on a separate safety invariant: the
+allocating pool and the reclaiming handle agree on **slot geometry** — the
+stride and the offsets of the counter and index. The reclaiming handle
+recomputes those from the value it holds, so the geometry must match the slot
+that was allocated for that value.
 
 Geometry is a pure function of layout, but not an injective one. Padding a
-value out to make room for the counter and index collapses neighbouring
+value out to make room for the counter and index collapses neighboring
 layouts together: `u8`, `u16`, `u32` and `[u8; 4]` are four distinct layouts
-with one geometry between them. Bucketing would therefore be sound *within* a
-geometry equivalence class. Routing on the exact layout is simply the cheapest
-rule that is always sufficient, and it needs no table of classes to stay
-correct.
-
-The consequence to keep in mind when reading the rest of this chapter is that
-**pool identity follows layout, not geometry**. Those four types get four
-layout pools, not one, and each has its own chunks, its own free list and its
-own share of any cap. Geometry appears only in the soundness argument above; it
-never partitions anything.
+with one geometry between them. The directory still uses the exact Rust
+`Layout` as its key. **Pool identity follows layout, not geometry**: those four
+types get four layout pools, not one, and each has its own chunks, its own free
+list, its own statistics, and its own share of any cap. Geometry appears only
+in the safety invariant above; it never partitions anything.
 
 The rule pays for itself: a blind pool has no internal fragmentation from
 rounding, and a value occupies exactly the space a typed pool would give it.
@@ -222,8 +217,9 @@ two separate layout pools alive for different durations.
 
 ## Concurrency
 
-The blind pool follows the same single-producer / multi-consumer discipline as
-the typed pool ([concurrency](./concurrency.md)), and for the same reason:
+The blind pool follows the same single allocator, multiple reclaimers
+discipline as the typed pool ([concurrency](./concurrency.md)), and for the
+same reason:
 allocation mutates the directory and must not overlap with itself, while frees
 never touch the directory at all. The pool object may be moved between threads
 but not shared, and its handles carry their own thread-mobility rules.
@@ -259,16 +255,24 @@ constructors. The only change is where the type parameter sits:
 typed.alloc_box(value);          // Pool<Widget>  — type fixed by the pool
 blind.alloc_box(value);          // BlindPool     — type inferred from the value
 blind.alloc_uninit_box::<Widget>();  // named where it cannot be inferred
+let erased: plurality::Box<dyn core::fmt::Display> =
+    plurality::Box::unsize(
+        blind.alloc_box(1.5_f64),
+        plurality::coerce!(dyn core::fmt::Display),
+    );
 ```
 
 Introspection splits into two tiers, because a blind pool has no single slot
-size. Aggregate queries report the whole pool — how many values are live, how
-many chunks are held, how many distinct layouts are in play. Per-layout queries
-are named for a type and report that type's layout pool: its capacity, its live
-count, and the effective chunk size and chunk cap in force for that layout.
-Per-layout queries never create a layout pool, so asking about a type the pool
-has not yet seen simply reports an empty pool at that layout's effective
-sizing.
+size. Aggregate queries report the whole pool — the count of live detachable
+allocations (`Box`, `Arc`, and `Rc`), the chunks held, and the distinct layouts
+in play. Lifetime-bound `Alloc` handles can occupy slots, but they do not hold
+a pool-level reference and do not contribute to `len`; `is_empty` uses the same
+definition, so it is not a physical occupancy test. Per-layout queries are
+named for a type and report that type's layout pool: its capacity, its
+detachable-allocation count, and the effective chunk size and chunk cap in
+force for that layout. Per-layout queries never create a layout pool, so asking
+about a type the pool has not yet seen simply reports an empty pool at that
+layout's effective sizing.
 
 Aggregate queries cost time proportional to the number of layouts, since they
 sum over the layout pools. They inherit the typed pool's imprecision under
@@ -300,10 +304,10 @@ type, so a value's concrete type is recovered from its handle or not at all.
 
 Converting a blind pool into a typed pool for one of its layouts, or the
 reverse, is likewise not offered. The obstacle is not geometry — both forms
-derive the same slot geometry from the same layout, which is the property the
-whole design rests on. It is that a typed pool and a layout pool are distinct
-instantiations with their own teardown hooks and their own sizing and capping
-policies, so neither can adopt the other's slots without adopting its
+derive the same slot geometry from the same layout, which allocation and
+reclamation safety require. It is that a typed pool and a layout pool are
+distinct instantiations with their own teardown hooks and their own sizing and
+capping policies, so neither can adopt the other's slots without adopting its
 configuration and its pool-metadata teardown as well.
 
 ## Failure

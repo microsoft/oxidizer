@@ -127,8 +127,8 @@ sentinel means the pool must grow. Otherwise the head index is resolved to a
 slot address, the slot's counter word is read to obtain the next index, and the
 head is swapped for it with a compare-exchange. This is a plain compare-exchange
 loop with no ABA tag, which is sound because pops happen only on the allocator
-thread; pushes are the multi-producer side and can only ever install a
-different head, which the loop retries.
+thread. In the free-slot flow, reclaiming handles are the producer side and can
+only ever install a different head, which the loop retries.
 
 **Occupying a claimed slot** differs by handle flavor, and the differences are
 deliberate:
@@ -156,7 +156,7 @@ loop {
 
 The load needs only a recent head — a stale one makes the compare-exchange
 retry — so it is `Relaxed`. The `Release` on the swap publishes the link store
-to the consumer's `Acquire` load on the pop side, which is what makes the
+to the allocator's `Acquire` load on the pop side, which is what makes the
 popped slot's next-index read valid.
 
 The value's destructor runs before the push, and it may unwind. RAII guards
@@ -351,16 +351,19 @@ between allocation and publication. Both compile to nothing outside `loom`.
 
 ## Concurrency discipline
 
-`Pool` is `Send` when its allocator is, and is never `Sync`. Every piece of
-cross-thread state is atomic; the one piece that is not — the chunk directory —
-is confined to the allocator thread by the absence of `Sync`.
+`Pool` is `Send` when its allocator is, and is never `Sync`. The architecture is
+single allocator, multiple reclaimers. Every piece of cross-thread state is
+atomic; the one piece that is not — the chunk directory — is confined to the
+allocator thread by the absence of `Sync`.
 
 "The allocator thread" means whichever single thread holds a shared reference
-to the pool at a given moment. Because the pool is `!Sync`, such a reference cannot be
-shared across threads, so the free-list pop, the directory read on the
-addressing path, and the directory write during growth cannot overlap with
-themselves. Frees are the multi-producer side: they run from any thread, are
-lock-free, and touch only atomics and immutable chunk state.
+to the pool at a given moment. Because the pool is `!Sync`, such a reference
+cannot be shared across threads, so the free-list pop, the directory read on
+the addressing path, and the directory write during growth cannot overlap with
+themselves. Frees run from any thread, are lock-free, and touch only atomics and
+immutable chunk state. In producer/consumer terms, allocated-value flow is
+single-producer/multi-consumer, while free-slot flow is
+multi-producer/single-consumer.
 
 `Send` deliberately carries no `T: Send` bound. A pool object owns no values:
 values are owned by handles, whose own `Send` bounds govern where they may
@@ -390,8 +393,8 @@ first use.
 
 The rounded chunk size yields `shift` and `mask`. The free list starts at the
 sentinel, the pool reference count starts at one, and the directory starts
-empty, so a freshly built pool holds no chunks and performs no allocation until
-its first use.
+empty, so a freshly built pool holds no chunks and does not call its configured
+chunk allocator until first use.
 
 The two pool forms obtain their metadata block differently, because their
 failure contracts differ. The typed builder allocates it with `Box::new`, whose

@@ -11,8 +11,7 @@ enum ErrorKind {
     /// `max_chunks` cap, or, for an unbounded pool, the addressable
     /// slot-index ceiling.
     CapacityExhausted,
-    /// The backing allocator failed to provide memory the pool needed for its
-    /// own use.
+    /// The pool could not obtain memory needed for its own use.
     AllocatorFailed,
 }
 
@@ -40,7 +39,8 @@ impl AllocError {
         kind: ErrorKind::CapacityExhausted,
     };
 
-    /// The backing allocator failed (see [`is_allocator_failure`]).
+    /// The pool could not obtain required memory (see
+    /// [`is_allocator_failure`]).
     ///
     /// [`is_allocator_failure`]: Self::is_allocator_failure
     pub(crate) const ALLOCATOR_FAILED: Self = Self {
@@ -53,8 +53,8 @@ impl AllocError {
         matches!(self.kind, ErrorKind::CapacityExhausted)
     }
 
-    /// Returns `true` if allocation failed because the backing allocator could
-    /// not provide memory the pool needed for its own use.
+    /// Returns `true` if the pool could not obtain memory needed for its own
+    /// use.
     #[must_use]
     pub fn is_allocator_failure(self) -> bool {
         matches!(self.kind, ErrorKind::AllocatorFailed)
@@ -65,7 +65,7 @@ impl fmt::Display for AllocError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.kind {
             ErrorKind::CapacityExhausted => "the pool reached its maximum capacity",
-            ErrorKind::AllocatorFailed => "the backing allocator failed to provide memory for the pool",
+            ErrorKind::AllocatorFailed => "the pool could not obtain required memory",
         })
     }
 }

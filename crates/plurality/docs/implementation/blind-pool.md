@@ -142,12 +142,13 @@ pool is `!Sync`, so allocation never overlaps with itself, and the directory is
 touched only while allocating. Reclamation never reaches it.
 
 The discipline that keeps this sound is that no borrow of either vector is held
-across *pool* user code — construction closures and destructors. A lookup
-copies the layout pool's inner pointer to a local and releases the borrow
-before anything else happens. `Vec::try_reserve` holds `&mut` across a call
-into the *global* allocator, which is the same exposure the chunk directory has
-in the typed pool's growth path. `Vec::push` runs only into capacity that was
-already reserved.
+across code outside this module. A lookup copies the layout pool's inner
+pointer to a local and releases the borrow before anything else happens, and
+the introspection helpers do the same before invoking their callbacks.
+`Vec::try_reserve` is the one place that must hold `&mut` across a call into the
+*global* allocator; that window is latched, and
+[`reentrancy.md`](./reentrancy.md) describes how entry to it is refused.
+`Vec::push` runs only into capacity that was already reserved.
 
 ### Reentrancy
 
@@ -164,23 +165,23 @@ obvious. All of them must be accounted for:
 
 The last three run *while a new layout pool is being created or grown*, which
 is precisely the window in which pool state is inconsistent. Two of them are
-handled by ordering, and one by a precondition.
+handled by ordering, and one by the growth latch.
 
-**The pool's allocator must not allocate from, or free into, a plurality
-pool.** Growth reads the chunk count, derives the new chunk's base index from
-it, calls `A::allocate`, and publishes the incremented count only after the
-chunk is installed. An allocator that re-entered the pool during that call
-would read the same chunk count and derive the same base index, so two chunks
-would claim one range of global slot indices. This matches the global
-allocator's precondition recorded among the [design
-invariants](../DESIGN.md#design-invariants-at-a-glance), and it is a
-precondition rather than a defended-against condition because defending it
-would put a publication protocol on the growth path to serve an allocator no
-caller has reason to write.
+**A reentrant chunk allocation is refused.** Growth reads the chunk count,
+derives the new chunk's base index from it, calls `A::allocate`, and publishes
+the incremented count only after the chunk is installed. An allocator that
+re-entered the pool during that call would read the same chunk count and derive
+the same base index, so two chunks would claim one range of global slot indices.
+The window is latched and the nested request is rejected as an allocator
+failure, so the guarantee holds against any allocator a caller can write.
+[`reentrancy.md`](./reentrancy.md) covers the latch and the matching window in
+directory reservation.
 
 The ordering below is chosen so that no other reentrant call can observe a
 broken state or force a failure into an infallible position:
 
+0. Refuse to route at all if a directory reservation is in progress, before the
+   first directory read.
 1. Compute the layout and scan the key vector for it. On a hit, copy the found
    entry's inner pointer to a local, release the borrow, and go to step 8.
 2. On a miss, check the layout cap. If it is reached, release both borrows
@@ -192,9 +193,9 @@ broken state or force a failure into an infallible position:
    failure here leaves both vectors exactly as they were. `A::clone()` and the
    global allocator run during this step, and a reentrant allocation that
    reaches them sees a consistent — merely incomplete — directory.
-4. `try_reserve` both vectors. Reserving after construction means the
-   reservation cannot be consumed by a reentrant miss that happened during
-   step 3.
+4. `try_reserve` both vectors, under the reservation latch. Reserving after
+   construction means the reservation cannot be consumed by a reentrant miss
+   that happened during step 3.
 5. **Re-scan, and re-check the cap.** Step 3 released control twice, so the
    directory may have grown since. The freshly built pool is abandoned if an
    entry for this layout exists, or if the layout cap is reached. Both checks
@@ -212,14 +213,16 @@ broken state or force a failure into an infallible position:
    abandoned pool's teardown runs the cloned allocator's destructor and a
    global deallocation, and the rejected value's destructor is arbitrary user
    code.
-7. Otherwise push `pools` first, then `layouts`. Lookups scan `layouts`, so
-   this ordering keeps `layouts.len() <= pools.len()` at every instant, and a
-   key is never visible before the pool that serves it exists. The reverse
-   order leaves a window in which a reentrant lookup — triggered by the global
-   allocator during the second push — finds a key whose pool is not there and
-   indexes out of bounds. Both pushes are into capacity reserved in step 4 and
-   nothing between step 4 and here can consume it, so neither reallocates and
-   neither can fail.
+7. Otherwise push `pools` first, then `layouts`. Layout-pool construction in
+   step 3 and directory reservation in step 4 are the global-allocation and
+   reentrancy boundaries on the install path. No operation consumes either
+   reservation before these pushes, nothing callback-capable runs between the
+   reservations and these pushes, and both pushes use the capacity reserved in
+   step 4, so neither reallocates nor fails. Lookups scan `layouts`, so the
+   pool-first order preserves `layouts.len() <= pools.len()` and keeps every
+   published key paired with an existing pool. The reverse order is invalid
+   because it breaks that directory invariant, not because it opens an
+   allocator-reentrancy window.
 8. Copy the layout pool's inner pointer to a local, drop all borrows, and
    perform the allocation through that local.
 

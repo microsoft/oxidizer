@@ -93,7 +93,28 @@ pub(crate) fn chunk_layout(size: usize, align: usize, slots: usize) -> Option<La
 /// emits the same code it would with the formulas written inline. The runtime
 /// form answers with loaded fields, which is what lets one pool body serve a
 /// layout that is only known at run time.
-pub(crate) trait SlotGeometry: Copy {
+///
+/// # Safety
+/// Each geometry value describes a single value layout. Every copy of that
+/// value must report the same stride, metadata offsets, slot-array offset, and
+/// chunk-layout result for the same slot count while the pool uses it.
+/// Ref: docs/implementation/geometry.md, "One formula, two consumers".
+///
+/// When [`chunk_layout`](Self::chunk_layout) returns `Some(layout)`, an
+/// allocation with that layout must be suitable for a [`ChunkHeader`] at the
+/// allocation base and for consecutive slots beginning
+/// [`slots_offset`](Self::slots_offset) bytes from that base, separated by
+/// [`stride`](Self::stride) bytes. For every slot address produced this way:
+/// the slot address must be the value address for the geometry's value layout;
+/// the value address must satisfy that layout's alignment; the reported
+/// reference-count and index offsets must identify in-bounds, properly aligned
+/// fields for `AtomicU32` and `u32`; and the stride must cover the value and
+/// metadata fields without overlap.
+///
+/// [`slot_at`](Self::slot_at) must return the corresponding slot address for a
+/// chunk and in-chunk offset. [`header_of`](Self::header_of) must be its inverse
+/// for a slot address and that slot's stored in-chunk index.
+pub(crate) unsafe trait SlotGeometry: Copy {
     /// Distance between consecutive slots.
     fn stride(self) -> usize;
     /// Byte offset of the reference count within a slot.
@@ -203,7 +224,14 @@ impl<T> Clone for TypedGeometry<T> {
 
 impl<T> Copy for TypedGeometry<T> {}
 
-impl<T> SlotGeometry for TypedGeometry<T> {
+// SAFETY: `TypedGeometry<T>` derives every number from `T`'s size and
+// alignment, and `CHECK` compares the stride, alignment and metadata offsets
+// with the compiler's `#[repr(C)] SlotCell<T>` layout. Chunk layout uses the
+// same formulas for the header and slot array, and the typed addressing
+// overrides use `SlotCell<T>` pointer arithmetic over that slot array, so the
+// two addressing directions agree with the layout they describe.
+// Ref: docs/implementation/geometry.md, "Proving the formulas".
+unsafe impl<T> SlotGeometry for TypedGeometry<T> {
     #[inline]
     fn stride(self) -> usize {
         stride(size_of::<T>(), align_of::<T>())
@@ -312,7 +340,14 @@ impl RuntimeGeometry {
     }
 }
 
-impl SlotGeometry for RuntimeGeometry {
+// SAFETY: `RuntimeGeometry::new` captures a valid `Layout`'s size and
+// alignment, precomputes every number from the shared formulas, and stores
+// those immutable values in the geometry. The default addressing methods use
+// the same stored stride and slot-array offset that `chunk_layout` uses when
+// sizing the chunk allocation, so allocation and pointer recovery describe the
+// same slots.
+// Ref: docs/implementation/geometry.md, "One derivation, two shapes".
+unsafe impl SlotGeometry for RuntimeGeometry {
     #[inline]
     fn stride(self) -> usize {
         self.stride

@@ -376,7 +376,7 @@ fn chunk_size_zero_panics() {
 }
 
 #[test]
-#[should_panic(expected = "chunk_size must be <= 2^31")]
+#[should_panic(expected = "chunk_size exceeds the largest slot count")]
 fn chunk_size_too_large_panics() {
     let _ = Pool::<u32>::builder().chunk_size((1 << 31) + 1).build();
 }
@@ -405,11 +405,11 @@ unsafe impl Allocator for FailingAllocator {
 fn allocator_failure_surfaces_as_allocator_failure() {
     let pool = Pool::<u32>::builder().chunk_size(4).allocator(FailingAllocator).build();
     // The first allocation must grow a chunk; the allocator fails, so the error
-    // identifies the backing allocator as the cause, not a capacity limit.
+    // identifies a failed memory request as the cause, not a capacity limit.
     let err = pool.try_alloc_box(1).unwrap_err();
     assert!(err.is_allocator_failure());
     assert!(!err.is_capacity_exhausted());
-    assert_eq!(format!("{err}"), "the backing allocator failed to provide memory for the pool");
+    assert_eq!(format!("{err}"), "the pool could not obtain required memory");
 }
 
 // An allocator that tracks the number of live bytes, to prove memory is freed.

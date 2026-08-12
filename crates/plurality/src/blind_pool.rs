@@ -24,8 +24,9 @@ use crate::blind_builder::BlindPoolBuilder;
 use crate::boxed::Box;
 use crate::error::AllocError;
 use crate::layout_pool::{LayoutPool, LayoutPoolRef};
-use crate::pool::{occupy_local, pool_full};
+use crate::pool::{allocation_failed, occupy_local};
 use crate::rc::Rc;
+use crate::reentrancy::ReentrancyLatch;
 use crate::slot::SlotCell;
 use crate::sync::Arc;
 
@@ -90,8 +91,8 @@ impl ChunkSizing {
 /// already holds its maximum number of layouts. Allocator failure additionally
 /// covers the metadata of a layout pool created on first sight of a layout. The
 /// `alloc_*` methods panic in either case; the `try_alloc_*` methods report an
-/// [`AllocError`]. Where the wording below says "the pool is full", it means
-/// both cases.
+/// [`AllocError`]. "Full" below always means capacity exhaustion alone;
+/// "allocation failed" covers either cause.
 ///
 /// ```
 /// use plurality::BlindPool;
@@ -113,6 +114,10 @@ pub struct BlindPool<A: Allocator + Clone = Global> {
     sizing: ChunkSizing,
     max_chunks: Option<u32>,
     max_layouts: Option<usize>,
+    /// Rejects a directory access taken from inside the reservation window,
+    /// where both vectors are mutably borrowed across a call into the global
+    /// allocator. Ref: docs/implementation/reentrancy.md.
+    reserving: ReentrancyLatch,
     allocator: A,
 }
 
@@ -168,6 +173,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
             sizing,
             max_chunks,
             max_layouts,
+            reserving: ReentrancyLatch::new(),
             allocator,
         }
     }
@@ -179,6 +185,12 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// to grow the directory in the meantime.
     #[inline]
     fn pool_for<T>(&self) -> Result<LayoutPoolRef<A>, AllocError> {
+        // Step 0: refuse to route from inside the reservation window, where the
+        // directory is mutably borrowed and unfit to be read.
+        // Ref: docs/implementation/reentrancy.md.
+        if self.reserving.is_held() {
+            return Err(AllocError::ALLOCATOR_FAILED);
+        }
         // Step 1: scan for an existing entry.
         let layout = Layout::new::<T>();
         match self.lookup(layout) {
@@ -276,6 +288,9 @@ impl<A: Allocator + Clone> BlindPool<A> {
     }
 
     /// `true` if a further layout would exceed the configured cap.
+    ///
+    /// Reached only through `pool_for`, which has already refused a read taken
+    /// from inside the reservation window.
     #[inline]
     fn at_layout_cap(&self) -> bool {
         // SAFETY: as for `lookup`.
@@ -289,18 +304,34 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// `try_reserve`, which also covers the capacity overflow `reserve` would
     /// panic on.
     fn try_reserve_one(&self) -> Result<(), AllocError> {
+        // Held across both reservations. Each holds `&mut` over a vector while
+        // it calls the global allocator, so an allocator that re-entered the
+        // router would alias that borrow — or read a buffer it has just freed.
+        // Ref: docs/implementation/reentrancy.md.
+        let Some(_reserving) = self.reserving.enter() else {
+            return Err(AllocError::ALLOCATOR_FAILED);
+        };
         #[expect(
             clippy::multiple_unsafe_ops_per_block,
             reason = "both reservations must succeed together, so splitting the block would obscure that they form one step"
         )]
-        // SAFETY: as for `lookup`. `try_reserve` holds `&mut` across a call
-        // into the global allocator, which the design invariants require not to
-        // re-enter a plurality pool.
+        // SAFETY: as for `lookup`, and the latch above bars any other directory
+        // access for as long as these borrows can be live.
         unsafe {
             (*self.pools.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
             (*self.layouts.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
         }
         Ok(())
+    }
+
+    /// Panics if a read of the directory re-enters the reservation window.
+    ///
+    /// Introspection has no way to report a failure, so a read that could alias
+    /// a live `&mut` is refused outright rather than performed.
+    /// Ref: docs/implementation/reentrancy.md.
+    #[inline]
+    fn assert_readable(&self) {
+        assert!(!self.reserving.is_held(), "the pool was read from inside an allocator callback");
     }
 
     /// Runs `f` over the pool serving `T`, creating it on first sight.
@@ -316,8 +347,13 @@ impl<A: Allocator + Clone> BlindPool<A> {
     // ─── introspection ───────────────────────────────────────────────────
 
     /// Number of distinct layouts the pool has served.
+    ///
+    /// # Panics
+    /// Panics if called from inside an allocator callback that re-enters this
+    /// pool.
     #[must_use]
     pub fn layouts(&self) -> usize {
+        self.assert_readable();
         // SAFETY: as for `lookup`.
         unsafe { (*self.layouts.get()).len() }
     }
@@ -330,11 +366,23 @@ impl<A: Allocator + Clone> BlindPool<A> {
 
     /// Runs `f` over every layout pool, summing the results.
     ///
-    /// Aggregate queries cost time proportional to the number of layouts.
+    /// Each view is copied out before `f` runs, so no directory borrow is live
+    /// while `f` executes. Aggregate queries cost time proportional to the
+    /// number of layouts.
     #[inline]
-    fn sum_pools(&self, f: impl Fn(&LayoutPool<A>) -> u64) -> u64 {
+    fn sum_pools(&self, f: fn(LayoutPoolRef<A>) -> u64) -> u64 {
+        self.assert_readable();
         // SAFETY: as for `lookup`.
-        unsafe { (*self.pools.get()).iter().map(f).sum() }
+        let installed = unsafe { (*self.pools.get()).len() };
+        let mut total = 0;
+        for index in 0..installed {
+            // SAFETY: as for `lookup`; `index` is below the length read above,
+            // which the latch keeps from shrinking. The view outlives the
+            // borrow it was copied out of.
+            let view = unsafe { (&*self.pools.get())[index].as_ref() };
+            total += f(view);
+        }
+        total
     }
 
     /// Live refcounted allocations (`Box`/`Arc`/`Rc`) across every layout.
@@ -344,7 +392,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// never in; this is a reporting instrument, not a control-flow input.
     #[must_use]
     pub fn len(&self) -> u64 {
-        self.sum_pools(LayoutPool::len)
+        self.sum_pools(LayoutPoolRef::len)
     }
 
     /// `true` if no refcounted allocation is live (see [`len`](Self::len)).
@@ -371,7 +419,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// creates a layout pool.
     #[must_use]
     pub fn chunk_size_of<T>(&self) -> u32 {
-        self.with_layout_of::<T, _>(LayoutPool::chunk_size, || {
+        self.with_layout_of::<T, _>(LayoutPoolRef::chunk_size, || {
             let layout = Layout::new::<T>();
             let stride = crate::geometry::stride(layout.size(), layout.align());
             crate::layout_pool::effective_chunk_size(layout, self.sizing.slots_for(stride))
@@ -381,7 +429,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Effective chunk cap in force for `T`'s layout, after clamping.
     #[must_use]
     pub fn max_chunks_of<T>(&self) -> u32 {
-        self.with_layout_of::<T, _>(LayoutPool::max_chunks, || {
+        self.with_layout_of::<T, _>(LayoutPoolRef::max_chunks, || {
             crate::layout_pool::effective_max_chunks(self.chunk_size_of::<T>(), self.max_chunks)
         })
     }
@@ -389,13 +437,13 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Chunks held for `T`'s layout. Zero for an unseen layout.
     #[must_use]
     pub fn chunks_allocated_of<T>(&self) -> u32 {
-        self.with_layout_of::<T, _>(LayoutPool::chunks_allocated, || 0)
+        self.with_layout_of::<T, _>(LayoutPoolRef::chunks_allocated, || 0)
     }
 
     /// Live refcounted allocations of `T`'s layout. Zero for an unseen layout.
     #[must_use]
     pub fn len_of<T>(&self) -> u64 {
-        self.with_layout_of::<T, _>(LayoutPool::len, || 0)
+        self.with_layout_of::<T, _>(LayoutPoolRef::len, || 0)
     }
 
     /// Total slots across allocated chunks of `T`'s layout.
@@ -428,29 +476,22 @@ impl<A: Allocator + Clone> BlindPool<A> {
     pub fn stats(&self) -> crate::PoolStats {
         crate::PoolStats {
             total_chunks_allocated: self.sum_pools(|pool| u64::from(pool.chunks_allocated())),
-            total_bytes_allocated: self.sum_pools(LayoutPool::bytes_allocated),
+            total_bytes_allocated: self.sum_pools(LayoutPoolRef::bytes_allocated),
         }
     }
 
     /// Applies `found` to the pool serving `T`, or evaluates `absent` when the
     /// layout has not been seen. Never creates a layout pool.
+    ///
+    /// The view is copied out before `found` runs, so neither closure executes
+    /// while a directory borrow is live.
     #[inline]
-    fn with_layout_of<T, R>(&self, found: impl FnOnce(&LayoutPool<A>) -> R, absent: impl FnOnce() -> R) -> R {
+    fn with_layout_of<T, R>(&self, found: impl FnOnce(LayoutPoolRef<A>) -> R, absent: impl FnOnce() -> R) -> R {
+        self.assert_readable();
         let layout = Layout::new::<T>();
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "both cell reads rest on the one invariant stated below, which a block per read would only duplicate"
-        )]
-        // SAFETY: as for `lookup`.
-        unsafe {
-            let layouts = &*self.layouts.get();
-            match layouts.iter().position(|&candidate| candidate == layout) {
-                Some(index) => {
-                    let pools = &*self.pools.get();
-                    found(&pools[index])
-                }
-                None => absent(),
-            }
+        match self.lookup(layout) {
+            Some(view) => found(view),
+            None => absent(),
         }
     }
 
@@ -464,8 +505,8 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Allocates `value` and returns a unique [`Box`].
     ///
     /// # Panics
-    /// Panics if the pool is full. Use [`try_alloc_box`](Self::try_alloc_box)
-    /// to handle exhaustion.
+    /// Panics if allocation fails. Use [`try_alloc_box`](Self::try_alloc_box)
+    /// to handle capacity exhaustion and allocator failure.
     ///
     /// ```
     /// use plurality::BlindPool;
@@ -478,20 +519,20 @@ impl<A: Allocator + Clone> BlindPool<A> {
     pub fn alloc_box<T>(&self, value: T) -> Box<T, A> {
         match self.try_alloc_box(value) {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns a unique [`Box`]. `f` is
-    /// not called if the pool is full.
+    /// not called if allocation fails.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_box_with<T, F: FnOnce() -> T>(&self, f: F) -> Box<T, A> {
         match self.try_alloc_box_with(f) {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -529,7 +570,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Allocates `value` and returns a shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc<T>(&self, value: T) -> Arc<T, A>
     where
@@ -537,14 +578,14 @@ impl<A: Allocator + Clone> BlindPool<A> {
     {
         match self.try_alloc_arc(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns a shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_with<T, F: FnOnce() -> T>(&self, f: F) -> Arc<T, A>
     where
@@ -552,7 +593,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     {
         match self.try_alloc_arc_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -597,7 +638,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// matching [`alloc::sync::Arc::pin`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_pin<T>(&self, value: T) -> Pin<Arc<T, A>>
     where
@@ -605,7 +646,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     {
         match self.try_alloc_arc_pin(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -613,7 +654,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// shared [`Arc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_arc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Pin<Arc<T, A>>
     where
@@ -621,7 +662,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     {
         match self.try_alloc_arc_pin_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -659,25 +700,25 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// the pool. It cannot outlive the pool, but is the cheapest handle.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc<T>(&self, value: T) -> Alloc<'_, T, A> {
         match self.try_alloc(value) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns an [`Alloc`]. `f` is not
-    /// called if the pool is full.
+    /// called if allocation fails.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Alloc<'_, T, A> {
         match self.try_alloc_with(f) {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -715,24 +756,24 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Allocates `value` and returns a shared, non-atomically refcounted [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc<T>(&self, value: T) -> Rc<T, A> {
         match self.try_alloc_rc(value) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
     /// Allocates a value produced by `f` and returns an [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_with<T, F: FnOnce() -> T>(&self, f: F) -> Rc<T, A> {
         match self.try_alloc_rc_with(f) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -771,12 +812,12 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// matching [`alloc::rc::Rc::pin`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_pin<T>(&self, value: T) -> Pin<Rc<T, A>> {
         match self.try_alloc_rc_pin(value) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -784,12 +825,12 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// shared [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[inline]
     pub fn alloc_rc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Pin<Rc<T, A>> {
         match self.try_alloc_rc_pin_with(f) {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -822,7 +863,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// [`assume_init`](crate::Box::assume_init) once written.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     ///
     /// ```
     /// use plurality::BlindPool;
@@ -839,7 +880,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     pub fn alloc_uninit_box<T>(&self) -> Box<MaybeUninit<T>, A> {
         match self.try_alloc_uninit_box::<T>() {
             Ok(b) => b,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -864,7 +905,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// [`assume_init`](crate::Arc::assume_init) once written.
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit_arc<T>(&self) -> Arc<MaybeUninit<T>, A>
@@ -873,7 +914,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     {
         match self.try_alloc_uninit_arc::<T>() {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -899,13 +940,13 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Reserves a slot for `T` and returns an uninitialized [`Alloc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit<T>(&self) -> Alloc<'_, MaybeUninit<T>, A> {
         match self.try_alloc_uninit::<T>() {
             Ok(a) => a,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 
@@ -929,13 +970,13 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Reserves a slot for `T` and returns an uninitialized [`Rc`].
     ///
     /// # Panics
-    /// Panics if the pool is full.
+    /// Panics if allocation fails.
     #[must_use]
     #[inline]
     pub fn alloc_uninit_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
         match self.try_alloc_uninit_rc::<T>() {
             Ok(r) => r,
-            Err(err) => pool_full(err),
+            Err(err) => allocation_failed(err),
         }
     }
 

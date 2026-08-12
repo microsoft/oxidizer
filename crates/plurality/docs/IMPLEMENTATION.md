@@ -29,6 +29,9 @@ picture and goes deeper.
   pool and the router in front of it: its state, lookup, interior mutability,
   the reentrancy-safe ordering of the cold path, and ownership of the layout
   pools.
+- [Reentrancy](./implementation/reentrancy.md) — the windows in which pool
+  state is unfit to be observed, the latch that refuses entry to them, and the
+  rule that keeps callbacks out of borrows elsewhere.
 - [Performance](./implementation/performance.md) — the cost model, what must
   not regress, and the benchmark decomposition that attributes each cost.
 - [Verification](./implementation/verification.md) — the layered test strategy

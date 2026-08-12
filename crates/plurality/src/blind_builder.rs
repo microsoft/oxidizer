@@ -52,18 +52,22 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     ///
     /// Each layout pool derives its own slot count by dividing the target by
     /// its slot stride, rounded down to a power of two and clamped to at least
-    /// one slot. Replaces any previous [`chunk_size`](Self::chunk_size).
+    /// one slot. The builder uses whichever sizing method appears last in the
+    /// chain.
     #[must_use]
     pub fn chunk_bytes(mut self, bytes: usize) -> Self {
         self.sizing = ChunkSizing::Bytes(bytes);
         self
     }
 
-    /// Sizes chunks by a slot count, so that every layout grows in equal
-    /// increments of capacity.
+    /// Sizes chunks from a requested slot count.
     ///
-    /// Every layout starts from this count, subject to per-layout clamping.
-    /// Replaces any previous [`chunk_bytes`](Self::chunk_bytes).
+    /// The request is bounded and rounded up to the next power of two before a
+    /// layout pool reduces it for chunk-layout overflow. Each layout starts
+    /// from that normalized count, so read
+    /// [`BlindPool::chunk_size_of`](crate::BlindPool::chunk_size_of) for the
+    /// effective per-layout value. The builder uses whichever sizing method
+    /// appears last in the chain.
     #[must_use]
     pub fn chunk_size(mut self, slots_per_chunk: u32) -> Self {
         self.sizing = ChunkSizing::Slots(slots_per_chunk);

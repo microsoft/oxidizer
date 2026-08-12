@@ -820,7 +820,7 @@ fn allocator_failure_on_the_chunk_path() {
     };
     assert!(err.is_allocator_failure());
     assert!(!err.is_capacity_exhausted());
-    assert_eq!(format!("{err}"), "the backing allocator failed to provide memory for the pool");
+    assert_eq!(format!("{err}"), "the pool could not obtain required memory");
     // The layout pool was created; only its first chunk failed.
     assert_eq!(pool.layouts(), 1);
 
@@ -850,28 +850,77 @@ use core::ptr::null_mut;
 #[cfg(not(miri))]
 use std::alloc::{GlobalAlloc, System};
 
-// Whether this thread's global allocations are being refused, and how many
-// more may pass before the refusals start. Thread-local so that a deny window
-// covers only the test that opened it, while the rest of the target's tests run
-// in parallel unaffected.
+// The refusal rule is thread-local so that a deny window covers only the test
+// that opened it, while the rest of the target's tests run in parallel
+// unaffected.
 #[cfg(not(miri))]
 thread_local! {
-    static DENY_GLOBAL: Cell<bool> = const { Cell::new(false) };
-    static DENY_ALLOWANCE: Cell<usize> = const { Cell::new(0) };
+    static DENY_MODE: Cell<DenyMode> = const { Cell::new(DenyMode::Disabled) };
+    static DENY_REQUESTS: Cell<usize> = const { Cell::new(0) };
+    static DENIED_ALLOCATION: Cell<Option<DeniedAllocation>> = const { Cell::new(None) };
 }
 
-/// `true` if this allocation is to be refused, consuming the allowance if not.
+/// Selects the global-allocation request denied by `DenyableGlobal`.
 #[cfg(not(miri))]
-fn refuse_allocation() -> bool {
-    if !DENY_GLOBAL.get() {
-        return false;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DenyMode {
+    Disabled,
+    After(usize),
+    Matching { layout: Layout, phase: AllocationPhase },
+}
+
+/// Identifies the allocation site a failure-injection rule is meant to reach.
+#[cfg(not(miri))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AllocationPhase {
+    AllocationSequence,
+    DirectoryLayoutsReservation,
+}
+
+/// Records the first global allocation refused during one denial window.
+#[cfg(not(miri))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DeniedAllocation {
+    layout: Layout,
+    phase: AllocationPhase,
+    preceding_requests: usize,
+}
+
+/// `true` if this allocation request is refused.
+#[cfg(not(miri))]
+fn refuse_allocation(layout: Layout) -> bool {
+    match DENY_MODE.get() {
+        DenyMode::Disabled => false,
+        DenyMode::After(0) => {
+            record_denial(layout, AllocationPhase::AllocationSequence);
+            true
+        }
+        DenyMode::After(allowance) => {
+            DENY_MODE.set(DenyMode::After(allowance - 1));
+            DENY_REQUESTS.set(DENY_REQUESTS.get() + 1);
+            false
+        }
+        DenyMode::Matching { layout: target, phase } if layout == target => {
+            record_denial(layout, phase);
+            true
+        }
+        DenyMode::Matching { .. } => {
+            DENY_REQUESTS.set(DENY_REQUESTS.get() + 1);
+            false
+        }
     }
-    let allowance = DENY_ALLOWANCE.get();
-    if allowance == 0 {
-        return true;
+}
+
+/// Stores only the first denial, because later failures are cascading effects.
+#[cfg(not(miri))]
+fn record_denial(layout: Layout, phase: AllocationPhase) {
+    if DENIED_ALLOCATION.get().is_none() {
+        DENIED_ALLOCATION.set(Some(DeniedAllocation {
+            layout,
+            phase,
+            preceding_requests: DENY_REQUESTS.get(),
+        }));
     }
-    DENY_ALLOWANCE.set(allowance - 1);
-    false
 }
 
 /// A global allocator that can be made to fail on one thread.
@@ -892,7 +941,7 @@ static GLOBAL: DenyableGlobal = DenyableGlobal;
 #[cfg(not(miri))]
 unsafe impl GlobalAlloc for DenyableGlobal {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if refuse_allocation() {
+        if refuse_allocation(layout) {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -900,7 +949,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        if refuse_allocation() {
+        if refuse_allocation(layout) {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -908,7 +957,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if refuse_allocation() {
+        if refuse_allocation(layout) {
             return null_mut();
         }
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
@@ -921,7 +970,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     }
 }
 
-/// Refuses this thread's global allocations for as long as it is held.
+/// Applies this thread's global-allocation refusal rule while held.
 #[cfg(not(miri))]
 struct DenyGlobal;
 
@@ -933,8 +982,22 @@ impl DenyGlobal {
 
     /// Lets `allowance` further allocations through before refusing.
     fn after(allowance: usize) -> Self {
-        DENY_ALLOWANCE.set(allowance);
-        DENY_GLOBAL.set(true);
+        Self::with_mode(DenyMode::After(allowance))
+    }
+
+    /// Refuses the first allocation request with `layout`.
+    fn matching(layout: Layout, phase: AllocationPhase) -> Self {
+        Self::with_mode(DenyMode::Matching { layout, phase })
+    }
+
+    fn denied_allocation() -> Option<DeniedAllocation> {
+        DENIED_ALLOCATION.get()
+    }
+
+    fn with_mode(mode: DenyMode) -> Self {
+        DENIED_ALLOCATION.set(None);
+        DENY_REQUESTS.set(0);
+        DENY_MODE.set(mode);
         Self
     }
 }
@@ -942,8 +1005,22 @@ impl DenyGlobal {
 #[cfg(not(miri))]
 impl Drop for DenyGlobal {
     fn drop(&mut self) {
-        DENY_GLOBAL.set(false);
+        DENY_MODE.set(DenyMode::Disabled);
     }
+}
+
+/// Layout requested by the first reservation of the layout-key directory.
+#[cfg(not(miri))]
+fn first_directory_layouts_reservation_layout() -> Layout {
+    first_vec_reservation_layout::<Layout>()
+}
+
+/// Asks `Vec` for its first buffer shape instead of copying its capacity rule.
+#[cfg(not(miri))]
+fn first_vec_reservation_layout<T>() -> Layout {
+    let mut vec = Vec::<T>::new();
+    vec.try_reserve(1).unwrap();
+    Layout::array::<T>(vec.capacity()).unwrap()
 }
 
 #[cfg(not(miri))]
@@ -978,20 +1055,27 @@ fn allocator_failure_on_the_metadata_path() {
 #[test]
 fn allocator_failure_while_growing_the_directory() {
     let pool = BlindPool::new();
+    let denied_layout = first_directory_layouts_reservation_layout();
 
-    // The directory is reserved before a key is published, so the reservation
-    // is a fallible step of its own. Letting the layout pool's metadata block
-    // through — the one global allocation that precedes the reservation, since
-    // the chunk is only requested once the key is in place — puts the failure
-    // on the reservation.
+    // The directory stores layout keys in a `Vec<Layout>`, and an empty `Vec`
+    // chooses its first buffer shape from the element layout. Targeting that
+    // allocation reaches the fallible reservation step without depending on
+    // how many global allocations layout-pool construction uses.
     // Ref: docs/design/blind-pool.md, "Failure".
     let outcome = {
-        let _deny = DenyGlobal::after(1);
+        let _deny = DenyGlobal::matching(denied_layout, AllocationPhase::DirectoryLayoutsReservation);
         pool.try_alloc_box(1_u64)
     };
     let Err(err) = outcome else {
         panic!("the directory reservation was expected to fail");
     };
+    let denied = DenyGlobal::denied_allocation().unwrap();
+    assert_eq!(denied.phase, AllocationPhase::DirectoryLayoutsReservation);
+    assert_eq!(denied.layout, denied_layout);
+    assert!(
+        denied.preceding_requests > 0,
+        "the denied request must follow layout-pool construction"
+    );
     assert!(err.is_allocator_failure());
     assert!(!err.is_capacity_exhausted());
     // Nothing was published, so the layout is still unseen.

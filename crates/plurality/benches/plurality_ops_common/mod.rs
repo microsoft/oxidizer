@@ -15,13 +15,17 @@
     reason = "test and benchmark code"
 )]
 
-//! Single-operation bodies for Callgrind allocation and fat-pointer benchmarks.
+//! Shared setup and operation bodies for allocation and fat-pointer benchmarks.
 
 use std::boxed::Box as StdBox;
 use std::hint::black_box;
 
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
 use plurality::{Arc, BlindPool as PluralityBlindPool, Box as PoolBox, Pool, Rc, coerce};
+
+mod metadata;
+
+pub(crate) use metadata::SPREAD_LAYOUTS;
 
 /// A small (~32-byte), `Drop`-free payload, so the benchmarks measure the
 /// pool's own allocate/free cost rather than user destructors.
@@ -89,15 +93,6 @@ pub(crate) fn setup_rc(n: usize) -> (Pool<Obj>, Rc<Obj>) {
     let base = pool.alloc_rc(Obj::new(0));
     (pool, base)
 }
-
-/// Distinct layouts present in the high case of the directory-scan pair.
-///
-/// The scan is linear, so this count sets the scan length the measured
-/// allocation pays. It is high enough for the per-entry slope to clear
-/// measurement noise, yet stays in the range of layout counts real programs
-/// present, which is what the linear scan is chosen for.
-/// Ref: docs/implementation/blind-pool.md, "Lookup".
-const SPREAD_LAYOUTS: usize = 16;
 
 /// A blind pool serving a single layout, pre-warmed exactly as [`setup_pool`]
 /// warms the typed pool.

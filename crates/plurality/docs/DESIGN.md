@@ -122,16 +122,18 @@ invariants:
     lives until the blind pool is dropped, which is what makes directory
     indices stable and lets a bound owner borrow the blind pool while pointing
     into a layout pool's slot.
-13. **Allocators do not re-enter the pool.** The pool's own state is mid-update
-    while it is calling out for memory, so neither the global allocator nor the
-    pool's allocator `A` may allocate from, or free into, a plurality pool from
-    within `allocate` or `deallocate`. Pool metadata and the layout directory
-    come from the global allocator; chunks come from the pool's allocator. This
-    is the ordinary assumption any interior-mutable container makes; it is
-    stated because a blind pool reaches both allocators at more points than a
-    typed pool does. The restriction is on allocator callbacks alone. Pooled
-    values' destructors and construction closures are subject to no such
-    restriction — they may allocate from and free into the pool freely.
+13. **Reentrant allocation is refused, not assumed away.** The pool's own state
+    is mid-update while it is calling out for memory, so an allocator that
+    allocated from the same pool from within `allocate` or `deallocate` would
+    observe a chunk index range that is derived but unpublished, or a directory
+    that is mutably borrowed. The implementation latches those windows and
+    rejects the nested request with an allocator failure, so no caller carries
+    an unenforced obligation. Pool metadata and the layout directory come from
+    the global allocator; chunks come from the pool's allocator. Introspection
+    taken from inside such a callback panics for the same reason, having no way
+    to report a failure. Pooled values' destructors and construction closures
+    are subject to no restriction — they may allocate from and free into the
+    pool freely.
 
 ## Verification strategy
 
