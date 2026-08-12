@@ -21,10 +21,16 @@ compile-time trait behaviour, and no single technique covers all three.
 
 ## Test targets
 
-All tests are external integration targets; the source tree carries no unit
-test modules. That is a deliberate constraint: it keeps the tests honest about
-the public surface, and the few internals worth exercising directly are reached
-through a gated re-export rather than by testing from the inside.
+Tests are external integration targets, with one exception. That is a
+deliberate constraint: it keeps the tests honest about the public surface, and
+the few internals worth exercising directly are reached through a gated
+re-export rather than by testing from the inside.
+
+The exception is `src/geometry.rs`, which carries a unit test module. The
+geometry formulas take a size and an alignment, not a type, and the property
+worth asserting is that they agree with the compiler's layout of a slot struct
+that is crate-private. There is no public surface to reach that through, so the
+test sits beside the code.
 
 | Target | Scope |
 |---|---|

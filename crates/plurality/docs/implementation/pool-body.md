@@ -395,12 +395,13 @@ sentinel, the pool reference count starts at one, and the directory starts
 empty, so a freshly built pool holds no chunks and performs no allocation until
 its first use.
 
-The metadata allocation is fallible internally: a crate-private constructor
-returns it as a `Result`, which the typed builder converts to the global
-allocator's out-of-memory handler and which `LayoutPool` consumes directly.
-That keeps `build()`'s failure behaviour a non-unwinding abort, which is what
-its documented contract promises, while giving the blind pool's cold path a
-failure it can report.
+The two pool forms obtain their metadata block differently, because their
+failure contracts differ. The typed builder allocates it with `Box::new`, whose
+failure is the global allocator's out-of-memory handler — a non-unwinding abort,
+which is what `build()`'s documented contract promises. `LayoutPool::new`
+allocates the same block through the raw global allocator and returns
+`Result`, because the blind pool's cold path must report a metadata failure as
+an `AllocError` rather than abort the process.
 
 ## Failure
 

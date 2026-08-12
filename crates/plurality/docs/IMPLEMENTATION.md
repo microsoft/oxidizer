@@ -72,7 +72,7 @@ question is answered by a type parameter rather than by duplicated code.
         │                                  LayoutPool<A>
         │                                  (crate-private)
         ▼                                       ▼
-   PoolInner<TypedGeometry<T>, A>          PoolInner<RuntimeGeometry, A>
+   PoolInner<A, TypedGeometry<T>>          PoolInner<A, RuntimeGeometry>
         └──────────────────┬────────────────────┘
                            ▼
                        PoolCore

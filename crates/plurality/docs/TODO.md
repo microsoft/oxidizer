@@ -8,9 +8,13 @@ These are designs and ideas carried over from the original design plan that are
 ## 0. Aggregate byte budget for `BlindPool`
 
 `BlindPool` bounds growth with a **per-layout** chunk cap and a cap on the
-number of layouts. Total memory is therefore bounded by the product of the two
-caps and the chunk byte target — a closed-form bound, but a coarse one, since
-every layout is charged its full allowance whether or not it uses it.
+number of layouts. Total memory is therefore bounded in *chunks*, by the product
+of the two caps. Converting that to bytes also requires knowing the largest
+layout the program will present, because the chunk byte target is a target
+rather than a ceiling: a value too large to fit it still gets a chunk, and a
+caller who fixes the slot count instead sizes chunks by stride. The bound is
+also coarse, since every layout is charged its full allowance whether or not it
+uses it.
 
 A tighter alternative is an aggregate byte budget shared by every layout pool
 under one `BlindPool`, consulted when a layout pool acquires a chunk and

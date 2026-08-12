@@ -82,18 +82,20 @@ allocating and freeing skip the pool reference count entirely, because the
 ```rust
 pub struct Alloc<'pool, T, A: Allocator = Global> {
     slot: NonNull<SlotCell<T>>,
-    _pool: PhantomData<&'pool (T, A)>,
-    _not_send_sync: PhantomData<alloc::rc::Rc<()>>,
+    _pool: PhantomData<&'pool Pool<T, A>>,
 }
 ```
 
-`_pool` carries the borrow lifetime and mentions both type parameters, which a
-struct must do for every parameter it declares. `_not_send_sync` denies `Send`
-and `Sync` explicitly, using the same marker type `Rc` uses. The denial has to
-be explicit: a bare `PhantomData<&'pool ()>` supplies the lifetime but is
-`Send` and `Sync`, which would silently make the bound owner thread-mobile
-while the pool it borrows is not. The auto-trait assertions in the test suite
-are what hold this in place.
+The single phantom does three jobs. It carries the borrow lifetime, so the
+handle cannot outlive the pool. It mentions both type parameters, which a
+struct must do for every parameter it declares. And it denies `Send` and
+`Sync`: a shared reference is `Send` only when its referent is `Sync`, and
+`Pool` is neither `Sync` nor — as a referent seen through a shared reference —
+able to confer either auto trait. Phrasing the phantom as a borrow of the pool
+rather than as a bare `PhantomData<&'pool ()>` is what makes the denial follow
+from the pool's own thread affinity instead of from a separately maintained
+marker. The auto-trait assertions in the test suite are what hold this in
+place.
 
 `Alloc` is invariant in `T`, and that invariance comes from the payload rather
 than from the markers: `SlotCell<T>` contains an `UnsafeCell`, and `UnsafeCell`

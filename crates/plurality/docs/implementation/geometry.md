@@ -117,12 +117,12 @@ ground truth, and a divergence is a build error rather than a corrupted free
 list.
 
 The check must be *forced* from a path every instantiation reaches — an
-associated `const` is only evaluated where it is used, so the geometry
-accessors reference it. Placing it behind the accessors rather than behind a
-dedicated entry point means no instantiation can route around it. These are
-post-monomorphization errors, so the diagnostic is poor and the check cannot be
-tested negatively; that is acceptable for an assertion whose only job is to
-fail a build that would otherwise ship a corrupted free list.
+associated `const` is only evaluated where it is used, so the constructor
+references it. The constructor is the only way to obtain a value of the type,
+so no instantiation can route around the check. These are post-monomorphization
+errors, so the diagnostic is poor and the check cannot be tested negatively;
+that is acceptable for an assertion whose only job is to fail a build that
+would otherwise ship a corrupted free list.
 
 A value allocated from a blind pool need not instantiate `TypedGeometry<T>` at
 all: allocation goes through `RuntimeGeometry` and reclamation through the free
