@@ -65,7 +65,7 @@ jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
