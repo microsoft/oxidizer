@@ -203,18 +203,28 @@ AND (in All mode: always; in Targeted/Changed mode: modified) AND either:
 Never surface a `source = user` entry (your decision is final for it), and never
 surface a cascade entry already at `breaking` (nothing higher to elevate to).
 
-For each surfaced package, make the decision the human used to make, deterministically:
+For each surfaced package, decide from the diff EVIDENCE (not taste), so models agree:
 1. Get its diff since its baseline: `git diff <baselineSha>..HEAD --
    crates/<folder>` (plus working-tree changes). If `hasBaseline` is false, diff
    against the last release tag or the full history.
-2. Decide its change type using the SAME evidence rule everywhere, to keep models
-   in agreement: the objective floor from Step 3 is the default. Elevate above the
-   floor ONLY when the diff shows a concrete, citable
-   breaking/behavioral change the tool cannot see (a removed/renamed public item,
-   a changed signature, a documented behavioral break). Cite the file+item when
-   you elevate. Leave a package OUT only when its modifications are demonstrably
-   immaterial to consumers (comments, tests, internal-only code with no public
-   effect).
+2. Decide its change type with the SAME rule everywhere:
+   - Default to the objective floor from Step 3. For a library crate that floor is
+     the `cargo semver-checks` verdict on the real diff, which ALREADY reflects a
+     public backward-compatible addition as `nonbreaking` and a removal/renamed
+     item/changed signature as `breaking`. So the tool -- not your taste -- usually
+     already sets the right level.
+   - Elevate ABOVE the floor only on concrete, citable evidence the tool cannot
+     see: a documented behavioral break (-> `breaking`) or a public
+     backward-compatible addition the tool genuinely missed (-> `nonbreaking`).
+     Cite the file+item whenever you elevate.
+   - Leave the package OUT when the diff shows no consumer-visible change. This
+     explicitly includes a package surfaced only because `-All` walks everything
+     but which has no modifications and no API-affecting diff: it is NOT released.
+   Do NOT invent a release for an unchanged package, and do NOT elevate beyond what
+   the evidence supports. A caller who wants to force either (release an unchanged
+   package, or pin a level above the evidence) must say so with an explicit
+   `-Packages`-style token; that enters as a user-source decision (Step 1), never
+   as a model guess.
 3. Feed the decision back: an accept becomes a `source = user` entry; re-run
    Steps 3-4 (re-resolve the set and cascade). A decline is remembered and never
    re-surfaced. If a later acceptance cascade-pulls a previously-declined package
@@ -355,26 +365,46 @@ break reproducibility and downstream consumers.
 ## Determinism test cases (golden oracle)
 
 The Pester scenarios under `scripts/tests/Pester/scenarios/*.scenario.psd1` are the
-authoritative behavioral oracle: each declares a workspace, a history, a run, and
-the exact `Released` set expected. Any plan you or the consensus models produce for
-one of those setups MUST match its `Expect.Released`. Use them to self-check the
-rules. Representative cases:
+behavioral reference. They fall into TWO classes, and only the first is part of the
+determinism contract.
+
+FACT-DETERMINED scenarios -- the outcome is a pure function of the facts, the
+`cargo semver-checks` verdicts, and the explicit tokens. Your plan and every
+consensus model's plan MUST match `Expect.Released` for these:
 
 - S13 (pin + cascade satisfied): `target@breaking, dependent@5.0.0` where
   `dependent` re-exports `target`. Expected: `target 1.0.0 -> 2.0.0`,
   `dependent 1.0.0 -> 5.0.0` (pin honored; it already satisfies the cascade
   requirement, so it is kept verbatim, not lowered to 2.0.0).
-- S16 (stable cascade + Invariant B elevation): chain `top -> middle -> bottom`,
-  all `1.0.0`, `middle` has source edits, user releases `bottom@patch`, and
-  `cargo semver-checks` reports `top` as non-breaking. Expected: `bottom -> 1.0.1`,
-  `middle -> 1.1.0` (cascaded to 1.0.1 as patch, then elevated to non-breaking
-  because it is a modified cascade entry below breaking), `top -> 1.1.0`.
-- A 0.x cascade: `dependency@breaking` at `0.2.0` with dependent at `0.1.0` that
+- S17 (explicit version pin) and S18 (pin rejected when not strictly greater than
+  the current version).
+- A 0.x cascade: `dependency@breaking` at `0.2.0` with a dependent at `0.1.0` that
   re-exports it. Expected: `dependency 0.2.0 -> 0.3.0`, and the dependent cascades
   at least `patch` (`0.1.0 -> 0.1.1`), raised to `0.2.0` if its own API breaks.
+- 0.0.z conservatism: a `0.0.5` package bumps to `0.0.6` for ANY change type.
 
-If your plan disagrees with a scenario's `Expect.Released`, your reading of the
-rules is wrong -- reconcile before proceeding.
+JUDGMENT-DEPENDENT scenarios -- their historical `Expect.Released` encodes a
+subjective operator choice the old interactive driver solicited at a TTY, which is
+NOT derivable from the diff alone. The AI skill deliberately replaces that choice
+with the Step 5 evidence rule, so it is NOT required to reproduce the historical
+number. Instead, the consensus gate requires the independent models to AGREE, and a
+divergence escalates to a human. Do not treat these as pass/fail oracles:
+
+- S16 (manual Invariant-B elevation): the scenario's `ModifySource` on `middle`
+  only appends a comment, so a real `cargo semver-checks` returns patch and the
+  deterministic skill yields `middle -> 1.0.1`; the scenario's `middle -> 1.1.0`
+  came from a human elevating a comment-only change, which the skill will not
+  invent. If `middle` had genuinely added public API, the tool would report
+  `nonbreaking` and the skill would reach `1.1.0` on its own evidence.
+- S22 / S23 (`-All` with no on-disk modifications): whether to force-release an
+  UNCHANGED package is an arbitrary operator override. The deterministic default
+  releases nothing (matching S22's empty result); forcing an unchanged release
+  (S23) requires an explicit `-Packages` token, not a model guess.
+
+If your plan disagrees with a FACT-DETERMINED scenario's `Expect.Released`, your
+reading of the rules is wrong -- reconcile before proceeding. For
+judgment-dependent cases, require the consensus models to agree and escalate to a
+human when they do not.
 
 ## Output (canonical plan JSON)
 
