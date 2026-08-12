@@ -70,7 +70,7 @@ ptr_meta = { workspace = true }
 serde = { workspace = true, features = ["alloc"], optional = true }
 serde_json = { workspace = true, features = ["alloc", "raw_value"], optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
-zerocopy = { workspace = true, optional = true }
+zerocopy = { workspace = true, features = ["derive"], optional = true }
 
 # Loom is only used under `--cfg loom` for the model-checked tests.
 # `target.'cfg(loom)'` is matched by Cargo when `RUSTFLAGS="--cfg loom"` is set.
