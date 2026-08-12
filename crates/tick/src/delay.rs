@@ -147,7 +147,6 @@ mod tests {
         assert!(now.elapsed() >= Duration::from_millis(5));
     }
 
-    #[cfg(feature = "fast-instant")]
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn delay_with_fast_instant_completes() {

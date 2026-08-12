@@ -350,7 +350,7 @@ impl Clock {
     /// let fast_watch = fast_clock.stopwatch();
     /// # }
     /// ```
-    #[cfg(feature = "fast-instant")]
+    #[cfg(any(feature = "fast-instant", test))]
     #[must_use]
     pub fn with_fast_instant(mut self, enabled: bool) -> Self {
         self.time = self.time.with_fast_instant(enabled);
@@ -626,7 +626,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "fast-instant")]
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
     fn test_configured_fast_instant_now() {

@@ -45,7 +45,7 @@ enum TimeKind {
     /// Reads real OS time. Stateless and zero-cost.
     System,
     /// Reads lower-precision OS time with lower overhead.
-    #[cfg(feature = "fast-instant")]
+    #[cfg(any(feature = "fast-instant", test))]
     SystemFast,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
@@ -90,7 +90,7 @@ impl SimpleClock {
     /// let precise = precise_clock.instant();
     /// let fast = fast_clock.instant();
     /// ```
-    #[cfg(feature = "fast-instant")]
+    #[cfg(any(feature = "fast-instant", test))]
     #[must_use]
     pub fn with_fast_instant(self, enabled: bool) -> Self {
         match self.0 {
@@ -182,7 +182,7 @@ impl SimpleClock {
     pub fn system_time(&self) -> SystemTime {
         match &self.0 {
             TimeKind::System => SystemTime::now(),
-            #[cfg(feature = "fast-instant")]
+            #[cfg(any(feature = "fast-instant", test))]
             TimeKind::SystemFast => SystemTime::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.system_time(),
@@ -222,7 +222,7 @@ impl SimpleClock {
     pub fn instant(&self) -> Instant {
         match &self.0 {
             TimeKind::System => Instant::now(),
-            #[cfg(feature = "fast-instant")]
+            #[cfg(any(feature = "fast-instant", test))]
             TimeKind::SystemFast => crate::fast_instant::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.instant(),
@@ -264,7 +264,6 @@ mod tests {
         assert!(second >= first);
     }
 
-    #[cfg(feature = "fast-instant")]
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
     fn configured_fast_instant_is_clone_local() {
@@ -280,7 +279,6 @@ mod tests {
         _ = fast_clock.instant();
     }
 
-    #[cfg(feature = "fast-instant")]
     #[test]
     fn fast_instant_configuration_does_not_affect_controlled_clock() {
         let control = ClockControl::new();

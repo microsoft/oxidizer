@@ -56,8 +56,14 @@ tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, optional = true, features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 ohno = { path = "../ohno", features = ["app-err"] }

@@ -196,7 +196,6 @@ mod tests {
         .unwrap();
     }
 
-    #[cfg(feature = "fast-instant")]
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn next_with_fast_instant_completes() {

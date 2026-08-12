@@ -311,7 +311,7 @@ mod clock;
 mod clock_control;
 mod delay;
 mod error;
-#[cfg(feature = "fast-instant")]
+#[cfg(any(feature = "fast-instant", test))]
 mod fast_instant;
 
 #[cfg(any(feature = "fmt", test))]
