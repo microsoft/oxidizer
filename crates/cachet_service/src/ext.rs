@@ -13,24 +13,8 @@ use crate::{CacheOperation, CacheResponse, GetRequest, InsertRequest, Invalidate
 pub trait CacheServiceExt<K, V>: Sized {
     /// Retrieves a value from the cache.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
-    /// Inserts a value into the cache.
-    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
     /// Inserts a value and reports whether it was accepted.
-    ///
-    /// The provided implementation reports acceptance after a successful
-    /// [`insert`](Self::insert). Implementations that can reject writes without
-    /// an error must override this method.
-    fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send
-    where
-        Self: Sync,
-        K: Send,
-        V: Send,
-    {
-        async {
-            self.insert(key, entry).await?;
-            Ok(InsertOutcome::Accepted)
-        }
-    }
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send;
     /// Invalidates (removes) a value from the cache.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;
     /// Clears all entries from the cache.
@@ -51,12 +35,8 @@ where
         }
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
-        let req = InsertRequest { key: key.clone(), entry };
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+        let req = InsertRequest { key, entry };
         match self.execute(CacheOperation::Insert(req)).await? {
             CacheResponse::Insert(outcome) => Ok(outcome),
             _ => Err(Error::from_message("unexpected response type")),
@@ -81,33 +61,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     use super::*;
-
-    #[derive(Debug, Default)]
-    struct LegacyExtension {
-        inserted: AtomicBool,
-    }
-
-    impl CacheServiceExt<String, i32> for LegacyExtension {
-        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
-            Ok(None)
-        }
-
-        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
-            self.inserted.store(true, Ordering::Relaxed);
-            Ok(())
-        }
-
-        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
-            Ok(())
-        }
-
-        async fn clear(&self) -> Result<(), Error> {
-            Ok(())
-        }
-    }
 
     // A correct service that returns expected response types
     #[derive(Debug)]
@@ -152,33 +106,11 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn ext_insert_returns_ok() {
+    async fn ext_insert_returns_outcome() {
         let svc = CorrectService;
-        CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42)).await.unwrap();
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn ext_insert_with_outcome_returns_outcome() {
-        let svc = CorrectService;
-        let outcome = CacheServiceExt::insert_with_outcome(&svc, "key".to_string(), CacheEntry::new(42))
-            .await
-            .unwrap();
-        assert_eq!(outcome, InsertOutcome::Accepted);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn ext_default_insert_with_outcome_delegates_to_insert() {
-        let extension = LegacyExtension::default();
-
-        let outcome = extension.insert_with_outcome("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let outcome = CacheServiceExt::insert(&svc, "key".to_string(), CacheEntry::new(42)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Accepted);
-        assert!(extension.inserted.load(Ordering::Relaxed));
-        assert!(extension.get(&"key".to_string()).await.unwrap().is_none());
-        extension.invalidate(&"key".to_string()).await.unwrap();
-        extension.clear().await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]

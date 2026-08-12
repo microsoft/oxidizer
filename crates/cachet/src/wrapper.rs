@@ -139,11 +139,7 @@ where
         }
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    async fn insert_with_outcome(&self, key: K, mut entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+    async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         entry.ensure_cached_at(self.clock.system_time());
         if !self.policy.should_insert(&entry) {
             self.telemetry.record_insert_rejected(self.name, self.fallback);
@@ -151,10 +147,13 @@ where
         }
 
         let watch = self.clock.stopwatch();
-        let result = self.inner.insert_with_outcome(key, entry).await;
+        let result = self.inner.insert(key, entry).await;
         match &result {
             Ok(InsertOutcome::Accepted) => self.telemetry.record_inserted(self.name, watch.elapsed(), self.fallback),
-            Ok(InsertOutcome::Rejected) => self.telemetry.record_insert_rejected(self.name, self.fallback),
+            Ok(InsertOutcome::Rejected) => {
+                self.telemetry
+                    .record_insert_rejected_with_duration(self.name, watch.elapsed(), self.fallback);
+            }
             Err(_) => self.telemetry.record_insert_error(self.name, watch.elapsed(), self.fallback),
         }
         result
@@ -187,9 +186,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use cachet_tier::MockCache;
+    use tick::ClockControl;
 
     use super::*;
+    use crate::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 
     #[derive(Debug)]
     struct RejectingCache;
@@ -199,11 +202,7 @@ mod tests {
             Ok(None)
         }
 
-        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
-            Ok(())
-        }
-
-        async fn insert_with_outcome(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
             Ok(InsertOutcome::Rejected)
         }
 
@@ -214,6 +213,48 @@ mod tests {
         async fn clear(&self) -> Result<(), Error> {
             Ok(())
         }
+    }
+
+    struct DelayedRejectingCache {
+        control: ClockControl,
+        duration: Duration,
+    }
+
+    impl CacheTier<String, i32> for DelayedRejectingCache {
+        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+            Ok(None)
+        }
+
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+            self.control.advance(self.duration);
+            Ok(InsertOutcome::Rejected)
+        }
+
+        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
+            Ok(())
+        }
+
+        async fn clear(&self) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct RejectionDurationHandler {
+        durations: Arc<Mutex<Vec<Duration>>>,
+    }
+
+    impl CacheEventHandler for RejectionDurationHandler {
+        fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+            if event.outcome == crate::telemetry::attributes::EVENT_INSERT_REJECTED {
+                self.durations
+                    .lock()
+                    .expect("test handler mutex should not be poisoned")
+                    .push(event.duration);
+            }
+        }
+
+        fn on_operation_complete(&self, _event: &CacheOperationEvent<'_>) {}
     }
 
     #[test]
@@ -471,13 +512,35 @@ mod tests {
         let telemetry = CacheTelemetry::new();
         let wrapper = CacheWrapper::new("test", RejectingCache, clock, None, telemetry, InsertPolicy::default(), false);
 
-        let outcome = wrapper.insert_with_outcome("key".to_string(), CacheEntry::new(1)).await.unwrap();
+        let outcome = wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Rejected);
         assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
         wrapper.inner.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
         wrapper.invalidate(&"key".to_string()).await.unwrap();
         wrapper.clear().await.unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn wrapper_records_inner_rejection_duration() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let duration = Duration::from_millis(7);
+        let durations = Arc::new(Mutex::new(Vec::new()));
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(RejectionDurationHandler {
+            durations: Arc::clone(&durations),
+        }));
+        let inner = DelayedRejectingCache { control, duration };
+        let wrapper = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), false);
+
+        let outcome = wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
+
+        assert_eq!(outcome, InsertOutcome::Rejected);
+        assert_eq!(
+            *durations.lock().expect("test handler mutex should not be poisoned"),
+            vec![duration]
+        );
     }
 
     #[cfg_attr(miri, ignore)]

@@ -258,9 +258,16 @@ where
     ///
     /// The entry's timestamp will be set to the current time according
     /// to the cache's clock if the configured insertion policy accepts it.
-    /// This compatibility method does not report policy rejection; use
-    /// [`insert_with_outcome`](Self::insert_with_outcome) when that distinction
-    /// matters.
+    /// The returned outcome distinguishes policy rejection from successful
+    /// insertion.
+    ///
+    /// An accepted entry may still be evicted immediately by the underlying cache.
+    /// In a multi-tier cache, acceptance means at least one tier accepted the
+    /// write; a higher-priority tier may still contain an older value.
+    ///
+    /// Multi-tier insertion is not atomic. If one tier accepts the write and
+    /// another returns an error, this method returns the error even though the
+    /// entry may remain stored in the successful tier.
     ///
     /// # Errors
     ///
@@ -282,28 +289,11 @@ where
     /// # Ok::<(), cachet::Error>(())
     /// # };
     /// ```
-    pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    /// Inserts a value and reports whether the configured insertion policy accepted it.
-    ///
-    /// An accepted entry may still be evicted immediately by the underlying cache.
-    /// In a multi-tier cache, acceptance means at least one tier accepted the
-    /// write; a higher-priority tier may still contain an older value.
-    ///
-    /// Multi-tier insertion is not atomic. If one tier accepts the write and
-    /// another returns an error, this method returns the error even though the
-    /// entry may remain stored in the successful tier.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying cache tier operation fails.
-    pub async fn insert_with_outcome(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<InsertOutcome, Error> {
+    pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<InsertOutcome, Error> {
         let request_id = next_request_id();
         let watch = self.clock.stopwatch();
         async {
-            let result = self.storage.insert_with_outcome(key, entry.into()).await;
+            let result = self.storage.insert(key, entry.into()).await;
             self.telemetry
                 .complete_operation(request_id, self.name, "cache.insert", watch.elapsed(), false);
             result
@@ -313,12 +303,16 @@ where
     }
 
     async fn insert_computed_entry(&self, key: &K, entry: CacheEntry<V>) -> Result<CacheEntry<V>, Error> {
-        let original = entry;
+        let mut original = entry;
         let mut candidate = original.clone();
-        candidate.ensure_cached_at(self.clock.system_time());
+        let cached_at = self.clock.system_time();
+        candidate.ensure_cached_at(cached_at);
 
-        match self.storage.insert_with_outcome(key.clone(), candidate.clone()).await? {
-            InsertOutcome::Accepted => Ok(candidate),
+        match self.storage.insert(key.clone(), candidate).await? {
+            InsertOutcome::Accepted => {
+                original.ensure_cached_at(cached_at);
+                Ok(original)
+            }
             InsertOutcome::Rejected => Ok(original),
         }
     }
@@ -867,7 +861,7 @@ where
                 Ok(cachet_service::CacheResponse::Get(entry))
             }
             cachet_service::CacheOperation::Insert(req) => {
-                let outcome = self.insert_with_outcome(req.key, req.entry).await?;
+                let outcome = self.insert(req.key, req.entry).await?;
                 Ok(cachet_service::CacheResponse::Insert(outcome))
             }
             cachet_service::CacheOperation::Invalidate(req) => {

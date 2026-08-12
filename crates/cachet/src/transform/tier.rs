@@ -70,14 +70,10 @@ where
         }
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let mapped_key = self.key_encoder.encode(&key)?;
         let mapped_entry = entry.try_map_value(|v| self.value_codec.encode(&v))?;
-        self.inner.insert_with_outcome(mapped_key, mapped_entry).await
+        self.inner.insert(mapped_key, mapped_entry).await
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {

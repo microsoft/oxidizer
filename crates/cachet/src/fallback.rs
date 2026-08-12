@@ -138,14 +138,10 @@ where
         self.get_from_fallback(key).await
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let (primary_result, fallback_result) = join!(
-            self.inner.primary.insert_with_outcome(key.clone(), entry.clone()),
-            self.inner.fallback.insert_with_outcome(key.clone(), entry)
+            self.inner.primary.insert(key.clone(), entry.clone()),
+            self.inner.fallback.insert(key, entry)
         );
         let primary_outcome = primary_result?;
         let fallback_outcome = fallback_result?;

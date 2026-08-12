@@ -12,7 +12,6 @@ use std::future::Future;
 use crate::{CacheEntry, Error, SizeError};
 
 /// Whether a cache tier accepted an insertion.
-#[must_use = "insertion may have been rejected"]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsertOutcome {
     /// The tier accepted the insertion.
@@ -48,28 +47,8 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
-    /// Attempts to insert or replace a value, returning an error if the operation fails.
-    ///
-    /// This compatibility method does not report policy rejection. Use
-    /// [`insert_with_outcome`](Self::insert_with_outcome) when the distinction
-    /// between acceptance and rejection matters.
-    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
-
     /// Inserts or replaces a value and reports whether the tier accepted it.
-    ///
-    /// The default implementation calls [`insert`](Self::insert) and reports
-    /// [`Accepted`](InsertOutcome::Accepted). Tiers that may reject writes
-    /// without returning an error must override this method.
-    fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send
-    where
-        K: Send,
-        V: Send,
-    {
-        async {
-            self.insert(key, entry).await?;
-            Ok(InsertOutcome::Accepted)
-        }
-    }
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;

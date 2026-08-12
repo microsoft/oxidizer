@@ -72,12 +72,8 @@ where
         }
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
-        self.insert_with_outcome(key, entry).await.map(drop)
-    }
-
-    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
-        let request = CacheOperation::Insert(InsertRequest::new(key.clone(), entry));
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+        let request = CacheOperation::Insert(InsertRequest::new(key, entry));
         match self.service.execute(request).await? {
             CacheResponse::Insert(outcome) => Ok(outcome),
             _ => Err(Error::from_message("unexpected response type for insert")),
@@ -152,24 +148,16 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn adapter_insert_returns_ok() {
+    async fn adapter_insert_preserves_acceptance() {
         let adapter = ServiceAdapter::new(MockService);
-        let result = adapter.insert("key".to_string(), CacheEntry::new(100)).await;
-        assert!(result.is_ok(), "insert should succeed");
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn adapter_insert_with_outcome_preserves_acceptance() {
-        let adapter = ServiceAdapter::new(MockService);
-        let outcome = adapter.insert_with_outcome("key".to_string(), CacheEntry::new(100)).await.unwrap();
+        let outcome = adapter.insert("key".to_string(), CacheEntry::new(100)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Accepted);
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn adapter_insert_with_outcome_preserves_rejection() {
+    async fn adapter_insert_preserves_rejection() {
         #[derive(Debug, Clone)]
         struct RejectingService;
 
@@ -187,7 +175,7 @@ mod tests {
         }
 
         let adapter = ServiceAdapter::new(RejectingService);
-        let outcome = adapter.insert_with_outcome("key".to_string(), CacheEntry::new(100)).await.unwrap();
+        let outcome = adapter.insert("key".to_string(), CacheEntry::new(100)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Rejected);
         assert!(adapter.get(&"key".to_string()).await.unwrap().is_none());

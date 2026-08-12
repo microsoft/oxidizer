@@ -9,7 +9,7 @@
 // tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
 testing_aids::init_tracing!();
 
-use cachet::{Cache, CacheEntry, Error, InsertPolicy};
+use cachet::{Cache, CacheEntry, Error, InsertOutcome, InsertPolicy};
 use cachet_tier::MockCache;
 use tick::Clock;
 
@@ -661,8 +661,8 @@ async fn stampede_protection_converts_panic_to_error() {
             Ok(None)
         }
 
-        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
-            Ok(())
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+            Ok(InsertOutcome::Accepted)
         }
 
         async fn invalidate(&self, _key: &String) -> Result<(), Error> {
@@ -849,7 +849,7 @@ async fn borrow_stampede_protection_with_str_key() {
 
 #[cfg(feature = "service")]
 mod service_tests {
-    use cachet::{CacheOperation, CacheResponse, GetRequest, InsertOutcome, InsertRequest, InvalidateRequest};
+    use cachet::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
     use layered::Service;
 
     use super::*;

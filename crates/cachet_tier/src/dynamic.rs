@@ -52,12 +52,8 @@ impl<K: Send + Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
         self.0.get(key).await
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         self.0.insert(key, entry).await
-    }
-
-    async fn insert_with_outcome(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
-        self.0.insert_with_outcome(key, entry).await
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
@@ -85,7 +81,7 @@ mod tests {
         let dynamic = DynamicCache::new(cache);
         let clone = dynamic.clone();
 
-        let outcome = dynamic.insert_with_outcome("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let outcome = dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
         assert_eq!(outcome, InsertOutcome::Accepted);
 
         let entry = clone.get(&"key".to_string()).await.unwrap().unwrap();

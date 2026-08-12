@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.4.0] - 2026-08-10
+
+- ⚠️ Breaking
+
+  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
+  - Now requires `0.4.0` of `cachet_tier`
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - add configurable ttl on stampede protected cache, eviction telemetry ([#454](https://github.com/microsoft/oxidizer/pull/454))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release bytesbuf v0.8.0 and 27 additional packages ([#652](https://github.com/microsoft/oxidizer/pull/652))
+  - release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+  - release new packages ([#488](https://github.com/microsoft/oxidizer/pull/488))
+  - release fetch_options 0.2.1, recoverable 0.1.5 ([#482](https://github.com/microsoft/oxidizer/pull/482))
+  - release ohno-macros v0.3.3, thread_aware_macros_impl v0.7.2 ([#477](https://github.com/microsoft/oxidizer/pull/477))
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
+- Core
+
+  - Release layered + dependents to unbreak GitHub publishing (part N+2) ([#468](https://github.com/microsoft/oxidizer/pull/468))
+
+- 🧩 Miscellaneous
+
+  - fix!(cachet): report rejected insertions accurately
+
 ## [0.3.0] - 2026-08-09
 
 - 🔧 Maintenance

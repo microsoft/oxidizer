@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.12.0] - 2026-08-10
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.1` of `cachet_memory`
+  - Now requires `0.4.0` of `cachet_service`
+  - Now requires `0.4.0` of `cachet_tier`
+
+- ⚠️ Breaking
+
+  - support no_std in bytesbuf and thread_aware ([#615](https://github.com/microsoft/oxidizer/pull/615))
+  - surface evicted key and value to on_eviction listeners ([#552](https://github.com/microsoft/oxidizer/pull/552))
+  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/pull/600))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+  - structured telemetry with correlated events, and handler API ([#460](https://github.com/microsoft/oxidizer/pull/460))
+  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - add configurable ttl on stampede protected cache, eviction telemetry ([#454](https://github.com/microsoft/oxidizer/pull/454))
+
+- 🐛 Bug Fixes
+
+  - migrate to alloc_tracker 0.7 ([#568](https://github.com/microsoft/oxidizer/pull/568))
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+  - de-flake every_helper_emits_its_event test ([#500](https://github.com/microsoft/oxidizer/pull/500))
+
+- ✔️ Tasks
+
+  - release bytesbuf v0.8.0 and 27 additional packages ([#652](https://github.com/microsoft/oxidizer/pull/652))
+  - release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/pull/599))
+  - release cachet_memory v0.5.0 and cachet v0.9.0 ([#582](https://github.com/microsoft/oxidizer/pull/582))
+  - release thread_aware v0.8.0 and 15 additional packages ([#550](https://github.com/microsoft/oxidizer/pull/550))
+  - release a new version of tick crate (and dependents) ([#542](https://github.com/microsoft/oxidizer/pull/542))
+  - upgrade alloc_tracker from 0.5.25 to 0.6.0 ([#513](https://github.com/microsoft/oxidizer/pull/513))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - technical release ([#511](https://github.com/microsoft/oxidizer/pull/511))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+  - release new packages ([#488](https://github.com/microsoft/oxidizer/pull/488))
+  - release fetch_options 0.2.1, recoverable 0.1.5 ([#482](https://github.com/microsoft/oxidizer/pull/482))
+  - release ohno-macros v0.3.3, thread_aware_macros_impl v0.7.2 ([#477](https://github.com/microsoft/oxidizer/pull/477))
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
+- 🔄 Continuous Integration
+
+  - add cargo-machete for workspace-wide unused-dependency detection ([#578](https://github.com/microsoft/oxidizer/pull/578))
+  - run cargo udeps with and without --all-targets; remove unused dev-dependencies ([#527](https://github.com/microsoft/oxidizer/pull/527))
+
+- Core
+
+  - Release layered + dependents to unbreak GitHub publishing (part N+2) ([#468](https://github.com/microsoft/oxidizer/pull/468))
+
+- 🧩 Miscellaneous
+
+  - fix!(cachet): report rejected insertions accurately
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
 ## [0.11.0] - 2026-08-09
 
 - 🔧 Maintenance
