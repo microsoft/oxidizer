@@ -95,6 +95,9 @@ mod tests {
         let attr: Attribute = parse_quote!(#[doc = 1]);
         assert!(!is_generated_marker(&attr));
 
+        let attr: Attribute = parse_quote!(#[doc = concat!(" ohno::generated-core@7f3d9c2a")]);
+        assert!(!is_generated_marker(&attr));
+
         let attr: Attribute = parse_quote!(#[other = " ohno::generated-core@7f3d9c2a"]);
         assert!(!is_generated_marker(&attr));
     }

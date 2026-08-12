@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Macros for the [`ohno`](https://docs.rs/ohno) crate.
@@ -47,6 +47,10 @@ use quote::ToTokens;
 /// By default, automatically implements `std::fmt::Debug` unless `#[no_debug]` is specified.
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
+// The entry points are thin shims a unit test cannot invoke: a `proc_macro::TokenStream` only
+// exists inside a real macro expansion. They are exercised through the `ohno` crate instead.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
 #[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     match syn::parse::<syn::DeriveInput>(input) {
@@ -58,6 +62,8 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 /// Attribute macro for adding error enrichment with file and line info to function errors.
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     match syn::parse::<syn::Item>(input) {
@@ -77,6 +83,8 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 /// ```
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
     if !args.is_empty() {

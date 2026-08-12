@@ -123,15 +123,11 @@ fn scope_to_self(expr: &Expr, fields: &Referenceable<'_>, errors: &mut Errors) -
     match argument::root(expr) {
         argument::Root::SelfKeyword(term) => errors.add(term, argument::SELF_PREFIXED),
         argument::Root::Unsupported => errors.add(expr, argument::UNSUPPORTED_ROOT),
-        root => {
-            let name = root.field_name().unwrap_or_default();
-            if fields.resolve(name).is_none() {
-                // The root term is the smallest thing carrying the fault, so it is what the
-                // diagnostic underlines.
-                match root {
-                    argument::Root::Name(_, term) | argument::Root::Index(_, term) => errors.add(term, fields.unknown(name)),
-                    argument::Root::SelfKeyword(_) | argument::Root::Unsupported => unreachable!("handled above"),
-                }
+        // The root term is the smallest thing carrying the fault, so it is what the diagnostic
+        // underlines.
+        argument::Root::Name(name, term) | argument::Root::Index(name, term) => {
+            if fields.resolve(&name).is_none() {
+                errors.add(term, fields.unknown(&name));
             }
         }
     }

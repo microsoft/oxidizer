@@ -26,7 +26,8 @@ pub(crate) enum Root<'a> {
 
 impl Root<'_> {
     /// The name the root is looked up by, if it names a field at all.
-    pub(crate) fn field_name(&self) -> Option<&str> {
+    #[cfg(test)]
+    fn field_name(&self) -> Option<&str> {
         match self {
             Self::Name(name, _) | Self::Index(name, _) => Some(name),
             Self::SelfKeyword(_) | Self::Unsupported => None,
@@ -163,11 +164,8 @@ mod tests {
         ];
 
         for expr in &expressions {
-            assert!(
-                matches!(root(expr), Root::Unsupported),
-                "expected unsupported: {}",
-                quote::quote!(#expr)
-            );
+            let rendered = quote::quote!(#expr).to_string();
+            assert!(matches!(root(expr), Root::Unsupported), "expected unsupported: {rendered}");
         }
     }
 }

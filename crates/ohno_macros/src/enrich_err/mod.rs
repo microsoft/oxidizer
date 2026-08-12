@@ -31,15 +31,15 @@ pub(crate) fn expand(args: TokenStream, item: Item) -> TokenStream {
         return passthrough(&function, &mut errors);
     };
 
-    if matches!(function.sig.output, ReturnType::Default) {
+    let ReturnType::Type(_, output) = function.sig.output.clone() else {
         errors.add(
             &function.sig,
             "`#[enrich_err(...)]` needs a return type to enrich. A function returning `()` has no error to carry the message",
         );
         return passthrough(&function, &mut errors);
-    }
+    };
 
-    function.block = Box::new(wrap(&function, &message));
+    function.block = Box::new(wrap(&function, &output, &message));
     function.into_token_stream()
 }
 
@@ -82,22 +82,20 @@ fn parse_message(args: TokenStream, function: &ItemFn, errors: &mut Errors) -> O
 /// inference, so a body that consumes `self` takes it by value while a body that only reads it
 /// borrows, and the message can still name a parameter the body did not consume.
 ///
+/// `output` is the declared return type, which the caller has already established is present.
+///
 /// The message is applied through `map_err`, so the wrapper works for any return type carrying one
 /// — `Result`, and the `Poll<Result<..>>` an implemented `Future::poll` returns.
-fn wrap(function: &ItemFn, message: &Message) -> syn::Block {
+fn wrap(function: &ItemFn, output: &syn::Type, message: &Message) -> syn::Block {
     let block = &function.block;
-    let output = &function.sig.output;
     let rendered = message.render();
     let enrichable = paths::enrichable();
     let entry = paths::enrichment_entry();
 
     let evaluated = if function.sig.asyncness.is_some() {
-        let ReturnType::Type(_, ty) = output else {
-            unreachable!("a missing return type is rejected before the body is rewritten")
-        };
-        quote!(let __ohno_result: #ty = async #block.await;)
+        quote!(let __ohno_result: #output = async #block.await;)
     } else {
-        quote!(let __ohno_result = (|| #output #block)();)
+        quote!(let __ohno_result = (|| -> #output #block)();)
     };
 
     syn::parse_quote!({

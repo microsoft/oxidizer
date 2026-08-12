@@ -420,6 +420,12 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_from_entry_that_names_no_type() {
+        let faults = parse_faults(parse_quote! { #[from((kind: 1))] struct T { inner: ohno::OhnoCore, } });
+        assert!(faults.contains("expected a type"), "{faults}");
+    }
+
+    #[test]
     fn rejects_a_malformed_display_attribute() {
         let faults = parse_faults(parse_quote! { #[display] struct T { inner: ohno::OhnoCore, } });
         assert!(!faults.is_empty());
