@@ -806,6 +806,9 @@ function Test-PackageExposesTarget {
         }
 
         $root = ($entry -split '::', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            return $true
+        }
         if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
             return $true
         }
@@ -864,12 +867,15 @@ function Test-PackageAllowlistNamesTarget {
     # This predicate is called only when no dependency edge to the target
     # exists. DepAliases is therefore irrelevant: production can populate an
     # alias only while processing a declared edge, which would take the direct
-    # branch instead. The only roots possible here belong to the target itself.
-    $acceptedRoots = @($TargetPackageName.Replace('-', '_'))
+    # branch instead. When the target's crate root is known it is exclusive:
+    # `[lib] name` replaces the package name as the usable Rust root. The
+    # package name remains only as compatibility for older synthetic records
+    # that predate CrateRoot.
     if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
-        $acceptedRoots += $TargetCrateRoot.Replace('-', '_')
+        $acceptedRoots = @($TargetCrateRoot.Replace('-', '_'))
+    } else {
+        $acceptedRoots = @($TargetPackageName.Replace('-', '_'))
     }
-    $acceptedRoots = @($acceptedRoots | Sort-Object -Unique)
 
     foreach ($entry in $Dependent.AllowedExternalTypes) {
         if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {

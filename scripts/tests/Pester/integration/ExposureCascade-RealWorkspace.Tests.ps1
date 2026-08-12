@@ -64,7 +64,7 @@ Describe 'Exposed-dependency cascade over the live workspace' {
             $roots | Should -Contain 'bytesbuf'
         }
 
-        It 'still matches the shared allowlist literal entry for entry' {
+        It 'still matches every shared allowlist literal entry' {
             # The unit tests assert exposure of `ohno` and `futures_core` too,
             # using the same literal. Checking only the bytesbuf root would
             # leave those two asserted against a copy nothing pins, so the unit

@@ -575,6 +575,14 @@ Describe 'Test-PackageExposesTarget' {
         }
     }
 
+    It 'fails closed when an entry has an empty root' {
+        foreach ($bad in @('::Bytes', ' ::Bytes')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($bad)) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue `
+                -Because "'$bad' has no usable crate root"
+        }
+    }
+
     It 'fails closed when a malformed entry follows valid ones' {
         $dep = New-Dependent -Allowed @('std::io::Error', $null)
         Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
@@ -692,6 +700,15 @@ Describe 'Test-PackageAllowlistNamesTarget' {
         $dep = New-Dependent -Allowed @('buf_core::Bytes')
         Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' `
             -TargetCrateRoot 'buf_core' | Should -BeTrue
+    }
+
+    It 'does not match the package name when a divergent crate root is known' {
+        # `[lib] name` replaces the package name as the Rust root. Keeping both
+        # would let an unrelated crate with the package-name root force a
+        # spurious breaking bump on this indirect target.
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' `
+            -TargetCrateRoot 'buf_core' | Should -BeFalse
     }
 
     It 'does not consult dependency-edge aliases for an indirect target' {
