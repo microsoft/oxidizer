@@ -4484,7 +4484,6 @@ dependencies = [
  "futures",
  "many_cpus",
  "mutants",
- "static_assertions",
  "thread_aware_core",
  "thread_aware_macros",
 ]
