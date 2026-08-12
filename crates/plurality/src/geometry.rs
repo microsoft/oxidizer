@@ -1,6 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+#![expect(
+    clippy::cast_ptr_alignment,
+    reason = "the recovered chunk header sits at a `ChunkHeader`-aligned offset by construction of the chunk layout"
+)]
+
 //! Slot geometry: the offsets and stride of a `#[repr(C)] SlotCell<T>`,
 //! expressed as a pure function of the value's size and alignment.
 //!
@@ -13,9 +22,11 @@
 
 use core::alloc::Layout;
 use core::marker::PhantomData;
+use core::ptr::NonNull;
 
 use crate::atomic::AtomicU32;
 use crate::chunk::ChunkHeader;
+use crate::slot::SlotCell;
 
 /// Rounds `x` up to the next multiple of `align`, which must be a power of two.
 #[inline]
@@ -101,6 +112,37 @@ pub(crate) trait SlotGeometry: Copy {
     fn slots_offset(self) -> usize;
     /// Layout of a chunk holding `slots` slots, or `None` on overflow.
     fn chunk_layout(self, slots: usize) -> Option<Layout>;
+
+    /// Returns the address of slot `offset` within the chunk headed by `chunk`.
+    ///
+    /// # Safety
+    /// `chunk` must head a live chunk laid out by this geometry, and `offset`
+    /// must be less than that chunk's slot count.
+    #[inline]
+    unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8> {
+        // SAFETY: the payload begins `slots_offset` bytes into the chunk and
+        // holds at least `offset + 1` slots by the caller's contract.
+        unsafe {
+            let first = chunk.as_ptr().cast::<u8>().add(self.slots_offset());
+            NonNull::new_unchecked(first.add(offset * self.stride()))
+        }
+    }
+
+    /// Recovers the owning chunk header from a slot address and the slot's
+    /// (already read) in-chunk index.
+    ///
+    /// # Safety
+    /// `slot` must address a live slot in a chunk laid out by this geometry,
+    /// and `index` must be that slot's stored in-chunk index.
+    #[inline]
+    unsafe fn header_of(self, slot: NonNull<u8>, index: u32) -> NonNull<ChunkHeader> {
+        // SAFETY: stepping back `index` slots lands on the first slot, and
+        // stepping back `slots_offset` further lands on the chunk header.
+        unsafe {
+            let back = index as usize * self.stride() + self.slots_offset();
+            NonNull::new_unchecked(slot.as_ptr().sub(back).cast::<ChunkHeader>())
+        }
+    }
 }
 
 /// Geometry of a pool whose element type is fixed at compile time.
@@ -114,9 +156,8 @@ impl<T> TypedGeometry<T> {
     /// type, so every element type the crate is instantiated with re-verifies
     /// them against ground truth.
     ///
-    /// Referenced from the accessors below rather than from a dedicated entry
-    /// point, because an associated `const` is evaluated only where it is used
-    /// and no instantiation may route around it.
+    /// Forced from the constructor, which is the only way to obtain a value of
+    /// this type, so no instantiation can route around it.
     const CHECK: () = {
         let size = size_of::<T>();
         let align = align_of::<T>();
@@ -130,6 +171,7 @@ impl<T> TypedGeometry<T> {
     #[inline]
     #[must_use]
     pub(crate) const fn new() -> Self {
+        () = Self::CHECK;
         Self(PhantomData)
     }
 }
@@ -145,32 +187,51 @@ impl<T> Copy for TypedGeometry<T> {}
 impl<T> SlotGeometry for TypedGeometry<T> {
     #[inline]
     fn stride(self) -> usize {
-        () = Self::CHECK;
         stride(size_of::<T>(), align_of::<T>())
     }
 
     #[inline]
     fn refcount_offset(self) -> usize {
-        () = Self::CHECK;
         refcount_offset(size_of::<T>())
     }
 
     #[inline]
     fn index_offset(self) -> usize {
-        () = Self::CHECK;
         index_offset(size_of::<T>())
     }
 
     #[inline]
     fn slots_offset(self) -> usize {
-        () = Self::CHECK;
         slots_offset(align_of::<T>())
     }
 
     #[inline]
     fn chunk_layout(self, slots: usize) -> Option<Layout> {
-        () = Self::CHECK;
         chunk_layout(size_of::<T>(), align_of::<T>(), slots)
+    }
+
+    /// Addresses the slot as the compiler lays out `[SlotCell<T>]`, rather than
+    /// by multiplying out the stride. `CHECK` proves the two agree, and the
+    /// typed form gives the optimiser the element type directly.
+    #[inline]
+    unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8> {
+        // SAFETY: the payload begins `slots_offset` bytes into the chunk and
+        // holds at least `offset + 1` slots by the caller's contract.
+        unsafe {
+            let first = chunk.as_ptr().cast::<u8>().add(self.slots_offset()).cast::<SlotCell<T>>();
+            NonNull::new_unchecked(first.add(offset).cast::<u8>())
+        }
+    }
+
+    /// The inverse of [`slot_at`](Self::slot_at), in the same terms.
+    #[inline]
+    unsafe fn header_of(self, slot: NonNull<u8>, index: u32) -> NonNull<ChunkHeader> {
+        // SAFETY: stepping back `index` slots lands on the first slot, and
+        // stepping back `slots_offset` further lands on the chunk header.
+        unsafe {
+            let first = slot.as_ptr().cast::<SlotCell<T>>().sub(index as usize);
+            NonNull::new_unchecked(first.cast::<u8>().sub(self.slots_offset()).cast::<ChunkHeader>())
+        }
     }
 }
 
@@ -242,7 +303,6 @@ impl SlotGeometry for RuntimeGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::slot::SlotCell;
 
     /// Checks both providers against the compiler's own layout of `SlotCell<$t>`.
     ///

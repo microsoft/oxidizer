@@ -11,6 +11,7 @@ use allocator_api2::alloc::{Allocator, Global};
 
 use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
+use crate::geometry::TypedGeometry;
 use crate::pool::{Pool, PoolCore, PoolInner, teardown_erased};
 use crate::slot::{FREE_END, MAX_POOL_SLOTS};
 
@@ -114,7 +115,7 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
             core: PoolCore {
                 free_head: AtomicU32::new(FREE_END),
                 pool_refcount: AtomicUsize::new(1),
-                teardown: teardown_erased::<T, A>,
+                teardown: teardown_erased::<A, TypedGeometry<T>>,
             },
             chunk_size,
             shift: chunk_size.trailing_zeros(),
@@ -126,7 +127,7 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
             chunk_layout: layout,
             directory: UnsafeCell::new(Vec::new()),
             allocator: self.allocator,
-            _marker: PhantomData,
+            geometry: TypedGeometry::<T>::new(),
         };
         let raw = AllocBox::into_raw(AllocBox::new(inner));
         let inner = NonNull::new(raw).expect("Box::into_raw never returns a null pointer");

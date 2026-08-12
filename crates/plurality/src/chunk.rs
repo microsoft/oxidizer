@@ -1,20 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
-)]
-
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
 use crate::geometry::{SlotGeometry, TypedGeometry};
 use crate::pool::PoolCore;
-use crate::slot::SlotCell;
 
 /// Header sitting at the base of every chunk allocation, followed (after
-/// alignment padding) by the chunk's `[SlotCell<T>; N]` payload.
+/// alignment padding) by the chunk's slot payload.
 #[repr(C)]
 pub(crate) struct ChunkHeader {
     /// Back-pointer to the owning pool, used to recover `PoolInner` from a slot
@@ -26,49 +20,7 @@ pub(crate) struct ChunkHeader {
     pub(crate) chunk_index: u32,
 }
 
-/// Byte offset of the slot payload within a chunk allocation. Independent of
-/// the chunk size, so recovery (and slot addressing) is pure arithmetic.
-fn slots_offset<T>() -> usize {
-    TypedGeometry::<T>::new().slots_offset()
-}
-
 /// Computes the [`Layout`] of a chunk holding `n` slots, or `None` on overflow.
 pub(crate) fn chunk_layout<T>(n: usize) -> Option<Layout> {
     TypedGeometry::<T>::new().chunk_layout(n)
-}
-
-/// Returns the slot at `offset` within the chunk whose header is `chunk`.
-///
-/// # Safety
-/// `chunk` must point at a live chunk and `offset` must be `< N`.
-#[inline]
-pub(crate) unsafe fn slot_at<T>(chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<SlotCell<T>> {
-    // SAFETY: the payload begins `slots_offset` bytes into the chunk and holds
-    // at least `offset + 1` slots by the caller's contract.
-    unsafe {
-        let first = chunk.as_ptr().cast::<u8>().add(slots_offset::<T>()).cast::<SlotCell<T>>();
-        NonNull::new_unchecked(first.add(offset))
-    }
-}
-
-/// Recovers the owning chunk header from a slot pointer and its (already read)
-/// in-chunk index, by arithmetic.
-///
-/// # Safety
-/// `slot` must point at a live slot belonging to a chunk laid out by this
-/// crate, and `index` must be that slot's stored in-chunk index.
-#[inline]
-#[expect(
-    clippy::cast_ptr_alignment,
-    reason = "the recovered chunk header sits at a `ChunkHeader`-aligned offset by construction of the chunk layout"
-)]
-pub(crate) unsafe fn header_of<T>(slot: NonNull<SlotCell<T>>, index: u32) -> NonNull<ChunkHeader> {
-    // SAFETY: `index` is the slot's in-chunk position, so stepping back that
-    // many slots lands on the first slot, and stepping back `slots_offset`
-    // bytes lands on the chunk header.
-    unsafe {
-        let first = slot.as_ptr().sub(index as usize);
-        let header = first.cast::<u8>().sub(slots_offset::<T>()).cast::<ChunkHeader>();
-        NonNull::new_unchecked(header)
-    }
 }

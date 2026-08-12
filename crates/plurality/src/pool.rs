@@ -11,7 +11,6 @@ use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::marker::PhantomData;
 use core::mem::{MaybeUninit, forget, needs_drop};
 use core::pin::Pin;
 use core::ptr::{NonNull, drop_in_place};
@@ -23,9 +22,9 @@ use crate::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::boxed::Box;
 use crate::builder::PoolBuilder;
-use crate::chunk::{ChunkHeader, header_of, slot_at};
+use crate::chunk::ChunkHeader;
 use crate::error::AllocError;
-use crate::geometry::{self, RuntimeGeometry, SlotGeometry};
+use crate::geometry::{self, RuntimeGeometry, SlotGeometry, TypedGeometry};
 #[cfg(feature = "stats")]
 use crate::pool_stats::PoolStats;
 use crate::rc::Rc;
@@ -48,17 +47,21 @@ pub(crate) struct PoolCore {
 ///
 /// This prevents a leak if `Vec::push` panics. Loom atomics must also be
 /// destroyed before their storage is freed.
-struct ChunkAllocationGuard<'a, T, A: Allocator> {
+struct ChunkAllocationGuard<'a, A: Allocator, G: SlotGeometry> {
     chunk: NonNull<ChunkHeader>,
     #[cfg(loom)]
     slots: u32,
+    /// Read only by the `loom` teardown loop below, but stored unconditionally
+    /// so the guard's shape does not vary by configuration. Zero-sized for a
+    /// typed pool.
+    #[cfg_attr(not(loom), expect(dead_code, reason = "read only by the loom-only slot teardown loop"))]
+    geometry: G,
     layout: Layout,
     allocator: &'a A,
-    _marker: PhantomData<fn() -> T>,
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-impl<T, A: Allocator> Drop for ChunkAllocationGuard<'_, T, A> {
+impl<A: Allocator, G: SlotGeometry> Drop for ChunkAllocationGuard<'_, A, G> {
     #[cfg_attr(test, mutants::skip)] // Observable only if Vec::push panics after allocation; the mutant leaks memory.
     fn drop(&mut self) {
         // SAFETY: the guard exclusively owns a fully initialized but
@@ -66,8 +69,8 @@ impl<T, A: Allocator> Drop for ChunkAllocationGuard<'_, T, A> {
         unsafe {
             #[cfg(loom)]
             for i in 0..self.slots {
-                let slot = slot_at::<T>(self.chunk, i as usize);
-                drop_in_place(&raw mut (*slot.as_ptr()).refcount);
+                let slot = self.geometry.slot_at(self.chunk, i as usize);
+                drop_in_place(refcount_of(self.geometry, slot));
             }
             self.allocator.deallocate(self.chunk.cast::<u8>(), self.layout);
         }
@@ -82,8 +85,13 @@ const fn unbounded_chunk_cap(chunk_size: u32) -> u64 {
 
 /// Concrete pool state. `core` is first so its full-provenance pointer can be
 /// cast back by the concrete teardown callback stored inside it.
+///
+/// Carries no element type: the geometry provider `G` supplies every layout
+/// number the body needs, and — for a typed pool — the element-type marker.
+/// Chunk memory is managed without ever reading or dropping value storage, so
+/// the body has no use for the element type beyond its layout.
 #[repr(C)]
-pub(crate) struct PoolInner<T, A> {
+pub(crate) struct PoolInner<A, G> {
     pub(crate) core: PoolCore,
     /// Slots per chunk (a power of two).
     pub(crate) chunk_size: u32,
@@ -107,7 +115,8 @@ pub(crate) struct PoolInner<T, A> {
     pub(crate) directory: UnsafeCell<Vec<NonNull<ChunkHeader>>>,
     /// Allocator used for chunk allocations.
     pub(crate) allocator: A,
-    pub(crate) _marker: PhantomData<fn() -> T>,
+    /// Supplies the slot offsets and stride this pool's chunks are laid out to.
+    pub(crate) geometry: G,
 }
 
 /// A growable, fixed-slot object pool.
@@ -120,7 +129,7 @@ pub(crate) struct PoolInner<T, A> {
 /// be dropped from any thread; `Alloc` and `Rc` are `!Send` and stay on the
 /// allocating thread.
 pub struct Pool<T, A: Allocator = Global> {
-    inner: NonNull<PoolInner<T, A>>,
+    inner: NonNull<PoolInner<A, TypedGeometry<T>>>,
 }
 
 // SAFETY: all cross-thread state in `PoolInner` is atomic; the non-atomic
@@ -180,12 +189,12 @@ impl<T> Default for Pool<T, Global> {
 }
 
 impl<T, A: Allocator> Pool<T, A> {
-    pub(crate) fn from_inner(inner: NonNull<PoolInner<T, A>>) -> Self {
+    pub(crate) fn from_inner(inner: NonNull<PoolInner<A, TypedGeometry<T>>>) -> Self {
         Self { inner }
     }
 
     #[inline]
-    fn inner(&self) -> &PoolInner<T, A> {
+    fn inner(&self) -> &PoolInner<A, TypedGeometry<T>> {
         // SAFETY: `inner` is valid while this `Pool` holds a pool refcount.
         unsafe { self.inner.as_ref() }
     }
@@ -855,8 +864,9 @@ impl<T, A: Allocator> Pool<T, A> {
             let dir = &*inner.directory.get();
             *dir.get_unchecked(chunk_no)
         };
-        // SAFETY: `offset < chunk_size`.
-        unsafe { slot_at::<T>(chunk, offset) }
+        // SAFETY: `offset < chunk_size`. The slot's value is field 0, so the
+        // slot address and the value address coincide.
+        unsafe { inner.geometry.slot_at(chunk, offset).cast::<SlotCell<T>>() }
     }
 
     /// Allocates and installs one new chunk, reserves its first slot for the
@@ -896,20 +906,20 @@ impl<T, A: Allocator> Pool<T, A> {
                 chunk_index: chunks,
             });
             for i in 0..n {
-                let slot = slot_at::<T>(ptr, i as usize);
+                let slot = inner.geometry.slot_at(ptr, i as usize).cast::<SlotCell<T>>();
                 slot.as_ptr().write(SlotCell {
                     value: UnsafeCell::new(MaybeUninit::uninit()),
                     refcount: AtomicU32::new(base_index + i + 1),
                     index: i,
                 });
             }
-            let guard = ChunkAllocationGuard::<T, A> {
+            let guard = ChunkAllocationGuard::<A, TypedGeometry<T>> {
                 chunk: ptr,
                 #[cfg(loom)]
                 slots: n,
+                geometry: inner.geometry,
                 layout: inner.chunk_layout,
                 allocator: &inner.allocator,
-                _marker: PhantomData,
             };
             (&mut *inner.directory.get()).push(ptr);
             // Directory publication transferred ownership to the pool.
@@ -925,13 +935,28 @@ impl<T, A: Allocator> Pool<T, A> {
         // slot `base_index` is returned to the caller.
         if n > 1 {
             // SAFETY: `ptr` chunk is live; its last slot is index n-1.
-            let last = unsafe { slot_at::<T>(ptr, (n - 1) as usize) };
+            let last = unsafe { inner.geometry.slot_at(ptr, (n - 1) as usize).cast::<SlotCell<T>>() };
             // SAFETY: `last` is the new chunk's (still-private) final slot.
             unsafe { splice_chain(&inner.core.free_head, last, base_index + 1) };
         }
         // SAFETY: slot 0 of the new chunk; never published, so exclusively ours.
-        Ok(unsafe { slot_at::<T>(ptr, 0) })
+        Ok(unsafe { inner.geometry.slot_at(ptr, 0).cast::<SlotCell<T>>() })
     }
+}
+
+/// Returns a raw pointer to a slot's refcount, given the slot's address.
+///
+/// # Safety
+/// `slot` must address a live slot laid out by `geometry`.
+#[inline]
+#[cfg_attr(not(loom), expect(dead_code, reason = "scaffolding: only the loom teardown paths need this until `LayoutPool` lands"))]
+#[expect(
+    clippy::cast_ptr_alignment,
+    reason = "the refcount sits at its natural `AtomicU32` alignment within the `#[repr(C)]` slot"
+)]
+unsafe fn refcount_of<G: SlotGeometry>(geometry: G, slot: NonNull<u8>) -> *mut AtomicU32 {
+    // SAFETY: the refcount follows the value within the slot.
+    unsafe { slot.as_ptr().add(geometry.refcount_offset()).cast::<AtomicU32>() }
 }
 
 /// Splices a freshly built chunk's free chain onto the global free list by
@@ -983,7 +1008,7 @@ unsafe fn push_free<T>(slot: NonNull<SlotCell<T>>) -> NonNull<PoolCore> {
     // SAFETY: recovery is valid for any live slot from this crate.
     unsafe {
         let index = (*slot.as_ptr()).index;
-        let header = header_of::<T>(slot, index);
+        let header = TypedGeometry::<T>::new().header_of(slot.cast::<u8>(), index);
         let pool = (*header.as_ptr()).pool;
         let global = (*header.as_ptr()).base_index + index;
         let inner = pool.as_ref();
@@ -1167,7 +1192,7 @@ pub(crate) unsafe fn drop_and_free_local<T>(slot: NonNull<SlotCell<T>>) {
 /// The pool refcount must have just reached zero; the pool is quiescent.
 #[cold]
 #[inline(never)]
-unsafe fn teardown<T, A: Allocator>(pool: NonNull<PoolInner<T, A>>) {
+unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolInner<A, G>>) {
     // SAFETY: exclusive ownership; chunks were allocated with `chunk_layout`.
     unsafe {
         let inner = pool.as_ref();
@@ -1182,8 +1207,8 @@ unsafe fn teardown<T, A: Allocator>(pool: NonNull<PoolInner<T, A>>) {
                 // or loom reports them leaked. A no-op (compiled out) otherwise.
                 #[cfg(loom)]
                 for i in 0..inner.chunk_size {
-                    let slot = slot_at::<T>(chunk, i as usize);
-                    drop_in_place(&raw mut (*slot.as_ptr()).refcount);
+                    let slot = inner.geometry.slot_at(chunk, i as usize);
+                    drop_in_place(refcount_of(inner.geometry, slot));
                 }
 
                 inner.allocator.deallocate(chunk.cast::<u8>(), layout);
@@ -1196,12 +1221,12 @@ unsafe fn teardown<T, A: Allocator>(pool: NonNull<PoolInner<T, A>>) {
 /// Restores a type-erased core pointer to its concrete pool type.
 ///
 /// # Safety
-/// `core` must be the first field of a live `PoolInner<T, A>` whose refcount
+/// `core` must be the first field of a live `PoolInner<A, G>` whose refcount
 /// just reached zero.
-pub(crate) unsafe fn teardown_erased<T, A: Allocator>(core: NonNull<PoolCore>) {
+pub(crate) unsafe fn teardown_erased<A: Allocator, G: SlotGeometry>(core: NonNull<PoolCore>) {
     // SAFETY: `PoolInner` is `#[repr(C)]` with `core` as its first field, and
     // this monomorphized callback was stored by that exact pool allocation.
-    unsafe { teardown::<T, A>(core.cast::<PoolInner<T, A>>()) };
+    unsafe { teardown::<A, G>(core.cast::<PoolInner<A, G>>()) };
 }
 
 #[cold]
