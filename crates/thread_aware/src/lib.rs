@@ -10,7 +10,7 @@
 //! # Crate features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-//!   hosted-only type implementations.
+//!   hosted-only closure support.
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * **`threads`** enables the `registry` module and implies `std`.
 //! * Disable default features for `#![no_std]` environments. The [`ThreadAware`] trait, affinity
@@ -102,7 +102,7 @@
 //! # Features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-//!   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
+//!   hosted-only closure support. Disable it for `#![no_std]` environments; the crate then
 //!   requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
@@ -110,30 +110,6 @@
 //!   `default-features = false, features = ["derive"]`.
 //! * **`threads`**: Enables features mainly used by async runtimes for OS interactions and implies
 //!   `std`.
-//!
-//! ## 3rd-party crate impls
-//!
-//! The following opt-in features provide [`ThreadAware`] implementations for
-//! inert value types from popular 3rd-party crates. Enabling a feature pulls
-//! that crate in as a dependency. By default none are enabled and this crate
-//! brings in no extra dependencies.
-//!
-//! Feature names follow this convention so that future breaking versions of
-//! the wrapped crate can be supported additively:
-//!
-//! * Stable `1.x` (or any other stable major) → bare crate name
-//!   (e.g. `bytes`, `http`, `uuid`).
-//! * `N.x` for `N >= 2` → `<crate><N>` (e.g. `bytes2` if `bytes 2.x` ever lands).
-//! * `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
-//!
-//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-//! * **`http`**: Enables `std` and provides impls for `http::StatusCode`, `http::Method`, `http::Version`,
-//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
-//!   `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
-//!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
-//!   `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
-//! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
-//! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
 //! # Examples
 //!

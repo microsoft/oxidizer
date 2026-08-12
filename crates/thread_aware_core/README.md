@@ -25,15 +25,8 @@ Relocation is a cooperative performance optimization rather than a correctness
 boundary. Implementations must remain correct if a relocation notification is
 omitted, repeated, or reports the same source and destination.
 
-## Cargo features
-
-The default `std` feature adds implementations for standard-library types such
-as `HashMap` and `Path`. Disable default features to use the core API with only
-`core` and `alloc`.
-
-Optional `bytes`, `http`, `jiff02`, and `uuid` features add implementations for
-selected inert types from those crates. No third-party dependencies are required
-unless one of these integration features is enabled.
+The crate has no Cargo features or dependencies. It is always `no_std` and
+provides implementations only for types available from `core` and `alloc`.
 
 
 <hr/>
@@ -41,6 +34,6 @@ unless one of these integration features is enabled.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbShX8a_r6gnUbZjOUFwoF8ccbRmXOuaJStpwbKe0MhKW5cv5hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTEuMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbSipgCTG4mwob-VHpgup2zzQbygufHMcASoobRfgy4sgHBmRhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTEuMC4w
  [__link0]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/trait.ThreadAware.html
  [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/struct.Affinity.html

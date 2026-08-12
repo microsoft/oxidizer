@@ -15,22 +15,14 @@
 //! boundary. Implementations must remain correct if a relocation notification is
 //! omitted, repeated, or reports the same source and destination.
 //!
-//! # Cargo features
-//!
-//! The default `std` feature adds implementations for standard-library types such
-//! as `HashMap` and `Path`. Disable default features to use the core API with only
-//! `core` and `alloc`.
-//!
-//! Optional `bytes`, `http`, `jiff02`, and `uuid` features add implementations for
-//! selected inert types from those crates. No third-party dependencies are required
-//! unless one of these integration features is enabled.
+//! The crate has no Cargo features or dependencies. It is always `no_std` and
+//! provides implementations only for types available from `core` and `alloc`.
 
 extern crate alloc;
-#[cfg(any(feature = "std", test))]
+#[cfg(test)]
 extern crate std;
 
 mod impls;
-mod third_party;
 
 /// Identifies a processor and memory region in an application's affinity topology.
 ///

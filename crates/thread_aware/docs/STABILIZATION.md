@@ -15,20 +15,15 @@ work. In particular, `thread_aware::ThreadAware` and
 `thread_aware::affinity::Affinity` remain the preferred paths for users of the
 full library.
 
-The core crate has no required third-party dependencies. Its optional `bytes`,
-`http`, `jiff02`, and `uuid` features provide implementations for foreign types.
-These implementations must live with the trait because Rust's coherence rules
-prevent the higher-level `thread_aware` crate from implementing a foreign trait
-for foreign types. The `thread_aware` features of the same names forward to these
-core features.
+The core crate has no Cargo features or dependencies. It provides
+implementations only for types available from `core` and `alloc`. Implementations
+for types from external crates are intentionally outside the stable boundary.
 
 ## Unstable utilities
 
 Implementation helpers, containers, callbacks, registry APIs, derive support,
 and integration helpers remain in the pre-1.0 `thread_aware` crate. Stable
-downstream crates should not expose those types in their public APIs. The
-feature-gated foreign-type implementations in `thread_aware_core` add trait
-implementations only; they do not add new public types to the stable core API.
+downstream crates should not expose those types in their public APIs.
 
 This split allows the trait contract and its required affinity identifier to
 remain stable without prematurely stabilizing the larger utility surface.

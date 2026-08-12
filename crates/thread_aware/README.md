@@ -18,7 +18,7 @@ Essential building blocks for thread-per-core libraries.
 ## Crate features
 
 * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-  hosted-only type implementations.
+  hosted-only closure support.
 * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 * **`threads`** enables the `registry` module and implies `std`.
 * Disable default features for `#![no_std]` environments. The [`ThreadAware`][__link0] trait, affinity
@@ -109,7 +109,7 @@ from types that implement [`ThreadAware`][__link24].
 ## Features
 
 * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
-  hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
+  hosted-only closure support. Disable it for `#![no_std]` environments; the crate then
   requires `alloc` and pointer-width atomics.
 * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
@@ -118,41 +118,12 @@ from types that implement [`ThreadAware`][__link24].
 * **`threads`**: Enables features mainly used by async runtimes for OS interactions and implies
   `std`.
 
-### 3rd-party crate impls
-
-The following opt-in features provide [`ThreadAware`][__link25] implementations for
-inert value types from popular 3rd-party crates. Enabling a feature pulls
-that crate in as a dependency. By default none are enabled and this crate
-brings in no extra dependencies.
-
-Feature names follow this convention so that future breaking versions of
-the wrapped crate can be supported additively:
-
-* Stable `1.x` (or any other stable major) → bare crate name
-  (e.g. `bytes`, `http`, `uuid`).
-
-* `N.x` for `N >= 2` → `<crate><N>` (e.g. `bytes2` if `bytes 2.x` ever lands).
-
-* `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
-
-* **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-
-* **`http`**: Enables `std` and provides impls for `http::StatusCode`, `http::Method`, `http::Version`,
-  `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
-  `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
-  `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
-  `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
-
-* **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
-
-* **`uuid`**: Impl for `uuid::Uuid`.
-
 ## Examples
 
-### Using the [`ThreadAware` derive macro][__link26]
+### Using the [`ThreadAware` derive macro][__link25]
 
 When the `derive` feature (enabled by default) is active you can simply
-use the [`ThreadAware` derive macro][__link27] instead of writing the
+use the [`ThreadAware` derive macro][__link26] instead of writing the
 implementation manually.
 
 ```rust
@@ -165,10 +136,10 @@ struct Point {
 }
 ```
 
-### Enabling [`ThreadAware`][__link28] via `Arc<T, S>`
+### Enabling [`ThreadAware`][__link27] via `Arc<T, S>`
 
-With the `std` feature, types containing fields not [`ThreadAware`][__link29] can use [`Arc`][__link30] to specify a
-strategy and wrap them in an [`Arc`][__link31] that implements the trait.
+With the `std` feature, types containing fields not [`ThreadAware`][__link28] can use [`Arc`][__link29] to specify a
+strategy and wrap them in an [`Arc`][__link30] that implements the trait.
 
 ```rust
 use thread_aware::{Arc, PerCore, ThreadAware};
@@ -195,7 +166,7 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbziMip5ExkKkbROtDHabkUj4blubaufU_GeYbpkp3mFVHCQJhZIOCbHRocmVhZF9hd2FyZWUwLjkuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMS4wLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb2vLTu5WRFQEbvwMsnL4X15QbvBN25-xR7DMbyFEnRT6YbUdhZIOCbHRocmVhZF9hd2FyZWUwLjkuMIJxdGhyZWFkX2F3YXJlX2NvcmVlMS4wLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
  [__link0]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link10]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
@@ -214,14 +185,13 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link22]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link23]: https://doc.rust-lang.org/stable/alloc/?search=sync::Arc
  [__link24]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
- [__link25]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
+ [__link25]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
  [__link26]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
- [__link27]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
+ [__link27]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link28]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
- [__link29]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
+ [__link29]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
  [__link3]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link30]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
- [__link31]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
  [__link4]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link5]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=ThreadAware
  [__link6]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc

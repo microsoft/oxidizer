@@ -17,59 +17,6 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core"
 
-[package.metadata.docs.rs]
-all-features = true
-
-[package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "bytes::bytes::Bytes",
-    "bytes::bytes_mut::BytesMut",
-    "http::error::Error",
-    "http::header::map::HeaderMap",
-    "http::header::name::HeaderName",
-    "http::header::value::HeaderValue",
-    "http::method::Method",
-    "http::request::Request",
-    "http::response::Response",
-    "http::status::StatusCode",
-    "http::uri::InvalidUri",
-    "http::uri::Uri",
-    "http::uri::authority::Authority",
-    "http::uri::path::PathAndQuery",
-    "http::uri::port::Port",
-    "http::uri::scheme::Scheme",
-    "http::version::Version",
-    "jiff::civil::date::Date",
-    "jiff::civil::datetime::DateTime",
-    "jiff::civil::iso_week_date::ISOWeekDate",
-    "jiff::civil::time::Time",
-    "jiff::signed_duration::SignedDuration",
-    "jiff::span::Span",
-    "jiff::timestamp::Timestamp",
-    "uuid::Uuid",
-]
-
-[features]
-default = ["std"]
-std = []
-bytes = ["dep:bytes"]
-http = ["std", "dep:http"]
-jiff02 = ["dep:jiff"]
-uuid = ["dep:uuid"]
-
-[dependencies]
-bytes = { version = "1.11.1", default-features = false, optional = true }
-http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
-jiff = { version = "0.2.21", default-features = false, optional = true }
-uuid = { version = "1.21.0", default-features = false, optional = true }
-
-[dev-dependencies]
-bytes = { version = "1.11.1", default-features = false }
-http = { version = "1.4.1", default-features = false, features = ["std"] }
-jiff = { version = "0.2.21", default-features = false }
-static_assertions = { workspace = true }
-uuid = { version = "1.21.0", default-features = false }
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

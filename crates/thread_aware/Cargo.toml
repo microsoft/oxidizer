@@ -29,34 +29,11 @@ all-features = true
 
 [features]
 default = ["std", "derive"]
-# Enables the per-affinity Arc and hosted-only type impls. Disable for `#![no_std]`
+# Enables the per-affinity Arc and hosted-only closure support. Disable for `#![no_std]`
 # environments; the crate then requires only `alloc`.
-std = ["thread_aware_core/std"]
+std = []
 derive = ["dep:thread_aware_macros"]
 threads = ["std", "dep:many_cpus"]
-
-# Optional `ThreadAware` impls for 3rd-party crate types. By default no such
-# features are enabled, so this crate does not pull in any additional
-# dependencies. Enabling a feature pulls in that crate and exposes the impls.
-#
-# Feature naming convention (agreed during PR review):
-#
-# * Crate at `1.x` (or any other stable major)
-#     → bare crate name (e.g. `bytes`, `http`, `uuid`)
-# * Crate at `N.x` for N >= 2
-#     → `<crate><N>` (e.g. `bytes2` if we ever added bytes 2.x)
-# * Crate at `0.x`
-#     → `<crate>0<x>` (e.g. `jiff02` for jiff 0.2.x, `jiff03` for 0.3.x)
-#
-# A future breaking version of any of these crates can therefore be supported
-# additively (e.g. add a new `bytes2` feature alongside `bytes`) without forcing
-# a breaking release of this crate.
-#
-# See the `third_party` module for the list of types each feature covers.
-bytes = ["thread_aware_core/bytes"]
-http = ["std", "thread_aware_core/http"]
-jiff02 = ["thread_aware_core/jiff02"]
-uuid = ["thread_aware_core/uuid"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
@@ -65,36 +42,11 @@ thread_aware_macros = { workspace = true, optional = true }
 thread_aware_core = { workspace = true }
 
 [dev-dependencies]
-bytes = { version = "1.11.1", default-features = false }
-criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-http = { version = "1.4.1", default-features = false, features = ["std"] }
-jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
-uuid = { version = "1.21.0", default-features = false }
-
-# Workspace dep declares `default-features = false`; we re-enable `default` here
-# (which pulls in the `benchmark` feature with `library_benchmark`,
-# `library_benchmark_group!`, and `gungraun::main!`) only on Linux, since
-# gungraun requires Valgrind.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
-[[bench]]
-name = "criterion_third_party"
-harness = false
-required-features = ["bytes", "http", "jiff02", "uuid"]
-
-# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
-# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
-# cfg-gated, so it is unconditional here.
-[[bench]]
-name = "gungraun_third_party"
-harness = false
-required-features = ["bytes", "http", "jiff02", "uuid"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
