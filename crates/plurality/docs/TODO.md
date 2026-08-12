@@ -5,6 +5,26 @@ These are designs and ideas carried over from the original design plan that are
 [`DESIGN.md`](./DESIGN.md). Items here range from a fully settled design
 (`KeyedPool`) to smaller follow-ups.
 
+## 0. Aggregate byte budget for `BlindPool`
+
+`BlindPool` bounds growth with a **per-layout** chunk cap and a cap on the
+number of layouts. Total memory is therefore bounded by the product of the two
+caps and the chunk byte target — a closed-form bound, but a coarse one, since
+every layout is charged its full allowance whether or not it uses it.
+
+A tighter alternative is an aggregate byte budget shared by every layout pool
+under one `BlindPool`, consulted when a layout pool acquires a chunk and
+released when it deallocates one. The check itself is free — chunk acquisition
+is already a cold path — but the budget is cross-pool mutable state with an
+awkward lifetime: it must outlive every layout pool, and layout pools outlive
+the `BlindPool` whenever handles do. That implies a third reference count
+(blind-pool core, alongside the existing per-slot and pool-level counts) and a
+release step in layout-pool teardown.
+
+Build it if bounded-memory deployments ask for it. The two caps are the right
+default either way, because they are the bounds that map onto the existing
+per-pool machinery with no shared state at all.
+
 ## 1. `KeyedPool` — copyable generational keys (`keys` feature)
 
 A dedicated, **keyed-only** sibling type that hands out copyable, generational
