@@ -63,7 +63,7 @@ json = ["dep:serde_core", "dep:serde_json"]
 test-util = ["tick/test-util"]
 
 [dependencies]
-bytes = { workspace = true }
+bytes = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
