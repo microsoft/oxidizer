@@ -373,6 +373,82 @@ Describe 'Get-WorkspacePackages: publish-syntax variants via cargo metadata' {
     }
 }
 
+Describe 'Get-WorkspacePackages: allowed_external_types container shapes' {
+
+    # `allowed_external_types` must be an array. `[package.metadata]` is
+    # arbitrary TOML that cargo passes through unvalidated, so a malformed
+    # shape reaches the planner intact and has to be rejected here.
+    #
+    # The rejection must produce $null, not an empty array: downstream,
+    # Test-PackageExposesTarget reads $null as "no policy declared" and fails
+    # closed, while @() is a positive claim of no foreign types and fails open.
+
+    It 'reads a well-formed array allowlist' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; AllowedExternalTypes = @('std::io::Error') }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-array')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        @($pkg.AllowedExternalTypes) | Should -Be @('std::io::Error')
+    }
+
+    It 'rejects a scalar allowlist rather than wrapping it into a valid-looking one' {
+        # Wrapping would turn the malformed `allowed_external_types = "std::*"`
+        # into a well-formed single-entry allowlist that matches no target, so
+        # the crate would read as provably not exposing anything -- a fail-open
+        # that ships a breaking dependency inside a compatible version.
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '"std::*"' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-scalar')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        $pkg.AllowedExternalTypes | Should -BeNullOrEmpty -Because 'a scalar is not a declared policy'
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' |
+            Should -BeTrue -Because 'malformed metadata must fail closed'
+    }
+
+    It 'rejects a table allowlist' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '{ std = "*" }' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-table')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        $pkg.AllowedExternalTypes | Should -BeNullOrEmpty
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'preserves an empty array as the positive claim it is' {
+        # `[]` is the one shape that legitimately means "my public API names
+        # nothing foreign", so it must survive as an empty allowlist rather
+        # than collapsing to $null and being read as absent metadata.
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '[]' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-empty')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        ($null -ne $pkg.AllowedExternalTypes) | Should -BeTrue -Because 'an empty array is a declared policy, not absent metadata'
+        @($pkg.AllowedExternalTypes).Count | Should -Be 0
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' |
+            Should -BeFalse -Because 'an empty allowlist claims no foreign types'
+    }
+}
+
 Describe 'Get-WorkspacePackages' {
     BeforeAll {
         Reset-ReleaseScriptCaches

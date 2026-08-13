@@ -187,6 +187,16 @@ function Write-PackageCargoToml {
         $entries = ($Package.AllowedExternalTypes | ForEach-Object { "`"$_`"" }) -join ', '
         $lines += "allowed_external_types = [$entries]"
     }
+    # Emits the value verbatim, bypassing the array wrapping above, so a test
+    # can build the malformed shapes cargo accepts. `[package.metadata]` is
+    # arbitrary TOML that cargo passes through unvalidated, so a scalar reaches
+    # the planner exactly as written here.
+    elseif ($Package.ContainsKey('RawAllowedExternalTypes') -and
+        -not [string]::IsNullOrWhiteSpace($Package.RawAllowedExternalTypes)) {
+        $lines += ''
+        $lines += '[package.metadata.cargo_check_external_types]'
+        $lines += "allowed_external_types = $($Package.RawAllowedExternalTypes)"
+    }
     if ($Package.ContainsKey('ProcMacro') -and $Package.ProcMacro) {
         $lines += ''
         $lines += '[lib]'

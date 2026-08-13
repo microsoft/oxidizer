@@ -665,7 +665,24 @@ function Get-WorkspacePackages {
             $externalTypes = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
             if ($externalTypes -and $null -ne $externalTypes.Value) {
                 $allowed = $externalTypes.Value.PSObject.Properties['allowed_external_types']
-                if ($allowed -and $null -ne $allowed.Value) {
+                # Only a genuine array is a declared policy. The schema demands
+                # one, so any other shape is malformed metadata -- and leaving
+                # $allowedTypes as $null routes it to the absent-metadata branch
+                # in Test-PackageExposesTarget, which fails closed.
+                #
+                # Wrapping instead would be a fail-OPEN: `@("std::*")` turns the
+                # malformed scalar `allowed_external_types = "std::*"` into a
+                # well-formed one-entry allowlist that matches nothing, so the
+                # crate reads as provably exposing nothing. `[package.metadata]`
+                # is arbitrary TOML that cargo passes through unvalidated, so
+                # such a value reaches the planner intact.
+                #
+                # A string is itself IEnumerable (over its characters), so it
+                # must be excluded explicitly or it would read as an array of
+                # single-character entries.
+                if ($allowed -and $null -ne $allowed.Value -and
+                    $allowed.Value -is [System.Collections.IEnumerable] -and
+                    $allowed.Value -isnot [string]) {
                     $allowedTypes = @($allowed.Value)
                 }
             }
