@@ -30,8 +30,10 @@ produce the identical plan. To guarantee this:
    "objective floor", never go below it and never elevate above it without
    concrete, cited evidence from a diff.
 3. Before writing anything, run the Multi-model consensus gate. If independent
-   models disagree on the plan, the rules were ambiguous for that case: STOP and
-   surface the divergence instead of guessing.
+   models disagree on the plan, the rules were ambiguous for that case: STOP,
+   surface the divergence, and emit an ambiguity report that proposes the concrete
+   skill edit which would remove the ambiguity (see "Multi-model consensus gate")
+   -- so each divergence improves this skill instead of only blocking.
 
 If you cannot make a step deterministic, prefer calling a helper or stopping over
 inventing a heuristic.
@@ -72,14 +74,25 @@ your reasoning, done under the rules below.
 
 You are invoked in one of three modes (mirrors the old `-Packages`/`-Changed`/`-All`):
 
-- Targeted: an explicit list of `name@change-spec` tokens.
+- Targeted: an explicit list of tokens. Each token is either a bare `name` OR
+  `name@change-spec`. A bare `name` is the common case: you determine the change
+  type objectively yourself (Step 3), exactly as you do for cascade dependents --
+  the caller does not have to know or state it. `@change-spec` is optional and only
+  needed to override that judgment (see below).
 - Changed: no list. Seed the plan from every published package whose facts show
   `modified = true`.
 - All: no list. Seed from every published package, modified or not.
 
-A `change-spec` is one of `breaking`, `nonbreaking`, `patch`, or an explicit
-SemVer 2.0 version (e.g. `1.0.0`, `0.10.0`, `1.0.0-rc.1`). `name` matches a
-package `folder` under `crates/` (or its Cargo `name` after `-`->`_`).
+The optional `change-spec` (the part after `@`) is one of:
+- `breaking` | `nonbreaking` | `patch` -- a LOWER-BOUND intent. You still run the
+  objective classification in Step 3 and take the STRONGER of the two, so this can
+  only raise the result, never hide a break the analysis finds.
+- an explicit SemVer 2.0 version (e.g. `1.0.0`, `0.10.0`, `1.0.0-rc.1`) -- an
+  explicit pin, used verbatim (must be strictly greater than the current version).
+
+When `@change-spec` is omitted, there is no lower bound and no pin: the Step 3
+objective floor IS the change type. `name` matches a package `folder` under
+`crates/` (or its Cargo `name` after `-`->`_`).
 
 ## Algorithm
 
@@ -99,20 +112,29 @@ manualReview (bool), cascadeReasons[]`.
 - Targeted mode: for each token, look up the package in the facts.
   - Reject a token whose package is not in the workspace, or has `published =
     false`.
-  - If the change-spec is an explicit version, it becomes `requestedPin`;
-    otherwise it becomes `requestedChangeType`.
+  - If the token carries an explicit version it becomes `requestedPin`. If it
+    carries a change type (`breaking`/`nonbreaking`/`patch`) it becomes
+    `requestedChangeType` (a lower bound). If it is a bare `name` (no
+    `@change-spec`), leave both unset -- the objective floor from Step 3 becomes its
+    change type.
   - Set `source = user`.
 - Changed/All mode: you will decide each candidate's change type during Step 5
   by reviewing its diff; seed the review roots with the candidate set and start
   with an empty user-source set (acceptances become user-source entries).
 
 ### Step 2 -- Compute each user-source target version
-For a `requestedChangeType`, compute the target with the Version-bump table
-(below) from `currentVersion`. For a `requestedPin`, the target is the pin
-verbatim; it MUST be strictly greater than `currentVersion` under SemVer 2.0
-precedence (prerelease < its release; build metadata ignored) -- if not, that is a
-FATAL error (never relaxed). Derive the pin's implied change type for bookkeeping
-from old vs new components.
+- If the entry has a `requestedPin`, the target is the pin verbatim; it MUST be
+  strictly greater than `currentVersion` under SemVer 2.0 precedence (prerelease <
+  its release; build metadata ignored) -- if not, that is a FATAL error (never
+  relaxed). Derive the pin's implied change type for bookkeeping from old vs new
+  components.
+- Otherwise the effective change type is the STRONGER of the entry's
+  `requestedChangeType` (or `none` when the token was a bare `name`) and the
+  package's objective floor from Step 3; compute the target with the Version-bump
+  table from `currentVersion`. A bare `name` therefore releases at exactly the
+  objective floor the analysis determines -- `patch` when nothing public changed,
+  `nonbreaking` for an additive change, `breaking` when the API broke -- with no
+  caller-supplied change type required.
 
 ### Step 3 -- Classify the objective required change type per package
 For every package that is (or will be) in the release set, determine its objective
@@ -290,14 +312,26 @@ models so ambiguity in these instructions is caught before any write.
    version-bump sequence and the affected-package set.
 4. Decision:
    - All plans identical -> consensus reached; proceed to apply.
-   - Any divergence -> STOP. Do not write. Emit a table showing, per package, each
-     model's `{to, changeType, source}` and highlight the mismatches. Divergence
-     means either a genuine judgment call (a proc-macro or behavioral break where
-     models legitimately differ -- escalate to a human with the diffs) or an
-     ambiguous rule in this file (fix the wording, then re-run). Never apply a
-     non-consensus plan.
+   - Any divergence -> STOP. Do not write. Never apply a non-consensus plan.
+     Produce an AMBIGUITY REPORT so the divergence improves this skill instead of
+     merely blocking, containing:
+     a. A per-package table of each model's `{to, changeType, source}`, with the
+        mismatched cells highlighted.
+     b. Root-cause classification for each mismatch: either a genuine judgment call
+        (a proc-macro or behavioral break where models legitimately differ) or an
+        under-specified rule in this file.
+     c. For an under-specified rule: quote the exact step/sentence that was
+        ambiguous and propose a concrete edit to this prompt that would make the
+        case deterministic (the wording that would have made the models agree).
+     d. A recommended next action: for a judgment call, escalate to a human with
+        the diffs; for an ambiguous rule, open a PR applying the proposed edit to
+        `.github/prompts/release-packages.prompt.md`, then re-run.
+     Emit this report to the user (and include it in the PR description if a plan
+     is later applied). Every divergence should either resolve a real judgment call
+     or leave this skill less ambiguous than it was.
 
-Record the consensus result (models used + agreement) in the PR description.
+Record the consensus result (models used + agreement, plus any ambiguity report)
+in the PR description.
 
 ## Apply the plan (atomic; only after consensus)
 
