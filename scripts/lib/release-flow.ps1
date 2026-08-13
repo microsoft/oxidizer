@@ -746,9 +746,11 @@ function Resolve-ReleaseSet {
     # that an unchanged signature now names a type from an incompatible version
     # of an external crate. Propagate that condition over dependency edges --
     # direct, plus indirect edges where a re-exported type is allowlisted under
-    # its defining crate -- until no dependent is strengthened. Use the version
-    # that will actually be written, not EffectiveChangeType, so -Force pins do
-    # not create a fictitious breaking transition farther up the graph.
+    # its defining crate -- until no dependent is strengthened. Each source is
+    # classified by Test-EntryPlansBreakingRelease, which asks whether the entry
+    # ships an incompatible API: normally the version it will actually write,
+    # and additionally a -Force pin that suppressed a breaking requirement,
+    # since such a pin lowers the version number without removing the break.
     $transitiveDependentCache = @{}
     $exposureChanged = $true
     while ($exposureChanged) {
