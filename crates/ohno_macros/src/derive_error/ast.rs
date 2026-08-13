@@ -4,7 +4,7 @@
 //! The input with the crate's own attributes decoded.
 //!
 //! `Ast` records what the user wrote. Whether what they wrote is allowed is decided by
-//! [`validate`](super::validate), which reports every R1 rule violation.
+//! [`validate`](super::validate), which reports the derive's own rule violations.
 
 use syn::{Attribute, Expr, Generics, Ident, LitStr, Member, Type};
 
