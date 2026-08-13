@@ -528,19 +528,24 @@ mod tests {
         let clock = control.to_clock();
         let duration = Duration::from_millis(7);
         let durations = Arc::new(Mutex::new(Vec::new()));
-        let telemetry = CacheTelemetry::new().with_handler(Arc::new(RejectionDurationHandler {
-            durations: Arc::clone(&durations),
-        }));
         let inner = DelayedRejectingCache { control, duration };
-        let wrapper = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), false);
+        let cache = crate::Cache::builder::<String, i32>(clock)
+            .storage(inner)
+            .event_handler(RejectionDurationHandler {
+                durations: Arc::clone(&durations),
+            })
+            .build();
 
-        let outcome = wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
+        let outcome = cache.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
 
         assert_eq!(outcome, InsertOutcome::Rejected);
         assert_eq!(
             *durations.lock().expect("test handler mutex should not be poisoned"),
             vec![duration]
         );
+        assert!(cache.get("key").await.unwrap().is_none());
+        cache.invalidate("key").await.unwrap();
+        cache.clear().await.unwrap();
     }
 
     #[cfg_attr(miri, ignore)]
