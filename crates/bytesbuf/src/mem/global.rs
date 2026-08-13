@@ -9,11 +9,12 @@ use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
+use nm::{Event, Magnitude};
+use plurality::Pool;
+
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
 use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
-use nm::{Event, Magnitude};
-use plurality::Pool;
 
 /// A memory pool that obtains memory from the Rust global allocator.
 ///
