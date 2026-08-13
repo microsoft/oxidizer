@@ -56,17 +56,28 @@ provider for a type a blind pool would otherwise serve entirely through the
 runtime one. Covering the spread only through `Box`, `Arc` and `Rc` would
 exercise one geometry derivation against itself.
 
-**Reentrancy is exercised where the install path releases control to
-unrestricted code.** Allocating from, and freeing into, a blind pool from inside
-a pooled value's destructor and from inside a construction closure covers the
-unrestricted reentrant user-code points. An allocator instrumented to re-enter
-from `A::clone` covers the layout-pool construction window, because
-`Clone::clone` is an unrestricted allocator method. Those tests exercise the
-install-path ordering: directory borrows are released before construction
-closures and rejected-value destructors can run, `A::clone` runs before
-reservation, and publication of a new layout remains pool-first and after the
-cap re-check. Allocator reentry from `allocate` or `deallocate` is covered by
-the allocator contract, not by a behavioural test.
+**Reentrancy is exercised through the same doors the design permits.** The
+allocator entry-point door is driven by an allocator whose `allocate` allocates
+from the pool it serves, with single-slot chunks so every allocation grows. The
+tests assert that the outer and nested allocations receive distinct chunks,
+that both values survive, and that the cap re-check holds the pool to its
+limit.
+
+The blind-pool allocator-clone door is covered by an allocator whose
+`Clone::clone` allocates from the same blind pool while a layout pool is being
+installed. The tests cover a nested allocation of the same layout, a nested
+allocation that consumes the remaining layout allowance, and a nested directory
+growth between reservation and publication. Pooled value destructors and
+`_with` construction closures allocate from the same blind pool after directory
+borrows have been released.
+
+Directory reservation is driven through a custom global allocator, because
+directory buffers come from the global allocator rather than the pool's own and
+no pool-level allocator can reach them. One test refuses the reservation and
+asserts the chunk allocated before it is returned rather than published;
+another allocates from the pool while the reservation is outstanding, filling
+the buffer it prepared so that the reservation must start over with a larger
+one.
 
 ## Undefined-behaviour checking
 

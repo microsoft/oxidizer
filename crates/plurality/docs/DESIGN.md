@@ -122,17 +122,17 @@ invariants:
     lives until the blind pool is dropped, which is what makes directory
     indices stable and lets a bound owner borrow the blind pool while pointing
     into a layout pool's slot.
-13. **Allocator `allocate` and `deallocate` do not re-enter the pools they
-    serve.** The pool's own state is mid-update while it is calling out for
-    memory. An allocator's `allocate` and `deallocate` must not allocate from,
-    or free into, the pool they serve, whether directly or through any code
-    they call. Pool metadata and the layout directory come from the global
-    allocator; chunks come from the pool's allocator, so the requirement
-    applies to both sources of memory. Other allocator methods, including
-    `Clone::clone` when a blind pool creates a layout pool, are unrestricted
-    and are covered by the cold-path ordering. Pooled values' destructors and
-    construction closures are subject to no restriction — they may allocate
-    from and free into the pool freely.
+13. **Reentrancy is safe and supported.** The pools place no obligation on
+    the allocator. `Allocator::allocate` and `Allocator::deallocate` may
+    allocate from, and free into, the pool they serve; the cold growth paths
+    order allocation and publication so reentry observes consistent state.
+    `Clone::clone` on a blind pool's allocator may also re-enter while a new
+    layout pool is installed and is covered by the same ordering. Pooled
+    values' destructors and the closures passed to `_with` constructors run
+    with no pool state in flight, so they may allocate from and free into the
+    pool freely. An allocator that re-enters unconditionally recurses until the
+    stack is exhausted, and the pool does not bound that depth. See
+    [allocator reentrancy](./implementation/reentrancy.md).
 
 ## Verification strategy
 

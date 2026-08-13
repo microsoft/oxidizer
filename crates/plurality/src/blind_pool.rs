@@ -27,6 +27,7 @@ use allocator_api2::alloc::{Allocator, Global};
 use crate::alloced::Alloc;
 use crate::blind_builder::BlindPoolBuilder;
 use crate::boxed::Box;
+use crate::directory::{self, Displaced};
 use crate::error::AllocError;
 use crate::layout_pool::{LayoutPool, LayoutPoolRef};
 use crate::pool::{allocation_failed, occupy_local};
@@ -220,8 +221,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
         let pool = LayoutPool::new(layout, self.sizing.slots_for(stride), self.max_chunks, self.allocator.clone())?;
 
         // Step 4: reserve after construction, so the reservation cannot be
-        // consumed by a reentrant miss that happened during step 3.
-        self.try_reserve_one()?;
+        // consumed by a reentrant miss that happened during step 3. The
+        // displaced buffers are freed when this function returns, after the
+        // pushes, so nothing between here and step 7 calls an allocator.
+        let _displaced = self.try_reserve_one()?;
 
         // Step 5: re-scan and re-check the cap. Step 3 released control twice.
         // Without the re-scan one layout could acquire two pools; without the
@@ -282,16 +285,15 @@ impl<A: Allocator + Clone> BlindPool<A> {
 
     /// Reserves room for one more entry in both vectors.
     ///
-    /// `Vec::reserve` aborts on failure, so the fallible path uses
-    /// `try_reserve`, which also covers the capacity overflow `reserve` would
-    /// panic on.
-    fn try_reserve_one(&self) -> Result<(), AllocError> {
-        // SAFETY: as for `lookup`.
-        unsafe {
-            (*self.pools.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
-            (*self.layouts.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
-        }
-        Ok(())
+    /// The displaced buffers are returned rather than freed, so that no
+    /// allocator call separates the reservation from the pushes it guarantees.
+    /// A reentrant miss could otherwise consume the reserved room and force the
+    /// infallible push to reallocate.
+    /// Ref: docs/implementation/reentrancy.md.
+    fn try_reserve_one(&self) -> Result<(Displaced<LayoutPool<A>>, Displaced<Layout>), AllocError> {
+        // SAFETY: as for `lookup`; neither call holds a borrow across the
+        // allocation it makes.
+        unsafe { Ok((directory::reserve_one(&self.pools)?, directory::reserve_one(&self.layouts)?)) }
     }
 
     /// Runs `f` over the pool serving `T`, creating it on first sight.

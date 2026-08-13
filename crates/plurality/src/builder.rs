@@ -76,9 +76,9 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
 
     /// Swaps in a custom allocator for chunk allocations.
     ///
-    /// The allocator's `allocate` and `deallocate` must not allocate from, or
-    /// free into, the pool they serve, whether directly or through any code
-    /// they call.
+    /// The allocator may allocate from, and free into, the pool it serves. An
+    /// allocator that does so unconditionally recurses until the stack is
+    /// exhausted, since serving the nested allocation calls it again.
     #[must_use]
     pub fn allocator<A2: Allocator>(self, allocator: A2) -> PoolBuilder<T, A2> {
         PoolBuilder {

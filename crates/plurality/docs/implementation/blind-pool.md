@@ -145,91 +145,70 @@ The discipline that keeps this sound is that no borrow of either vector is held
 across code outside this module. A lookup copies the layout pool's inner
 pointer to a local and releases the borrow before anything else happens, and
 the introspection helpers do the same before invoking their callbacks.
-`Vec::try_reserve` is the one place that must hold `&mut` across a call into the
-*global* allocator; that allocation is covered by the allocator rule described
-in [Reentrancy](#reentrancy). `Vec::push` runs only into capacity that was
-already reserved.
+Directory growth uses `directory::reserve_one` rather than `Vec::try_reserve`,
+so no vector borrow is held across the global allocator call; see
+[allocator reentrancy](./reentrancy.md). `Vec::push` runs only into capacity
+that was already reserved.
 
 ### Reentrancy
 
-Allocation runs code outside this module at more points than is immediately
-obvious. All of them must be accounted for:
+The general mechanism is described in
+[allocator reentrancy](./reentrancy.md). Blind-pool installation adds the layout
+directory and allocator cloning; this section records the blind-pool-specific
+ordering and directory invariant.
 
-- the construction closure;
-- the destructor of a value rejected by a failed fallible allocation;
-- `A::clone()`, when a new layout pool is being built;
-- the global allocator, during vector reservation and the metadata
-  allocation for a new layout pool;
-- the pool's own allocator, `A::allocate` on the growth path and
-  `A::deallocate` at teardown.
+Reentrancy reaches the router through the documented doors:
 
-The code outside this module falls into separate categories. Pool state is
-mid-update while the allocation path calls out for memory, and teardown hands
-chunk memory back through the pool's allocator. The pool's allocator and the
-global allocator must not allocate from, or free into, a plurality pool from
-within `allocate` or `deallocate`. `A::clone()` is unrestricted: a blind-pool
-allocator may allocate from the same pool while being cloned, and the install
-path orders directory state for that case. Pooled values' destructors and
-construction closures carry no such restriction.
+- `Allocator::allocate` and `Allocator::deallocate` may re-enter while chunk
+  memory, layout-pool metadata or directory capacity is being acquired or
+  released. This is the door that relies on cold-path ordering.
+- `Clone::clone` on the blind pool's allocator runs once when a new layout pool
+  is built. It happens before directory reservation, so a nested allocation sees
+  a consistent directory.
+- Pooled values' destructors and the closures passed to `_with` constructors run
+  after the router has copied out a `LayoutPoolRef` and released its directory
+  borrows. Rejected values are dropped only after the cap path has released its
+  borrows.
 
-**Allocator `allocate` and `deallocate` do not re-enter the pool they serve.**
-Growth reads the chunk count, derives the new chunk's base index from it, calls
-`A::allocate`, and publishes the incremented count only after the chunk is
-installed. During that window, `A::allocate` must not allocate from, or free
-into, the pool whose memory request it is serving. Directory reservation has
-the same shape for the global allocator: vector reservation holds a mutable
-directory borrow across the allocator call, and the global allocator must not
-allocate from, or free into, a plurality pool from within that `allocate` or
-`deallocate`. Teardown hands chunks back through `A::deallocate`; the same
-requirement applies to that callback.
-
-The ordering below is chosen so that unrestricted reentrant user code cannot
-observe a broken state or force a failure into an infallible position:
+The install path keeps directory state consistent with this ordering:
 
 1. Compute the layout and scan the key vector for it. On a hit, copy the found
    entry's inner pointer to a local, release the borrow, and go to step 8.
 2. On a miss, check the layout cap. If it is reached, release both borrows
    *before* returning, because returning drops the rejected value and its
-   destructor is reentrant code; then report capacity exhaustion.
-3. **Construct the layout pool.** Construction clones the allocator first and
+   destructor is user code that may re-enter; then report capacity exhaustion.
+3. Construct the layout pool. Construction clones the allocator first and
    allocates the metadata second, so a panic from `A::clone` cannot strand a
    metadata allocation. It is fallible and touches no directory state, so a
-   failure here leaves both vectors exactly as they were. `A::clone()` may
-   re-enter the blind pool; because construction happens before reservation,
-   such reentry sees a consistent — merely incomplete — directory. The
-   metadata allocation that follows is a global-allocator call and is covered
-   by the `allocate` and `deallocate` obligation.
-4. `try_reserve` both vectors. Reserving after construction means the
-   reservation cannot be consumed by a reentrant miss that happened during
-   step 3.
-5. **Re-scan, and re-check the cap.** Step 3 released control twice, so the
-   directory may have grown since. The freshly built pool is abandoned if an
-   entry for this layout exists, or if the layout cap is reached. Both checks
-   are necessary. Without the re-scan, one layout could acquire two pools —
-   the entry found by lookup would be arbitrary, the duplicate would be dead
-   but owned, and per-layout statistics would report only one of them. Without
-   the cap re-check, a reentrant miss on a *different* layout passes the same
-   step-2 check as the outer call and both push, so the cap overshoots by the
-   depth of reentrant misses and stops being a bound at all.
-6. On either abandonment, **return without pushing**. The freshly built pool is
-   dropped and the reserved capacity is left unused, which is harmless. Order
-   matters here: copy the found entry's inner pointer to a local and release
-   every borrow *before* dropping the abandoned pool, and, on the cap branch,
-   before dropping the rejected value. Both drops are reentrant code — the
-   abandoned pool's teardown runs the cloned allocator's destructor and a
-   global deallocation, and the rejected value's destructor is arbitrary user
-   code.
-7. Otherwise push `pools` first, then `layouts`. Layout-pool construction in
-   step 3 and directory reservation in step 4 are the global-allocation and
-   reentrancy boundaries on the install path. No operation consumes either
-   reservation before these pushes, nothing callback-capable runs between the
-   reservations and these pushes, and both pushes use the capacity reserved in
-   step 4, so neither reallocates nor fails. Lookups scan `layouts`, so the
-   pool-first order preserves `layouts.len() <= pools.len()` and keeps every
-   published key paired with an existing pool. The reverse order is invalid
-   because it breaks that directory invariant, not because it opens an
-   allocator `allocate` or `deallocate` window.
-8. Copy the layout pool's inner pointer to a local, drop all borrows, and
+   failure here leaves both vectors exactly as they were, and it happens before
+   reservation so that reentry from `A::clone` sees a consistent — merely
+   incomplete — directory.
+4. Reserve both vectors with `directory::reserve_one`. The displaced buffers
+   stay owned until after publication or abandonment, so no allocator call
+   separates reservation from the push it guarantees.
+5. Re-scan and re-check the cap. Step 3 released control twice, so the
+   directory may have grown since. The freshly built pool is abandoned if a
+   nested allocation installed this layout or consumed the remaining layout
+   allowance. Both checks are necessary. Without the re-scan, one layout could
+   acquire two pools — the entry found by lookup would be arbitrary, the
+   duplicate would be dead but owned, and per-layout statistics would report
+   only one of them. Without the cap re-check, a nested miss on a *different*
+   layout passes the same step-2 check as the outer call and both push, so the
+   cap overshoots by the depth of nested misses and stops being a bound at all.
+6. On abandonment, return without pushing. The freshly built pool is dropped
+   and the reserved capacity is left unused, which is harmless. Copy the found
+   entry's inner pointer to a local and release every borrow before dropping
+   the abandoned pool, and, on the cap branch, before dropping the rejected
+   value: the abandoned pool's teardown runs the cloned allocator's destructor
+   and a global deallocation, and the rejected value's destructor is arbitrary
+   user code.
+7. Otherwise push `pools` first, then `layouts`. Both pushes use the capacity
+   reserved in step 4, so neither allocates nor fails, and nothing
+   callback-capable runs between the reservation and the pushes. Lookups scan
+   `layouts`, so the pool-first order preserves `layouts.len() <=
+   pools.len()`, keeping every published key paired with an existing pool. The
+   reverse order is invalid because it breaks that directory invariant.
+8. Copy the layout pool's inner pointer to a local, release all borrows, and
    perform the allocation through that local.
 
 A reentrant allocation may grow and reallocate both vectors during step 8
@@ -237,9 +216,9 @@ without disturbing the in-flight operation, because the local points at a
 `PoolInner` on the heap that never moves.
 
 `Vec::reserve` aborts the process on failure, so the fallible path uses
-`try_reserve` throughout, which also handles the capacity overflow that
-`reserve` would panic on. `Vec::push` is only ever called into capacity that
-has already been reserved.
+`directory::reserve_one` throughout, which reports allocation failure and
+capacity overflow as `AllocError`. `Vec::push` is only ever called into capacity
+that has already been reserved.
 
 The fallible family reports pool failures as `Err`, and it is not panic-free
 with respect to code outside this module: a construction closure, a rejected

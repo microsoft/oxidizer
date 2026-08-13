@@ -234,15 +234,21 @@ another serving the pool object elsewhere. This is exactly what `Send` plus
 because per-layout cloning makes the situation reachable in a way a typed
 pool's single allocator instance never is.
 
-Because reclamation never enters the directory, a destructor running on a
-pooled value may freely allocate from, or free into, the same blind pool. There
-is no lock to re-enter and no directory borrow held across user code. The same
-freedom extends to construction closures and to `Clone::clone` on the blind
-pool's allocator. It does not extend to `allocate` or `deallocate` on the
-pool's allocator or the global allocator, which the
-[invariant list](../DESIGN.md#design-invariants-at-a-glance) requires not to
-re-enter a plurality pool; a blind pool reaches both at more points than a
-typed pool does.
+Reentrancy reaches a blind pool through the same doors described by the
+implementation guide:
+
+- `Allocator::allocate` and `Allocator::deallocate` may allocate from, and free
+  into, the pool they serve. This is the door that relies on cold-path
+  ordering.
+- `Clone::clone` on the blind pool's allocator runs once per new layout pool and
+  may re-enter; the install path uses the same ordering.
+- Pooled values' destructors and the closures passed to `_with` constructors run
+  with no pool state in flight, so they may allocate from and free into the pool
+  freely.
+
+An allocator that re-enters unconditionally recurses until the stack is
+exhausted; the pool does not bound recursion depth. The ordering details are in
+[allocator reentrancy](../implementation/reentrancy.md).
 
 ## Allocation surface
 
@@ -363,9 +369,9 @@ The `infinity_pool` column below describes version 0.8.
 | Pinning | Every value pinned | Opt-in pinned constructors |
 
 The row on value destructors and construction closures is about the user code a
-pool runs. Allocator `allocate` and `deallocate` callbacks are governed
-separately, by the
-[invariant list](../DESIGN.md#design-invariants-at-a-glance).
+pool runs. Allocator `allocate` and `deallocate` callbacks, and allocator
+`Clone::clone`, are separate reentry doors supported by the ordering described
+in [allocator reentrancy](../implementation/reentrancy.md).
 
 The single-word handle and the lookup-free drop are direct consequences of the
 pointer-recovery architecture the typed pool already rests on. Because a handle

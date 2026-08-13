@@ -12,7 +12,7 @@ use core::alloc::Layout;
 use core::any::type_name;
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::mem::{MaybeUninit, forget, needs_drop};
+use core::mem::{MaybeUninit, needs_drop};
 use core::pin::Pin;
 use core::ptr::{NonNull, drop_in_place};
 
@@ -24,6 +24,7 @@ use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::boxed::Box;
 use crate::builder::PoolBuilder;
 use crate::chunk::ChunkHeader;
+use crate::directory;
 use crate::error::AllocError;
 use crate::geometry::{self, RuntimeGeometry, SlotGeometry, TypedGeometry};
 #[cfg(feature = "stats")]
@@ -42,40 +43,6 @@ pub(crate) struct PoolCore {
     pub(crate) pool_refcount: AtomicUsize,
     /// Returns the core to its concrete `PoolInner<A, G>` type for teardown.
     pub(crate) teardown: unsafe fn(NonNull<Self>),
-}
-
-/// Owns an initialized chunk until directory publication succeeds.
-///
-/// This prevents a leak if `Vec::push` panics. Loom atomics must also be
-/// destroyed before their storage is freed.
-struct ChunkAllocationGuard<'a, A: Allocator, G: SlotGeometry> {
-    chunk: NonNull<ChunkHeader>,
-    #[cfg(loom)]
-    slots: u32,
-    /// Read only by the `loom` teardown loop below, but stored unconditionally
-    /// so the guard's shape does not vary by configuration. Zero-sized for a
-    /// typed pool.
-    #[cfg_attr(not(loom), expect(dead_code, reason = "read only by the loom-only slot teardown loop"))]
-    geometry: G,
-    layout: Layout,
-    allocator: &'a A,
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-impl<A: Allocator, G: SlotGeometry> Drop for ChunkAllocationGuard<'_, A, G> {
-    #[cfg_attr(test, mutants::skip)] // Observable only if Vec::push panics after allocation; the mutant leaks memory.
-    fn drop(&mut self) {
-        // SAFETY: the guard exclusively owns a fully initialized but
-        // unpublished chunk allocated with `layout`.
-        unsafe {
-            #[cfg(loom)]
-            for i in 0..self.slots {
-                let slot = self.geometry.slot_at(self.chunk, i as usize);
-                drop_in_place(refcount_of(self.geometry, slot));
-            }
-            self.allocator.deallocate(self.chunk.cast::<u8>(), self.layout);
-        }
-    }
 }
 
 #[inline]
@@ -854,7 +821,20 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             if head == FREE_END {
                 // `grow` reserves and returns the first slot of the new chunk
                 // (or an `AllocError` if the pool can't grow).
-                return self.grow();
+                match self.grow() {
+                    Ok(slot) => return Ok(slot),
+                    Err(err) => {
+                        // A nested allocation may have published a chunk while
+                        // ours was in flight, leaving slots free even though
+                        // growth is no longer possible. Report failure only
+                        // when there is genuinely nothing to hand out.
+                        // Ref: docs/implementation/reentrancy.md, "Growth".
+                        if self.core.free_head.load(Acquire) == FREE_END {
+                            return Err(err);
+                        }
+                        continue;
+                    }
+                }
             }
             // SAFETY: `head` is a valid global index currently on the free list.
             let slot = unsafe { self.slot_for_global(head) };
@@ -896,27 +876,69 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
         unsafe { self.geometry.slot_at(chunk, offset) }
     }
 
+    /// Hands an unpublished chunk back to the allocator, reporting `err`.
+    ///
+    /// # Safety
+    /// `ptr` must be a chunk allocation of this pool that was never published
+    /// to the directory.
+    #[cold]
+    unsafe fn discard_chunk<R>(&self, ptr: NonNull<ChunkHeader>, err: AllocError) -> Result<R, AllocError> {
+        // SAFETY: the caller guarantees an unpublished chunk of this pool,
+        // which is allocated with `chunk_layout`.
+        unsafe { self.allocator.deallocate(ptr.cast::<u8>(), self.chunk_layout) };
+        Err(err)
+    }
+
     /// Allocates and installs one new chunk, reserves its first slot for the
     /// caller, and splices the rest onto the free list. Returns the reserved
     /// slot, or an [`AllocError`] identifying why the pool cannot grow (capacity
     /// limit vs. allocator failure). Runs only on the allocator thread.
+    ///
+    /// Growth tolerates the allocator re-entering the pool.
+    /// Ref: docs/implementation/reentrancy.md, "Growth".
     #[cold]
     #[inline(never)]
     fn grow(&self) -> Result<NonNull<u8>, AllocError> {
-        let chunks = self.chunks_allocated.load(Relaxed);
         let n = self.chunk_size;
         // Cap = the user's `max_chunks`, or for an unbounded pool the chunk count
         // that keeps every global index below the `FREE_END` sentinel.
         let cap = self.max_chunks.map_or_else(|| unbounded_chunk_cap(n), u64::from);
-        if u64::from(chunks) >= cap {
+        if u64::from(self.chunks_allocated.load(Relaxed)) >= cap {
             return Err(AllocError::CAPACITY_EXHAUSTED);
         }
-        let base_index = chunks * n;
 
+        // Allocate before claiming anything. Control leaves the pool here, and
+        // an allocator that allocates from this pool runs a nested `grow` to
+        // completion; deriving the chunk's identity afterwards means it derives
+        // it from a count that already includes whatever the nested call
+        // published. Ref: docs/implementation/reentrancy.md.
         let ptr = match self.allocator.allocate(self.chunk_layout) {
             Ok(p) => p.cast::<ChunkHeader>(),
             Err(_) => return Err(AllocError::ALLOCATOR_FAILED),
         };
+
+        // Reserve the directory slot the chunk will be published into. This is
+        // the last point control leaves the pool, so the publication below
+        // cannot allocate and cannot be overtaken. The displaced buffer is
+        // freed when this function returns, after publication.
+        // SAFETY: no directory borrow is live here, and `!Sync` confines this
+        // path to one thread.
+        let _displaced = match unsafe { directory::reserve_one(&self.directory) } {
+            Ok(displaced) => displaced,
+            // SAFETY: `ptr` is the fresh allocation above, never published.
+            Err(err) => return unsafe { self.discard_chunk(ptr, err) },
+        };
+
+        // Re-read the count now that control is back, and re-check the cap a
+        // nested `grow` may have consumed. Without this the pool would overshoot
+        // by the reentry depth, and an unbounded pool could derive slot indices
+        // that reach the `FREE_END` sentinel.
+        let chunks = self.chunks_allocated.load(Relaxed);
+        if u64::from(chunks) >= cap {
+            // SAFETY: `ptr` is the fresh allocation above, never published.
+            return unsafe { self.discard_chunk(ptr, AllocError::CAPACITY_EXHAUSTED) };
+        }
+        let base_index = chunks * n;
 
         // SAFETY: `ptr` is a fresh, exclusively owned allocation sized for one
         // chunk; the header and all slots are initialized before publishing.
@@ -936,17 +958,9 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
                 self.refcount_at(slot).write(AtomicU32::new(base_index + i + 1));
                 self.index_at(slot).write(i);
             }
-            let guard = ChunkAllocationGuard::<A, G> {
-                chunk: ptr,
-                #[cfg(loom)]
-                slots: n,
-                geometry: self.geometry,
-                layout: self.chunk_layout,
-                allocator: &self.allocator,
-            };
+            // Pushes into the capacity reserved above, so it neither allocates
+            // nor panics and needs no guard against a partial publication.
             (&mut *self.directory.get()).push(ptr);
-            // Directory publication transferred ownership to the pool.
-            forget(guard);
         }
         self.chunks_allocated.store(chunks + 1, Release);
         // `Relaxed` suffices: the counter is only read via `stats()`, never to
@@ -1238,19 +1252,22 @@ pub(crate) unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolI
         // Acquire the directory publication from `grow`; relaxed pool-refcount
         // increments do not make it visible to a different teardown thread.
         let _ = inner.chunks_allocated.load(Acquire);
-        {
-            let dir = &*inner.directory.get();
-            for &chunk in dir {
-                // Loom's instrumented atomics must be dropped, not just freed,
-                // or loom reports them leaked. A no-op (compiled out) otherwise.
-                #[cfg(loom)]
-                for i in 0..inner.chunk_size {
-                    let slot = inner.geometry.slot_at(chunk, i as usize);
-                    drop_in_place(refcount_of(inner.geometry, slot));
-                }
-
-                inner.allocator.deallocate(chunk.cast::<u8>(), layout);
+        // Re-borrowed per chunk so that no directory borrow is live across the
+        // `deallocate` call below, keeping the crate's rule that control never
+        // leaves the pool while a directory is borrowed.
+        // Ref: docs/implementation/reentrancy.md.
+        let chunks = (&*inner.directory.get()).len();
+        for i in 0..chunks {
+            let chunk = (&*inner.directory.get())[i];
+            // Loom's instrumented atomics must be dropped, not just freed,
+            // or loom reports them leaked. A no-op (compiled out) otherwise.
+            #[cfg(loom)]
+            for i in 0..inner.chunk_size {
+                let slot = inner.geometry.slot_at(chunk, i as usize);
+                drop_in_place(refcount_of(inner.geometry, slot));
             }
+
+            inner.allocator.deallocate(chunk.cast::<u8>(), layout);
         }
         drop(AllocBox::from_raw(pool.as_ptr()));
     }

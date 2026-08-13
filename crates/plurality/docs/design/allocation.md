@@ -42,13 +42,12 @@ lock-free stack, so only plain atomics are required. Chunk acquisition goes
 through the standard allocator abstraction, so custom and instrumented allocators
 compose naturally.
 
-An allocator supplied to a pool has a scoped reentrancy requirement: its
-`allocate` and `deallocate` must not allocate from, or free into, the pool it
-serves, whether directly or through any code they call. The same requirement
-applies to the global allocator while it supplies pool metadata and
-layout-directory storage, because pool state is mid-update while allocator
-calls are outstanding. Other allocator methods, including `Clone::clone` on a
-blind pool's allocator, are unrestricted. The
-[invariant list](../DESIGN.md#design-invariants-at-a-glance) states the rule and
-its scope; it constrains allocation and deallocation callbacks alone, and never
-pooled values' destructors or construction closures.
+Allocators supplied to pools carry no plurality-specific reentrancy
+requirement. `Allocator::allocate` and `Allocator::deallocate` may allocate
+from, and free into, the pool they serve. Cold growth and directory-reservation
+paths are ordered so such reentry is safe, and `Clone::clone` on a blind pool's
+allocator is covered by the same ordering. Pooled values' destructors and
+`_with` construction closures run with no pool state in flight and are
+unrestricted. An allocator that re-enters unconditionally recurses until the
+stack is exhausted; the pool does not bound recursion depth. See
+[allocator reentrancy](../implementation/reentrancy.md).

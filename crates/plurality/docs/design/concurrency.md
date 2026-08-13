@@ -69,14 +69,20 @@ as a standing constraint on the pool's API.
 
 ## Reentrancy
 
-A pooled value's destructor and a construction closure may allocate from, and
-free into, the same pool. There is no lock to re-enter, and no directory borrow
-is held across user code.
+Reentrant pool use is part of the single-allocator-thread model: a nested call
+runs on the same thread rather than overlapping another allocator thread.
 
-The pool's allocator and the global allocator are held to the opposite rule:
-neither may allocate from, or free into, a plurality pool from within
-`allocate` or `deallocate`, because the pool's own state is mid-update while
-those calls are outstanding. Other allocator methods used by a blind pool,
-including `Clone::clone`, follow the unrestricted rule above. The
-[invariant list](../DESIGN.md#design-invariants-at-a-glance) states this in
-full.
+The following apply:
+
+- `Allocator::allocate` and `Allocator::deallocate` may allocate from, and free
+  into, the pool they serve. Cold growth and directory-reservation paths order
+  their state updates around those calls; see
+  [allocator reentrancy](../implementation/reentrancy.md).
+- `Clone::clone` on a blind pool's allocator may re-enter while a new layout
+  pool is installed and is covered by the same ordering.
+- Pooled values' destructors and the closures passed to `_with` constructors
+  run with no pool state in flight, so they may allocate from and free into the
+  pool freely.
+
+An allocator that re-enters unconditionally recurses until the stack is
+exhausted; the pool does not bound recursion depth.

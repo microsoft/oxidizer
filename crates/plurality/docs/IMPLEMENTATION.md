@@ -27,8 +27,10 @@ picture and goes deeper.
   shared macro-generated surface, coercion and pinning.
 - [The blind pool](./implementation/blind-pool.md) — the crate-private layout
   pool and the router in front of it: its state, lookup, interior mutability,
-  the reentrancy-safe ordering of the cold path, and ownership of the layout
-  pools.
+  installation, and ownership of the layout pools.
+- [Allocator reentrancy](./implementation/reentrancy.md) — how allocator calls,
+  blind-pool allocator cloning, and user-code callbacks can re-enter pools, and
+  how cold paths keep state consistent.
 - [Performance](./implementation/performance.md) — the cost model, what must
   not regress, and the benchmark decomposition that attributes each cost.
 - [Verification](./implementation/verification.md) — the layered test strategy

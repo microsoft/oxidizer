@@ -150,6 +150,7 @@ mod builder;
 mod chunk;
 mod coerce;
 mod common;
+mod directory;
 mod error;
 mod geometry;
 mod layout_pool;

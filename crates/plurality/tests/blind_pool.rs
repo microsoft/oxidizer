@@ -875,6 +875,7 @@ enum DenyMode {
 enum AllocationPhase {
     AllocationSequence,
     DirectoryLayoutsReservation,
+    DirectoryChunksReservation,
 }
 
 /// Records the first global allocation refused during one denial window.
@@ -944,6 +945,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
         if refuse_allocation(layout) {
             return null_mut();
         }
+        maybe_reenter(layout);
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
         unsafe { System.alloc(layout) }
     }
@@ -967,6 +969,65 @@ unsafe impl GlobalAlloc for DenyableGlobal {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
         unsafe { System.dealloc(ptr, layout) };
+    }
+}
+
+/// Element type whose chunk layout differs from the directory buffer's, so the
+/// reentry hook can tell the two allocations apart.
+#[cfg(not(miri))]
+type ReentryValue = [u64; 4];
+
+// The reentry hook lets a test drive an allocation that arrives while a pool is
+// reserving directory capacity, which is the one path no pool-level allocator
+// can reach: directory buffers come from the global allocator.
+#[cfg(not(miri))]
+thread_local! {
+    static REENTRY_LAYOUT: Cell<Option<Layout>> = const { Cell::new(None) };
+    static REENTRY_POOL: RefCell<Option<StdRc<Pool<ReentryValue>>>> = const { RefCell::new(None) };
+    static REENTRY_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static REENTRY_VALUES: RefCell<Vec<PoolBox<ReentryValue>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Allocates from the registered pool if this request is the one being watched.
+#[cfg(not(miri))]
+fn maybe_reenter(layout: Layout) {
+    if REENTRY_LAYOUT.get() != Some(layout) || REENTRY_ACTIVE.replace(true) {
+        return;
+    }
+    let target = REENTRY_POOL.with_borrow(Option::clone);
+    if let Some(pool) = target {
+        // Four values fill the buffer the interrupted reservation prepared,
+        // which is what forces it to start over with a larger one.
+        for i in 0..4_u64 {
+            REENTRY_VALUES.with_borrow_mut(|values| values.push(pool.alloc_box([i; 4])));
+        }
+    }
+    REENTRY_ACTIVE.set(false);
+}
+
+/// Arms the reentry hook for the lifetime of the guard.
+#[cfg(not(miri))]
+struct ReenterGlobal;
+
+#[cfg(not(miri))]
+impl ReenterGlobal {
+    fn on(layout: Layout, pool: &StdRc<Pool<ReentryValue>>) -> Self {
+        REENTRY_VALUES.with_borrow_mut(Vec::clear);
+        REENTRY_POOL.replace(Some(StdRc::clone(pool)));
+        REENTRY_LAYOUT.set(Some(layout));
+        Self
+    }
+
+    fn values() -> Vec<PoolBox<ReentryValue>> {
+        REENTRY_VALUES.with_borrow_mut(core::mem::take)
+    }
+}
+
+#[cfg(not(miri))]
+impl Drop for ReenterGlobal {
+    fn drop(&mut self) {
+        REENTRY_LAYOUT.set(None);
+        REENTRY_POOL.replace(None);
     }
 }
 
@@ -1013,6 +1074,17 @@ impl Drop for DenyGlobal {
 #[cfg(not(miri))]
 fn first_directory_layouts_reservation_layout() -> Layout {
     first_vec_reservation_layout::<Layout>()
+}
+
+/// Layout requested when a chunk directory that is already at its first
+/// capacity reserves room for one more chunk.
+///
+/// The directory holds one pointer per chunk, and reservation doubles the
+/// buffer, so the second reservation asks for twice the first capacity.
+#[cfg(not(miri))]
+fn grown_directory_chunks_reservation_layout() -> Layout {
+    let first = first_vec_reservation_layout::<*const ()>();
+    Layout::from_size_align(first.size() * 2, first.align()).unwrap()
 }
 
 /// Asks `Vec` for its first buffer shape instead of copying its capacity rule.
@@ -1086,8 +1158,71 @@ fn allocator_failure_while_growing_the_directory() {
     assert_eq!(pool.layouts(), 1);
 }
 
-// ── panic safety ─────────────────────────────────────────────────────────
+#[cfg(not(miri))]
+#[test]
+fn allocator_failure_while_growing_a_chunk_directory() {
+    let pool = BlindPool::builder().chunk_size(1).build();
 
+    // One slot per chunk, so each allocation grows the chunk directory. Filling
+    // its first capacity means the next growth must reserve, which is the
+    // fallible step this test denies.
+    let held: Vec<_> = (0..4_u64).map(|i| pool.alloc_box(i)).collect();
+    assert_eq!(pool.chunks_allocated(), 4);
+
+    let denied_layout = grown_directory_chunks_reservation_layout();
+    let outcome = {
+        let _deny = DenyGlobal::matching(denied_layout, AllocationPhase::DirectoryChunksReservation);
+        pool.try_alloc_box(4_u64)
+    };
+    let Err(err) = outcome else {
+        panic!("the chunk directory reservation was expected to fail");
+    };
+    let denied = DenyGlobal::denied_allocation().unwrap();
+    assert_eq!(denied.phase, AllocationPhase::DirectoryChunksReservation);
+    assert!(err.is_allocator_failure());
+    assert!(!err.is_capacity_exhausted());
+
+    // The chunk allocated before the reservation was returned to the allocator
+    // rather than published, so the pool is exactly as it was.
+    assert_eq!(pool.chunks_allocated(), 4);
+    assert_eq!(pool.len(), 4);
+
+    // The pool grows again once the allocator recovers.
+    assert_eq!(*pool.alloc_box(4_u64), 4);
+    assert_eq!(pool.chunks_allocated(), 5);
+    drop(held);
+}
+
+#[cfg(not(miri))]
+#[test]
+fn a_reentrant_allocation_that_fills_a_reservation_makes_it_start_over() {
+    let pool = StdRc::new(Pool::<ReentryValue>::builder().chunk_size(1).build());
+
+    // The pool's first growth reserves its chunk directory from empty. The hook
+    // fires while that reservation is outstanding and pushes exactly as many
+    // chunks as the prepared buffer holds, so the reservation cannot use it and
+    // must prepare a larger one.
+    // Ref: docs/implementation/reentrancy.md, "Reserving without a live borrow".
+    let outer = {
+        let _reenter = ReenterGlobal::on(first_vec_reservation_layout::<*const ()>(), &pool);
+        pool.alloc_box([u64::MAX; 4])
+    };
+    let nested = ReenterGlobal::values();
+
+    assert_eq!(nested.len(), 4, "the hook must have allocated during the reservation");
+    assert_eq!(pool.chunks_allocated(), 5, "one chunk per allocation, none shared");
+    assert_eq!(*outer, [u64::MAX; 4], "the outer allocation kept its own slot");
+    for (i, value) in nested.iter().enumerate() {
+        assert_eq!(**value, [i as u64; 4], "a reentrant allocation kept its own slot");
+    }
+    assert_eq!(pool.len(), 5);
+
+    drop(nested);
+    drop(outer);
+    assert_eq!(pool.len(), 0);
+}
+
+// ── panic safety ─────────────────────────────────────────────────────────
 #[test]
 fn a_panicking_construction_closure_returns_the_slot() {
     fn check(alloc_panics: impl Fn(&BlindPool)) {
@@ -1265,6 +1400,10 @@ enum ReentryTarget {
     /// A different layout, so the outer call's cap re-check sees the layout
     /// allowance consumed while it was building.
     OtherLayout,
+    /// A different layout, re-entered from `Allocator::allocate` rather than
+    /// from `Clone::clone`, which reaches the chunk-growth window inside the
+    /// layout pool instead of the layout-installation window around it.
+    FromAllocate,
 }
 
 /// State shared between [`ReentrantAllocator`] and the tests driving it.
@@ -1277,6 +1416,9 @@ struct ReentryState {
     active: Cell<bool>,
     /// Counts reentrant allocations, so a test can tell the hook actually ran.
     reentries: Cell<u32>,
+    /// The value a [`ReentryTarget::FromAllocate`] reentry obtained, held so
+    /// that it stays live alongside the outer allocation.
+    reentrant: RefCell<Option<PoolBox<u64, ReentrantAllocator>>>,
 }
 
 impl ReentryState {
@@ -1286,6 +1428,7 @@ impl ReentryState {
             target,
             active: Cell::new(false),
             reentries: Cell::new(0),
+            reentrant: RefCell::new(None),
         }
     }
 }
@@ -1301,6 +1444,9 @@ struct ReentrantAllocator(StdRc<ReentryState>);
 impl Clone for ReentrantAllocator {
     fn clone(&self) -> Self {
         let state = StdRc::clone(&self.0);
+        if matches!(state.target, ReentryTarget::FromAllocate) {
+            return Self(state);
+        }
         if !state.active.replace(true) {
             state.reentries.set(state.reentries.get() + 1);
             let target = state.pool.borrow().upgrade();
@@ -1309,7 +1455,7 @@ impl Clone for ReentrantAllocator {
                 // branch of the outer call's re-scan is taken.
                 match state.target {
                     ReentryTarget::SameLayout => drop(pool.alloc_box(0_u8)),
-                    ReentryTarget::OtherLayout => drop(pool.alloc_box(0_u64)),
+                    ReentryTarget::OtherLayout | ReentryTarget::FromAllocate => drop(pool.alloc_box(0_u64)),
                 }
             }
             state.active.set(false);
@@ -1318,10 +1464,20 @@ impl Clone for ReentrantAllocator {
     }
 }
 
-// SAFETY: allocation and deallocation forward unchanged to `Global`.
+// SAFETY: allocation and deallocation forward unchanged to `Global`; the
+// reentrant call between them only uses the pool's public API.
 unsafe impl Allocator for ReentrantAllocator {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BackingAllocError> {
-        Global.allocate(layout)
+        let block = Global.allocate(layout)?;
+        if matches!(self.0.target, ReentryTarget::FromAllocate) && !self.0.active.replace(true) {
+            self.0.reentries.set(self.0.reentries.get() + 1);
+            let target = self.0.pool.borrow().upgrade();
+            if let Some(pool) = target {
+                *self.0.reentrant.borrow_mut() = Some(pool.alloc_box(u64::MAX));
+            }
+            self.0.active.set(false);
+        }
+        Ok(block)
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
@@ -1465,3 +1621,50 @@ fn a_pool_moved_to_another_thread_serves_allocations_there() {
 
 // Blind-pool statistics live in `tests/stats.rs` alongside the typed-pool
 // statistics, because the `stats` feature owns that file.
+
+#[test]
+fn allocator_reentry_during_chunk_growth_yields_distinct_slots() {
+    let state = StdRc::new(ReentryState::new(ReentryTarget::FromAllocate));
+    let pool = reentrant_pool(&state, None);
+
+    // The reentrant allocation runs inside the layout pool's `grow`, between
+    // its allocator call and its chunk publication. Both allocations use the
+    // same layout, so both are served by one layout pool and the nested chunk
+    // must not claim the global slot indices the outer chunk is about to.
+    // Ref: docs/implementation/reentrancy.md, "Growth".
+    let outer = pool.alloc_box(1_u64);
+    let nested = state
+        .reentrant
+        .borrow_mut()
+        .take()
+        .expect("the allocator must have re-entered the pool");
+
+    assert_eq!(state.reentries.get(), 1);
+    assert_eq!(pool.chunks_allocated_of::<u64>(), 2, "each allocation grew its own chunk");
+    assert_ne!(
+        from_ref::<u64>(&outer),
+        from_ref::<u64>(&nested),
+        "the two chunks handed out one slot twice"
+    );
+    assert_eq!(*outer, 1);
+    assert_eq!(*nested, u64::MAX);
+    assert_eq!(pool.len(), 2);
+    assert_eq!(pool.layouts(), 1, "both values share a layout, so one layout pool serves them");
+
+    drop(outer);
+    drop(nested);
+    assert_eq!(pool.len(), 0);
+
+    // Reallocating both slots resolves each global index back to the chunk that
+    // owns it. Two chunks that had claimed one index range would send a slot
+    // home to the wrong chunk, which the reuse below would expose.
+    let reused = [pool.alloc_box(7_u64), pool.alloc_box(8_u64)];
+    assert_ne!(from_ref::<u64>(&reused[0]), from_ref::<u64>(&reused[1]));
+    assert_eq!(*reused[0], 7);
+    assert_eq!(*reused[1], 8);
+    assert_eq!(
+        pool.chunks_allocated_of::<u64>(),
+        2,
+        "returned slots are reused rather than grown past"
+    );
+}

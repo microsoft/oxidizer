@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An allocator that allocates from the pool it serves no longer corrupts the
+  pool. Growth derives a chunk's identity after the allocator call rather than
+  before, and directory capacity is reserved without holding a borrow across
+  the allocation, so a nested allocation can no longer claim the same global
+  slot indices or alias the directory.
 - Freeing a pool through the last surviving handle no longer deallocates through
   a pointer derived from a shared borrow, which was undefined behaviour (caught
   by Miri as a borrow-stack violation).

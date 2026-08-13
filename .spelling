@@ -482,6 +482,7 @@ reallocations
 recency
 reclaimer
 reclaimers
+recurses
 recoverability
 recoverable
 reentrancy
