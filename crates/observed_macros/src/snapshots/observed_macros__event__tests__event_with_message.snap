@@ -1,0 +1,41 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for RequestFailed {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "request.failed",
+            ::core::option::Option::Some(::core::any::TypeId::of::<RequestFailed>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "request.failed",
+                    ::observed::Severity::Warn,
+                    ::core::option::Option::Some("Request failed"),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "reason",
+                    ::core::option::Option::Some(LogFieldEntry::new("reason")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(&self.reason, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

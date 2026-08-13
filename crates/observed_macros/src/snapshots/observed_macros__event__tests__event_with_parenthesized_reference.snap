@@ -1,0 +1,38 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl<'a> ::observed::Event for ParenRef<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "paren.ref",
+            ::core::option::Option::Some(::core::any::TypeId::of::<ParenRef<'static>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "paren.ref",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "name",
+                    ::core::option::Option::Some(LogFieldEntry::new("name")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|engine| Value::from_redacted(self.name, engine))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

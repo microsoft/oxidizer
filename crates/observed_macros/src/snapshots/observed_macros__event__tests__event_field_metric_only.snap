@@ -1,0 +1,42 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for GaugeEvent {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "system.memory",
+            ::core::option::Option::Some(::core::any::TypeId::of::<GaugeEvent>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "bytes",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "bytes",
+                            ::observed::metadata::MetricDescription::new(
+                                "system.memory.usage",
+                                ::observed::metadata::InstrumentKind::Gauge,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.bytes.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

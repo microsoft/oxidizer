@@ -1,0 +1,46 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for CountEvent {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "http.request.count",
+            ::core::option::Option::Some(::core::any::TypeId::of::<CountEvent>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "http.request.count",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "region",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(MetricFieldEntry::dimension("region")),
+                );
+                match self.region.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(&FIELD_DESC, &|_engine| Value::from(__val.clone()))?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| Value::from("n/a"))?;
+                    }
+                }
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
