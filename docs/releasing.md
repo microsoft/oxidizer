@@ -121,6 +121,14 @@ elevate missed incompatibilities to `breaking` and backward-compatible additions
 to `nonbreaking`. In particular, review manual auto-trait implementations and
 their generic bounds: replacing structural derivation can remove implementations
 for previously accepted type arguments without being reported by the tool.
+Likewise, a major dependency upgrade is breaking when that dependency appears in
+the crate's exposed public types, even if the crate-local Rust source is
+unchanged.
+
+Packaged documentation repairs that fix broken links or incorrect consumer
+guidance are patch changes. Opaque generated README metadata and dependency-link
+version refreshes do not independently seed a release when they are only
+byproducts of another package's planned release.
 
 First releases do not run against their introducing commit. They publish at the
 version already declared in `Cargo.toml`, unless explicitly pinned higher.

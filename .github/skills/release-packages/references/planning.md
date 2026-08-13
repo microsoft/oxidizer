@@ -105,9 +105,14 @@ For a reviewed package:
 3. Elevate only with concrete evidence the tool cannot see:
    - documented behavioral incompatibility -> breaking;
    - missed public signature or type incompatibility -> breaking;
+   - a major dependency upgrade used in exposed public types -> breaking;
    - narrowed generic or auto-trait implementation bounds -> breaking;
    - missed backward-compatible public addition -> nonbreaking.
-4. Decline packages with no consumer-visible change.
+4. Treat packaged documentation repairs that fix broken links or incorrect
+   consumer guidance as patch changes.
+5. Decline packages with no consumer-visible change. Opaque generated README
+   metadata and dependency-version link refreshes do not seed a release when
+   they are only byproducts of another package's planned release.
 
 Never elevate by taste. Cite the file and public item or behavior.
 If every changed or all candidate is declined, stop with an empty plan and do
