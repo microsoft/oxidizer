@@ -352,19 +352,27 @@ function Set-CascadeReason {
 # breaking).
 #
 # PinHonoredAgainstCascade is the second signal, and it is not redundant. It is
-# set only when -Force honored an explicit pin BELOW a required breaking
-# version, which writes a numerically compatible version over a genuinely
-# incompatible API. The break is real: a crate pinned to 1.1.0 while exposing a
-# dependency that went 2.0.0 is still compiled against that 2.0.0, so its
-# public API names different types than 1.0.0 did. Under caret semantics a
-# consumer of `1.0` upgrades into it silently. Judging that entry by its
-# version alone stops the cascade at exactly the crate whose break was
-# suppressed, letting dependents ship compatible releases over it -- the silent
-# SemVer break this cascade exists to prevent.
+# set only when -Force honored an explicit pin BELOW a required version, which
+# writes a numerically compatible version over an API that the requirement says
+# is not. When the suppressed requirement was itself breaking, the break is
+# real: a crate pinned to 1.1.0 while exposing a dependency that went 2.0.0 is
+# still compiled against that 2.0.0, so its public API names different types
+# than 1.0.0 did. Under caret semantics a consumer of `1.0` upgrades into it
+# silently. Judging that entry by its version alone stops the cascade at
+# exactly the crate whose break was suppressed, letting dependents ship
+# compatible releases over it -- the silent SemVer break this cascade exists to
+# prevent.
 #
 # -Force means "write my number and warn me", not "the incompatibility is not
 # there". Propagation must follow the API, so it follows the unmet requirement
 # too.
+#
+# The suppressed requirement is tested with the same Test-IsBreakingChange used
+# for the planned transition, NOT compared against the literal 'breaking'. The
+# flag is set for any suppressed requirement, including a merely additive one,
+# and a forced non-breaking pin must not drag exposing dependents to a major
+# release. Routing it through the same predicate also keeps 0.x semantics
+# consistent between the two branches.
 #
 # Only the exposure fixpoint calls this, and it already skips proc-macro-only
 # sources -- so a 'breaking' tag arising from proc-macro manual review, which
@@ -374,7 +382,8 @@ function Test-EntryPlansBreakingRelease {
         [Parameter(Mandatory = $true)][pscustomobject]$Entry
     )
 
-    if ($Entry.PinHonoredAgainstCascade) {
+    if ($Entry.PinHonoredAgainstCascade -and
+        (Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $Entry.EffectiveChangeType)) {
         return $true
     }
 

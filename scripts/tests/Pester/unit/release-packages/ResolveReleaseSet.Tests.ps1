@@ -822,6 +822,35 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['c'].EffectiveChangeType      | Should -Be 'patch'
         }
 
+        It 'does not propagate from a forced pin that suppressed only a non-breaking requirement' {
+            # PinHonoredAgainstCascade is set for ANY suppressed requirement,
+            # not only a breaking one. Here b's own self-check requires
+            # non-breaking (1.1.0) and the user pins 1.0.1 with -Force, so the
+            # flag is set while the suppressed requirement was merely additive.
+            # An additive API change breaks no consumer, so c must stay at its
+            # patch floor rather than being dragged to a major release.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $classifier = { param($folder) if ($folder -eq 'b') { 'non-breaking' } else { 'patch' } }
+            $parsed = Parse-ReleaseTokens -Tokens @('b@1.0.1')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeTrue
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'non-breaking'
+            $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.0.1'
+
+            $byFolder['c'].EffectiveChangeType      | Should -Not -Be 'breaking'
+        }
+
         It '-Force emits a warning naming the package, the pin, the required minimum, and the sources' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
