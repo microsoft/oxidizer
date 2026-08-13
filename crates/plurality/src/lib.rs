@@ -28,8 +28,8 @@
 //!
 //! A [`MultiPool`] moves the element type from the pool to each allocation, so
 //! one pool object backs values of many types. It creates an internal layout
-//! pool for each distinct [`Layout`](core::alloc::Layout) it sees and routes
-//! each value to the pool serving that exact layout, while handing out the same
+//! pool for each distinct slot shape it sees and routes each value to the pool
+//! serving values of exactly its size and alignment, while handing out the same
 //! handles with the same guarantees.
 //!
 //! Use [`Pool<T>`] for a working set that repeatedly allocates one value type,

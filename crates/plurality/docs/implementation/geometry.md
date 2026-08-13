@@ -12,7 +12,7 @@ index, laid out as `#[repr(C)]`. Every offset in the pool follows from the
 value's size and alignment alone:
 
 ```text
-cell_align   = max(align, align_of::<u32>())
+cell_align   = max(align, align_of::<AtomicU32>(), align_of::<u32>())
 refcount_off = round_up(size, align_of::<AtomicU32>())
 index_off    = round_up(refcount_off + size_of::<AtomicU32>(), align_of::<u32>())
 stride       = round_up(index_off + size_of::<u32>(), cell_align)
@@ -20,6 +20,10 @@ slots_off    = round_up(size_of::<ChunkHeader>(), cell_align)
 chunk_align  = max(align_of::<ChunkHeader>(), cell_align)
 chunk_bytes  = pad_to_align(slots_off + stride * slot_count, chunk_align)
 ```
+
+A slot's alignment must hold both metadata words as well as the value, and
+`AtomicU32` is named beside `u32` because a target may align an atomic more
+strictly than the plain integer of the same width.
 
 These formulas have two independent consumers that must agree exactly:
 
@@ -39,19 +43,21 @@ Two standard-library guarantees carry the chain from `Layout::new::<T>()` to
 the slot's first field, and both are load-bearing: `UnsafeCell<T>` is
 `#[repr(transparent)]` over `T`, and `MaybeUninit<T>` has the same size,
 alignment and ABI as `T`. Together they mean the slot's value field has exactly
-`T`'s layout, so routing on `Layout::new::<T>()` and laying out a slot from
-that layout describe the same bytes.
+`T`'s layout, so deriving a slot from `Layout::new::<T>()` and laying out a
+slot for a `T` describe the same bytes.
 
 Notice that `slots_off` does not depend on the slot count. Recovery and slot
 addressing are therefore pure arithmetic over the geometry and an index, with
-no per-chunk state to consult beyond the chunk's base address. See
-[the pool body](./pool-body.md) for how the two directions of that arithmetic
-are used.
+no per-chunk state to consult beyond the chunk's base address. Both directions
+of that arithmetic, `slot_at` and `header_of`, are methods of the geometry
+abstraction in `src/geometry.rs`, so a safety review of slot addressing has a
+single place to look; [the pool body](./pool-body.md) covers how the walk is
+used.
 
 ## The geometry provider
 
 ```rust
-pub(crate) trait SlotGeometry: Copy {
+pub(crate) unsafe trait SlotGeometry: Copy {
     fn stride(self) -> usize;
     fn refcount_offset(self) -> usize;
     fn index_offset(self) -> usize;
@@ -62,6 +68,20 @@ pub(crate) trait SlotGeometry: Copy {
     unsafe fn header_of(self, slot: NonNull<u8>, index: u32) -> NonNull<ChunkHeader>;
 }
 ```
+
+The trait is `unsafe`, and both providers are `unsafe impl`s, because
+`PoolInner` trusts one geometry value for the whole slot layout at once: it
+sizes a chunk allocation with `chunk_layout`, places and addresses the slots
+inside that allocation through `slots_offset` and `stride`, initializes and
+reads the slot metadata at `refcount_offset` and `index_offset`, and walks back
+from a slot to its chunk header with `header_of`. What an implementer promises
+is that those answers describe one and the same layout — a chunk allocation
+that admits the slots the stride and the slot-array offset describe, metadata
+fields in bounds and aligned within each slot, and `header_of` as the exact
+inverse of `slot_at` — and that every copy of the value answers alike for as
+long as a pool holds it. A caller cannot check that: the numbers are meaningful
+only together, and their consistency is exactly what it is asking the geometry
+for.
 
 The first five methods answer with numbers. The last two are the addressing
 directions built on them, and they are where the two providers differ. Both
@@ -123,11 +143,13 @@ errors, so the diagnostic is poor and the check cannot be tested negatively;
 that is acceptable for an assertion whose only job is to fail a build that
 would otherwise ship a corrupted free list.
 
-A value allocated from a multi pool need not instantiate `TypedGeometry<T>` at
-all: allocation goes through `RuntimeGeometry` and reclamation through the free
-path. The bound owner is what pulls the typed provider in, so the multi pool's
-tests deliberately drive their layout spread through it as well as through the
-handles.
+A value allocated from a multi pool meets `RuntimeGeometry` on both of its
+ordinary paths: allocation reads the layout pool's stored geometry, and the
+detachable handles reclaim through the erased free path. The bound owner is
+what pulls the typed provider in — its drop path recovers the chunk header
+through `TypedGeometry<T>`, whose constructor forces the check — so the multi
+pool's tests deliberately drive their layout spread through it as well as
+through the handles.
 
 This check is the primary guard on the formulas, which is why it asserts stride
 and alignment and not only offsets. Both halves of the pool evaluate the same
@@ -137,10 +159,11 @@ agrees with itself and disagrees with the compiler. Comparing against the
 compiler's layout is what turns such a bug into a failed build.
 
 One consumer is deliberately left on an independent derivation for the same
-reason. The bound owner reads its slot through the compiler's layout of the
-slot struct rather than through a geometry provider (see
-[handles](./handles.md)), so a formula bug shared by both providers is
-observable as a test failure.
+reason. The bound owner holds a `NonNull<SlotCell<T>>` and reaches the value,
+the reference count and the index through the compiler's field offsets rather
+than through the formulas (see [handles](./handles.md)); only its step back to
+the chunk header consults a geometry provider. A formula bug shared by both
+providers is therefore observable as a test failure.
 
 Because both providers share the formulas, comparing them against each other
 proves only that neither corrupted the other's inputs. The formulas themselves
@@ -158,6 +181,8 @@ produced by coercing to a trait object or to a slice. In every case the
 geometry derived from a value's runtime size and alignment equals the geometry
 the pool was built with. That agreement is the allocation and reclamation
 safety invariant: a value is allocated and later recovered through matching
-stride and metadata offsets. The multi-pool directory uses exact Rust `Layout`
-as its key — value size and alignment — even when several layouts produce the
-same slot geometry (see [the multi pool's design](../design/multi-pool.md)).
+stride and metadata offsets. The multi-pool directory keys on slot geometry
+rather than on the exact Rust `Layout`: a value's size paired with its
+alignment widened to hold the slot metadata, so layouts differing only below
+that alignment share one layout pool (see
+[the multi pool's design](../design/multi-pool.md)).

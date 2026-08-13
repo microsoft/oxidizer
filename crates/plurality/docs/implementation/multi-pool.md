@@ -43,7 +43,7 @@ impl<A: Allocator> LayoutPoolRef<A> {
     pub(crate) fn core(&self) -> &PoolCore;
 
     /// # Safety
-    /// `Layout::new::<T>()` must equal the pool's layout.
+    /// `Layout::new::<T>()` must route to the pool.
     pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError>;
 }
 ```
@@ -53,10 +53,10 @@ running any user code. It carries no lifetime and copies freely, which is what
 lets the allocation path hold nothing borrowed while a value's constructor —
 which may itself allocate into the same multi pool — runs.
 
-`alloc_slot` is `unsafe` with the precondition that the element type's layout
-equals the pool's layout. The precondition exists because it is the invariant
+`alloc_slot` is `unsafe` with the precondition that the element type routes to
+this pool. The precondition exists because it is the invariant
 that keeps allocation and reclamation in agreement, and because the router
-establishes it by construction — it selected this pool *because* the layouts
+establishes it by construction — it selected this pool *because* the keys
 matched. Re-checking it on every allocation would pay for a fact the caller
 already proved. A debug assertion restates the precondition so that violations
 surface in testing; it documents intent more than it verifies anything, since
@@ -117,14 +117,22 @@ The directory is reachable only from the pool object.
 
 ### Lookup
 
-Allocation computes `Layout::new::<T>()` — a compile-time constant at each call
-site — and scans the key vector for it. Programs present few distinct layouts,
-so a linear scan over a contiguous array is the right shape: it is
-branch-predictable, prefetch-friendly, and beats a tree or a hash for the sizes
-that actually occur. Entries are held in first-seen order.
+Allocation computes a **routing key** from `Layout::new::<T>()` — a
+compile-time constant at each call site — and scans the key vector for it. The
+key is the value's size paired with its alignment widened by `cell_align`,
+which is the pair the slot geometry is a function of, so two types that lay out
+identical slots share one entry rather than holding two that would allocate the
+same chunks and lengthen every other lookup. Widening is idempotent, so a pool
+built from a key has the geometry the original layout asked for, and the key's
+alignment is never narrower than the layout's, so no value is under-aligned.
+
+Programs present few distinct geometries, so a linear scan over a contiguous
+array is the right shape: it is branch-predictable, prefetch-friendly, and
+beats a tree or a hash for the sizes that actually occur. Entries are held in
+first-seen order.
 
 A hit is the only thing the allocation path pays for. Creating and installing a
-layout pool is outlined behind `#[cold]` and takes the layout as a value rather
+layout pool is outlined behind `#[cold]` and takes the key as a value rather
 than a type parameter, so it is emitted once per allocator instead of once per
 element type and never occupies registers on the path that finds its pool.
 
@@ -137,18 +145,21 @@ performance guidance requires a measured win before adding either.
 ### Interior mutability and the allocator thread
 
 Allocation takes `&self` and may grow the directory, so the vectors sit behind
-`UnsafeCell`. The soundness argument is the one the chunk directory uses: the
-pool is `!Sync`, so allocation never overlaps with itself, and the directory is
-touched only while allocating. Reclamation never reaches it.
+`UnsafeCell`. The soundness argument is the one the chunk directory uses:
+`!Sync` keeps every access on one thread, and the only operations that reach
+the directory are the `&self` operations on the pool object itself —
+allocation and introspection. Reclamation never reaches it.
 
-The discipline that keeps this sound is that no borrow of either vector is held
+`!Sync` excludes another thread, not a second entry on this one: a custom
+allocator may re-enter allocation while an outer allocation is mid-flight. The
+discipline that keeps that sound is that no borrow of either vector is held
 across code outside this module. A lookup copies the layout pool's inner
 pointer to a local and releases the borrow before anything else happens, and
 the introspection helpers do the same before invoking their callbacks.
 Directory growth uses `directory::reserve_one` rather than `Vec::try_reserve`,
 so no vector borrow is held across the global allocator call; see
 [allocator reentrancy](./reentrancy.md). `Vec::push` runs only into capacity
-that was already reserved.
+that was already reserved, which is what makes it neither allocate nor fail.
 
 ### Reentrancy
 

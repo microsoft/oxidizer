@@ -37,8 +37,9 @@ that maps a layout to the pool serving it.
         │  Layout::new::<Widget>()  →  (size 24, align 8)
         ▼
    ┌───────────────────────────────┐
-   │  multi pool: layout directory │
-   │   (0, 1)  →  layout pool ●    │
+   │  multi pool: geometry         │
+   │  directory                    │
+   │   (0, 4)  →  layout pool ●    │
    │   (8, 8)  →  layout pool ●    │
    │  (24, 8)  →  layout pool ●────┼──► chunks · slots · free list
    └───────────────────────────────┘
@@ -47,7 +48,7 @@ that maps a layout to the pool serving it.
    Box<Widget>  — one pointer, no reference to the directory
 ```
 
-Types that share a layout share a layout pool: `u64` and `i64` draw from the
+Types that share a geometry share a layout pool: `u64` and `i64` draw from the
 same slots, and so do two structs of identical size and alignment. This is
 memory sharing, not type confusion — each slot holds exactly one value, and the
 handle that owns it carries the concrete type. A consequence worth stating
@@ -75,30 +76,32 @@ metadata. It is also why freeing costs exactly what it costs in a typed pool,
 and why frees remain concurrent and lock-free while the directory stays
 confined to the single allocator thread.
 
-## Exact layouts, no size classes
+## Exact sizes, no size classes
 
-A multi pool routes a value only to the pool whose layout is *exactly*
-`Layout::new::<T>()`. It never rounds sizes up, buckets nearby layouts
-together, or imposes size classes.
+A multi pool routes on a value's **slot geometry** — the stride and the offsets
+of the counter and index — which is a pure function of the value's size and
+alignment. It never rounds sizes up, buckets nearby sizes together, or imposes
+size classes.
 
-Allocation and reclamation also rely on a separate safety invariant: the
-allocating pool and the reclaiming handle agree on **slot geometry** — the
-stride and the offsets of the counter and index. The reclaiming handle
-recomputes those from the value it holds, so the geometry must match the slot
-that was allocated for that value.
+Geometry is not an injective function of layout. Padding a value out to make
+room for the trailing counter and index widens any alignment narrower than a
+`u32`'s, so `[u8; 8]` and `[u16; 4]` — distinct Rust layouts — describe the
+same slot exactly: same stride, same offsets, same chunk shape. **Pool identity
+follows geometry**: those two types share one layout pool, with one set of
+chunks, one free list, one line in the statistics and one share of any cap.
+Merging them costs nothing, because the merged slot is the slot either type
+would have been given alone. Sizes never merge, and alignments merge only where
+the slot metadata had already forced them together.
 
-Geometry is a pure function of layout, but not an injective one. Padding a
-value out to make room for the counter and index collapses neighboring
-layouts together: `u8`, `u16`, `u32` and `[u8; 4]` are four distinct layouts
-with one geometry between them. The directory still uses the exact Rust
-`Layout` as its key. **Pool identity follows layout, not geometry**: those four
-types get four layout pools, not one, and each has its own chunks, its own free
-list, its own statistics, and its own share of any cap. Geometry appears only
-in the safety invariant above; it never partitions anything.
+Geometry is also the safety invariant that allocation and reclamation rest on:
+the allocating pool and the reclaiming handle must agree on it. The handle
+recomputes it from the value it holds ([handles](./handles.md)), so a value in
+a merged pool recovers the same offsets its own layout implies — which is
+precisely why the merge is invisible to it.
 
 The rule pays for itself: a multi pool has no internal fragmentation from
 rounding, and a value occupies exactly the space a typed pool would give it.
-What it costs is one layout pool per distinct layout — bounded in practice by
+What it costs is one layout pool per distinct geometry — bounded in practice by
 the set of types a program instantiates.
 
 Values of zero size are ordinary participants. Their slots carry only the
@@ -153,23 +156,22 @@ rather than on what it asked for.
 
 ## Bounding growth
 
-The chunk cap is **per layout pool**, and because routing is by exact layout,
-that means per distinct layout — not per geometry. Types that share a geometry
-but differ in layout hold separate pools and separate allowances. Each layout
-pool independently refuses to grow past the cap and reports capacity
-exhaustion, exactly as a typed pool does.
+The chunk cap is **per layout pool**, which means per distinct geometry. Types
+that share a geometry share one allowance. Each layout pool independently
+refuses to grow past the cap and reports capacity exhaustion, exactly as a
+typed pool does.
 
-A per-layout cap alone does not bound the pool, because the number of distinct
-layouts is a property of the whole program's type set — including types from
-dependencies — and is not something a caller can enumerate. A multi pool
-therefore also accepts a **cap on the number of layouts**. Once reached, a
-request for an unseen layout reports capacity exhaustion rather than creating a
-pool for it. Like the typed pool's chunk cap, it is optional: growth in both
-dimensions is unbounded unless the caller says otherwise.
+A per-geometry cap alone does not bound the pool, because the number of
+distinct geometries is a property of the whole program's type set — including
+types from dependencies — and is not something a caller can enumerate. A multi
+pool therefore also accepts a **cap on the number of layout pools**. Once
+reached, a request for an unseen geometry reports capacity exhaustion rather
+than creating a pool for it. Like the typed pool's chunk cap, it is optional:
+growth in both dimensions is unbounded unless the caller says otherwise.
 
-When both caps are set, they bound the pool's memory as layouts times chunks
-times the size of a chunk; with either left open, memory is unbounded in that
-dimension. That last factor tracks the byte target only for layouts whose
+When both caps are set, they bound the pool's memory as layout pools times
+chunks times the size of a chunk; with either left open, memory is unbounded in
+that dimension. That last factor tracks the byte target only for layouts whose
 values are small relative to it. A chunk always holds a minimum number of
 slots, so a value large enough to exceed the target on its own gets a chunk
 sized by the value rather than by the target; and when a caller fixes the slot
@@ -182,16 +184,16 @@ directly, but it requires cross-pool mutable state that outlives every layout
 pool. That is a genuine extension rather than a variation, and is recorded in
 [`TODO.md`](../TODO.md).
 
-Because the cap is per layout, the *first* allocation of a previously unseen
-layout does not compete for capacity with layouts already in the pool: it fails
-only against the layout cap, never against another layout's chunk cap.
+Because the cap is per layout pool, the *first* allocation of a previously
+unseen geometry does not compete for capacity with those already in the pool:
+it fails only against the layout cap, never against another pool's chunk cap.
 
-## Memory is monotonic per layout
+## Memory is monotonic per layout pool
 
 A layout pool is never retired. Once created it lives until the multi pool is
-dropped, even after every value of its layout has been freed, and chunk memory
+dropped, even after every value it serves has been freed, and chunk memory
 is never returned to the allocator. A multi pool's memory is therefore
-monotonic per layout: the capacity and the chunk count reported for a layout
+monotonic: the capacity and the chunk count reported for a layout
 are a high-water mark over the pool's lifetime, not a measure of what is in use.
 
 Heterogeneity makes this far more visible than it is in a typed pool. Chunks
@@ -271,18 +273,20 @@ let erased: plurality::Box<dyn core::fmt::Display> =
 
 Introspection splits into two tiers, because a multi pool has no single slot
 size. Aggregate queries report the whole pool — the count of live detachable
-allocations (`Box`, `Arc`, and `Rc`), the chunks held, and the distinct layouts
-in play. Lifetime-bound `Alloc` handles can occupy slots, but they do not hold
+allocations (`Box`, `Arc`, and `Rc`), the chunks held, and the layout pools in
+play. Lifetime-bound `Alloc` handles can occupy slots, but they do not hold
 a pool-level reference and do not contribute to `len`; `is_empty` uses the same
 definition, so it is not a physical occupancy test. Per-layout queries are
 named for a type and report that type's layout pool: its capacity, its
 detachable-allocation count, and the effective chunk size and chunk cap in
 force for that layout. Per-layout queries never create a layout pool, so asking
 about a type the pool has not yet seen simply reports an empty pool at that
-layout's effective sizing.
+layout's effective sizing. A type that shares its geometry with another reports
+that shared pool's figures, so the counts it returns may include values it did
+not contribute.
 
-Aggregate queries cost time proportional to the number of layouts, since they
-sum over the layout pools. They inherit the typed pool's imprecision under
+Aggregate queries cost time proportional to the number of layout pools, since
+they sum over them. They inherit the typed pool's imprecision under
 concurrent frees, and compound it: a sum of independently read counters may
 describe a state the pool was never in. They are reporting instruments, not
 control-flow inputs.
@@ -294,9 +298,9 @@ control-flow inputs.
 | Type parameter | On the pool | On the allocation |
 | Handles | Four flavors | The same four |
 | Chunk sizing | Slot count | Byte target, or a slot count, clamped per layout |
-| Chunk cap | Per pool | Per layout, clamped, plus a cap on layouts |
-| Capacity queries | Single tier, constant time | Two tiers; aggregates scale with layouts |
-| Allocator | Held once | Cloned per layout, so it must be cloneable |
+| Chunk cap | Per pool | Per layout pool, clamped, plus a cap on layout pools |
+| Capacity queries | Single tier, constant time | Two tiers; aggregates scale with layout pools |
+| Allocator | Held once | Cloned per layout pool, so it must be cloneable |
 | First use of a layout | — | Cold path that allocates pool metadata |
 
 Everything else is common: the handle types and their guarantees, coercion to

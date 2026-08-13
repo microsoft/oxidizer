@@ -1021,8 +1021,10 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
 /// concurrent free races this otherwise single-threaded splice.
 ///
 /// # Safety
-/// `last` must be the final slot of a fully-initialized, not-yet-published
-/// chunk whose first global index is `base_index`.
+/// `last_link` must be a valid, properly aligned pointer to the reference-count
+/// link field of the final slot of a fully-initialized, not-yet-published chunk,
+/// and must remain valid for the duration of the call. `base_index` must be the
+/// global slot index at which that chunk's free chain begins.
 #[cfg_attr(coverage_nightly, coverage(off))]
 unsafe fn splice_chain(last_link: *mut AtomicU32, free_head: &AtomicU32, base_index: u32) {
     loop {

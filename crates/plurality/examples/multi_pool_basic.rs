@@ -43,12 +43,12 @@ fn main() {
     println!("shared     = {}", *shared);
     println!("borrowed   = {}", *borrowed);
 
-    // Distinct layouts get distinct internal pools. Types that happen to share
-    // a layout share one, which is why the count below is not simply the
+    // Each distinct slot shape gets its own internal pool. Types that lay out
+    // identical slots share one, which is why the count below is not simply the
     // number of types used: `u64` and `f64` agree on size and alignment.
     println!();
     println!("live values  = {} (the borrowed handle is not counted)", pool.len());
-    println!("layouts seen = {}", pool.layouts());
+    println!("layout pools = {}", pool.layouts());
 
     // Capacity is a per-layout question, so the accessors take the type. The
     // `u64` figures cover the `f64` too, since they share an internal pool.

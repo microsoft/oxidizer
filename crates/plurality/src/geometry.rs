@@ -43,6 +43,34 @@ pub(crate) const fn cell_align(align: usize) -> usize {
     if align > wider { align } else { wider }
 }
 
+/// The key a multi pool routes on: the part of a layout that its slot geometry
+/// actually depends on.
+///
+/// Every offset, the stride and the chunk shape derive from the size and from
+/// [`cell_align`] of the alignment, so two layouts that agree on both produce
+/// byte-identical chunks and are served by one pool. Widening is idempotent, so
+/// building a pool from the key yields the geometry the original layout asked
+/// for, and a value is never under-aligned: the key's alignment is never
+/// narrower than the layout's own.
+/// Ref: docs/design/multi-pool.md, "Routing".
+#[inline]
+#[must_use]
+pub(crate) const fn routing_key(layout: Layout) -> Layout {
+    let align = cell_align(layout.align());
+
+    // Widening cannot make a representable layout unrepresentable: the floor is
+    // a primitive alignment, and a layout describing a value leaves that much
+    // room below the size ceiling.
+    debug_assert!(
+        Layout::from_size_align(layout.size(), align).is_ok(),
+        "widening a value layout must stay representable"
+    );
+
+    // SAFETY: `align` is a power of two, being either the layout's own or the
+    // alignment of a primitive type, and the size fits as argued above.
+    unsafe { Layout::from_size_align_unchecked(layout.size(), align) }
+}
+
 /// Byte offset of the reference count within a slot.
 #[inline]
 #[must_use]

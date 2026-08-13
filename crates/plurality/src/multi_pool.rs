@@ -32,7 +32,7 @@ use crate::layout_pool::{LayoutPool, LayoutPoolRef};
 use crate::multi_builder::MultiPoolBuilder;
 use crate::pool::{allocation_failed, occupy_local};
 use crate::rc::Rc;
-use crate::slot::SlotCell;
+use crate::slot::{MAX_CHUNK_SIZE_SLOTS, SlotCell};
 use crate::sync::Arc;
 
 /// Chunk sizing shared by every layout pool a [`MultiPool`] creates.
@@ -59,7 +59,7 @@ impl ChunkSizing {
         match self {
             Self::Bytes(target) => {
                 let slots = target / stride.max(1);
-                let slots = u32::try_from(slots).unwrap_or(u32::MAX).clamp(1, 1 << 31);
+                let slots = u32::try_from(slots).unwrap_or(u32::MAX).clamp(1, MAX_CHUNK_SIZE_SLOTS);
                 // Rounding down keeps the chunk within the byte target. Chunk
                 // sizes stay powers of two so that slot addressing remains
                 // shift-and-mask arithmetic.
@@ -74,9 +74,9 @@ impl ChunkSizing {
 ///
 /// One pool object backs a heterogeneous working set: the type parameter
 /// travels with the allocation rather than with the pool. Values are routed to
-/// the internal pool serving their exact [`Layout`], so each occupies the same
-/// space it would in a pool dedicated to that one type — layouts are never
-/// rounded up to share a size class.
+/// the internal pool serving their exact size and alignment, so each occupies
+/// the same space it would in a pool dedicated to that one type — sizes are
+/// never rounded up to share a size class.
 ///
 /// Allocation hands back an owned or shared handle, either detachable or bound
 /// to the pool's borrow. Each keeps its value at a stable address for as
@@ -187,7 +187,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
     #[inline]
     fn pool_for<T>(&self) -> Result<LayoutPoolRef<A>, AllocError> {
         // Step 1: scan for an existing entry.
-        let layout = Layout::new::<T>();
+        let layout = crate::geometry::routing_key(Layout::new::<T>());
         match self.lookup(layout) {
             Some(found) => Ok(found),
             None => self.install(layout),
@@ -195,6 +195,8 @@ impl<A: Allocator + Clone> MultiPool<A> {
     }
 
     /// Creates the pool serving `layout` and installs it in the directory.
+    ///
+    /// `layout` is a routing key, not a value layout.
     ///
     /// Outlined and kept off the generic parameter so that an allocation whose
     /// layout is already known costs a scan and nothing else, and so that the
@@ -224,9 +226,10 @@ impl<A: Allocator + Clone> MultiPool<A> {
         // Step 4: reserve after construction, so the reservation cannot be
         // consumed by a reentrant miss that happened during step 3. The
         // reservation is confirmed against both vectors before it is handed
-        // back, and the displaced buffers are freed when this function returns,
-        // after the pushes, so nothing between here and step 7 calls an
-        // allocator.
+        // back, and the displaced buffers are freed when this function returns
+        // — after the pushes on the success path, and with nothing published on
+        // an abandon or a cap return, so in neither case does an allocator call
+        // separate a reservation from the push it guarantees.
         let _displaced = self.try_reserve_one()?;
 
         // Step 5: re-scan and re-check the cap. Step 3 released control twice.
@@ -349,14 +352,18 @@ impl<A: Allocator + Clone> MultiPool<A> {
 
     // ─── introspection ───────────────────────────────────────────────────
 
-    /// Number of distinct layouts the pool has served.
+    /// Number of internal layout pools the pool has created.
+    ///
+    /// Types of identical size and alignment share one layout pool, as do types
+    /// whose alignments differ only below the width of the slot metadata.
+    /// Ref: docs/design/multi-pool.md, "Exact sizes, no size classes".
     #[must_use]
     pub fn layouts(&self) -> usize {
         // SAFETY: as for `lookup`.
         unsafe { (*self.layouts.get()).len() }
     }
 
-    /// The cap on distinct layouts, if any.
+    /// The cap on internal layout pools, if any.
     #[must_use]
     pub fn max_layouts(&self) -> Option<usize> {
         self.max_layouts
@@ -366,7 +373,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
     ///
     /// Each view is copied out before `f` runs, so no directory borrow is live
     /// while `f` executes. Aggregate queries cost time proportional to the
-    /// number of layouts.
+    /// number of layout pools.
     #[inline]
     fn sum_pools(&self, f: fn(LayoutPoolRef<A>) -> u64) -> u64 {
         // SAFETY: as for `lookup`.
@@ -417,7 +424,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
     #[must_use]
     pub fn chunk_size_of<T>(&self) -> u32 {
         self.with_layout_of::<T, _>(LayoutPoolRef::chunk_size, || {
-            let layout = Layout::new::<T>();
+            let layout = crate::geometry::routing_key(Layout::new::<T>());
             let stride = crate::geometry::stride(layout.size(), layout.align());
             crate::layout_pool::effective_chunk_size(layout, self.sizing.slots_for(stride))
         })
@@ -484,7 +491,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
     /// while a directory borrow is live.
     #[inline]
     fn with_layout_of<T, R>(&self, found: impl FnOnce(LayoutPoolRef<A>) -> R, absent: impl FnOnce() -> R) -> R {
-        let layout = Layout::new::<T>();
+        let layout = crate::geometry::routing_key(Layout::new::<T>());
         match self.lookup(layout) {
             Some(view) => found(view),
             None => absent(),

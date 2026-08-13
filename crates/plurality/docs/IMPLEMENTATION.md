@@ -49,13 +49,15 @@ external types.
 | `pool` | `Pool`, `PoolCore`, `PoolInner`, the slot lifecycle, growth, pointer recovery and teardown. |
 | `multi_pool` | `MultiPool`, the layout router. |
 | `layout_pool` | `LayoutPool`, the crate-private pool keyed on a runtime layout. |
-| `geometry` | The slot-geometry abstraction and its compile-time and run-time providers. |
-| `chunk` | `ChunkHeader` and the chunk-level address arithmetic. |
+| `geometry` | The slot-geometry abstraction, its compile-time and run-time providers, and the two directions of slot addressing. |
+| `chunk` | `ChunkHeader` and the typed chunk-layout helper. |
+| `directory` | `reserve_one` and `Displaced`, the reservation primitive the chunk and layout directories grow through without a borrow live across an allocator call. |
 | `slot` | `SlotCell`, the free-list sentinel, the pool-size ceiling and the reference-count overflow guard. |
 | `boxed`, `sync`, `rc`, `alloced` | The `Box`, `Arc`, `Rc` and `Alloc` handles. |
 | `common` | Macros emitting the forwarding impls shared by all handles. |
 | `coerce` | The `Coercion` token, `unsize()` and the `coerce!` macro. |
-| `builder` | The pool builders and their validation. |
+| `builder` | `PoolBuilder` and the typed pool's configuration validation. |
+| `multi_builder` | `MultiPoolBuilder` and the multi pool's sizing and cap configuration. |
 | `error` | `AllocError` and its private `ErrorKind`. |
 | `pool_stats` | `PoolStats`, compiled only under the `stats` feature. |
 | `atomic` | A re-export shim that swaps in `loom`'s atomics under `--cfg loom`. |

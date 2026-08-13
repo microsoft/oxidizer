@@ -7,9 +7,10 @@ use core::fmt;
 /// Why a [`Pool`](crate::Pool) allocation failed.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum ErrorKind {
-    /// Every slot is occupied and the pool cannot grow: it hit the configured
-    /// `max_chunks` cap, or, for an unbounded pool, the addressable
-    /// slot-index ceiling.
+    /// A configured capacity limit was reached: a pool's chunk-growth limit
+    /// (the `max_chunks` cap, or, for an unbounded pool, the addressable
+    /// slot-index ceiling), or a multi pool's `max_layouts` limit on the number
+    /// of internal layout pools.
     CapacityExhausted,
     /// The pool could not obtain memory needed for its own use.
     AllocatorFailed,
@@ -47,7 +48,10 @@ impl AllocError {
         kind: ErrorKind::AllocatorFailed,
     };
 
-    /// Returns `true` if every slot was occupied and the pool could not grow.
+    /// Returns `true` if a configured capacity limit was reached: either the
+    /// pool may grow no further, or a [`MultiPool`](crate::MultiPool) reached
+    /// its limit on the number of internal layout pools and the request needed
+    /// a new one.
     #[must_use]
     pub fn is_capacity_exhausted(self) -> bool {
         matches!(self.kind, ErrorKind::CapacityExhausted)

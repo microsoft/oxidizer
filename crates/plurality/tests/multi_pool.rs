@@ -68,7 +68,7 @@ struct Triple(u64, u64, u64);
 
 /// Size 64, alignment 64: a value whose alignment exceeds its payload, so its
 /// slot is padded and its chunk reserves alignment-sized padding ahead of the
-/// first slot. Ref: docs/design/multi-pool.md, "Exact layouts, no size classes".
+/// first slot. Ref: docs/design/multi-pool.md, "Exact sizes, no size classes".
 #[repr(align(64))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OverAligned(u8);
@@ -252,6 +252,33 @@ fn distinct_types_of_one_layout_share_a_layout_pool() {
     drop(distances);
     assert_eq!(pool.len_of::<Seconds>(), 8);
     drop(durations);
+    assert!(pool.is_empty());
+}
+
+#[test]
+fn types_of_one_geometry_share_a_layout_pool() {
+    // Same size, different alignment, and both alignments are narrower than the
+    // slot metadata's, so the two lay out identical slots and route together.
+    // Ref: docs/design/multi-pool.md, "Routing".
+    assert_eq!(size_of::<[u8; 8]>(), size_of::<[u16; 4]>());
+    assert_ne!(align_of::<[u8; 8]>(), align_of::<[u16; 4]>());
+
+    let pool = MultiPool::new();
+    let bytes = pool.alloc_box([1_u8; 8]);
+    let words = pool.alloc_box([2_u16; 4]);
+
+    assert_eq!(pool.layouts(), 1);
+    assert_eq!(pool.len_of::<[u8; 8]>(), 2, "the shared pool counts both");
+    assert_eq!(pool.chunks_allocated_of::<[u16; 4]>(), 1);
+    assert_eq!(*bytes, [1_u8; 8]);
+    assert_eq!(*words, [2_u16; 4]);
+    assert!(
+        from_ref::<[u8; 8]>(&bytes).is_aligned(),
+        "the shared slot must suit both alignments"
+    );
+    assert!(from_ref::<[u16; 4]>(&words).is_aligned());
+
+    drop((bytes, words));
     assert!(pool.is_empty());
 }
 
@@ -1466,9 +1493,11 @@ fn a_construction_closure_may_grow_the_directory() {
     let outer = pool.alloc_box_with(|| {
         // Enough unseen layouts that the directory outgrows its buffer several
         // times over while the outer allocation is still in flight, so a
-        // reference held across the closure would dangle.
+        // reference held across the closure would dangle. Four bytes is absent
+        // because it would route to the outer `u32`'s pool rather than to one
+        // of its own.
         // Ref: docs/implementation/multi-pool.md, "Reentrancy".
-        alloc_each_layout!(&pool, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+        alloc_each_layout!(&pool, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13);
         99_u32
     });
 

@@ -205,10 +205,10 @@ A new chunk is fully initialized before it is published. The header is written
 first, then every slot's counter is set to the *next* global index, which
 pre-threads the whole chunk as a free chain. The chunk is then pushed into the
 directory, and only afterwards is the chunk count published with a `Release`
-store, which teardown pairs with. Between the allocation and the successful
-push, a guard owns the chunk so that a panicking `Vec::push` deallocates it
-rather than leaking it; publication transfers ownership to the pool and the
-guard is forgotten.
+store, which teardown pairs with. The push runs into capacity reserved before
+the chunk was allocated, so it neither allocates nor fails; ownership of the
+chunk passes to the pool at that point, and every earlier exit deallocates it
+explicitly. Ref: [allocator reentrancy](./reentrancy.md).
 
 Finally, the chunk's slots from the second onwards are spliced onto the free
 list in one compare-exchange, and the first slot is handed to the caller
@@ -346,15 +346,19 @@ reaches teardown holds no live values by construction.
 
 Under `loom`, teardown additionally drops each slot's instrumented atomic
 before deallocating the chunk, because loom tracks those objects and reports
-them as leaked otherwise. The same loop appears in the guard that owns a chunk
-between allocation and publication. Both compile to nothing outside `loom`.
+them as leaked otherwise. The same loop appears on the growth path's failure
+exits, which deallocate a chunk the pool never took ownership of. Both compile
+to nothing outside `loom`.
 
 ## Concurrency discipline
 
 `Pool` is `Send` when its allocator is, and is never `Sync`. The architecture is
 single allocator, multiple reclaimers. Every piece of cross-thread state is
 atomic; the one piece that is not — the chunk directory — is confined to the
-allocator thread by the absence of `Sync`.
+`&self` operations on the pool object by the absence of `Sync`. That excludes
+another thread but not a reentrant allocator on this one, which the growth
+ordering handles rather than forbids. Ref:
+[allocator reentrancy](./reentrancy.md).
 
 "The allocator thread" means whichever single thread holds a shared reference
 to the pool at a given moment. Because the pool is `!Sync`, such a reference
@@ -397,12 +401,13 @@ empty, so a freshly built pool holds no chunks and does not call its configured
 chunk allocator until first use.
 
 The two pool forms obtain their metadata block differently, because their
-failure contracts differ. The typed builder allocates it with `Box::new`, whose
-failure is the global allocator's out-of-memory handler — a non-unwinding abort,
-which is what `build()`'s documented contract promises. `LayoutPool::new`
+failure contracts differ. The typed builder allocates it with `Box::new`, so a
+failure to obtain it is handled by the global allocator on its own terms;
+`build()`'s documentation promises a panic for invalid configuration and says
+nothing about how an allocation failure is disposed of. `LayoutPool::new`
 allocates the same block through the raw global allocator and returns
 `Result`, because the multi pool's cold path must report a metadata failure as
-an `AllocError` rather than abort the process.
+an `AllocError`.
 
 ## Failure
 

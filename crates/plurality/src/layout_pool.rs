@@ -190,9 +190,9 @@ impl<A: Allocator> LayoutPoolRef<A> {
     /// Pops a free slot, growing the pool if necessary.
     ///
     /// # Safety
-    /// `Layout::new::<T>()` must equal the layout this pool serves. The router
-    /// establishes this by construction — it selected this pool because the
-    /// layouts matched.
+    /// `Layout::new::<T>()` must route to this pool. The router establishes
+    /// this by construction — it selected this pool because the routing keys
+    /// matched.
     ///
     /// # Errors
     /// Returns [`AllocError`] if allocation fails.
@@ -200,7 +200,11 @@ impl<A: Allocator> LayoutPoolRef<A> {
     pub(crate) unsafe fn alloc_slot<T>(self) -> Result<NonNull<SlotCell<T>>, AllocError> {
         // SAFETY: the owning `LayoutPool` outlives every view of it.
         let inner = unsafe { self.inner.as_ref() };
-        debug_assert_eq!(Layout::new::<T>(), inner.geometry.layout(), "layout pool served a mismatched type");
+        debug_assert_eq!(
+            crate::geometry::routing_key(Layout::new::<T>()),
+            inner.geometry.layout(),
+            "layout pool served a mismatched type"
+        );
         match inner.alloc_slot() {
             Ok(slot) => Ok(slot.cast::<SlotCell<T>>()),
             Err(err) => Err(err),
@@ -227,7 +231,12 @@ fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout)
         // It holds for every value layout `Layout::new::<T>()` can produce,
         // because a single slot leaves the address space room to spare.
         assert!(slots > 1, "a one-slot chunk must always have a representable layout");
+        let previous = slots;
         slots /= 2;
+        // Termination rests on the halving strictly shrinking the count. The
+        // assertion states that rather than trusting it, so a mutation of the
+        // arithmetic above fails the test instead of hanging it.
+        debug_assert!(slots < previous, "chunk size retried without shrinking");
     }
 }
 

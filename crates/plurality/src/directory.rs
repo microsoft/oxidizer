@@ -82,6 +82,13 @@ pub(crate) unsafe fn reserve_one<T>(cell: &UnsafeCell<Vec<T>>) -> Result<Displac
         // The allocation above is the last point control leaves this function,
         // so re-read the length it may have changed. Everything below is pure
         // memory movement.
+        //
+        // A reentrant push may have grown `cell` to a buffer that already has
+        // room, making the copy below a waste of a fresh allocation. Returning
+        // early on that observation was considered and rejected: it trades a
+        // branch on every reservation for a saving on an interleaving nothing
+        // in the crate can predict the frequency of, and the copy is correct
+        // either way.
         // SAFETY: as above.
         let live = unsafe { (*cell.get()).len() };
         if live >= target {

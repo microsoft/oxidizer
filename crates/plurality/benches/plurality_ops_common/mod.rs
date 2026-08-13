@@ -111,8 +111,9 @@ pub(crate) fn setup_multi_pool(n: usize) -> MultiPool {
 pub(crate) fn setup_multi_pool_spread(n: usize) -> MultiPool {
     let pool = MultiPool::builder().chunk_size(CAP as u32).build();
 
-    /// Registers one filler layout per byte length. Each length is a distinct
-    /// layout, and none of them collides with `Obj`, whose alignment differs.
+    /// Registers one filler layout per byte length. Each length routes to a
+    /// pool of its own, and none of them collides with `Obj`, whose size is
+    /// larger than any of them.
     macro_rules! fillers {
         ($($len:literal),*) => {
             $( drop(pool.alloc_box([0_u8; $len])); )*

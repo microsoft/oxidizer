@@ -18,6 +18,15 @@ Reentrancy reaches a pool through three doors, and only the first needs care:
 - Destructors of pooled values and the closures passed to the `_with`
   constructors. These run with no pool state in flight and need no ordering.
 
+Two distinct allocators can re-enter, and both are supported:
+
+- The pool's own `A`, through the doors above.
+- The `#[global_allocator]`, which the directory `Vec`s call directly. `A` has
+  no part in directory growth, so the reservation paths below are reachable
+  only from a reentrant global allocator, never from a reentrant `A`. The
+  chunk-growth paths are the mirror image: they are reachable from `A`, and
+  from the global allocator only where a directory grows alongside.
+
 An allocator that re-enters unconditionally recurses until the stack is
 exhausted, because serving the nested allocation calls it again. That is a
 livelock in the allocator's own logic, not a memory-safety problem, so it is
@@ -148,3 +157,11 @@ directory reservation is driven through a custom global allocator instead, and
 is therefore excluded from Miri, whose allocator model gives no meaning to a
 global allocator forwarding to the system one. That path holds no borrow across
 the allocation by construction, which is what the ordering above establishes.
+
+The two doors therefore carry different evidence. Reentry from `A` is checked
+under Miri with Tree Borrows and so is verified as an aliasing question.
+Reentry from the global allocator is checked only under the ordinary test
+runner, where the assertions cover the reachable outcomes — one pool per
+layout, the cap respected, room confirmed before every push — but no tool
+inspects the borrows. Its aliasing argument rests on the ordering, which keeps
+every allocator call outside every borrow, rather than on a checker.

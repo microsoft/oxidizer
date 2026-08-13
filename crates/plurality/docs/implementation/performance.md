@@ -34,11 +34,11 @@ every geometry expression on that path folds to a constant. The gate is
 instruction counts: the typed rows in [`PERF.md`](../PERF.md) must hold.
 
 The one genuinely new cost on the runtime path is that slot addressing
-multiplies by a loaded stride from the pool body.
-Where a typed pool's stride is a power of two the compiler emits a shift or
-folds the scaling into an addressing mode, so this is a real addition rather
-than a relocation of work the compiler was going to do anyway. It is confined
-to `LayoutPool`; the typed path keeps its constant.
+multiplies by a loaded stride from the pool body, where a typed pool's constant
+stride folds into an addressing mode. Measurement puts the difference at zero
+instructions — the multiply and its loads displace the address arithmetic the
+typed path performs instead — so this is a difference in shape rather than in
+work. It is confined to `LayoutPool`; the typed path keeps its constant.
 
 ## Benchmarks
 
@@ -61,14 +61,37 @@ That pair of layout counts is the whole parameterisation. One low value and one
 high value make the per-entry cost legible, and further values would add rows
 without adding information.
 
-The intercept still folds the runtime stride together with the fixed part of
-the lookup — loading the two directory vectors and following the layout pool's
-pointer. Splitting those would need a benchmark rung between the two, against
-`LayoutPool` directly, which is crate-private and would have to be exposed to
-reach it. That is public-surface debt for a diagnostic, so it is recorded as
-available in [`TODO.md`](../TODO.md) rather than built: the shipped pair
-already bounds the cost that scales, which is the one that governs whether the
-linear scan remains the right structure.
+The intercept is dominated not by the lookup but by the shape of the call that
+performs it. Every allocation entry point funnels through one routing helper
+that takes the value, or its constructor, as a closure; the compiler emits that
+helper out of line. Measured against the typed pool on x86-64, for one
+allocation from a warm pool holding a single directory entry:
+
+| Cost | Instructions |
+|---|---:|
+| Out-of-line call: frame, argument setup, `Result` returned through memory | 18 |
+| Second copy of the payload into the closure's slot | 8 |
+| Directory: borrowing both vectors, loop setup, one key comparison, the bounds check on the parallel vector | 15 |
+| Extra hop from the pool vector through the layout pool to the pool body, and one spill of the result | 3 |
+| Free-list pop and slot addressing | 0 |
+
+Two of these are worth stating plainly because they are not what the shape of
+the code suggests.
+
+The runtime stride costs nothing. Slot addressing on the routed path loads the
+stride, offset and slots offset from the pool body and multiplies, where the
+typed path folds a constant into an addressing mode — and the two encode to the
+same instruction count. The routed path trades an address computation for a
+multiply and three loads. The geometry it loads is not copied wholesale either:
+only the fields an operation uses are read, whatever the source reads into a
+local.
+
+The lookup itself is the smaller half. Roughly two thirds of the intercept is
+the cost of getting to the lookup rather than the lookup, and it would be paid
+by any helper of this shape regardless of what it did.
+
+The per-entry slope is what the linear scan actually stakes its case on, and it
+is the part that scales. The intercept is a fixed toll on the routed path only.
 
 Reclamation is the same code on both paths and contributes equally to every
 row, so it cancels in the differences. That also gives the design's claim that

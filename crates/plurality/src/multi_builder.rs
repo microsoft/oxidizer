@@ -74,7 +74,8 @@ impl<A: Allocator + Clone> MultiPoolBuilder<A> {
         self
     }
 
-    /// Caps the number of chunks **per layout**. Omit for unbounded growth.
+    /// Caps the number of chunks **per internal layout pool**. Omit for
+    /// unbounded growth.
     ///
     /// The effective cap for a layout is the smaller of this and the ceiling
     /// its chunk size permits; read it back with
@@ -85,10 +86,10 @@ impl<A: Allocator + Clone> MultiPoolBuilder<A> {
         self
     }
 
-    /// Caps the number of distinct layouts. Omit for unbounded growth.
+    /// Caps the number of internal layout pools. Omit for unbounded growth.
     ///
-    /// Once reached, allocating a value of an unseen layout reports capacity
-    /// exhaustion rather than creating a pool for it.
+    /// Once reached, allocating a value that would need a new layout pool
+    /// reports capacity exhaustion rather than creating one.
     #[must_use]
     pub fn max_layouts(mut self, max: usize) -> Self {
         self.max_layouts = Some(max);

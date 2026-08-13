@@ -59,9 +59,9 @@ points, the split between panicking and fallible variants, the two failure
 causes the pool distinguishes, and the `no_std` and custom-allocator story.
 
 **[Multi pool](./design/multi-pool.md)** — pooling values of any type in one
-pool object: the layout directory that sits on the allocation path only, exact
-layout routing, byte-target chunk sizing, the caps that bound growth, and how
-the multi pool differs from a typed one.
+pool object: the geometry directory that sits on the allocation path only,
+exact-size routing, byte-target chunk sizing, the caps that bound growth, and
+how the multi pool differs from a typed one.
 
 The implementation of this design is documented in
 [`IMPLEMENTATION.md`](./IMPLEMENTATION.md), measured performance in
@@ -113,11 +113,15 @@ invariants:
 10. **A pool serves exactly one slot geometry.** A value may only be placed in a
     pool whose geometry equals the geometry derived from the value's own size
     and alignment, since reclamation recomputes it from the value. Routing on
-    the exact layout is the rule that enforces this, and it is stricter than
-    strictly necessary because distinct layouts can share a geometry.
-11. **The layout directory is allocation-path state.** It is read and grown
-    only while allocating, on the single allocator thread, and is never
-    reachable from a free, a destructor, or a teardown.
+    the derived geometry is the rule that enforces this, and it is exactly as
+    strict as necessary: two layouts share a pool precisely when they describe
+    the same slot.
+11. **The layout directory is pool-object state.** It is read and grown through
+    `&self` operations on the pool object — allocation and introspection — and
+    is never reachable from a free, a destructor, or a teardown. `!Sync`
+    excludes another thread; same-thread allocator reentry is admitted and is
+    handled by the ordering in
+    [reentrancy](./implementation/reentrancy.md), not excluded.
 12. **Layout pools are never retired.** A layout pool created by a multi pool
     lives until the multi pool is dropped, which is what makes directory
     indices stable and lets a bound owner borrow the multi pool while pointing

@@ -29,22 +29,25 @@ Build it if bounded-memory deployments ask for it. The two caps are the right
 default either way, because they are the bounds that map onto the existing
 per-pool machinery with no shared state at all.
 
-## 0b. A `LayoutPool` benchmark rung
+## 0b. Inlining the routing helper
 
-The shipped multi-pool benchmarks vary the directory size, which separates the
-per-entry scan cost from everything else the routed path adds. What they do not
-separate is the fixed remainder: the runtime stride on the addressing path
-against the fixed part of the lookup.
+Every multi-pool allocation entry point funnels through one routing helper that
+takes the value, or its constructor, as a closure. The compiler emits that
+helper out of line, and the resulting call — frame, argument setup, a `Result`
+returned through memory, and a second copy of the payload into the closure's
+slot — is the larger part of what the routed path costs over the typed path.
+Ref: [performance](./implementation/performance.md), "Attributing the routing
+cost".
 
-A rung between the typed pool and the multi pool — allocating through
-`LayoutPool` directly, with runtime geometry but no router — would split it.
-The obstacle is that `LayoutPool` is crate-private and carries a single
-slot-claiming primitive, so reaching it from a benchmark target means exposing
-both the type and an allocation method through a `#[doc(hidden)]` re-export.
+Forcing it inline removes roughly a sixth of the routed path's instruction
+count in a static probe, and leaves the typed path untouched. The cost is code
+size: the helper carries the directory scan, and inlining replicates it per
+entry point per element type, in a crate whose entry points already multiply
+across four handle flavors and their uninitialised and pinned variants.
 
-Build it if the fixed remainder ever needs attributing. Until then the shipped
-pair bounds the cost that scales with directory size, which is the one that
-governs whether the linear scan remains the right structure.
+Build it if the routed path's fixed cost ever matters more than the size of the
+binary that pays it. The measurement stands either way; what is missing is a
+size budget to weigh it against.
 
 ## 1. `KeyedPool` — copyable generational keys (`keys` feature)
 
