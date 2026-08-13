@@ -1447,9 +1447,9 @@ dependencies = [
 
 [[package]]
 name = "fast_time"
-version = "0.1.24"
+version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad188d8ad2b4f4af0659f0f23f3025063cc4b500350f5ecd219522639355f8b2"
+checksum = "3c13224c1b52d6c5160cf76f975527a83778b67f37080e5cdfc5b61c67781925"
 dependencies = [
  "libc",
  "windows",
@@ -4721,6 +4721,7 @@ dependencies = [
  "futures-core",
  "insta",
  "jiff",
+ "libc",
  "mutants",
  "ohno 0.4.0",
  "pin-project-lite",
@@ -4731,6 +4732,7 @@ dependencies = [
  "thread_aware",
  "time",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
