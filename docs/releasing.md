@@ -115,8 +115,12 @@ required.
 
 Map detected compatibility requirements to `breaking`, `nonbreaking`, or
 `patch`. Tool and build failures are fatal. `cargo semver-checks` proves
-compatibility but may not identify a new public API as requiring a minor bump, so
-source-diff review must elevate backward-compatible additions to `nonbreaking`.
+compatibility but does not catch every public signature/type change and may not
+identify a new public API as requiring a minor bump. Source-diff review must
+elevate missed incompatibilities to `breaking` and backward-compatible additions
+to `nonbreaking`. In particular, review manual auto-trait implementations and
+their generic bounds: replacing structural derivation can remove implementations
+for previously accepted type arguments without being reported by the tool.
 
 First releases do not run against their introducing commit. They publish at the
 version already declared in `Cargo.toml`, unless explicitly pinned higher.

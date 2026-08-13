@@ -221,7 +221,12 @@ try {
     }
 
     if (-not $SkipReadme) {
-        Invoke-CheckedCommand -Command just -Arguments @('readme')
+        Push-Location $RepoRoot
+        try {
+            Invoke-CheckedCommand -Command just -Arguments @('readme')
+        } finally {
+            Pop-Location
+        }
     }
     Invoke-CheckedCommand -Command cargo -Arguments @(
         'metadata', '--manifest-path', $rootManifest, '--format-version', '1'

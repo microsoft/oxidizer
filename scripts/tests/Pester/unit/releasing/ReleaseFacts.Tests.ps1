@@ -49,6 +49,20 @@ Describe 'release-facts.ps1' {
                     Version = '0.1.0'
                     Deps = @(@{ Name = 'beta'; Kind = 'dev' })
                 }
+                @{
+                    Name = 'empty_exposer'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'beta' })
+                    AllowedExternalTypes = @()
+                }
+                @{
+                    Name = 'dual_dep'
+                    Version = '0.1.0'
+                    Deps = @(
+                        @{ Name = 'beta' }
+                        @{ Name = 'beta'; Kind = 'build' }
+                    )
+                }
                 @{ Name = 'priv_pkg';     Version = '0.4.0'; Published = $false }
             )
         }
@@ -79,7 +93,16 @@ Describe 'release-facts.ps1' {
 
     It 'emits every workspace package under crates/' {
         $folders = @($script:Facts.packages | ForEach-Object { $_.folder }) | Sort-Object
-        $folders | Should -Be @('alpha', 'beta', 'devonly', 'exposer', 'gamma_macros', 'priv_pkg')
+        $folders | Should -Be @(
+            'alpha',
+            'beta',
+            'devonly',
+            'dual_dep',
+            'empty_exposer',
+            'exposer',
+            'gamma_macros',
+            'priv_pkg'
+        )
     }
 
     It 'reports name, version and published flag' {
@@ -93,6 +116,7 @@ Describe 'release-facts.ps1' {
         @($script:ByFolder['alpha'].deps) | Should -Contain 'beta'
         @($script:ByFolder['beta'].deps).Count | Should -Be 0
         @($script:ByFolder['devonly'].deps).Count | Should -Be 0
+        @($script:ByFolder['dual_dep'].deps) | Should -Be @('beta')
     }
 
     It 'emits deterministic workspace exposure edges from external-type metadata' {
@@ -103,6 +127,11 @@ Describe 'release-facts.ps1' {
     It 'treats missing external-type metadata as no exposure for libraries' {
         $script:ByFolder['alpha'].exposureUnknown | Should -BeFalse
         @($script:ByFolder['alpha'].exposedDeps).Count | Should -Be 0
+    }
+
+    It 'treats an explicit empty allowlist as no exposure for libraries' {
+        $script:ByFolder['empty_exposer'].exposureUnknown | Should -BeFalse
+        @($script:ByFolder['empty_exposer'].exposedDeps).Count | Should -Be 0
     }
 
     It 'includes exposure properties for every package' {

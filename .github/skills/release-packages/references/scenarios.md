@@ -17,7 +17,7 @@ The matrix covers:
 | Modes | targeted, changed, all |
 | Output | topological order, merged reasons, breaking flags, warnings |
 | Changelogs | maintenance, breaking, multiple sorted reasons |
-| Cargo APIs | internal edit, backward-compatible addition, removed public item |
+| Cargo APIs | internal edit, addition, removal, signatures, fields, traits, enums |
 | Atomic apply | exact version edits, validation, rollback |
 
 The test matrix is the hard oracle for mechanical behavior. Diff interpretation,

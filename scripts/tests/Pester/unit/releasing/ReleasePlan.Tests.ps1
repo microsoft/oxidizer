@@ -3,6 +3,7 @@
 
 BeforeAll {
     . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
+    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\releasing.ps1')
 
     $script:Resolver = Join-Path (
         Get-OxiRepoRoot
@@ -330,6 +331,18 @@ Describe 'resolve-plan.ps1 pins and validation' {
         } | Should -Throw '*must be strictly greater*'
     }
 
+    It 'rejects build-only pins because build metadata has equal precedence' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package -Version '1.2.3+old') `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package@1.2.3+new')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*must be strictly greater*'
+    }
+
     It 'accepts a greater pin and preserves build metadata' {
         $plan = Invoke-ReleasePlan `
             -Facts @(New-ReleaseFact -Name package -Version '1.2.3-alpha.1') `
@@ -362,6 +375,72 @@ Describe 'resolve-plan.ps1 pins and validation' {
         } | Should -Throw '*Missing objective classification*'
     }
 
+    It 'rejects duplicate package tokens' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package@patch', 'package@breaking')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*appears more than once*'
+    }
+
+    It 'rejects unknown and unpublished packages' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('missing')
+                    classifications = @{}
+                }
+        } | Should -Throw '*matched 0 workspace packages*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package -Published $false) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{}
+                }
+        } | Should -Throw '*is not publishable*'
+    }
+
+    It 'rejects malformed modes, change types, and empty requests' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'invalid'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*Unknown release mode*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package@major')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*Invalid SemVer version*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @()
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*requires at least one accepted package token*'
+    }
+
     It 'preserves changed and all mode labels after package selection' {
         foreach ($mode in @('changed', 'all')) {
             $plan = Invoke-ReleasePlan `
@@ -372,6 +451,256 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
             $plan.mode | Should -Be $mode
+        }
+    }
+
+    Describe 'resolve-plan.ps1 generated exposure matrix' {
+        BeforeDiscovery {
+            $versions = @('1.2.3', '0.4.2', '0.0.5')
+            $changes = @('patch', 'nonbreaking', 'breaking')
+            $exposureCases = foreach ($dependencyVersion in $versions) {
+                foreach ($change in $changes) {
+                    foreach ($consumerVersion in $versions) {
+                        foreach ($exposed in @($false, $true)) {
+                            @{
+                                Name = "$dependencyVersion $change -> $consumerVersion exposed=$exposed"
+                                DependencyVersion = $dependencyVersion
+                                Change = $change
+                                ConsumerVersion = $consumerVersion
+                                Exposed = $exposed
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        It '<Name>' -ForEach $exposureCases {
+            $facts = @(
+                New-ReleaseFact -Name dependency -Version $DependencyVersion
+                New-ReleaseFact `
+                    -Name consumer `
+                    -Version $ConsumerVersion `
+                    -Deps dependency `
+                    -ExposedDeps $(if ($Exposed) { @('dependency') } else { @() })
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'targeted'
+                tokens = @("dependency@$Change")
+                classifications = @{ dependency = 'patch'; consumer = 'patch' }
+            }
+
+            $internalChange = if ($Change -eq 'nonbreaking') {
+                'non-breaking'
+            } else {
+                $Change
+            }
+            $dependencyBreaks = Test-IsBreakingChange `
+                -oldVersion $DependencyVersion `
+                -ChangeType $internalChange
+            $expectedConsumerChange = if ($Exposed -and $dependencyBreaks) {
+                'breaking'
+            } else {
+                'patch'
+            }
+            $consumer = $plan.releases | Where-Object folder -eq consumer
+            $consumer.changeType | Should -Be $expectedConsumerChange
+            $consumer.to | Should -Be (
+                Get-NextVersion `
+                    -currentVersion $ConsumerVersion `
+                    -ChangeType $expectedConsumerChange
+            )
+            $consumer.cascadeReasons[0].breaking |
+                Should -Be ($Exposed -and $dependencyBreaks)
+        }
+    }
+
+    Describe 'resolve-plan.ps1 generated lower-bound matrix' {
+        BeforeDiscovery {
+            $versions = @('1.2.3', '0.4.2', '0.0.5')
+            $objectives = @('patch', 'nonbreaking', 'breaking')
+            $requests = @('', 'patch', 'nonbreaking', 'breaking')
+            $lowerBoundCases = foreach ($version in $versions) {
+                foreach ($objective in $objectives) {
+                    foreach ($request in $requests) {
+                        @{
+                            Name = "$version objective=$objective request=$request"
+                            Version = $version
+                            Objective = $objective
+                            Request = $request
+                        }
+                    }
+                }
+            }
+        }
+
+        It '<Name>' -ForEach $lowerBoundCases {
+            $rank = @{ patch = 1; nonbreaking = 2; breaking = 3 }
+            $expectedChange = if (
+                [string]::IsNullOrEmpty($Request) -or
+                $rank[$Objective] -ge $rank[$Request]
+            ) {
+                $Objective
+            } else {
+                $Request
+            }
+            $token = if ([string]::IsNullOrEmpty($Request)) {
+                'package'
+            } else {
+                "package@$Request"
+            }
+            $plan = Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package -Version $Version) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @($token)
+                    classifications = @{ package = $Objective }
+                }
+
+            $internalChange = if ($expectedChange -eq 'nonbreaking') {
+                'non-breaking'
+            } else {
+                $expectedChange
+            }
+            $plan.releases[0].changeType | Should -Be $expectedChange
+            $plan.releases[0].to | Should -Be (
+                Get-NextVersion `
+                    -currentVersion $Version `
+                    -ChangeType $internalChange
+            )
+        }
+    }
+
+    Describe 'resolve-plan.ps1 generated fixed-point matrix' {
+        BeforeDiscovery {
+            $versions = @('1.2.3', '0.4.2', '0.0.5')
+            $changes = @('patch', 'nonbreaking', 'breaking')
+            $fixedPointCases = foreach ($dependencyVersion in $versions) {
+                foreach ($change in $changes) {
+                    foreach ($firstExposed in @($false, $true)) {
+                        foreach ($secondExposed in @($false, $true)) {
+                            @{
+                                Name = "$dependencyVersion $change edges=$firstExposed/$secondExposed"
+                                DependencyVersion = $dependencyVersion
+                                Change = $change
+                                FirstExposed = $firstExposed
+                                SecondExposed = $secondExposed
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        It '<Name>' -ForEach $fixedPointCases {
+            $facts = @(
+                New-ReleaseFact -Name bottom -Version $DependencyVersion
+                New-ReleaseFact `
+                    -Name middle `
+                    -Deps bottom `
+                    -ExposedDeps $(if ($FirstExposed) { @('bottom') } else { @() })
+                New-ReleaseFact `
+                    -Name top `
+                    -Deps middle `
+                    -ExposedDeps $(if ($SecondExposed) { @('middle') } else { @() })
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'targeted'
+                tokens = @("bottom@$Change")
+                classifications = @{ bottom = 'patch'; middle = 'patch'; top = 'patch' }
+            }
+
+            $internalChange = if ($Change -eq 'nonbreaking') {
+                'non-breaking'
+            } else {
+                $Change
+            }
+            $bottomBreaks = Test-IsBreakingChange `
+                -oldVersion $DependencyVersion `
+                -ChangeType $internalChange
+            $middleBreaking = $bottomBreaks -and $FirstExposed
+            $topBreaking = $middleBreaking -and $SecondExposed
+            ($plan.releases | Where-Object folder -eq middle).changeType |
+                Should -Be $(if ($middleBreaking) { 'breaking' } else { 'patch' })
+            ($plan.releases | Where-Object folder -eq top).changeType |
+                Should -Be $(if ($topBreaking) { 'breaking' } else { 'patch' })
+        }
+    }
+
+    Describe 'resolve-plan.ps1 generated diamond matrix' {
+        BeforeDiscovery {
+            $versions = @('1.2.3', '0.4.2', '0.0.5')
+            $changes = @('patch', 'nonbreaking', 'breaking')
+            $diamondCases = foreach ($dependencyVersion in $versions) {
+                foreach ($change in $changes) {
+                    foreach ($mask in 0..15) {
+                        @{
+                            Name = "$dependencyVersion $change diamond-mask=$mask"
+                            DependencyVersion = $dependencyVersion
+                            Change = $change
+                            RootToLeft = [bool]($mask -band 1)
+                            RootToRight = [bool]($mask -band 2)
+                            LeftToTop = [bool]($mask -band 4)
+                            RightToTop = [bool]($mask -band 8)
+                        }
+                    }
+                }
+            }
+        }
+
+        It '<Name>' -ForEach $diamondCases {
+            $facts = @(
+                New-ReleaseFact -Name root -Version $DependencyVersion
+                New-ReleaseFact `
+                    -Name left `
+                    -Deps root `
+                    -ExposedDeps $(if ($RootToLeft) { @('root') } else { @() })
+                New-ReleaseFact `
+                    -Name right `
+                    -Deps root `
+                    -ExposedDeps $(if ($RootToRight) { @('root') } else { @() })
+                New-ReleaseFact `
+                    -Name top `
+                    -Deps @('left', 'right') `
+                    -ExposedDeps @(
+                        if ($LeftToTop) { 'left' }
+                        if ($RightToTop) { 'right' }
+                    )
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'targeted'
+                tokens = @("root@$Change")
+                classifications = @{
+                    root = 'patch'
+                    left = 'patch'
+                    right = 'patch'
+                    top = 'patch'
+                }
+            }
+
+            $internalChange = if ($Change -eq 'nonbreaking') {
+                'non-breaking'
+            } else {
+                $Change
+            }
+            $rootBreaks = Test-IsBreakingChange `
+                -oldVersion $DependencyVersion `
+                -ChangeType $internalChange
+            $leftBreaks = $rootBreaks -and $RootToLeft
+            $rightBreaks = $rootBreaks -and $RootToRight
+            $topBreaks =
+                ($leftBreaks -and $LeftToTop) -or
+                ($rightBreaks -and $RightToTop)
+
+            ($plan.releases | Where-Object folder -eq left).changeType |
+                Should -Be $(if ($leftBreaks) { 'breaking' } else { 'patch' })
+            ($plan.releases | Where-Object folder -eq right).changeType |
+                Should -Be $(if ($rightBreaks) { 'breaking' } else { 'patch' })
+            $top = $plan.releases | Where-Object folder -eq top
+            $top.changeType |
+                Should -Be $(if ($topBreaks) { 'breaking' } else { 'patch' })
+            @($top.cascadeReasons).Count | Should -Be 2
+            @($top.cascadeReasons.target) | Should -Be @('left', 'right')
         }
     }
 

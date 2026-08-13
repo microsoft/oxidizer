@@ -106,10 +106,11 @@ this simple process:
 
 2. Create a branch off of main.
 
-3. Invoke the repository's `release-packages` skill with `<crate_name>@<change_type>`.
-   The change type is `breaking`, `nonbreaking`, `patch`, or an explicit version
-   such as `1.0.0`. Multiple tokens, for example `foo@nonbreaking bar@patch`,
-   form one release plan.
+3. Invoke the repository's `release-packages` skill with `<crate_name>`. The
+   skill determines the change type from repository history and source review.
+   Optional `@breaking`, `@nonbreaking`, `@patch`, or explicit-version suffixes
+   set lower bounds or pins when needed. Multiple crate names form one release
+   plan.
 
 4. Create a PR like normal to push changes out.
 

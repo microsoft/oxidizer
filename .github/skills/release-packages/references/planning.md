@@ -104,6 +104,8 @@ For a reviewed package:
 2. Default to the objective classification.
 3. Elevate only with concrete evidence the tool cannot see:
    - documented behavioral incompatibility -> breaking;
+   - missed public signature or type incompatibility -> breaking;
+   - narrowed generic or auto-trait implementation bounds -> breaking;
    - missed backward-compatible public addition -> nonbreaking.
 4. Decline packages with no consumer-visible change.
 
