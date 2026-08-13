@@ -124,9 +124,9 @@ Describe 'release-facts.ps1' {
         @($script:ByFolder['exposer'].exposedDeps) | Should -Be @('beta')
     }
 
-    It 'treats missing external-type metadata as no exposure for libraries' {
+    It 'fails closed for a direct dependency when exposure metadata is absent' {
         $script:ByFolder['alpha'].exposureUnknown | Should -BeFalse
-        @($script:ByFolder['alpha'].exposedDeps).Count | Should -Be 0
+        @($script:ByFolder['alpha'].exposedDeps) | Should -Be @('beta')
     }
 
     It 'treats an explicit empty allowlist as no exposure for libraries' {

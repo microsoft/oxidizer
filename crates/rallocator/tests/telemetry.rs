@@ -107,7 +107,7 @@ fn collection_includes_every_participating_thread_log() {
     let threads: Vec<_> = (0..4)
         .map(|value| {
             std::thread::spawn(move || {
-                drop(Box::new(value));
+                drop(std::hint::black_box(Box::new(value)));
             })
         })
         .collect();

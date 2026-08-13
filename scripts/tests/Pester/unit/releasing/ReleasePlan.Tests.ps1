@@ -159,6 +159,26 @@ Describe 'resolve-plan.ps1 cascades' {
         $plan.releases[2].cascadeReasons[0].breaking | Should -BeTrue
     }
 
+    It 'propagates a break to an indirect dependent that exposes the defining crate' {
+        $facts = @(
+            New-ReleaseFact -Name core
+            New-ReleaseFact -Name relay -Deps core
+            New-ReleaseFact -Name facade -Deps relay -ExposedDeps core
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'patch'; relay = 'patch'; facade = 'patch' }
+        }
+
+        @($plan.releases.folder) | Should -Be @('core', 'relay', 'facade')
+        ($plan.releases | Where-Object folder -eq relay).changeType | Should -Be 'patch'
+        $facade = $plan.releases | Where-Object folder -eq facade
+        $facade.changeType | Should -Be 'breaking'
+        $facade.cascadeReasons[0].target | Should -Be 'core'
+        $facade.cascadeReasons[0].breaking | Should -BeTrue
+    }
+
     It 'treats every 0.0.z bump as breaking when the dependency is exposed' {
         $facts = @(
             New-ReleaseFact -Name unstable -Version '0.0.5'

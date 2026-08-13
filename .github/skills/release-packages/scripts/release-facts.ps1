@@ -81,13 +81,60 @@ if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
 $packages = @(Get-WorkspacePackages -repoRoot $RepoRoot)
 $modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
 
+$packageByName = @{}
+foreach ($package in $packages) {
+    $packageByName[$package.Name.Replace('-', '_')] = $package
+}
+
+function Get-ReachableWorkspacePackages {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Package)
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    foreach ($dependency in @($Package.Deps)) {
+        $queue.Enqueue($dependency)
+    }
+
+    while ($queue.Count -gt 0) {
+        $dependency = $queue.Dequeue()
+        if (-not $seen.Add($dependency)) { continue }
+        if (-not $packageByName.ContainsKey($dependency)) { continue }
+        foreach ($transitiveDependency in @($packageByName[$dependency].Deps)) {
+            $queue.Enqueue($transitiveDependency)
+        }
+    }
+
+    return @($seen | Sort-Object)
+}
+
 $factPackages = foreach ($package in $packages) {
     $baselineSha = $null
-    $exposure = Get-PackageExposureFacts `
-        -Dependencies @($package.Deps) `
-        -ExposureMetadataKnown $package.ExposureMetadataKnown `
-        -UncheckedTarget ([bool]$package.IsProcMacroOnly -or -not [bool]$package.HasLibraryTarget) `
-        -AllowedExternalTypes $package.AllowedExternalTypes
+    $uncheckedTarget = [bool]$package.IsProcMacroOnly -or -not [bool]$package.HasLibraryTarget
+    $reachablePackages = @(Get-ReachableWorkspacePackages -Package $package)
+    $exposedPackages = if ($uncheckedTarget) {
+        @($package.Deps)
+    } else {
+        @(
+            foreach ($targetName in $reachablePackages) {
+                $target = $packageByName[$targetName]
+                if ($null -eq $target) { continue }
+
+                $exposed = if (@($package.Deps) -contains $targetName) {
+                    Test-PackageExposesTarget `
+                        -Dependent $package `
+                        -TargetPackageName $target.Name
+                } else {
+                    Test-PackageAllowlistNamesTarget `
+                        -Dependent $package `
+                        -TargetPackageName $target.Name `
+                        -TargetCrateRoot $target.CrateRoot
+                }
+                if ($exposed) { $targetName }
+            }
+        )
+    }
 
     # baselineSha is the crate's previous version-bump commit, or null if none can
     # be found. Note a crate's introducing commit counts as a bump, so in practice
@@ -105,8 +152,10 @@ $factPackages = foreach ($package in $packages) {
         procMacroOnly     = [bool]$package.IsProcMacroOnly
         hasLibraryTarget  = [bool]$package.HasLibraryTarget
         deps              = @($package.Deps)
-        exposedDeps       = @($exposure.ExposedDeps)
-        exposureUnknown   = [bool]$exposure.ExposureUnknown
+        # Includes direct exposure edges and positively identified indirect
+        # re-export edges to transitively reachable workspace packages.
+        exposedDeps       = @($exposedPackages | Sort-Object -Unique)
+        exposureUnknown   = $uncheckedTarget
         baselineSha       = $baselineSha
         hasBaseline       = ($null -ne $baselineSha)
         # Whether the crate has ever been published, determined from its release

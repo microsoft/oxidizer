@@ -89,16 +89,24 @@ everReleased, modified, modifiedFileCount
 excluded.
 
 For ordinary libraries, public exposure is derived from
-`package.metadata.cargo_check_external_types.allowed_external_types`, intersected
-with real workspace dependencies. This removes stale and third-party roots.
-Because CI checks ordinary library allowlists:
+`package.metadata.cargo_check_external_types.allowed_external_types`. Fact
+gathering resolves dependency aliases and custom `[lib] name` crate roots before
+matching allowlist entries. It also records a transitively reachable workspace
+package in `exposedDeps` when an allowlist positively identifies that defining
+crate through a re-export, even when no direct dependency edge exists.
 
-- missing or empty metadata means no workspace dependency types are exposed;
-- a bare wildcard conservatively exposes every dependency.
+Exposure handling is conservative:
 
-Proc-macro-only and other unchecked targets always set `exposureUnknown = true`
-and conservatively expose every dependency. Any metadata on those targets is
-ignored for planning because CI does not enforce it.
+- absent metadata fails closed for direct dependencies because working-tree
+  changes may not have passed CI yet;
+- an explicit empty allowlist proves that no direct dependency type is exposed;
+- malformed or wildcard direct entries fail closed;
+- indirect exposure requires positive allowlist evidence, so absent or malformed
+  metadata does not mark every transitive dependency as exposed.
+
+Proc-macro-only and other unchecked targets always set
+`exposureUnknown = true` and conservatively expose every direct dependency. Any
+metadata on those targets is ignored for planning because CI does not enforce it.
 
 ## Classification
 
@@ -148,12 +156,17 @@ Every released dependency gives each previously released, publishable direct
 dependent a patch floor so it can pick up the new dependency requirement.
 Never-published dependents are not cascade releases.
 
-A dependent receives a breaking floor when:
+A package receives a breaking floor when:
 
 1. the dependency's actual version transition is breaking under Cargo
    compatibility; and
-2. the dependent exposes that dependency through `exposedDeps`, or has
-   `exposureUnknown = true`.
+2. the package exposes that dependency through `exposedDeps`, or is a direct
+   dependent with `exposureUnknown = true`.
+
+The exposure edge may be direct or may identify a transitively reachable
+defining crate through a public re-export. Indirect packages receive no patch
+floor for compatible dependency changes because they do not declare the
+dependency requirement themselves.
 
 This is a fixed-point calculation. A strengthened package can strengthen its own
 dependents, including through chains and diamonds. Every `0.0.z` bump therefore
@@ -222,7 +235,8 @@ Mechanical behavior is covered by the Pester suite:
 
 - stable, `0.x`, and `0.0.x` arithmetic;
 - patch, additive, and breaking synthetic Cargo changes;
-- linear, diamond, duplicate-edge, exposed, and unknown-exposure graphs;
+- linear, diamond, duplicate-edge, renamed-root, direct, indirect, and
+  unknown-exposure graphs;
 - first releases, unpublished packages, proc-macros, pins, and force;
 - changelog rendering;
 - successful application and rollback after validation failure.
