@@ -186,7 +186,7 @@ fn slot_reuse_across_threads_with_non_send_values() {
 /// live, so teardown is deferred and ultimately runs on the *originating*
 /// thread when that last handle departs.
 #[test]
-fn teardown_on_far_thread_with_non_send_values() {
+fn teardown_on_origin_thread_with_non_send_values() {
     let pool: Pool<ThreadBound> = Pool::builder().build();
     let shared = StdRc::new(Cell::new(0_u64));
     let drops = DropLog::default();

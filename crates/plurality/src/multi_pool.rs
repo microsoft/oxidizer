@@ -81,10 +81,10 @@ impl ChunkSizing {
 ///
 /// Allocation hands back an owned or shared handle, either detachable or bound
 /// to the pool's borrow. Each keeps its value at a stable address for as
-/// long as it lives, is one pointer wide for a sized value, and coerces to
-/// trait objects and slices. Freeing costs no more than it would from a pool
-/// dedicated to that one type, because a handle finds its own pool by pointer
-/// recovery and never consults the router.
+/// long as it lives and is one pointer wide for a sized value; the detachable
+/// handles also coerce to trait objects and slices. Freeing costs no more than
+/// it would from a pool dedicated to that one type, because a handle finds its
+/// own pool by pointer recovery and never consults the router.
 ///
 /// A multi pool is `Send` when its allocator is, and is not `Sync`: one thread
 /// allocates at a time, while frees may happen anywhere. Values of types with
