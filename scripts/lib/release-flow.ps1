@@ -600,6 +600,9 @@ function Get-ManualSemverReviewFindings {
             PackageName                = $entry.Name
             CurrentVersion             = $entry.CurrentVersion
             InReleaseSet               = $true
+            PlannedCurrentVersion      = $entry.CurrentVersion
+            EffectiveChangeType        = $entry.EffectiveChangeType
+            EffectiveTargetVersion     = $entry.EffectiveTargetVersion
             ChangedFileCount           = $changedFileCount
             DependencyChains           = @()
             WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $entry.Folder
@@ -656,6 +659,9 @@ function Get-ManualSemverReviewFindings {
                 PackageName                = $dependentEntry.Name
                 CurrentVersion             = $dependentEntry.CurrentVersion
                 InReleaseSet               = $true
+                PlannedCurrentVersion      = $dependentEntry.CurrentVersion
+                EffectiveChangeType        = $dependentEntry.EffectiveChangeType
+                EffectiveTargetVersion     = $dependentEntry.EffectiveTargetVersion
                 ChangedFileCount           = $changedFileCount
                 DependencyChains           = @()
                 WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $dependentFolder
@@ -1299,7 +1305,29 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
     if ($inReleaseSet) {
-        [void]$sb.AppendLine('  2. Keep the release level already in the plan')
+        $plannedCurrentVersion = if ($null -ne $Finding.PSObject.Properties['PlannedCurrentVersion']) {
+            [string]$Finding.PlannedCurrentVersion
+        } else {
+            ''
+        }
+        $plannedChangeType = if ($null -ne $Finding.PSObject.Properties['EffectiveChangeType']) {
+            [string]$Finding.EffectiveChangeType
+        } else {
+            ''
+        }
+        $plannedTargetVersion = if ($null -ne $Finding.PSObject.Properties['EffectiveTargetVersion']) {
+            [string]$Finding.EffectiveTargetVersion
+        } else {
+            ''
+        }
+        $plannedHint = if (-not [string]::IsNullOrWhiteSpace($plannedChangeType) -and
+            -not [string]::IsNullOrWhiteSpace($plannedCurrentVersion) -and
+            -not [string]::IsNullOrWhiteSpace($plannedTargetVersion)) {
+            " ($($plannedChangeType): $plannedCurrentVersion -> $plannedTargetVersion)"
+        } else {
+            ''
+        }
+        [void]$sb.AppendLine("  2. Keep the release level already in the plan$plannedHint")
     } else {
         [void]$sb.AppendLine('  2. No material changes - release only if another package requires it')
     }
