@@ -52,7 +52,7 @@ pub(crate) const fn cell_align(align: usize) -> usize {
 /// building a pool from the key yields the geometry the original layout asked
 /// for, and a value is never under-aligned: the key's alignment is never
 /// narrower than the layout's own.
-/// Ref: docs/design/multi-pool.md, "Routing".
+/// Ref: docs/design/multi-pool.md, "Exact sizes, no size classes".
 #[inline]
 #[must_use]
 pub(crate) const fn routing_key(layout: Layout) -> Layout {

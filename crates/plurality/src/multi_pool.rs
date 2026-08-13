@@ -74,9 +74,10 @@ impl ChunkSizing {
 ///
 /// One pool object backs a heterogeneous working set: the type parameter
 /// travels with the allocation rather than with the pool. Values are routed to
-/// the internal pool serving their exact size and alignment, so each occupies
-/// the same space it would in a pool dedicated to that one type — sizes are
-/// never rounded up to share a size class.
+/// the internal pool serving their slot geometry, so each occupies the same
+/// space it would in a pool dedicated to that one type — sizes are never
+/// rounded up to share a size class.
+/// Ref: docs/design/multi-pool.md, "Exact sizes, no size classes".
 ///
 /// Allocation hands back an owned or shared handle, either detachable or bound
 /// to the pool's borrow. Each keeps its value at a stable address for as

@@ -35,8 +35,9 @@ handle runs `T`’s destructor and returns the slot to the pool.
 A [`MultiPool`][__link8] moves the element type from the pool to each allocation, so
 one pool object backs values of many types. It creates an internal layout
 pool for each distinct slot shape it sees and routes each value to the pool
-serving values of exactly its size and alignment, while handing out the same
-handles with the same guarantees.
+serving that shape, so a value occupies exactly the space a pool dedicated
+to its type would give it, while handing out the same handles with the same
+guarantees.
 
 Use [`Pool<T>`][__link9] for a working set that repeatedly allocates one value type,
 and [`MultiPool`][__link10] for heterogeneous recycled values. Both flavors suit
@@ -149,7 +150,7 @@ Runnable programs covering larger scenarios:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbywvLEi7IWFcbJkA30tgnoH0bZripcd-PAwobKKfwcC2g9dlhZIGCaXBsdXJhbGl0eWUwLjIuMg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbgnAstlZKnI4bXOxX_gHGIMgbmwmbIsFXLjIbFwQIz2UWqMVhZIGCaXBsdXJhbGl0eWUwLjIuMg
  [__link0]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.2.2/plurality/?search=MultiPool
