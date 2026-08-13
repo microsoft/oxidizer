@@ -26,6 +26,10 @@ pub(crate) struct Placeholder<'a> {
 
 impl Placeholder<'_> {
     /// The placeholder as it is written in the lowered template, with the name dropped.
+    ///
+    /// The spec is carried through as written and never inspected, so one that refers to another
+    /// argument is reported by `rustc` against the derive rather than by the macro against the
+    /// template. See the limits section of `docs/design.md`.
     pub(crate) fn lowered(&self) -> String {
         self.spec.map_or_else(|| "{}".to_owned(), |spec| format!("{{:{spec}}}"))
     }

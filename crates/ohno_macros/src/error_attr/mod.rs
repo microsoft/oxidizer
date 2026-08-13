@@ -137,7 +137,7 @@ fn unused_name(fields: &FieldsNamed) -> String {
     (1..=fields.named.len())
         .map(|n| format!("{CORE_FIELD_NAME}_{n}"))
         .find(|candidate| !taken(candidate))
-        .unwrap_or_default()
+        .expect("more candidates than there are fields, so one of them is always free")
 }
 
 #[cfg(test)]

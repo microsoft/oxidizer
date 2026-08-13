@@ -507,12 +507,19 @@ re-emitted faithfully, so such a function is rejected by `rustc` rather than by
 the macro. No test exercises the combination; if one is added, the macro should
 reject `const` itself, with a message, rather than let the expansion fail.
 
-The declared return type is named in both arms — as the closure's return type,
-and as the `let` annotation the `async` arm needs — so it lands in a position
-where `impl Trait` is not allowed (E0562). A function returning
-`Result<impl Iterator<..>, E>` therefore cannot carry `#[enrich_err]`. The
-annotation is what pins the `Ok` type when the body cannot, e.g. a body that
-only returns `Err`, so it is kept and the limit recorded here.
+Neither arm names the declared return type. The wrapper's tail is the function's
+return expression, so inference reaches it from the signature, and naming the
+type would put it in a closure return type or a `let` annotation — positions an
+opaque type is not allowed in, which would cost every function returning
+`Result<impl Trait, E>`.
+
+**A `#[display(...)]` format spec is not checked.** The text after the `:` is
+carried into the generated `format!` as written, so a spec that refers to another
+argument — a width or precision naming something the generated code does not
+have — is reported by `rustc` against the derive rather than by the macro against
+the template. That is the one place the R4 guarantee is not structural. Checking
+it would mean parsing the format grammar a second time, which is what lowering to
+`format!` exists to avoid, so the gap is recorded rather than closed.
 
 ## Diagnostics
 

@@ -35,11 +35,16 @@ use quote::ToTokens;
 /// - `#[display("...")]` - Custom display message with field interpolation. Positional arguments
 ///   are implicitly scoped to `self`, so fields are referenced by their bare name
 ///   (`path.display()`, not `self.path.display()`)
-/// - `#[no_constructors]` - Disable automatic constructor generation
+/// - `#[no_constructors]` - Disable automatic constructor generation. The generated `new()` and
+///   `caused_by()` are `pub(crate)` even when the error type is `pub`, so an error type that needs
+///   a public constructor declares one by hand. Rejected under `#[ohno::error]`, which adds the
+///   `OhnoCore` field a hand-written constructor would have to initialize
 /// - `#[no_debug]` - Disable automatic Debug trait implementation
 /// - `#[from(Type1, Type2, ...)]` - Generate From implementations for specified types
 ///
-/// By default, automatically implements `std::fmt::Debug` unless `#[no_debug]` is specified.
+/// By default, automatically implements `std::fmt::Debug` unless `#[no_debug]` is specified, so an
+/// existing manual `#[derive(Debug, Error)]` collides: drop the manual `Debug` derive, or add
+/// `#[no_debug]` to keep it.
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 // The entry points are thin shims a unit test cannot invoke: a `proc_macro::TokenStream` only

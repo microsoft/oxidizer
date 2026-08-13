@@ -7,7 +7,7 @@ pub unsafe extern "C" fn load<T: Clone>(&mut self, value: T) -> Result<T, MyErro
 where
     T: Send,
 {
-    let __ohno_result = (|| -> Result<T, MyError> { todo!() })();
+    let __ohno_result = (|| { todo!() })();
     __ohno_result
         .map_err(|mut __ohno_error| {
             ::ohno::Enrichable::add_enrichment(

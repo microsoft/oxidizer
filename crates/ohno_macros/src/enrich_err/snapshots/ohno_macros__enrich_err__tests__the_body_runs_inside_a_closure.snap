@@ -3,7 +3,7 @@ source: crates/ohno_macros/src/enrich_err/mod.rs
 expression: "rendered(quote!(\"failed\"),\nparse_quote!(fn load() -> Result<(), MyError> { Err(MyError::new()) }))"
 ---
 fn load() -> Result<(), MyError> {
-    let __ohno_result = (|| -> Result<(), MyError> { Err(MyError::new()) })();
+    let __ohno_result = (|| { Err(MyError::new()) })();
     __ohno_result
         .map_err(|mut __ohno_error| {
             ::ohno::Enrichable::add_enrichment(

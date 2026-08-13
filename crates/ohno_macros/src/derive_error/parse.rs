@@ -54,6 +54,11 @@ pub(crate) fn parse(input: DeriveInput, errors: &mut Errors) -> Option<Ast> {
 /// Reads the struct's own attributes into `ast`.
 fn parse_struct_attribute(attr: &Attribute, ast: &mut Ast, errors: &mut Errors) {
     if attr.path().is_ident("display") {
+        if ast.display.is_some() {
+            errors.add(&attr.meta, "only one `#[display(...)]` may be given, and this is the second");
+            return;
+        }
+
         match attr.parse_args::<FormatArgs>() {
             Ok(args) => {
                 ast.display = Some(DisplayAttr {
@@ -463,6 +468,17 @@ mod tests {
             assert!(errors.is_empty(), "{}", errors.into_compile_error());
             assert_eq!(ast.conversions.len(), 1);
         }
+    }
+
+    #[test]
+    fn rejects_a_second_display_attribute() {
+        let faults = parse_faults(parse_quote! {
+            #[display("first")]
+            #[display("second")]
+            struct T { inner: ohno::OhnoCore, }
+        });
+
+        assert!(faults.contains("only one"), "{faults}");
     }
 
     #[test]
