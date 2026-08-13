@@ -84,8 +84,17 @@ reimplementation of the same bounds: `chunk_layout` reports overflow as `None`
 — its slot array is sized by checked multiplication, since `Layout::repeat` is
 unstable — and the clamp simply halves the slot count until that call succeeds.
 The clamp therefore cannot disagree with the layout computation it is
-protecting. A one-slot chunk is the floor, and it is representable for every
-layout `Layout::new::<T>()` can produce.
+protecting.
+
+A one-slot chunk is the floor. Where even that has no representable layout, the
+layout cannot be pooled at any chunk size, and the floor is reported rather than
+asserted away: `LayoutPool::new` returns an allocator failure, and the sizing
+queries report zero. Reaching the floor takes a value layout within the slot
+metadata and chunk header of the `Layout` size ceiling, which a target only
+permits where its largest object comes that close to it — on a 64-bit target
+the compiler's own object-size bound is orders of magnitude below the ceiling,
+so the floor is unreachable there. Handling it fallibly is what keeps the
+promise that a `try_` call reports rather than panics, on every target.
 
 ## The router
 

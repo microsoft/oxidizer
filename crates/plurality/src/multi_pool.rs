@@ -420,7 +420,7 @@ impl<A: Allocator + Clone> MultiPool<A> {
     /// Effective slots per chunk in force for `T`'s layout.
     ///
     /// Reports the value the pool will actually use, after clamping. Never
-    /// creates a layout pool.
+    /// creates a layout pool. Zero for a layout too large to pool at all.
     #[must_use]
     pub fn chunk_size_of<T>(&self) -> u32 {
         self.with_layout_of::<T, _>(LayoutPoolRef::chunk_size, || {
@@ -430,7 +430,8 @@ impl<A: Allocator + Clone> MultiPool<A> {
         })
     }
 
-    /// Effective chunk cap in force for `T`'s layout, after clamping.
+    /// Effective chunk cap in force for `T`'s layout, after clamping. Zero for
+    /// a layout too large to pool at all.
     #[must_use]
     pub fn max_chunks_of<T>(&self) -> u32 {
         self.with_layout_of::<T, _>(LayoutPoolRef::max_chunks, || {

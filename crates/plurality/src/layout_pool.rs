@@ -50,10 +50,11 @@ impl<A: Allocator> LayoutPool<A> {
     ///
     /// # Errors
     /// Returns [`AllocError::ALLOCATOR_FAILED`] if the global allocator cannot
-    /// supply the pool's metadata block.
+    /// supply the pool's metadata block, or if `layout` is so large that not
+    /// even a one-slot chunk of it has a representable [`Layout`].
     pub(crate) fn new(layout: Layout, chunk_size: u32, max_chunks: Option<u32>, allocator: A) -> Result<Self, AllocError> {
         let geometry = RuntimeGeometry::new(layout);
-        let (chunk_size, chunk_layout) = clamp_chunk_size(geometry, chunk_size);
+        let (chunk_size, chunk_layout) = clamp_chunk_size(geometry, chunk_size).ok_or(AllocError::ALLOCATOR_FAILED)?;
         let max_chunks = clamp_max_chunks(chunk_size, max_chunks);
 
         let inner = PoolInner {
@@ -219,18 +220,23 @@ unsafe impl<A: Allocator + Send> Send for LayoutPool<A> {}
 
 /// Rounds `chunk_size` up to a power of two, then halves it until a chunk of
 /// that many slots has a representable [`Layout`]. Returns the effective slot
-/// count together with that layout.
-fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout) {
+/// count together with that layout, or `None` when not even a one-slot chunk
+/// can be laid out.
+fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> Option<(u32, Layout)> {
     let mut slots = chunk_size.clamp(1, MAX_CHUNK_SIZE_SLOTS).next_power_of_two();
     loop {
         if let Some(layout) = geometry.chunk_layout(slots as usize) {
-            return (slots, layout);
+            return Some((slots, layout));
         }
-        // A zero-slot chunk would divide by zero in `clamp_max_chunks` and
-        // underflow the index mask, so the floor is stated rather than trusted.
-        // It holds for every value layout `Layout::new::<T>()` can produce,
-        // because a single slot leaves the address space room to spare.
-        assert!(slots > 1, "a one-slot chunk must always have a representable layout");
+        // A value whose slot and chunk header together leave the `Layout`
+        // ceiling behind cannot be pooled at any chunk size, so the floor is
+        // reported rather than retried. Reaching it needs a value layout within
+        // the slot metadata of that ceiling, which a target only permits when
+        // its largest object is that close to it.
+        // Ref: docs/implementation/multi-pool.md, "Clamping the sizing configuration".
+        if slots == 1 {
+            return None;
+        }
         let previous = slots;
         slots /= 2;
         // Termination rests on the halving strictly shrinking the count. The
@@ -242,9 +248,9 @@ fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout)
 
 /// The slot count [`LayoutPool::new`] would settle on for `layout`, without
 /// building a pool. Lets the multi pool report effective sizing for a layout it
-/// has not yet seen.
+/// has not yet seen. Zero for a layout no chunk can hold.
 pub(crate) fn effective_chunk_size(layout: Layout, requested: u32) -> u32 {
-    clamp_chunk_size(RuntimeGeometry::new(layout), requested).0
+    clamp_chunk_size(RuntimeGeometry::new(layout), requested).map_or(0, |(slots, _)| slots)
 }
 
 /// The chunk cap [`LayoutPool::new`] would settle on, without building a pool.
@@ -258,11 +264,55 @@ pub(crate) fn effective_max_chunks(chunk_size: u32, requested: Option<u32>) -> u
 /// A cap of zero is a pool that can never allocate, exactly as it is for
 /// [`Pool`](crate::Pool), so only the upper bound is applied.
 fn clamp_max_chunks(chunk_size: u32, max_chunks: Option<u32>) -> u32 {
-    // `clamp_chunk_size` guarantees a nonzero divisor. The quotient can still
-    // be zero on a target whose addressable slot count is below the effective
-    // chunk size, which yields a pool that can never allocate — the same
-    // outcome an explicit zero cap produces, and not a new failure mode.
-    let ceiling = MAX_POOL_SLOTS / u64::from(chunk_size);
+    // A zero chunk size is what the sizing query reports for a layout no chunk
+    // can hold. Such a pool is never built, so there is no cap to clamp; the
+    // divisor below would be zero.
+    let Some(ceiling) = MAX_POOL_SLOTS.checked_div(u64::from(chunk_size)) else {
+        return 0;
+    };
+    // The quotient can still be zero on a target whose addressable slot count
+    // is below the effective chunk size, which yields a pool that can never
+    // allocate — the same outcome an explicit zero cap produces, and not a new
+    // failure mode.
     let requested = max_chunks.map_or(ceiling, u64::from);
     u32::try_from(requested.min(ceiling)).unwrap_or(u32::MAX)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use allocator_api2::alloc::Global;
+
+    use super::*;
+
+    /// A value layout so close to the `Layout` size ceiling that adding the
+    /// slot metadata and the chunk header leaves it behind.
+    ///
+    /// Only a target whose largest object reaches this far can produce such a
+    /// layout from `Layout::new::<T>()`, so the layout is built directly.
+    fn unpoolable_layout() -> Layout {
+        Layout::from_size_align(isize::MAX as usize, 1).expect("a value layout at the size ceiling")
+    }
+
+    #[test]
+    fn a_layout_leaving_no_room_for_a_chunk_has_no_pool() {
+        let Err(error) = LayoutPool::new(unpoolable_layout(), 64, None, Global) else {
+            panic!("no chunk of this layout fits");
+        };
+        assert!(error.is_allocator_failure());
+    }
+
+    #[test]
+    fn a_layout_leaving_no_room_for_a_chunk_reports_no_sizing() {
+        assert_eq!(effective_chunk_size(unpoolable_layout(), 64), 0);
+        assert_eq!(effective_max_chunks(0, None), 0);
+        assert_eq!(effective_max_chunks(0, Some(8)), 0);
+    }
+
+    #[test]
+    fn a_layout_leaving_room_for_one_slot_is_clamped_to_it() {
+        // Half the address space per value: a chunk holds exactly one slot.
+        let layout = Layout::from_size_align(1 << (usize::BITS - 2), 1).expect("half the address space");
+        assert_eq!(effective_chunk_size(layout, 64), 1);
+    }
 }
