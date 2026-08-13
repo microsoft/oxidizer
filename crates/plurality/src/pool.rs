@@ -815,33 +815,37 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
     /// allocation fails (see [`AllocError`] for the cause).
     #[inline]
     pub(crate) fn alloc_slot(&self) -> Result<NonNull<u8>, AllocError> {
+        if let Some(slot) = self.pop_free() {
+            return Ok(slot);
+        }
+        // `grow` reserves and returns the first slot of the new chunk (or an
+        // `AllocError` if the pool can't grow).
+        match self.grow() {
+            Ok(slot) => Ok(slot),
+            // A nested allocation may have published a chunk while ours was in
+            // flight, leaving slots free even though growth is no longer
+            // possible. That allocation has returned by now, so one more look
+            // at the free list settles whether anything is there to hand out.
+            // Ref: docs/implementation/reentrancy.md, "Growth".
+            Err(err) => self.pop_free().ok_or(err),
+        }
+    }
+
+    /// Pops a free slot, or returns `None` if the free list is empty.
+    #[inline]
+    fn pop_free(&self) -> Option<NonNull<u8>> {
         let geometry = self.geometry;
         loop {
             let head = self.core.free_head.load(Acquire);
             if head == FREE_END {
-                // `grow` reserves and returns the first slot of the new chunk
-                // (or an `AllocError` if the pool can't grow).
-                match self.grow() {
-                    Ok(slot) => return Ok(slot),
-                    Err(err) => {
-                        // A nested allocation may have published a chunk while
-                        // ours was in flight, leaving slots free even though
-                        // growth is no longer possible. Report failure only
-                        // when there is genuinely nothing to hand out.
-                        // Ref: docs/implementation/reentrancy.md, "Growth".
-                        if self.core.free_head.load(Acquire) == FREE_END {
-                            return Err(err);
-                        }
-                        continue;
-                    }
-                }
+                return None;
             }
             // SAFETY: `head` is a valid global index currently on the free list.
             let slot = unsafe { self.slot_for_global(head) };
             // SAFETY: a free slot's refcount field holds the next-free link.
             let next = unsafe { (*refcount_of(geometry, slot)).load(Relaxed) };
             if self.core.free_head.compare_exchange_weak(head, next, AcqRel, Acquire).is_ok() {
-                return Ok(slot);
+                return Some(slot);
             }
         }
     }
