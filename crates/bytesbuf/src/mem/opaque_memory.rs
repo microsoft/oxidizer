@@ -11,7 +11,8 @@ use crate::mem::{Memory, MemoryShared};
 /// This adapter adds some inefficiency due to additional indirection overhead for
 /// every memory reservation, so avoid this adapter if you can tolerate alternatives (generics).
 ///
-/// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards [`ThreadAware`]
+/// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards
+/// [`ThreadAware`](thread_aware_core::ThreadAware)
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
