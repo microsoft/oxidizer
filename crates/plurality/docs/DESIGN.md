@@ -3,7 +3,23 @@
 This document describes the architecture of the pool: the model it presents, the
 patterns that make it fast and safe, and the invariants that hold it together. It
 is intentionally implementation-agnostic — for the concrete API see the
-crate-level rustdoc, and for forward-looking ideas see [`TODO.md`](./TODO.md).
+crate-level rustdoc, for measured cost see [`PERF.md`](./PERF.md), and for
+forward-looking ideas see [`TODO.md`](./TODO.md).
+
+## Table of contents
+
+- [What plurality is](#what-plurality-is)
+- [The handle model](#the-handle-model)
+- [Concurrency model](#concurrency-model)
+- [Memory layout](#memory-layout)
+- [Reclamation without back-pointers](#reclamation-without-back-pointers)
+- [The free list](#the-free-list)
+- [Two reference counts, two lifetimes](#two-reference-counts-two-lifetimes)
+- [Allocation surface and failure](#allocation-surface-and-failure)
+- [`no_std` and allocator integration](#no_std-and-allocator-integration)
+- [Design invariants at a glance](#design-invariants-at-a-glance)
+- [Novel aspects and risk areas](#novel-aspects-and-risk-areas)
+- [Testing and verification](#testing-and-verification)
 
 ## What plurality is
 
@@ -143,9 +159,11 @@ single decision shapes the whole design.
 ```
 
 - **Allocation is single-threaded.** Growing the pool and popping free slots
-  happen on exactly one thread at a time. The pool object can be *moved* between
-  threads, but only one thread ever holds it, so these operations are
-  uncontended and need no locking among themselves.
+  happen on exactly one thread at a time. This is not a convention the caller
+  must uphold: the pool is `Send` but **`!Sync`**, so the shared reference that
+  every allocation entry point takes can never be observed from two threads at
+  once. The pool object can be *moved* between threads and resumed there; what
+  the type system forbids is two allocations overlapping in time.
 - **Frees are concurrent.** The owning and shared handles are thread-mobile, so
   many threads may drop handles — and thus return slots — simultaneously.
 
@@ -156,6 +174,14 @@ entirely with atomics — **there is no mutex anywhere in the pool**. State touc
 only by the single allocator thread (notably the directory of chunks) needs no
 synchronization at all; its confinement to that one thread is itself the
 soundness argument.
+
+That confinement is load-bearing in a specific way worth spelling out. The
+directory is a growable vector of chunk pointers, so adding a chunk may
+reallocate it and invalidate every pointer *into* the directory. The free path
+therefore never consults the directory at all — it recovers everything it needs
+from the value pointer itself (see below). The directory is read only by the
+allocator thread when popping a free-list index, and once more at teardown, when
+the pool is provably quiescent.
 
 ## Memory layout
 
@@ -330,7 +356,8 @@ invariants:
    pops slots, and the directory of chunks is confined to that thread. This is a
    "no concurrent allocation" rule, not a thread-affinity rule: the pool may be
    moved to and resumed on a different thread, so long as allocations never
-   overlap in time.
+   overlap in time. It is enforced statically by the pool being `!Sync`, not by
+   caller discipline.
 2. **Chunks are immortal until teardown.** They never move and are never freed
    individually, so back-references from chunks to pool state can never dangle.
 3. **The slot counter is context-typed.** Occupied slots read it as a count,
@@ -347,23 +374,150 @@ invariants:
    is established only during fresh construction before an ordinary alias can
    escape.
 
-## Verification strategy
+## Novel aspects and risk areas
 
-The architecture is validated by a layered suite of complementary techniques,
-each targeting a different failure class:
+### What is unusual here
 
-- **Functional tests** exercise the full handle surface, panic paths, and
-  behaviour under custom, failing, and counting allocators, plus contention
-  stress.
-- **Undefined-behaviour and data-race checking** validates the pointer-recovery
-  arithmetic and the non-atomic shared-handle path.
-- **Exhaustive interleaving exploration** covers the concurrent free path:
-  multiple shared handles on one slot, cross-thread frees, and teardown running
-  on a non-allocator thread — confirming each value is destroyed exactly once.
-- **Property and fuzz testing** probes pool invariants under randomized
-  operation sequences.
-- **Coverage and mutation testing** guard against untested paths and assertions
-  that do not actually constrain behaviour.
-- **Instruction-exact and wall-clock benchmarks** run identical operation bodies
-  so the hot paths are measured consistently, including cross-crate and
-  macro-benchmark comparisons against the system allocator.
+Most of the crate is conventional; a handful of choices are not, and they are
+where a reader's intuition from other pools will mislead them.
+
+- **Smart pointers instead of keys.** Slab- and slotmap-style containers hand
+  back an index that the caller must carry alongside a borrow of the container.
+  Plurality hands back a real smart pointer that dereferences to the value and
+  frees itself on drop. Everything below exists to make that affordable.
+- **One-pointer handles with no side table.** A handle to a sized value is
+  exactly one pointer — no index, no generation counter, no back-pointer stored
+  next to the value. Reclamation reconstructs the slot, chunk, and pool from
+  the value address by fixed-offset arithmetic alone.
+- **A type-erased reclamation core.** Recovery lands on a small, non-generic
+  core shared by every instantiation, holding only the free-list head, the
+  pool-level count, and a type-restoring teardown hook. This is what lets a
+  handle that has been coerced to `dyn Trait` — and has therefore forgotten its
+  concrete type at the type level — still return its slot correctly.
+- **A counter with two meanings.** The per-slot word is a reference count while
+  the slot is occupied and a free-list link while it is free. It is never both,
+  so one word serves both purposes.
+- **Single-producer / multi-consumer, inverted.** The usual lock-free stack has
+  many consumers; here the *pop* side is single-threaded and the *push* side is
+  concurrent. That inversion is what removes ABA from the design rather than
+  mitigating it with tags or hazard pointers.
+- **Asymmetric pinning.** Whether a handle can be pinned is decided per
+  ownership form rather than uniformly, because address stability alone does not
+  satisfy `Pin`'s contract when a handle can be forgotten.
+
+### Where the design is fragile
+
+Each item below is an invariant whose violation is silent — the code still
+compiles and usually still passes ordinary tests.
+
+| Invariant | What breaks without it | What enforces it today |
+|---|---|---|
+| Allocation never runs concurrently | The chunk directory is a plain vector behind an `UnsafeCell`; a concurrent grow and read is a data race and a use-after-free of the reallocated buffer | `Pool` is `!Sync`; adding a `Sync` impl, or moving any directory access onto the free path, breaks it |
+| The free path never touches the directory | Growth may reallocate the directory underneath a concurrent freer | Reclamation is pure pointer arithmetic and reads only the chunk header and the type-erased core |
+| Chunks are never moved or individually freed | The chunk header's back-pointer to the pool core would dangle | Chunks are released only at teardown, in bulk |
+| Slot stride and header offset are fixed and type-independent | Stepping from a value pointer back to its chunk header lands on the wrong address | The header offset is computed from `size_of`/`align_of` alone and never from the chunk size |
+| The slot counter's two roles never overlap in time | A live handle would read a free-list link as a reference count, or vice versa | The transition into and out of the free list is the same operation that publishes the counter's new meaning |
+| Every detachable handle holds one unit of the pool-level count | Teardown could run while values are still live, or memory could be freed under a live handle | Acquisition happens at allocation and release only after the value's destructor has run |
+| A value's destructor runs on its handle's final drop, never at teardown | Double drop, or a leaked destructor | A zero pool-level count implies no live detachable handles, so teardown has nothing to destroy |
+| Release/acquire ordering on the pool count and the published directory | The teardown thread could observe a partially published chunk set | The final count decrement is a release; teardown acquires before walking chunks |
+
+Two further hazards are worth calling out separately:
+
+- **Growth is the only path that can leak.** Publishing a freshly built chunk
+  into the directory can fail (the directory push may itself allocate). A guard
+  owns the chunk until publication succeeds, so an unwind there frees the chunk
+  rather than stranding it. Any restructuring of growth must preserve that
+  ownership hand-off.
+- **The reserved-slot shortcut in growth.** After acquiring a chunk, the
+  allocator serves the pending request from a slot it reserves directly, and
+  splices only the remainder onto the free list. Replacing this with "splice
+  everything, then pop" reintroduces a window in which concurrent pops could
+  re-empty the list and force an unbounded retry.
+
+### Known limits and sharp edges
+
+- **Slot indices are 32-bit.** The largest sentinel-free index bounds an
+  unbounded pool's capacity; on narrow-pointer targets the pool-level count is
+  the tighter bound instead.
+- **Reference-count overflow aborts the process**, mirroring the standard
+  library's `Arc`. Under `no_std` the abort is produced by a deliberate double
+  panic.
+- **Dropping the pool object is not synchronous.** It relinquishes only the
+  pool's own claim; memory survives until the last handle departs, and teardown
+  then runs on whichever thread dropped it.
+- **A forgotten handle leaks its slot permanently.** `mem::forget` is sound but
+  the slot never returns to the free list, and for a detachable handle it also
+  pins the pool's memory.
+- **Chunk memory is never returned early.** Capacity is monotonic within a
+  pool's lifetime; there is no shrink or compaction.
+
+## Testing and verification
+
+The architecture is validated by a layered suite in which each technique targets
+a failure class the others structurally cannot see. The pool's unsafe surface is
+concentrated in slot lifecycle, pointer recovery, and the free list, so the
+suite is weighted towards those.
+
+**Functional and contract tests** cover the full handle surface, the panic and
+fallible-allocation paths, and behaviour under custom, deliberately failing, and
+counting allocators. Separate suites pin down unsizing and trait-object
+coercion, uninitialized-then-initialize construction, and statistics accounting.
+Auto-trait boundaries are asserted *statically* rather than exercised at
+runtime — the pool-bound and non-atomic shared handles are asserted **not** to
+be `Send` or `Sync`, a pinned owner asserted not to be `Unpin`, and the unique
+owner of an address-sensitive value asserted not to expose `DerefMut`. A
+negative assertion of this kind is the only way to test that an unsound API was
+*not* accidentally exposed. Unwind safety is checked both statically and
+behaviourally, since a panicking constructor must leave the pool usable.
+
+**Miri** runs the whole suite in CI, including under tree borrows, strict
+provenance, and many-seeds race exploration. This is the primary defence for
+pointer recovery: the arithmetic that walks from a value pointer back to its
+chunk header must preserve provenance across the whole chunk allocation, which
+ordinary testing cannot observe. `cargo careful` runs alongside it.
+
+**Loom** exhaustively explores the concurrent free path. It is a separate test
+target, compiled only with the `loom` marker feature and `--cfg loom` so that
+the crate's atomics are swapped for loom's instrumented ones. The models are
+small and each defends one specific claim:
+
+| Model | Claim under test |
+|---|---|
+| Two shared handles racing on one slot | Exactly one of them observes the final release and frees the slot |
+| Teardown on a worker thread | The last handle may drop on a non-allocator thread and still reclaim correctly |
+| Concurrent frees of distinct slots | Independent pushes onto the free-list head never lose a slot |
+| A free landing during growth | A slot returned while a chunk is being spliced in survives the splice |
+| Value destroyed exactly once | No interleaving produces a double drop or a skipped drop |
+
+The growth model deserves a note: it drives the interleaving through a custom
+allocator that deliberately stalls inside the second chunk allocation, which is
+how the test forces a free to land in the narrow window that growth opens.
+
+**Property and fuzz testing** interprets a fuzzer-supplied byte stream as a
+sequence of allocate / share / drop operations against a deliberately tiny chunk
+size, so growth and reuse are hit constantly. Two invariants are asserted after
+every run: the number of destructor calls equals the number of allocations, and
+releasing every handle leaves the pool empty. This is excluded under Miri, which
+does not provide the filesystem isolation the fuzzing harness needs.
+
+**Allocation tracking** proves a claim that no functional test can express: that
+a warmed pool serves allocations with *zero* traffic to the system allocator.
+It measures real allocator calls around the steady-state paths, with the holding
+vectors reserved outside the measured spans so their own growth is not counted.
+It is likewise excluded under Miri, whose allocator model does not represent
+system allocations.
+
+**Coverage and mutation testing** guard against untested paths and assertions
+that do not actually constrain behaviour. Mutants that are provably not viable —
+overflow branches reachable only past a count no test can produce, and
+initialization whose removal would itself be undefined behaviour — are
+individually annotated with the reason, so an unexplained surviving mutant is
+always a real gap.
+
+**Benchmarks** pair Criterion wall-clock measurements with Callgrind
+instruction-count measurements over *identical* operation bodies, so the two
+views cannot drift apart. Coverage spans the per-handle micro-costs, a
+head-to-head comparison against other pooling crates, and a churn macro-benchmark
+against the system allocator. [`PERF.md`](./PERF.md) publishes a curated
+wall-clock subset; the instruction-count suites stay in the repository for
+optimization work.

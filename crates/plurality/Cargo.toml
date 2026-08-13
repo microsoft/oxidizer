@@ -81,6 +81,13 @@ harness = false
 name = "pool_comparison"
 harness = false
 
+# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
+[[bench]]
+name = "pool_comparison_cg"
+harness = false
+
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
 # discover this target authoritatively; the tests still build under `--cfg loom`.
 [[test]]

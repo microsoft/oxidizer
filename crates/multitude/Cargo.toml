@@ -189,8 +189,8 @@ required-features = ["serde_json"]
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
 # discover this target authoritatively; the tests still build under `--cfg loom`.
 [[test]]
-name = "loom"
-path = "tests/loom.rs"
+name = "loom_arena"
+path = "tests/loom_arena.rs"
 required-features = ["loom"]
 
 # >>> anvil-managed: anvil-lints

@@ -10,11 +10,15 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 ---
 
-//! Run the criterion + gungraun benchmark suites and rebuild `docs/PERF.md`.
+//! Run the criterion wall-clock and memory-footprint benchmark suites and
+//! rebuild `docs/PERF.md`.
 //!
-//! On Linux the script runs both criterion (wall-clock) and gungraun
-//! (Callgrind instruction counts) suites; gungraun requires `valgrind` to be
-//! installed. When valgrind is unavailable the gungraun columns show "—".
+//! The published report is a curated set of customer-facing scenarios: the three
+//! interning operations (`insert`, `reuse`, `lookup`) single-threaded and
+//! concurrently at 1/2/4/8 threads, plus the live-heap footprint of each
+//! interner. The crate's Callgrind instruction-count benches
+//! (`benches/internity_compare_cg.rs`) are kept for internal optimization work
+//! and are not part of this report, so no valgrind installation is required.
 //!
 //! Usage:
 //!   `scripts/perf_report.rs`                                    — full run (30 samples, 2s measurement)
@@ -23,11 +27,8 @@ clap = { version = "4", features = ["derive"] }
 //!
 //! internity has a single criterion bench binary (`internity_compare`, with
 //! groups `internity_compare/insert` / `internity_compare/reuse` /
-//! `internity_compare/lookup` and their `*-concurrent` counterparts) and a single
-//! gungraun binary (`internity_compare_cg`, functions `insert_*` / `reuse_*` /
-//! `lookup_*`). The `GROUPS` table below maps each criterion `<group>/<variant>`
-//! to its gungraun counterpart (or `None` for multi-threaded rows, which have no
-//! Callgrind microprobe). Every benchmark measures only
+//! `internity_compare/lookup` and their `*-concurrent` counterparts) and a
+//! memory-footprint binary (`internity_mem`). Every benchmark measures only
 //! insert/dedupe or lookup; benchmark setup and result destruction are kept
 //! outside the timed region.
 
@@ -37,13 +38,13 @@ use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode};
 
 use clap::Parser;
 
 type BoxErr = Box<dyn Error>;
 
-/// Run the criterion + gungraun benchmark suites and rebuild `docs/PERF.md`.
+/// Run the criterion + memory benchmark suites and rebuild `docs/PERF.md`.
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
 struct Args {
@@ -62,136 +63,83 @@ struct Args {
     /// Criterion warm-up time, in seconds (default: 1).
     #[arg(long)]
     warm_up_time: Option<u32>,
-
-    /// Force-skip the gungraun (Callgrind) benches even when `valgrind` is
-    /// available.
-    #[arg(long)]
-    no_gungraun: bool,
 }
 
-/// `(criterion_variant, Some(gungraun_fn) | None)`.
-type Variant = (&'static str, Option<&'static str>);
+/// `(operation, criterion_group, interner_rows_in_table_order)`.
+type Group = (&'static str, &'static str, &'static [&'static str]);
 
-/// `(group_name, variants_in_table_order)`.
-type Group = (&'static str, &'static [Variant]);
-
-/// Ordered (group, variants). The criterion variant name is the string passed
-/// to `g.bench_function(...)` / `BenchmarkId::new(...)` in
-/// `benches/internity_compare.rs`; the gungraun function name is the `fn` in
-/// `benches/counts/linux.rs`, included by `benches/internity_compare_cg.rs`. Competitor
-/// rows have no gungraun counterpart (`None`) and show "—".
-const GROUPS: &[Group] = &[
+/// Single-threaded tables. The row name is the string passed to
+/// `g.bench_function(...)` in `benches/internity_compare.rs`.
+const SINGLE_GROUPS: &[Group] = &[
     (
+        "insert",
         "internity_compare/insert",
         &[
-            ("internity", Some("insert_internity")),
-            ("internity-threaded", Some("insert_internity_threaded")),
-            ("lasso", Some("insert_lasso")),
-            ("string-interner", Some("insert_string_interner")),
-            ("symbol_table", Some("insert_symbol_table")),
-            ("ustr", Some("insert_ustr")),
-            ("string_cache", Some("insert_string_cache")),
+            "internity",
+            "internity-threaded",
+            "lasso",
+            "string-interner",
+            "symbol_table",
+            "ustr",
+            "string_cache",
         ],
     ),
     (
-        "internity_compare/insert-concurrent",
-        &[
-            ("internity/1", None),
-            ("internity/2", None),
-            ("internity/4", None),
-            ("internity/8", None),
-            ("lasso-threaded/1", None),
-            ("lasso-threaded/2", None),
-            ("lasso-threaded/4", None),
-            ("lasso-threaded/8", None),
-            ("symbol_table/1", None),
-            ("symbol_table/2", None),
-            ("symbol_table/4", None),
-            ("symbol_table/8", None),
-        ],
-    ),
-    (
+        "reuse",
         "internity_compare/reuse",
         &[
-            ("internity", Some("reuse_internity")),
-            ("internity-threaded", Some("reuse_internity_threaded")),
-            ("lasso", Some("reuse_lasso")),
-            ("string-interner", Some("reuse_string_interner")),
-            ("symbol_table", Some("reuse_symbol_table")),
-            ("ustr", Some("reuse_ustr")),
-            ("string_cache", Some("reuse_string_cache")),
+            "internity",
+            "internity-threaded",
+            "lasso",
+            "string-interner",
+            "symbol_table",
+            "ustr",
+            "string_cache",
         ],
     ),
     (
-        "internity_compare/reuse-concurrent",
-        &[
-            ("internity/1", None),
-            ("internity/2", None),
-            ("internity/4", None),
-            ("internity/8", None),
-            ("lasso-threaded/1", None),
-            ("lasso-threaded/2", None),
-            ("lasso-threaded/4", None),
-            ("lasso-threaded/8", None),
-            ("symbol_table/1", None),
-            ("symbol_table/2", None),
-            ("symbol_table/4", None),
-            ("symbol_table/8", None),
-            ("ustr/1", None),
-            ("ustr/2", None),
-            ("ustr/4", None),
-            ("ustr/8", None),
-            ("string_cache/1", None),
-            ("string_cache/2", None),
-            ("string_cache/4", None),
-            ("string_cache/8", None),
-        ],
-    ),
-    (
+        "lookup",
         "internity_compare/lookup",
         &[
-            ("internity", Some("lookup_internity")),
-            ("internity-frozen", Some("lookup_internity_frozen")),
-            ("lasso", Some("lookup_lasso")),
-            ("string-interner", Some("lookup_string_interner")),
-            ("symbol_table", Some("lookup_symbol_table")),
-            ("ustr", Some("lookup_ustr")),
-            ("string_cache", Some("lookup_string_cache")),
-        ],
-    ),
-    (
-        "internity_compare/lookup-concurrent",
-        &[
-            ("internity/1", None),
-            ("internity/2", None),
-            ("internity/4", None),
-            ("internity/8", None),
-            ("lasso-resolver/1", None),
-            ("lasso-resolver/2", None),
-            ("lasso-resolver/4", None),
-            ("lasso-resolver/8", None),
-            ("symbol_table/1", None),
-            ("symbol_table/2", None),
-            ("symbol_table/4", None),
-            ("symbol_table/8", None),
-            ("ustr/1", None),
-            ("ustr/2", None),
-            ("ustr/4", None),
-            ("ustr/8", None),
-            ("string_cache/1", None),
-            ("string_cache/2", None),
-            ("string_cache/4", None),
-            ("string_cache/8", None),
+            "internity",
+            "internity-frozen",
+            "lasso",
+            "string-interner",
+            "symbol_table",
+            "ustr",
+            "string_cache",
         ],
     ),
 ];
 
+/// Concurrent tables. Each row is measured at every entry of `THREAD_COUNTS`,
+/// under the criterion id `<group>/<interner>/<threads>`.
+const CONCURRENT_GROUPS: &[Group] = &[
+    (
+        "insert",
+        "internity_compare/insert-concurrent",
+        &["internity", "lasso-threaded", "symbol_table"],
+    ),
+    (
+        "reuse",
+        "internity_compare/reuse-concurrent",
+        &["internity", "lasso-threaded", "symbol_table", "ustr", "string_cache"],
+    ),
+    (
+        "lookup",
+        "internity_compare/lookup-concurrent",
+        &["internity", "lasso-resolver", "symbol_table", "ustr", "string_cache"],
+    ),
+];
+
+const THREAD_COUNTS: &[&str] = &["1", "2", "4", "8"];
+
+/// Rows that have no repeatable single-threaded criterion timing in this suite
+/// because they are backed by a process-global, persistent table.
 const CRITERION_OMITTED: &[&str] = &[
     "internity_compare/insert/ustr",
     "internity_compare/insert/string_cache",
 ];
-
-const GUNG_REQUIRED_METRICS: &[&str] = &["Instructions", "L1 Hits", "LL Hits", "RAM Hits"];
 
 fn unit_to_ns(unit: &str) -> Option<f64> {
     match unit {
@@ -272,85 +220,23 @@ fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
     crit.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
 }
 
-/// One gungraun benchmark's parsed metrics.
-struct GungEntry {
-    name: String,
-    metrics: Vec<(String, u64)>,
-}
-
-/// Parse the gungraun / iai-callgrind text output. Per-bench headers look like
-/// `<prefix>::<module>::<fn> <case>:(...)`; metric lines follow as
-/// `  <Metric>: <value>|...`.
-fn parse_gungraun(text: &str, prefix: &str) -> Vec<GungEntry> {
-    let mut out: Vec<GungEntry> = Vec::new();
-    let mut cur: Option<GungEntry> = None;
-    let header_prefix = format!("{prefix}::");
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix(&header_prefix) {
-            if let Some(after_mod) = rest.find("::") {
-                let after = &rest[after_mod + 2..];
-                let fn_name = match after.find(char::is_whitespace) {
-                    Some(sp) => &after[..sp],
-                    None => after,
-                };
-                let valid = !fn_name.is_empty()
-                    && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-                if valid {
-                    if let Some(prev) = cur.take() {
-                        out.push(prev);
-                    }
-                    cur = Some(GungEntry {
-                        name: fn_name.to_string(),
-                        metrics: Vec::new(),
-                    });
-                    continue;
-                }
-            }
-        }
-        if let Some(entry) = cur.as_mut() {
-            let trimmed = line.trim_start();
-            if let Some(colon) = trimmed.find(':') {
-                let key = &trimmed[..colon];
-                if matches!(key, "Instructions" | "L1 Hits" | "LL Hits" | "RAM Hits") {
-                    let after = trimmed[colon + 1..].trim_start();
-                    let num: String = after.chars().take_while(char::is_ascii_digit).collect();
-                    if let Ok(v) = num.parse::<u64>() {
-                        entry.metrics.push((key.to_string(), v));
-                    }
-                }
-            }
-        }
-    }
-    if let Some(entry) = cur.take() {
-        out.push(entry);
-    }
-    out
-}
-
-fn gung_metric(g: &[GungEntry], name: &str, key: &str) -> Option<u64> {
-    let entry = g.iter().find(|e| e.name == name)?;
-    entry.metrics.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
-}
-
-fn gung_instructions(g: &[GungEntry], name: Option<&str>) -> Option<u64> {
-    gung_metric(g, name?, "Instructions")
-}
-
-fn gung_mem(g: &[GungEntry], name: Option<&str>) -> Option<u64> {
-    let name = name?;
-    let l1 = gung_metric(g, name, "L1 Hits")?;
-    let ll = gung_metric(g, name, "LL Hits")?;
-    let ram = gung_metric(g, name, "RAM Hits")?;
-    Some(l1 + ll + ram)
-}
-
 fn validate_criterion(crit: &[(String, f64)]) -> Result<(), BoxErr> {
     let mut missing = Vec::new();
-    for (group, variants) in GROUPS {
-        for (variant, _) in *variants {
-            let key = format!("{group}/{variant}");
+    for (_, group, rows) in SINGLE_GROUPS {
+        for row in *rows {
+            let key = format!("{group}/{row}");
             if !CRITERION_OMITTED.contains(&key.as_str()) && lookup_time(crit, &key).is_none() {
                 missing.push(key);
+            }
+        }
+    }
+    for (_, group, rows) in CONCURRENT_GROUPS {
+        for row in *rows {
+            for threads in THREAD_COUNTS {
+                let key = format!("{group}/{row}/{threads}");
+                if lookup_time(crit, &key).is_none() {
+                    missing.push(key);
+                }
             }
         }
     }
@@ -358,31 +244,6 @@ fn validate_criterion(crit: &[(String, f64)]) -> Result<(), BoxErr> {
         Ok(())
     } else {
         Err(format!("missing required criterion timings: {}", missing.join(", ")).into())
-    }
-}
-
-fn validate_gungraun(gung: &[GungEntry]) -> Result<(), BoxErr> {
-    let mut missing = Vec::new();
-    for (_, variants) in GROUPS {
-        for (_, gung_name) in *variants {
-            let Some(name) = *gung_name else {
-                continue;
-            };
-            if !gung.iter().any(|entry| entry.name == name) {
-                missing.push(format!("{name} (benchmark)"));
-                continue;
-            }
-            for metric in GUNG_REQUIRED_METRICS {
-                if gung_metric(gung, name, metric).is_none() {
-                    missing.push(format!("{name} ({metric})"));
-                }
-            }
-        }
-    }
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("missing required gungraun data: {}", missing.join(", ")).into())
     }
 }
 
@@ -395,39 +256,8 @@ fn fmt_ns(ns: Option<f64>) -> String {
     }
 }
 
-fn fmt_int(n: Option<u64>) -> String {
-    match n {
-        None => "—".into(),
-        Some(n) => {
-            let s = n.to_string();
-            let bytes = s.as_bytes();
-            let mut out = String::with_capacity(s.len() + s.len() / 3);
-            let first = bytes.len() % 3;
-            if first > 0 {
-                out.push_str(&s[..first]);
-            }
-            for (i, chunk) in bytes[first..].chunks(3).enumerate() {
-                if !(i == 0 && first == 0) {
-                    out.push(',');
-                }
-                out.push_str(std::str::from_utf8(chunk).expect("ASCII digits"));
-            }
-            out
-        }
-    }
-}
-
-/// The `internity` variant to compare against for a given variant: the same
-/// thread-count suffix for concurrent rows, else the plain `internity` row.
-fn internity_ref(variant: &str) -> String {
-    match variant.split_once('/') {
-        Some((_, suffix)) => format!("internity/{suffix}"),
-        None => "internity".to_string(),
-    }
-}
-
-/// Formats one variant's speed relative to the `internity` reference in the same
-/// group: `+42%` means this variant is 42% slower than internity; `-30%` faster.
+/// Formats one row's speed relative to the `internity` reference in the same
+/// table: `+42%` means this row is 42% slower than internity; `-30%` faster.
 fn fmt_delta(this: Option<f64>, reference: Option<f64>, is_ref: bool) -> String {
     if is_ref {
         return "ref".into();
@@ -438,114 +268,123 @@ fn fmt_delta(this: Option<f64>, reference: Option<f64>, is_ref: bool) -> String 
     }
 }
 
-fn build_report(crit: &[(String, f64)], gung: &[GungEntry]) -> String {
+fn header() -> String {
     let mut out = String::new();
     out.push_str("# internity Performance Report\n\n");
-    out.push_str("Generated by `scripts/perf_report.rs`. Head-to-head against the main Rust\n");
-    out.push_str("interners.\n\n");
     out.push_str(
-        "- `cargo bench --bench internity_compare` — criterion wall-clock timings for three \
-         operations (`insert`, `reuse`, `lookup`), each in a **single-threaded** \
-         flavor and **multi-threaded** flavors at 1/2/4/8 threads.\n",
+        "Generated by [`scripts/perf_report.rs`](../scripts/perf_report.rs). Re-run it to \
+         refresh these numbers.\n\n",
     );
     out.push_str(
-        "- `cargo bench --bench internity_compare_cg` — gungraun / Callgrind instruction-precise \
-         counts for a **single** interning/lookup operation against a table of 1000 filler \
-         entries plus the fixed key (1001 preloaded), reported separately as microprobes (see below).\n",
+        "All timing figures are wall-clock medians measured by Criterion. They are\n\
+         machine-dependent: the ratios between rows are the durable signal, not the\n\
+         absolute values.\n\n",
     );
     out.push_str(
-        "- `cargo bench --bench internity_mem` — live heap footprint of each interner \
-         (tracking global allocator).\n\n",
+        "This report is a curated set of customer-facing scenarios. The crate also carries\n\
+         internal Callgrind instruction-count benches (`benches/internity_compare_cg.rs`)\n\
+         used for optimization work, which are not published here; run them with\n\
+         `cargo bench --bench internity_compare_cg`.\n\n",
+    );
+    out.push_str(
+        "**Workload:** a corpus of ≈6000 identifier-like strings, exercised through three \
+         customer operations — `insert` (interning a string for the first time), `reuse` \
+         (interning a string that is already interned) and `lookup` (resolving a handle back \
+         to its string).\n\n",
     );
     out.push_str(
         "**Methodology:** every timed region measures only insert/dedupe or lookup — \
-         setup and result destruction are kept outside the elapsed-time boundary. \
-         Refcounted `string_cache` atoms are retained across dedupe/lookup rounds \
-         so hits are measured against populated dynamic entries. `lookup` uses the \
-         same random order for all crates. Multi-threaded flavors run the op on `n` \
-         threads, barrier-timed so only the parallel work is counted (no thread \
-         spawn/join). Corpus ≈ 6000 identifier-like strings.  \n",
+         benchmark setup and result destruction are kept outside the elapsed-time boundary. \
+         Refcounted `string_cache` atoms are retained across dedupe/lookup rounds so hits \
+         are measured against populated dynamic entries. `lookup` uses the same random order \
+         for all crates. The concurrent flavors run the operation on `n` threads and are \
+         barrier-timed, so thread spawn/join is excluded and only the parallel work is \
+         counted.  \n",
     );
     out.push_str(
         "**Δ vs internity:** `+x%` = that row is x% slower than internity on the same \
          workload; `-x%` = faster.  \n",
     );
     out.push_str(
-        "The process-global/cache-backed rows (`ustr`, `string_cache`) have no \
-         repeatable single-threaded Criterion `insert` timing in this suite and are \
-         therefore omitted from that table; their deterministic single-insert cost \
-         appears in the Callgrind microprobe section below.\n\n",
+        "The process-global, cache-backed rows (`ustr`, `string_cache`) keep their table \
+         alive for the whole process, so they have no repeatable first-time `insert` timing \
+         and are absent from the single-threaded `insert` table.\n\n",
+    );
+    out
+}
+
+fn render_single(out: &mut String, crit: &[(String, f64)]) {
+    out.push_str("## Single-threaded interning\n\n");
+    out.push_str(
+        "One table per operation, comparing internity against every other interner measured \
+         for that operation on a single thread.\n\n",
     );
 
-    for (group, variants) in GROUPS {
-        // Concurrent groups are rendered as one table per thread count.
-        if group.ends_with("-concurrent") {
-            render_concurrent(&mut out, group, crit, variants);
-            continue;
-        }
-
-        let _ = writeln!(out, "## `{group}` — single-threaded\n");
-        out.push_str("| Variant | Time | Δ vs internity |\n");
+    for (op, group, rows) in SINGLE_GROUPS {
+        let _ = writeln!(out, "### `{op}` — single-threaded\n");
+        out.push_str("| Interner | Time | Δ vs internity |\n");
         out.push_str("|---|---:|---:|\n");
-        for (variant, _) in *variants {
-            let key = format!("{group}/{variant}");
-            let t = lookup_time(crit, &key);
-            // Rows without a repeatable Criterion timing live only in the
-            // Callgrind microprobe section, not this wall-clock table.
-            if t.is_none() {
+        let reference = lookup_time(crit, &format!("{group}/internity"));
+        for row in *rows {
+            let key = format!("{group}/{row}");
+            let time = lookup_time(crit, &key);
+            if time.is_none() {
                 continue;
             }
-            let is_ref = *variant == "internity" || variant.starts_with("internity/");
-            let reference = lookup_time(crit, &format!("{group}/{}", internity_ref(variant)));
             let _ = writeln!(
                 out,
-                "| `{variant}` | {} | {} |",
-                fmt_ns(t),
-                fmt_delta(t, reference, is_ref),
+                "| `{row}` | {} | {} |",
+                fmt_ns(time),
+                fmt_delta(time, reference, *row == "internity"),
             );
         }
         out.push('\n');
     }
-
-    render_microprobes(&mut out, gung);
-
-    out
 }
 
-/// Render the Callgrind instruction-count microprobes as a **standalone** section,
-/// one table per single-threaded operation. These are deliberately *not* presented
-/// as counterparts to the Criterion wall-clock tables: the setup (a fixed
-/// 1000-entry table, a single measured op, fixed-seed hashers for the randomly
-/// seeded competitors) differs from the ≈6000-operation Criterion corpus loop, so
-/// the two datasets must not be compared row-for-row.
-fn render_microprobes(out: &mut String, gung: &[GungEntry]) {
-    out.push_str("## Instruction-count microprobes (Callgrind)\n\n");
-    out.push_str(
-        "These are **standalone** deterministic microprobes, **not** counterparts to the \
-         Criterion wall-clock tables above. Each measures a **single** interning or lookup \
-         operation against a table pre-populated with 1000 filler entries plus the fixed key \
-         (1001 preloaded), with `lasso`/`string-interner` pinned to fixed-seed hashers for reproducibility. \
-         Occupancy, key distribution, hasher configuration, and operation granularity all \
-         differ from the ≈6000-operation Criterion corpus loop, so the instruction counts \
-         here must **not** be read as a per-row explanation of the wall-clock timings.  \n",
-    );
-    out.push_str("Mem accesses = L1 + LL + RAM hits (Callgrind D-cache references).\n\n");
+/// Render each concurrent operation as a single table: one row per interner, one
+/// column per thread count, and a trailing delta at the highest thread count.
+fn render_concurrent(out: &mut String, crit: &[(String, f64)]) {
+    let top = THREAD_COUNTS
+        .last()
+        .expect("THREAD_COUNTS is a non-empty compile-time constant");
 
-    for (group, variants) in GROUPS {
-        if group.ends_with("-concurrent") {
-            continue;
+    out.push_str("## Concurrent scaling\n\n");
+    out.push_str(
+        "One table per operation, with a column per thread count. Each cell is the \
+         wall-clock median of the whole parallel phase at that thread count, so the total \
+         work grows with the thread count and the numbers show how each interner holds up \
+         under contention rather than a per-thread speedup. The trailing column is the \
+         delta against internity at the highest thread count, which is where the designs \
+         separate most; per-thread-count deltas are omitted to keep the tables readable.\n\n",
+    );
+
+    for (op, group, rows) in CONCURRENT_GROUPS {
+        let _ = writeln!(out, "### `{op}` — concurrent\n");
+        out.push_str("| Interner |");
+        for threads in THREAD_COUNTS {
+            let _ = write!(out, " {threads} thr |");
         }
-        let op = group.strip_prefix("internity_compare/").unwrap_or(group);
-        let _ = writeln!(out, "### `{op}` — single operation\n");
-        out.push_str("| Interner | Instructions | Mem accesses |\n");
-        out.push_str("|---|---:|---:|\n");
-        for (variant, gung_name) in *variants {
-            if gung_name.is_none() {
-                continue;
+        let _ = writeln!(out, " Δ vs internity @ {top} thr |");
+        out.push_str("|---|");
+        for _ in THREAD_COUNTS {
+            out.push_str("---:|");
+        }
+        out.push_str("---:|\n");
+
+        let reference = lookup_time(crit, &format!("{group}/internity/{top}"));
+        for row in *rows {
+            let _ = write!(out, "| `{row}` |");
+            for threads in THREAD_COUNTS {
+                let time = lookup_time(crit, &format!("{group}/{row}/{threads}"));
+                let _ = write!(out, " {} |", fmt_ns(time));
             }
-            let instr = gung_instructions(gung, *gung_name);
-            let mem = gung_mem(gung, *gung_name);
-            let _ = writeln!(out, "| `{variant}` | {} | {} |", fmt_int(instr), fmt_int(mem));
+            let top_time = lookup_time(crit, &format!("{group}/{row}/{top}"));
+            let _ = writeln!(
+                out,
+                " {} |",
+                fmt_delta(top_time, reference, *row == "internity")
+            );
         }
         out.push('\n');
     }
@@ -561,7 +400,7 @@ fn memory_section(mem_log: &str) -> Result<String, BoxErr> {
         .ok_or("memory footprint output did not contain a `Corpus:` section")?;
     let is_cargo_status = |l: &str| {
         let t = l.trim_start();
-        ["Compiling", "Finished", "Running", "warning", "error", "note:"]
+        ["Compiling", "Finished", "Running", "Blocking", "warning", "error", "note:"]
             .iter()
             .any(|p| t.starts_with(p))
     };
@@ -582,54 +421,16 @@ fn memory_section(mem_log: &str) -> Result<String, BoxErr> {
          Live heap bytes held by each interner, measured with a tracking global \
          allocator over the same corpus (`cargo bench --bench internity_mem`). `insert` is the \
          filled interner; `lookup` is the read structure the lookup benchmark resolves \
-         against (the frozen read form where a crate has one).\n\n\
+         against (the frozen read form where a crate has one). Lower is better.\n\n\
          ```text\n{table}\n```\n"
     ))
 }
 
-/// Render a concurrent group as one table per thread count. Variant names are
-/// `<crate>/<threads>`; rows are the crates (compared to internity at the same
-/// thread count), with a separate table per distinct thread count. `group` is
-/// e.g. `insert-concurrent`; its label drops the `-concurrent` suffix.
-fn render_concurrent(out: &mut String, group: &str, crit: &[(String, f64)], variants: &[Variant]) {
-    let op = group.strip_suffix("-concurrent").unwrap_or(group);
-
-    // Collect crates and thread counts in first-seen order.
-    let mut crates: Vec<&str> = Vec::new();
-    let mut threads: Vec<&str> = Vec::new();
-    for (variant, _) in variants {
-        if let Some((c, t)) = variant.split_once('/') {
-            if !crates.contains(&c) {
-                crates.push(c);
-            }
-            if !threads.contains(&t) {
-                threads.push(t);
-            }
-        }
-    }
-
-    for t in &threads {
-        let label = if *t == "1" {
-            "1 thread".to_string()
-        } else {
-            format!("{t} threads")
-        };
-        let _ = writeln!(out, "## `{op}` — multi-threaded, {label}\n");
-        out.push_str("| Interner | Time | Δ vs internity |\n");
-        out.push_str("|---|---:|---:|\n");
-        let reference = lookup_time(crit, &format!("{group}/internity/{t}"));
-        for c in &crates {
-            let time = lookup_time(crit, &format!("{group}/{c}/{t}"));
-            let is_ref = *c == "internity";
-            let _ = writeln!(
-                out,
-                "| `{c}` | {} | {} |",
-                fmt_ns(time),
-                fmt_delta(time, reference, is_ref),
-            );
-        }
-        out.push('\n');
-    }
+fn build_report(crit: &[(String, f64)]) -> String {
+    let mut out = header();
+    render_single(&mut out, crit);
+    render_concurrent(&mut out, crit);
+    out
 }
 
 /// Locate the crate root. With `cargo +nightly -Zscript`, `CARGO_MANIFEST_DIR`
@@ -639,16 +440,6 @@ fn crate_root() -> PathBuf {
         .parent()
         .expect("scripts/ always has a parent crate directory")
         .to_path_buf()
-}
-
-/// Check whether `valgrind` is available on PATH.
-fn have_valgrind() -> bool {
-    Command::new("valgrind")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
 }
 
 /// Run `cargo bench --bench <name> -- <extra>` from `cwd`, capturing combined
@@ -689,20 +480,6 @@ fn run(args: &Args) -> Result<(), BoxErr> {
         .into());
     }
 
-    let run_gungraun = if args.no_gungraun {
-        eprintln!("note: --no-gungraun set; gungraun columns will show \"—\".");
-        false
-    } else if have_valgrind() {
-        true
-    } else {
-        eprintln!(
-            "note: valgrind not found; skipping gungraun benches. \
-             Instruction/memory columns will show \"—\". Rerun with valgrind installed \
-             for the full report."
-        );
-        false
-    };
-
     let (def_samples, def_meas) = if args.fast { (10, 1) } else { (30, 2) };
     let samples = args.samples.unwrap_or(def_samples).to_string();
     let meas = args.measurement_time.unwrap_or(def_meas).to_string();
@@ -723,36 +500,22 @@ fn run(args: &Args) -> Result<(), BoxErr> {
         &crit_args,
         &format!("criterion internity_compare: {samples} samples, {meas}s measurement"),
     )?;
-    let gung_log = if run_gungraun {
-        run_bench(&crate_dir, "internity_compare_cg", &[], "gungraun internity_compare_cg")?
-    } else {
-        String::new()
-    };
     let mem_log = run_bench(&crate_dir, "internity_mem", &[], "memory footprint")?;
 
     println!("==> Building docs/PERF.md");
     let crit = parse_criterion(&crit_log);
-    let gung = parse_gungraun(&gung_log, "internity_compare_cg");
     let mem = memory_section(&mem_log)?;
 
     validate_criterion(&crit)?;
-    if run_gungraun {
-        validate_gungraun(&gung)?;
-    }
 
-    let report = build_report(&crit, &gung);
+    let report = build_report(&crit);
     let report = format!("{report}{mem}");
     let docs_dir = crate_dir.join("docs");
     fs::create_dir_all(&docs_dir).map_err(|e| format!("creating {}: {e}", docs_dir.display()))?;
     let out_path = docs_dir.join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| format!("writing {}: {e}", out_path.display()))?;
 
-    println!(
-        "Wrote {} ({} criterion, {} gungraun benches)",
-        out_path.display(),
-        crit.len(),
-        gung.len(),
-    );
+    println!("Wrote {} ({} criterion benches)", out_path.display(), crit.len());
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())
 }
