@@ -7,7 +7,7 @@ use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
 use layered::{DynamicService, DynamicServiceExt, Service, Stack};
 use opentelemetry::metrics::Meter;
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::Dispatch;
@@ -18,7 +18,7 @@ use crate::pipeline::standard::{ConfigureStandardPipeline, RecoveryMode};
 use crate::resilience::HttpResilienceContext;
 use crate::{HttpRequest, HttpResponse};
 
-#[derive(Debug, Clone, ThreadAware)]
+#[derive(Debug, Clone, thread_aware::ThreadAware)]
 pub(crate) enum PipelineBuilder {
     StandardPipeline(ConfigureStandardPipeline),
     Minimal,

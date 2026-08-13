@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 /// Options for configuring body-level behavior.
 ///
@@ -21,7 +21,7 @@ use thread_aware::ThreadAware;
 ///
 /// let options = HttpBodyOptions::default().timeout(Duration::from_secs(60));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ThreadAware)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, thread_aware::ThreadAware)]
 pub struct HttpBodyOptions {
     pub(crate) timeout: Option<Duration>,
     pub(crate) buffer_limit: Option<usize>,

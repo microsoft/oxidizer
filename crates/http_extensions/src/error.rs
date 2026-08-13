@@ -11,8 +11,7 @@ use http::status::InvalidStatusCode;
 use http::uri::{InvalidUri, InvalidUriParts};
 use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware_core::{Affinity, ThreadAware};
 
 use crate::HttpRequest;
 use crate::error_labels::{

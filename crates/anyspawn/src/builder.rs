@@ -5,9 +5,8 @@
 
 use std::fmt::Debug;
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware_core::{Affinity, ThreadAware};
 
 use crate::Spawner;
 use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};

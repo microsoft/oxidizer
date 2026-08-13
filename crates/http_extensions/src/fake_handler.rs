@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use http::{Response, StatusCode};
 use layered::Service;
-use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
+use thread_aware_core::{Affinity, ThreadAware};
 
 use crate::constants::ERR_POISONED_LOCK;
 use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};

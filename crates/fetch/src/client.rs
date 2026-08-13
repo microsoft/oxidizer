@@ -15,7 +15,8 @@ use http_extensions::timeout::ResponseTimeout;
 use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
 use layered::Service;
 use templated_uri::{BaseUri, Uri};
-use thread_aware::{PerCore, ThreadAware};
+use thread_aware::PerCore;
+use thread_aware_core::ThreadAware;
 use tick::{Clock, FutureExt as TimeoutExt};
 
 use crate::pipeline::Pipeline;
@@ -50,7 +51,7 @@ use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 ///
 /// See [crate-level][`crate`] documentation for more details on available configuration options
 /// and advanced usage scenarios.
-#[derive(Debug, Clone, ThreadAware)]
+#[derive(Debug, Clone, thread_aware::ThreadAware)]
 pub struct HttpClient {
     pipeline: HttpClientPipeline,
     body_builder: HttpBodyBuilder,
@@ -370,7 +371,7 @@ impl Service<HttpRequest> for HttpClient {
     }
 }
 
-#[derive(ThreadAware, Clone, Debug)]
+#[derive(thread_aware::ThreadAware, Clone, Debug)]
 pub(super) enum HttpClientPipeline {
     Shared(#[thread_aware(skip)] Arc<Pipeline>),
     Isolated(thread_aware::Arc<Pipeline, PerCore>),

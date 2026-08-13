@@ -3,7 +3,7 @@
 
 use core::fmt::Debug;
 
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 use crate::BytesBuf;
 use crate::mem::Memory;
@@ -65,7 +65,7 @@ use crate::mem::Memory;
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
-#[derive(Clone, ThreadAware)]
+#[derive(Clone, thread_aware::ThreadAware)]
 pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
     data: D,
     // The function pointer holds no state; only the captured data can be thread-affine.
@@ -141,7 +141,7 @@ mod tests {
     assert_impl_all!(CallbackMemory<TransparentMemory>: MemoryShared);
 
     /// Thread-aware callback data carrying an observable call counter alongside the wrapped provider.
-    #[derive(Clone, Debug, ThreadAware)]
+    #[derive(Clone, Debug, thread_aware::ThreadAware)]
     struct CountingData {
         inner: TransparentMemory,
         // The counter is inert shared state, so relocation does not affect it.
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn works_with_non_debug_data() {
         // Data that is intentionally not `Debug`, to confirm `CallbackMemory` does not require it.
-        #[derive(Clone, ThreadAware)]
+        #[derive(Clone, thread_aware::ThreadAware)]
         struct NotDebug {
             inner: TransparentMemory,
         }

@@ -307,8 +307,13 @@ pub use timeout::Timeout;
 macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(
-            impl thread_aware::ThreadAware for $t {
-                fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {}
+            impl thread_aware_core::ThreadAware for $t {
+                fn relocate(
+                    &mut self,
+                    _source: Option<thread_aware_core::Affinity>,
+                    _destination: thread_aware_core::Affinity,
+                ) {
+                }
             }
         )+
     };

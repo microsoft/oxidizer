@@ -11,7 +11,7 @@
 
 #[doc(no_inline)]
 pub use http_extensions::FakeHandler;
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};
@@ -22,7 +22,7 @@ use crate::{HttpClient, HttpClientBuilder};
 ///
 /// Minimal configuration used in testing environments where only basic
 /// clock functionality is needed.
-#[derive(Debug, Clone, ThreadAware)]
+#[derive(Debug, Clone, thread_aware::ThreadAware)]
 pub struct FakeDeps {
     /// Clock for testing time-based operations.
     pub clock: Clock,

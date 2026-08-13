@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use nm::{Event, Magnitude};
 use plurality::Pool;
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
@@ -36,7 +36,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
-#[derive(Clone, Debug, ThreadAware)]
+#[derive(Clone, Debug, thread_aware::ThreadAware)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
 }

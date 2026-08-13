@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 use std::num::NonZero;
 
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
@@ -42,7 +42,7 @@ use crate::mem::{BlockSize, Memory};
 /// ```
 ///
 /// [1]: crate::mem::GlobalPool
-#[derive(Clone, Debug, Default, ThreadAware)]
+#[derive(Clone, Debug, Default, thread_aware::ThreadAware)]
 pub struct TransparentMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.
     _placeholder: (),

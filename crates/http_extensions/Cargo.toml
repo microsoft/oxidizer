@@ -48,8 +48,6 @@ allowed_external_types = [
     "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
     "templated_uri::base_uri::BaseUri",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
     "thread_aware_core::ThreadAware",
     "tick::clock::Clock",
 ]
@@ -77,6 +75,7 @@ serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
+thread_aware_core = { workspace = true }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]

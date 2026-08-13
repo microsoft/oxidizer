@@ -93,6 +93,7 @@ dependencies = [
  "smol",
  "static_assertions",
  "thread_aware",
+ "thread_aware_core",
  "tokio",
 ]
 
@@ -673,6 +674,7 @@ dependencies = [
  "static_assertions",
  "testing_aids",
  "thread_aware",
+ "thread_aware_core",
  "windows-sys 0.61.2",
 ]
 
@@ -732,6 +734,7 @@ dependencies = [
  "mutants",
  "ohno 0.4.0",
  "thread_aware",
+ "thread_aware_core",
  "tokio",
 ]
 
@@ -1400,6 +1403,7 @@ dependencies = [
  "templated_uri",
  "testing_aids",
  "thread_aware",
+ "thread_aware_core",
  "tick",
  "tokio",
  "tracing",
@@ -1956,6 +1960,7 @@ dependencies = [
  "static_assertions",
  "templated_uri",
  "thread_aware",
+ "thread_aware_core",
  "tick",
  "tokio",
  "uuid",
@@ -4004,6 +4009,7 @@ dependencies = [
  "static_assertions",
  "testing_aids",
  "thread_aware",
+ "thread_aware_core",
  "tick",
  "tokio",
  "tower",
@@ -4540,6 +4546,7 @@ dependencies = [
  "serde_json",
  "static_assertions",
  "thread_aware",
+ "thread_aware_core",
  "time",
  "tokio",
 ]
@@ -5020,6 +5027,7 @@ dependencies = [
  "futures-util",
  "mutants",
  "thread_aware",
+ "thread_aware_core",
  "tokio",
 ]
 

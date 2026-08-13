@@ -23,8 +23,6 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
     "thread_aware_core::ThreadAware",
 ]
 
@@ -46,6 +44,7 @@ nm = { workspace = true, optional = true }
 plurality = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, default-features = false, features = ["derive"] }
+thread_aware_core = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }

@@ -141,9 +141,9 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::affinity::Affinity;
 use thread_aware::storage::Strategy;
-use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware};
+use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess};
+use thread_aware_core::{Affinity, ThreadAware};
 
 /// Suppresses duplicate async operations identified by a key.
 ///

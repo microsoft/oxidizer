@@ -31,8 +31,6 @@ allowed_external_types = [
     "tower_layer::Layer",
     "tower_service::Service",
     "thread_aware_core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
 ]
 
 [package.metadata.docs.rs]
@@ -67,6 +65,7 @@ opentelemetry = { workspace = true, optional = true }
 recoverable = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
+thread_aware_core = { workspace = true }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

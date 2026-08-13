@@ -6,14 +6,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use layered::{DynamicService, DynamicServiceExt};
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 use crate::handlers::Dispatch;
 use crate::pipeline::pipeline_context::PipelineContext;
 use crate::{HttpRequest, HttpResponse, RequestHandler};
 
 /// A convenience API for creating a custom request pipeline.
-#[derive(Clone, ThreadAware)]
+#[derive(Clone, thread_aware::ThreadAware)]
 pub(crate) struct CustomPipelineFactory(
     #[thread_aware(skip)] Arc<dyn Fn(Dispatch, PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> + Send + Sync>,
 );

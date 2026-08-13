@@ -16,7 +16,8 @@ use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
 use foldhash::fast::RandomState;
 use moka::Expiry;
 use moka::future::Cache;
-use thread_aware::{Arc, PerProcess, ThreadAware};
+use thread_aware::{Arc, PerProcess};
+use thread_aware_core::ThreadAware;
 
 use crate::builder::InMemoryCacheBuilder;
 
@@ -45,7 +46,7 @@ use crate::builder::InMemoryCacheBuilder;
 /// assert_eq!(*value.unwrap().value(), 42);
 /// # };
 /// ```
-#[derive(Debug, Clone, ThreadAware)]
+#[derive(Debug, Clone, thread_aware::ThreadAware)]
 pub struct InMemoryCache<K, V, H = RandomState>
 where
     K: Hash + Eq + Send + Sync + 'static,

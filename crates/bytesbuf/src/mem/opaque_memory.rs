@@ -4,7 +4,7 @@
 #[cfg(not(test))]
 use alloc::boxed::Box;
 
-use thread_aware::ThreadAware;
+use thread_aware_core::ThreadAware;
 
 use crate::mem::{Memory, MemoryShared};
 
@@ -17,7 +17,7 @@ use crate::mem::{Memory, MemoryShared};
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
-#[derive(Debug, ThreadAware)]
+#[derive(Debug, thread_aware::ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,
 }
