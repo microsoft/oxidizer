@@ -11,6 +11,11 @@
 //! agreement is structural — both evaluate the formulas here over the same
 //! inputs. See `docs/implementation/geometry.md`.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+
 use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
@@ -132,10 +137,6 @@ pub(crate) unsafe trait SlotGeometry: Copy {
     /// `chunk` must head a live chunk laid out by this geometry, and `offset`
     /// must be less than that chunk's slot count.
     #[inline]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "the offset and the non-null assertion share one safety invariant, which a block each would duplicate"
-    )]
     unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8> {
         // SAFETY: the payload begins `slots_offset` bytes into the chunk and
         // holds at least `offset + 1` slots by the caller's contract.
@@ -152,10 +153,6 @@ pub(crate) unsafe trait SlotGeometry: Copy {
     /// `slot` must address a live slot in a chunk laid out by this geometry,
     /// and `index` must be that slot's stored in-chunk index.
     #[inline]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "the offset and the non-null assertion share one safety invariant, which a block each would duplicate"
-    )]
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "the recovered header sits at a `ChunkHeader`-aligned offset by construction of the chunk layout"
@@ -261,10 +258,6 @@ unsafe impl<T> SlotGeometry for TypedGeometry<T> {
     /// by multiplying out the stride. `CHECK` proves the two agree, and the
     /// typed form gives the optimizer the element type directly.
     #[inline]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "the offset and the non-null assertion share one safety invariant, which a block each would duplicate"
-    )]
     unsafe fn slot_at(self, chunk: NonNull<ChunkHeader>, offset: usize) -> NonNull<u8> {
         // SAFETY: the payload begins `slots_offset` bytes into the chunk and
         // holds at least `offset + 1` slots by the caller's contract.
@@ -276,10 +269,6 @@ unsafe impl<T> SlotGeometry for TypedGeometry<T> {
 
     /// The inverse of [`slot_at`](Self::slot_at), in the same terms.
     #[inline]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "the offset and the non-null assertion share one safety invariant, which a block each would duplicate"
-    )]
     #[expect(
         clippy::cast_ptr_alignment,
         reason = "the slot payload and the recovered header both sit at their natural offsets by construction of the chunk layout"

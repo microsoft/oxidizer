@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ptr::{NonNull, drop_in_place};
@@ -90,14 +95,8 @@ impl<T> SlotCell<T> {
     /// respect Rust's aliasing rules for its returned lifetime.
     #[inline]
     pub(crate) unsafe fn value_ref<'a>(slot: NonNull<Self>) -> &'a T {
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "the slot dereference, cell projection, and value borrow are one projection from an occupied slot"
-        )]
         // SAFETY: caller guarantees an occupied, initialized slot.
-        unsafe {
-            &*(*(*slot.as_ptr()).value.get()).as_ptr()
-        }
+        unsafe { &*(*(*slot.as_ptr()).value.get()).as_ptr() }
     }
 
     /// Exclusively borrows the contained value.
@@ -107,14 +106,8 @@ impl<T> SlotCell<T> {
     /// exclusive access to it for the returned lifetime.
     #[inline]
     pub(crate) unsafe fn value_mut<'a>(slot: NonNull<Self>) -> &'a mut T {
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "the slot dereference, cell projection, and mutable value borrow are one exclusive projection from an occupied slot"
-        )]
         // SAFETY: caller guarantees exclusive access to an initialized slot.
-        unsafe {
-            &mut *(*(*slot.as_ptr()).value.get()).as_mut_ptr()
-        }
+        unsafe { &mut *(*(*slot.as_ptr()).value.get()).as_mut_ptr() }
     }
 
     /// Writes a value into a freshly popped (exclusively owned) slot.
@@ -124,14 +117,8 @@ impl<T> SlotCell<T> {
     /// storage is logically uninitialized and exclusively owned.
     #[inline]
     pub(crate) unsafe fn write_value(slot: NonNull<Self>, value: T) {
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "the slot dereference, cell projection, and write are one initialization step for an exclusively owned slot"
-        )]
         // SAFETY: caller guarantees exclusive ownership of an uninitialized slot.
-        unsafe {
-            (*(*slot.as_ptr()).value.get()).write(value)
-        };
+        unsafe { (*(*slot.as_ptr()).value.get()).write(value) };
     }
 
     /// Runs the contained value's destructor in place.
@@ -141,10 +128,6 @@ impl<T> SlotCell<T> {
     /// accessed afterwards.
     #[inline]
     pub(crate) unsafe fn drop_value(slot: NonNull<Self>) {
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "the slot dereference, cell projection, and destructor call are one destruction step for an occupied slot"
-        )]
         // SAFETY: caller guarantees an occupied, initialized slot dropped once.
         unsafe {
             drop_in_place((*(*slot.as_ptr()).value.get()).as_mut_ptr());

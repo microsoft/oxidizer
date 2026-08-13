@@ -122,18 +122,17 @@ invariants:
     lives until the blind pool is dropped, which is what makes directory
     indices stable and lets a bound owner borrow the blind pool while pointing
     into a layout pool's slot.
-13. **Reentrant allocation is refused, not assumed away.** The pool's own state
-    is mid-update while it is calling out for memory, so an allocator that
-    allocated from the same pool from within `allocate` or `deallocate` would
-    observe a chunk index range that is derived but unpublished, or a directory
-    that is mutably borrowed. The implementation latches those windows and
-    rejects the nested request with an allocator failure, so no caller carries
-    an unenforced obligation. Pool metadata and the layout directory come from
-    the global allocator; chunks come from the pool's allocator. Introspection
-    taken from inside such a callback panics for the same reason, having no way
-    to report a failure. Pooled values' destructors and construction closures
-    are subject to no restriction — they may allocate from and free into the
-    pool freely.
+13. **Allocator `allocate` and `deallocate` do not re-enter the pools they
+    serve.** The pool's own state is mid-update while it is calling out for
+    memory. An allocator's `allocate` and `deallocate` must not allocate from,
+    or free into, the pool they serve, whether directly or through any code
+    they call. Pool metadata and the layout directory come from the global
+    allocator; chunks come from the pool's allocator, so the requirement
+    applies to both sources of memory. Other allocator methods, including
+    `Clone::clone` when a blind pool creates a layout pool, are unrestricted
+    and are covered by the cold-path ordering. Pooled values' destructors and
+    construction closures are subject to no restriction — they may allocate
+    from and free into the pool freely.
 
 ## Verification strategy
 

@@ -39,7 +39,6 @@ test sits beside the code.
 | `unsize` | Type erasure end to end: trait objects, generic and borrowed trait arguments, array-to-slice, destructors through a vtable, slice element drops, `dyn Future` with a pinned view, slot reuse after an unsized drop, cross-thread frees of erased handles, pin-preserving coercion, leak behaviour when a coercion panics, zero-sized and over-aligned reclamation, and metadata preservation across a raw round trip. |
 | `unwind_safe` | The unwind-safety contracts, including negative probes that fail to compile if a bound is widened. |
 | `send_bound_probe` | Representative evidence for the argument that `Pool: Send` needs no `T: Send`, by moving pools of a deliberately thread-bound element type across threads. Interesting only under Miri, since the failures it looks for are aliasing and data-race violations. |
-| `reentrant_allocator` | The two latched windows, each probed by an allocator that re-enters the pool it serves. The directory half is excluded under Miri because it reaches its window through a custom global allocator. |
 | `stats` | The counters, compiled only with the `stats` feature. |
 | `bolero_pool` | Randomised operation streams. |
 | `bolero_blind_pool` | Randomised operation streams over a spread of layouts. |
@@ -57,18 +56,17 @@ provider for a type a blind pool would otherwise serve entirely through the
 runtime one. Covering the spread only through `Box`, `Arc` and `Rc` would
 exercise one geometry derivation against itself.
 
-**Reentrancy is tested at each point the cold path releases control.**
-Allocating from, and freeing into, a blind pool from inside a pooled value's
-destructor and from inside a construction closure covers the ordinary points.
-An allocator instrumented to re-enter the pool from `A::clone` covers the
-layout-pool construction window, which is where the duplicate re-scan and the
-cap re-check live and which no user-written closure can reach. The two latched
-windows have their own probes: an allocator that allocates from the pool it
-serves covers chunk growth, and a global allocator that routes through a blind
-pool on every allocation covers directory reservation. Each asserts both that
-the nested request inside the window is refused and that the same request
-outside it is served, so the refusal is attributable to the window (see
-[reentrancy](./reentrancy.md)).
+**Reentrancy is exercised where the install path releases control to
+unrestricted code.** Allocating from, and freeing into, a blind pool from inside
+a pooled value's destructor and from inside a construction closure covers the
+unrestricted reentrant user-code points. An allocator instrumented to re-enter
+from `A::clone` covers the layout-pool construction window, because
+`Clone::clone` is an unrestricted allocator method. Those tests exercise the
+install-path ordering: directory borrows are released before construction
+closures and rejected-value destructors can run, `A::clone` runs before
+reservation, and publication of a new layout remains pool-first and after the
+cap re-check. Allocator reentry from `allocate` or `deallocate` is covered by
+the allocator contract, not by a behavioural test.
 
 ## Undefined-behaviour checking
 

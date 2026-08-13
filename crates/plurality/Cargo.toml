@@ -3,7 +3,7 @@
 
 [package]
 name = "plurality"
-version = "0.2.1"
+version = "0.2.2"
 description = "A highly efficient pooling memory allocator"
 readme = "README.md"
 keywords = ["pool", "memory", "allocator"]
@@ -76,9 +76,6 @@ name = "blind_pool_basic"
 
 [[example]]
 name = "blind_pool_dyn_dispatch"
-
-[[example]]
-name = "blind_pool_tuning"
 
 [[bench]]
 name = "criterion"

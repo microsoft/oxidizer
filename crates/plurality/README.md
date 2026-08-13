@@ -142,7 +142,6 @@ Runnable programs covering larger scenarios:
 * [`pool_across_threads`][__link37]: Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
 * [`blind_pool_basic`][__link38]: Values of unrelated types in one pool, and per-layout capacity.
 * [`blind_pool_dyn_dispatch`][__link39]: A pipeline of differently sized trait objects backed by one pool.
-* [`blind_pool_tuning`][__link40]: Chunk sizing, capacity bounds, and graceful exhaustion.
 
 
 <hr/>
@@ -150,45 +149,44 @@ Runnable programs covering larger scenarios:
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbf1IO_H8UfcAbb74QJsi5LZMbVrpVpy_GmfsbBUdYzIjymadhZIGCaXBsdXJhbGl0eWUwLjIuMQ
- [__link0]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link1]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link10]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link11]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
- [__link12]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link13]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
- [__link14]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
- [__link15]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link16]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link17]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link18]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link19]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link2]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link20]: https://docs.rs/plurality/0.2.1/plurality/?search=Pool
- [__link21]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
- [__link22]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link23]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link24]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link25]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboiykxghyLZ4bb0qE7pKUHpgblJn4M7_3_30bC5IST9RXT7hhZIGCaXBsdXJhbGl0eWUwLjIuMg
+ [__link0]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
+ [__link1]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
+ [__link10]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
+ [__link11]: https://docs.rs/plurality/0.2.2/plurality/?search=BlindPool
+ [__link12]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
+ [__link13]: https://docs.rs/plurality/0.2.2/plurality/?search=BlindPool
+ [__link14]: https://docs.rs/plurality/0.2.2/plurality/?search=BlindPool
+ [__link15]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
+ [__link16]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
+ [__link17]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc
+ [__link18]: https://docs.rs/plurality/0.2.2/plurality/?search=Alloc
+ [__link19]: https://docs.rs/plurality/0.2.2/plurality/?search=Rc
+ [__link2]: https://docs.rs/plurality/0.2.2/plurality/?search=Alloc
+ [__link20]: https://docs.rs/plurality/0.2.2/plurality/?search=Pool
+ [__link21]: https://docs.rs/plurality/0.2.2/plurality/?search=BlindPool
+ [__link22]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
+ [__link23]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc
+ [__link24]: https://docs.rs/plurality/0.2.2/plurality/?search=Rc
+ [__link25]: https://docs.rs/plurality/0.2.2/plurality/?search=Alloc
  [__link26]: https://crates.io/crates/allocator-api2
  [__link27]: https://doc.rust-lang.org/stable/alloc
- [__link28]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link29]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link3]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link30]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link31]: https://docs.rs/plurality/0.2.1/plurality/?search=Box::unsize
- [__link32]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc::unsize
- [__link33]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc::unsize
+ [__link28]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
+ [__link29]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc
+ [__link3]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc
+ [__link30]: https://docs.rs/plurality/0.2.2/plurality/?search=Rc
+ [__link31]: https://docs.rs/plurality/0.2.2/plurality/?search=Box::unsize
+ [__link32]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc::unsize
+ [__link33]: https://docs.rs/plurality/0.2.2/plurality/?search=Rc::unsize
  [__link34]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
  [__link35]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
  [__link36]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs
  [__link37]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs
  [__link38]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs
  [__link39]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs
- [__link4]: https://docs.rs/plurality/0.2.1/plurality/?search=Rc
- [__link40]: https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs
- [__link5]: https://docs.rs/plurality/0.2.1/plurality/?search=Arc
- [__link6]: https://docs.rs/plurality/0.2.1/plurality/?search=Box
- [__link7]: https://docs.rs/plurality/0.2.1/plurality/?search=Alloc
- [__link8]: https://docs.rs/plurality/0.2.1/plurality/?search=BlindPool
+ [__link4]: https://docs.rs/plurality/0.2.2/plurality/?search=Rc
+ [__link5]: https://docs.rs/plurality/0.2.2/plurality/?search=Arc
+ [__link6]: https://docs.rs/plurality/0.2.2/plurality/?search=Box
+ [__link7]: https://docs.rs/plurality/0.2.2/plurality/?search=Alloc
+ [__link8]: https://docs.rs/plurality/0.2.2/plurality/?search=BlindPool
  [__link9]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout

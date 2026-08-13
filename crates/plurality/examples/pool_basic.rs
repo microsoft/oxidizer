@@ -5,8 +5,6 @@
 //!
 //! Run with `cargo run --example pool_basic`.
 
-#![allow(clippy::std_instead_of_core, reason = "example prints to stdout")]
-
 use plurality::{Arc, Box, Pool, Rc};
 
 #[derive(Debug)]

@@ -99,6 +99,10 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     ///
     /// Each layout pool owns its own clone, so the allocator must be
     /// cloneable.
+    ///
+    /// The allocator's `allocate` and `deallocate` must not allocate from, or
+    /// free into, the pool they serve, whether directly or through any code
+    /// they call. Other methods, including `Clone::clone`, are unrestricted.
     #[must_use]
     pub fn allocator<A2: Allocator + Clone>(self, allocator: A2) -> BlindPoolBuilder<A2> {
         BlindPoolBuilder {

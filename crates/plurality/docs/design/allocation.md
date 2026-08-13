@@ -42,11 +42,13 @@ lock-free stack, so only plain atomics are required. Chunk acquisition goes
 through the standard allocator abstraction, so custom and instrumented allocators
 compose naturally.
 
-An allocator supplied to a pool may not usefully allocate from, or free into,
-that same pool from within `allocate` or `deallocate`: the pool latches the
-windows in which its state is unfit to be observed and rejects such a nested
-request as an allocator failure. Introspection reaching the layout directory
-from inside such a callback panics, having no error to return. The
+An allocator supplied to a pool has a scoped reentrancy requirement: its
+`allocate` and `deallocate` must not allocate from, or free into, the pool it
+serves, whether directly or through any code they call. The same requirement
+applies to the global allocator while it supplies pool metadata and
+layout-directory storage, because pool state is mid-update while allocator
+calls are outstanding. Other allocator methods, including `Clone::clone` on a
+blind pool's allocator, are unrestricted. The
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) states the rule and
-its scope; it constrains allocator callbacks alone, and never pooled values'
-destructors or construction closures.
+its scope; it constrains allocation and deallocation callbacks alone, and never
+pooled values' destructors or construction closures.

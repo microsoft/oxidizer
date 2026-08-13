@@ -13,7 +13,6 @@ use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
 use crate::geometry::TypedGeometry;
 use crate::pool::{Pool, PoolCore, PoolInner, publish_address, teardown_erased};
-use crate::reentrancy::ReentrancyLatch;
 use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS};
 
 /// Default number of slots per chunk.
@@ -76,6 +75,10 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
     }
 
     /// Swaps in a custom allocator for chunk allocations.
+    ///
+    /// The allocator's `allocate` and `deallocate` must not allocate from, or
+    /// free into, the pool they serve, whether directly or through any code
+    /// they call.
     #[must_use]
     pub fn allocator<A2: Allocator>(self, allocator: A2) -> PoolBuilder<T, A2> {
         PoolBuilder {
@@ -131,7 +134,6 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
             bytes_allocated: AtomicUsize::new(0),
             chunk_layout: layout,
             directory: UnsafeCell::new(Vec::new()),
-            growing: ReentrancyLatch::new(),
             allocator: self.allocator,
             geometry: TypedGeometry::<T>::new(),
         };

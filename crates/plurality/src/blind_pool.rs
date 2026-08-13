@@ -9,6 +9,11 @@
 //! `docs/implementation/blind-pool.md` for the reentrancy ordering the cold
 //! path follows.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+
 use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::any::type_name;
@@ -26,7 +31,6 @@ use crate::error::AllocError;
 use crate::layout_pool::{LayoutPool, LayoutPoolRef};
 use crate::pool::{allocation_failed, occupy_local};
 use crate::rc::Rc;
-use crate::reentrancy::ReentrancyLatch;
 use crate::slot::SlotCell;
 use crate::sync::Arc;
 
@@ -114,10 +118,6 @@ pub struct BlindPool<A: Allocator + Clone = Global> {
     sizing: ChunkSizing,
     max_chunks: Option<u32>,
     max_layouts: Option<usize>,
-    /// Rejects a directory access taken from inside the reservation window,
-    /// where both vectors are mutably borrowed across a call into the global
-    /// allocator. Ref: docs/implementation/reentrancy.md.
-    reserving: ReentrancyLatch,
     allocator: A,
 }
 
@@ -173,7 +173,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
             sizing,
             max_chunks,
             max_layouts,
-            reserving: ReentrancyLatch::new(),
             allocator,
         }
     }
@@ -185,12 +184,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// to grow the directory in the meantime.
     #[inline]
     fn pool_for<T>(&self) -> Result<LayoutPoolRef<A>, AllocError> {
-        // Step 0: refuse to route from inside the reservation window, where the
-        // directory is mutably borrowed and unfit to be read.
-        // Ref: docs/implementation/reentrancy.md.
-        if self.reserving.is_held() {
-            return Err(AllocError::ALLOCATOR_FAILED);
-        }
         // Step 1: scan for an existing entry.
         let layout = Layout::new::<T>();
         match self.lookup(layout) {
@@ -249,10 +242,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
         // its pool. Both push into capacity reserved in step 4, so neither
         // reallocates and neither can fail.
         //
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "the two pushes must stay in one block to keep the ordering invariant visible as a unit"
-        )]
         // SAFETY: `!Sync` confines the allocation path to one thread, and no
         // borrow of either vector outlives this block. The two vectors live in
         // distinct cells, so the borrows taken here do not alias.
@@ -272,10 +261,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// code immediately.
     #[inline]
     fn lookup(&self, layout: Layout) -> Option<LayoutPoolRef<A>> {
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "both cell reads rest on the one invariant stated below, which a block per read would only duplicate"
-        )]
         // SAFETY: `!Sync` confines directory access to the allocation path on
         // one thread; the borrows end with this block.
         unsafe {
@@ -288,9 +273,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
     }
 
     /// `true` if a further layout would exceed the configured cap.
-    ///
-    /// Reached only through `pool_for`, which has already refused a read taken
-    /// from inside the reservation window.
     #[inline]
     fn at_layout_cap(&self) -> bool {
         // SAFETY: as for `lookup`.
@@ -304,35 +286,12 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// `try_reserve`, which also covers the capacity overflow `reserve` would
     /// panic on.
     fn try_reserve_one(&self) -> Result<(), AllocError> {
-        // Held across both reservations. Each holds `&mut` over a vector while
-        // it calls the global allocator, so an allocator that re-entered the
-        // router would alias that borrow — or read a buffer it has just freed.
-        // `pool_for` is the only path here and refuses a nested caller before
-        // its first directory read, so this claim cannot be contested; it
-        // publishes the window to readers rather than arbitrating entry.
-        // Ref: docs/implementation/reentrancy.md.
-        let _reserving = self.reserving.hold();
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "both reservations must succeed together, so splitting the block would obscure that they form one step"
-        )]
-        // SAFETY: as for `lookup`, and the latch above bars any other directory
-        // access for as long as these borrows can be live.
+        // SAFETY: as for `lookup`.
         unsafe {
             (*self.pools.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
             (*self.layouts.get()).try_reserve(1).map_err(|_err| AllocError::ALLOCATOR_FAILED)?;
         }
         Ok(())
-    }
-
-    /// Panics if a read of the directory re-enters the reservation window.
-    ///
-    /// Introspection has no way to report a failure, so a read that could alias
-    /// a live `&mut` is refused outright rather than performed.
-    /// Ref: docs/implementation/reentrancy.md.
-    #[inline]
-    fn assert_readable(&self) {
-        assert!(!self.reserving.is_held(), "the pool was read from inside an allocator callback");
     }
 
     /// Runs `f` over the pool serving `T`, creating it on first sight.
@@ -348,13 +307,8 @@ impl<A: Allocator + Clone> BlindPool<A> {
     // ─── introspection ───────────────────────────────────────────────────
 
     /// Number of distinct layouts the pool has served.
-    ///
-    /// # Panics
-    /// Panics if called from inside an allocator callback that re-enters this
-    /// pool.
     #[must_use]
     pub fn layouts(&self) -> usize {
-        self.assert_readable();
         // SAFETY: as for `lookup`.
         unsafe { (*self.layouts.get()).len() }
     }
@@ -372,14 +326,13 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// number of layouts.
     #[inline]
     fn sum_pools(&self, f: fn(LayoutPoolRef<A>) -> u64) -> u64 {
-        self.assert_readable();
         // SAFETY: as for `lookup`.
         let installed = unsafe { (*self.pools.get()).len() };
         let mut total = 0;
         for index in 0..installed {
             // SAFETY: as for `lookup`; `index` is below the length read above,
-            // which the latch keeps from shrinking. The view outlives the
-            // borrow it was copied out of.
+            // and the vector only ever grows because layout pools are never
+            // retired. The view outlives the borrow it was copied out of.
             let view = unsafe { (&*self.pools.get())[index].as_ref() };
             total += f(view);
         }
@@ -488,7 +441,6 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// while a directory borrow is live.
     #[inline]
     fn with_layout_of<T, R>(&self, found: impl FnOnce(LayoutPoolRef<A>) -> R, absent: impl FnOnce() -> R) -> R {
-        self.assert_readable();
         let layout = Layout::new::<T>();
         match self.lookup(layout) {
             Some(view) => found(view),

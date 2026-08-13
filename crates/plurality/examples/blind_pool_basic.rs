@@ -10,15 +10,13 @@
 //!
 //! Run with `cargo run --example blind_pool_basic`.
 
-#![allow(clippy::std_instead_of_core, reason = "example prints to stdout")]
+#![expect(dead_code, reason = "example data is carried for its layout and Debug output")]
 
 use plurality::BlindPool;
 
 #[derive(Debug)]
 struct Connection {
-    #[expect(dead_code, reason = "printed through the Debug impl")]
     id: u64,
-    #[expect(dead_code, reason = "printed through the Debug impl")]
     peer: String,
 }
 

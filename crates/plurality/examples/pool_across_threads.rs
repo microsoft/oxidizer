@@ -10,8 +10,7 @@
 //!
 //! Run with `cargo run --example pool_across_threads`.
 
-#![allow(clippy::std_instead_of_core, reason = "example uses std::thread")]
-#![allow(clippy::unwrap_used, reason = "example code")]
+#![expect(clippy::unwrap_used, reason = "example code")]
 
 use std::rc::Rc;
 use std::sync::Mutex;

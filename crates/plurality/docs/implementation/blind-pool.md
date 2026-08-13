@@ -146,9 +146,9 @@ across code outside this module. A lookup copies the layout pool's inner
 pointer to a local and releases the borrow before anything else happens, and
 the introspection helpers do the same before invoking their callbacks.
 `Vec::try_reserve` is the one place that must hold `&mut` across a call into the
-*global* allocator; that window is latched, and
-[`reentrancy.md`](./reentrancy.md) describes how entry to it is refused.
-`Vec::push` runs only into capacity that was already reserved.
+*global* allocator; that allocation is covered by the allocator rule described
+in [Reentrancy](#reentrancy). `Vec::push` runs only into capacity that was
+already reserved.
 
 ### Reentrancy
 
@@ -163,25 +163,29 @@ obvious. All of them must be accounted for:
 - the pool's own allocator, `A::allocate` on the growth path and
   `A::deallocate` at teardown.
 
-The last three run *while a new layout pool is being created or grown*, which
-is precisely the window in which pool state is inconsistent. Two of them are
-handled by ordering, and one by the growth latch.
+The code outside this module falls into separate categories. Pool state is
+mid-update while the allocation path calls out for memory, and teardown hands
+chunk memory back through the pool's allocator. The pool's allocator and the
+global allocator must not allocate from, or free into, a plurality pool from
+within `allocate` or `deallocate`. `A::clone()` is unrestricted: a blind-pool
+allocator may allocate from the same pool while being cloned, and the install
+path orders directory state for that case. Pooled values' destructors and
+construction closures carry no such restriction.
 
-**A reentrant chunk allocation is refused.** Growth reads the chunk count,
-derives the new chunk's base index from it, calls `A::allocate`, and publishes
-the incremented count only after the chunk is installed. An allocator that
-re-entered the pool during that call would read the same chunk count and derive
-the same base index, so two chunks would claim one range of global slot indices.
-The window is latched and the nested request is rejected as an allocator
-failure, so the guarantee holds against any allocator a caller can write.
-[`reentrancy.md`](./reentrancy.md) covers the latch and the matching window in
-directory reservation.
+**Allocator `allocate` and `deallocate` do not re-enter the pool they serve.**
+Growth reads the chunk count, derives the new chunk's base index from it, calls
+`A::allocate`, and publishes the incremented count only after the chunk is
+installed. During that window, `A::allocate` must not allocate from, or free
+into, the pool whose memory request it is serving. Directory reservation has
+the same shape for the global allocator: vector reservation holds a mutable
+directory borrow across the allocator call, and the global allocator must not
+allocate from, or free into, a plurality pool from within that `allocate` or
+`deallocate`. Teardown hands chunks back through `A::deallocate`; the same
+requirement applies to that callback.
 
-The ordering below is chosen so that no other reentrant call can observe a
-broken state or force a failure into an infallible position:
+The ordering below is chosen so that unrestricted reentrant user code cannot
+observe a broken state or force a failure into an infallible position:
 
-0. Refuse to route at all if a directory reservation is in progress, before the
-   first directory read.
 1. Compute the layout and scan the key vector for it. On a hit, copy the found
    entry's inner pointer to a local, release the borrow, and go to step 8.
 2. On a miss, check the layout cap. If it is reached, release both borrows
@@ -190,12 +194,14 @@ broken state or force a failure into an infallible position:
 3. **Construct the layout pool.** Construction clones the allocator first and
    allocates the metadata second, so a panic from `A::clone` cannot strand a
    metadata allocation. It is fallible and touches no directory state, so a
-   failure here leaves both vectors exactly as they were. `A::clone()` and the
-   global allocator run during this step, and a reentrant allocation that
-   reaches them sees a consistent — merely incomplete — directory.
-4. `try_reserve` both vectors, under the reservation latch. Reserving after
-   construction means the reservation cannot be consumed by a reentrant miss
-   that happened during step 3.
+   failure here leaves both vectors exactly as they were. `A::clone()` may
+   re-enter the blind pool; because construction happens before reservation,
+   such reentry sees a consistent — merely incomplete — directory. The
+   metadata allocation that follows is a global-allocator call and is covered
+   by the `allocate` and `deallocate` obligation.
+4. `try_reserve` both vectors. Reserving after construction means the
+   reservation cannot be consumed by a reentrant miss that happened during
+   step 3.
 5. **Re-scan, and re-check the cap.** Step 3 released control twice, so the
    directory may have grown since. The freshly built pool is abandoned if an
    entry for this layout exists, or if the layout cap is reached. Both checks
@@ -222,7 +228,7 @@ broken state or force a failure into an infallible position:
    pool-first order preserves `layouts.len() <= pools.len()` and keeps every
    published key paired with an existing pool. The reverse order is invalid
    because it breaks that directory invariant, not because it opens an
-   allocator-reentrancy window.
+   allocator `allocate` or `deallocate` window.
 8. Copy the layout pool's inner pointer to a local, drop all borrows, and
    perform the allocation through that local.
 
@@ -301,6 +307,6 @@ rather than aborting. The disposition of both failures is described in
 
 The cold path is ordered so that failure leaks nothing and reserves nothing
 prematurely: the layout pool is constructed first, so a construction failure
-leaves both vectors untouched; reservation follows, so a reentrant allocation
-during construction cannot consume it; and the pushes come last, into reserved
+leaves both vectors untouched; reservation follows, so reentry from
+`A::clone()` cannot consume it; and the pushes come last, into reserved
 capacity, so they cannot fail.

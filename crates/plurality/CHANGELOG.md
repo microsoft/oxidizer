@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.2] - 2026-08-13
 
 ### Added
 
@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `Pool<T, A>: Send` no longer requires `T: Send`, only `A: Send`. A pool owns
+  no values and offers no route to one, so a pool of non-`Send` values may
+  itself cross a thread boundary while its handles keep their own bounds.
 - The allocator-failure `AllocError` message and predicate documentation no
   longer name chunks specifically, because the same error covers a pool's other
   internal allocations.

@@ -27,7 +27,6 @@ use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::error::AllocError;
 use crate::geometry::{RuntimeGeometry, SlotGeometry};
 use crate::pool::{PoolCore, PoolInner, publish_address, teardown, teardown_erased};
-use crate::reentrancy::ReentrancyLatch;
 use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS, SlotCell};
 
 /// A pool serving one fixed value [`Layout`].
@@ -73,7 +72,6 @@ impl<A: Allocator> LayoutPool<A> {
             bytes_allocated: AtomicUsize::new(0),
             chunk_layout,
             directory: UnsafeCell::new(Vec::new()),
-            growing: ReentrancyLatch::new(),
             allocator,
             geometry,
         };

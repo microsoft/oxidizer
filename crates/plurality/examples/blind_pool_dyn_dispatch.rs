@@ -10,8 +10,6 @@
 //!
 //! Run with `cargo run --example blind_pool_dyn_dispatch`.
 
-#![allow(clippy::std_instead_of_core, reason = "example prints to stdout")]
-
 use plurality::{BlindPool, Box, coerce};
 
 /// A step in a rendering pipeline.

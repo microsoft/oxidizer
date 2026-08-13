@@ -138,7 +138,6 @@
 //! - [`pool_across_threads`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs): Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
 //! - [`blind_pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs): Values of unrelated types in one pool, and per-layout capacity.
 //! - [`blind_pool_dyn_dispatch`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs): A pipeline of differently sized trait objects backed by one pool.
-//! - [`blind_pool_tuning`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_tuning.rs): Chunk sizing, capacity bounds, and graceful exhaustion.
 
 extern crate alloc;
 
@@ -158,7 +157,6 @@ mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;
 mod rc;
-mod reentrancy;
 mod slot;
 mod sync;
 

@@ -237,11 +237,12 @@ pool's single allocator instance never is.
 Because reclamation never enters the directory, a destructor running on a
 pooled value may freely allocate from, or free into, the same blind pool. There
 is no lock to re-enter and no directory borrow held across user code. The same
-freedom extends to construction closures. It does not extend to the pool's
-allocator or to the global allocator, which the
+freedom extends to construction closures and to `Clone::clone` on the blind
+pool's allocator. It does not extend to `allocate` or `deallocate` on the
+pool's allocator or the global allocator, which the
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) requires not to
-re-enter a plurality pool from `allocate` or `deallocate`; a blind pool reaches
-both at more points than a typed pool does.
+re-enter a plurality pool; a blind pool reaches both at more points than a
+typed pool does.
 
 ## Allocation surface
 
@@ -362,7 +363,8 @@ The `infinity_pool` column below describes version 0.8.
 | Pinning | Every value pinned | Opt-in pinned constructors |
 
 The row on value destructors and construction closures is about the user code a
-pool runs. Allocator callbacks are governed separately, by the
+pool runs. Allocator `allocate` and `deallocate` callbacks are governed
+separately, by the
 [invariant list](../DESIGN.md#design-invariants-at-a-glance).
 
 The single-word handle and the lookup-free drop are direct consequences of the

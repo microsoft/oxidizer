@@ -76,6 +76,7 @@ is held across user code.
 The pool's allocator and the global allocator are held to the opposite rule:
 neither may allocate from, or free into, a plurality pool from within
 `allocate` or `deallocate`, because the pool's own state is mid-update while
-those calls are outstanding. The
+those calls are outstanding. Other allocator methods used by a blind pool,
+including `Clone::clone`, follow the unrestricted rule above. The
 [invariant list](../DESIGN.md#design-invariants-at-a-glance) states this in
 full.
