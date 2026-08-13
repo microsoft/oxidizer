@@ -28,12 +28,22 @@ BeforeAll {
         New-Item -ItemType Directory -Path $caseDir | Out-Null
         $factsPath = Join-Path $caseDir 'facts.json'
         $requestPath = Join-Path $caseDir 'request.json'
-        $script:Facts |
+        $factsForPlan = $script:Facts |
+            ConvertTo-Json -Depth 8 |
+            ConvertFrom-Json
+        foreach ($fact in $factsForPlan.packages) {
+            if ([bool]$fact.published) {
+                # CI checks out pull-request merge refs without tags. This live
+                # topology test exercises cascade mechanics, not tag discovery.
+                $fact.everReleased = $true
+            }
+        }
+        $factsForPlan |
             ConvertTo-Json -Depth 8 |
             Set-Content -LiteralPath $factsPath -Encoding utf8
         $classifications = @{}
-        foreach ($fact in $script:Facts.packages) {
-            if ([bool]$fact.published -and [bool]$fact.everReleased) {
+        foreach ($fact in $factsForPlan.packages) {
+            if ([bool]$fact.published) {
                 $classifications[$fact.folder] = 'patch'
             }
         }
@@ -88,7 +98,7 @@ Describe 'Exposure cascades over the live workspace' {
     It 'raises an indirect exposing package when the defining crate breaks' {
         $pair = @(
             foreach ($fact in $script:Facts.packages) {
-                if (-not [bool]$fact.everReleased) { continue }
+                if (-not [bool]$fact.published) { continue }
                 foreach ($target in @($fact.exposedDeps)) {
                     if (
                         @($fact.deps) -notcontains $target -and

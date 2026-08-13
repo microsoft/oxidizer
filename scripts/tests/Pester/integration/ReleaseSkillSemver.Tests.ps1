@@ -2,8 +2,8 @@
 # Licensed under the MIT License.
 
 BeforeDiscovery {
-    $null = & cargo semver-checks --version 2>$null
-    $script:HasSemverChecks = $LASTEXITCODE -eq 0
+    $script:HasSemverChecks =
+        $null -ne (Get-Command cargo-semver-checks -ErrorAction SilentlyContinue)
 }
 
 BeforeAll {
