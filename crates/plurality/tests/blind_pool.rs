@@ -946,6 +946,7 @@ unsafe impl GlobalAlloc for DenyableGlobal {
             return null_mut();
         }
         maybe_reenter(layout);
+        maybe_install_reentrantly(layout);
         // SAFETY: forwarded under the caller's `GlobalAlloc` contract.
         unsafe { System.alloc(layout) }
     }
@@ -1003,6 +1004,39 @@ fn maybe_reenter(layout: Layout) {
         }
     }
     REENTRY_ACTIVE.set(false);
+}
+
+// The install-reentry hook lets a test drive fresh installs that arrive while a
+// blind pool is between its two directory reservations, which is the interval
+// in which reserved room can be taken away from the reservation's owner.
+#[cfg(not(miri))]
+thread_local! {
+    static INSTALL_REENTRY_LAYOUT: Cell<Option<Layout>> = const { Cell::new(None) };
+    static INSTALL_REENTRY_POOL: RefCell<Option<StdRc<BlindPool>>> = const { RefCell::new(None) };
+    static INSTALL_REENTRY_FIRED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Installs unseen layouts in the registered blind pool if this request is the
+/// one being watched, then disarms so that the pool's remaining allocations run
+/// undisturbed.
+#[cfg(not(miri))]
+fn maybe_install_reentrantly(layout: Layout) {
+    if INSTALL_REENTRY_LAYOUT.get() != Some(layout) {
+        return;
+    }
+    INSTALL_REENTRY_LAYOUT.set(None);
+    INSTALL_REENTRY_FIRED.set(true);
+
+    if let Some(pool) = INSTALL_REENTRY_POOL.take() {
+        // One install per slot of room the interrupted reservation had already
+        // secured in the pool directory. The values are not needed afterwards;
+        // it is the layout pools they create that stay behind and consume the
+        // room.
+        drop(pool.alloc_box([0_u8; 1]));
+        drop(pool.alloc_box([0_u8; 2]));
+        drop(pool.alloc_box([0_u8; 3]));
+        drop(pool.alloc_box([0_u8; 5]));
+    }
 }
 
 /// Arms the reentry hook for the lifetime of the guard.
@@ -1084,6 +1118,14 @@ fn first_directory_layouts_reservation_layout() -> Layout {
 #[cfg(not(miri))]
 fn grown_directory_chunks_reservation_layout() -> Layout {
     let first = first_vec_reservation_layout::<*const ()>();
+    Layout::from_size_align(first.size() * 2, first.align()).unwrap()
+}
+
+/// Layout requested when a layout-key directory that is already at its first
+/// capacity reserves room for one more key.
+#[cfg(not(miri))]
+fn grown_directory_layouts_reservation_layout() -> Layout {
+    let first = first_vec_reservation_layout::<Layout>();
     Layout::from_size_align(first.size() * 2, first.align()).unwrap()
 }
 
@@ -1220,6 +1262,53 @@ fn a_reentrant_allocation_that_fills_a_reservation_makes_it_start_over() {
     drop(nested);
     drop(outer);
     assert_eq!(pool.len(), 0);
+}
+
+#[cfg(not(miri))]
+#[test]
+fn reentrant_installs_that_consume_reserved_room_make_the_reservation_start_over() {
+    let pool = StdRc::new(BlindPool::new());
+
+    // Fill both directories to their first capacity, so that the next install
+    // has to grow them and the hook has a reservation to interrupt.
+    let filled = (
+        pool.alloc_box([0_u8; 8]),
+        pool.alloc_box([0_u8; 16]),
+        pool.alloc_box([0_u8; 24]),
+        pool.alloc_box([0_u8; 32]),
+    );
+    assert_eq!(pool.layouts(), 4);
+
+    // Growing the layout-key directory is the outer install's second
+    // reservation, so the hook fires with the first one already granted. The
+    // reentrant installs then take every slot that first reservation secured,
+    // which the outer install must notice before it pushes.
+    // Ref: docs/implementation/reentrancy.md, "Reserving two vectors at once".
+    INSTALL_REENTRY_POOL.replace(Some(StdRc::clone(&pool)));
+    INSTALL_REENTRY_LAYOUT.set(Some(grown_directory_layouts_reservation_layout()));
+    let outer = pool.alloc_box([7_u8; 64]);
+
+    assert!(INSTALL_REENTRY_FIRED.get(), "the hook must have fired during the reservation");
+    assert_eq!(pool.layouts(), 9, "four prepared layouts, four reentrant ones and the outer one");
+    assert_eq!(*outer, [7; 64]);
+
+    // Every layout still routes to its own pool, so the push that followed the
+    // reentrant installs neither lost a directory entry nor moved one.
+    assert_eq!(pool.len_of::<[u8; 64]>(), 1);
+    for len in [
+        pool.len_of::<[u8; 1]>(),
+        pool.len_of::<[u8; 2]>(),
+        pool.len_of::<[u8; 3]>(),
+        pool.len_of::<[u8; 5]>(),
+    ] {
+        assert_eq!(len, 0, "the reentrant values were dropped again");
+    }
+    assert_eq!(*filled.0, [0; 8]);
+    assert_eq!(*filled.3, [0; 32]);
+
+    drop(filled);
+    drop(outer);
+    assert!(pool.is_empty());
 }
 
 // ── panic safety ─────────────────────────────────────────────────────────

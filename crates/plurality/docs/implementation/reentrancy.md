@@ -103,6 +103,23 @@ the supposedly infallible push to reallocate. Handing the buffer back as a
 `Displaced<T>` moves that free to the end of the caller's critical section,
 which is what makes step 3 of `grow` the genuinely last release of control.
 
+## Reserving two vectors at once
+
+A caller that needs room in two vectors cannot reserve them one after the
+other and assume both reservations survive. The second `reserve_one` may
+allocate, and that allocation is a release of control: a nested install can
+push into the first vector and consume exactly the room reserved for the
+caller. The caller would then push into a full vector, reallocating under the
+`&mut` it holds — the aliasing hazard the reservation exists to prevent.
+
+`BlindPool::try_reserve_one` therefore reserves both vectors and then confirms
+that both still have room, retrying until they do. Only a reentrant install
+consumes reserved room, and it consumes it by publishing a layout of its own,
+so the installed layout count strictly increases across attempts and the retry
+terminates. The buffers displaced by an abandoned attempt are freed before the
+next one begins, keeping that free off the path between the successful
+reservation and the pushes.
+
 ## The blind pool
 
 `BlindPool::install` follows the same shape across its two directories, and
@@ -110,8 +127,9 @@ predates the growth fix. It constructs the layout pool before reserving,
 reserves both directories after, re-scans for a pool a nested miss may have
 installed for the same layout, re-checks the layout cap, and pushes `pools`
 before `layouts` so that `layouts.len() <= pools.len()` holds at every point a
-nested call could observe. Its reservation returns two `Displaced` buffers,
-freed after both pushes, for the reason given above.
+nested call could observe. Its reservation covers two directories at once and
+returns two `Displaced` buffers, freed after both pushes, for the reasons given
+above.
 
 ## Verification
 

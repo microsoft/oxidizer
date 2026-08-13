@@ -74,8 +74,9 @@ impl ChunkSizing {
 ///
 /// One pool object backs a heterogeneous working set: the type parameter
 /// travels with the allocation rather than with the pool. Values are routed to
-/// the internal pool serving their exact [`Layout`], so a value occupies
-/// exactly the space its layout requires and nothing more.
+/// the internal pool serving their exact [`Layout`], so each occupies the same
+/// space it would in a pool dedicated to that one type — layouts are never
+/// rounded up to share a size class.
 ///
 /// Allocation hands back an owned or shared handle, either detachable or bound
 /// to the pool's borrow. Each keeps its value at a stable address for as
@@ -222,8 +223,10 @@ impl<A: Allocator + Clone> BlindPool<A> {
 
         // Step 4: reserve after construction, so the reservation cannot be
         // consumed by a reentrant miss that happened during step 3. The
-        // displaced buffers are freed when this function returns, after the
-        // pushes, so nothing between here and step 7 calls an allocator.
+        // reservation is confirmed against both vectors before it is handed
+        // back, and the displaced buffers are freed when this function returns,
+        // after the pushes, so nothing between here and step 7 calls an
+        // allocator.
         let _displaced = self.try_reserve_one()?;
 
         // Step 5: re-scan and re-check the cap. Step 3 released control twice.
@@ -244,7 +247,12 @@ impl<A: Allocator + Clone> BlindPool<A> {
         // pools.len()` holds at every instant and a key is never visible before
         // its pool. Both push into capacity reserved in step 4, so neither
         // reallocates and neither can fail.
-        //
+        debug_assert!(
+            // SAFETY: as for `lookup`.
+            unsafe { directory::has_room(&self.pools) && directory::has_room(&self.layouts) },
+            "step 4 must leave room in both directories"
+        );
+
         // SAFETY: `!Sync` confines the allocation path to one thread, and no
         // borrow of either vector outlives this block. The two vectors live in
         // distinct cells, so the borrows taken here do not alias.
@@ -289,11 +297,44 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// allocator call separates the reservation from the pushes it guarantees.
     /// A reentrant miss could otherwise consume the reserved room and force the
     /// infallible push to reallocate.
-    /// Ref: docs/implementation/reentrancy.md.
+    ///
+    /// Reserving the second vector is itself such a call, so the room reserved
+    /// in the first is confirmed once both are in hand rather than assumed.
+    /// Ref: docs/implementation/reentrancy.md, "Reserving two vectors at once".
     fn try_reserve_one(&self) -> Result<(Displaced<LayoutPool<A>>, Displaced<Layout>), AllocError> {
-        // SAFETY: as for `lookup`; neither call holds a borrow across the
-        // allocation it makes.
-        unsafe { Ok((directory::reserve_one(&self.pools)?, directory::reserve_one(&self.layouts)?)) }
+        let mut previous = None;
+        loop {
+            // SAFETY: as for `lookup`; neither call holds a borrow across the
+            // allocation it makes.
+            let displaced = unsafe { (directory::reserve_one(&self.pools)?, directory::reserve_one(&self.layouts)?) };
+
+            // SAFETY: as for `lookup`.
+            let (installed, reserved) = unsafe {
+                (
+                    (*self.layouts.get()).len(),
+                    directory::has_room(&self.pools) && directory::has_room(&self.layouts),
+                )
+            };
+            if reserved {
+                return Ok(displaced);
+            }
+
+            // Reserved room is only ever consumed by a reentrant install, which
+            // consumes it by publishing a layout of its own. The installed
+            // count is therefore strictly increasing across iterations, and
+            // every install costs a layout pool's worth of memory, so the loop
+            // terminates.
+            debug_assert!(
+                previous.is_none_or(|seen| installed > seen),
+                "reservation retried without an intervening install"
+            );
+            previous = Some(installed);
+
+            // Freeing the buffers displaced by this attempt is another point
+            // where control leaves the pool, so it happens here, before the
+            // next attempt re-reserves and re-checks.
+            drop(displaced);
+        }
     }
 
     /// Runs `f` over the pool serving `T`, creating it on first sight.

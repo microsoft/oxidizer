@@ -415,10 +415,11 @@ through predicate methods:
   pool it also covers a request for an unseen layout when the layout cap is
   reached.
 - **Allocator failure** — memory for the pool's own use could not be obtained.
-  That covers a chunk and, on the blind pool's cold path, directory capacity
-  and the metadata of a new layout pool. These allocator failures share a case
-  because the caller's recourse is identical, and because a third case would be
-  a breaking change to an error type callers match on.
+  That covers a chunk, the chunk directory that indexes it, and, on the blind
+  pool's cold path, the layout directory and the metadata of a new layout pool.
+  These allocator failures share a case because the caller's recourse is
+  identical, and because a third case would be a breaking change to an error
+  type callers match on.
 
 Failures are handled in three ways. The fallible allocation family returns
 `Result`. The panicking family routes the same error through one cold function

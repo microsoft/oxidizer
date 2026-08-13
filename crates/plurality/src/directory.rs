@@ -35,6 +35,17 @@ use crate::error::AllocError;
 /// one empty, so dropping this releases memory without touching values.
 pub(crate) struct Displaced<T>(#[expect(dead_code, reason = "held solely so the caller controls when the buffer is freed")] Vec<T>);
 
+/// `true` if one more element fits in `cell` without reallocating.
+///
+/// # Safety
+/// No borrow of `cell` may be live, and the caller must hold the pool's
+/// single-threaded allocation path.
+pub(crate) unsafe fn has_room<T>(cell: &UnsafeCell<Vec<T>>) -> bool {
+    // SAFETY: the caller guarantees no other borrow is live, and this one ends
+    // with the statement.
+    unsafe { (*cell.get()).len() < (*cell.get()).capacity() }
+}
+
 /// Reserves room in `cell` for one more element.
 ///
 /// The returned buffer is freed on drop. Hold it until the element has been

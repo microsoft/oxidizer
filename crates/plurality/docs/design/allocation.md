@@ -22,14 +22,15 @@ distinct reasons, and the error distinguishes them:
 
 - **Capacity exhausted** — a configured chunk cap (or the intrinsic index
   ceiling of an unbounded pool) is reached and no slot is free.
-- **Allocator failure** — acquiring a new chunk from the underlying allocator
-  failed.
+- **Allocator failure** — acquiring memory failed, whether for a new chunk from
+  the configured allocator or for the pool's own bookkeeping from the global
+  allocator.
 
 On failure the rejected value is dropped and no construction closure is invoked,
 matching the standard fallible-allocation convention.
 
 A [blind pool](./blind-pool.md) reports the same two failures, widened to cover
-its layout cap, directory capacity and its own metadata; it adds no third.
+its layout cap and its own metadata; it adds no third.
 Global-allocator out-of-memory handling on paths that are not represented as
 `AllocError` follows the global allocator's own behavior.
 
