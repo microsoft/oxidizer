@@ -19,9 +19,34 @@ anvil-doc-test: anvil-doc-test-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
-    & cargo test --doc @pkg --all-features --locked
+    $docArgs = if ($pkg -contains '--workspace') {
+        @('--workspace')
+    } else {
+        $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $byName = @{}
+        foreach ($p in $meta.packages) { $byName[$p.name] = $p }
+
+        $filteredArgs = [System.Collections.Generic.List[string]]::new()
+        for ($i = 0; $i -lt $pkg.Count; $i++) {
+            if ($pkg[$i] -ne '--package' -or ($i + 1) -ge $pkg.Count) { continue }
+            $spec = $pkg[++$i]
+            $name = ($spec -split '@', 2)[0]
+            $p = $byName[$name]
+            if ($p -and ($p.targets | Where-Object { $_.kind -contains 'lib' -and $_.doctest })) {
+                $filteredArgs.Add('--package')
+                $filteredArgs.Add($spec)
+            }
+        }
+        @($filteredArgs)
+    }
+    if ($docArgs.Count -eq 0) {
+        Write-Host 'anvil-doc-test: no affected packages with doctestable library targets; skipping'
+        exit 0
+    }
+    & cargo test --doc @docArgs --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & cargo test --doc @pkg --locked
+    & cargo test --doc @docArgs --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Install prerequisites for the `anvil-doc-test` recipe.
