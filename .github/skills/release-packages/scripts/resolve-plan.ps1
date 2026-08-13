@@ -292,15 +292,22 @@ while ($queue.Count -gt 0) {
                 [bool]$_.published -and
                 [bool]$_.everReleased -and
                 $_.folder -ne $dependencyFolder -and
-                @($_.deps) -contains $dependencyName
+                (
+                    @($_.deps) -contains $dependencyName -or
+                    (
+                        $dependencyBreaksConsumers -and
+                        @($_.exposedDeps) -contains $dependencyName
+                    )
+                )
             } |
             Sort-Object folder
     )
 
     foreach ($dependentFact in $dependents) {
         $classification = Get-Classification -Fact $dependentFact -Request $request
+        $isDirectDependent = @($dependentFact.deps) -contains $dependencyName
         $exposesDependency =
-            [bool]$dependentFact.exposureUnknown -or
+            ($isDirectDependent -and [bool]$dependentFact.exposureUnknown) -or
             (@($dependentFact.exposedDeps) -contains $dependencyName)
         $edgeBreaking = $dependencyBreaksConsumers -and $exposesDependency
         $cascadeChangeType = Get-StrongerChangeType `

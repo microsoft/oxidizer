@@ -31,13 +31,15 @@ exposedDeps, exposureUnknown, baselineSha, hasBaseline, everReleased, modified,
 modifiedFileCount`.
 
 - `deps` contains normalized non-dev dependency names.
-- `exposedDeps` is the subset of those dependencies whose types are permitted in
-  the package's public API.
-- `exposureUnknown` is true for every unchecked target, such as a proc-macro,
-  and for wildcard metadata. The resolver then assumes every dependency is
-  exposed because metadata on unchecked targets is not CI-enforced.
-- For ordinary libraries checked by `cargo check-external-types`, missing or
-  empty metadata means no external dependency types are exposed.
+- `exposedDeps` contains direct or transitively reachable workspace packages
+  whose defining types appear in the package's public API. Fact gathering
+  resolves dependency aliases and custom `[lib] name` crate roots.
+- `exposureUnknown` is true for every unchecked target, such as a proc-macro.
+  The resolver then assumes every direct dependency is exposed because metadata
+  on unchecked targets is not CI-enforced.
+- For ordinary libraries, missing metadata fails closed on direct dependencies;
+  an explicit empty allowlist proves no direct exposure. Indirect exposure
+  requires positive allowlist evidence.
 - Use `everReleased`, not `hasBaseline`, to identify a first release. A crate's
   introducing commit also counts as a version-bump baseline.
 
@@ -165,9 +167,11 @@ The resolver guarantees:
 - deterministic, sorted cascade reasons.
 
 An exposure edge is breaking when the dependency's version transition is breaking
-under Cargo compatibility rules and the dependent lists it in `exposedDeps` or
-has `exposureUnknown = true`. Therefore every `0.0.z` bump propagates as breaking
-through exposure edges, even when its source classification was patch.
+under Cargo compatibility rules and the dependent lists it in `exposedDeps`, or
+is a direct dependent with `exposureUnknown = true`. The edge may identify a
+transitively reachable defining crate through a public re-export. Therefore every
+`0.0.z` bump propagates as breaking through exposure edges, even when its source
+classification was patch.
 
 `force` never permits a downgrade or a pin equal to the current version. When it
 keeps a pin below a computed requirement, the resolver records a warning and
