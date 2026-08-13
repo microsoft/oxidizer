@@ -4,9 +4,10 @@ What `ohno_macros` has to deliver. Written before the rewrite, from the previous
 implementation, the crate docs, and the tests in `crates/ohno`.
 
 The authority for behavior is `crates/ohno/tests/**` (integration tests) and
-`crates/ohno/tests/ui/**` (compile-fail snapshots). Nothing in the crate's own
-tree is authoritative; internal unit tests and expansion snapshots were removed
-with the implementation.
+`crates/ohno/tests/ui/**` (compile-fail snapshots): they are the only tests that
+compile what the macros produce. The crate's own unit tests and expansion
+snapshots pin the shape of the tokens each phase emits, which is a regression
+net rather than a statement of what the crate owes.
 
 ## Public surface
 
