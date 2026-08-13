@@ -248,11 +248,6 @@ wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 
-[patch.crates-io]
-# parking_lot_core 0.9.12 loses pointer provenance in WordLock. Use the
-# upstream AtomicPtr fix until the next crates.io release includes it.
-parking_lot_core = { git = "https://github.com/Amanieu/parking_lot.git", rev = "fbfe854e8b5407f7a898c64fb6d296c5e965c877" }
-
 # >>> anvil-managed: anvil-workspace-lints
 [workspace.lints]
 # Catalog of opinionated lints, in dotted-key form so users can extend the
@@ -349,6 +344,11 @@ clippy.significant_drop_tightening = "allow"
 clippy.wildcard_imports = "allow"
 clippy.empty_structs_with_brackets = "warn"
 clippy.panic = "warn"
+
+[patch.crates-io]
+# parking_lot_core 0.9.12 loses pointer provenance in WordLock. Use the
+# upstream AtomicPtr fix until the next crates.io release includes it.
+parking_lot_core = { path = "patches/parking_lot_core" }
 
 # A bit of debugging support for release builds.
 [profile.release]
