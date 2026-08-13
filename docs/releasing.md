@@ -395,10 +395,10 @@ suppress a change type the API analysis requires.
   analysis requires the planner errors instead of silently overriding
   the caller. Pass `-Force` to override: the pin is honored verbatim, the
   package's effective change-type tag is still upgraded to record the
-  stronger unmet requirement and support warnings/bookkeeping. Exposure
-  propagation follows the actual current-to-pinned version transition: a
-  compatible forced pin stops propagation, while an incompatible forced pin
-  continues it. A warning is printed flagging that consumers may break.)
+  stronger unmet requirement, and a warning is printed flagging that
+  consumers may break. Exposure propagation continues past a forced pin:
+  the pin lowers the version number, not the incompatibility, so dependents
+  that expose the crate still inherit the break.)
 
 ---
 

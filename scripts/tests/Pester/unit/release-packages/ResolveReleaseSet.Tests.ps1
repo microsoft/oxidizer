@@ -747,13 +747,14 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].PinHonoredAgainstCascade  | Should -BeTrue
         }
 
-        It '-Force stops the exposure cascade at the pinned crate rather than at its tag' {
-            # Exposed chain a -> b -> c. a@breaking would normally drive both b
-            # and c to breaking, but b is pinned to 1.1.0 -- a compatible
-            # transition from 1.0.0. c never sees an incompatible b, so it must
-            # stay at its BFS patch floor. Cascading from b's 'breaking' *tag*
-            # instead of its planned version would invent a break for c that no
-            # consumer of b can observe.
+        It '-Force does not stop the exposure cascade at the pinned crate' {
+            # Exposed chain a -> b -> c. a@breaking drives b breaking, but b is
+            # pinned to 1.1.0 -- numerically compatible from 1.0.0. The pin
+            # changes b's version, not b's API: b@1.1.0 is still built against
+            # a@2.0.0 and exposes `a::*`, so its public API names different
+            # types than b@1.0.0 did, and a consumer of `b = "1.0"` upgrades
+            # into that silently. c must inherit the break even though b's own
+            # version transition looks compatible.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0')
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
@@ -767,12 +768,14 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
 
+            # The pin is still honored verbatim -- -Force writes the number the
+            # user asked for, and only the propagation decision changes.
             $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.1.0'
             $byFolder['b'].EffectiveChangeType      | Should -Be 'breaking'
             $byFolder['b'].PinHonoredAgainstCascade | Should -BeTrue
 
-            $byFolder['c'].EffectiveChangeType      | Should -Be 'patch'
-            $byFolder['c'].EffectiveTargetVersion   | Should -Be '1.0.1'
+            $byFolder['c'].EffectiveChangeType      | Should -Be 'breaking'
+            $byFolder['c'].EffectiveTargetVersion   | Should -Be '2.0.0'
         }
 
         It 'resumes the exposure cascade past a pinned crate when the pin is itself breaking' {
@@ -794,6 +797,29 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].EffectiveTargetVersion | Should -Be '2.0.0'
             $byFolder['c'].EffectiveChangeType    | Should -Be 'breaking'
             $byFolder['c'].EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'does not propagate from a compatible release that no pin suppressed' {
+            # Boundary guard for the forced-pin clause: propagation is widened
+            # only by PinHonoredAgainstCascade, not by every entry in the set.
+            # a releases non-breaking, so b's own release stays compatible and
+            # nothing was suppressed -- c must remain at its patch floor.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeFalse
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'patch'
+            $byFolder['c'].EffectiveChangeType      | Should -Be 'patch'
         }
 
         It '-Force emits a warning naming the package, the pin, the required minimum, and the sources' {

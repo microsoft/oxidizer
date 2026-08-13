@@ -343,18 +343,40 @@ function Set-CascadeReason {
     $Entry.CascadeReasons.Add($Reason)
 }
 
-# Returns $true when the version this entry will actually write is an
-# incompatible transition from the version currently on disk.
+# Returns $true when this entry ships an API incompatible with its previous
+# release -- whether or not the version number admits it.
 #
-# Deliberately derived from EffectiveTargetVersion rather than
-# EffectiveChangeType: a -Force pin honored below the cascade-required version
-# carries a 'breaking' tag while writing a version that is not in fact a
-# breaking transition, and cascading from the tag would invent a break farther
-# up the graph that consumers never actually see.
+# The version transition is the primary signal, derived from the versions
+# rather than from EffectiveChangeType so that 0.x semantics are applied by
+# the same rules that produced the number (under 0.x a minor bump is itself
+# breaking).
+#
+# PinHonoredAgainstCascade is the second signal, and it is not redundant. It is
+# set only when -Force honored an explicit pin BELOW a required breaking
+# version, which writes a numerically compatible version over a genuinely
+# incompatible API. The break is real: a crate pinned to 1.1.0 while exposing a
+# dependency that went 2.0.0 is still compiled against that 2.0.0, so its
+# public API names different types than 1.0.0 did. Under caret semantics a
+# consumer of `1.0` upgrades into it silently. Judging that entry by its
+# version alone stops the cascade at exactly the crate whose break was
+# suppressed, letting dependents ship compatible releases over it -- the silent
+# SemVer break this cascade exists to prevent.
+#
+# -Force means "write my number and warn me", not "the incompatibility is not
+# there". Propagation must follow the API, so it follows the unmet requirement
+# too.
+#
+# Only the exposure fixpoint calls this, and it already skips proc-macro-only
+# sources -- so a 'breaking' tag arising from proc-macro manual review, which
+# need not imply any rustdoc-visible break, never reaches here.
 function Test-EntryPlansBreakingRelease {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Entry
     )
+
+    if ($Entry.PinHonoredAgainstCascade) {
+        return $true
+    }
 
     $plannedChangeType = Get-ChangeTypeFromVersions `
         -oldVersion $Entry.CurrentVersion `
@@ -474,9 +496,10 @@ function Update-EntryForExposedDependency {
 #                       undershoots the cascade-required version is honored
 #                       verbatim instead of throwing. EffectiveChangeType is
 #                       still upgraded to record the stronger unmet requirement;
-#                       PinHonoredAgainstCascade lets callers warn the user.
-#                       Exposure propagation uses the actual CurrentVersion to
-#                       EffectiveTargetVersion transition, not the severity tag.
+#                       PinHonoredAgainstCascade lets callers warn the user and
+#                       keeps the exposure cascade running past the pin, since
+#                       the pin lowers the version number rather than the
+#                       incompatibility of the API being shipped.
 #                       -Force does NOT relax the always-fatal "pin is not
 #                       strictly greater than the current on-disk version" check.
 #
@@ -519,7 +542,8 @@ function Update-EntryForExposedDependency {
 #        - or create a new cascade-source entry.
 #      Ordinary library dependents use their own cargo-semver-checks result,
 #      floored at patch. A second pass raises a dependent to breaking when it
-#      exposes a dependency whose planned version transition is incompatible.
+#      exposes a dependency that ships an incompatible API -- an incompatible
+#      planned version transition, or a forced pin that suppressed one.
 #      That pass considers direct dependency edges (failing closed on absent or
 #      malformed allowlist metadata) plus indirect edges to a transitive
 #      dependency whose types the dependent explicitly allowlists, which is how

@@ -165,9 +165,10 @@
     silently override an explicit pin). With -Force, the explicit pin
     is honored verbatim, and the package's EffectiveChangeType tag is
     upgraded to record the stronger unmet requirement for warnings and
-    bookkeeping. Further exposure propagation is based on the actual
-    current-to-pinned version transition, not that tag. A warning is printed
-    flagging that consumers may break.
+    bookkeeping. Exposure propagation continues past the forced pin: the
+    pin lowers the version number, not the incompatibility of the API
+    being shipped, so dependents exposing the crate still inherit the
+    break. A warning is printed flagging that consumers may break.
 
     -Force does NOT relax the always-fatal "pin is not strictly greater
     than the current on-disk version" check, and has no effect on
