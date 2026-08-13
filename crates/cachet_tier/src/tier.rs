@@ -31,7 +31,10 @@ pub enum InsertOutcome {
 /// tier in a composite cache, accepted the write. It does not guarantee that the
 /// next read returns that entry. The entry may be evicted or invalidated, and a
 /// higher-priority tier in a composite cache may still contain an older value.
-/// Individual implementations may document stronger consistency guarantees.
+/// The outcome is intentionally aggregate and does not describe which child of
+/// a composite accepted the write. Individual implementations may document
+/// stronger consistency guarantees or expose topology-specific diagnostics
+/// separately.
 ///
 /// `len` and `is_empty` have default implementations:
 /// - `len`: Returns `Err(SizeError::unsupported())` (not all tiers track size)

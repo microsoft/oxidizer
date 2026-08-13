@@ -268,6 +268,8 @@ where
     /// Multi-tier insertion is not atomic. If one tier accepts the write and
     /// another returns an error, this method returns the error even though the
     /// entry may remain stored in the successful tier.
+    /// Use a [`CacheEventHandler`](crate::CacheEventHandler) when per-tier
+    /// acceptance details are needed.
     ///
     /// # Errors
     ///
