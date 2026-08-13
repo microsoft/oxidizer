@@ -40,6 +40,10 @@ Describe 'release-facts.ps1' {
         $script:Ws.SetVersion('beta', '0.5.0')
         $script:Ws.AddCommit('bump beta to 0.5.0')
 
+        # Tag 'beta' as released so everReleased distinguishes it from the
+        # never-released crates (whose introducing commit also yields a baseline).
+        & git -C $script:Ws.Path tag 'beta-v0.5.0' 2>&1 | Out-Null
+
         # Leave an uncommitted source edit on 'alpha' so it registers as modified.
         $script:Ws.ModifySource('alpha')
 
@@ -86,6 +90,16 @@ Describe 'release-facts.ps1' {
         foreach ($p in $script:Facts.packages) {
             $p.PSObject.Properties.Name | Should -Contain 'baselineSha'
         }
+    }
+
+    It 'distinguishes an ever-released crate from a never-released one via everReleased' {
+        # beta is tagged 'beta-v0.5.0'; the others have no release tag. Every crate
+        # has a baselineSha (its introducing commit counts as a bump), so
+        # everReleased -- not hasBaseline -- is the real discriminator.
+        $script:ByFolder['beta'].everReleased  | Should -BeTrue
+        $script:ByFolder['alpha'].everReleased | Should -BeFalse
+        $script:ByFolder['beta'].hasBaseline   | Should -BeTrue
+        $script:ByFolder['alpha'].hasBaseline  | Should -BeTrue
     }
 
     It 'detects unreleased (working-tree) modifications' {

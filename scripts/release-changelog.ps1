@@ -63,7 +63,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot/lib/release-flow.ps1"
+. "$PSScriptRoot/lib/changelog.ps1"
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

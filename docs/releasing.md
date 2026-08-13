@@ -1,51 +1,42 @@
 # Releasing Oxidizer Packages
 
-This document is the reference for the human-driven release tooling in
-`scripts/`:
+This document is the shared specification for releasing Oxidizer packages: the
+glossary, the cascade-organisation invariants, and the version-component rules the
+release process implements. Read it before changing anything about releasing.
 
-- `scripts/release-packages.ps1` — interactive release driver. Picks one
-  of three mutually-exclusive target-selection modes:
+**The release process is the AI prompt** at
+`.github/prompts/release-packages.prompt.md`. It plans a release (which packages,
+which version bumps) and applies it -- deriving change types from
+`cargo semver-checks` and diffs under the precise rules in that prompt, and
+cross-checking the plan across independent reasoning models before writing.
 
-  - `-Packages '<name>@<change-spec>', ...` — the caller supplies the
-    full release plan up-front as `name@change-spec` tokens.
-  - `-Changed` — guided walk through every workspace package with
-    unreleased modifications (changes newer than the package's last
-    `version =` / `publish =` commit). The script prompts for a
-    per-package decision (view diff / ignore / release as breaking,
-    non-breaking, or patch). Note: the change scan only sees files
-    under `crates/<package>/`; modifications elsewhere in the
-    repository (e.g. the workspace-level `Cargo.toml`, `.cargo/`,
-    `deny.toml`, or shared CI configuration) do NOT surface a package
-    even if they affect how it builds or behaves — use `-All` or
-    `-Packages` to cover that case.
-  - `-All` — guided walk through every publishable workspace package,
-    even ones with no on-disk modifications. Use to force-walk the
-    workspace when a refactor may have touched packages the change scan
-    misses, or to coordinate a multi-package release after an internal
-    cleanup.
+The former interactive PowerShell driver (`scripts/release-packages.ps1`) and its
+plan engine (`scripts/lib/release-flow.ps1`, plus the plan/cascade/elevation half
+of `scripts/lib/releasing.ps1`) have been **retired** in favour of the prompt -- a
+script-heavy workflow that was hard to maintain. Only small, mechanical helper
+scripts remain, which the prompt calls:
 
-  All three modes are interactive — even `-Packages` may prompt for
-  elevation review when modified-but-unreleased dependencies of the
-  requested packages are detected. The script must be run from an
-  interactive terminal.
+- `scripts/release-facts.ps1` — emits the workspace release facts as JSON
+  (dependency graph, versions, published / proc-macro flags, baseline commit shas,
+  the `everReleased` release-tag flag, and the unreleased-modification set).
+- `scripts/release-changelog.ps1` — regenerates one crate's `CHANGELOG.md` via the
+  tested changelog generator in `scripts/lib/changelog.ps1`.
+- `scripts/ci/semver-report.ps1` — the unchanged CI check that reports the minimum
+  required version bump for each crate a PR publishes.
 
-  In every mode the same pipeline runs: plan resolution,
-  cascade toward dependents, an interactive elevation review for any
-  modified-but-unreleased dependencies, a final plan display, then
-  atomic application of all version-number increments, changelog
-  updates, README regeneration, and `Cargo.toml` rewrites.
+## How the prompt-based release works
 
-## AI-agentic release path (recommended)
-
-`.github/prompts/release-packages.prompt.md` is an AI-agentic replacement
-for the interactive driver. It encodes the same planning algorithm --
-token parsing, `cargo semver-checks` classification, proc-macro manual
-review, cascade toward dependents (floor at `patch`, raised to the
-stronger of that floor and the crate's own API verdict), the elevation
+`.github/prompts/release-packages.prompt.md` IS the release process. It encodes
+the planning algorithm -- token parsing, `cargo semver-checks` classification,
+proc-macro manual review, cascade toward dependents (floor at `patch`, raised to
+the stronger of that floor and the crate's own API verdict), the elevation
 invariants, explicit-pin rules, and the version-bump table -- as precise,
-model-independent instructions. An agent runs the reasoning (which
-packages, which bumps) and makes the diff-based judgment calls a human
-used to make at the terminal, then applies the plan.
+model-independent instructions. An agent runs the reasoning (which packages, which
+bumps) and makes the diff-based judgment calls a human used to make at the
+terminal, then applies the plan. A release request is a list of `name` tokens (the
+agent determines the change type itself), optionally `name@breaking|nonbreaking|patch`
+to set a lower bound, or `name@<version>` to pin -- or the `changed` / `all` modes
+that walk modified / all publishable packages.
 
 Two design properties make it trustworthy:
 
@@ -53,29 +44,31 @@ Two design properties make it trustworthy:
   are forwarded to small deterministic helper scripts rather than being
   re-derived by hand: `scripts/release-facts.ps1` (emits the workspace
   graph, versions, published/proc-macro flags, dependency edges, baseline
-  commit shas, and the modified-package set as JSON) and
+  commit shas, the `everReleased` flag, and the modified-package set as JSON) and
   `scripts/release-changelog.ps1` (regenerates one changelog via the
-  existing tested `Write-Changelog`). Both are thin shells over the
-  `scripts/lib` release library and add no new release logic.
+  tested generator in `scripts/lib/changelog.ps1`). Both are thin shells over
+  `scripts/lib/releasing.ps1` and add no new release logic.
 - **Multi-model consensus.** Before writing anything, the skill dispatches
   the frozen plan inputs to at least two additional reasoning models from
   different families and requires an identical affected-package set and
-  version-bump sequence. A divergence stops the run instead of guessing.
+  version-bump sequence. A divergence stops the run and emits an ambiguity report
+  proposing a concrete skill edit, instead of guessing.
 
-The skill also corrects a few shortcomings of the current scripts (they
-are deliberate improvements, listed in the skill's "Corrections" section):
-all-or-nothing apply gated by `cargo check` with rollback on failure; an
-already-released crate whose baseline cannot be resolved gets a `patch`
-floor plus mandatory manual review instead of silently dropping to "no
-constraint"; and dependency-requirement edits are validated with
-`cargo check` / `cargo metadata` rather than trusted. The intentional
-Cargo `0.x` / `0.0.x` conservatism in the version-bump table is preserved
-exactly.
+The skill also corrects a few shortcomings of the retired scripts (deliberate
+improvements, listed in the skill's "Corrections" section): all-or-nothing apply
+gated by `cargo check` with rollback on failure; a never-released crate detected
+via its `everReleased` release-tag flag (not `hasBaseline`, which is true even for
+first releases) so its first publish ships at its declared version instead of being
+misclassified as breaking; and dependency-requirement edits validated with
+`cargo check` / `cargo metadata` rather than trusted. The intentional Cargo `0.x` /
+`0.0.x` conservatism in the version-bump table is preserved exactly.
 
-The PowerShell driver and `scripts/ci/semver-report.ps1` remain in place:
-CI still consumes the report, and the tested library is the source of the
-helpers' behavior. The rest of this document (glossary, invariants,
-version-component rules) is the shared specification both paths implement.
+Only `scripts/ci/semver-report.ps1` remains as a separate script (an unchanged CI
+check that still consumes the tested library). The rest of this document (glossary,
+invariants, version-component rules) is the shared specification the prompt
+implements. Where sections below show a `./scripts/release-packages.ps1 -Packages
+'<name>@<spec>'` command, read it as the historical spelling of the same release
+request you now hand to the prompt as `<name>@<spec>` tokens (or a bare `<name>`).
 
 Maintainers SHOULD read the **Glossary** below before making changes to
 the release tooling; the rest of the codebase, the PR comments, the

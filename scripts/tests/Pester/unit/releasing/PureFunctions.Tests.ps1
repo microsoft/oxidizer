@@ -166,54 +166,6 @@ Describe 'Test-IsBreakingChange' {
     }
 }
 
-Describe 'Test-ValidVersion' {
-    It 'accepts SemVer triples' {
-        Test-ValidVersion -version '1.2.3' | Should -BeTrue
-        Test-ValidVersion -version '0.0.0' | Should -BeTrue
-        Test-ValidVersion -version '99.999.9999' | Should -BeTrue
-    }
-
-    It 'accepts empty string (optional)' {
-        Test-ValidVersion -version '' | Should -BeTrue
-        Test-ValidVersion -version $null | Should -BeTrue
-    }
-
-    It 'accepts SemVer 2.0 pre-release identifiers' {
-        Test-ValidVersion -version '1.2.3-alpha'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3-pre01'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3-rc.1'       | Should -BeTrue
-        Test-ValidVersion -version '1.0.0-alpha.beta' | Should -BeTrue
-    }
-
-    It 'accepts SemVer 2.0 build metadata' {
-        Test-ValidVersion -version '1.2.3+build'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3+exp.sha.5'  | Should -BeTrue
-        Test-ValidVersion -version '1.0.0-rc.1+meta'  | Should -BeTrue
-    }
-
-    It 'rejects short / long forms' {
-        Test-ValidVersion -version '1.2'    | Should -BeFalse
-        Test-ValidVersion -version '1'      | Should -BeFalse
-        Test-ValidVersion -version '1.2.3.4'| Should -BeFalse
-    }
-
-    It 'rejects non-numeric components' {
-        Test-ValidVersion -version '1.x.3' | Should -BeFalse
-    }
-
-    It 'rejects leading-zero numeric components (per SemVer 2.0)' {
-        Test-ValidVersion -version '01.2.3' | Should -BeFalse
-        Test-ValidVersion -version '1.02.3' | Should -BeFalse
-        Test-ValidVersion -version '1.2.03' | Should -BeFalse
-    }
-
-    It 'rejects malformed pre-release / build suffixes' {
-        Test-ValidVersion -version '1.2.3-'     | Should -BeFalse
-        Test-ValidVersion -version '1.2.3+'     | Should -BeFalse
-        Test-ValidVersion -version '1.2.3-01'   | Should -BeFalse  # leading zero in numeric pre-release identifier
-    }
-}
-
 Describe 'Split-SemanticVersion' {
     It 'splits a plain SemVer triple' {
         $parts = Split-SemanticVersion -version '1.2.3'
@@ -243,35 +195,6 @@ Describe 'Split-SemanticVersion' {
         { Split-SemanticVersion -version '1.2'     } | Should -Throw '*Invalid SemVer*'
         { Split-SemanticVersion -version '01.2.3'  } | Should -Throw '*Invalid SemVer*'
         { Split-SemanticVersion -version 'bogus'   } | Should -Throw '*Invalid SemVer*'
-    }
-}
-
-Describe 'Test-ValidPackageName' {
-    It 'accepts simple alpha names' {
-        Test-ValidPackageName -packageName 'foo'   | Should -BeTrue
-        Test-ValidPackageName -packageName 'foo_bar' | Should -BeTrue
-        Test-ValidPackageName -packageName 'foo-bar' | Should -BeTrue
-    }
-
-    It 'accepts digits inside' {
-        Test-ValidPackageName -packageName 'crate1' | Should -BeTrue
-        Test-ValidPackageName -packageName '1crate' | Should -BeTrue
-    }
-
-    It 'rejects empty and overly long names' {
-        Test-ValidPackageName -packageName '' | Should -BeFalse
-        Test-ValidPackageName -packageName ('a' * 65) | Should -BeFalse
-    }
-
-    It 'rejects edge underscores/hyphens' {
-        Test-ValidPackageName -packageName '-foo' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo-' | Should -BeFalse
-    }
-
-    It 'rejects whitespace and special chars' {
-        Test-ValidPackageName -packageName 'foo bar' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo.bar' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo/bar' | Should -BeFalse
     }
 }
 
@@ -312,30 +235,6 @@ Describe 'ConvertFrom-SemverChecksOutput' {
     }
 }
 
-Describe 'Get-StrongerChangeType' {
-    It 'returns the higher-ranked change type' {
-        Get-StrongerChangeType 'patch' 'breaking'     | Should -Be 'breaking'
-        Get-StrongerChangeType 'breaking' 'patch'     | Should -Be 'breaking'
-        Get-StrongerChangeType 'patch' 'non-breaking' | Should -Be 'non-breaking'
-        Get-StrongerChangeType 'non-breaking' 'patch' | Should -Be 'non-breaking'
-    }
-
-    It 'treats none as below patch' {
-        Get-StrongerChangeType 'patch' 'none' | Should -Be 'patch'
-        Get-StrongerChangeType 'none' 'patch' | Should -Be 'patch'
-        Get-StrongerChangeType 'none' 'none' | Should -Be 'none'
-    }
-
-    It 'treats unknown/empty inputs as none (rank 0)' {
-        Get-StrongerChangeType 'breaking' '' | Should -Be 'breaking'
-        Get-StrongerChangeType $null 'patch' | Should -Be 'patch'
-    }
-
-    It 'returns the first argument on a tie' {
-        Get-StrongerChangeType 'non-breaking' 'non-breaking' | Should -Be 'non-breaking'
-    }
-}
-
 Describe 'Get-PackageFolderForPath' {
     It 'returns package folder for files under crates/<x>/' {
         Get-PackageFolderForPath -Path 'crates/foo/src/lib.rs' | Should -Be 'foo'
@@ -361,7 +260,7 @@ Describe 'Get-PackageFolderForPath' {
 
 Describe 'Sort-KeysByPreferredOrder' {
     BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\changelog.ps1')
     }
 
     It 'places preferred keys first in declared order' {
@@ -387,7 +286,7 @@ Describe 'Sort-KeysByPreferredOrder' {
 
 Describe 'Format-ConventionalCommits' {
     BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\changelog.ps1')
     }
 
     It 'returns an empty array for no commits' {
@@ -461,70 +360,3 @@ Describe 'Format-ConventionalCommits' {
     }
 }
 
-Describe 'Reduce-DependencyChains' {
-    It 'returns an empty array when given no chains' {
-        $out = Reduce-DependencyChains -Chains @()
-        @($out).Count | Should -Be 0
-    }
-
-    It 'keeps a single chain unchanged' {
-        $out = Reduce-DependencyChains -Chains @(, @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'foo|bar|baz'
-    }
-
-    It 'deduplicates identical chains' {
-        $out = Reduce-DependencyChains -Chains @(@('a', 'b'), @('a', 'b'))
-        @($out).Count | Should -Be 1
-    }
-
-    It 'drops a chain that is a strict suffix of another chain' {
-        # 'bar -> baz' is fully contained as the tail of 'foo -> bar -> baz'.
-        $out = Reduce-DependencyChains -Chains @(@('bar', 'baz'), @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'foo|bar|baz'
-    }
-
-    It 'preserves multiple non-subsuming chains with different roots and intermediates' {
-        $out = Reduce-DependencyChains -Chains @(
-            @('foo', 'bar', 'baz'),
-            @('quu', 'nuu', 'baz'),
-            @('lurk', 'baz')
-        )
-        @($out).Count | Should -Be 3
-        # Output is sorted alphabetically by joined chain text.
-        ($out | ForEach-Object { $_ -join ' -> ' }) -join '|' |
-            Should -Be 'foo -> bar -> baz|lurk -> baz|quu -> nuu -> baz'
-    }
-
-    It 'does NOT drop a shorter chain that is NOT a tail-aligned suffix' {
-        # 'b -> c' is not a suffix of 'a -> b -> d' (last element differs).
-        $out = Reduce-DependencyChains -Chains @(@('a', 'b', 'd'), @('b', 'c'))
-        @($out).Count | Should -Be 2
-    }
-
-    It 'does NOT drop a shorter chain that overlaps the head, not the tail, of a longer chain' {
-        # 'foo -> bar' overlaps the head of 'foo -> bar -> baz' but is not a suffix.
-        $out = Reduce-DependencyChains -Chains @(@('foo', 'bar'), @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 2
-    }
-
-    It 'collapses several chains into one when all are nested suffixes' {
-        $out = Reduce-DependencyChains -Chains @(
-            @('d'),
-            @('c', 'd'),
-            @('b', 'c', 'd'),
-            @('a', 'b', 'c', 'd')
-        )
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'a|b|c|d'
-    }
-
-    It 'returns chains in stable alphabetical order regardless of input order' {
-        $a = Reduce-DependencyChains -Chains @(@('z', 'baz'), @('a', 'baz'))
-        $b = Reduce-DependencyChains -Chains @(@('a', 'baz'), @('z', 'baz'))
-        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' |
-            Should -Be (($b | ForEach-Object { $_ -join ' -> ' }) -join '|')
-        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' | Should -Be 'a -> baz|z -> baz'
-    }
-}

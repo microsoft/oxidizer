@@ -1,16 +1,17 @@
 ---
 mode: 'agent'
-description: 'Plan and apply an Oxidizer workspace package release deterministically. AI-agentic replacement for scripts/release-packages.ps1: the reasoning (which packages, which version bumps) is done by the agent under precise rules, mechanical sub-tasks are forwarded to small deterministic helper scripts, and the plan is cross-checked across independent reasoning models before anything is written.'
+description: 'Plan and apply an Oxidizer workspace package release deterministically. This prompt IS the release process (it replaces the retired interactive scripts/release-packages.ps1 driver and its plan engine): the agent derives which packages release and which version bumps under precise rules, forwards only mechanical sub-tasks (facts, changelog) to small deterministic helper scripts, and cross-checks the plan across independent reasoning models before anything is written.'
 ---
 
 # Release Oxidizer Packages (AI-agentic)
 
 You are acting as the Oxidizer release planner. Your job is to turn a release
 request into an exact, reproducible plan -- the set of affected packages and the
-ordered sequence of version bumps -- and then apply it. You replace the
-interactive PowerShell driver `scripts/release-packages.ps1`; the human judgment
-that driver solicited at a terminal, you make yourself by reading diffs, under the
-precise rules below.
+ordered sequence of version bumps -- and then apply it. You are the release
+process: you replace the retired interactive PowerShell driver that used to live at
+`scripts/release-packages.ps1`, making yourself -- by reading diffs, under the
+precise rules below -- the human judgment that driver solicited at a terminal. Only
+small, mechanical helper scripts remain (see "Deterministic helpers").
 
 Read `docs/releasing.md` once for the glossary (direct/transitive dependent vs
 dependency, cascade direction, change type vs version component, release set,
@@ -40,17 +41,20 @@ inventing a heuristic.
 
 ## Deterministic helpers (use these; do NOT reinvent them)
 
-These small scripts wrap the existing, tested release library so every model sees
-identical inputs/outputs. Never hand-parse `cargo metadata`, never hand-walk git
-history for baselines, never hand-write changelog prose.
+These small scripts are thin shells over the trimmed, tested helper library
+(`scripts/lib/releasing.ps1` for facts, `scripts/lib/changelog.ps1` for changelog
+prose) so every model sees identical inputs/outputs. Never hand-parse `cargo
+metadata`, never hand-walk git history for baselines, never hand-write changelog
+prose.
 
 - `scripts/release-facts.ps1 [-RepoRoot <path>] [-BaseRef HEAD]`
   Prints JSON: for every workspace package under `crates/`:
   `folder, name, version, published, procMacroOnly, hasLibraryTarget,
   deps (normal+build only, dev excluded, names normalized '-'->'_'),
-  baselineSha, hasBaseline, modified, modifiedFileCount`.
+  baselineSha, hasBaseline, everReleased, modified, modifiedFileCount`.
   This is your fact base. Read it first; re-read it after any on-disk edit
-  (it resets its own caches).
+  (it resets its own caches). Use `everReleased` (not `hasBaseline`) to tell a
+  first-ever release from a real one -- see Step 3.
 
 - `cargo semver-checks --package <name> --baseline-rev <baselineSha>
   --all-features --color never`
@@ -63,8 +67,10 @@ history for baselines, never hand-write changelog prose.
   PR links, `## Unreleased` folding, and cascade "Now requires `X` of `Y`"
   bullets). `CascadeReasonsJson` is `[{"Target","Version","Breaking"}]`.
 
-- `just readme` (or `just package=<name> readme`)
-  Regenerates `README.md` files from crate docs. Never hand-edit generated READMEs.
+- `just readme`
+  Regenerates every crate's `README.md` from its docs (workspace-wide; the
+  `package=` variable does NOT narrow this recipe). Never hand-edit generated
+  READMEs.
 
 Everything else -- token parsing, change-type classification decisions, cascade
 resolution, version arithmetic, elevation decisions, and the consensus gate -- is
@@ -128,6 +134,9 @@ manualReview (bool), cascadeReasons[]`.
   its release; build metadata ignored) -- if not, that is a FATAL error (never
   relaxed). Derive the pin's implied change type for bookkeeping from old vs new
   components.
+- Else if the package has never been released (`everReleased = false`), its target
+  is its current declared on-disk version verbatim -- a first release does not bump
+  (Step 3). (A `requestedPin` above still overrides this.)
 - Otherwise the effective change type is the STRONGER of the entry's
   `requestedChangeType` (or `none` when the token was a bare `name`) and the
   package's objective floor from Step 3; compute the target with the Version-bump
@@ -145,19 +154,23 @@ minimum change type -- the floor you must not go below:
   `manualReview = true`. You (or the consensus models) must read its diff and
   decide the real change type: exported macro names, accepted input syntax,
   diagnostics, and generated code are all breaking surfaces the tool cannot see.
-- Ordinary library crate with `hasBaseline = true`: run
+- Ordinary library crate that has been released before (`everReleased = true`): run
   `cargo semver-checks --package <name> --baseline-rev <baselineSha>
   --all-features --color never`. Map its result:
   - a required major bump -> `breaking`
   - only a required minor bump -> `nonbreaking`
   - compatible / no update required -> `patch`
-- Ordinary library crate with `hasBaseline = false`:
-  - If it is genuinely brand-new (never released: no `<name>-vX.Y.Z` git tag AND
-    no prior released version in its `CHANGELOG.md`), it imposes NO floor
-    (`none`).
-  - Otherwise (it has released before but no baseline commit could be resolved),
-    do NOT treat it as unconstrained. Set floor `patch` and flag
-    `manualReview = true`. [Corrected defect -- see Corrections #2.]
+  Note `baselineSha` is the crate's previous version-bump commit and is set for
+   pretty much every crate (a crate's introducing commit counts as a bump), so
+  `hasBaseline` is NOT the discriminator here -- `everReleased` (from release tags)
+  is.
+- Ordinary library crate that has NEVER been released (`everReleased = false`):
+  this is its first-ever release. Do NOT run `cargo semver-checks` against its
+  introducing commit -- that baseline has no published API behind it and would
+  misclassify ordinary pre-publication churn as `breaking`, shipping the first
+  release as `0.2.0` instead of `0.1.0`. Instead it imposes NO floor and ships at
+  its declared on-disk version verbatim (the version already in its `Cargo.toml`);
+  do not bump it. [Corrected defect -- see Corrections #2.]
 
 Record each package's objective floor. This floor is the same for every model;
 never substitute a guess for a `cargo semver-checks` run.
@@ -343,9 +356,12 @@ not edit consumers' `[dependencies]`.
 For each released package, in order:
 1. Set `[package].version` in `crates/<folder>/Cargo.toml` to
    `effectiveTargetVersion` (edit the `version = "..."` line only).
-2. Set that package's entry in the root `Cargo.toml` `[workspace.dependencies]`
-   table to the new version (plain `version = "x.y.z"`, no `^`, no `=` -- match
-   the existing format exactly).
+2. In the root `Cargo.toml` `[workspace.dependencies]` table, edit ONLY the
+   `version = "..."` value inside that package's existing inline table; leave
+   `path`, `default-features` and every other key byte-identical. Plain `x.y.z`,
+   no `^`, no `=`. Do NOT rewrite the entry as a bare version string -- dropping
+   `default-features = false` changes feature resolution workspace-wide and
+   `cargo check` will NOT catch it.
 3. Regenerate the changelog:
    `scripts/release-changelog.ps1 -RepoRoot . -PackageFolder <folder>
    -NewVersion <target> -PrBaseUrl https://github.com/microsoft/oxidizer
@@ -374,12 +390,16 @@ the fixes.
    no rollback, so a mid-run failure left the tree half-released. Fix: apply all,
    validate with `cargo check`, and revert the written files on any failure
    (all-or-nothing).
-2. Unknown baseline treated as "no constraint". `Invoke-CrateSemverCheck` returns
-   `none` whenever no previous version-bump commit is found -- which also fires for
-   an already-released crate whose baseline lookup failed, silently dropping its
-   floor to nothing. Fix: only a genuinely brand-new crate (no release tag, no
-   released changelog entry) is unconstrained; an already-released crate with an
-   unresolved baseline gets a `patch` floor plus mandatory manual review.
+2. "Unknown baseline" cannot be detected via `hasBaseline`. A crate's introducing
+   commit counts as a version bump, so every crate -- even a never-released one --
+   has a `baselineSha`, making `hasBaseline` always true. Running `cargo
+   semver-checks` against a never-published crate's own introducing commit
+   misclassifies ordinary pre-publication churn as `breaking`, shipping the first
+   release as `0.2.0` instead of `0.1.0`. Fix: `release-facts.ps1` emits an
+   `everReleased` fact from the crate's `<name>-v*` release tags, and Step 3
+   branches on it -- a never-released crate imposes no floor and ships at its
+   declared version, while an ever-released crate is analysed against its real
+   prior-release baseline.
 3. Regex TOML rewriting. `Update-PackageVersion` edits versions by regex and only
    recognizes one workspace-dependency shape. Fix: after editing, VALIDATE with
    `cargo check` / `cargo metadata` so a missed or malformed requirement fails

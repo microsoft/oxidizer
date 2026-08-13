@@ -62,12 +62,11 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 # never read stale cargo-metadata or git results.
 Reset-ReleaseScriptCaches
 
-# Validate BaseRef once, loudly. An unresolvable or un-fetched ref must fail here
-# rather than being swallowed per-package and disguised as "no baseline", which
-# would silently drop each crate's cargo-semver-checks floor and let an
-# under-incremented release pass. Test-GitRef is the same check
-# Get-PreviousVersionBumpCommit uses internally; doing it once up front gives a
-# single clear failure instead of one per package.
+# Validate BaseRef once, up front, for a single clear failure. An unresolvable or
+# un-fetched ref cannot yield meaningful facts. Get-PreviousVersionBumpCommit runs
+# the same Test-GitRef internally and already throws on a bad ref, so this is not
+# guarding against silent swallowing -- it just fails once here rather than once
+# per package.
 if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
     throw "Base ref '$BaseRef' could not be resolved in '$RepoRoot'. Ensure it is fetched (CI should checkout with fetch-depth: 0) and spelled correctly."
 }
@@ -77,11 +76,11 @@ $modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
 
 $factPackages = foreach ($package in $packages) {
     $baselineSha = $null
-    # A brand-new crate (no prior version-bump commit) legitimately has no baseline
-    # and imposes no change-type floor, so baselineSha stays null. BaseRef was
-    # validated above, so Get-PreviousVersionBumpCommit returns null ONLY for that
-    # genuine case; any real error it raises is allowed to propagate (not disguised
-    # as "no baseline").
+    # baselineSha is the crate's previous version-bump commit, or null if none can
+    # be found. Note a crate's introducing commit counts as a bump, so in practice
+    # even a never-released crate gets a baselineSha (its own first commit) -- use
+    # the everReleased fact below, NOT hasBaseline, to tell a first-ever release
+    # apart from a real one.
     $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
     if ($null -ne $bump) { $baselineSha = $bump.Sha }
 
@@ -95,6 +94,13 @@ $factPackages = foreach ($package in $packages) {
         deps              = @($package.Deps)
         baselineSha       = $baselineSha
         hasBaseline       = ($null -ne $baselineSha)
+        # Whether the crate has ever been published, determined from its release
+        # tags. A crate's introducing commit counts as a version bump, so
+        # hasBaseline alone cannot distinguish a first-ever release from a real one;
+        # cargo-semver-checks against an unpublished baseline would classify normal
+        # pre-publication churn as breaking. The release skill's Step 3 branches on
+        # this fact.
+        everReleased      = [bool](Invoke-Git -Arguments @('tag', '--list', "$($package.Name)-v*") -RepoRoot $RepoRoot)
         modified          = $modified.ContainsKey($package.Folder)
         modifiedFileCount = if ($modified.ContainsKey($package.Folder)) { [int]$modified[$package.Folder] } else { 0 }
     }
