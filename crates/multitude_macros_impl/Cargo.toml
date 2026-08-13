@@ -34,9 +34,6 @@ proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
 
-[dev-dependencies]
-prettyplease = { workspace = true }
-
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
