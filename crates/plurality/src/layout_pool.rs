@@ -27,7 +27,7 @@ use crate::atomic::{AtomicU32, AtomicUsize, fence};
 use crate::error::AllocError;
 use crate::geometry::{RuntimeGeometry, SlotGeometry};
 use crate::pool::{PoolCore, PoolInner, publish_address, teardown, teardown_erased};
-use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS, SlotCell};
+use crate::slot::{FREE_END, MAX_CHUNK_SIZE_SLOTS, MAX_POOL_SLOTS, SlotCell};
 
 /// A pool serving one fixed value [`Layout`].
 ///
@@ -217,7 +217,7 @@ unsafe impl<A: Allocator + Send> Send for LayoutPool<A> {}
 /// that many slots has a representable [`Layout`]. Returns the effective slot
 /// count together with that layout.
 fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout) {
-    let mut slots = chunk_size.clamp(1, MAX_CHUNK_SIZE).next_power_of_two();
+    let mut slots = chunk_size.clamp(1, MAX_CHUNK_SIZE_SLOTS).next_power_of_two();
     loop {
         if let Some(layout) = geometry.chunk_layout(slots as usize) {
             return (slots, layout);

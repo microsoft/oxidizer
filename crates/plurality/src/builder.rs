@@ -13,7 +13,7 @@ use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
 use crate::geometry::TypedGeometry;
 use crate::pool::{Pool, PoolCore, PoolInner, publish_address, teardown_erased};
-use crate::slot::{FREE_END, MAX_CHUNK_SIZE, MAX_POOL_SLOTS};
+use crate::slot::{FREE_END, MAX_CHUNK_SIZE_SLOTS, MAX_POOL_SLOTS};
 
 /// Default number of slots per chunk.
 const DEFAULT_CHUNK_SIZE: u32 = 32;
@@ -103,7 +103,7 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
     pub fn build(self) -> Pool<T, A> {
         assert!(self.chunk_size >= 1, "chunk_size must be >= 1");
         assert!(
-            self.chunk_size <= MAX_CHUNK_SIZE,
+            self.chunk_size <= MAX_CHUNK_SIZE_SLOTS,
             "chunk_size exceeds the largest slot count with a representable next power of two"
         );
         let chunk_size = self.chunk_size.next_power_of_two();
