@@ -1,11 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.2.1] - 2026-08-13
 
 ### Added
 
@@ -17,3 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `**`, and `{field.path=sub-template}` variable bindings).
 - `ParseError` reports every structural parse failure, with `is_*` predicates to
   categorize it.
+
+- ✨ Features
+
+  - add REST transcoding for gRPC services ([#600](https://github.com/microsoft/oxidizer/600))
+
+- 🔄 Continuous Integration
+
+  - update to cargo-anvil 0.3.0 ([#596](https://github.com/microsoft/oxidizer/596))
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

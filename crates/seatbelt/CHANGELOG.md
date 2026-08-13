@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.6.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/659))
+
 ## [0.7.0] - 2026-08-09
 
 - 🔧 Maintenance

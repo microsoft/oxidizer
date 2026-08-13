@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - Now requires `0.4.0` of `cachet_tier`
+
 ## [0.3.0] - 2026-08-09
 
 - 🔧 Maintenance

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - document pub(crate) constructors, reject #[no_constructors] under #[ohno::error] ([#653](https://github.com/microsoft/oxidizer/653))
+
+- 🐛 Bug Fixes
+
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/659))
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance

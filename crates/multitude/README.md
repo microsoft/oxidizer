@@ -469,117 +469,117 @@ including a custom DST with a trait-object tail.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboB0ATxJR-IsbzzBMueWRYhcbDZf0PEttIM8b893i_v4GCwRhZIaCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjguMIJpbXVsdGl0dWRlZTAuOC4wgmVzZXJkZWcxLjAuMjI4gmh6ZXJvY29weWYwLjguNTI
- [__link0]: https://docs.rs/multitude/0.8.0/multitude/?search=Alloc
- [__link1]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link10]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboB0ATxJR-IsbzzBMueWRYhcbDZf0PEttIM8b893i_v4GCwRhZIaCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjkuMIJpbXVsdGl0dWRlZTAuOS4wgmVzZXJkZWcxLjAuMjI4gmh6ZXJvY29weWYwLjguNTI
+ [__link0]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
+ [__link1]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link10]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec
  [__link100]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
- [__link101]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link102]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
+ [__link101]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link102]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
  [__link103]: https://docs.rs/bytes/1.12.0/bytes/?search=Bytes
- [__link104]: https://docs.rs/bytesbuf/0.8.0/bytesbuf/?search=mem::Memory
- [__link105]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
- [__link106]: https://docs.rs/bytesbuf/0.8.0/bytesbuf/?search=BytesBuf
- [__link107]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
+ [__link104]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=mem::Memory
+ [__link105]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
+ [__link106]: https://docs.rs/bytesbuf/0.9.0/bytesbuf/?search=BytesBuf
+ [__link107]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
  [__link108]: https://crates.io/crates/hashbrown
- [__link109]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_hash_map
- [__link11]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::format
- [__link110]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_hash_map_with_capacity
- [__link111]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_set
- [__link112]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_set_with_capacity
+ [__link109]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_hash_map
+ [__link11]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::format
+ [__link110]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_hash_map_with_capacity
+ [__link111]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_set
+ [__link112]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_set_with_capacity
  [__link12]: https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/BUMPALO.md
  [__link13]: https://crates.io/crates/bumpalo
- [__link14]: https://docs.rs/multitude/0.8.0/multitude/?search=Alloc
- [__link15]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link16]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link17]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link18]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc
- [__link19]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_box
- [__link2]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link20]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_rc
- [__link21]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_arc
- [__link22]: https://docs.rs/multitude/0.8.0/multitude/?search=Alloc
- [__link23]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link24]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link25]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
+ [__link14]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
+ [__link15]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link16]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link17]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link18]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc
+ [__link19]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_box
+ [__link2]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link20]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_rc
+ [__link21]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_arc
+ [__link22]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
+ [__link23]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link24]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link25]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
  [__link26]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link27]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
- [__link28]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link29]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link3]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
+ [__link28]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link29]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link3]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
  [__link30]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
- [__link31]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
+ [__link31]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
  [__link32]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link33]: https://docs.rs/multitude/0.8.0/multitude/?search=Alloc
- [__link34]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link35]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec
- [__link36]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String
- [__link37]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String
+ [__link33]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
+ [__link34]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link35]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec
+ [__link36]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String
+ [__link37]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String
  [__link38]: https://crates.io/crates/allocator-api2
- [__link39]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String
- [__link4]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link40]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec
- [__link41]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String::into_boxed_str
- [__link42]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link43]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link44]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec::into_boxed_slice
- [__link45]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link46]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link47]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link48]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link49]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec::leak
- [__link5]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link50]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
+ [__link39]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String
+ [__link4]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link40]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec
+ [__link41]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String::into_boxed_str
+ [__link42]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link43]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link44]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec::into_boxed_slice
+ [__link45]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link46]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link47]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link48]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link49]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec::leak
+ [__link5]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link50]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
  [__link51]: https://crates.io/crates/hashbrown
- [__link52]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_hash_map
- [__link53]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_hash_map_with_capacity
- [__link54]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_set
- [__link55]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_set_with_capacity
- [__link56]: https://docs.rs/multitude/0.8.0/multitude/strings/index.html
- [__link57]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
- [__link58]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link59]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link6]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link60]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
- [__link61]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String
- [__link62]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String
- [__link63]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::format
- [__link64]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::format_utf16
- [__link65]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String
- [__link66]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String::into_boxed_str
- [__link67]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link68]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String
- [__link69]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String::into_boxed_utf16_str
- [__link7]: https://docs.rs/multitude/0.8.0/multitude/?search=Alloc
- [__link70]: https://docs.rs/multitude/0.8.0/multitude/?search=de::DeserializeIn
- [__link71]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
+ [__link52]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_hash_map
+ [__link53]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_hash_map_with_capacity
+ [__link54]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_set
+ [__link55]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_set_with_capacity
+ [__link56]: https://docs.rs/multitude/0.9.0/multitude/strings/index.html
+ [__link57]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
+ [__link58]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link59]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link6]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link60]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
+ [__link61]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String
+ [__link62]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String
+ [__link63]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::format
+ [__link64]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::format_utf16
+ [__link65]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String
+ [__link66]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String::into_boxed_str
+ [__link67]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link68]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String
+ [__link69]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String::into_boxed_utf16_str
+ [__link7]: https://docs.rs/multitude/0.9.0/multitude/?search=Alloc
+ [__link70]: https://docs.rs/multitude/0.9.0/multitude/?search=de::DeserializeIn
+ [__link71]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
  [__link72]: https://docs.rs/serde/1.0.228/serde/?search=Deserialize
- [__link73]: https://docs.rs/multitude/0.8.0/multitude/?search=de::DeserializeIn
- [__link74]: https://docs.rs/multitude/0.8.0/multitude/de/index.html
- [__link75]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena
- [__link76]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_dst_arc
- [__link77]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_dst_rc
- [__link78]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::alloc_dst_box
+ [__link73]: https://docs.rs/multitude/0.9.0/multitude/?search=de::DeserializeIn
+ [__link74]: https://docs.rs/multitude/0.9.0/multitude/de/index.html
+ [__link75]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena
+ [__link76]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_dst_arc
+ [__link77]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_dst_rc
+ [__link78]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::alloc_dst_box
  [__link79]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout
- [__link8]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::String
+ [__link8]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::String
  [__link80]: https://crates.io/crates/dst-factory
- [__link81]: https://docs.rs/multitude/0.8.0/multitude/?search=Box
- [__link82]: https://docs.rs/multitude/0.8.0/multitude/?search=Rc
- [__link83]: https://docs.rs/multitude/0.8.0/multitude/?search=Arc
+ [__link81]: https://docs.rs/multitude/0.9.0/multitude/?search=Box
+ [__link82]: https://docs.rs/multitude/0.9.0/multitude/?search=Rc
+ [__link83]: https://docs.rs/multitude/0.9.0/multitude/?search=Arc
  [__link84]: `coerce!`
  [__link85]: `coerce!`
  [__link86]: https://doc.rust-lang.org/stable/std/?search=io::Write
- [__link87]: https://docs.rs/multitude/0.8.0/multitude/?search=vec::Vec
- [__link88]: https://docs.rs/multitude/0.8.0/multitude/?search=de::DeserializeIn
- [__link89]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::deserialize
- [__link9]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String
- [__link90]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::deserialize_json
- [__link91]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::Utf16String
- [__link92]: https://docs.rs/multitude/0.8.0/multitude/?search=strings::format_utf16
+ [__link87]: https://docs.rs/multitude/0.9.0/multitude/?search=vec::Vec
+ [__link88]: https://docs.rs/multitude/0.9.0/multitude/?search=de::DeserializeIn
+ [__link89]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::deserialize
+ [__link9]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String
+ [__link90]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::deserialize_json
+ [__link91]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::Utf16String
+ [__link92]: https://docs.rs/multitude/0.9.0/multitude/?search=strings::format_utf16
  [__link93]: https://crates.io/crates/widestring
- [__link94]: https://docs.rs/multitude/0.8.0/multitude/?search=zerocopy::ZerocopyView
+ [__link94]: https://docs.rs/multitude/0.9.0/multitude/?search=zerocopy::ZerocopyView
  [__link95]: https://docs.rs/zerocopy/0.8.52/zerocopy/?search=FromZeros
- [__link96]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::zerocopy
- [__link97]: https://docs.rs/multitude/0.8.0/multitude/?search=bytemuck::BytemuckView
+ [__link96]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::zerocopy
+ [__link97]: https://docs.rs/multitude/0.9.0/multitude/?search=bytemuck::BytemuckView
  [__link98]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
- [__link99]: https://docs.rs/multitude/0.8.0/multitude/?search=Arena::bytemuck
+ [__link99]: https://docs.rs/multitude/0.9.0/multitude/?search=Arena::bytemuck

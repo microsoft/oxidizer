@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `thread_aware_macros`
+
 ## [0.9.0] - 2026-08-09
 
 ### ⚠ Breaking Changes
