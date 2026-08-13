@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `BlindPool<A>` and `BlindPoolBuilder` — an object pool that accepts values of
+- `MultiPool<A>` and `MultiPoolBuilder` — an object pool that accepts values of
   any type. The element type moves from the pool to each allocation call, so one
   pool serves a heterogeneous mix of values while every handle keeps the size,
   handle flavors, and reclamation cost of the typed pool.

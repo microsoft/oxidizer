@@ -3,16 +3,16 @@
 
 //! One pool holding values of unrelated types.
 //!
-//! A [`BlindPool`] moves the type parameter from the pool to the allocation, so
+//! A [`MultiPool`] moves the type parameter from the pool to the allocation, so
 //! a single pool object backs a mixed working set. Each type is routed to the
 //! internal pool serving its layout, so a small value is never charged for the
 //! largest type the pool holds.
 //!
-//! Run with `cargo run --example blind_pool_basic`.
+//! Run with `cargo run --example multi_pool_basic`.
 
 #![expect(dead_code, reason = "example data is carried for its layout and Debug output")]
 
-use plurality::BlindPool;
+use plurality::MultiPool;
 
 #[derive(Debug)]
 struct Connection {
@@ -21,7 +21,7 @@ struct Connection {
 }
 
 fn main() {
-    let pool = BlindPool::new();
+    let pool = MultiPool::new();
 
     // Types need nothing in common. The pool never names them.
     let count = pool.alloc_box(42_u64);

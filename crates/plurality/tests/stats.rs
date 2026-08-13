@@ -3,11 +3,11 @@
 #![allow(clippy::allow_attributes, clippy::unwrap_used, reason = "test code")]
 
 //! Tests for the `stats` feature: `PoolStats`, `Pool::stats` and
-//! `BlindPool::stats`.
+//! `MultiPool::stats`.
 
 #[cfg(feature = "stats")]
 mod stats_tests {
-    use plurality::{BlindPool, Pool, PoolStats};
+    use plurality::{MultiPool, Pool, PoolStats};
 
     /// A brand-new pool has allocated nothing yet.
     #[test]
@@ -84,10 +84,10 @@ mod stats_tests {
         assert_eq!(format!("{s1:?}"), format!("{s2:?}"));
     }
 
-    /// A blind pool reports one set of totals covering every layout it serves.
+    /// A multi pool reports one set of totals covering every layout it serves.
     #[test]
-    fn blind_stats_sum_across_layouts() {
-        let pool = BlindPool::builder().chunk_size(2).build();
+    fn multi_stats_sum_across_layouts() {
+        let pool = MultiPool::builder().chunk_size(2).build();
         assert_eq!(pool.stats(), PoolStats::default());
 
         let a = pool.alloc_box(1_u8);

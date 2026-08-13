@@ -16,7 +16,7 @@ enum ErrorKind {
 }
 
 /// The error returned by the fallible `try_alloc_*` methods of
-/// [`Pool`](crate::Pool) and [`BlindPool`](crate::BlindPool).
+/// [`Pool`](crate::Pool) and [`MultiPool`](crate::MultiPool).
 ///
 /// Distinguish the two causes with
 /// [`is_capacity_exhausted`](Self::is_capacity_exhausted) and

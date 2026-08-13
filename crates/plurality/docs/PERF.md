@@ -29,8 +29,8 @@ Every allocation function, measured as one allocate-then-free against a pre-warm
 | `Rc` — `alloc_rc` | 13.13 ns | 60 | 94 | 272 |
 | `Rc` — `alloc_rc_with` | 16.08 ns | 60 | 94 | 272 |
 | `Rc` — `alloc_uninit_rc` | 16.30 ns | 63 | 100 | 278 |
-| `BlindPool` — `alloc_box`, one layout | 14.20 ns | 106 | 171 | 327 |
-| `BlindPool` — `alloc_box`, 16 layouts | 14.83 ns | 196 | 276 | 440 |
+| `MultiPool` — `alloc_box`, one layout | 14.20 ns | 106 | 171 | 327 |
+| `MultiPool` — `alloc_box`, 16 layouts | 14.83 ns | 196 | 276 | 440 |
 
 ### Clone + drop (shared handles)
 
@@ -69,11 +69,11 @@ From `cargo bench --bench graph_churn`: 1,000,000 node allocations with a realis
 
 ## Owning fat-pointer comparison
 
-Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle. Before measurement, every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once. This keeps growth, layout-map creation, and first-use effects outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator. infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The `BlindPool` rows additionally support heterogeneous layouts and therefore pay for more capability. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench criterion` + `--bench gungraun`.
+Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle. Before measurement, every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once. This keeps growth, layout-map creation, and first-use effects outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator. infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The `MultiPool` rows additionally support heterogeneous layouts and therefore pay for more capability. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench criterion` + `--bench gungraun`.
 
 | Handle | Time / op | Time vs plurality | Instructions | Instructions vs plurality | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|---:|---:|
-| plurality — `BlindPool` / `Box<dyn Trait>` (heterogeneous) | 15.91 ns | 1.02× | 145 | 1.53× | 234 | 514 |
+| plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous) | 15.91 ns | 1.02× | 145 | 1.53× | 234 | 514 |
 | plurality — `Box<dyn Trait>` | 15.59 ns | 1.00× | 95 | 1.00× | 149 | 391 |
 | infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 32.83 ns | 2.11× | 220 | 2.32× | 355 | 533 |
 | infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 26.42 ns | 1.70× | 156 | 1.64× | 262 | 444 |

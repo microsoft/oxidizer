@@ -14,7 +14,7 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use plurality::{Arc as PoolArc, BlindPool, Box as PoolBox, Pool, Rc as PoolRc};
+use plurality::{Arc as PoolArc, Box as PoolBox, MultiPool, Pool, Rc as PoolRc};
 
 /// Single-operation bodies for the pooled fat-pointer comparison. Kept as a
 /// self-contained copy (rather than an include shared with the benches) so this
@@ -24,7 +24,7 @@ mod dyn_box_ops {
     use std::hint::black_box;
 
     use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-    use plurality::{BlindPool as PluralityBlindPool, Box as PoolBox, Pool, coerce};
+    use plurality::{Box as PoolBox, MultiPool, Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
     pub(crate) const CAP: usize = 1024;
@@ -76,8 +76,8 @@ mod dyn_box_ops {
         pool
     }
 
-    pub(crate) fn setup_plurality_blind(n: usize) -> PluralityBlindPool {
-        let pool = PluralityBlindPool::new();
+    pub(crate) fn setup_plurality_multi(n: usize) -> MultiPool {
+        let pool = MultiPool::new();
         let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
         drop(warm);
         assert!(pool.capacity_of::<Obj>() >= n as u64);
@@ -159,7 +159,7 @@ mod dyn_box_ops {
     }
 
     #[inline]
-    pub(crate) fn plurality_blind_box(pool: &PluralityBlindPool, i: u64) {
+    pub(crate) fn plurality_multi_box(pool: &MultiPool, i: u64) {
         let handle = pool.alloc_box(black_box(Obj::new(i)));
         let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
         invoke_dyn(&*handle);
@@ -242,7 +242,7 @@ fn assert_no_system_allocations(session: &Session, name: &str, mut f: impl FnMut
 #[test]
 fn dyn_box_benchmark_allocation_behavior_matches_design() {
     let plurality = dyn_box_ops::setup_plurality(dyn_box_ops::CAP);
-    let plurality_blind = dyn_box_ops::setup_plurality_blind(dyn_box_ops::CAP);
+    let plurality_multi = dyn_box_ops::setup_plurality_multi(dyn_box_ops::CAP);
     let infinity = dyn_box_ops::setup_infinity_pinned(dyn_box_ops::CAP);
     let infinity_local = dyn_box_ops::setup_infinity_local_pinned(dyn_box_ops::CAP);
     let infinity_blind = dyn_box_ops::setup_infinity_blind(dyn_box_ops::CAP);
@@ -252,8 +252,8 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
     assert_no_system_allocations(&session, "plurality_dyn_box", || {
         dyn_box_ops::plurality_box(&plurality, 0);
     });
-    assert_no_system_allocations(&session, "plurality_blind_dyn_box", || {
-        dyn_box_ops::plurality_blind_box(&plurality_blind, 0);
+    assert_no_system_allocations(&session, "plurality_multi_dyn_box", || {
+        dyn_box_ops::plurality_multi_box(&plurality_multi, 0);
     });
     assert_no_system_allocations(&session, "infinity_pinned_dyn_box", || {
         dyn_box_ops::infinity_pinned(&infinity, 0);
@@ -459,12 +459,12 @@ fn steady_state_rolling_churn_does_not_allocate() {
     );
 }
 
-/// One value of each layout the blind-pool workload presents. Holding them in a
+/// One value of each layout the multi-pool workload presents. Holding them in a
 /// tuple keeps every layout live simultaneously and makes each cycle alternate
 /// between layout pools, so every allocation runs a directory scan.
 type MixedRow = (PoolBox<u8>, PoolBox<u32>, PoolBox<u64>, PoolBox<[u64; 4]>);
 
-fn fill_mixed(pool: &BlindPool, hold: &mut Vec<MixedRow>) {
+fn fill_mixed(pool: &MultiPool, hold: &mut Vec<MixedRow>) {
     for i in 0..WORKLOAD {
         let wide = i as u64;
         hold.push((
@@ -476,11 +476,11 @@ fn fill_mixed(pool: &BlindPool, hold: &mut Vec<MixedRow>) {
     }
 }
 
-/// A warmed blind pool must reuse slots exactly as a typed pool does, including
+/// A warmed multi pool must reuse slots exactly as a typed pool does, including
 /// when the workload spans several layouts.
 #[test]
-fn steady_state_blind_mix_does_not_allocate() {
-    let pool = BlindPool::new();
+fn steady_state_multi_mix_does_not_allocate() {
+    let pool = MultiPool::new();
     let session = quiet_session();
     let mut hold: Vec<MixedRow> = Vec::with_capacity(WORKLOAD);
 
@@ -489,7 +489,7 @@ fn steady_state_blind_mix_does_not_allocate() {
         hold.clear();
     }
 
-    let steady = session.operation("blind_mix_steady_state");
+    let steady = session.operation("multi_mix_steady_state");
     {
         let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
@@ -498,8 +498,8 @@ fn steady_state_blind_mix_does_not_allocate() {
         }
     }
     assert_eq!(
-        total_bytes_allocated(&session, "blind_mix_steady_state"),
+        total_bytes_allocated(&session, "multi_mix_steady_state"),
         0,
-        "steady-state blind fill/drop cycles must reuse slots across every layout, not allocate from the system"
+        "steady-state multi-pool fill/drop cycles must reuse slots across every layout, not allocate from the system"
     );
 }

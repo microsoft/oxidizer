@@ -3,7 +3,7 @@
 
 use allocator_api2::alloc::{Allocator, Global};
 
-use crate::blind_pool::{BlindPool, ChunkSizing};
+use crate::multi_pool::{ChunkSizing, MultiPool};
 
 /// Default per-chunk byte target.
 ///
@@ -11,29 +11,29 @@ use crate::blind_pool::{BlindPool, ChunkSizing};
 /// kilobyte-scale values still holds several slots.
 const DEFAULT_CHUNK_BYTES: usize = 4096;
 
-/// Configures and builds a [`BlindPool`].
+/// Configures and builds a [`MultiPool`].
 ///
 /// ```
-/// let pool = plurality::BlindPool::builder()
+/// let pool = plurality::MultiPool::builder()
 ///     .chunk_bytes(8192)
 ///     .max_layouts(16)
 ///     .build();
 /// assert_eq!(pool.max_layouts(), Some(16));
 /// ```
 #[derive(Debug)]
-pub struct BlindPoolBuilder<A: Allocator + Clone = Global> {
+pub struct MultiPoolBuilder<A: Allocator + Clone = Global> {
     sizing: ChunkSizing,
     max_chunks: Option<u32>,
     max_layouts: Option<usize>,
     allocator: A,
 }
 
-impl BlindPoolBuilder<Global> {
+impl MultiPoolBuilder<Global> {
     /// Creates a builder with the default byte target, unbounded growth, and
     /// the global allocator.
     ///
     /// Crate-internal: the public entry point is
-    /// [`BlindPool::builder`](crate::BlindPool::builder), per the builder
+    /// [`MultiPool::builder`](crate::MultiPool::builder), per the builder
     /// convention that a builder is obtained from its target type.
     #[must_use]
     pub(crate) fn new() -> Self {
@@ -46,7 +46,7 @@ impl BlindPoolBuilder<Global> {
     }
 }
 
-impl<A: Allocator + Clone> BlindPoolBuilder<A> {
+impl<A: Allocator + Clone> MultiPoolBuilder<A> {
     /// Sizes chunks by a byte target, so that layouts of very different sizes
     /// commit comparable memory per growth step.
     ///
@@ -65,7 +65,7 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     /// The request is bounded and rounded up to the next power of two before a
     /// layout pool reduces it for chunk-layout overflow. Each layout starts
     /// from that normalized count, so read
-    /// [`BlindPool::chunk_size_of`](crate::BlindPool::chunk_size_of) for the
+    /// [`MultiPool::chunk_size_of`](crate::MultiPool::chunk_size_of) for the
     /// effective per-layout value. The builder uses whichever sizing method
     /// appears last in the chain.
     #[must_use]
@@ -78,7 +78,7 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     ///
     /// The effective cap for a layout is the smaller of this and the ceiling
     /// its chunk size permits; read it back with
-    /// [`BlindPool::max_chunks_of`](crate::BlindPool::max_chunks_of).
+    /// [`MultiPool::max_chunks_of`](crate::MultiPool::max_chunks_of).
     #[must_use]
     pub fn max_chunks(mut self, max: u32) -> Self {
         self.max_chunks = Some(max);
@@ -104,8 +104,8 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     /// allocator that does so unconditionally recurses until the stack is
     /// exhausted, since serving the nested allocation calls it again.
     #[must_use]
-    pub fn allocator<A2: Allocator + Clone>(self, allocator: A2) -> BlindPoolBuilder<A2> {
-        BlindPoolBuilder {
+    pub fn allocator<A2: Allocator + Clone>(self, allocator: A2) -> MultiPoolBuilder<A2> {
+        MultiPoolBuilder {
             sizing: self.sizing,
             max_chunks: self.max_chunks,
             max_layouts: self.max_layouts,
@@ -116,7 +116,7 @@ impl<A: Allocator + Clone> BlindPoolBuilder<A> {
     /// Builds the pool.
     #[must_use]
     #[cold]
-    pub fn build(self) -> BlindPool<A> {
-        BlindPool::from_parts(self.sizing, self.max_chunks, self.max_layouts, self.allocator)
+    pub fn build(self) -> MultiPool<A> {
+        MultiPool::from_parts(self.sizing, self.max_chunks, self.max_layouts, self.allocator)
     }
 }

@@ -10,7 +10,7 @@ numbers live in [`PERF.md`](../PERF.md).
 - **Allocate, typed pool:** pop the free list, write the value, and — for the
   shared handles — initialize the slot counter and increment the pool
   reference count.
-- **Allocate, blind pool:** the above, plus a scan of the key vector, a load of
+- **Allocate, multi pool:** the above, plus a scan of the key vector, a load of
   the layout pool's pointer, and a slot address computed from a loaded stride
   rather than a constant. With one layout present the scan is a single
   comparison; each further layout adds a few instructions, so the structure
@@ -42,20 +42,20 @@ to `LayoutPool`; the typed path keeps its constant.
 
 ## Benchmarks
 
-Blind-pool coverage follows the workspace conventions: identical operation
+Multi-pool coverage follows the workspace conventions: identical operation
 bodies in the wall-clock and instruction-count harnesses, single-threaded,
 measuring elementary operations against a pre-warmed pool with growth and
 first-use effects outside the measured region.
 
 ### Attributing the routing cost
 
-The blind path adds two costs over the typed path — a runtime stride on the
+The routed path adds two costs over the typed path — a runtime stride on the
 addressing path and a directory scan — and a benchmark comparing only the two
 ends reports their sum as one number. The scan is separated out by varying the
 directory size instead: the same operation runs against a pool holding one
 layout and against a pool holding sixteen, with the measured layout registered
 last so the scan runs its full length. The slope between them is the per-entry
-scan cost; the intercept is everything else the blind path adds.
+scan cost; the intercept is everything else the routed path adds.
 
 That pair of layout counts is the whole parameterisation. One low value and one
 high value make the per-entry cost legible, and further values would add rows
@@ -83,13 +83,13 @@ would show up as a delta larger than the modeled addition explains.
   lookup scales with directory size.
 - **Allocate, coerce to a trait object, dispatch, and free** — the row that
   lines up with the owning fat-pointer comparison, where the reference
-  implementation's blind pools already appear. This is where the architectural
+  implementation's multi pools already appear. This is where the architectural
   claim is expressed as a number.
 
 The cross-crate comparison set stays typed. Every pool in it is generic over
-one element type, so the blind pool has no counterpart there; its cross-crate
+one element type, so the multi pool has no counterpart there; its cross-crate
 row is the fat-pointer comparison, which is where the surveyed crates expose
 their own heterogeneous pools.
 
-Allocation tracking asserts that a warmed blind pool performs no system
+Allocation tracking asserts that a warmed multi pool performs no system
 allocations in steady state, including across a mix of layouts.

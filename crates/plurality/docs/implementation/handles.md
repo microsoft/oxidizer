@@ -113,7 +113,7 @@ geometry formulas fails a test rather than hiding behind its own consistency
 
 One path serves both pool forms. A layout pool built
 from `Layout::new::<T>()` has, by definition, the geometry the compiler
-computes for `SlotCell<T>`, so a bound owner obtained from a blind pool reads
+computes for `SlotCell<T>`, so a bound owner obtained from a multi pool reads
 its slot at the offsets that pool used.
 
 `Alloc` takes `T: Sized`, offers an unconditional `DerefMut`, and cannot be

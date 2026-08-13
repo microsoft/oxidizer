@@ -5,9 +5,9 @@ These are designs and ideas carried over from the original design plan that are
 [`DESIGN.md`](./DESIGN.md). Items here range from a fully settled design
 (`KeyedPool`) to smaller follow-ups.
 
-## 0. Aggregate byte budget for `BlindPool`
+## 0. Aggregate byte budget for `MultiPool`
 
-`BlindPool` bounds growth with a **per-layout** chunk cap and a cap on the
+`MultiPool` bounds growth with a **per-layout** chunk cap and a cap on the
 number of layouts. Total memory is therefore bounded in *chunks*, by the product
 of the two caps. Converting that to bytes also requires knowing the largest
 layout the program will present, because the chunk byte target is a target
@@ -17,12 +17,12 @@ also coarse, since every layout is charged its full allowance whether or not it
 uses it.
 
 A tighter alternative is an aggregate byte budget shared by every layout pool
-under one `BlindPool`, consulted when a layout pool acquires a chunk and
+under one `MultiPool`, consulted when a layout pool acquires a chunk and
 released when it deallocates one. The check itself is free — chunk acquisition
 is already a cold path — but the budget is cross-pool mutable state with an
 awkward lifetime: it must outlive every layout pool, and layout pools outlive
-the `BlindPool` whenever handles do. That implies a third reference count
-(blind-pool core, alongside the existing per-slot and pool-level counts) and a
+the `MultiPool` whenever handles do. That implies a third reference count
+(multi-pool core, alongside the existing per-slot and pool-level counts) and a
 release step in layout-pool teardown.
 
 Build it if bounded-memory deployments ask for it. The two caps are the right
@@ -31,12 +31,12 @@ per-pool machinery with no shared state at all.
 
 ## 0b. A `LayoutPool` benchmark rung
 
-The shipped blind-pool benchmarks vary the directory size, which separates the
-per-entry scan cost from everything else the blind path adds. What they do not
+The shipped multi-pool benchmarks vary the directory size, which separates the
+per-entry scan cost from everything else the routed path adds. What they do not
 separate is the fixed remainder: the runtime stride on the addressing path
 against the fixed part of the lookup.
 
-A rung between the typed pool and the blind pool — allocating through
+A rung between the typed pool and the multi pool — allocating through
 `LayoutPool` directly, with runtime geometry but no router — would split it.
 The obstacle is that `LayoutPool` is crate-private and carries a single
 slot-claiming primitive, so reaching it from a benchmark target means exposing

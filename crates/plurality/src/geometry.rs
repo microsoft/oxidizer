@@ -402,7 +402,7 @@ mod tests {
                 stringify!($t),
             );
 
-            // A blind pool addressing a layout must land exactly where a typed
+            // A multi pool addressing a layout must land exactly where a typed
             // pool for that layout would.
             assert_eq!(runtime.stride(), typed.stride(), "runtime stride for {}", stringify!($t));
             assert_eq!(

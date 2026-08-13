@@ -26,18 +26,18 @@
 //! Every handle derefs to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
 //! handle runs `T`'s destructor and returns the slot to the pool.
 //!
-//! A [`BlindPool`] moves the element type from the pool to each allocation, so
+//! A [`MultiPool`] moves the element type from the pool to each allocation, so
 //! one pool object backs values of many types. It creates an internal layout
 //! pool for each distinct [`Layout`](core::alloc::Layout) it sees and routes
 //! each value to the pool serving that exact layout, while handing out the same
 //! handles with the same guarantees.
 //!
 //! Use [`Pool<T>`] for a working set that repeatedly allocates one value type,
-//! and [`BlindPool`] for heterogeneous recycled values. Both flavors suit
+//! and [`MultiPool`] for heterogeneous recycled values. Both flavors suit
 //! stable-address data structures and workloads that need a capacity limit.
 //! Slots are reused without a chunk-allocation call. `max_chunks` bounds a
-//! [`Pool<T>`] or one [`BlindPool`] layout pool; bounding aggregate
-//! [`BlindPool`] growth also requires `max_layouts`, and total memory depends
+//! [`Pool<T>`] or one [`MultiPool`] layout pool; bounding aggregate
+//! [`MultiPool`] growth also requires `max_layouts`, and total memory depends
 //! on the layouts and effective chunk sizes. Prefer a general allocator for
 //! long-lived values or an arena when values can all be reclaimed together.
 //!
@@ -51,7 +51,7 @@
 //! Moving a pool is independent of moving its values: [`Pool<T>`] is `Send`
 //! when the allocator is, whatever `T` is, because a pool owns no values and
 //! offers no way to reach one. Thread mobility for values is carried entirely
-//! by the handles. [`BlindPool`] follows the same rule, which is what lets one
+//! by the handles. [`MultiPool`] follows the same rule, which is what lets one
 //! pool hold values of types with different thread affinities at once.
 //!
 //! Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
@@ -73,7 +73,7 @@
 //!   a `no_std` target.
 //! - **`stats`** *(disabled by default)* — enables runtime allocation
 //!   statistics: the `PoolStats` type and the `Pool::stats` and
-//!   `BlindPool::stats` methods. The accounting counters are compiled in only
+//!   `MultiPool::stats` methods. The accounting counters are compiled in only
 //!   when this feature is active, so leaving it off keeps the pool free of any
 //!   tracking overhead.
 //!
@@ -136,15 +136,13 @@
 //!
 //! - [`pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs): The handle flavors, address stability, and slot reuse.
 //! - [`pool_across_threads`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs): Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
-//! - [`blind_pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_basic.rs): Values of unrelated types in one pool, and per-layout capacity.
-//! - [`blind_pool_dyn_dispatch`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/blind_pool_dyn_dispatch.rs): A pipeline of differently sized trait objects backed by one pool.
+//! - [`multi_pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/multi_pool_basic.rs): Values of unrelated types in one pool, and per-layout capacity.
+//! - [`multi_pool_dyn_dispatch`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/multi_pool_dyn_dispatch.rs): A pipeline of differently sized trait objects backed by one pool.
 
 extern crate alloc;
 
 mod alloced;
 mod atomic;
-mod blind_builder;
-mod blind_pool;
 mod boxed;
 mod builder;
 mod chunk;
@@ -154,6 +152,8 @@ mod directory;
 mod error;
 mod geometry;
 mod layout_pool;
+mod multi_builder;
+mod multi_pool;
 mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;
@@ -162,12 +162,12 @@ mod slot;
 mod sync;
 
 pub use alloced::Alloc;
-pub use blind_builder::BlindPoolBuilder;
-pub use blind_pool::BlindPool;
 pub use boxed::Box;
 pub use builder::PoolBuilder;
 pub use coerce::Coercion;
 pub use error::AllocError;
+pub use multi_builder::MultiPoolBuilder;
+pub use multi_pool::MultiPool;
 pub use pool::Pool;
 #[cfg(feature = "stats")]
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]

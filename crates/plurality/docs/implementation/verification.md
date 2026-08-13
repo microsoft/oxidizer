@@ -33,7 +33,7 @@ test sits beside the code.
 | Target | Scope |
 |---|---|
 | `pool` | Construction and builder validation, introspection, growth, power-of-two rounding, slot reuse, bounded exhaustion and recovery, panicking closures and destructors, allocator failure, chunk release at teardown, handles outliving the pool, moving a pool across threads, concurrent frees and compare-exchange contention. |
-| `blind_pool` | Heterogeneous mixes, two types sharing one layout, zero-sized and over-aligned values, coercion from a blind pool, handles outliving the pool, per-layout capacity exhaustion, the layout cap, the sizing clamps at both ends, allocator failure on both the chunk and metadata paths, and panic safety in construction closures. |
+| `multi_pool` | Heterogeneous mixes, two types sharing one layout, zero-sized and over-aligned values, coercion from a multi pool, handles outliving the pool, per-layout capacity exhaustion, the layout cap, the sizing clamps at both ends, allocator failure on both the chunk and metadata paths, and panic safety in construction closures. |
 | `box`, `arc`, `rc`, `alloc` | Per-handle behaviour and the uninitialized placement tier. The `rc` target additionally covers the non-atomic-to-atomic handover when a freed slot is reused by an `Arc`. |
 | `smart_ptr` | The shared macro-generated surface: pointer accessors, identity, uniqueness queries, construction-time pinning, `Unpin`, the auto-trait assertions and every forwarding impl. |
 | `unsize` | Type erasure end to end: trait objects, generic and borrowed trait arguments, array-to-slice, destructors through a vtable, slice element drops, `dyn Future` with a pinned view, slot reuse after an unsized drop, cross-thread frees of erased handles, pin-preserving coercion, leak behaviour when a coercion panics, zero-sized and over-aligned reclamation, and metadata preservation across a raw round trip. |
@@ -41,18 +41,18 @@ test sits beside the code.
 | `send_bound_probe` | Representative evidence for the argument that `Pool: Send` needs no `T: Send`, by moving pools of a deliberately thread-bound element type across threads. Interesting only under Miri, since the failures it looks for are aliasing and data-race violations. |
 | `stats` | The counters, compiled only with the `stats` feature. |
 | `bolero_pool` | Randomised operation streams. |
-| `bolero_blind_pool` | Randomised operation streams over a spread of layouts. |
+| `bolero_multi_pool` | Randomised operation streams over a spread of layouts. |
 | `loom_pool` | Interleaving models, compiled only under `--cfg loom`. |
 | `alloc_tracking` | Steady-state allocation behaviour under a tracking global allocator. |
 
-Two obligations in this table are specific to the blind pool and are easy to
+Two obligations in this table are specific to the multi pool and are easy to
 satisfy vacuously, so they are called out.
 
 **The layout spread must be exercised through `Alloc` specifically**, not only
 through the detachable handles. The bound owner is the sole consumer that reads
 slots through the compiler's layout of the slot type (see
 [handles](./handles.md)), and it is also what instantiates the typed geometry
-provider for a type a blind pool would otherwise serve entirely through the
+provider for a type a multi pool would otherwise serve entirely through the
 runtime one. Covering the spread only through `Box`, `Arc` and `Rc` would
 exercise one geometry derivation against itself.
 
@@ -63,12 +63,12 @@ tests assert that the outer and nested allocations receive distinct chunks,
 that both values survive, and that the cap re-check holds the pool to its
 limit.
 
-The blind-pool allocator-clone door is covered by an allocator whose
-`Clone::clone` allocates from the same blind pool while a layout pool is being
+The multi-pool allocator-clone door is covered by an allocator whose
+`Clone::clone` allocates from the same multi pool while a layout pool is being
 installed. The tests cover a nested allocation of the same layout, a nested
 allocation that consumes the remaining layout allowance, and a nested directory
 growth between reservation and publication. Pooled value destructors and
-`_with` construction closures allocate from the same blind pool after directory
+`_with` construction closures allocate from the same multi pool after directory
 borrows have been released.
 
 Directory reservation is driven through a custom global allocator, because
@@ -109,7 +109,7 @@ which is why teardown and the chunk guard carry loom-only drop loops.
 
 Bolero drives a byte stream interpreted as a sequence of allocate, clone and
 drop operations in native execution, asserting that every value is destroyed
-exactly once and that releasing every handle empties the pool. For the blind
+exactly once and that releasing every handle empties the pool. For the multi
 pool the stream ranges over a spread of layouts, and the assertions add that a
 slot address is never served for two different layouts — layout pools neither
 share chunks nor release them, so an address that appears under two layouts is
@@ -119,7 +119,7 @@ a slot that crossed layouts.
 
 A tracking global allocator asserts that warmed steady-state operation spans
 perform no system allocations: fill-and-drop and rolling churn for each handle
-flavor, a warmed blind pool across a mix of layouts, and the benchmark bodies
+flavor, a warmed multi pool across a mix of layouts, and the benchmark bodies
 behind the published fat-pointer comparison, so that the claim in
 [`PERF.md`](../PERF.md) is enforced rather than asserted. The target carries
 its own copy of those bodies so that it pulls in no cross-target files. These
@@ -132,7 +132,7 @@ outstanding global allocations across pool construction and teardown.
 Auto-trait and variance behaviour is not observable at run time, so it is
 asserted at compile time: the negative assertions that pin `Rc` and `Alloc` as
 neither `Send` nor `Sync`, the positive ones for `Box` and `Arc` under their
-respective bounds, and the blind pool's own `Send`-ness depending on its
+respective bounds, and the multi pool's own `Send`-ness depending on its
 allocator alone. These assertions are what catch a marker field that silently
 stops denying a trait.
 

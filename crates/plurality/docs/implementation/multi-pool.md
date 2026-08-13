@@ -1,10 +1,10 @@
-# The blind pool
+# The multi pool
 
 This document covers the two pieces that turn the shared pool body into a pool
 of any type: the crate-private `LayoutPool`, which serves one runtime layout,
-and `BlindPool`, the directory that routes each allocation to one. Back to the
+and `MultiPool`, the directory that routes each allocation to one. Back to the
 [implementation hub](../IMPLEMENTATION.md). For the user-visible model see
-[the blind pool's design](../design/blind-pool.md).
+[the multi pool's design](../design/multi-pool.md).
 
 ## `LayoutPool`
 
@@ -15,14 +15,14 @@ pub(crate) struct LayoutPool<A: Allocator> {
 ```
 
 One pointer, like the typed pool. It is constructed from a value `Layout` plus
-the chunk-sizing configuration, and it is crate-private: the blind pool is its
+the chunk-sizing configuration, and it is crate-private: the multi pool is its
 only user.
 
 It owns the pool it points at: dropping it releases the pool's reference, so
 outstanding handles keep the body alive exactly as they do for a typed pool.
 
-The wide allocation surface lives on `BlindPool`, not here. A layout pool
-exposes one allocation primitive — claim a slot — and the blind pool layers the
+The wide allocation surface lives on `MultiPool`, not here. A layout pool
+exposes one allocation primitive — claim a slot — and the multi pool layers the
 handle flavors and construction forms over it. Putting the ~40 methods in one
 place keeps a single set of doc comments and a single translation of "claimed
 slot" into "handle", which is the only logic those methods contain.
@@ -51,7 +51,7 @@ impl<A: Allocator> LayoutPoolRef<A> {
 The view exists so that the router can drop its borrow of the directory before
 running any user code. It carries no lifetime and copies freely, which is what
 lets the allocation path hold nothing borrowed while a value's constructor —
-which may itself allocate into the same blind pool — runs.
+which may itself allocate into the same multi pool — runs.
 
 `alloc_slot` is `unsafe` with the precondition that the element type's layout
 equals the pool's layout. The precondition exists because it is the invariant
@@ -67,7 +67,7 @@ the only caller establishes the precondition structurally.
 The typed pool asserts at construction that its chunk size times its chunk cap
 fits the pool's maximum slot count, and treats chunk-layout overflow as a
 panic. Both are reasonable when a human supplied both numbers for one known
-element type. Neither is reasonable for a layout pool: a blind pool derives the
+element type. Neither is reasonable for a layout pool: a multi pool derives the
 chunk size per layout, so one user-supplied cap meets many derived sizes, and
 the first allocation of an unfortunate layout would panic from inside a call
 that promised to return a `Result`.
@@ -75,9 +75,9 @@ that promised to return a `Result`.
 `LayoutPool::new` therefore **clamps rather than asserts**. The derived chunk
 size is clamped so that the chunk layout cannot overflow, and the effective
 chunk cap is clamped to what the maximum slot count permits at that chunk size.
-The resulting effective values are part of the blind pool's contract and are
+The resulting effective values are part of the multi pool's contract and are
 exposed through its per-layout queries; see
-[the blind pool's design](../design/blind-pool.md).
+[the multi pool's design](../design/multi-pool.md).
 
 The clamp is driven by the chunk-layout computation itself rather than by a
 reimplementation of the same bounds: `chunk_layout` reports overflow as `None`
@@ -92,7 +92,7 @@ layout `Layout::new::<T>()` can produce.
 ### State
 
 ```rust
-pub struct BlindPool<A: Allocator + Clone = Global> {
+pub struct MultiPool<A: Allocator + Clone = Global> {
     layouts: UnsafeCell<Vec<Layout>>,
     pools: UnsafeCell<Vec<LayoutPool<A>>>,
     sizing: ChunkSizing,
@@ -111,7 +111,7 @@ striding over pool pointers it does not need. `layouts` is the shorter of the
 two at every instant (see [Reentrancy](#reentrancy)), so a key is never visible
 without its pool.
 
-The blind pool needs no heap indirection of its own. Nothing points at it:
+The multi pool needs no heap indirection of its own. Nothing points at it:
 chunk headers point at their layout pool's core, and handles point at values.
 The directory is reachable only from the pool object.
 
@@ -153,8 +153,8 @@ that was already reserved.
 ### Reentrancy
 
 The general mechanism is described in
-[allocator reentrancy](./reentrancy.md). Blind-pool installation adds the layout
-directory and allocator cloning; this section records the blind-pool-specific
+[allocator reentrancy](./reentrancy.md). Multi-pool installation adds the layout
+directory and allocator cloning; this section records the multi-pool-specific
 ordering and directory invariant.
 
 Reentrancy reaches the router through the documented doors:
@@ -162,7 +162,7 @@ Reentrancy reaches the router through the documented doors:
 - `Allocator::allocate` and `Allocator::deallocate` may re-enter while chunk
   memory, layout-pool metadata or directory capacity is being acquired or
   released. This is the door that relies on cold-path ordering.
-- `Clone::clone` on the blind pool's allocator runs once when a new layout pool
+- `Clone::clone` on the multi pool's allocator runs once when a new layout pool
   is built. It happens before directory reservation, so a nested allocation sees
   a consistent directory.
 - Pooled values' destructors and the closures passed to `_with` constructors run
@@ -227,17 +227,17 @@ all panic, and those panics propagate.
 
 ### Ownership
 
-The blind pool holds one unit of each layout pool's pool-level reference count,
-exactly as a typed pool object holds one unit of its own. Dropping the blind
+The multi pool holds one unit of each layout pool's pool-level reference count,
+exactly as a typed pool object holds one unit of its own. Dropping the multi
 pool drops the pool vector, releasing one unit from each layout pool; those
 with outstanding detachable handles survive until their last handle departs.
 The key vector is plain data.
 
 **Entries are never removed.** A layout pool, once created, lives until the
-blind pool is dropped, even when every value of that layout has been freed.
+multi pool is dropped, even when every value of that layout has been freed.
 This is what makes indices stable, makes the parallel vectors safe to grow
 under a shared reference, and — most importantly — makes the `Alloc` borrow
-argument hold: an `Alloc` borrows the blind pool, the blind pool owns the
+argument hold: an `Alloc` borrows the multi pool, the multi pool owns the
 vector, and nothing can retire the layout pool the `Alloc` points into while
 that borrow is alive.
 
@@ -246,9 +246,9 @@ directory entry it saves. Retiring an empty layout pool would drop its last
 pool-level reference and run its teardown, which deallocates **every chunk it
 holds** — for a large layout pinned at the minimum slot count, a substantial
 amount of memory held for a type the program touched once. Retention is
-therefore monotonic per layout: a blind pool's memory only grows until it is
+therefore monotonic per layout: a multi pool's memory only grows until it is
 dropped. That is the same policy the typed pool follows, which never returns
-chunk memory either; a blind pool makes the policy more visible because it
+chunk memory either; a multi pool makes the policy more visible because it
 accumulates layouts a program may use briefly. Bounding this is the job of the
 two caps rather than of retirement, and an aggregate byte budget is recorded as
 an extension in [`TODO.md`](../TODO.md).
@@ -257,7 +257,7 @@ Vector reallocation moves the layout pool *handles* — each one pointer — but
 never the heap `PoolInner` they point at. Handles that point into a layout
 pool's slots are therefore unaffected by router growth.
 
-Each layout pool needs its own allocator instance, which is why the blind pool
+Each layout pool needs its own allocator instance, which is why the multi pool
 requires a cloneable allocator. Sharing one instance would mean either a
 lifetime in the pool's type — which would infect every handle and destroy their
 detachability — or an extra reference count on the allocator, paid on a path
@@ -280,7 +280,7 @@ never create a layout pool, so querying an unseen type reports an empty pool.
 Chunk memory comes from the pool's allocator and fails through the shared
 allocator-failure path. Pool metadata — the `PoolInner` allocation and the
 directory vectors — comes from the global allocator, and every step of the cold
-path that touches it is fallible, so a blind pool reports metadata failure
+path that touches it is fallible, so a multi pool reports metadata failure
 rather than aborting. The disposition of both failures is described in
 [the pool body](./pool-body.md#failure).
 

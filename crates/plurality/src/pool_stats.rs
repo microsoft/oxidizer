@@ -4,9 +4,9 @@
 /// Runtime allocation statistics for a pool.
 ///
 /// Returned by [`Pool::stats`](crate::Pool::stats) and
-/// [`BlindPool::stats`](crate::BlindPool::stats) under the `stats` feature.
+/// [`MultiPool::stats`](crate::MultiPool::stats) under the `stats` feature.
 /// For [`Pool`](crate::Pool), the counters describe that pool. For
-/// [`BlindPool`](crate::BlindPool), each counter is summed across every layout
+/// [`MultiPool`](crate::MultiPool), each counter is summed across every layout
 /// pool.
 ///
 /// Chunks are retained until pool teardown, so the counters are monotonic and
@@ -17,13 +17,13 @@
 pub struct PoolStats {
     /// Total chunks allocated for pooled storage.
     ///
-    /// For [`BlindPool`](crate::BlindPool), this is the sum of chunks
+    /// For [`MultiPool`](crate::MultiPool), this is the sum of chunks
     /// allocated by every layout pool.
     pub total_chunks_allocated: u64,
 
     /// Total bytes allocated for pooled chunks.
     ///
-    /// For [`BlindPool`](crate::BlindPool), this is the sum of chunk bytes
+    /// For [`MultiPool`](crate::MultiPool), this is the sum of chunk bytes
     /// allocated by every layout pool. Includes chunk headers, slots, and
     /// alignment padding.
     pub total_bytes_allocated: u64,

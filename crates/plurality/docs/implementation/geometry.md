@@ -103,7 +103,7 @@ independent oracle the formulas are proven against (see below).
 multiplication and the header offset added by checked addition. Overflow is
 therefore reported by `Option` rather than by `core`, and a chunk sizing that
 overflows is clamped rather than propagated (see
-[the blind pool](./blind-pool.md)).
+[the multi pool](./multi-pool.md)).
 
 ## Proving the formulas
 
@@ -123,9 +123,9 @@ errors, so the diagnostic is poor and the check cannot be tested negatively;
 that is acceptable for an assertion whose only job is to fail a build that
 would otherwise ship a corrupted free list.
 
-A value allocated from a blind pool need not instantiate `TypedGeometry<T>` at
+A value allocated from a multi pool need not instantiate `TypedGeometry<T>` at
 all: allocation goes through `RuntimeGeometry` and reclamation through the free
-path. The bound owner is what pulls the typed provider in, so the blind pool's
+path. The bound owner is what pulls the typed provider in, so the multi pool's
 tests deliberately drive their layout spread through it as well as through the
 handles.
 
@@ -158,6 +158,6 @@ produced by coercing to a trait object or to a slice. In every case the
 geometry derived from a value's runtime size and alignment equals the geometry
 the pool was built with. That agreement is the allocation and reclamation
 safety invariant: a value is allocated and later recovered through matching
-stride and metadata offsets. The blind-pool directory uses exact Rust `Layout`
+stride and metadata offsets. The multi-pool directory uses exact Rust `Layout`
 as its key — value size and alignment — even when several layouts produce the
-same slot geometry (see [the blind pool's design](../design/blind-pool.md)).
+same slot geometry (see [the multi pool's design](../design/multi-pool.md)).

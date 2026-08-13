@@ -1,4 +1,4 @@
-# Plurality — Blind pool
+# Plurality — Multi pool
 
 Pooling values of any type from one pool object: how a value is routed to the
 pool serving its layout, how such a pool is sized and bounded, and where it
@@ -6,12 +6,12 @@ departs from a typed pool. Part of the [architecture](../DESIGN.md).
 
 ## Heterogeneous pooling
 
-A typed pool fixes its element type at construction. A **blind pool** moves
+A typed pool fixes its element type at construction. A **multi pool** moves
 that decision to the call site: one pool object accepts values of any type, and
 the type parameter travels with the allocation instead of with the pool.
 
 ```rust
-let pool = BlindPool::new();
+let pool = MultiPool::new();
 let widget = pool.alloc_box(Widget::new());    // Box<Widget>
 let count  = pool.alloc_arc(0_u64);            // Arc<u64>
 let name   = pool.alloc_rc(String::new());     // Rc<String>
@@ -19,17 +19,17 @@ let name   = pool.alloc_rc(String::new());     // Rc<String>
 
 Everything the typed pool promises about a handle continues to hold: address
 stability, detachable lifetime, one-pointer width for sized values, and
-coercion to trait objects and slices ([handles](./handles.md)). A blind pool is
+coercion to trait objects and slices ([handles](./handles.md)). A multi pool is
 what lets a single pool back a heterogeneous working set — a scheduler holding
 many distinct future types, a scene graph of unrelated node types, or any
 collection stored as `Box<dyn Trait>` where the concrete types differ.
 
 ## The router and the layout pools
 
-A blind pool owns a set of **layout pools**. A layout pool is the same
+A multi pool owns a set of **layout pools**. A layout pool is the same
 machinery as a typed pool with the element type replaced by a layout fixed at
 construction: same chunks, same slots, same free list, same pair of reference
-counts. The blind pool itself holds no slots and no values — it is a directory
+counts. The multi pool itself holds no slots and no values — it is a directory
 that maps a layout to the pool serving it.
 
 ```text
@@ -37,7 +37,7 @@ that maps a layout to the pool serving it.
         │  Layout::new::<Widget>()  →  (size 24, align 8)
         ▼
    ┌───────────────────────────────┐
-   │  blind pool: layout directory │
+   │  multi pool: layout directory │
    │   (0, 1)  →  layout pool ●    │
    │   (8, 8)  →  layout pool ●    │
    │  (24, 8)  →  layout pool ●────┼──► chunks · slots · free list
@@ -69,7 +69,7 @@ never asks which pool the value came from, so it never consults the directory.
  free:      value pointer ─────────────────────► layout pool   (no lookup)
 ```
 
-This is why blind handles are byte-for-byte the typed handles — one pointer for
+This is why multi-pool handles are byte-for-byte the typed handles — one pointer for
 a sized value, with no layout key, no pool reference, and no per-handle
 metadata. It is also why freeing costs exactly what it costs in a typed pool,
 and why frees remain concurrent and lock-free while the directory stays
@@ -77,7 +77,7 @@ confined to the single allocator thread.
 
 ## Exact layouts, no size classes
 
-A blind pool routes a value only to the pool whose layout is *exactly*
+A multi pool routes a value only to the pool whose layout is *exactly*
 `Layout::new::<T>()`. It never rounds sizes up, buckets nearby layouts
 together, or imposes size classes.
 
@@ -96,7 +96,7 @@ types get four layout pools, not one, and each has its own chunks, its own free
 list, its own statistics, and its own share of any cap. Geometry appears only
 in the safety invariant above; it never partitions anything.
 
-The rule pays for itself: a blind pool has no internal fragmentation from
+The rule pays for itself: a multi pool has no internal fragmentation from
 rounding, and a value occupies exactly the space a typed pool would give it.
 What it costs is one layout pool per distinct layout — bounded in practice by
 the set of types a program instantiates.
@@ -109,17 +109,17 @@ Over-aligned values are ordinary participants too, and pay the same overhead a
 typed pool charges them: a slot is padded to the value's alignment, so a value
 whose alignment exceeds its size is stored in a slot larger than itself, and a
 chunk reserves alignment-sized padding ahead of its first slot. This matches
-the typed pool, but a blind pool is likelier to meet such types, so it is worth
+the typed pool, but a multi pool is likelier to meet such types, so it is worth
 stating.
 
 ## Sizing chunks by bytes
 
 A typed pool sizes chunks in **slots**, because it knows how big a slot is. A
-blind pool serves layouts spanning several orders of magnitude, so a uniform
+multi pool serves layouts spanning several orders of magnitude, so a uniform
 slot count would make chunk sizes just as uneven — a few hundred bytes for a
 pool of small integers and many megabytes for a pool of large aggregates.
 
-A blind pool therefore sizes chunks by a **byte target**. Each layout pool
+A multi pool therefore sizes chunks by a **byte target**. Each layout pool
 derives its own slot count by dividing the target by its slot stride, clamped
 to the representable slot-count range and rounded down to a power of two
 (chunk sizes must remain powers of two so that slot addressing stays
@@ -133,8 +133,8 @@ power of two and subject to the clamping below.
 
 ## Clamping and effective sizing
 
-The chunk size and chunk cap a blind pool uses for a layout are derived values,
-not the configured ones. A single configuration meets many layouts, so a blind
+The chunk size and chunk cap a multi pool uses for a layout are derived values,
+not the configured ones. A single configuration meets many layouts, so a multi
 pool clamps rather than rejecting:
 
 - The per-layout chunk size is clamped so that the chunk's own memory layout
@@ -161,7 +161,7 @@ exhaustion, exactly as a typed pool does.
 
 A per-layout cap alone does not bound the pool, because the number of distinct
 layouts is a property of the whole program's type set — including types from
-dependencies — and is not something a caller can enumerate. A blind pool
+dependencies — and is not something a caller can enumerate. A multi pool
 therefore also accepts a **cap on the number of layouts**. Once reached, a
 request for an unseen layout reports capacity exhaustion rather than creating a
 pool for it. Like the typed pool's chunk cap, it is optional: growth in both
@@ -188,9 +188,9 @@ only against the layout cap, never against another layout's chunk cap.
 
 ## Memory is monotonic per layout
 
-A layout pool is never retired. Once created it lives until the blind pool is
+A layout pool is never retired. Once created it lives until the multi pool is
 dropped, even after every value of its layout has been freed, and chunk memory
-is never returned to the allocator. A blind pool's memory is therefore
+is never returned to the allocator. A multi pool's memory is therefore
 monotonic per layout: the capacity and the chunk count reported for a layout
 are a high-water mark over the pool's lifetime, not a measure of what is in use.
 
@@ -198,34 +198,34 @@ Heterogeneity makes this far more visible than it is in a typed pool. Chunks
 hold a minimum number of slots regardless of how large the layout is, so a
 single value of a large layout commits that chunk for as long as the pool
 lives, and a program that presents many transient layouts accumulates a layout
-pool for each one it touches. A program of that shape should scope its blind
+pool for each one it touches. A program of that shape should scope its multi
 pool to the phase that uses those layouts, so that the memory is released when
 the pool is dropped.
 
 ## Lifetimes and teardown
 
-A blind pool holds one unit of the pool-level reference count on each of its
+A multi pool holds one unit of the pool-level reference count on each of its
 layout pools, in the same way a typed pool object holds one unit of its own.
-Dropping the blind pool drops the directory, releasing one unit from every
+Dropping the multi pool drops the directory, releasing one unit from every
 layout pool it created. Any layout pool with outstanding detachable handles
 survives and tears down when its last handle departs, on whichever thread that
 happens to be.
 
-Handles from a blind pool therefore outlive it individually and independently:
-two values of different layouts, allocated from the same blind pool, may keep
+Handles from a multi pool therefore outlive it individually and independently:
+two values of different layouts, allocated from the same multi pool, may keep
 two separate layout pools alive for different durations.
 
 ## Concurrency
 
-The blind pool follows the same single allocator, multiple reclaimers
+The multi pool follows the same single allocator, multiple reclaimers
 discipline as the typed pool ([concurrency](./concurrency.md)), and for the
 same reason:
 allocation mutates the directory and must not overlap with itself, while frees
 never touch the directory at all. The pool object may be moved between threads
 but not shared, and its handles carry their own thread-mobility rules.
 
-A blind pool is `Send` whenever its allocator is, on the same terms as a typed
-pool and for the same reasons. The only bound specific to the blind pool is on
+A multi pool is `Send` whenever its allocator is, on the same terms as a typed
+pool and for the same reasons. The only bound specific to the multi pool is on
 the allocator: because each layout pool owns its own clone of it, and because
 layout pools tear down independently, two clones may be in use on two threads
 at once — one tearing down a layout pool whose last handle just departed,
@@ -234,13 +234,13 @@ another serving the pool object elsewhere. This is exactly what `Send` plus
 because per-layout cloning makes the situation reachable in a way a typed
 pool's single allocator instance never is.
 
-Reentrancy reaches a blind pool through the same doors described by the
+Reentrancy reaches a multi pool through the same doors described by the
 implementation guide:
 
 - `Allocator::allocate` and `Allocator::deallocate` may allocate from, and free
   into, the pool they serve. This is the door that relies on cold-path
   ordering.
-- `Clone::clone` on the blind pool's allocator runs once per new layout pool and
+- `Clone::clone` on the multi pool's allocator runs once per new layout pool and
   may re-enter; the install path uses the same ordering.
 - Pooled values' destructors and the closures passed to `_with` constructors run
   with no pool state in flight, so they may allocate from and free into the pool
@@ -252,7 +252,7 @@ exhausted; the pool does not bound recursion depth. The ordering details are in
 
 ## Allocation surface
 
-The blind pool mirrors the typed pool's allocation surface method for method
+The multi pool mirrors the typed pool's allocation surface method for method
 ([allocation](./allocation.md)). Every handle flavor offers the by-value,
 closure, and uninitialized-then-initialize forms, each with a panicking and a
 fallible variant, and the shared flavors additionally offer their pinned
@@ -260,16 +260,16 @@ constructors. The only change is where the type parameter sits:
 
 ```rust
 typed.alloc_box(value);          // Pool<Widget>  — type fixed by the pool
-blind.alloc_box(value);          // BlindPool     — type inferred from the value
-blind.alloc_uninit_box::<Widget>();  // named where it cannot be inferred
+multi.alloc_box(value);          // MultiPool     — type inferred from the value
+multi.alloc_uninit_box::<Widget>();  // named where it cannot be inferred
 let erased: plurality::Box<dyn core::fmt::Display> =
     plurality::Box::unsize(
-        blind.alloc_box(1.5_f64),
+        multi.alloc_box(1.5_f64),
         plurality::coerce!(dyn core::fmt::Display),
     );
 ```
 
-Introspection splits into two tiers, because a blind pool has no single slot
+Introspection splits into two tiers, because a multi pool has no single slot
 size. Aggregate queries report the whole pool — the count of live detachable
 allocations (`Box`, `Arc`, and `Rc`), the chunks held, and the distinct layouts
 in play. Lifetime-bound `Alloc` handles can occupy slots, but they do not hold
@@ -287,9 +287,9 @@ concurrent frees, and compound it: a sum of independently read counters may
 describe a state the pool was never in. They are reporting instruments, not
 control-flow inputs.
 
-## How the blind pool differs from a typed pool
+## How the multi pool differs from a typed pool
 
-| Aspect | Typed pool | Blind pool |
+| Aspect | Typed pool | Multi pool |
 |---|---|---|
 | Type parameter | On the pool | On the allocation |
 | Handles | Four flavors | The same four |
@@ -309,7 +309,7 @@ iteration over pool contents — handles are the only way to reach a value. And
 there is no type identity or downcasting: the pool records a layout, not a
 type, so a value's concrete type is recovered from its handle or not at all.
 
-Converting a blind pool into a typed pool for one of its layouts, or the
+Converting a multi pool into a typed pool for one of its layouts, or the
 reverse, is likewise not offered. The obstacle is not geometry — both forms
 derive the same slot geometry from the same layout, which allocation and
 reclamation safety require. It is that a typed pool and a layout pool are
@@ -319,7 +319,7 @@ configuration and its pool-metadata teardown as well.
 
 ## Failure
 
-The blind pool reports the same two failures as the typed pool, and adds no
+The multi pool reports the same two failures as the typed pool, and adds no
 third.
 
 Capacity exhaustion covers two cases: the layout pool serving the request
@@ -335,7 +335,7 @@ pool — rather than naming chunks specifically.
 
 ## Comparison with `infinity_pool::BlindPool`
 
-The reference design for this feature is `infinity_pool`'s blind pool family.
+The reference design for this feature is `infinity_pool`'s multi pool family.
 The capability sets are close; the structural difference is where the
 type-to-pool mapping is consulted, and who owns the lock.
 
@@ -383,4 +383,4 @@ to reacquire it.
 
 The router, the layout pools, and the ordering that keeps the directory
 consistent are described in
-[`implementation/blind-pool.md`](../implementation/blind-pool.md).
+[`implementation/multi-pool.md`](../implementation/multi-pool.md).

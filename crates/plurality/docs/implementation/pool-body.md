@@ -54,8 +54,8 @@ it is needed on the growth path and again at teardown, which may run on a
 thread that never held the pool object.
 
 **`Pool<T, A>`** is one pointer, `NonNull<PoolInner<A, TypedGeometry<T>>>`.
-`BlindPool` and `LayoutPool` are described in
-[the blind pool](./blind-pool.md).
+`MultiPool` and `LayoutPool` are described in
+[the multi pool](./multi-pool.md).
 
 **`ChunkHeader`** sits at the start of every chunk allocation:
 
@@ -217,7 +217,7 @@ growth from racing a concurrent free for the slot it just created.
 
 ## Chunk sizing
 
-A typed pool takes a slot count directly. A blind pool sizes chunks from a byte
+A typed pool takes a slot count directly. A multi pool sizes chunks from a byte
 target, because one slot count across layouts spanning orders of magnitude
 would make chunk sizes just as uneven:
 
@@ -240,7 +240,7 @@ enough that a layout touched once does not cost much.
 A caller may instead request a slot count, which every layout starts from
 uniformly before power-of-two rounding and per-layout clamping. The per-layout
 clamps that keep a derived size legal are described in
-[the blind pool](./blind-pool.md).
+[the multi pool](./multi-pool.md).
 
 ## Pointer recovery
 
@@ -401,7 +401,7 @@ failure contracts differ. The typed builder allocates it with `Box::new`, whose
 failure is the global allocator's out-of-memory handler — a non-unwinding abort,
 which is what `build()`'s documented contract promises. `LayoutPool::new`
 allocates the same block through the raw global allocator and returns
-`Result`, because the blind pool's cold path must report a metadata failure as
+`Result`, because the multi pool's cold path must report a metadata failure as
 an `AllocError` rather than abort the process.
 
 ## Failure
@@ -411,11 +411,11 @@ the discriminants are not part of the public API and can be matched only
 through predicate methods:
 
 - **Capacity exhausted** — every slot is occupied and the pool cannot grow,
-  because it reached its chunk cap or the addressable slot ceiling. For a blind
+  because it reached its chunk cap or the addressable slot ceiling. For a multi
   pool it also covers a request for an unseen layout when the layout cap is
   reached.
 - **Allocator failure** — memory for the pool's own use could not be obtained.
-  That covers a chunk, the chunk directory that indexes it, and, on the blind
+  That covers a chunk, the chunk directory that indexes it, and, on the multi
   pool's cold path, the layout directory and the metadata of a new layout pool.
   These allocator failures share a case because the caller's recourse is
   identical, and because a third case would be a breaking change to an error
@@ -449,8 +449,8 @@ through `stats()` and never used to establish a happens-before relationship.
 Compiling it out entirely when the feature is off is the point of the gate —
 the pool carries no tracking overhead a caller has not asked for.
 
-The blind pool's aggregate queries sum over its layout pools; see
-[the blind pool](./blind-pool.md).
+The multi pool's aggregate queries sum over its layout pools; see
+[the multi pool](./multi-pool.md).
 
 ## Compilation configuration
 

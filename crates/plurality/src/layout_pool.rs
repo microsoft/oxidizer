@@ -6,13 +6,13 @@
 //! `LayoutPool` is the same body as [`Pool`](crate::Pool) driven by
 //! [`RuntimeGeometry`] instead of compile-time constants, so it can serve a
 //! layout that is only known when the pool is built. It is crate-private:
-//! [`BlindPool`](crate::BlindPool) is its only user, and it exists so that the
-//! blind pool's router has something uniform to route to.
+//! [`MultiPool`](crate::MultiPool) is its only user, and it exists so that the
+//! multi pool's router has something uniform to route to.
 //!
 //! Every allocation entry point is `unsafe` and unchecked, because the router
 //! selected this pool *because* the layouts matched — re-checking on every
 //! allocation would pay for a fact the caller already proved. See
-//! `docs/implementation/blind-pool.md`.
+//! `docs/implementation/multi-pool.md`.
 
 use alloc::alloc::alloc as global_alloc;
 use alloc::vec::Vec;
@@ -43,10 +43,10 @@ impl<A: Allocator> LayoutPool<A> {
     /// `chunk_size` is rounded up to a power of two and then **clamped** so
     /// that a chunk's memory layout cannot overflow; `max_chunks` is clamped to
     /// what the pool's slot-index ceiling permits at the effective chunk size.
-    /// Clamping rather than asserting is what lets one blind-pool-wide sizing
+    /// Clamping rather than asserting is what lets one multi-pool-wide sizing
     /// configuration meet an arbitrary layout without the first allocation of
     /// an unfortunate layout panicking out of a fallible call.
-    /// Ref: docs/implementation/blind-pool.md, "Clamping the sizing configuration".
+    /// Ref: docs/implementation/multi-pool.md, "Clamping the sizing configuration".
     ///
     /// # Errors
     /// Returns [`AllocError::ALLOCATOR_FAILED`] if the global allocator cannot
@@ -102,7 +102,7 @@ impl<A: Allocator> LayoutPool<A> {
     /// borrow before allocating, so that reentrant user code is free to grow
     /// the directory. The view stays valid because the `PoolInner` it addresses
     /// is heap-allocated and never moves, and because layout pools are never
-    /// retired. Ref: docs/implementation/blind-pool.md, "Reentrancy".
+    /// retired. Ref: docs/implementation/multi-pool.md, "Reentrancy".
     #[inline]
     pub(crate) fn as_ref(&self) -> LayoutPoolRef<A> {
         LayoutPoolRef { inner: self.inner }
@@ -122,10 +122,10 @@ impl<A: Allocator> Drop for LayoutPool<A> {
 
 /// A [`Copy`], non-owning view of a [`LayoutPool`].
 ///
-/// Holds no reference count: it is only ever used while the [`BlindPool`] that
+/// Holds no reference count: it is only ever used while the [`MultiPool`] that
 /// owns the pool is borrowed, and layout pools are never retired.
 ///
-/// [`BlindPool`]: crate::BlindPool
+/// [`MultiPool`]: crate::MultiPool
 pub(crate) struct LayoutPoolRef<A: Allocator> {
     inner: NonNull<PoolInner<A, RuntimeGeometry>>,
 }
@@ -232,7 +232,7 @@ fn clamp_chunk_size(geometry: RuntimeGeometry, chunk_size: u32) -> (u32, Layout)
 }
 
 /// The slot count [`LayoutPool::new`] would settle on for `layout`, without
-/// building a pool. Lets the blind pool report effective sizing for a layout it
+/// building a pool. Lets the multi pool report effective sizing for a layout it
 /// has not yet seen.
 pub(crate) fn effective_chunk_size(layout: Layout, requested: u32) -> u32 {
     clamp_chunk_size(RuntimeGeometry::new(layout), requested).0

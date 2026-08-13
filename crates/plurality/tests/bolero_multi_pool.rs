@@ -15,7 +15,7 @@
     reason = "test and benchmark code"
 )]
 
-//! Property tests for mixed allocation, clone, and drop sequences over a blind
+//! Property tests for mixed allocation, clone, and drop sequences over a multi
 //! pool. Every value must be dropped once, releasing all handles must empty the
 //! pool, and a slot must only ever be reused within its own layout.
 
@@ -27,7 +27,7 @@ use std::ptr::from_ref;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use plurality::{Arc, BlindPool, Box};
+use plurality::{Arc, Box, MultiPool};
 
 /// Values recording their destruction into a shared counter, over a spread of
 /// layouts. The pool must keep their slots apart even though one pool serves
@@ -64,7 +64,7 @@ enum Handle {
 /// Interprets `input` as an op stream and checks the invariants.
 fn run(input: &[u8]) {
     let counter = StdArc::new(AtomicUsize::new(0));
-    let pool = BlindPool::builder().chunk_size(4).build();
+    let pool = MultiPool::builder().chunk_size(4).build();
     let mut handles: Vec<Handle> = Vec::new();
     let mut allocations = 0_usize;
 
@@ -153,6 +153,6 @@ fn run(input: &[u8]) {
 }
 
 #[test]
-fn blind_pool_invariants() {
+fn multi_pool_invariants() {
     bolero::check!().for_each(|input: &[u8]| run(input));
 }

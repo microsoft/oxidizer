@@ -4,7 +4,7 @@
 //! Growth for the vectors a pool mutates while an allocator call may be
 //! outstanding.
 //!
-//! A pool keeps its chunk directory, and a blind pool its layout directory, in
+//! A pool keeps its chunk directory, and a multi pool its layout directory, in
 //! an [`UnsafeCell<Vec<_>>`]. Growing such a vector through `Vec` itself holds
 //! `&mut` across a call into the global allocator, and an allocator that
 //! allocates from the pool it serves would take a second borrow of the same

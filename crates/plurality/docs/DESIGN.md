@@ -8,10 +8,10 @@ steady-state cost of allocating and freeing an object is a handful of pointer
 operations rather than a round trip through the global allocator.
 
 It comes in two forms. A **typed pool** fixes its element type at construction
-and serves values of that one type. A **blind pool** accepts values of any
+and serves values of that one type. A **multi pool** accepts values of any
 type, routing each one to the internal pool that serves its memory layout.
 Both hand out the same handles and rest on the same chunk, slot, and free-list
-machinery; the blind pool adds a layout directory in front of it.
+machinery; the multi pool adds a layout directory in front of it.
 
 It occupies a deliberate niche between three neighbours:
 
@@ -58,10 +58,10 @@ that connects the allocating thread to the freeing ones.
 points, the split between panicking and fallible variants, the two failure
 causes the pool distinguishes, and the `no_std` and custom-allocator story.
 
-**[Blind pool](./design/blind-pool.md)** — pooling values of any type in one
+**[Multi pool](./design/multi-pool.md)** — pooling values of any type in one
 pool object: the layout directory that sits on the allocation path only, exact
 layout routing, byte-target chunk sizing, the caps that bound growth, and how
-the blind pool differs from a typed one.
+the multi pool differs from a typed one.
 
 The implementation of this design is documented in
 [`IMPLEMENTATION.md`](./IMPLEMENTATION.md), measured performance in
@@ -118,15 +118,15 @@ invariants:
 11. **The layout directory is allocation-path state.** It is read and grown
     only while allocating, on the single allocator thread, and is never
     reachable from a free, a destructor, or a teardown.
-12. **Layout pools are never retired.** A layout pool created by a blind pool
-    lives until the blind pool is dropped, which is what makes directory
-    indices stable and lets a bound owner borrow the blind pool while pointing
+12. **Layout pools are never retired.** A layout pool created by a multi pool
+    lives until the multi pool is dropped, which is what makes directory
+    indices stable and lets a bound owner borrow the multi pool while pointing
     into a layout pool's slot.
 13. **Reentrancy is safe and supported.** The pools place no obligation on
     the allocator. `Allocator::allocate` and `Allocator::deallocate` may
     allocate from, and free into, the pool they serve; the cold growth paths
     order allocation and publication so reentry observes consistent state.
-    `Clone::clone` on a blind pool's allocator may also re-enter while a new
+    `Clone::clone` on a multi pool's allocator may also re-enter while a new
     layout pool is installed and is covered by the same ordering. Pooled
     values' destructors and the closures passed to `_with` constructors run
     with no pool state in flight, so they may allocate from and free into the
@@ -149,7 +149,7 @@ each targeting a different failure class:
   on a non-allocator thread — confirming each value is destroyed exactly once.
 - **Property and fuzz testing** probes pool invariants under randomized
   operation sequences.
-- **Heterogeneous-workload tests** drive many layouts through one blind pool,
+- **Heterogeneous-workload tests** drive many layouts through one multi pool,
   including zero-sized and over-aligned values and values reaching the pool as
   trait objects, confirming that every value is destroyed exactly once and that
   a slot is only ever reused for its own layout.

@@ -37,8 +37,8 @@ const N: u64 = 1000;
 
 fn alloc_benches(c: &mut Criterion) {
     let pool = ops::setup_pool(ops::CAP);
-    let blind = ops::setup_blind_pool(ops::CAP);
-    let blind_spread = ops::setup_blind_pool_spread(ops::CAP);
+    let multi = ops::setup_multi_pool(ops::CAP);
+    let multi_spread = ops::setup_multi_pool_spread(ops::CAP);
 
     let mut g = c.benchmark_group("alloc");
     macro_rules! bench {
@@ -69,8 +69,8 @@ fn alloc_benches(c: &mut Criterion) {
     bench!(rc_val);
     bench!(rc_with);
     bench!(rc_uninit);
-    bench!(blind_box_val, &blind);
-    bench!(blind_box_val_spread, &blind_spread);
+    bench!(multi_box_val, &multi);
+    bench!(multi_box_val_spread, &multi_spread);
     g.finish();
 
     let mut g = c.benchmark_group("clone");
@@ -95,7 +95,7 @@ fn alloc_benches(c: &mut Criterion) {
 
 fn dyn_box_benches(c: &mut Criterion) {
     let plurality = ops::setup_plurality(ops::CAP);
-    let plurality_blind = ops::setup_plurality_blind(ops::CAP);
+    let plurality_multi = ops::setup_plurality_multi(ops::CAP);
     let infinity = ops::setup_infinity_pinned(ops::CAP);
     let infinity_local = ops::setup_infinity_local_pinned(ops::CAP);
     let infinity_blind = ops::setup_infinity_blind(ops::CAP);
@@ -110,10 +110,10 @@ fn dyn_box_benches(c: &mut Criterion) {
             }
         });
     });
-    group.bench_function("plurality_blind_box", |b| {
+    group.bench_function("plurality_multi_box", |b| {
         b.iter(|| {
             for i in 0..N {
-                ops::plurality_blind_box(black_box(&plurality_blind), i);
+                ops::plurality_multi_box(black_box(&plurality_multi), i);
             }
         });
     });

@@ -5,8 +5,8 @@
 //!
 //! The router that maps a value's layout to the [`LayoutPool`] serving it, and
 //! the allocation surface layered on top of it. See
-//! `docs/design/blind-pool.md` for the user-visible model and
-//! `docs/implementation/blind-pool.md` for the reentrancy ordering the cold
+//! `docs/design/multi-pool.md` for the user-visible model and
+//! `docs/implementation/multi-pool.md` for the reentrancy ordering the cold
 //! path follows.
 
 #![expect(
@@ -25,21 +25,21 @@ use core::pin::Pin;
 use allocator_api2::alloc::{Allocator, Global};
 
 use crate::alloced::Alloc;
-use crate::blind_builder::BlindPoolBuilder;
 use crate::boxed::Box;
 use crate::directory::{self, Displaced};
 use crate::error::AllocError;
 use crate::layout_pool::{LayoutPool, LayoutPoolRef};
+use crate::multi_builder::MultiPoolBuilder;
 use crate::pool::{allocation_failed, occupy_local};
 use crate::rc::Rc;
 use crate::slot::SlotCell;
 use crate::sync::Arc;
 
-/// Chunk sizing shared by every layout pool a [`BlindPool`] creates.
+/// Chunk sizing shared by every layout pool a [`MultiPool`] creates.
 ///
 /// A byte target lets layouts of very different sizes commit comparable memory
 /// per growth step; a fixed slot count gives every layout equal increments of
-/// capacity. Ref: docs/design/blind-pool.md, "Sizing chunks by bytes".
+/// capacity. Ref: docs/design/multi-pool.md, "Sizing chunks by bytes".
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ChunkSizing {
     /// Each layout pool takes as many slots as fit in this many bytes.
@@ -54,7 +54,7 @@ impl ChunkSizing {
     ///
     /// A chunk always holds at least one slot, so a value larger than the byte
     /// target on its own gets a chunk sized by the value.
-    /// Ref: docs/design/blind-pool.md, "Bounding growth".
+    /// Ref: docs/design/multi-pool.md, "Bounding growth".
     fn slots_for(self, stride: usize) -> u32 {
         match self {
             Self::Bytes(target) => {
@@ -85,7 +85,7 @@ impl ChunkSizing {
 /// dedicated to that one type, because a handle finds its own pool by pointer
 /// recovery and never consults the router.
 ///
-/// A blind pool is `Send` when its allocator is, and is not `Sync`: one thread
+/// A multi pool is `Send` when its allocator is, and is not `Sync`: one thread
 /// allocates at a time, while frees may happen anywhere. Values of types with
 /// different thread affinities may share one pool, because the pool owns no
 /// values — each handle carries its own bound.
@@ -101,16 +101,16 @@ impl ChunkSizing {
 /// "allocation failed" covers either cause.
 ///
 /// ```
-/// use plurality::BlindPool;
+/// use plurality::MultiPool;
 ///
-/// let pool = BlindPool::new();
+/// let pool = MultiPool::new();
 /// let widget = pool.alloc_box(42_u64);
 /// let name = pool.alloc_box(String::from("hello"));
 /// assert_eq!(*widget, 42);
 /// assert_eq!(&*name, "hello");
 /// assert_eq!(pool.layouts(), 2);
 /// ```
-pub struct BlindPool<A: Allocator + Clone = Global> {
+pub struct MultiPool<A: Allocator + Clone = Global> {
     /// Keys, in first-seen order. Kept in their own vector so a lookup scans
     /// keys only, without striding over pool pointers it does not need.
     layouts: UnsafeCell<Vec<Layout>>,
@@ -130,33 +130,33 @@ pub struct BlindPool<A: Allocator + Clone = Global> {
 // slots, which hold nothing live. Thread mobility for values is carried by the
 // handles, each of which imposes its own bound.
 // Ref: docs/DESIGN.md, invariant 7.
-unsafe impl<A: Allocator + Clone + Send> Send for BlindPool<A> {}
+unsafe impl<A: Allocator + Clone + Send> Send for MultiPool<A> {}
 
-impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for BlindPool<A> {}
-impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::UnwindSafe for BlindPool<A> {}
+impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::RefUnwindSafe for MultiPool<A> {}
+impl<A: Allocator + Clone + core::panic::RefUnwindSafe> core::panic::UnwindSafe for MultiPool<A> {}
 
-impl BlindPool<Global> {
-    /// Creates a blind pool with the default chunk sizing and unbounded growth.
+impl MultiPool<Global> {
+    /// Creates a multi pool with the default chunk sizing and unbounded growth.
     #[must_use]
     pub fn new() -> Self {
-        BlindPoolBuilder::new().build()
+        MultiPoolBuilder::new().build()
     }
 
-    /// Starts a [`BlindPoolBuilder`].
+    /// Starts a [`MultiPoolBuilder`].
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // Replacing the builder with Default is an unviable/equivalent mutant.
-    pub fn builder() -> BlindPoolBuilder<Global> {
-        BlindPoolBuilder::new()
+    pub fn builder() -> MultiPoolBuilder<Global> {
+        MultiPoolBuilder::new()
     }
 }
 
-impl Default for BlindPool<Global> {
+impl Default for MultiPool<Global> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<A: Allocator + Clone> fmt::Debug for BlindPool<A> {
+impl<A: Allocator + Clone> fmt::Debug for MultiPool<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("layouts", &self.layouts())
@@ -167,7 +167,7 @@ impl<A: Allocator + Clone> fmt::Debug for BlindPool<A> {
     }
 }
 
-impl<A: Allocator + Clone> BlindPool<A> {
+impl<A: Allocator + Clone> MultiPool<A> {
     pub(crate) fn from_parts(sizing: ChunkSizing, max_chunks: Option<u32>, max_layouts: Option<usize>, allocator: A) -> Self {
         Self {
             layouts: UnsafeCell::new(Vec::new()),
@@ -202,7 +202,7 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// element type.
     ///
     /// The step ordering below is load-bearing and is derived in
-    /// `docs/implementation/blind-pool.md`, "Reentrancy". Every step that
+    /// `docs/implementation/multi-pool.md`, "Reentrancy". Every step that
     /// releases control to code outside this module is marked.
     #[cold]
     #[inline(never)]
@@ -454,9 +454,9 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// ```
     /// # fn main() {
     /// # #[cfg(feature = "stats")] {
-    /// use plurality::BlindPool;
+    /// use plurality::MultiPool;
     ///
-    /// let pool = BlindPool::new();
+    /// let pool = MultiPool::new();
     /// assert_eq!(pool.stats().total_chunks_allocated, 0);
     ///
     /// let _a = pool.alloc_box(7_u64);
@@ -505,9 +505,9 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// to handle capacity exhaustion and allocator failure.
     ///
     /// ```
-    /// use plurality::BlindPool;
+    /// use plurality::MultiPool;
     ///
-    /// let pool = BlindPool::new();
+    /// let pool = MultiPool::new();
     /// let value = pool.alloc_box([1_u8, 2, 3]);
     /// assert_eq!(*value, [1, 2, 3]);
     /// ```
@@ -862,9 +862,9 @@ impl<A: Allocator + Clone> BlindPool<A> {
     /// Panics if allocation fails.
     ///
     /// ```
-    /// use plurality::BlindPool;
+    /// use plurality::MultiPool;
     ///
-    /// let pool = BlindPool::new();
+    /// let pool = MultiPool::new();
     /// let mut slot = pool.alloc_uninit_box::<u64>();
     /// slot.write(7);
     /// // SAFETY: the value was just written.

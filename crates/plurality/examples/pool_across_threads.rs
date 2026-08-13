@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Mutex;
 use std::thread;
 
-use plurality::{Arc, BlindPool, Box, Pool};
+use plurality::{Arc, Box, MultiPool, Pool};
 
 #[derive(Debug)]
 struct Job {
@@ -26,9 +26,9 @@ struct Job {
 
 fn main() {
     // A `Mutex` makes the allocation path shared. The pool itself imposes no
-    // locking policy, so a single-threaded caller pays for none. A blind pool
+    // locking policy, so a single-threaded caller pays for none. A multi pool
     // is used here so one lock covers every type the threads allocate.
-    let pool = Mutex::new(BlindPool::new());
+    let pool = Mutex::new(MultiPool::new());
 
     let results: Vec<(u32, u64)> = thread::scope(|scope| {
         // Every worker must be spawned before any is joined, or they run one

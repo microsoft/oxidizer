@@ -34,7 +34,7 @@ mod benchmark_metadata;
 const N: f64 = 1000.0;
 
 /// Benchmark identifier for the high directory-scan case.
-const BLIND_BOX_VAL_SPREAD: &str = "blind_box_val_spread";
+const MULTI_BOX_VAL_SPREAD: &str = "multi_box_val_spread";
 
 /// The aligned allocation operations: `(name, pretty label)`. `name` is both the
 /// criterion variant (`alloc/<name>`) and the gungraun fn (in group `alloc`).
@@ -53,8 +53,8 @@ const ALLOC_OPS: &[(&str, &str)] = &[
     ("rc_val", "`Rc` — `alloc_rc`"),
     ("rc_with", "`Rc` — `alloc_rc_with`"),
     ("rc_uninit", "`Rc` — `alloc_uninit_rc`"),
-    ("blind_box_val", "`BlindPool` — `alloc_box`, one layout"),
-    (BLIND_BOX_VAL_SPREAD, "`BlindPool` — `alloc_box`"),
+    ("multi_box_val", "`MultiPool` — `alloc_box`, one layout"),
+    (MULTI_BOX_VAL_SPREAD, "`MultiPool` — `alloc_box`"),
 ];
 
 /// The aligned clone operations (criterion group `clone`, gungraun group `clone`).
@@ -66,8 +66,8 @@ const CLONE_OPS: &[(&str, &str)] = &[
 /// Comparable owning handles that erase a concrete pooled value to `dyn Marker`.
 const DYN_BOX_OPS: &[(&str, &str)] = &[
     (
-        "plurality_blind_box",
-        "plurality — `BlindPool` / `Box<dyn Trait>` (heterogeneous)",
+        "plurality_multi_box",
+        "plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous)",
     ),
     ("plurality_box", "plurality — `Box<dyn Trait>`"),
     (
@@ -558,7 +558,7 @@ fn build_report(
          single-threaded, lock-free allocation; infinity-pool's `PinnedPool` \
          variants support concurrent, lock-based allocation with `Send` handles, \
          while their faster `Local` variants make both pool and handles \
-         single-threaded. The `BlindPool` rows additionally support heterogeneous \
+         single-threaded. The heterogeneous rows additionally support mixed \
          layouts and therefore pay for more capability. Other \
          surveyed pool crates return keys or pool-borrowing guards rather than \
          owning fat-pointer handles. \
@@ -603,7 +603,7 @@ fn emit_aligned_table(
 }
 
 fn aligned_label(name: &str, label: &str) -> String {
-    if name == BLIND_BOX_VAL_SPREAD {
+    if name == MULTI_BOX_VAL_SPREAD {
         format!("{label}, {} layouts", benchmark_metadata::SPREAD_LAYOUTS)
     } else {
         label.to_owned()

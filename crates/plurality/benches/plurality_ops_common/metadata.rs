@@ -9,5 +9,5 @@
 /// allocation pays. It is high enough for the per-entry slope to clear
 /// measurement noise, yet stays in the range of layout counts real programs
 /// present, which is what the linear scan is chosen for.
-/// Ref: docs/implementation/blind-pool.md, "Lookup".
+/// Ref: docs/implementation/multi-pool.md, "Lookup".
 pub(crate) const SPREAD_LAYOUTS: usize = 16;

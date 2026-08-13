@@ -78,7 +78,7 @@ The following apply:
   into, the pool they serve. Cold growth and directory-reservation paths order
   their state updates around those calls; see
   [allocator reentrancy](../implementation/reentrancy.md).
-- `Clone::clone` on a blind pool's allocator may re-enter while a new layout
+- `Clone::clone` on a multi pool's allocator may re-enter while a new layout
   pool is installed and is covered by the same ordering.
 - Pooled values' destructors and the closures passed to `_with` constructors
   run with no pool state in flight, so they may allocate from and free into the

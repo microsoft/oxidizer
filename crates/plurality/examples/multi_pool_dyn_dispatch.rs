@@ -5,12 +5,12 @@
 //!
 //! This is the case a typed pool cannot serve. The implementations of a trait
 //! have different sizes, so a `Pool<T>` would need one pool per implementation
-//! and a way to keep them all alive. A [`BlindPool`] holds them together, and
+//! and a way to keep them all alive. A [`MultiPool`] holds them together, and
 //! the handles coerce to `dyn Trait` so callers see a uniform collection.
 //!
-//! Run with `cargo run --example blind_pool_dyn_dispatch`.
+//! Run with `cargo run --example multi_pool_dyn_dispatch`.
 
-use plurality::{BlindPool, Box, coerce};
+use plurality::{Box, MultiPool, coerce};
 
 /// A step in a rendering pipeline.
 trait Stage {
@@ -67,7 +67,7 @@ impl Stage for Clamp {
 }
 
 fn main() {
-    let pool = BlindPool::new();
+    let pool = MultiPool::new();
 
     // Each stage is a different concrete type of a different size. They are
     // allocated from one pool, then unsized to a common handle type.

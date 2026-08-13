@@ -72,10 +72,10 @@ name = "pool_basic"
 name = "pool_across_threads"
 
 [[example]]
-name = "blind_pool_basic"
+name = "multi_pool_basic"
 
 [[example]]
-name = "blind_pool_dyn_dispatch"
+name = "multi_pool_dyn_dispatch"
 
 [[bench]]
 name = "criterion"

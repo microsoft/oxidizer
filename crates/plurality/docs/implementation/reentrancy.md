@@ -13,7 +13,7 @@ Reentrancy reaches a pool through three doors, and only the first needs care:
 
 - `Allocator::allocate` and `Allocator::deallocate`, called on the cold growth
   paths while the pool is mid-flight. This is the door discussed below.
-- `Clone::clone` on a blind pool's allocator, called once per new layout pool.
+- `Clone::clone` on a multi pool's allocator, called once per new layout pool.
   This is on the same cold path and is covered by the same ordering.
 - Destructors of pooled values and the closures passed to the `_with`
   constructors. These run with no pool state in flight and need no ordering.
@@ -112,7 +112,7 @@ push into the first vector and consume exactly the room reserved for the
 caller. The caller would then push into a full vector, reallocating under the
 `&mut` it holds — the aliasing hazard the reservation exists to prevent.
 
-`BlindPool::try_reserve_one` therefore reserves both vectors and then confirms
+`MultiPool::try_reserve_one` therefore reserves both vectors and then confirms
 that both still have room, retrying until they do. Only a reentrant install
 consumes reserved room, and it consumes it by publishing a layout of its own,
 so the installed layout count strictly increases across attempts and the retry
@@ -120,9 +120,9 @@ terminates. The buffers displaced by an abandoned attempt are freed before the
 next one begins, keeping that free off the path between the successful
 reservation and the pushes.
 
-## The blind pool
+## The multi pool
 
-`BlindPool::install` follows the same shape across its two directories, and
+`MultiPool::install` follows the same shape across its two directories, and
 predates the growth fix. It constructs the layout pool before reserving,
 reserves both directories after, re-scans for a pool a nested miss may have
 installed for the same layout, re-checks the layout cap, and pushes `pools`
@@ -140,7 +140,7 @@ survive intact, and that returning both slots resolves each global index to the
 chunk that owns it. A bounded variant asserts the cap re-check holds the pool
 to its limit whatever the reentry depth, and another asserts that a pool which
 can no longer grow still hands out a slot a nested allocation left free. A
-blind-pool variant re-enters from `Clone::clone` instead.
+multi-pool variant re-enters from `Clone::clone` instead.
 
 Those tests run under Miri with Tree Borrows, which is what actually rules out
 the aliasing hazard; the assertions alone would not catch it. Reentry into the

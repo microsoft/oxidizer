@@ -29,7 +29,7 @@ distinct reasons, and the error distinguishes them:
 On failure the rejected value is dropped and no construction closure is invoked,
 matching the standard fallible-allocation convention.
 
-A [blind pool](./blind-pool.md) reports the same two failures, widened to cover
+A [multi pool](./multi-pool.md) reports the same two failures, widened to cover
 its layout cap and its own metadata; it adds no third.
 Global-allocator out-of-memory handling on paths that are not represented as
 `AllocError` follows the global allocator's own behavior.
@@ -46,7 +46,7 @@ compose naturally.
 Allocators supplied to pools carry no plurality-specific reentrancy
 requirement. `Allocator::allocate` and `Allocator::deallocate` may allocate
 from, and free into, the pool they serve. Cold growth and directory-reservation
-paths are ordered so such reentry is safe, and `Clone::clone` on a blind pool's
+paths are ordered so such reentry is safe, and `Clone::clone` on a multi pool's
 allocator is covered by the same ordering. Pooled values' destructors and
 `_with` construction closures run with no pool state in flight and are
 unrestricted. An allocator that re-enters unconditionally recurses until the

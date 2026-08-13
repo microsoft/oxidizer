@@ -9,7 +9,7 @@ Part of the [architecture](../DESIGN.md).
 The pool's public surface is a family of **smart-pointer handles**, not a
 container you index into. Allocation hands back a handle; dropping the handle
 runs the value's destructor and returns its slot to the pool. The same four
-handles serve both the typed pool and the [blind pool](./blind-pool.md). There
+handles serve both the typed pool and the [multi pool](./multi-pool.md). There
 are four flavors, spanning two axes — *owned vs. shared* and *pool-bound vs.
 detachable*:
 

@@ -25,11 +25,11 @@ picture and goes deeper.
 - [Handles](./implementation/handles.md) — the four owning handle flavors:
   their representation, drop paths, auto-trait and variance behaviour, the
   shared macro-generated surface, coercion and pinning.
-- [The blind pool](./implementation/blind-pool.md) — the crate-private layout
+- [The multi pool](./implementation/multi-pool.md) — the crate-private layout
   pool and the router in front of it: its state, lookup, interior mutability,
   installation, and ownership of the layout pools.
 - [Allocator reentrancy](./implementation/reentrancy.md) — how allocator calls,
-  blind-pool allocator cloning, and user-code callbacks can re-enter pools, and
+  multi-pool allocator cloning, and user-code callbacks can re-enter pools, and
   how cold paths keep state consistent.
 - [Performance](./implementation/performance.md) — the cost model, what must
   not regress, and the benchmark decomposition that attributes each cost.
@@ -47,7 +47,7 @@ external types.
 | Module | Contents |
 |---|---|
 | `pool` | `Pool`, `PoolCore`, `PoolInner`, the slot lifecycle, growth, pointer recovery and teardown. |
-| `blind_pool` | `BlindPool`, the layout router. |
+| `multi_pool` | `MultiPool`, the layout router. |
 | `layout_pool` | `LayoutPool`, the crate-private pool keyed on a runtime layout. |
 | `geometry` | The slot-geometry abstraction and its compile-time and run-time providers. |
 | `chunk` | `ChunkHeader` and the chunk-level address arithmetic. |
@@ -67,8 +67,8 @@ single question — *is the slot geometry known at compile time?* — and that
 question is answered by a type parameter rather than by duplicated code.
 
 ```text
-   Pool<T, A>                              BlindPool<A>
-   (public, typed)                         (public, blind)
+   Pool<T, A>                              MultiPool<A>
+   (public, typed)                         (public, any type)
         │                                       │
         │                                  layout directory
         │                                       │
@@ -106,7 +106,7 @@ value and nothing else. To free, it derives the slot geometry from the value's
 own size and alignment, steps to the reference count and the index, steps back
 to the chunk header, and reads the pool pointer stored there. No handle ever
 needs to know which pool object produced it, which is what keeps handles one
-pointer wide and what lets the blind pool put its router on the allocation path
+pointer wide and what lets the multi pool put its router on the allocation path
 alone.
 
 **Two reference counts express two lifetimes.** For shared handles, the
