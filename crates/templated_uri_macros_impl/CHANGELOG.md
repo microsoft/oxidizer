@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.4.1] - 2026-08-13
+## [0.5.0] - 2026-08-13
 
-- 🔧 Maintenance
+- ⚠️ Breaking
 
   - Now requires `0.5.0` of `ohno`
 

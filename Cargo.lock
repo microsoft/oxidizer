@@ -4600,7 +4600,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -4608,7 +4608,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "chumsky",
  "darling",
