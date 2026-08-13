@@ -4713,6 +4713,7 @@ dependencies = [
 name = "tick"
 version = "0.5.0"
 dependencies = [
+ "alloc_tracker",
  "chrono",
  "chrono-tz",
  "criterion",
