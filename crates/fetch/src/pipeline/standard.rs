@@ -10,7 +10,6 @@ use http_extensions::HttpResponse;
 use http_extensions::routing::Router;
 use layered::{Intercept, InterceptLayer};
 use opentelemetry::metrics::Meter;
-use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::{Logging, LoggingLayer, Metrics, MetricsLayer};

@@ -29,7 +29,6 @@ use futures::{FutureExt, Stream, TryFutureExt, TryStreamExt};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use pin_project::pin_project;
-use thread_aware_core::ThreadAware;
 
 use crate::constants::DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES;
 use crate::error_labels::{LABEL_BODY_CONSUMED, LABEL_BODY_NOT_BUFFERED, LABEL_BODY_SIZE_LIMIT, LABEL_BODY_UTF8_INVALID};
@@ -647,7 +646,7 @@ mod tests {
 
     #[test]
     fn assert_send_and_sync() {
-        assert_impl_all!(super::HttpBody: Send, Debug, ThreadAware);
+        assert_impl_all!(super::HttpBody: Send, Debug, thread_aware_core::ThreadAware);
     }
 
     #[test]

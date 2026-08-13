@@ -11,7 +11,6 @@ use http_extensions::routing::{BaseUriConflict, Router};
 use http_extensions::{HttpBodyOptions, HttpRequest, HttpResponse};
 use opentelemetry::metrics::{Meter, MeterProvider};
 use seatbelt::ResilienceContext;
-use thread_aware_core::ThreadAware;
 
 use crate::client::HttpClientPipeline;
 use crate::constants::DEFAULT_HTTP_CLIENT_NAME;

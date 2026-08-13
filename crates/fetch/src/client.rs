@@ -16,7 +16,6 @@ use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
 use layered::Service;
 use templated_uri::{BaseUri, Uri};
 use thread_aware::PerCore;
-use thread_aware_core::ThreadAware;
 use tick::{Clock, FutureExt as TimeoutExt};
 
 use crate::pipeline::Pipeline;
@@ -394,7 +393,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_send() {
-        assert_impl_all!(HttpClient: Send, Sync, Clone, ThreadAware);
+        assert_impl_all!(HttpClient: Send, Sync, Clone, thread_aware_core::ThreadAware);
     }
 
     #[cfg_attr(miri, ignore)]

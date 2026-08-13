@@ -15,7 +15,6 @@ use fetch_tls::{TlsBackend, TlsBackendBuilder};
 use http_extensions::Result;
 use hyper_util::rt::TokioIo;
 use templated_uri::BaseUri;
-use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};

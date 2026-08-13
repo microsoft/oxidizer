@@ -7,7 +7,6 @@ use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
 use layered::{DynamicService, DynamicServiceExt, Service, Stack};
 use opentelemetry::metrics::Meter;
-use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::Dispatch;

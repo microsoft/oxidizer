@@ -11,7 +11,6 @@
 
 #[doc(no_inline)]
 pub use http_extensions::FakeHandler;
-use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};

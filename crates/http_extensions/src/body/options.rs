@@ -3,8 +3,6 @@
 
 use std::time::Duration;
 
-use thread_aware_core::ThreadAware;
-
 /// Options for configuring body-level behavior.
 ///
 /// This is passed to [`HttpBodyBuilder::body`][super::HttpBodyBuilder::body] and [`HttpBodyBuilder::stream`][super::HttpBodyBuilder::stream] so that

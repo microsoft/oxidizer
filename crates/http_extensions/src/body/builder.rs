@@ -6,7 +6,6 @@ use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
-use thread_aware_core::ThreadAware;
 use tick::Clock;
 
 use super::HttpBody;

@@ -734,7 +734,6 @@ dependencies = [
  "mutants",
  "ohno 0.4.0",
  "thread_aware",
- "thread_aware_core",
  "tokio",
 ]
 

@@ -17,7 +17,6 @@ use foldhash::fast::RandomState;
 use moka::Expiry;
 use moka::future::Cache;
 use thread_aware::{Arc, PerProcess};
-use thread_aware_core::ThreadAware;
 
 use crate::builder::InMemoryCacheBuilder;
 

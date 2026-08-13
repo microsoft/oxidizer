@@ -9,13 +9,11 @@ use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
-use nm::{Event, Magnitude};
-use plurality::Pool;
-use thread_aware_core::ThreadAware;
-
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
 use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
+use nm::{Event, Magnitude};
+use plurality::Pool;
 
 /// A memory pool that obtains memory from the Rust global allocator.
 ///
@@ -494,12 +492,13 @@ mod tests {
 
     use static_assertions::assert_impl_all;
     use thread_aware::affinity::pinned_affinities;
+    use thread_aware_core::ThreadAware;
 
     use super::*;
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
-    assert_impl_all!(GlobalPool: ThreadAware);
+    assert_impl_all!(GlobalPool: thread_aware_core::ThreadAware);
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {

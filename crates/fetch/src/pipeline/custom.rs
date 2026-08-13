@@ -6,7 +6,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use layered::{DynamicService, DynamicServiceExt};
-use thread_aware_core::ThreadAware;
 
 use crate::handlers::Dispatch;
 use crate::pipeline::pipeline_context::PipelineContext;

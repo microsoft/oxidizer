@@ -5,8 +5,6 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
-use thread_aware_core::ThreadAware;
-
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
 use crate::mem::{BlockSize, Memory};
@@ -133,6 +131,7 @@ mod tests {
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
     use thread_aware::affinity::pinned_affinities;
+    use thread_aware_core::ThreadAware;
 
     use super::*;
     use crate::BytesView;
