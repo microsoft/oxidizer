@@ -116,8 +116,11 @@ fn select_core(ast: &Ast, errors: &mut Errors) -> Option<usize> {
 /// Reports every marker beyond the first, whether it repeats on one field or spreads over several.
 ///
 /// Reporting each extra marker rather than the first tells the user which one to delete.
+///
+/// The generated marker occupies the core slot before any of these are read, so when it is present
+/// every hand-written `#[error]` is one marker too many, wherever in the struct it sits.
 fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
-    let mut seen_marked_field = false;
+    let mut seen_marked_field = fields.iter().any(|field| field.generated);
 
     for field in fields {
         let mut marks = field.marks.iter();
@@ -131,12 +134,6 @@ fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
 
         for repeated in marks {
             errors.add(repeated, DUPLICATE_MARKER);
-        }
-    }
-
-    for field in fields.iter().filter(|field| field.generated && !field.marks.is_empty()) {
-        for mark in &field.marks {
-            errors.add(mark, MULTIPLE_MARKED);
         }
     }
 }
@@ -288,6 +285,20 @@ mod tests {
                 #[error]
                 #[doc = " ohno::generated-core@7f3d9c2a"]
                 inner: ohno::OhnoCore,
+            }
+        });
+
+        assert!(faults.contains("Multiple fields marked"), "{faults}");
+    }
+
+    #[test]
+    fn a_marker_on_a_sibling_of_the_generated_one_is_reported() {
+        let faults = faults_of(parse_quote! {
+            struct T {
+                #[error]
+                carried: ohno::OhnoCore,
+                #[doc = " ohno::generated-core@7f3d9c2a"]
+                ohno_core: ohno::OhnoCore,
             }
         });
 

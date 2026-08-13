@@ -7,7 +7,8 @@
 //! reported here and left out of the `Ast`, so validation has nothing to check for it and reports
 //! only faults it can actually see.
 
-use proc_macro2::TokenTree;
+use proc_macro2::{Delimiter, Spacing, TokenTree};
+use syn::buffer::Cursor;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Data, DeriveInput, Expr, Fields, Index, Member, Meta, Token, Type};
@@ -65,8 +66,10 @@ fn parse_struct_attribute(attr: &Attribute, ast: &mut Ast, errors: &mut Errors) 
     } else if attr.path().is_ident("from") {
         parse_from_attribute(attr, ast, errors);
     } else if attr.path().is_ident("no_debug") {
+        check_bare_marker(attr, "no_debug", errors);
         ast.no_debug = true;
     } else if attr.path().is_ident("no_constructors") {
+        check_bare_marker(attr, "no_constructors", errors);
         ast.no_constructors = true;
     }
 }
@@ -98,9 +101,10 @@ impl Parse for FromEntry {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         // The type is collected token by token rather than handed straight to `Type::parse`,
         // because a following `(kind: ...)` group is not a parenthesized generic argument list and
-        // would make that parse fail.
+        // would make that parse fail. A parenthesis group that holds no `key: value` pair is part
+        // of the type instead — a tuple, or a function's parameter list — so it is collected.
         let mut tokens = proc_macro2::TokenStream::new();
-        while !input.is_empty() && !input.peek(Token![,]) && !input.peek(syn::token::Paren) {
+        while !input.is_empty() && !input.peek(Token![,]) && !holds_overrides(input) {
             tokens.extend(std::iter::once(input.parse::<TokenTree>()?));
         }
 
@@ -123,6 +127,26 @@ impl Parse for FromEntry {
 
         Ok(Self(FromAttr { source, overrides }))
     }
+}
+
+/// Whether a parenthesis group opens at `input` and holds field overrides rather than type syntax.
+///
+/// An override list opens with a member and a `:`. The `:` has to stand alone, so the `std` of a
+/// parenthesized `(std::io::Error)` does not read as a member.
+fn holds_overrides(input: ParseStream<'_>) -> bool {
+    let Some((inner, ..)) = input.cursor().group(Delimiter::Parenthesis) else {
+        return false;
+    };
+
+    let after_key = inner
+        .ident()
+        .map(|(_, rest)| rest)
+        .or_else(|| inner.literal().map(|(_, rest)| rest));
+
+    matches!(
+        after_key.and_then(Cursor::punct),
+        Some((punct, _)) if punct.as_char() == ':' && punct.spacing() == Spacing::Alone
+    )
 }
 
 /// One `key: expression` pair inside a `#[from(...)]` entry.
@@ -180,7 +204,7 @@ fn parse_fields(ident: &syn::Ident, data: Data, errors: &mut Errors) -> Option<(
             let mut generated = false;
             for attr in field.attrs {
                 if attr.path().is_ident("error") {
-                    check_bare_marker(&attr, errors);
+                    check_bare_marker(&attr, "error", errors);
                     marks.push(attr);
                 } else if marker::is_generated_marker(&attr) {
                     generated = true;
@@ -199,13 +223,13 @@ fn parse_fields(ident: &syn::Ident, data: Data, errors: &mut Errors) -> Option<(
     Some((style, parsed))
 }
 
-/// Reports an `#[error]` that carries anything beyond the bare word.
+/// Reports a bare marker attribute that carries anything beyond the bare word.
 ///
-/// The mark is kept either way: the user has said which field holds the core, so taking the marker
-/// away here would report a missing core on top of the malformed attribute.
-fn check_bare_marker(attr: &Attribute, errors: &mut Errors) {
+/// The flag is kept either way: the user has said what they want, so ignoring the attribute here
+/// would report the consequence of a missing item on top of the malformed attribute.
+fn check_bare_marker(attr: &Attribute, name: &str, errors: &mut Errors) {
     if !matches!(attr.meta, Meta::Path(_)) {
-        errors.add(&attr.meta, "`#[error]` takes no arguments");
+        errors.add(&attr.meta, format!("`#[{name}]` takes no arguments"));
     }
 }
 
@@ -423,6 +447,32 @@ mod tests {
     fn rejects_a_from_entry_that_names_no_type() {
         let faults = parse_faults(parse_quote! { #[from((kind: 1))] struct T { inner: ohno::OhnoCore, } });
         assert!(faults.contains("expected a type"), "{faults}");
+    }
+
+    #[test]
+    fn reads_a_source_type_written_with_parentheses() {
+        // Parentheses appear inside types too, so a group is only read as an override list when it
+        // holds `key: value` pairs.
+        for input in [
+            parse_quote! { #[from((u32, String))] struct T { inner: ohno::OhnoCore, } },
+            parse_quote! { #[from(fn() -> std::io::Error)] struct T { inner: ohno::OhnoCore, } },
+            parse_quote! { #[from(Box<dyn Fn() -> u8>)] struct T { inner: ohno::OhnoCore, } },
+        ] {
+            let mut errors = Errors::default();
+            let ast = parse(input, &mut errors).expect("the input parses");
+            assert!(errors.is_empty(), "{}", errors.into_compile_error());
+            assert_eq!(ast.conversions.len(), 1);
+        }
+    }
+
+    #[test]
+    fn rejects_a_flag_that_carries_arguments() {
+        for input in [
+            parse_quote! { #[no_debug(foo)] struct T { inner: ohno::OhnoCore, } },
+            parse_quote! { #[no_constructors = "x"] struct T { inner: ohno::OhnoCore, } },
+        ] {
+            assert!(parse_faults(input).contains("takes no arguments"));
+        }
     }
 
     #[test]

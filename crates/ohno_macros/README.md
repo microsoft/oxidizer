@@ -21,11 +21,6 @@ Macros for the [`ohno`][__link0] crate.
 * `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
 * `#[ohno::error]` - Turn a plain struct into an error type
 
-## Status
-
-See `docs/requirements.md` for what the crate has to deliver and `docs/design.md` for the shape
-it is built in.
-
 
 <hr/>
 <sub>

@@ -21,8 +21,9 @@ readable, so both pass parse.
 
 **validate** turns `Ast` into `Model` by applying the rules in
 `requirements.md`. It answers the other question: *is what you wrote allowed?*
-Every rejection listed in R1, R2 and R3 that is not a decoding failure is
-reported here.
+Every R1 rejection that is not a decoding failure is reported here. R2 belongs
+to `#[ohno::error]` and R3 to `#[enrich_err]`, so each is applied by its own
+entry point.
 
 **generate** turns `Model` into tokens. It returns `TokenStream`, not
 `Result<TokenStream>`. It cannot fail, because a `Model` that would make it fail
@@ -157,24 +158,20 @@ struct AstField {
     /// `Named(Ident)` or `Unnamed(Index)`, ready to quote as `self.#member`
     member: Member,
     ty: Type,
-    /// Every `#[error]` and every reserved doc marker on this field, in order.
-    /// A `Vec` rather than an `Option`, so "marked twice" is representable and
-    /// therefore reportable (R1.2).
-    marks: Vec<Mark>,
-    /// `new_spanned` anchor for a fault in the declaration itself
-    span: Span,
-}
-
-enum Mark {
-    /// A hand-written `#[error]`; the span covers the whole attribute
-    Explicit(Span),
-    /// The reserved doc marker `#[ohno::error]` writes; the span covers the field
-    Generated(Span),
+    /// Every hand-written `#[error]` on this field, in order. A `Vec` rather
+    /// than an `Option`, so "marked twice" is representable and therefore
+    /// reportable (R1.2). The attribute is kept whole, so a diagnostic points
+    /// at the marker the user wrote.
+    marks: Vec<Attribute>,
+    /// Whether the field carries the reserved doc marker `#[ohno::error]`
+    /// writes. Separate from `marks`, because a generated marker and a
+    /// hand-written one are different inputs and R1.2 treats them differently.
+    generated: bool,
 }
 
 struct DisplayAttr {
     /// The template literal, kept whole so diagnostics can point at it
-    literal: LitStr,
+    template: LitStr,
     arguments: Vec<Expr>,
 }
 
@@ -182,8 +179,7 @@ struct FromAttr {
     source: Type,
     /// The field expressions, keyed as the user wrote them. Whether a key names
     /// a field is a rule, so it is checked in validate, not here.
-    overrides: Vec<(Member, Expr)>,
-    span: Span,
+    overrides: Vec<FromOverride>,
 }
 ```
 
@@ -251,10 +247,10 @@ same split removes the "named struct with a positional core" case: `Style` and
 `member` are read from the same value, so they cannot disagree.
 
 `Member` also removes most of the named-versus-tuple branching from `generate`.
-`self.#member` is `self.path` or `self.0`, and `Self { #member: #expr, ... }` is
-valid Rust for a tuple struct too, so construction takes one form. `Style` is
-consulted for exactly one item: `Debug`, which needs `debug_struct` for a named
-struct and `debug_tuple` for a tuple one (R1.3).
+`self.#member` is `self.path` or `self.0`, so every read of a field takes one
+form. `Style` is consulted by exactly two items: `Debug`, which needs
+`debug_struct` for a named struct and `debug_tuple` for a tuple one (R1.3), and
+`construct`, which emits `Self { .. }` or `Self(..)`.
 
 ### `Message`
 
@@ -284,11 +280,12 @@ The two cases are not cosmetic. A message with no arguments is rendered as a
 literal rather than as a one-argument `format!`, so a static `#[display("...")]`
 costs no allocation at run time.
 
-By the time a `Message` built by the derive exists, every field it names has
-been checked to exist and every argument has been checked to be rooted in a
-field (R1.5), and each argument is already wrapped as `&(self.<arg>)` — the
-parentheses being load-bearing, so `count as u64` casts the field rather than a
-reference to it. Rendering it is one `quote!`.
+By the time a `Message` built by the derive reaches `generate`, every field it
+names exists and every argument is rooted in a field (R1.5) — the latter because
+`expand` emits nothing but diagnostics once a fault was recorded, not because
+`Message` could not hold such an argument. Each argument is already wrapped as
+`&(self.<arg>)` — the parentheses being load-bearing, so `count as u64` casts
+the field rather than a reference to it. Rendering it is one `quote!`.
 
 ### `Conversion`
 
@@ -306,9 +303,14 @@ struct Conversion {
 ### Where the invariants live
 
 Two of the three invariants `generate` relies on are structural: `Shape` makes
-"exactly one core" unrepresentable, and `Message` makes "an argument that is not
-rooted in a field" unrepresentable, because the only way to obtain either type
-is through validation.
+"exactly one core" unrepresentable, and `Message` names only fields that exist,
+because the only way to obtain either type is through validation.
+
+An argument that is not rooted in a field is the exception. Lowering records the
+fault and still returns the `Message`, so that a bad template and a bad argument
+are reported together rather than one at a time; the argument is kept out of
+generated code by `expand`, which emits the diagnostics alone whenever any fault
+was recorded. That one is a procedural invariant, not a structural one.
 
 The third is not, and saying so is more useful than pretending otherwise.
 "`Conversion::initializers` is as long as `Shape::data()`" is a relation between
@@ -361,9 +363,11 @@ impl #impl_generics ::core::fmt::Display for #ident #ty_generics #where_clause {
 ```
 
 `#override_message` is `::core::option::Option::None` when `model.message` is
-`None`, and
-`::core::option::Option::Some(::std::borrow::Cow::Owned(format!(..)))`
-otherwise.
+`None`, and `::core::option::Option::Some(::std::borrow::Cow::from(..))`
+otherwise. `Cow::from` takes both a `&'static str` and a `String`, so a static
+`#[display("...")]` renders as a string literal and allocates nothing, while a
+formatted one renders as a `format!` call — without the generator branching on
+which it is.
 
 **`std::error::Error`** delegates `source`:
 
@@ -498,10 +502,17 @@ function beside the `compile_error!`, so `rustc` reports the one fault the macro
 found rather than that fault plus every call site of a function that no longer
 exists.
 
-**Limit.** The closure rewrite is not usable in a `const fn`. `const` is
+**Limits.** The closure rewrite is not usable in a `const fn`. `const` is
 re-emitted faithfully, so such a function is rejected by `rustc` rather than by
 the macro. No test exercises the combination; if one is added, the macro should
 reject `const` itself, with a message, rather than let the expansion fail.
+
+The declared return type is named in both arms — as the closure's return type,
+and as the `let` annotation the `async` arm needs — so it lands in a position
+where `impl Trait` is not allowed (E0562). A function returning
+`Result<impl Iterator<..>, E>` therefore cannot carry `#[enrich_err]`. The
+annotation is what pins the `Ok` type when the body cannot, e.g. a body that
+only returns `Err`, so it is kept and the limit recorded here.
 
 ## Diagnostics
 

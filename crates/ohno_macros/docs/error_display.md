@@ -97,10 +97,9 @@ the mirror-image reason: it would otherwise be copied into the generated
 `format!` string, where `rustc` reports it against code the user cannot see. Both
 are spanned at the template, which is the only thing the user wrote.
 
-**The scoping prefix is applied by parsing, not by enumeration.** Whether an
-argument can carry `self.` at all is answered by building the unprefixed
-`self.<argument>` and asking `syn` to parse it. Enumerating the expression forms
-that may legally follow a dot would be a second copy of the grammar.
+**The scoping prefix is applied to the argument's leftmost term.** Which
+expression forms may legally follow a dot is answered by enumerating them, and
+anything else is reported rather than prefixed.
 
 **The result is then wrapped as `&(...)`.** The parentheses are load-bearing: a
 bare `&self.<argument>` binds the reference to the leftmost term alone, so
@@ -116,6 +115,5 @@ because it would otherwise expand to `self.self`.
 its leading component names a field of `self`; the rest reaches into that
 field's own type and is left to `rustc`.
 
-**Raw identifiers keep their `r#`.** Field names reach the macro as text, and
-`Ident::new` panics on that spelling, which would turn a user's typo into a
-macro crash rather than a diagnostic.
+**Raw identifiers keep their `r#`.** Field names are compared as text, so a name
+spelled `r#type` in the template has to match the field spelled the same way.
