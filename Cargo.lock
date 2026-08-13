@@ -3205,6 +3205,7 @@ dependencies = [
 [[package]]
 name = "parking_lot_core"
 version = "0.9.12"
+source = "git+https://github.com/Amanieu/parking_lot.git?rev=fbfe854e8b5407f7a898c64fb6d296c5e965c877#fbfe854e8b5407f7a898c64fb6d296c5e965c877"
 dependencies = [
  "cfg-if",
  "libc",

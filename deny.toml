@@ -64,3 +64,5 @@ wildcards = "warn"
 unknown-registry = "deny"
 unknown-git = "deny"
 # <<< anvil-managed: anvil-deny-sources
+# Temporary, commit-pinned upstream fix for parking_lot_core strict provenance.
+allow-git = ["https://github.com/Amanieu/parking_lot.git"]
