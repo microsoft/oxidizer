@@ -531,7 +531,8 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
 
   script-tests:
-    # Pester test suite for the release skill and shared PowerShell libraries.
+    # Pester test suite for the release-related PowerShell scripts
+    # (release-packages.ps1, lib/releasing.ps1, lib/release-flow.ps1).
     # Always runs (no delta gate) because script-level changes don't move any
     # Rust crates so delta would mark the PR skippable, but the scripts
     # themselves may still need validation. Cross-platform matrix mirrors the
