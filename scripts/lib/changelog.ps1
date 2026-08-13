@@ -8,8 +8,8 @@
     Changelog generation for the release tooling.
 
 .DESCRIPTION
-    Deterministic CHANGELOG.md generation reused by scripts/release-changelog.ps1
-    (the small helper the AI release skill forwards changelog work to). Extracted
+    Deterministic CHANGELOG.md generation reused by the release skill's small
+    changelog helper. Extracted
     from the retired interactive release driver so the only release logic that
     remains in scripts/ is the mechanical, format-heavy work the prompt should not
     re-derive by hand: grouping conventional commits into sections, rendering PR

@@ -1,607 +1,222 @@
 # Releasing Oxidizer Packages
 
-This document is the shared specification for releasing Oxidizer packages: the
-glossary, the cascade-organisation invariants, and the version-component rules the
-release process implements. Read it before changing anything about releasing.
+Oxidizer package releases are planned and applied by the repository skill at
+`.github/skills/release-packages/SKILL.md`. The skill owns orchestration and
+source-diff judgment; small PowerShell helpers own deterministic mechanics.
 
-**The release process is the AI prompt** at
-`.github/prompts/release-packages.prompt.md`. It plans a release (which packages,
-which version bumps) and applies it -- deriving change types from
-`cargo semver-checks` and diffs under the precise rules in that prompt, and
-cross-checking the plan across independent reasoning models before writing.
+## Architecture
 
-The former interactive PowerShell driver (`scripts/release-packages.ps1`) and its
-plan engine (`scripts/lib/release-flow.ps1`, plus the plan/cascade/elevation half
-of `scripts/lib/releasing.ps1`) have been **retired** in favour of the prompt -- a
-script-heavy workflow that was hard to maintain. Only small, mechanical helper
-scripts remain, which the prompt calls:
-
-- `scripts/release-facts.ps1` — emits the workspace release facts as JSON
-  (dependency graph, versions, published / proc-macro flags, baseline commit shas,
-  the `everReleased` release-tag flag, and the unreleased-modification set).
-- `scripts/release-changelog.ps1` — regenerates one crate's `CHANGELOG.md` via the
-  tested changelog generator in `scripts/lib/changelog.ps1`.
-- `scripts/ci/semver-report.ps1` — the unchanged CI check that reports the minimum
-  required version bump for each crate a PR publishes.
-
-## How the prompt-based release works
-
-`.github/prompts/release-packages.prompt.md` IS the release process. It encodes
-the planning algorithm -- token parsing, `cargo semver-checks` classification,
-proc-macro manual review, cascade toward dependents (floor at `patch`, raised to
-the stronger of that floor and the crate's own API verdict), the elevation
-invariants, explicit-pin rules, and the version-bump table -- as precise,
-model-independent instructions. An agent runs the reasoning (which packages, which
-bumps) and makes the diff-based judgment calls a human used to make at the
-terminal, then applies the plan. A release request is a list of `name` tokens (the
-agent determines the change type itself), optionally `name@breaking|nonbreaking|patch`
-to set a lower bound, or `name@<version>` to pin -- or the `changed` / `all` modes
-that walk modified / all publishable packages.
-
-Two design properties make it trustworthy:
-
-- **Determinism by construction.** The mechanical, error-prone sub-tasks
-  are forwarded to small deterministic helper scripts rather than being
-  re-derived by hand: `scripts/release-facts.ps1` (emits the workspace
-  graph, versions, published/proc-macro flags, dependency edges, baseline
-  commit shas, the `everReleased` flag, and the modified-package set as JSON) and
-  `scripts/release-changelog.ps1` (regenerates one changelog via the
-  tested generator in `scripts/lib/changelog.ps1`). Both are thin shells over
-  `scripts/lib/releasing.ps1` and add no new release logic.
-- **Multi-model consensus.** Before writing anything, the skill dispatches
-  the frozen plan inputs to at least two additional reasoning models from
-  different families and requires an identical affected-package set and
-  version-bump sequence. A divergence stops the run and emits an ambiguity report
-  proposing a concrete skill edit, instead of guessing.
-
-The skill also corrects a few shortcomings of the retired scripts (deliberate
-improvements, listed in the skill's "Corrections" section): all-or-nothing apply
-gated by `cargo check` with rollback on failure; a never-released crate detected
-via its `everReleased` release-tag flag (not `hasBaseline`, which is true even for
-first releases) so its first publish ships at its declared version instead of being
-misclassified as breaking; and dependency-requirement edits validated with
-`cargo check` / `cargo metadata` rather than trusted. The intentional Cargo `0.x` /
-`0.0.x` conservatism in the version-bump table is preserved exactly.
-
-Only `scripts/ci/semver-report.ps1` remains as a separate script (an unchanged CI
-check that still consumes the tested library). The rest of this document (glossary,
-invariants, version-component rules) is the shared specification the prompt
-implements. Where sections below show a `./scripts/release-packages.ps1 -Packages
-'<name>@<spec>'` command, read it as the historical spelling of the same release
-request you now hand to the prompt as `<name>@<spec>` tokens (or a bare `<name>`).
-
-Maintainers SHOULD read the **Glossary** below before making changes to
-the release tooling; the rest of the codebase, the PR comments, the
-script output, and the unit tests all use these terms with the precise
-meanings defined here.
-
----
-
-## Glossary
-
-- **Direct dependency** — a workspace package listed under another
-  package's `[dependencies]` (or `[dev-dependencies]` /
-  `[build-dependencies]`) in its `Cargo.toml`. If `bytesbuf_io` lists
-  `bytesbuf`, then `bytesbuf` is a direct dependency of `bytesbuf_io`.
-
-- **Transitive dependency** — a workspace package reachable through
-  some chain of direct-dependency edges. Every direct dependency is also
-  a transitive dependency.
-
-- **Direct dependent** — the inverse of direct dependency. If
-  `bytesbuf_io` lists `bytesbuf`, then `bytesbuf_io` is a direct
-  dependent of `bytesbuf`.
-
-- **Transitive dependent** — the inverse of transitive dependency: any
-  package reachable through a chain of dependent edges. Every direct
-  dependent is also a transitive dependent.
-
-  > Avoid "upstream" / "downstream" — they are ambiguous (their meaning
-  > depends on which way the reader visualises the graph). Always use the
-  > dependency/dependent vocabulary above.
-
-- **Cascade toward dependents** — the automatic version-number-increment
-  propagation that happens when a released package's transitive
-  dependents need to also be released because they (transitively) consume
-  it. The planner walks the user-supplied release plan, computes the
-  transitive dependents of each user-source release, and adds
-  cascade-source entries to the plan so the dependents are also released.
-
-- **Cascade toward dependencies** — the inverse: when a package being
-  released has direct dependencies with unreleased modifications, the
-  release plan does NOT automatically pull them in. Instead the planner
-  surfaces them to the caller during the review step, who decides
-  whether to release them too or leave them out. The surfaced
-  dependencies that the caller accepts join the release plan as ordinary
-  user-source releases — there is no separate "dependency-cascade-source"
-  release kind because the caller is always the decision-maker for any
-  pulled-in dependency.
-
-- **Change type** — the *semantic intent* of a release:
-  `breaking` / `nonbreaking` / `patch`. This is what releasers reason
-  about. In the `-Packages` tokens it appears as the part after `@`, e.g.
-  `bytesbuf@breaking`.
-
-- **Change spec** — the value of the part after `@` in a `-Packages`
-  token. A change spec is either a change type (`breaking`,
-  `nonbreaking`, `patch`) or an explicit semver version like `1.0.0` or
-  `2.5.0`. Change types are translated into concrete versions using the
-  version-increment rules below. Explicit versions pass through verbatim
-  and must be strictly greater than the package's current on-disk
-  version.
-
-- **Version component** — a *position* in the SemVer string
-  `major.minor.patch` (the three integers in `x.y.z`). These names are
-  positional, not semantic. The same change type maps to different
-  version components depending on the current version:
-
-  | Current   | breaking      | nonbreaking      | patch            |
-  |-----------|---------------|------------------|------------------|
-  | `x.y.z`, x≥1 | `(x+1).0.0` | `x.(y+1).0`     | `x.y.(z+1)`      |
-  | `0.y.z`, y≥1 | `0.(y+1).0` | `0.y.(z+1)`     | `0.y.(z+1)`†     |
-  | `0.0.z`      | `0.0.(z+1)` | `0.0.(z+1)`     | `0.0.(z+1)`      |
-
-  † On `0.x.y` a `patch` change spec produces the same numeric outcome
-  as `nonbreaking`. The planner does not reject this — the caller may
-  still record the intent as `patch` so it shows up that way in the
-  release plan and commit message.
-
-  Do not call a `0.4.1 → 0.5.0` increment a "major version change" — the
-  value of the *major component* (0) did not change, even though the
-  change is breaking under Cargo's 0.x SemVer rules.
-
-- **Release set** — the set of workspace packages a single release will
-  publish to crates.io. The local driver (`release-packages.ps1`)
-  materialises it as the **resolved release set**: the caller's
-  `-Packages` tokens plus everything pulled in by the cascade toward
-  dependents.
-
-- **Pending release** — a member of the release set that has not yet
-  reached crates.io. Committed-vs-uncommitted is irrelevant: a
-  version-number increment sitting in your working tree, a
-  committed-but-unpushed increment, and a merged-but-untagged increment
-  all count the same.
-
-- **Resolved release set** — the per-invocation, in-memory result of
-  plan resolution. It is a hashtable keyed by package folder where each
-  entry records the package's source (`user` or `cascade`), the
-  effective change type (after cascade-driven upgrade), the effective
-  target version, and the list of cascade reasons (which user-source
-  releases caused the cascade). The resolved release set is the
-  planner's source of truth for the rest of the run.
-
-- **User-source release** — a release plan entry derived directly from a
-  `-Packages` token, OR added by the caller's "release this" choice
-  during dep-scan review. Either way, the caller explicitly asked for
-  this release.
-
-- **Cascade-source release** — a release plan entry added by the
-  cascade-toward-dependents walk during plan resolution. The caller did
-  not list this package in `-Packages` and did not accept it during
-  dep-scan review; it was added because it is a transitive dependent of
-  a user-source release.
-
----
-
-## Bundled-input release model
-
-Every invocation of `release-packages.ps1` describes a *complete release
-plan*. The planner reads the entire plan up-front (the `-Packages`
-argument is the entire input — there is no base ref), resolves the
-cascade toward dependents, surfaces any modified-but-unreleased
-dependencies for review, and then applies all version-number increments,
-changelog updates, and `Cargo.toml` rewrites in one shot. A second
-invocation is treated as a fresh, independent release plan — there is
-no notion of "adding to a previous run".
-
-Version arithmetic anchors on what is currently in each `Cargo.toml` on
-disk. The planner does not consult `git` for prior versions; it
-increments from the value it reads right now. Consequently, if you
-re-run on the same branch after a prior run already increased a version,
-the new run will increment *on top of* that change — see
-[Re-running on the same branch](#re-running-on-the-same-branch).
-
-If you need to re-plan (for example because you accepted a release
-during review that you now want to remove), use `git reset` /
-`git restore` to revert the on-disk state and re-run the script with
-the corrected `-Packages` argument.
-
-### `-Packages` token syntax
-
-Each token has the form `<name>@<change-spec>`:
-
-- `<name>` is the package name as it appears in `crates/<name>/Cargo.toml`.
-- `<change-spec>` is one of:
-  - `breaking`, `nonbreaking`, `patch` — the change type. The planner
-    computes the target version from the package's current version on
-    disk using the version-increment rules in the **Version component**
-    glossary entry.
-  - An explicit semver (e.g. `1.0.0`, `2.5.0`, `0.10.0`) — used
-    verbatim. Must be strictly greater than the current on-disk
-    version. There is no special handling for any particular version
-    value; `1.0.0` is just another explicit pin.
-
-Examples:
-
-```powershell
-# Single package, non-breaking change.
-./scripts/release-packages.ps1 -Packages 'bytesbuf@nonbreaking'
-
-# Two packages: one breaking, one patch.
-./scripts/release-packages.ps1 -Packages 'bytesbuf@breaking','bytesbuf_io@patch'
-
-# Pin one package to 1.0.0 and another to an explicit version.
-./scripts/release-packages.ps1 -Packages 'foo@1.0.0','bar@2.5.0'
-```
-
-### Cascade-toward-dependents and topological consistency
-
-After parsing the tokens, the planner walks the workspace dependency
-graph forward from every user-source release and adds each transitive
-published dependent as a cascade-source release. For ordinary library
-packages, the required change type — both for directly-requested
-(user-source) packages and cascade-pulled dependents — is derived by running
-[`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
-against each crate's **previous version-bump commit in git history** —
-the most recent commit that changed the crate's `[package] version`,
-supplied to the tool as `--baseline-rev <sha>`. cargo-semver-checks
-rebuilds the baseline rustdoc from the crate's source at that commit, so
-**no registry access is required** and the check behaves identically for
-open-source (crates.io) and enterprise/offline consumers. The current
-working-tree API is analysed, so a coordinated release's in-progress
-edits — including a dependency whose public types a dependent re-exports
-— are reflected in the dependent's own API diff.
-
-Versioning is treated as a **source-level** concern: the baseline is the
-version the repository last *declared*, regardless of whether it was ever
-published anywhere. This is what lets one workflow serve both public and
-private/enterprise environments (which cannot reach crates.io and whose
-published content lags the source), and it means an aborted release that
-bumped a crate to `4.0.0` without publishing is still the baseline the
-next change is measured against.
-
-This replaces the former
-`[package.metadata.cargo_check_external_types]` allowlist heuristic. That
-allowlist is a hand-maintained list of the external types a crate is
-*permitted* to expose; it was repurposed as a proxy for the types a
-crate *actually* re-exports. When the two drift apart — an entry missing
-or stale — the heuristic misjudged whether a dependent re-exports a
-changed dependency, so a breaking change in an exposed dependency could
-be cascaded as `patch` instead of `breaking` (the motivating defect: a
-breaking change in `bytesbuf` was not propagated to `bytesbuf_io`, which
-re-exports `bytesbuf` types). Analysing the real API with
-`cargo semver-checks` removes the proxy entirely.
-
-**How the change type is determined.** `cargo semver-checks` is invoked
-as a CLI (not as a library) and its textual result is parsed into one of
-our change types. The mapping mirrors the tool's own
-[`required_bump`](https://docs.rs/cargo-semver-checks/latest/cargo_semver_checks/struct.CrateReport.html#method.required_bump)
-notion (major / minor / none); the exact parsing lives in
-`ConvertFrom-SemverChecksOutput` (`scripts/lib/releasing.ps1`):
-
-| `cargo semver-checks` result | change type |
+| Component | Responsibility |
 |---|---|
-| a major-level change is required | `breaking` |
-| only a minor-level change is required | `non-breaking` |
-| compatible / no update required | `patch` |
-| no prior version-bump commit (new crate) | no constraint |
+| `release-facts.ps1` | Workspace packages, versions, dependencies, exposure edges, release baselines, and modifications |
+| `resolve-plan.ps1` | Tokens, SemVer arithmetic, pins, dependent cascades, and topological ordering |
+| `apply-plan.ps1` | Version writes, changelogs, README generation, Cargo validation, and rollback |
+| `release-changelog.ps1` | One deterministic changelog |
+| `scripts/ci/semver-report.ps1` | CI report for version changes already present in a PR |
 
-Cascade dependents are floored at `patch` (they must re-release to pick
-up the new dependency version even when their own public API is
-unchanged), then raised to whatever their own `cargo semver-checks`
-result requires.
+Shared functions remain in `scripts/lib/releasing.ps1` and
+`scripts/lib/changelog.ps1` because CI also consumes them.
 
-#### Proc-macro-only packages require manual SemVer review
+The model may classify source changes and procedural macro contracts. It must not
+reimplement version arithmetic, dependency closure, Cargo.toml editing, or
+rollback.
 
-`cargo semver-checks` deliberately supports ordinary library targets,
-not proc-macro-only targets. For a package whose `cargo metadata`
-targets contain `proc-macro` but no ordinary `lib` target, the tool exits
-with "no crates with library targets selected". This is expected: its
-rustdoc-based analysis cannot validate the procedural macro contract,
-including exported macro names, accepted input syntax, diagnostics, or
-generated output.
+## Terminology
 
-The release tooling detects this target shape from the workspace
-metadata **before invoking `cargo semver-checks`**. It does not reinterpret
-the unsupported-tool error as success and does not guess a breaking
-change:
+- **Dependency**: a package consumed by another package.
+- **Dependent**: a package that consumes another package.
+- **Direct**: one dependency edge away.
+- **Transitive**: reachable through one or more dependency edges.
+- **Change type**: `breaking`, `nonbreaking`, or `patch`.
+- **Release set**: explicit releases plus published dependents pulled in by the
+  cascade.
+- **User-source release**: selected explicitly during review.
+- **Cascade-source release**: added because one of its dependencies is released.
+- **First release**: a publishable package with no matching release tag;
+  `everReleased`, not `hasBaseline`, identifies this state.
 
-- Every proc-macro-only package in the release set is shown in the
-  standard interactive package dialog, even when it was supplied via
-  `-Packages` or was cascade-added without changes in its own folder.
-- The tool asks the same questions for every package. For a proc macro, it
-  skips the unsupported automated check and records the answer as a manual
-  review.
-- For a proc macro that is not yet in the plan, choosing **No material
-  changes** completes the review. The package is not released unless
-  another package needs it. If that happens later in the same run, the
-  proc macro gets a patch release without another prompt.
-- Use **View diff**, then either keep the currently planned change type
-  or select breaking / non-breaking / patch. For a targeted package, a
-  new selection replaces the provisional `-Packages` change type. For a
-  cascade-added package, it replaces the mechanical `patch` floor.
-- The final release plan labels the package as manually classified and
-  states that `cargo-semver-checks` was not run for it.
-- Ordinary library dependents keep their normal behavior: each is
-  re-released at least as `patch`, and its own public API is still
-  analysed by `cargo-semver-checks`. A manually chosen proc-macro
-  severity is never copied to dependents.
-- If the proc-macro release is breaking, the tool asks the maintainer to
-  review each published crate that directly depends on it.
-- If one of those crates is also breaking, the tool then reviews that
-  crate's direct dependents. Otherwise, the extra review stops there.
-  Each crate keeps its own result; the proc macro's result is never copied
-  to another crate. For `0.0.x` packages, every release is breaking, so
-  the review continues to the next set of direct dependents.
+Avoid *upstream* and *downstream* because their direction is ambiguous.
 
-The CI SemVer report follows the same target detection. It skips the
-unsupported invocation, emits a `warn` row saying manual proc-macro
-review is required, and does **not** claim that the version increment was
-automatically verified. For a breaking proc-macro increment, CI marks
-the direct published consumer for manual review while retaining that
-consumer's ordinary `cargo-semver-checks` result. It continues only
-through consumers whose own version increment is breaking. If a required
-direct consumer is absent from the publishing set, the report calls out
-the incomplete review chain. If CI cannot determine a reviewed package's
-baseline, it conservatively continues the warning to the next edge rather
-than treating the unknown result as non-breaking.
+## Modes and tokens
 
-Build and test validation are separate from SemVer validation. The
-release driver runs `cargo check --workspace` after applying the plan,
-and normal CI exercises the workspace tests. Those checks can catch
-compilation failures and tested behavioral regressions, but passing them
-does not prove compatibility for exported macro names, all accepted
-inputs, diagnostics, or generated code. Review those aspects explicitly.
+The skill supports:
 
-For example, to validate the main consumer and release
-`templated_uri_macros`, run:
+- **targeted**: explicit package tokens;
+- **changed**: review every publishable package with unreleased changes;
+- **all**: review every publishable package.
 
-```powershell
-cargo test -p templated_uri
-./scripts/release-packages.ps1 -Packages 'templated_uri_macros@patch'
+A token is:
+
+```text
+name
+name@breaking
+name@nonbreaking
+name@patch
+name@<semver>
 ```
 
-The `patch` token is the provisional plan entry, not an automated
-compatibility verdict. In the standard package dialog, view the diff
-and choose the actual change type before allowing the release to proceed.
-If that choice is breaking, the planner next requires review of
-`templated_uri`, its direct published consumer; keep or elevate
-`templated_uri` based on whether its public contract exposes the macro
-change.
+Change types are lower bounds. An explicit version is an exact pin and must be
+strictly greater than the package's current version under SemVer precedence.
+Build metadata does not affect precedence.
 
-**Baseline semantics.** The baseline is the crate's previous
-version-bump commit — the most recent commit (before the change under
-review) that altered the crate's `[package] version`. Because it comes
-from git history rather than a registry, a version that was committed but
-never published *is* the baseline: an aborted release that bumped
-`bytesbuf` to `4.0.0` without publishing means the next change is
-compared against `4.0.0`, not a stale published `3.3.3`. A brand-new
-crate with no prior version-bump commit has no baseline and imposes no
-constraint. This works offline and in enterprise environments with no
-crates.io access, since the baseline API is rebuilt from the crate's own
-source at the baseline commit.
+If every changed or all candidate is declined, the result is an empty plan and
+nothing is written.
 
-The planner enforces **topological consistency**: if a user-supplied
-change type for a package is *weaker* than `cargo semver-checks`
-requires (for that package or via a cascade), the planner auto-upgrades
-it and notes the upgrade in the review output. The caller's `-Packages`
-token is therefore a *lower bound*, not a guarantee — the caller can
-always elevate further on the next iteration of the review, but cannot
-suppress a change type the API analysis requires.
+## Version rules
 
-### Errors the planner rejects
+| Current | breaking | nonbreaking | patch |
+|---|---|---|---|
+| `x.y.z`, `x >= 1` | `(x+1).0.0` | `x.(y+1).0` | `x.y.(z+1)` |
+| `0.y.z`, `y >= 1` | `0.(y+1).0` | `0.y.(z+1)` | `0.y.(z+1)` |
+| `0.0.z` | `0.0.(z+1)` | `0.0.(z+1)` | `0.0.(z+1)` |
 
-- An explicit semver that is not strictly greater than the package's
-  current on-disk version. (Always fatal — `-Force` does not relax this.)
-- A user-supplied change type that pins the package *below* what
-  `cargo semver-checks` (or the cascade) computes for it. (The planner
-  can auto-upgrade ordinary change-type tokens, but treats an explicit
-  semver token as a hard pin — if the explicit version is below what the
-  analysis requires the planner errors instead of silently overriding
-  the caller. Pass `-Force` to override: the pin is honored verbatim, the
-  package's effective change-type tag is still upgraded so further
-  cascade decisions are correct, and a warning is printed flagging that
-  consumers may break.)
+On `0.y.z`, nonbreaking and patch retain distinct intent despite producing the
+same version. Every `0.0.z` transition is breaking under Cargo compatibility.
+See the skill's `references/version-rules.md` for the executable resolver's
+canonical rules.
 
----
+## Release facts and exposure
 
-## Cascade Organisation Invariants
+`release-facts.ps1` emits, for each package:
 
-The dependency-scan loop (which surfaces modified-but-unreleased
-workspace packages for the caller to review) operates on two invariants.
+```text
+folder, name, version, published, procMacroOnly, hasLibraryTarget,
+deps, exposedDeps, exposureUnknown, baselineSha, hasBaseline,
+everReleased, modified, modifiedFileCount
+```
 
-### Invariant A — A cascade-added release-set member is never itself surfaced as a finding in the dep-scan.
+`deps` contains normalized normal and build dependencies; dev dependencies are
+excluded.
 
-A package that received only a cascade-applied version-number change
-(no pre-existing developer modifications) requires no caller review —
-its version-number increment is mechanical and follows directly from
-the released dependency. Such packages must not appear in the dep-scan
-prompt.
+For ordinary libraries, public exposure is derived from
+`package.metadata.cargo_check_external_types.allowed_external_types`, intersected
+with real workspace dependencies. This removes stale and third-party roots.
+Because CI checks ordinary library allowlists:
 
-Cascading toward dependents *does* enlarge the release set, which
-enlarges the set of packages whose dependencies the dep-scan walks. So
-a cascade can INDIRECTLY cause pre-existing modified packages — packages
-that already had unreleased modifications, not the cascade-added
-members themselves — to surface as new findings on a subsequent
-iteration of the review loop. This is the desired behaviour: the
-caller wants to know about every package whose modifications might
-need a release, and the cascade just enlarged the relevant scope.
+- missing or empty metadata means no workspace dependency types are exposed;
+- a bare wildcard conservatively exposes every dependency.
 
-The implementation upholds the no-self-surface part of this invariant
-by snapshotting the "has unreleased modifications" set BEFORE any
-cascade runs, so the snapshot reflects pre-cascade reality.
+Proc-macro-only and other unchecked targets always set `exposureUnknown = true`
+and conservatively expose every dependency. Any metadata on those targets is
+ignored for planning because CI does not enforce it.
 
-### Invariant B — User-source releases are never surfaced; cascade-source releases are surfaced only when not already at `breaking`.
+## Classification
 
-The dep-scan surfaces a release-set member only when both:
+For every previously released ordinary library that may enter the release set:
 
-1. It is a cascade-source release (added by the cascade toward
-   dependents, not by a `-Packages` token or a caller acceptance
-   during a prior dep-scan iteration).
-2. Its cascade-applied change type is not yet `breaking` (so there is
-   room for the caller to elevate it).
+```text
+cargo semver-checks --package <name> --baseline-rev <baselineSha> \
+  --all-features --color never
+```
 
-A user-source release is the caller's final decision. It is never
-re-prompted, regardless of its change type — the caller already chose
-the change type, and to revise it they re-invoke the script with a
-different `-Packages` token (after first reverting the on-disk state).
-A cascade-source release already at `breaking` is also dropped: no
-higher change type exists, so there is nothing for the caller to
-elevate.
+The baseline is the most recent reachable commit that changed the package's
+declared version. It is rebuilt from repository history, so no registry access is
+required.
 
-The user-review queue therefore contains two categories of finding:
+Map detected compatibility requirements to `breaking`, `nonbreaking`, or
+`patch`. Tool and build failures are fatal. `cargo semver-checks` proves
+compatibility but may not identify a new public API as requiring a minor bump, so
+source-diff review must elevate backward-compatible additions to `nonbreaking`.
 
-- **Modifications not part of this release** — packages with
-  modifications that are NOT in the release set. The caller must decide
-  whether the modifications warrant a release.
-- **Elevation candidates** — packages with modifications that ARE in
-  the release set as cascade-source releases but whose cascade-applied
-  change type is not yet `breaking`. The caller must decide whether to
-  elevate.
+First releases do not run against their introducing commit. They publish at the
+version already declared in `Cargo.toml`, unless explicitly pinned higher.
 
----
+Proc-macro-only packages require manual review of:
 
-## How to release one or more packages
+- exported macro names;
+- accepted syntax;
+- diagnostics;
+- generated code and public types.
 
-1. Decide which packages you want to release and the change type for each.
-   This is the caller's judgment. There is no algorithmic "correct"
-   answer — review the cumulative diff being released (source + dependency
-   edits) and decide whether each package's change is breaking,
-   backward-compatible, a pure internal patch, or whether to pin to an
-   explicit version. Picking too weak a change type causes consumers
-   to silently get incompatible behaviour after `cargo update`;
-   picking too strong a change type is harmless except it forces direct
-   dependents to bump as well.
+Their mechanical floor is patch and `manualReview` remains true.
 
-2. Run one of:
+## Cascade rules
 
-   ```powershell
-   # Targeted — pin the plan up front:
-   ./scripts/release-packages.ps1 -Packages 'pkg1@<change-spec>','pkg2@<change-spec>'
+Every released dependency gives each previously released, publishable direct
+dependent a patch floor so it can pick up the new dependency requirement.
+Never-published dependents are not cascade releases.
 
-   # Guided walk through every package with on-disk modifications:
-   ./scripts/release-packages.ps1 -Changed
+A dependent receives a breaking floor when:
 
-   # Guided walk through every publishable package, modified or not:
-   ./scripts/release-packages.ps1 -All
-   ```
+1. the dependency's actual version transition is breaking under Cargo
+   compatibility; and
+2. the dependent exposes that dependency through `exposedDeps`, or has
+   `exposureUnknown = true`.
 
-   The script will:
-   - Parse the tokens (targeted mode) or seed the review loop with every
-     modified / every publishable package (guided modes) and compute the
-     resolved release set, including the cascade toward dependents.
-   - Show the release plan.
-   - For each workspace package with unreleased modifications that is
-     transitively pulled in by something in the release set (and is not
-     itself in the release set with a cascade-applied change type of
-     `breaking`), show a per-package menu where you can view the diff and
-     decide whether to include the package, elevate its change type, or
-     leave it out. In `-All` mode the same menu is also shown for
-     publishable packages with no on-disk changes; the "View diff" option
-     is relabelled `View diff (no changes in this package)` so the empty
-     state is obvious before you open the editor.
-   - For every proc-macro-only package in the release set, show the same
-     menu as a mandatory manual SemVer review. This includes targeted
-     packages and unchanged proc-macro dependents added by cascade.
-     A breaking result then surfaces direct published consumers one edge
-     at a time; propagation stops at the first consumer reviewed below
-     breaking.
-   - After review, apply all version-number increments, changelog
-     updates, README regeneration, `Cargo.toml` rewrites, and workspace
-     `[workspace.dependencies]` updates in one shot.
+This is a fixed-point calculation. A strengthened package can strengthen its own
+dependents, including through chains and diamonds. Every `0.0.z` bump therefore
+propagates as breaking across exposure edges even when its source classification
+was patch.
 
-3. Commit the resulting changes and open a PR.
+The release set is ordered dependency before dependent. Duplicate normal/build
+edges are deduplicated. Unpublished packages are excluded.
 
-Once your PR is merged, automation tags the commit and pushes each
-released crate to crates.io.
+## Pins and force
 
-### Re-running on the same branch
+A pin below its objective or cascade requirement is rejected. With `force: true`,
+the resolver retains the exact pin, emits a warning, and preserves the stronger
+effective change type for downstream cascade decisions.
 
-You may run `release-packages.ps1` multiple times on the same branch,
-but each invocation reads the *on-disk* version of every package (the
-planner uses the version it finds in `Cargo.toml`, not the version in
-any base ref). A second run therefore plans increments *on top of*
-whatever the first run already wrote — typically not what you want
-when re-planning the same release.
+Force never permits a downgrade or a pin equal to the current version.
 
-If a previous run produced changes you want to discard before
-re-planning, use `git reset` / `git restore` to revert the on-disk
-state first, then re-run with the corrected arguments.
+## Consensus
 
----
+Before applying a plan, freeze facts, classifications, evidence, request JSON,
+and resolver output. At least two additional model families review the
+classifications and verify that the resolver output follows from them.
 
-## Guided modes (`-Changed`, `-All`)
+The resolver is authoritative for arithmetic, cascades, pins, and ordering.
+Models do not independently replace it with hand-computed plans. Any
+classification or rule disagreement stops the release instead of being averaged
+or silently resolved.
 
-Both `-Changed` and `-All` walk the workspace one package at a time and
-prompt for a per-package release decision. They differ only in which
-packages get surfaced:
+## Atomic application
 
-- `-Changed` surfaces every published workspace package with unreleased
-  modifications. Use this when you know "something changed and probably
-  needs releasing" but do not yet have the full `-Packages` list ready.
-  If the scan finds no packages with unreleased modifications, the
-  script prints a confirmation and exits without prompting.
+Apply a resolved plan with:
 
-  The change scan only inspects files under `crates/<package>/`. Edits
-  to anything outside a package directory — the workspace-level
-  `Cargo.toml`, `.cargo/`, `deny.toml`, shared CI workflows, top-level
-  scripts — are invisible to the scan even if they affect how the
-  package builds or behaves. Switch to `-All` (or pass the affected
-  packages with `-Packages`) when a cross-cutting change matters.
+```powershell
+./.github/skills/release-packages/scripts/apply-plan.ps1 -PlanPath plan.json
+```
 
-- `-All` surfaces every published workspace package, regardless of
-  whether the on-disk content has been modified. Use this when you want
-  to force-walk the entire workspace — for example to coordinate a
-  multi-package release after an internal refactor, or when you suspect
-  the change scan might be missing something. Packages with no detected
-  changes still expose the View-diff option (relabelled to make the
-  empty state obvious) so muscle-memory navigation continues to work.
+The helper:
 
-For each surfaced package the menu lets you:
+1. verifies each package and workspace dependency is still at the plan's `from`
+   version;
+2. edits only `[package].version` and the existing workspace dependency inline
+   table's `version` value;
+3. generates changelogs in dependency-first order;
+4. runs `just readme` once;
+5. runs Cargo metadata and workspace checks;
+6. verifies every applied package and workspace dependency version.
 
-- **View the diff** since the last release commit.
-- **Ignore** the package (leave it unreleased; treat the change as
-  immaterial or not yet ready).
-- **Release as breaking / non-breaking / patch** — synthesises a release
-  token for the package internally and feeds it back into the planner.
+It snapshots package manifests, the root manifest and lockfile, changelogs, and
+all possible crate README paths. Any failure restores modified files and removes
+files created by the failed release.
 
-Acceptances behave exactly as if you had passed the corresponding
-`-Packages` token: the planner re-resolves the release set, computes
-the cascade toward dependents, and the next iteration surfaces any
-newly-relevant elevation candidates. Decisions are final — each
-package is prompted at most once. If a later acceptance cascade-pulls
-a previously-ignored package into the release set, or strengthens an
-already-reviewed package's cascade level, the planner silently accepts
-the cascade-applied level (reflecting the user's earlier decision not
-to elevate). The final release plan summary records the cascade
-reasons for every released package.
+Do not publish packages unless publication was explicitly requested.
 
-Conceptually, both guided modes are equivalent to imagining a virtual
-`*` package that depends on every surfaced workspace package and
-running the planner to cascade releases from `*` outward. There is no
-real `*` token; the review loop seeds its dependency BFS with every
-surfaced package as an additional root, so per-package chains between
-surfaced packages emerge naturally during planning.
+## CI SemVer report
 
-For each surfaced package the menu lists **every in-workspace dependency
-chain** ending at that package — not only the chains rooted at the
-current release set. This gives the reviewer a release-set-independent
-big-picture view of what releasing the package could ripple through
-(cascading may pull more dependents into the release set after the
-prompt, so a release-set-rooted listing would be misleadingly narrow).
-A package with no in-workspace dependents is shown with the hint
-"No in-workspace dependents".
+`.github/workflows/main.yml` invokes `scripts/ci/semver-report.ps1` for package
+version changes in a PR. It uses the same release-baseline and proc-macro
+semantics but remains outside the skill because it is a CI entry point.
 
-If you skip every prompt, the script exits without writing any files.
+The report verifies whether versions already written in the PR are sufficient.
+It does not replace release planning or source-diff review.
 
----
+## Tests
 
-## Why we say "package" everywhere
+Mechanical behavior is covered by the Pester suite:
 
-Cargo's official term for a workspace member is "package", so the
-release tooling uses "package" throughout the PowerShell API surface
-(`-Packages`, `-PackageName`, etc.) and in all human-readable output.
+- stable, `0.x`, and `0.0.x` arithmetic;
+- patch, additive, and breaking synthetic Cargo changes;
+- linear, diamond, duplicate-edge, exposed, and unknown-exposure graphs;
+- first releases, unpublished packages, proc-macros, pins, and force;
+- changelog rendering;
+- successful application and rollback after validation failure.
 
-The token "crate" survives only in identifiers carried over from
-Cargo's own vocabulary — the filesystem directory `crates/`,
-`[workspace.dependencies]`, `Cargo.toml`, `cargo metadata`, `crates.io`.
+Run:
+
+```powershell
+pwsh -NoProfile -File scripts/tests/Pester/Run-Tests.ps1
+```

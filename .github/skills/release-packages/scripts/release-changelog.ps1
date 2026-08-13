@@ -9,7 +9,7 @@
 
 .DESCRIPTION
     A small, deterministic helper for the AI release skill
-    (.github/prompts/release-packages.prompt.md). Changelog generation is the
+    (.github/skills/release-packages/SKILL.md). Changelog generation is the
     kind of mechanical, format-heavy sub-task that an agent should NOT reproduce
     by hand -- grouping conventional commits into sections, rendering PR links,
     folding `## Unreleased`, and emitting cascade "Now requires X of Y" bullets in
@@ -17,7 +17,7 @@
     regardless of which reasoning model drove the plan.
 
     This is a thin shell over the existing, tested Write-Changelog function in
-    scripts/lib/release-flow.ps1; it does not reimplement any changelog logic.
+    scripts/lib/changelog.ps1; it does not reimplement any changelog logic.
     It writes exactly one file: crates/<PackageFolder>/CHANGELOG.md.
 
 .PARAMETER RepoRoot
@@ -26,6 +26,9 @@
 
 .PARAMETER PackageFolder
     Folder name under crates/ for the package being released.
+
+.PARAMETER PackageName
+    Cargo package name. When omitted, it is resolved from workspace metadata.
 
 .PARAMETER NewVersion
     The already-decided target version (e.g. '1.3.0'). This helper performs NO
@@ -42,7 +45,8 @@
     section with one "Now requires `<Version>` of `<Target>`" bullet per reason.
 
 .EXAMPLE
-    ./scripts/release-changelog.ps1 -PackageFolder bytesbuf_io -NewVersion 0.9.0 `
+    ./.github/skills/release-packages/scripts/release-changelog.ps1 `
+        -PackageFolder bytesbuf_io -NewVersion 0.9.0 `
         -PrBaseUrl https://github.com/microsoft/oxidizer `
         -CascadeReasonsJson '[{"Target":"bytesbuf","Version":"0.9.0","Breaking":true}]'
 #>
@@ -52,6 +56,8 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$PackageFolder,
+
+    [string]$PackageName,
 
     [Parameter(Mandatory = $true)]
     [string]$NewVersion,
@@ -63,24 +69,38 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot/lib/changelog.ps1"
+$skillRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$releasingLibrary = Join-Path $skillRepoRoot 'scripts\lib\releasing.ps1'
+$changelogLibrary = Join-Path $skillRepoRoot 'scripts\lib\changelog.ps1'
+foreach ($libraryPath in @($releasingLibrary, $changelogLibrary)) {
+    if (-not (Test-Path -LiteralPath $libraryPath)) {
+        throw "The release skill requires the shared library at '$libraryPath'."
+    }
+    . $libraryPath
+}
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $RepoRoot = $skillRepoRoot
 } else {
     $RepoRoot = (Resolve-Path $RepoRoot).Path
 }
 
 Reset-ReleaseScriptCaches
 
-$package = @(Get-WorkspacePackages -repoRoot $RepoRoot) |
-    Where-Object { $_.Folder -eq $PackageFolder } |
-    Select-Object -First 1
-if ($null -eq $package) {
+$packageFolderPath = Join-Path $RepoRoot "crates/$PackageFolder"
+if (-not (Test-Path -LiteralPath (Join-Path $packageFolderPath 'Cargo.toml'))) {
     throw "Package folder '$PackageFolder' was not found under 'crates/' in '$RepoRoot'."
 }
+if ([string]::IsNullOrWhiteSpace($PackageName)) {
+    $package = @(Get-WorkspacePackages -repoRoot $RepoRoot) |
+        Where-Object { $_.Folder -eq $PackageFolder } |
+        Select-Object -First 1
+    if ($null -eq $package) {
+        throw "Package folder '$PackageFolder' was not found under 'crates/' in '$RepoRoot'."
+    }
+    $PackageName = $package.Name
+}
 
-$packageFolderPath = Join-Path $RepoRoot "crates/$PackageFolder"
 $changelogFile     = Join-Path $packageFolderPath 'CHANGELOG.md'
 
 $cascadeReasons = $null
@@ -92,7 +112,7 @@ if (-not [string]::IsNullOrWhiteSpace($CascadeReasonsJson)) {
 # it from the workspace root.
 Push-Location $RepoRoot
 try {
-    Write-Changelog -packageName $package.Name `
+    Write-Changelog -packageName $PackageName `
         -newVersion $NewVersion `
         -packageFolder $packageFolderPath `
         -changelogFile $changelogFile `

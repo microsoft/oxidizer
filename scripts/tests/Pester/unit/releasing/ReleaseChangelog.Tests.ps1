@@ -2,8 +2,8 @@
 # Licensed under the MIT License.
 
 <#
-    Tests for scripts/release-changelog.ps1 -- the thin deterministic changelog
-    helper the AI release skill forwards to. Verifies the version header and the
+    Tests for the release skill's thin deterministic changelog helper. Verifies
+    the version header and the
     cascade "Now requires X of Y" bullet are written by reusing Write-Changelog.
 #>
 
@@ -12,7 +12,9 @@ BeforeAll {
     . (Join-Path $PSScriptRoot '..\..\_common\New-SyntheticWorkspace.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\releasing.ps1')
 
-    $script:ChangelogScript = Join-Path (Get-OxiRepoRoot) 'scripts\release-changelog.ps1'
+    $script:ChangelogScript = Join-Path (
+        Get-OxiRepoRoot
+    ) '.github\skills\release-packages\scripts\release-changelog.ps1'
 }
 
 Describe 'release-changelog.ps1' {

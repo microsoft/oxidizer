@@ -235,6 +235,78 @@ Describe 'ConvertFrom-SemverChecksOutput' {
     }
 }
 
+Describe 'Get-PackageExposureFacts' {
+    It 'treats missing metadata as no exposure for CI-checked libraries' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('zeta-dep', 'alpha_dep') `
+            -ExposureMetadataKnown $false `
+            -UncheckedTarget $false
+
+        $facts.ExposureUnknown | Should -BeFalse
+        @($facts.ExposedDeps).Count | Should -Be 0
+    }
+
+    It 'conservatively exposes every dependency for unchecked targets with missing metadata' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('zeta-dep', 'alpha_dep') `
+            -ExposureMetadataKnown $false `
+            -UncheckedTarget $true
+
+        $facts.ExposureUnknown | Should -BeTrue
+        @($facts.ExposedDeps) | Should -Be @('alpha_dep', 'zeta_dep')
+    }
+
+    It 'ignores allowlists that are not enforced for unchecked targets' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('implementation') `
+            -ExposureMetadataKnown $true `
+            -UncheckedTarget $true `
+            -AllowedExternalTypes @('macro_crate::*')
+
+        $facts.ExposureUnknown | Should -BeTrue
+        @($facts.ExposedDeps) | Should -Be @('implementation')
+    }
+
+    It 'treats an explicit empty allowlist as exposing nothing' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('alpha') `
+            -ExposureMetadataKnown $true `
+            -UncheckedTarget $false `
+            -AllowedExternalTypes @()
+
+        $facts.ExposureUnknown | Should -BeFalse
+        @($facts.ExposedDeps).Count | Should -Be 0
+    }
+
+    It 'extracts normalized roots and filters stale or external entries' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('zeta', 'foo-bar', 'alpha') `
+            -ExposureMetadataKnown $true `
+            -UncheckedTarget $false `
+            -AllowedExternalTypes @(
+                'zeta::Specific',
+                'foo_bar::*',
+                'zeta::*',
+                'stale::*',
+                'http::HeaderMap'
+            )
+
+        $facts.ExposureUnknown | Should -BeFalse
+        @($facts.ExposedDeps) | Should -Be @('foo_bar', 'zeta')
+    }
+
+    It 'treats a bare wildcard as unknown and exposes every dependency' {
+        $facts = Get-PackageExposureFacts `
+            -Dependencies @('beta', 'alpha') `
+            -ExposureMetadataKnown $true `
+            -UncheckedTarget $false `
+            -AllowedExternalTypes @('*')
+
+        $facts.ExposureUnknown | Should -BeTrue
+        @($facts.ExposedDeps) | Should -Be @('alpha', 'beta')
+    }
+}
+
 Describe 'Get-PackageFolderForPath' {
     It 'returns package folder for files under crates/<x>/' {
         Get-PackageFolderForPath -Path 'crates/foo/src/lib.rs' | Should -Be 'foo'
@@ -359,4 +431,3 @@ Describe 'Format-ConventionalCommits' {
         ($r -join "`n") | Should -Match 'totally unstructured commit message'
     }
 }
-

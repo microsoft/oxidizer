@@ -175,8 +175,8 @@ function Compare-SemanticVersions {
 #
 #   * CHANGE TYPE — the semantic intent of a release: 'breaking' /
 #     'non-breaking' / 'patch'. This is what the user thinks about; the change
-#     type for each released package is supplied in the `-Packages` argument
-#     to `release-packages.ps1` (e.g. `mypkg@breaking`, `mypkg@nonbreaking`).
+#     type for each released package is supplied by the release skill
+#     (e.g. `mypkg@breaking`, `mypkg@nonbreaking`).
 #     Internally the same vocabulary is used for the `$changeType` enum (and
 #     for `-ChangeType` parameters throughout the release tooling).
 #
@@ -192,8 +192,7 @@ function Compare-SemanticVersions {
 #   - For 0.0.x          : every change -> 0.0.(x+1) (every change is breaking).
 #
 # DO NOT leak the internal `breaking|non-breaking|patch` enum directly into
-# user-visible output without a translation step — use `Get-ChangeTypeLabel`
-# in release-flow.ps1 to get a user-friendly noun phrase.
+# user-visible output without translating `non-breaking` to `nonbreaking`.
 function Get-NextVersion {
     param(
         [string]$currentVersion,
@@ -439,7 +438,7 @@ function Get-PreviousVersionBumpCommit {
 $script:CachedWorkspaceMetadata = $null
 
 # Caches for git-derived data that is invariant for the entire script run.
-# These are valid for the whole release-packages.ps1 invocation because:
+# These are valid for the whole release-skill invocation because:
 #   - $BaseRef is fixed by the caller for the entire run, and
 #   - the script never makes git commits (HEAD does not move).
 # Therefore the per-package baseline commit, the per-package committed-changes
@@ -491,6 +490,8 @@ function Reset-ReleaseScriptCaches {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   AllowedExternalTypes  - array from [package.metadata.cargo_check_external_types]
+#   ExposureMetadataKnown - $true when allowed_external_types is explicitly present
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
@@ -513,21 +514,91 @@ function Get-WorkspacePackages {
             }
         }
 
+        $allowedExternalTypes = $null
+        $exposureMetadataKnown = $false
+        $packageMetadata = $package.PSObject.Properties['metadata']
+        if ($packageMetadata -and $null -ne $packageMetadata.Value) {
+            $externalTypesMetadata = $packageMetadata.Value.PSObject.Properties['cargo_check_external_types']
+            if ($externalTypesMetadata -and $null -ne $externalTypesMetadata.Value) {
+                $allowedTypes = $externalTypesMetadata.Value.PSObject.Properties['allowed_external_types']
+                if ($allowedTypes -and $null -ne $allowedTypes.Value) {
+                    $allowedExternalTypes = @($allowedTypes.Value)
+                    $exposureMetadataKnown = $true
+                }
+            }
+        }
+
         $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
         $hasLibraryTarget = $targetKinds -contains 'lib'
 
         $packages += [pscustomobject]@{
-            Name                 = $package.name
-            Folder               = Split-Path $manifestDir -Leaf
-            Version              = $package.version
-            Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
-            Deps                 = $deps
-            HasLibraryTarget     = $hasLibraryTarget
-            IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
+            Name                    = $package.name
+            Folder                  = Split-Path $manifestDir -Leaf
+            Version                 = $package.version
+            Published               = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
+            Deps                    = @($deps | Sort-Object -Unique)
+            AllowedExternalTypes    = $allowedExternalTypes
+            ExposureMetadataKnown   = $exposureMetadataKnown
+            HasLibraryTarget        = $hasLibraryTarget
+            IsProcMacroOnly         = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
     }
 
     return $packages
+}
+
+# Derives conservative workspace exposure edges from cargo-check-external-types
+# metadata. The allowlist is CI-enforced and therefore cannot omit an actually
+# exposed type, though it may contain stale permitted entries. Intersecting its
+# roots with real non-dev dependencies removes those stale/external entries.
+function Get-PackageExposureFacts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Dependencies,
+        [Parameter(Mandatory = $true)][bool]$ExposureMetadataKnown,
+        [Parameter(Mandatory = $true)][bool]$UncheckedTarget,
+        [AllowNull()][AllowEmptyCollection()][object[]]$AllowedExternalTypes
+    )
+
+    $normalizedDependencies = @(
+        $Dependencies |
+            ForEach-Object { $_.Replace('-', '_') } |
+            Sort-Object -Unique
+    )
+
+    $entries = @($AllowedExternalTypes)
+    $exposureUnknown = $UncheckedTarget -or ($entries -contains '*')
+    if ($exposureUnknown) {
+        return [pscustomobject]@{
+            ExposedDeps     = $normalizedDependencies
+            ExposureUnknown = $true
+        }
+    }
+
+    if (-not $ExposureMetadataKnown) {
+        return [pscustomobject]@{
+            ExposedDeps     = @()
+            ExposureUnknown = $false
+        }
+    }
+
+    $roots = @(
+        $entries |
+            ForEach-Object {
+                $entry = $_.ToString()
+                ($entry -split '::', 2)[0].Replace('-', '_')
+            } |
+            Sort-Object -Unique
+    )
+
+    return [pscustomobject]@{
+        ExposedDeps = @(
+            $normalizedDependencies |
+                Where-Object { $roots -contains $_ } |
+                Sort-Object -Unique
+        )
+        ExposureUnknown = $false
+    }
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)

@@ -9,7 +9,7 @@
 
 .DESCRIPTION
     This is a small, deterministic helper for the AI release skill
-    (.github/prompts/release-packages.prompt.md). It does NOT make any release
+    (.github/skills/release-packages/SKILL.md). It does NOT make any release
     decisions and NEVER writes to the repository. It only gathers the objective
     facts an agent needs to plan a release, so that different reasoning models
     start from an identical, machine-checked fact base rather than re-deriving it
@@ -19,7 +19,8 @@
     (scripts/lib/releasing.ps1) so this script stays a thin shell:
 
       - Get-WorkspacePackages          -> folder / name / version / published /
-                                          proc-macro-only / library-target / deps
+                                          proc-macro-only / library-target /
+                                          dependency and exposure edges
                                           (normal + build deps, dev excluded,
                                            names normalised with '-' -> '_').
       - Get-PreviousVersionBumpCommit  -> baseline commit sha for
@@ -40,7 +41,8 @@
     Defaults to HEAD (the last committed version bump == the previous release).
 
 .EXAMPLE
-    ./scripts/release-facts.ps1 | ConvertFrom-Json
+    ./.github/skills/release-packages/scripts/release-facts.ps1 |
+        ConvertFrom-Json
 #>
 [CmdletBinding()]
 param(
@@ -50,10 +52,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot/lib/releasing.ps1"
+$skillRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$libraryPath = Join-Path $skillRepoRoot 'scripts\lib\releasing.ps1'
+if (-not (Test-Path -LiteralPath $libraryPath)) {
+    throw "The release skill requires the shared library at '$libraryPath'."
+}
+. $libraryPath
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $RepoRoot = $skillRepoRoot
 } else {
     $RepoRoot = (Resolve-Path $RepoRoot).Path
 }
@@ -76,6 +83,12 @@ $modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
 
 $factPackages = foreach ($package in $packages) {
     $baselineSha = $null
+    $exposure = Get-PackageExposureFacts `
+        -Dependencies @($package.Deps) `
+        -ExposureMetadataKnown $package.ExposureMetadataKnown `
+        -UncheckedTarget ([bool]$package.IsProcMacroOnly -or -not [bool]$package.HasLibraryTarget) `
+        -AllowedExternalTypes $package.AllowedExternalTypes
+
     # baselineSha is the crate's previous version-bump commit, or null if none can
     # be found. Note a crate's introducing commit counts as a bump, so in practice
     # even a never-released crate gets a baselineSha (its own first commit) -- use
@@ -92,6 +105,8 @@ $factPackages = foreach ($package in $packages) {
         procMacroOnly     = [bool]$package.IsProcMacroOnly
         hasLibraryTarget  = [bool]$package.HasLibraryTarget
         deps              = @($package.Deps)
+        exposedDeps       = @($exposure.ExposedDeps)
+        exposureUnknown   = [bool]$exposure.ExposureUnknown
         baselineSha       = $baselineSha
         hasBaseline       = ($null -ne $baselineSha)
         # Whether the crate has ever been published, determined from its release

@@ -2,8 +2,8 @@
 # Licensed under the MIT License.
 
 <#
-    Tests for scripts/release-facts.ps1 -- the deterministic fact-gathering
-    helper that the AI release skill consumes. Uses the synthetic-workspace
+    Tests for the release skill's deterministic fact-gathering helper. Uses the
+    synthetic-workspace
     fixture so the assertions are hermetic (no dependency on the real workspace).
 #>
 
@@ -12,7 +12,9 @@ BeforeAll {
     . (Join-Path $PSScriptRoot '..\..\_common\New-SyntheticWorkspace.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\releasing.ps1')
 
-    $script:FactsScript = Join-Path (Get-OxiRepoRoot) 'scripts\release-facts.ps1'
+    $script:FactsScript = Join-Path (
+        Get-OxiRepoRoot
+    ) '.github\skills\release-packages\scripts\release-facts.ps1'
 
     function Invoke-ReleaseFacts {
         param([Parameter(Mandatory = $true)][string]$RepoRoot)
@@ -29,7 +31,24 @@ Describe 'release-facts.ps1' {
             Packages = @(
                 @{ Name = 'alpha';        Version = '0.1.0'; Deps = @(@{ Name = 'beta' }) }
                 @{ Name = 'beta';         Version = '0.2.0' }
-                @{ Name = 'gamma_macros'; Version = '0.3.0'; ProcMacro = $true }
+                @{
+                    Name = 'exposer'
+                    Version = '0.2.0'
+                    Deps = @(@{ Name = 'beta' })
+                    AllowedExternalTypes = @('beta::*', 'http::*', 'stale::*')
+                }
+                @{
+                    Name = 'gamma_macros'
+                    Version = '0.3.0'
+                    ProcMacro = $true
+                    Deps = @(@{ Name = 'beta' })
+                    AllowedExternalTypes = @('gamma_macros::*')
+                }
+                @{
+                    Name = 'devonly'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'beta'; Kind = 'dev' })
+                }
                 @{ Name = 'priv_pkg';     Version = '0.4.0'; Published = $false }
             )
         }
@@ -60,7 +79,7 @@ Describe 'release-facts.ps1' {
 
     It 'emits every workspace package under crates/' {
         $folders = @($script:Facts.packages | ForEach-Object { $_.folder }) | Sort-Object
-        $folders | Should -Be @('alpha', 'beta', 'gamma_macros', 'priv_pkg')
+        $folders | Should -Be @('alpha', 'beta', 'devonly', 'exposer', 'gamma_macros', 'priv_pkg')
     }
 
     It 'reports name, version and published flag' {
@@ -73,12 +92,35 @@ Describe 'release-facts.ps1' {
     It 'captures normal dependency edges (dev excluded)' {
         @($script:ByFolder['alpha'].deps) | Should -Contain 'beta'
         @($script:ByFolder['beta'].deps).Count | Should -Be 0
+        @($script:ByFolder['devonly'].deps).Count | Should -Be 0
+    }
+
+    It 'emits deterministic workspace exposure edges from external-type metadata' {
+        $script:ByFolder['exposer'].exposureUnknown | Should -BeFalse
+        @($script:ByFolder['exposer'].exposedDeps) | Should -Be @('beta')
+    }
+
+    It 'treats missing external-type metadata as no exposure for libraries' {
+        $script:ByFolder['alpha'].exposureUnknown | Should -BeFalse
+        @($script:ByFolder['alpha'].exposedDeps).Count | Should -Be 0
+    }
+
+    It 'includes exposure properties for every package' {
+        foreach ($p in $script:Facts.packages) {
+            $p.PSObject.Properties.Name | Should -Contain 'exposedDeps'
+            $p.PSObject.Properties.Name | Should -Contain 'exposureUnknown'
+        }
     }
 
     It 'flags proc-macro-only packages' {
         $script:ByFolder['gamma_macros'].procMacroOnly | Should -BeTrue
         $script:ByFolder['gamma_macros'].hasLibraryTarget | Should -BeFalse
         $script:ByFolder['beta'].procMacroOnly | Should -BeFalse
+    }
+
+    It 'ignores unenforced proc-macro exposure metadata conservatively' {
+        $script:ByFolder['gamma_macros'].exposureUnknown | Should -BeTrue
+        @($script:ByFolder['gamma_macros'].exposedDeps) | Should -Be @('beta')
     }
 
     It 'resolves a baseline commit sha for a package with a prior version bump' {
