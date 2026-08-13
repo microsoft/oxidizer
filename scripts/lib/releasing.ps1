@@ -732,11 +732,13 @@ function Get-WorkspacePackages {
 # crate-root parameter.
 #
 # A third diversion exists but is not this function's problem: the same
-# `[lib] name` seen from a crate that does NOT declare the edge. A re-exported
-# type is attributed to its defining crate, so a dependent several hops away
-# names it without depending on it -- and having no edge, it has no DepAliases
-# entry for it either. Test-PackageAllowlistNamesTarget handles that case,
-# building its roots from the target's own record instead.
+# `[lib] name` carried by an allowlist entry earned on an INDIRECT path. A
+# re-exported type is attributed to its defining crate, so a dependent several
+# hops away names it under that root -- and having crossed no edge to the
+# target, no alias applies to it. Test-PackageAllowlistNamesTarget handles that
+# case, building its roots from the target's own record instead. A crate can
+# hold both kinds of path at once, so the two are evaluated independently
+# rather than as alternatives; see Get-PublishedDependentsExposingTarget.
 #
 # The real package name below is a known over-acceptance, not a considered
 # exception to that rule: a rename shadows the package name exactly as it
@@ -844,15 +846,18 @@ function Test-PackageExposesTarget {
 # closed.
 #
 # This function answers "does this crate claim to name the target's types?" for
-# an INDIRECT dependency. cargo-check-external-types attributes a re-exported
+# an INDIRECT path. cargo-check-external-types attributes a re-exported
 # type to its DEFINING crate, so a crate that reaches `a::T` through `b`
 # allowlists `a` while depending only on `b` (fetch_azure documents exactly this
-# for typespec_client_core). Such an edge is invisible to a direct-dependency
+# for typespec_client_core). Such a path is invisible to a direct-dependency
 # scan, so it needs its own check.
 #
-# Because there is no declared edge, the name the allowlist carries comes from
-# the target itself -- its crate root -- and never from a rename, which only a
-# crate that declares the dependency can apply. Hence -TargetCrateRoot.
+# Because the path crosses no edge to the target, the name the allowlist
+# carries comes from the target itself -- its crate root -- and never from a
+# rename, which only a crate that declares the dependency can apply. Hence
+# -TargetCrateRoot. That holds even when the same crate separately declares a
+# direct edge: the two paths are judged independently, since a crate can hold
+# both and earn a root on one that the other cannot supply.
 #
 # It must not inherit the fail-closed branches, because "no allowlist" would
 # then match every transitive dependency in the graph and force unrelated
@@ -866,8 +871,8 @@ function Test-PackageAllowlistNamesTarget {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
-        # Matters most on this path: a crate reached indirectly declares no edge
-        # to the target, so it has no DepAliases entry for it. The target's own
+        # Matters most on this path: a crate reached indirectly crosses no edge
+        # to the target, so no DepAliases entry applies to it. The target's own
         # crate root is the only place the diverted name can come from.
         [string]$TargetCrateRoot
     )
@@ -876,13 +881,18 @@ function Test-PackageAllowlistNamesTarget {
         return $false
     }
 
-    # This predicate is called only when no dependency edge to the target
-    # exists. DepAliases is therefore irrelevant: production can populate an
-    # alias only while processing a declared edge, which would take the direct
-    # branch instead. When the target's crate root is known it is exclusive:
-    # `[lib] name` replaces the package name as the usable Rust root. The
-    # package name remains only as compatibility for older synthetic records
-    # that predate CrateRoot.
+    # This predicate judges an INDIRECT path, which crosses no edge to the
+    # target. DepAliases is therefore not consulted even when the dependent
+    # also declares a direct edge: an alias applies only to the edge that
+    # declares it, and a type arriving re-exported through a conduit is
+    # attributed to the target's own crate root regardless of what any direct
+    # edge renames it to. The direct edge is judged separately, by
+    # Test-PackageExposesTarget, against its own aliases.
+    #
+    # When the target's crate root is known it is exclusive: `[lib] name`
+    # replaces the package name as the usable Rust root. The package name
+    # remains only as compatibility for older synthetic records that predate
+    # CrateRoot.
     if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
         $acceptedRoots = @($TargetCrateRoot.Replace('-', '_'))
     } else {
