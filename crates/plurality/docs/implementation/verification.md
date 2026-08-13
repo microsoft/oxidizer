@@ -21,14 +21,19 @@ compile-time trait behaviour, and no single technique covers all three.
 
 ## Test targets
 
-Tests are external integration targets, with one exception. That is a
-deliberate constraint: it keeps the tests honest about the public surface.
+Tests are external integration targets. That is a deliberate constraint: it
+keeps the tests honest about the public surface. Two modules carry unit tests
+instead, because what they assert cannot be reached from outside the crate.
 
-The exception is `src/geometry.rs`, which carries a unit test module. The
-geometry formulas take a size and an alignment, not a type, and the property
-worth asserting is that they agree with the compiler's layout of a slot struct
-that is crate-private. There is no public surface to reach that through, so the
-test sits beside the code.
+`src/geometry.rs` asserts that the geometry formulas agree with the compiler's
+layout of a slot struct that is crate-private. The formulas take a size and an
+alignment, not a type, so there is no public surface to drive them through.
+
+`src/layout_pool.rs` asserts the sizing floor: a value layout so large that a
+single-slot chunk cannot be described. Reaching it requires a `Layout` no Rust
+type on a 64-bit target can have (see [multi pool](./multi-pool.md), "Clamping
+the sizing configuration"), so the tests construct the layout directly and call
+the crate-private constructor.
 
 | Target | Scope |
 |---|---|
