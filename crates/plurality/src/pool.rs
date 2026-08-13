@@ -818,6 +818,18 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
         if let Some(slot) = self.pop_free() {
             return Ok(slot);
         }
+        self.alloc_slot_by_growing()
+    }
+
+    /// The empty-free-list half of [`alloc_slot`](Self::alloc_slot).
+    ///
+    /// Kept out of line so that the free-list pop stays the fall-through path
+    /// and its result stays in a register. Inlining this here costs the hot
+    /// path a branch and a spill/reload pair, because the second `pop_free`
+    /// below merges with the first through a stack slot.
+    #[cold]
+    #[inline(never)]
+    fn alloc_slot_by_growing(&self) -> Result<NonNull<u8>, AllocError> {
         // `grow` reserves and returns the first slot of the new chunk (or an
         // `AllocError` if the pool can't grow).
         match self.grow() {

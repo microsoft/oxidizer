@@ -72,6 +72,13 @@ have published a chunk whose remaining slots are free, so the caller re-examines
 the free list and reports capacity exhaustion only when there is genuinely
 nothing to hand out.
 
+That second look at the free list lives in `alloc_slot_by_growing`, which is
+marked `#[cold]` and `#[inline(never)]`. Reentry is rare and growth is rarer,
+so none of this belongs in the code the allocation path actually executes;
+inlining it costs the free-list pop its fall-through position and forces the
+slot pointer through a stack slot, because the two pops then merge there
+instead of in a register.
+
 ## Reserving without a live borrow
 
 `directory::reserve_one` grows a directory `Vec` without ever holding a borrow
