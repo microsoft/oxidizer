@@ -167,6 +167,61 @@ function Get-SelectionDecision {
     ) {
         throw "Selection reason 'explicit-release' is only valid for an unchanged package in all mode."
     }
+    $manifestDependencyScopes = @($Fact.manifestDependencyScopes)
+    $hasRuntimeDependencyChange = (
+        $manifestDependencyScopes -contains 'normal' -or
+        $manifestDependencyScopes -contains 'build' -or
+        $manifestDependencyScopes -contains 'features'
+    )
+    if ($reason -eq 'runtime-manifest-change' -and -not $hasRuntimeDependencyChange) {
+        throw "Selection reason 'runtime-manifest-change' for '$($Fact.folder)' requires a changed normal/build dependency or package feature declaration."
+    }
+    if ($decision -eq 'decline' -and $hasRuntimeDependencyChange) {
+        throw "Selection decision '$($Fact.folder)' cannot decline a changed normal/build dependency or package feature declaration."
+    }
+    $packagePrefix = "crates/$($Fact.folder)/"
+    $otherFiles = @(
+        $Fact.modifiedFiles |
+            ForEach-Object { $_.ToString().Replace('\', '/') } |
+            Where-Object {
+                if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
+                    return $true
+                }
+                $relative = $_.Substring($packagePrefix.Length)
+                return $relative -notin @('Cargo.toml', 'README.md', 'CHANGELOG.md')
+            }
+    )
+    if (
+        $decision -eq 'accept' -and
+        $manifestDependencyScopes.Count -eq 1 -and
+        $manifestDependencyScopes[0] -eq 'dev' -and
+        -not [bool]$Fact.manifestOtherChanged -and
+        $otherFiles.Count -eq 0
+    ) {
+        throw "Selection decision '$($Fact.folder)' cannot accept a dev-dependency-only manifest change."
+    }
+    if (
+        $decision -eq 'decline' -and
+        $manifestDependencyScopes.Count -eq 1 -and
+        $manifestDependencyScopes[0] -eq 'dev' -and
+        -not [bool]$Fact.manifestOtherChanged -and
+        $otherFiles.Count -eq 0 -and
+        $reason -ne 'dev-dependency-only'
+    ) {
+        throw "Selection decision '$($Fact.folder)' must classify a pure dev dependency manifest edit as 'dev-dependency-only'."
+    }
+    if ($reason -eq 'dev-dependency-only') {
+        if (
+            $manifestDependencyScopes -notcontains 'dev' -or
+            $hasRuntimeDependencyChange -or
+            [bool]$Fact.manifestOtherChanged
+        ) {
+            throw "Selection reason 'dev-dependency-only' for '$($Fact.folder)' requires only changed dev dependency declarations and ignorable release metadata."
+        }
+        if ($otherFiles.Count -gt 0) {
+            throw "Selection reason 'dev-dependency-only' for '$($Fact.folder)' cannot ignore changed source, tests, benchmarks, or authored documentation."
+        }
+    }
     if ($decision -eq 'accept' -and -not [bool]$Fact.everReleased) {
         if ($reason -ne 'first-release') {
             throw "Never-released package '$($Fact.folder)' must use selection reason 'first-release'."
@@ -449,7 +504,7 @@ function Assert-PinSatisfiesRequirement {
 
 $factsDocument = Get-Content -LiteralPath (Resolve-Path $FactsPath) -Raw | ConvertFrom-Json
 $request = Get-Content -LiteralPath (Resolve-Path $RequestPath) -Raw | ConvertFrom-Json
-if ($factsDocument.schemaVersion -ne 3) {
+if ($factsDocument.schemaVersion -ne 4) {
     throw 'The facts document uses an unsupported schema. Rerun release-facts.ps1.'
 }
 $facts = @($factsDocument.packages)
@@ -462,6 +517,8 @@ foreach ($fact in $facts) {
             'macroImplementationClosure',
             'macroRuntimePartners',
             'modifiedFiles',
+            'manifestDependencyScopes',
+            'manifestOtherChanged',
             'workspaceModified'
         )) {
         if ($null -eq $fact.PSObject.Properties[$requiredProperty]) {

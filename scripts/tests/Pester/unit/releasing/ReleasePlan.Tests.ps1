@@ -24,6 +24,8 @@ BeforeAll {
             [bool]$ProcMacroOnly = $false,
             [bool]$Modified = $true,
             [string[]]$ModifiedFiles = @(),
+            [string[]]$ManifestDependencyScopes = @(),
+            [bool]$ManifestOtherChanged = $false,
             [bool]$WorkspaceModified = $Modified
         )
 
@@ -50,6 +52,8 @@ BeforeAll {
             modified         = $Modified
             modifiedFiles    = @($ModifiedFiles)
             modifiedFileCount = $ModifiedFiles.Count
+            manifestDependencyScopes = @($ManifestDependencyScopes)
+            manifestOtherChanged = $ManifestOtherChanged
             workspaceModified = $WorkspaceModified
         }
     }
@@ -81,7 +85,7 @@ BeforeAll {
         param(
             [Parameter(Mandatory = $true)][object[]]$Facts,
             [Parameter(Mandatory = $true)][hashtable]$Request,
-            [int]$SchemaVersion = 3
+            [int]$SchemaVersion = 4
         )
 
         $caseDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -769,7 +773,7 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     tokens = @('package')
                     classifications = @{ package = 'patch' }
                 } `
-                -SchemaVersion 2
+                -SchemaVersion 3
         } | Should -Throw '*unsupported schema*'
 
         $fact = New-ReleaseFact -Name package
@@ -795,6 +799,30 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
         } | Should -Throw "*missing 'modifiedFiles'*"
+
+        $fact = New-ReleaseFact -Name package
+        $fact.Remove('manifestDependencyScopes')
+        {
+            Invoke-ReleasePlan `
+                -Facts @($fact) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*missing 'manifestDependencyScopes'*"
+
+        $fact = New-ReleaseFact -Name package
+        $fact.Remove('manifestOtherChanged')
+        {
+            Invoke-ReleasePlan `
+                -Facts @($fact) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*missing 'manifestOtherChanged'*"
     }
 
     It 'rejects malformed and contradictory macro contracts clearly' {
@@ -894,6 +922,231 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ accepted = 'patch' }
                 }
         } | Should -Throw "*Accepted selection decision 'accepted' is missing*"
+    }
+
+    It 'rejects a dev-only manifest change as a runtime release seed' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact `
+                        -Name package `
+                        -ModifiedFiles 'crates/package/Cargo.toml' `
+                        -ManifestDependencyScopes dev
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision `
+                            -Reason runtime-manifest-change
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*requires a changed normal/build dependency or package feature*"
+    }
+
+    It 'rejects declining a runtime manifest change' {
+        foreach ($scope in @('normal', 'build', 'features')) {
+            {
+                Invoke-ReleasePlan `
+                    -Facts @(
+                        New-ReleaseFact `
+                            -Name package `
+                            -ModifiedFiles 'crates/package/Cargo.toml' `
+                            -ManifestDependencyScopes $scope
+                    ) `
+                    -Request @{
+                        mode = 'changed'
+                        tokens = @()
+                        selectionDecisions = @{
+                            package = New-SelectionDecision `
+                                -Decision decline `
+                                -Reason test-only
+                        }
+                        classifications = @{ package = 'patch' }
+                    }
+            } | Should -Throw '*cannot decline a changed normal/build dependency or package feature*'
+        }
+    }
+
+    It 'rejects relabeling a dev-only manifest change as another accepted reason' {
+        foreach ($reason in @(
+                'breaking',
+                'nonbreaking-api',
+                'behavior-fix',
+                'authored-doc-fix'
+            )) {
+            {
+                Invoke-ReleasePlan `
+                    -Facts @(
+                        New-ReleaseFact `
+                            -Name package `
+                            -ModifiedFiles @(
+                                'crates/package/Cargo.toml',
+                                'crates/package/README.md'
+                            ) `
+                            -ManifestDependencyScopes dev
+                    ) `
+                    -Request @{
+                        mode = 'changed'
+                        tokens = @('package')
+                        selectionDecisions = @{
+                            package = New-SelectionDecision -Reason $reason
+                        }
+                        classifications = @{ package = 'patch' }
+                    }
+            } | Should -Throw '*cannot accept a dev-dependency-only manifest change*'
+        }
+    }
+
+    It 'allows an evidenced non-dependency manifest change alongside a dev dependency edit' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact `
+                    -Name package `
+                    -ModifiedFiles 'crates/package/Cargo.toml' `
+                    -ManifestDependencyScopes dev `
+                    -ManifestOtherChanged $true
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('package')
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Reason behavior-fix
+                }
+                classifications = @{ package = 'patch' }
+            }
+
+        $plan.releases[0].folder | Should -Be 'package'
+    }
+
+    It 'allows benchmark-only manifest and authored-file changes to decline' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact `
+                    -Name package `
+                    -ModifiedFiles @(
+                        'crates/package/Cargo.toml',
+                        'crates/package/benches/throughput.rs'
+                    ) `
+                    -ManifestOtherChanged $true
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    package = New-SelectionDecision `
+                        -Decision decline `
+                        -Reason benchmark-only
+                }
+                classifications = @{ package = 'patch' }
+            }
+
+        $plan.releases.Count | Should -Be 0
+    }
+
+    It 'requires the canonical reason for a pure dev dependency manifest edit' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact `
+                        -Name package `
+                        -ModifiedFiles 'crates/package/Cargo.toml' `
+                        -ManifestDependencyScopes dev
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        package = New-SelectionDecision `
+                            -Decision decline `
+                            -Reason release-metadata-only
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*must classify a pure dev dependency manifest edit as 'dev-dependency-only'*"
+    }
+
+    It 'accepts runtime dependency changes and dev-only declines' {
+        $runtimePlan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact `
+                    -Name runtime `
+                    -ModifiedFiles 'crates/runtime/Cargo.toml' `
+                    -ManifestDependencyScopes normal
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('runtime')
+                selectionDecisions = @{
+                    runtime = New-SelectionDecision `
+                        -Reason runtime-manifest-change
+                }
+                classifications = @{ runtime = 'patch' }
+            }
+        $runtimePlan.releases[0].folder | Should -Be 'runtime'
+
+        $featurePlan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact `
+                    -Name features `
+                    -ModifiedFiles 'crates/features/Cargo.toml' `
+                    -ManifestDependencyScopes features
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('features')
+                selectionDecisions = @{
+                    features = New-SelectionDecision `
+                        -Reason runtime-manifest-change
+                }
+                classifications = @{ features = 'patch' }
+            }
+        $featurePlan.releases[0].folder | Should -Be 'features'
+
+        $devPlan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact `
+                    -Name devonly `
+                    -ModifiedFiles 'crates/devonly/Cargo.toml' `
+                    -ManifestDependencyScopes dev
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    devonly = New-SelectionDecision `
+                        -Decision decline `
+                        -Reason dev-dependency-only
+                }
+                classifications = @{ devonly = 'patch' }
+            }
+        $devPlan.releases.Count | Should -Be 0
+    }
+
+    It 'rejects dev-dependency-only when other authored files changed' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact `
+                        -Name package `
+                        -ModifiedFiles @(
+                            'crates/package/Cargo.toml',
+                            'crates/package/src/lib.rs'
+                        ) `
+                        -ManifestDependencyScopes dev
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        package = New-SelectionDecision `
+                            -Decision decline `
+                            -Reason dev-dependency-only
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*cannot ignore changed source*'
     }
 
     It 'emits normalized selection decisions' {

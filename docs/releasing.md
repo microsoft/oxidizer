@@ -83,7 +83,8 @@ canonical rules.
 folder, name, version, published, procMacroOnly, hasLibraryTarget,
 deps, exposedDeps, macroPublicDeps, macroImplementationClosure,
 macroRuntimePartners, exposureUnknown, baselineSha, hasBaseline,
-everReleased, modified, modifiedFiles, modifiedFileCount, workspaceModified
+everReleased, modified, modifiedFiles, modifiedFileCount,
+manifestDependencyScopes, manifestOtherChanged, workspaceModified
 ```
 
 `deps` contains normalized normal and build dependencies; dev dependencies are
@@ -96,6 +97,13 @@ review cannot skip a private implementation helper that changed.
 reject a first release justified only by tests, benchmarks, or generated files.
 The paths come from one frozen published/unpublished workspace scan and are
 ordered ordinally.
+`manifestDependencyScopes` records whether changed dependency declarations are
+normal, build, or dev scoped, and whether package features changed. Selection
+validation uses it to prevent dev-only manifest edits from becoming release
+seeds.
+`manifestOtherChanged` distinguishes a pure dev-dependency edit from another
+mixed manifest change without deciding whether that other edit requires a
+release; lints and `[package.metadata]` remain ignorable release metadata.
 
 For ordinary libraries, public exposure is derived from
 `package.metadata.cargo_check_external_types.allowed_external_types`. Fact
@@ -127,7 +135,7 @@ generated-runtime relationships without a public façade edge.
 If a macro attestation marks generated runtime paths as changed but no partner
 was inferred or declared, resolution blocks with `macroRuntimeUnknown`.
 
-Facts use `schemaVersion: 3`. The resolver rejects older or incomplete facts
+Facts use `schemaVersion: 4`. The resolver rejects older or incomplete facts
 instead of silently disabling macro-contract checks; regenerate facts after
 updating the release tooling.
 

@@ -140,6 +140,7 @@ Describe 'release-facts.ps1' {
     }
 
     It 'emits every workspace package under crates/' {
+        $script:Facts.schemaVersion | Should -Be 4
         $folders = @($script:Facts.packages | ForEach-Object { $_.folder }) | Sort-Object
         $folders | Should -Be @(
             'alpha',
@@ -194,6 +195,7 @@ Describe 'release-facts.ps1' {
         foreach ($p in $script:Facts.packages) {
             $p.PSObject.Properties.Name | Should -Contain 'exposedDeps'
             $p.PSObject.Properties.Name | Should -Contain 'exposureUnknown'
+            $p.PSObject.Properties.Name | Should -Contain 'manifestOtherChanged'
         }
     }
 
@@ -270,7 +272,218 @@ Describe 'release-facts.ps1' {
             Should -Be $script:ByFolder['alpha'].modifiedFileCount
         $script:ByFolder['alpha'].modifiedFiles |
             Should -Contain 'crates/alpha/src/lib.rs'
+        @($script:ByFolder['alpha'].manifestDependencyScopes).Count |
+            Should -Be 0
         $script:ByFolder['beta'].modified | Should -BeFalse
+    }
+
+    It 'handles dependency table variants without inheriting unrelated TOML sections' {
+        $cases = @(
+            @{
+                Name = 'normal'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace(
+                        'beta.workspace = true',
+                        'beta = { workspace = true, features = ["std"] }'
+                    )
+                }
+                Expected = @('normal')
+            },
+            @{
+                Name = 'padded normal header'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace('[dependencies]', '[ dependencies ]').Replace(
+                        'beta.workspace = true',
+                        'beta = { workspace = true, features = ["std"] }'
+                    )
+                }
+                Expected = @('normal')
+            },
+            @{
+                Name = 'build removal'
+                Deps = @(@{ Name = 'beta'; Kind = 'build' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace('beta.workspace = true', '')
+                }
+                Expected = @('build')
+            },
+            @{
+                Name = 'dev'
+                Deps = @(@{ Name = 'beta'; Kind = 'dev' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace(
+                        'beta.workspace = true',
+                        'beta = { workspace = true, features = ["testing"] }'
+                    )
+                }
+                Expected = @('dev')
+            },
+            @{
+                Name = 'target dev'
+                Deps = @()
+                Edit = {
+                    param($raw)
+                    "$raw`n`n[target.'cfg(windows)'.dev-dependencies]`nbeta.workspace = true"
+                }
+                Expected = @('dev')
+            },
+            @{
+                Name = 'scope move'
+                Deps = @(@{ Name = 'beta'; Kind = 'dev' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace('[dev-dependencies]', '[dependencies]')
+                }
+                Expected = @('normal', 'dev')
+            },
+            @{
+                Name = 'target relocation'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace(
+                        '[dependencies]',
+                        "[target.'cfg(unix)'.dependencies]"
+                    )
+                }
+                Expected = @('normal')
+            },
+            @{
+                Name = 'inline comment'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    $raw.Replace(
+                        'beta.workspace = true',
+                        'beta.workspace = true # explanation changed'
+                    )
+                }
+                Expected = @()
+            },
+            @{
+                Name = 'package features'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    "$raw`n`n[features]`ndefault = []`ntesting = [`"beta/testing`"]"
+                }
+                Expected = @('features')
+            },
+            @{
+                Name = 'metadata'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    @"
+$raw
+
+[package.metadata.review.dependencies]
+note = "not a Cargo dependency table"
+"@
+                }
+                Expected = @()
+            },
+            @{
+                Name = 'array table'
+                Deps = @(@{ Name = 'beta' })
+                Edit = {
+                    param($raw)
+                    @"
+$raw
+
+[[example]]
+name = "demo"
+path = "examples/demo.rs"
+"@
+                }
+                Expected = @()
+                OtherChanged = $true
+                Example = $true
+            }
+        )
+
+        foreach ($case in $cases) {
+            $root = Join-Path $TestDrive "manifest-$($case.Name.Replace(' ', '-'))"
+            $ws = New-SyntheticWorkspace -Path $root -Spec @{
+                Packages = @(
+                    @{ Name = 'alpha'; Version = '0.1.0'; Deps = $case.Deps }
+                    @{ Name = 'beta'; Version = '0.1.0' }
+                )
+            }
+            if ($case.Example) {
+                $exampleDir = Join-Path $ws.Path 'crates\alpha\examples'
+                New-Item -ItemType Directory -Path $exampleDir | Out-Null
+                Set-Content `
+                    -LiteralPath (Join-Path $exampleDir 'demo.rs') `
+                    -Value 'fn main() {}' `
+                    -NoNewline
+            }
+            $manifest = Join-Path $ws.Path 'crates\alpha\Cargo.toml'
+            $raw = Get-Content -LiteralPath $manifest -Raw
+            Set-Content `
+                -LiteralPath $manifest `
+                -Value (& $case.Edit $raw) `
+                -NoNewline
+
+            $facts = Invoke-ReleaseFacts -RepoRoot $ws.Path
+            $alpha = $facts.packages | Where-Object folder -eq alpha
+            @($alpha.manifestDependencyScopes) | Should -Be $case.Expected
+            $alpha.manifestOtherChanged |
+                Should -Be ([bool]($case.OtherChanged ?? $false))
+        }
+    }
+
+    It 'detects case-only manifest changes ordinally' {
+        $root = Join-Path $TestDrive 'manifest-case-only'
+        $ws = New-SyntheticWorkspace -Path $root -Spec @{
+            Packages = @(
+                @{ Name = 'alpha'; Version = '0.1.0' }
+            )
+        }
+        $manifest = Join-Path $ws.Path 'crates\alpha\Cargo.toml'
+        $raw = Get-Content -LiteralPath $manifest -Raw
+        Set-Content `
+            -LiteralPath $manifest `
+            -Value "$raw`n`n[features]`ndefault = []`nstd = []" `
+            -NoNewline
+        & git -C $ws.Path add . 2>&1 | Out-Null
+        & git -C $ws.Path commit --amend --no-edit 2>&1 | Out-Null
+        (Get-Content -LiteralPath $manifest -Raw).Replace('std = []', 'STD = []') |
+            Set-Content -LiteralPath $manifest -NoNewline
+
+        $facts = Invoke-ReleaseFacts -RepoRoot $ws.Path
+        $alpha = $facts.packages | Where-Object folder -eq alpha
+        @($alpha.manifestDependencyScopes) | Should -Be @('features')
+
+        $targetRoot = Join-Path $TestDrive 'manifest-case-only-target'
+        $targetWs = New-SyntheticWorkspace -Path $targetRoot -Spec @{
+            Packages = @(
+                @{ Name = 'alpha'; Version = '0.1.0' }
+                @{ Name = 'beta'; Version = '0.1.0' }
+            )
+        }
+        $targetManifest = Join-Path $targetWs.Path 'crates\alpha\Cargo.toml'
+        $targetRaw = Get-Content -LiteralPath $targetManifest -Raw
+        Set-Content `
+            -LiteralPath $targetManifest `
+            -Value "$targetRaw`n`n[target.'cfg(target_os = `"linux`")'.dependencies]`nbeta.workspace = true" `
+            -NoNewline
+        & git -C $targetWs.Path add . 2>&1 | Out-Null
+        & git -C $targetWs.Path commit --amend --no-edit 2>&1 | Out-Null
+        (Get-Content -LiteralPath $targetManifest -Raw).Replace(
+            'target_os = "linux"',
+            'target_os = "LINUX"'
+        ) | Set-Content -LiteralPath $targetManifest -NoNewline
+
+        $targetFacts = Invoke-ReleaseFacts -RepoRoot $targetWs.Path
+        $targetAlpha = $targetFacts.packages | Where-Object folder -eq alpha
+        @($targetAlpha.manifestDependencyScopes) | Should -Be @('normal')
     }
 
     It 'never surfaces publish=false packages as modified' {
