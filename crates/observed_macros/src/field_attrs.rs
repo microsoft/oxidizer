@@ -521,4 +521,27 @@ mod coverage_tests {
         // a non-type (lifetime) generic argument.
         assert!(option_inner_type(&ty("Option<'a>")).is_none());
     }
+
+    #[test]
+    fn strip_reference_peels_every_reference_layer() {
+        fn rendered(ty: &syn::Type) -> String {
+            quote::ToTokens::to_token_stream(ty).to_string()
+        }
+
+        assert_eq!(rendered(strip_reference(&ty("&T"))), "T");
+        assert_eq!(rendered(strip_reference(&ty("& &mut T"))), "T");
+        // A non-reference type is returned unchanged.
+        assert_eq!(rendered(strip_reference(&ty("Vec<T>"))), rendered(&ty("Vec<T>")));
+    }
+
+    #[test]
+    fn mentions_any_type_param_descends_into_token_groups() {
+        let param: Ident = syn::parse_str("T").expect("parse ident");
+
+        // Array and tuple types nest their contents in a token `Group`, which is
+        // the only way the walker recurses.
+        assert!(mentions_any_type_param(&ty("[T; 4]"), std::slice::from_ref(&param)));
+        assert!(mentions_any_type_param(&ty("(u8, T)"), std::slice::from_ref(&param)));
+        assert!(!mentions_any_type_param(&ty("[u8; 4]"), std::slice::from_ref(&param)));
+    }
 }

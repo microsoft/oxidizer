@@ -368,10 +368,29 @@ mod tests {
     }
 
     #[test]
+    fn value_from_text_is_stored_as_is() {
+        assert_eq!(Value::from(Text::Static("kept")), Value::String(Text::Static("kept")));
+    }
+
+    #[test]
+    fn value_from_text_arrays() {
+        assert_eq!(Value::from(vec![Text::Static("a")]), Value::StringArray(vec![Text::Static("a")]));
+        assert_eq!(Value::from(vec!["b"]), Value::StringArray(vec![Text::Static("b")]));
+    }
+
+    #[test]
     fn value_display_delegates() {
         assert_eq!(Value::from(42_i64).to_string(), "42");
         assert_eq!(Value::from(true).to_string(), "true");
         assert_eq!(Value::from("hi").to_string(), "hi");
         assert_eq!(Value::from(vec![1_i64, 2]).to_string(), "[1, 2]");
+    }
+
+    #[test]
+    fn value_display_covers_every_variant() {
+        assert_eq!(Value::from(1.5_f64).to_string(), "1.5");
+        assert_eq!(Value::from(vec![true, false]).to_string(), "[true, false]");
+        assert_eq!(Value::from(vec![1.5_f64, 2.5]).to_string(), "[1.5, 2.5]");
+        assert_eq!(Value::from(vec![Text::Static("a"), Text::Static("b")]).to_string(), "[a, b]");
     }
 }

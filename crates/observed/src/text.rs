@@ -149,4 +149,19 @@ mod tests {
     fn display_writes_contents() {
         assert_eq!(Text::from("hello").to_string(), "hello");
     }
+
+    #[test]
+    fn hash_agrees_with_equality_across_representations() {
+        fn hash_of(text: &Text) -> u64 {
+            use std::hash::{Hash as _, Hasher as _};
+
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        // `Text` hashes its contents, so a literal and an owned string with the
+        // same bytes are interchangeable as hash-map keys.
+        assert_eq!(hash_of(&Text::from("same")), hash_of(&Text::from(String::from("same"))));
+    }
 }

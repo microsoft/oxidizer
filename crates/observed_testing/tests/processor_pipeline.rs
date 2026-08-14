@@ -93,6 +93,20 @@ fn uninterested_processor_receives_nothing() {
 }
 
 #[test]
+fn flushing_a_failing_processor_reports_it_and_keeps_the_events() {
+    let processor = MockProcessor::with_flush_error("mock", "exporter offline");
+    let sink = Sink::new("test", vec![Arc::new(processor.clone())], tick::SimpleClock::new_frozen());
+
+    emit!(sink, AuthFailed { attempts: PublicI64(3) });
+
+    let error = sink.flush().expect_err("the mock processor always fails to flush");
+    assert_eq!(error.failures().len(), 1);
+    assert_eq!(error.failures()[0].processor(), "mock");
+    // A failing flush must not discard what was already captured.
+    assert_eq!(processor.len(), 1);
+}
+
+#[test]
 fn multiple_processors_receive_events_independently() {
     let all_processor = MockProcessor::new();
     let warn_processor = MockProcessor::with_filter(|desc| desc.log().is_some_and(|l| l.severity() >= Severity::Warn));
