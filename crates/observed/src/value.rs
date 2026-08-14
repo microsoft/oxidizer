@@ -21,6 +21,32 @@ use crate::text::Text;
 /// shares an [`Arc<str>`] rather than copying. A non-`'static` `&str` has no
 /// conversion on purpose - copying it must be spelled out at the call site as
 /// `Arc::from(s)`.
+///
+/// # Integer conversions
+///
+/// An unredacted value keeps its own type: nothing is saturated, wrapped or
+/// stringified on the way in, so a counter never reports a number the caller
+/// did not pass.
+///
+/// | Source | Variant | Conversion |
+/// |--------|---------|------------|
+/// | `i8`, `i16`, `i32`, `i64` | [`I64`](Self::I64) | widening, lossless |
+/// | `u8`, `u16`, `u32` | [`I64`](Self::I64) | widening, lossless |
+/// | `u64` | [`U64`](Self::U64) | exact |
+/// | `isize` | [`I64`](Self::I64) | exact on every supported target |
+/// | `usize` | [`U64`](Self::U64) | exact on every supported target |
+/// | `f32`, `f64` | [`F64`](Self::F64) | widening, lossless |
+///
+/// `u64` has its own variant rather than being folded into `I64` because more
+/// than half its range does not fit there, and byte and request counters live
+/// exactly in that half. Exporters therefore need a `U64` arm; this enum is
+/// `#[non_exhaustive]`, so adding one is a source-compatible change for
+/// matchers outside this crate.
+///
+/// `u128` and `i128` have **no** conversion. No telemetry backend represents
+/// them, so the only options would be truncating or stringifying a number the
+/// caller believes was recorded; `#[event(...)]` rejects them at compile time
+/// instead.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Value {
@@ -28,6 +54,11 @@ pub enum Value {
     Bool(bool),
     /// A signed 64-bit integer.
     I64(i64),
+    /// An unsigned 64-bit integer.
+    ///
+    /// Separate from [`I64`](Self::I64) because values above `i64::MAX` cannot
+    /// be represented there.
+    U64(u64),
     /// A 64-bit float.
     F64(f64),
     /// A string.
@@ -114,6 +145,7 @@ impl fmt::Display for Value {
         match self {
             Self::Bool(v) => v.fmt(f),
             Self::I64(v) => v.fmt(f),
+            Self::U64(v) => v.fmt(f),
             Self::F64(v) => v.fmt(f),
             Self::String(v) => v.fmt(f),
             Self::BoolArray(v) => fmt_array(f, v),
@@ -198,6 +230,54 @@ impl From<i32> for Value {
 impl From<u32> for Value {
     fn from(v: u32) -> Self {
         Self::I64(i64::from(v))
+    }
+}
+
+impl From<i8> for Value {
+    fn from(v: i8) -> Self {
+        Self::I64(i64::from(v))
+    }
+}
+
+impl From<i16> for Value {
+    fn from(v: i16) -> Self {
+        Self::I64(i64::from(v))
+    }
+}
+
+impl From<u8> for Value {
+    fn from(v: u8) -> Self {
+        Self::I64(i64::from(v))
+    }
+}
+
+impl From<u16> for Value {
+    fn from(v: u16) -> Self {
+        Self::I64(i64::from(v))
+    }
+}
+
+impl From<u64> for Value {
+    fn from(v: u64) -> Self {
+        Self::U64(v)
+    }
+}
+
+impl From<usize> for Value {
+    /// Exact on every target Rust supports, where `usize` is at most 64 bits.
+    /// The saturating fallback exists only so a hypothetical wider target
+    /// cannot make this panic.
+    fn from(v: usize) -> Self {
+        Self::U64(u64::try_from(v).unwrap_or(u64::MAX))
+    }
+}
+
+impl From<isize> for Value {
+    /// Exact on every target Rust supports, where `isize` is at most 64 bits.
+    /// The saturating fallback exists only so a hypothetical wider target
+    /// cannot make this panic.
+    fn from(v: isize) -> Self {
+        Self::I64(i64::try_from(v).unwrap_or(i64::MAX))
     }
 }
 
@@ -482,5 +562,47 @@ mod tests {
         assert_eq!(Value::from(vec![true, false]).to_string(), "[true, false]");
         assert_eq!(Value::from(vec![1.5_f64, 2.5]).to_string(), "[1.5, 2.5]");
         assert_eq!(Value::from(vec![Text::Static("a"), Text::Static("b")]).to_string(), "[a, b]");
+    }
+}
+
+#[cfg(test)]
+mod integer_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn small_integers_widen_losslessly_into_i64() {
+        assert_eq!(Value::from(-1_i8), Value::I64(-1));
+        assert_eq!(Value::from(i8::MIN), Value::I64(i64::from(i8::MIN)));
+        assert_eq!(Value::from(-1_i16), Value::I64(-1));
+        assert_eq!(Value::from(i16::MIN), Value::I64(i64::from(i16::MIN)));
+        assert_eq!(Value::from(255_u8), Value::I64(255));
+        assert_eq!(Value::from(u16::MAX), Value::I64(i64::from(u16::MAX)));
+    }
+
+    #[test]
+    fn u64_keeps_its_own_variant() {
+        // The whole point of `U64`: more than half of `u64`'s range does not
+        // fit in `i64`, and byte counters live in that half.
+        assert_eq!(Value::from(7_u64), Value::U64(7));
+        assert_eq!(Value::from(u64::MAX), Value::U64(u64::MAX));
+
+        // `U64` and `I64` are distinct even where the numbers agree, so a
+        // matcher cannot confuse the signedness of what it is exporting.
+        assert_ne!(Value::from(7_u64), Value::from(7_i64));
+    }
+
+    #[test]
+    fn pointer_sized_integers_are_exact() {
+        assert_eq!(Value::from(12_usize), Value::U64(12));
+        assert_eq!(Value::from(-12_isize), Value::I64(-12));
+        assert_eq!(Value::from(usize::MAX), Value::U64(usize::MAX as u64));
+        assert_eq!(Value::from(isize::MAX), Value::I64(isize::MAX as i64));
+    }
+
+    #[test]
+    fn integer_values_display_as_plain_numbers() {
+        // Exporters that fall back to `Display` must not see a variant name.
+        assert_eq!(Value::from(u64::MAX).to_string(), u64::MAX.to_string());
+        assert_eq!(Value::from(-3_i8).to_string(), "-3");
     }
 }

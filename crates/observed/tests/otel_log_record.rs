@@ -52,10 +52,13 @@ struct DbError {
 }
 
 /// A metric-only event: no severity attribute, so it carries no log signal.
+///
+/// The gauge value is `#[unredacted]`: a classified value is rendered as a
+/// string by the redaction engine, which carries no measurement to record.
 #[event("system.memory.usage")]
 #[gauge(bytes, name = "system.memory.usage")]
 struct MemoryUsage {
-    #[data_class(TEST_DC)]
+    #[unredacted]
     bytes: i64,
 }
 

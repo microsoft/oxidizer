@@ -354,31 +354,53 @@ impl InstrumentKindValue {
     }
 }
 
-/// The signedness of a primitive integer type, used to enforce metric value
-/// constraints (`kind = counter` requires unsigned, `kind = updown_counter`
-/// requires signed).
+/// How a primitive numeric type may be used as a metric instrument's value.
+///
+/// Only types [`observed::Value`] can carry are listed. `u128`/`i128` are
+/// deliberately absent: no telemetry backend represents them, so `Value` offers
+/// no conversion and the macro rejects them with a dedicated diagnostic rather
+/// than truncating.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum IntegerSignedness {
-    Signed,
-    Unsigned,
+enum NumericKind {
+    /// A signed integer: `i8`, `i16`, `i32`, `i64`, `isize`.
+    SignedInt,
+    /// An unsigned integer: `u8`, `u16`, `u32`, `u64`, `usize`.
+    UnsignedInt,
+    /// A float: `f32`, `f64`.
+    Float,
 }
 
-/// Returns the signedness of a primitive integer type, matched syntactically on
-/// the last path segment (so `u64`, `std::primitive::u64` are recognized, but a
-/// type aliased to an integer is not). Returns `None` for non-integer types
-/// (e.g. `f64`) or unrecognized paths. Group and parenthesis wrappers are
-/// transparent; `Option<T>` deliberately is **not**, so an optional field can
-/// never satisfy an instrument's value-type requirement.
-fn integer_signedness(ty: &syn::Type) -> Option<IntegerSignedness> {
+/// Classifies a primitive numeric type, matched syntactically on the last path
+/// segment (so `u64` and `std::primitive::u64` are recognized, but a type
+/// aliased to an integer is not). Returns `None` for non-numeric types,
+/// unrecognized paths, and the unsupported 128-bit widths. Group and
+/// parenthesis wrappers are transparent; `Option<T>` deliberately is **not**, so
+/// an optional field can never satisfy an instrument's value-type requirement.
+fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
     let ident = type_path.path.segments.last()?.ident.to_string();
     match ident.as_str() {
-        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => Some(IntegerSignedness::Unsigned),
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => Some(IntegerSignedness::Signed),
+        "u8" | "u16" | "u32" | "u64" | "usize" => Some(NumericKind::UnsignedInt),
+        "i8" | "i16" | "i32" | "i64" | "isize" => Some(NumericKind::SignedInt),
+        "f32" | "f64" => Some(NumericKind::Float),
         _ => None,
     }
+}
+
+/// Returns true for the 128-bit integer widths, which are recognized only so
+/// they can be rejected with a specific diagnostic instead of the generic
+/// "not a supported numeric type" one.
+fn is_128_bit_int(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
+        return false;
+    };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|s| matches!(s.ident.to_string().as_str(), "u128" | "i128"))
 }
 
 /// Strips transparent `Paren`/`Group` wrappers from a type.
@@ -591,32 +613,77 @@ fn resolve_metrics(specs: Vec<MetricSpec>, fields: &mut [FieldDef], event_name: 
     Ok(event_metric)
 }
 
-/// Enforces requirement that `kind = counter` value fields are unsigned integers
-/// and `kind = updown_counter` value fields are signed integers. `gauge`/`histogram`
-/// place no signedness constraint on the value type. `Option<T>` never satisfies
-/// any of these, but it is rejected earlier with a dedicated diagnostic.
+/// Enforces the metric value contract.
+///
+/// A metric instrument records a measurement on every emission, so its value
+/// field has to arrive as a number. Two things can stop that, and both used to
+/// pass validation and then drop the measurement at runtime:
+///
+/// - **Redaction.** Anything that is not `#[unredacted]` is rendered through
+///   `Value::from_redacted`, which always produces a string. A metric processor
+///   cannot take a measurement from a string.
+/// - **The value type.** `Value` carries `i8`-`i64`/`isize`, `u8`-`u64`/`usize`
+///   and `f32`/`f64`. Anything else - a string newtype, a bool, `u128`/`i128` -
+///   has no numeric representation to record.
+///
+/// On top of that, `counter` requires an unsigned integer and `updown_counter`
+/// a signed one; `gauge` and `histogram` accept any supported numeric type,
+/// floats included. `Option<T>` never satisfies any of these, but it is
+/// rejected earlier with a dedicated diagnostic.
 fn enforce_value_type(kind: InstrumentKindValue, field: &FieldDef, attr: &syn::Attribute) -> Result<()> {
+    let field_ident = &field.ident;
+    let attr_name = kind.attr_name();
+
+    if !matches!(field.redaction, FieldRedaction::Unredacted) {
+        return Err(Error::new_spanned(
+            attr,
+            format!(
+                "`#[{attr_name}({field_ident})]` requires field `{field_ident}` to be `#[unredacted]`; a classified value is \
+                 rendered through the redaction engine as a string, which carries no measurement for the instrument to record",
+            ),
+        ));
+    }
+
+    if is_128_bit_int(&field.ty) {
+        return Err(Error::new_spanned(
+            attr,
+            format!(
+                "`#[{attr_name}({field_ident})]` does not support 128-bit integers; no telemetry backend represents them, so \
+                 `observed::Value` has no conversion. Use a 64-bit width instead",
+            ),
+        ));
+    }
+
+    let Some(actual) = numeric_kind(&field.ty) else {
+        return Err(Error::new_spanned(
+            attr,
+            format!(
+                "`#[{attr_name}({field_ident})]` requires field `{field_ident}` to be a numeric type that \
+                 `observed::Value` can carry (i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64)",
+            ),
+        ));
+    };
+
     let required = match kind {
-        InstrumentKindValue::Counter => IntegerSignedness::Unsigned,
-        InstrumentKindValue::UpDownCounter => IntegerSignedness::Signed,
+        InstrumentKindValue::Counter => NumericKind::UnsignedInt,
+        InstrumentKindValue::UpDownCounter => NumericKind::SignedInt,
+        // Width- and signedness-agnostic: both accept every supported numeric
+        // type, so the checks above are the whole contract.
         InstrumentKindValue::Gauge | InstrumentKindValue::Histogram => return Ok(()),
     };
 
-    if integer_signedness(&field.ty) == Some(required) {
+    if actual == required {
         return Ok(());
     }
 
     let (word, examples) = match required {
-        IntegerSignedness::Unsigned => ("unsigned", "u8, u16, u32, u64, u128, usize"),
-        IntegerSignedness::Signed => ("signed", "i8, i16, i32, i64, i128, isize"),
+        NumericKind::UnsignedInt => ("unsigned", "u8, u16, u32, u64, usize"),
+        NumericKind::SignedInt => ("signed", "i8, i16, i32, i64, isize"),
+        NumericKind::Float => unreachable!("gauge and histogram return early"),
     };
     Err(Error::new_spanned(
         attr,
-        format!(
-            "`#[{}(...)]` requires field `{}` to be a {word} integer type ({examples})",
-            kind.attr_name(),
-            field.ident,
-        ),
+        format!("`#[{attr_name}(...)]` requires field `{field_ident}` to be a {word} integer type ({examples})"),
     ))
 }
 
@@ -2292,17 +2359,116 @@ mod coverage_tests {
     }
 
     #[test]
-    fn integer_signedness_of_non_path_type_is_none() {
-        let reference: syn::Type = syn::parse_str("&u64").expect("parse type");
-        assert!(integer_signedness(&reference).is_none());
+    fn classified_metric_value_field_is_rejected() {
+        // A classified value is rendered through the redaction engine as a
+        // string, which carries no measurement -- so it must be a compile-time
+        // error rather than an instrument that silently records nothing.
+        let msg = expect_err(r#"#[event("e")] #[info] #[counter(n)] struct E { #[data_class(DC)] n: u64 }"#);
+        assert!(msg.contains("#[unredacted]"), "diagnostic should name the fix, got: {msg}");
+
+        // The default (no redaction attribute at all) takes the same path.
+        let msg = expect_err(r#"#[event("e")] #[info] #[counter(n)] struct E { n: u64 }"#);
+        assert!(msg.contains("#[unredacted]"), "diagnostic should name the fix, got: {msg}");
     }
 
     #[test]
-    fn integer_signedness_does_not_see_through_option() {
+    fn non_numeric_metric_value_field_is_rejected() {
+        // `gauge`/`histogram` place no signedness constraint, but they still
+        // need a number: a non-numeric value produces no measurement at all.
+        for kind in ["gauge", "histogram"] {
+            let msg = expect_err(&format!(
+                r#"#[event("e")] #[info] #[{kind}(n)] struct E {{ #[unredacted] n: PublicString }}"#
+            ));
+            assert!(msg.contains("numeric"), "diagnostic should say numeric, got: {msg}");
+        }
+    }
+
+    #[test]
+    fn metric_value_field_accepts_supported_widths() {
+        // `u64` in particular: it is the natural type for a byte or request
+        // counter, and `Value` carries it exactly.
+        for ty in ["u8", "u16", "u32", "u64", "usize"] {
+            expect_ok(&format!(
+                r#"#[event("e")] #[info] #[counter(n)] struct E {{ #[unredacted] n: {ty} }}"#
+            ));
+        }
+        for ty in ["i8", "i16", "i32", "i64", "isize"] {
+            expect_ok(&format!(
+                r#"#[event("e")] #[info] #[updown_counter(n)] struct E {{ #[unredacted] n: {ty} }}"#
+            ));
+        }
+        // Gauge and histogram are signedness- and width-agnostic, floats included.
+        for ty in ["u64", "i64", "f32", "f64"] {
+            expect_ok(&format!(
+                r#"#[event("e")] #[info] #[gauge(n)] struct E {{ #[unredacted] n: {ty} }}"#
+            ));
+            expect_ok(&format!(
+                r#"#[event("e")] #[info] #[histogram(n)] struct E {{ #[unredacted] n: {ty} }}"#
+            ));
+        }
+    }
+
+    #[test]
+    fn metric_value_field_rejects_128_bit_widths() {
+        // No telemetry backend represents these, so `Value` has no conversion.
+        // The diagnostic is specific rather than the generic "not numeric" one.
+        let msg = expect_err(r#"#[event("e")] #[info] #[counter(n)] struct E { #[unredacted] n: u128 }"#);
+        assert!(msg.contains("128-bit"), "diagnostic should call out the width, got: {msg}");
+        let msg = expect_err(r#"#[event("e")] #[info] #[updown_counter(n)] struct E { #[unredacted] n: i128 }"#);
+        assert!(msg.contains("128-bit"), "diagnostic should call out the width, got: {msg}");
+    }
+
+    #[test]
+    fn counter_still_requires_unsigned_and_updown_counter_signed() {
+        let msg = expect_err(r#"#[event("e")] #[info] #[counter(n)] struct E { #[unredacted] n: i64 }"#);
+        assert!(msg.contains("unsigned"), "got: {msg}");
+        let msg = expect_err(r#"#[event("e")] #[info] #[updown_counter(n)] struct E { #[unredacted] n: u64 }"#);
+        assert!(msg.contains("signed"), "got: {msg}");
+        // A float is not an integer, so neither counter accepts one.
+        let msg = expect_err(r#"#[event("e")] #[info] #[counter(n)] struct E { #[unredacted] n: f64 }"#);
+        assert!(msg.contains("unsigned"), "got: {msg}");
+    }
+
+    #[test]
+    fn numeric_kind_of_non_path_type_is_none() {
+        let reference: syn::Type = syn::parse_str("&u64").expect("parse type");
+        assert!(numeric_kind(&reference).is_none());
+    }
+
+    #[test]
+    fn numeric_kind_does_not_see_through_option() {
         // `Option<u64>` must not satisfy an instrument's value-type requirement --
         // an optional field has no measurement to record when it is `None`.
         let optional: syn::Type = syn::parse_str("Option<u64>").expect("parse type");
-        assert!(integer_signedness(&optional).is_none());
+        assert!(numeric_kind(&optional).is_none());
+    }
+
+    #[test]
+    fn numeric_kind_rejects_128_bit_widths() {
+        // `Value` has no conversion for these, so they are not "numeric" for the
+        // purposes of an instrument; `is_128_bit_int` exists to give them a
+        // dedicated diagnostic instead of the generic one.
+        for spelling in ["u128", "i128"] {
+            let ty: syn::Type = syn::parse_str(spelling).expect("parse type");
+            assert!(numeric_kind(&ty).is_none(), "{spelling} must not be a supported numeric");
+            assert!(is_128_bit_int(&ty), "{spelling} must be recognized for its own diagnostic");
+        }
+    }
+
+    #[test]
+    fn is_128_bit_int_is_false_for_non_path_and_supported_types() {
+        let reference: syn::Type = syn::parse_str("&u128").expect("parse type");
+        assert!(!is_128_bit_int(&reference));
+        let supported: syn::Type = syn::parse_str("u64").expect("parse type");
+        assert!(!is_128_bit_int(&supported));
+    }
+
+    #[test]
+    fn numeric_kind_classifies_floats() {
+        for spelling in ["f32", "f64"] {
+            let ty: syn::Type = syn::parse_str(spelling).expect("parse type");
+            assert!(matches!(numeric_kind(&ty), Some(NumericKind::Float)));
+        }
     }
 
     #[test]

@@ -8,6 +8,9 @@ use observed::Value;
 /// Returns the value as an `f64` suitable for recording against a metric
 /// instrument, or `None` when the value is not numeric (strings, booleans,
 /// arrays).
+///
+/// [`Value::U64`] is included: `u64` is the natural type for byte and request
+/// counters, so omitting it here would make those instruments record nothing.
 #[must_use]
 pub fn metric_number_of(value: &Value) -> Option<f64> {
     match value {
@@ -15,6 +18,11 @@ pub fn metric_number_of(value: &Value) -> Option<f64> {
         {
             #[expect(clippy::cast_precision_loss, reason = "metric recording precision loss is acceptable")]
             Some(*i as f64)
+        }
+        Value::U64(u) =>
+        {
+            #[expect(clippy::cast_precision_loss, reason = "metric recording precision loss is acceptable")]
+            Some(*u as f64)
         }
         Value::F64(f) => Some(*f),
         _ => None,

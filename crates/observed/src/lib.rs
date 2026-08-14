@@ -353,11 +353,16 @@ pub use observed_macros::Enrichment;
 ///
 /// Value-type constraints are enforced at compile time:
 ///
-/// - `#[counter(x)]` requires `x` to be an **unsigned** integer type
-///   (`u8`..`u128`, `usize`).
-/// - `#[updown_counter(x)]` requires `x` to be a **signed** integer type
-///   (`i8`..`i128`, `isize`).
-/// - `gauge` / `histogram` impose no value-type constraint.
+/// - The value field must be `#[unredacted]`. A classified value is rendered
+///   through the redaction engine as a *string*, which carries no measurement
+///   for the instrument to record.
+/// - The value field must be a numeric primitive [`Value`] can carry: `i8`,
+///   `i16`, `i32`, `i64`, `isize`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`,
+///   `f64`. `u128` and `i128` are **not** supported - no telemetry backend
+///   represents them - and neither is a newtype wrapper.
+/// - `#[counter(x)]` requires `x` to be an **unsigned** integer type.
+/// - `#[updown_counter(x)]` requires `x` to be a **signed** integer type.
+/// - `gauge` / `histogram` accept any supported numeric type, floats included.
 /// - No instrument accepts an `Option<T>` value field: an instrument records a
 ///   measurement on every emission, and the `#[if_none(...)]` placeholder for a
 ///   `None` is a *string*, which is not a valid measurement. Record an optional

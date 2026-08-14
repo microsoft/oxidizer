@@ -269,7 +269,7 @@ Field-level attributes control routing and redaction. By default, every field is
 | `#[dimension(log = "...", metric = "...")]` | Route both signals with independent keys; either side may be omitted (but not both). `log = exclude` omits the field from logs, and a bare `metric` uses the field name | |
 | `#[if_none("...")]` | For `Option` fields: emit the given placeholder when the value is `None` (default is `#[if_none("n/a")]`) | Only valid on `Option` fields |
 | `#[if_none(drop)]` | For `Option` fields: omit the field entirely when the value is `None` | Only valid on `Option` fields |
-| instrument `<field>` | Leading positional field name inside `#[counter(...)]` / `#[updown_counter(...)]` / `#[gauge(...)]` / `#[histogram(...)]`, naming the field whose value IS the metric value | The referenced field must not also be a metric dimension; `#[counter(x)]` requires an unsigned integer, `#[updown_counter(x)]` a signed one |
+| instrument `<field>` | Leading positional field name inside `#[counter(...)]` / `#[updown_counter(...)]` / `#[gauge(...)]` / `#[histogram(...)]`, naming the field whose value IS the metric value | The referenced field must not also be a metric dimension; it must be `#[unredacted]` and a numeric primitive `Value` can carry (`u128`/`i128` are unsupported); `#[counter(x)]` requires an unsigned integer, `#[updown_counter(x)]` a signed one, and `gauge`/`histogram` accept any supported numeric type including floats |
 | `#[data_class(<expr>)]` | Data-classification expression; wraps the value in `Sensitive::new(value, expr)` before redaction | Mutually exclusive with `#[unredacted]` |
 | `#[unredacted]` | Bypass redaction; the type must implement `Into<Value>` | Mutually exclusive with `#[data_class(...)]` |
 

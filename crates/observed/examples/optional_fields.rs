@@ -51,7 +51,7 @@ fn main() {
         HttpResponse {
             method: HttpMethod("GET".to_owned()),
             status: HttpStatus(200),
-            duration_ms: DurationMs(42.7),
+            duration_ms: 42.7,
             region: Some(Region("westus".to_owned())),
             cache_status: Some(CacheStatus("hit".to_owned())),
         }
@@ -66,7 +66,7 @@ fn main() {
         HttpResponse {
             method: HttpMethod("POST".to_owned()),
             status: HttpStatus(503),
-            duration_ms: DurationMs(1280.0),
+            duration_ms: 1280.0,
             region: None,
             cache_status: None,
         }
@@ -85,10 +85,6 @@ struct HttpMethod(String);
 struct HttpStatus(u16);
 
 #[classified(DataTaxonomy::SystemMetadata)]
-#[derive(Clone, Copy)]
-struct DurationMs(f64);
-
-#[classified(DataTaxonomy::SystemMetadata)]
 #[derive(Clone)]
 struct Region(String);
 
@@ -100,7 +96,7 @@ struct CacheStatus(String);
 /// absent.
 #[event("http.response")]
 #[info("{http.request.method} -> {http.response.status}")]
-#[histogram(status)]
+#[histogram(duration_ms, name = "http.server.duration")]
 struct HttpResponse {
     #[dimension(log = "http.request.method", metric = "http.request.method")]
     method: HttpMethod,
@@ -108,8 +104,12 @@ struct HttpResponse {
     #[dimension(log = "http.response.status")]
     status: HttpStatus,
 
+    // A metric instrument's value field must be `#[unredacted]` and a numeric
+    // primitive: a classified value is rendered as a string by the redaction
+    // engine, which carries no measurement to record.
     #[dimension(log = "http.server.duration")]
-    duration_ms: DurationMs,
+    #[unredacted]
+    duration_ms: f64,
 
     #[dimension(metric = "region")]
     #[if_none("unknown")]

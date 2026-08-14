@@ -58,6 +58,7 @@ fn any_value_of(value: Value) -> AnyValue {
     match value {
         Value::Bool(v) => AnyValue::Boolean(v),
         Value::I64(v) => AnyValue::Int(v),
+        Value::U64(v) => i64::try_from(v).map_or_else(|_| AnyValue::String(v.to_string().into()), AnyValue::Int),
         Value::F64(v) => AnyValue::Double(v),
         Value::String(v) => AnyValue::String(string_value_of(v)),
         Value::BoolArray(v) => list_of(v, AnyValue::Boolean),
