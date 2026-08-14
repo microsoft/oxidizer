@@ -194,11 +194,9 @@ rather than by the macro, which `design.md` records under Limits.
 
 A macro reports what it can rather than emitting code that fails to compile.
 Errors reach the user as `compile_error!` at a span in their own source, never
-as a panic and never as a `rustc` error pointing into generated code. Two
-exceptions survive from the implementation this replaces, both recorded in
-`design.md` under Limits: a `const fn` under `#[enrich_err]`, and a
-`#[display(...)]` format spec naming an argument the generated code does not
-have.
+as a panic and never as a `rustc` error pointing into generated code. A few
+inputs survive from the implementation this replaces where that does not hold;
+`design.md` records them under Limits.
 
 Where an input breaks several rules, all of them are reported at once rather
 than one per compile cycle.

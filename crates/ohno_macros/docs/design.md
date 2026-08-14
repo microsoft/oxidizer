@@ -519,9 +519,9 @@ exists.
 
 ## Limits
 
-Two inputs reach `rustc` as an error instead of being reported by a macro, which
-is where the R4 guarantee stops being structural. Both are recorded rather than
-closed.
+Some inputs reach `rustc` as an error instead of being reported by a macro,
+which is where the R4 guarantee stops being structural. They are recorded rather
+than closed.
 
 **A `const fn` under `#[enrich_err(...)]`.** The closure rewrite is not usable in
 a `const fn`, and `const` is re-emitted faithfully, so such a function is
@@ -535,6 +535,13 @@ argument — a width or precision naming something the generated code does not
 have — is reported by `rustc` against the derive rather than by the macro against
 the template. Checking it would mean parsing the format grammar a second time,
 which is what lowering to `format!` exists to avoid.
+
+**A return type carrying no `map_err`.** `#[enrich_err(...)]` checks that a
+return type is present, not what it is, so a function returning a plain value is
+rejected by `rustc` against the generated `map_err` call. Deciding this
+syntactically is not possible: `Result` is reachable through an alias such as
+`io::Result<T>`, and the supported `Poll<Result<..>>` is not a `Result` at all,
+which is why the wrapper goes through `map_err` rather than naming the type.
 
 ## Diagnostics
 
