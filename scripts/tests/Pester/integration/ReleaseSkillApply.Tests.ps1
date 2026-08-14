@@ -35,6 +35,26 @@ BeforeAll {
 }
 
 Describe 'apply-plan.ps1' {
+    It 'rejects a blocked plan before writing files' {
+        $workspace = New-SyntheticWorkspace -Spec @{
+            Packages = @(
+                @{ Name = 'subject'; Version = '0.1.0' }
+            )
+        } -Path (Join-Path $TestDrive 'apply-blocked-plan')
+        $planPath = Join-Path $workspace.Path 'plan.json'
+        @{
+            status = 'blocked'
+            mode = 'targeted'
+            releases = @()
+            ambiguities = @(@{ kind = 'macroContractUnreviewed' })
+        } | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath $planPath -Encoding utf8
+
+        {
+            & $script:ApplyPlan -RepoRoot $workspace.Path -PlanPath $planPath -SkipReadme
+        } | Should -Throw "*release plan is 'blocked'*"
+    }
+
     It 'updates only package and workspace dependency version values' {
         $workspace = New-SyntheticWorkspace -Spec @{
             Packages = @(

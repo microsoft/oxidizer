@@ -80,6 +80,9 @@ if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
 
 $packages = @(Get-WorkspacePackages -repoRoot $RepoRoot)
 $modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
+$workspaceModified = Get-PackagesWithUnreleasedChanges `
+    -RepoRoot $RepoRoot `
+    -IncludeUnpublished
 
 $packageByName = @{}
 foreach ($package in $packages) {
@@ -99,8 +102,8 @@ function Get-ReachableWorkspacePackages {
 
     while ($queue.Count -gt 0) {
         $dependency = $queue.Dequeue()
-        if (-not $seen.Add($dependency)) { continue }
         if (-not $packageByName.ContainsKey($dependency)) { continue }
+        if (-not $seen.Add($dependency)) { continue }
         foreach ($transitiveDependency in @($packageByName[$dependency].Deps)) {
             $queue.Enqueue($transitiveDependency)
         }
@@ -111,15 +114,32 @@ function Get-ReachableWorkspacePackages {
 
 $factPackages = foreach ($package in $packages) {
     $baselineSha = $null
-    $uncheckedTarget = [bool]$package.IsProcMacroOnly -or -not [bool]$package.HasLibraryTarget
+    if (
+        @($package.MacroRuntimePartners).Count -gt 0 -and
+        -not [bool]$package.IsProcMacroOnly
+    ) {
+        throw "Package '$($package.Folder)' declares macro_runtime but is not proc-macro-only."
+    }
+    foreach ($partner in @($package.MacroRuntimePartners)) {
+        if (-not $packageByName.ContainsKey($partner)) {
+            throw "Package '$($package.Folder)' declares unknown macro_runtime partner '$partner'."
+        }
+        if (-not [bool]$packageByName[$partner].Published) {
+            throw "Package '$($package.Folder)' declares unpublished macro_runtime partner '$partner'."
+        }
+    }
+    $uncheckedTarget = -not [bool]$package.IsProcMacroOnly -and -not [bool]$package.HasLibraryTarget
     $reachablePackages = @(Get-ReachableWorkspacePackages -Package $package)
-    $exposedPackages = if ($uncheckedTarget) {
+    $exposedPackages = if ([bool]$package.IsProcMacroOnly) {
+        @()
+    } elseif ($uncheckedTarget) {
         @($package.Deps)
     } else {
         @(
             foreach ($targetName in $reachablePackages) {
                 $target = $packageByName[$targetName]
                 if ($null -eq $target) { continue }
+                if ([bool]$target.IsProcMacroOnly) { continue }
 
                 $exposed = if (@($package.Deps) -contains $targetName) {
                     Test-PackageExposesTarget `
@@ -135,6 +155,28 @@ $factPackages = foreach ($package in $packages) {
             }
         )
     }
+    $macroPublicPackages = @(
+        foreach ($targetName in $reachablePackages) {
+            $target = $packageByName[$targetName]
+            if ($null -eq $target -or -not [bool]$target.IsProcMacroOnly) {
+                continue
+            }
+
+            $isDirect = @($package.Deps) -contains $targetName
+            $published = if ($isDirect) {
+                Test-PackageAllowlistNamesDirectTarget `
+                    -Dependent $package `
+                    -TargetPackageName $target.Name
+            } else {
+                Test-PackageAllowlistNamesTarget `
+                    -Dependent $package `
+                    -TargetPackageName $target.Name `
+                    -TargetCrateRoot $target.CrateRoot `
+                    -WildcardIsEvidence $false
+            }
+            if ($published) { $targetName }
+        }
+    )
 
     # baselineSha is the crate's previous version-bump commit, or null if none can
     # be found. Note a crate's introducing commit counts as a bump, so in practice
@@ -155,6 +197,17 @@ $factPackages = foreach ($package in $packages) {
         # Includes direct exposure edges and positively identified indirect
         # re-export edges to transitively reachable workspace packages.
         exposedDeps       = @($exposedPackages | Sort-Object -Unique)
+        # Proc-macro entry points are behavioral contracts, not Rust type
+        # identities. Keep their public re-export edges separate so a macro's
+        # reviewed contract change, rather than its Cargo version, controls
+        # breaking propagation.
+        macroPublicDeps   = @($macroPublicPackages | Sort-Object -Unique)
+        macroImplementationClosure = if ([bool]$package.IsProcMacroOnly) {
+            @($reachablePackages)
+        } else {
+            @()
+        }
+        macroRuntimePartners = @($package.MacroRuntimePartners)
         exposureUnknown   = $uncheckedTarget
         baselineSha       = $baselineSha
         hasBaseline       = ($null -ne $baselineSha)
@@ -167,10 +220,29 @@ $factPackages = foreach ($package in $packages) {
         everReleased      = [bool](Invoke-Git -Arguments @('tag', '--list', "$($package.Name)-v*") -RepoRoot $RepoRoot)
         modified          = $modified.ContainsKey($package.Folder)
         modifiedFileCount = if ($modified.ContainsKey($package.Folder)) { [int]$modified[$package.Folder] } else { 0 }
+        workspaceModified = $workspaceModified.ContainsKey($package.Folder)
+    }
+}
+
+$factByName = @{}
+foreach ($fact in $factPackages) {
+    $factByName[$fact.name.Replace('-', '_')] = $fact
+}
+foreach ($dependent in $factPackages) {
+    if (-not [bool]$dependent.published) { continue }
+    foreach ($macroName in @($dependent.macroPublicDeps)) {
+        $macroFact = $factByName[$macroName]
+        if ($null -eq $macroFact) { continue }
+        $macroFact['macroRuntimePartners'] = @(
+            @($macroFact.macroRuntimePartners) +
+                $dependent.name.Replace('-', '_') |
+                Sort-Object -Unique
+        )
     }
 }
 
 [ordered]@{
+    schemaVersion = 2
     repoRoot = $RepoRoot
     baseRef  = $BaseRef
     packages = @($factPackages)

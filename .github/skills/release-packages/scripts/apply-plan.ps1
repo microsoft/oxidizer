@@ -47,6 +47,12 @@ if (-not (Test-Path -LiteralPath $rootManifest)) {
 }
 
 $plan = Get-Content -LiteralPath (Resolve-Path $PlanPath) -Raw | ConvertFrom-Json
+if (
+    $plan.PSObject.Properties['status'] -and
+    $plan.status -ne 'resolved'
+) {
+    throw "The release plan is '$($plan.status)' and cannot be applied."
+}
 $releases = @($plan.releases)
 if ($releases.Count -eq 0) {
     throw 'The release plan contains no packages.'

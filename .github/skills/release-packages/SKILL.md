@@ -22,10 +22,11 @@ Run these from the repository root:
 
 - `.github/skills/release-packages/scripts/release-facts.ps1` gathers the
   workspace graph, release baselines,
-  modification state, and public exposure edges.
+  modification state, public type exposure, macro publication, implementation
+  closures, and generated-runtime relationships.
 - `.github/skills/release-packages/scripts/resolve-plan.ps1` performs token
-  parsing, version arithmetic, pins, exposure-aware cascades, and topological
-  ordering.
+  parsing, version arithmetic, pins, type- and macro-contract-aware cascades,
+  ambiguity reporting, and topological ordering.
 - `.github/skills/release-packages/scripts/apply-plan.ps1` performs version
   writes, changelog and README generation, validation, and rollback.
 - `.github/skills/release-packages/scripts/release-changelog.ps1` writes one
@@ -47,7 +48,11 @@ Never reproduce their work by hand.
 3. **Classify**
    - For every ordinary, previously released library that may enter the plan,
      run `cargo semver-checks` against its `baselineSha`.
-   - Review proc-macro diffs manually and retain `manualReview: true`.
+   - Review each affected proc-macro contract across its
+     `macroImplementationClosure` and `macroRuntimePartners`.
+   - Record a `macroContracts` attestation covering exported macros, accepted
+     syntax, compile behavior, generated API, runtime paths, and hygiene.
+   - Retain `manualReview: true`.
    - Review modified packages according to the elevation rules in
      `references/planning.md`.
    - If resolution reports missing classifications, classify the complete
@@ -55,10 +60,13 @@ Never reproduce their work by hand.
 
 4. **Resolve mechanically**
    - Write request JSON containing `mode`, accepted `tokens`, `classifications`,
-     and optional `force`.
+     required `macroContracts`, and optional `force`.
    - Run `scripts/resolve-plan.ps1 -FactsPath <facts.json> -RequestPath
      <request.json>`.
    - Treat its release set, versions, cascade reasons, and ordering as canonical.
+   - If it returns `status: blocked`, review every package named in
+     `ambiguities` and rerun with the same frozen facts. Never convert an
+     unresolved macro contract into a conservative breaking guess.
    - In changed or all mode, stop without invoking the resolver when every
      reviewed candidate is declined.
 

@@ -8,8 +8,8 @@ source-diff judgment; small PowerShell helpers own deterministic mechanics.
 
 | Component | Responsibility |
 |---|---|
-| `release-facts.ps1` | Workspace packages, versions, dependencies, exposure edges, release baselines, and modifications |
-| `resolve-plan.ps1` | Tokens, SemVer arithmetic, pins, dependent cascades, and topological ordering |
+| `release-facts.ps1` | Workspace packages, versions, dependencies, type exposure, macro relationships, release baselines, and modifications |
+| `resolve-plan.ps1` | Tokens, SemVer arithmetic, pins, type/macro contract cascades, ambiguities, and topological ordering |
 | `apply-plan.ps1` | Version writes, changelogs, README generation, Cargo validation, and rollback |
 | `release-changelog.ps1` | One deterministic changelog |
 | `scripts/ci/semver-report.ps1` | CI report for version changes already present in a PR |
@@ -81,12 +81,17 @@ canonical rules.
 
 ```text
 folder, name, version, published, procMacroOnly, hasLibraryTarget,
-deps, exposedDeps, exposureUnknown, baselineSha, hasBaseline,
-everReleased, modified, modifiedFileCount
+deps, exposedDeps, macroPublicDeps, macroImplementationClosure,
+macroRuntimePartners, exposureUnknown, baselineSha, hasBaseline,
+everReleased, modified, modifiedFileCount, workspaceModified
 ```
 
 `deps` contains normalized normal and build dependencies; dev dependencies are
 excluded.
+
+`modified` remains publishable-only for changed-mode selection.
+`workspaceModified` also records unpublished workspace changes so proc-macro
+review cannot skip a private implementation helper that changed.
 
 For ordinary libraries, public exposure is derived from
 `package.metadata.cargo_check_external_types.allowed_external_types`. Fact
@@ -104,9 +109,23 @@ Exposure handling is conservative:
 - indirect exposure requires positive allowlist evidence, so absent or malformed
   metadata does not mark every transitive dependency as exposed.
 
-Proc-macro-only and other unchecked targets always set
-`exposureUnknown = true` and conservatively expose every direct dependency. Any
-metadata on those targets is ignored for planning because CI does not enforce it.
+Proc-macro-only packages cannot expose dependency Rust types: rustc restricts
+their public surface to proc-macro entry points. They therefore have no
+`exposedDeps` and do not set `exposureUnknown`. Public macro re-exports are recorded separately in `macroPublicDeps` only when
+a concrete allowlist root identifies the direct proc-macro dependency.
+Wildcards are not positive publication evidence.
+
+`macroImplementationClosure` identifies workspace code that can change a macro's
+behavior. `macroRuntimePartners` is inferred by reversing `macroPublicDeps`: a
+package that publicly exposes a proc macro is treated as its runtime façade.
+`[package.metadata.oxidizer_release].macro_runtime` remains an escape hatch for
+generated-runtime relationships without a public façade edge.
+If a macro attestation marks generated runtime paths as changed but no partner
+was inferred or declared, resolution blocks with `macroRuntimeUnknown`.
+
+Facts use `schemaVersion: 2`. The resolver rejects older or incomplete facts
+instead of silently disabling macro-contract checks; regenerate facts after
+updating the release tooling.
 
 ## Classification
 
@@ -141,14 +160,18 @@ byproducts of another package's planned release.
 First releases do not run against their introducing commit. They publish at the
 version already declared in `Cargo.toml`, unless explicitly pinned higher.
 
-Proc-macro-only packages require manual review of:
+Proc-macro-only packages require a `macroContracts` attestation covering:
 
-- exported macro names;
-- accepted syntax;
-- diagnostics;
-- generated code and public types.
+- exported macro names and derive helper attributes;
+- accepted syntax and compile success/failure;
+- generated behavior, public API, bounds, and implementations;
+- generated runtime paths and requirements;
+- hygiene and name resolution.
 
-Their mechanical floor is patch and `manualReview` remains true.
+The verdict is `compatible`, `nonbreaking`, or `breaking`. It includes reviewed
+packages, channel decisions, and concrete evidence. Diagnostic wording and token
+formatting are patch unless they alter documented behavior. `manualReview`
+remains true.
 
 ## Cascade rules
 
@@ -156,7 +179,7 @@ Every released dependency gives each previously released, publishable direct
 dependent a patch floor so it can pick up the new dependency requirement.
 Never-published dependents are not cascade releases.
 
-A package receives a breaking floor when:
+A package receives an ordinary Rust type breaking floor when:
 
 1. the dependency's actual version transition is breaking under Cargo
    compatibility; and
@@ -170,15 +193,30 @@ dependency requirement themselves.
 
 This is a fixed-point calculation. A strengthened package can strengthen its own
 dependents, including through chains and diamonds. Every `0.0.z` bump therefore
-propagates as breaking across exposure edges even when its source classification
-was patch.
+propagates as breaking across ordinary type-exposure edges even when its source
+classification was patch.
 
 The release set is ordered dependency before dependent. Duplicate normal/build
 edges are deduplicated. Unpublished packages are excluded.
 
+Proc-macro cascades are separate:
+
+- an implementation dependency release gives the proc macro a patch floor;
+- its Cargo-incompatible version does not imply a broken macro contract;
+- a required but missing macro review blocks resolution instead of guessing;
+- a reviewed breaking macro contract propagates only through
+  `macroPublicDeps`;
+- a private proc-macro dependency remains a patch pickup;
+- generated-runtime relationships require review when the runtime breaks.
+
+The plan records `contractBreaking`, edge class, judgment, and judgment source
+so macro decisions remain auditable.
+
 ## Pins and force
 
-A pin below its objective or cascade requirement is rejected. With `force: true`,
+A proc-macro exact pin still requires a contract attestation because version
+arithmetic cannot prove behavioral compatibility. A pin below its objective or
+cascade requirement is rejected. With `force: true`,
 the resolver retains the exact pin, emits a warning, and preserves the stronger
 effective change type for downstream cascade decisions.
 

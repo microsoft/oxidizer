@@ -15,10 +15,15 @@ BeforeAll {
             [string]$Version = '1.0.0',
             [string[]]$Deps = @(),
             [string[]]$ExposedDeps = @(),
+            [string[]]$MacroPublicDeps = @(),
+            [string[]]$MacroImplementationClosure = @(),
+            [string[]]$MacroRuntimePartners = @(),
             [bool]$ExposureUnknown = $false,
             [bool]$Published = $true,
             [bool]$EverReleased = $true,
-            [bool]$ProcMacroOnly = $false
+            [bool]$ProcMacroOnly = $false,
+            [bool]$Modified = $true,
+            [bool]$WorkspaceModified = $Modified
         )
 
         return [ordered]@{
@@ -30,26 +35,54 @@ BeforeAll {
             hasLibraryTarget = -not $ProcMacroOnly
             deps             = @($Deps)
             exposedDeps      = @($ExposedDeps)
+            macroPublicDeps  = @($MacroPublicDeps)
+            macroImplementationClosure = @($MacroImplementationClosure)
+            macroRuntimePartners = @($MacroRuntimePartners)
             exposureUnknown  = $ExposureUnknown
             baselineSha      = if ($EverReleased) { '0123456789012345678901234567890123456789' } else { $null }
             hasBaseline      = $EverReleased
             everReleased     = $EverReleased
-            modified         = $true
-            modifiedFileCount = 1
+            modified         = $Modified
+            modifiedFileCount = if ($Modified) { 1 } else { 0 }
+            workspaceModified = $WorkspaceModified
+        }
+    }
+
+    function New-MacroContract {
+        param(
+            [ValidateSet('compatible', 'nonbreaking', 'breaking')]
+            [string]$Verdict = 'compatible',
+            [string[]]$ReviewedPackages = @('macros'),
+            [string[]]$Evidence = @('Reviewed macro exports, compile fixtures, and generated API.')
+        )
+
+        return @{
+            verdict = $Verdict
+            reviewedPackages = @($ReviewedPackages)
+            channels = @{
+                exportedMacros = 'unchanged'
+                acceptedSyntax = 'unchanged'
+                compileBehavior = 'unchanged'
+                generatedApi = 'unchanged'
+                generatedRuntimePaths = 'unchanged'
+                hygiene = 'unchanged'
+            }
+            evidence = @($Evidence)
         }
     }
 
     function Invoke-ReleasePlan {
         param(
             [Parameter(Mandatory = $true)][object[]]$Facts,
-            [Parameter(Mandatory = $true)][hashtable]$Request
+            [Parameter(Mandatory = $true)][hashtable]$Request,
+            [int]$SchemaVersion = 2
         )
 
         $caseDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $caseDir | Out-Null
         $factsPath = Join-Path $caseDir 'facts.json'
         $requestPath = Join-Path $caseDir 'request.json'
-        [ordered]@{ packages = @($Facts) } |
+        [ordered]@{ schemaVersion = $SchemaVersion; packages = @($Facts) } |
             ConvertTo-Json -Depth 8 |
             Set-Content -LiteralPath $factsPath -Encoding utf8
         $Request |
@@ -231,10 +264,11 @@ Describe 'resolve-plan.ps1 cascades' {
         @($plan.releases.folder) | Should -Be @('core')
     }
 
-    It 'keeps proc-macro manual review visible when a cascade becomes breaking' {
+    It 'blocks a breaking implementation dependency until the macro contract is reviewed' {
         $facts = @(
             New-ReleaseFact -Name core
-            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core -ExposedDeps core -ProcMacroOnly $true
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core `
+                -MacroImplementationClosure core -ProcMacroOnly $true
         )
         $plan = Invoke-ReleasePlan -Facts $facts -Request @{
             mode = 'targeted'
@@ -242,10 +276,255 @@ Describe 'resolve-plan.ps1 cascades' {
             classifications = @{ core = 'patch' }
         }
 
+        $plan.status | Should -Be 'blocked'
+        $plan.releases.Count | Should -Be 0
+        $plan.ambiguities[0].kind | Should -Be 'macroContractUnreviewed'
+        @($plan.ambiguities[0].reviewScope) | Should -Be @('core', 'macros')
+    }
+
+    It 'keeps an implementation break at a proc-macro patch floor when its contract is compatible' {
+        $facts = @(
+            New-ReleaseFact -Name core
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core `
+                -MacroImplementationClosure core -ProcMacroOnly $true
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -ReviewedPackages @('core', 'macros')
+            }
+        }
+
         $macros = $plan.releases | Where-Object folder -eq macros
-        $macros.to | Should -Be '0.5.0'
-        $macros.changeType | Should -Be 'breaking'
+        $macros.to | Should -Be '0.4.1'
+        $macros.changeType | Should -Be 'patch'
         $macros.manualReview | Should -BeTrue
+        $macros.contractBreaking | Should -BeFalse
+        $macros.cascadeReasons[0].edgeClass | Should -Be 'macroImplementation'
+        $macros.cascadeReasons[0].judgment | Should -Be 'contractCompatible'
+    }
+
+    It 'blocks an incomplete macro review scope' {
+        $facts = @(
+            New-ReleaseFact -Name core
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core `
+                -MacroImplementationClosure core -ProcMacroOnly $true
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -ReviewedPackages @('macros')
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.ambiguities[0].kind | Should -Be 'macroContractIncomplete'
+        @($plan.ambiguities[0].reviewScope) | Should -Contain 'core'
+    }
+
+    It 'blocks when an unpublished implementation helper changed' {
+        $facts = @(
+            New-ReleaseFact -Name helper -Published $false -Modified $false `
+                -WorkspaceModified $true
+            New-ReleaseFact -Name macros -ProcMacroOnly $true -Modified $false `
+                -WorkspaceModified $false -MacroImplementationClosure helper
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{}
+        }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.ambiguities[0].reviewScope) | Should -Be @('helper', 'macros')
+    }
+
+    It 'reviews an unpublished helper without releasing it' {
+        $facts = @(
+            New-ReleaseFact -Name helper -Published $false -Modified $false `
+                -WorkspaceModified $true
+            New-ReleaseFact -Name macros -ProcMacroOnly $true -Modified $false `
+                -WorkspaceModified $false -MacroImplementationClosure helper
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{}
+            macroContracts = @{
+                macros = New-MacroContract -ReviewedPackages @('helper', 'macros')
+            }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases.folder) | Should -Be @('macros')
+    }
+
+    It 'blocks changed generated-runtime paths when no partner can be inferred' {
+        $contract = New-MacroContract
+        $contract.channels.generatedRuntimePaths = 'changed'
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name macros -Version '1.0.0' `
+                    -ProcMacroOnly $true
+            ) `
+            -Request @{
+                mode = 'targeted'
+                tokens = @('macros@patch')
+                classifications = @{}
+                macroContracts = @{ macros = $contract }
+            }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.ambiguities[0].kind | Should -Be 'macroRuntimeUnknown'
+    }
+
+    It 'propagates a reviewed breaking macro contract through a public macro edge' {
+        $facts = @(
+            New-ReleaseFact -Name core
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core `
+                -MacroImplementationClosure core -ProcMacroOnly $true
+            New-ReleaseFact -Name runtime -Version '0.4.0' -Deps macros `
+                -MacroPublicDeps macros
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict breaking `
+                    -ReviewedPackages @('core', 'macros')
+            }
+        }
+
+        $macros = $plan.releases | Where-Object folder -eq macros
+        $runtime = $plan.releases | Where-Object folder -eq runtime
+        $macros.to | Should -Be '0.5.0'
+        $macros.contractBreaking | Should -BeTrue
+        $runtime.to | Should -Be '0.5.0'
+        $runtime.cascadeReasons[0].edgeClass | Should -Be 'macroPublic'
+        $runtime.cascadeReasons[0].breaking | Should -BeTrue
+    }
+
+    It 'does not turn a compatible macro major pin into a public contract break' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '0.4.0' -ProcMacroOnly $true
+            New-ReleaseFact -Name runtime -Version '0.4.0' -Deps macros `
+                -MacroPublicDeps macros
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@0.5.0')
+            classifications = @{ runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract
+            }
+        }
+
+        $macros = $plan.releases | Where-Object folder -eq macros
+        $runtime = $plan.releases | Where-Object folder -eq runtime
+        $macros.changeType | Should -Be 'breaking'
+        $macros.contractBreaking | Should -BeFalse
+        $runtime.changeType | Should -Be 'patch'
+        $runtime.cascadeReasons[0].edgeClass | Should -Be 'macroPublic'
+        $runtime.cascadeReasons[0].breaking | Should -BeFalse
+    }
+
+    It 'requires a macro contract for an unchanged exact version pin' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name macros -Version '1.0.0' `
+                    -ProcMacroOnly $true -Modified $false
+            ) `
+            -Request @{
+                mode = 'targeted'
+                tokens = @('macros@2.0.0')
+                classifications = @{}
+            }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.ambiguities[0].kind | Should -Be 'macroContractUnreviewed'
+    }
+
+    It 'does not propagate Cargo breaking arithmetic for a compatible 0.0 proc macro' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '0.0.5' -ProcMacroOnly $true
+            New-ReleaseFact -Name runtime -Version '1.0.0' -Deps macros `
+                -MacroPublicDeps macros
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract
+            }
+        }
+
+        ($plan.releases | Where-Object folder -eq macros).to |
+            Should -Be '0.0.6'
+        ($plan.releases | Where-Object folder -eq runtime).changeType |
+            Should -Be 'patch'
+    }
+
+    It 'keeps an internally used proc macro at a patch floor even when its contract breaks' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '1.0.0' -ProcMacroOnly $true
+            New-ReleaseFact -Name internal_user -Version '1.0.0' -Deps macros
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@breaking')
+            classifications = @{ internal_user = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict breaking
+            }
+        }
+
+        $internal = $plan.releases | Where-Object folder -eq internal_user
+        $internal.changeType | Should -Be 'patch'
+        $internal.cascadeReasons[0].edgeClass | Should -Be 'macroPrivate'
+        $internal.cascadeReasons[0].breaking | Should -BeFalse
+    }
+
+    It 'requires a contract when a cascade-reached macro is classified above patch' {
+        $facts = @(
+            New-ReleaseFact -Name core -Modified $false
+            New-ReleaseFact -Name macros -Deps core -ProcMacroOnly $true `
+                -Modified $false
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@patch')
+            classifications = @{ core = 'patch'; macros = 'breaking' }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.ambiguities[0].kind | Should -Be 'macroContractUnreviewed'
+    }
+
+    It 'reviews generated-runtime coupling and releases the macro only for a changed contract' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '1.0.0' -ProcMacroOnly $true `
+                -MacroRuntimePartners runtime
+            New-ReleaseFact -Name runtime -Version '1.0.0' -Deps macros
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('runtime@breaking')
+            classifications = @{ runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict nonbreaking `
+                    -ReviewedPackages @('macros', 'runtime')
+            }
+        }
+
+        $macros = $plan.releases | Where-Object folder -eq macros
+        $macros.changeType | Should -Be 'nonbreaking'
+        $macros.cascadeReasons[0].edgeClass | Should -Be 'macroRuntime'
     }
 
     It 'uses exposureUnknown as a conservative breaking edge' {
@@ -459,6 +738,63 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
         } | Should -Throw '*requires at least one accepted package token*'
+    }
+
+    It 'rejects stale facts schemas and missing macro fact fields' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                } `
+                -SchemaVersion 1
+        } | Should -Throw '*unsupported schema*'
+
+        $fact = New-ReleaseFact -Name package
+        $fact.Remove('macroPublicDeps')
+        {
+            Invoke-ReleasePlan `
+                -Facts @($fact) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*missing 'macroPublicDeps'*"
+    }
+
+    It 'rejects malformed and contradictory macro contracts clearly' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact -Name macros -ProcMacroOnly $true
+                ) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('macros@patch')
+                    classifications = @{}
+                    macroContracts = @{
+                        macros = @{ verdict = 'compatible' }
+                    }
+                }
+        } | Should -Throw '*must include reviewedPackages, channels, and evidence*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact -Name macros -ProcMacroOnly $true
+                ) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('macros@breaking')
+                    classifications = @{}
+                    macroContracts = @{
+                        macros = New-MacroContract
+                    }
+                }
+        } | Should -Throw '*conflicts with its*contract verdict*'
     }
 
     It 'preserves changed and all mode labels after package selection' {

@@ -9,21 +9,39 @@
 
 .DESCRIPTION
     Performs only mechanical work: token parsing, version arithmetic, dependency
-    closure, exposure-aware breaking propagation, pin reconciliation, and
-    topological ordering. The release skill remains responsible for classifying
-    source diffs and reviewing proc-macro behavior.
+    closure, type-exposure and macro-contract propagation, pin reconciliation,
+    and topological ordering. The release skill remains responsible for
+    classifying source diffs and reviewing proc-macro behavior.
 
 .PARAMETER FactsPath
     JSON emitted by release-facts.ps1.
 
 .PARAMETER RequestPath
-    JSON with mode, tokens, classifications, and optional force:
+    JSON with mode, tokens, classifications, macroContracts, and optional force:
       {
         "mode": "targeted",
         "tokens": ["bytesbuf@breaking"],
         "classifications": {
           "bytesbuf": "patch",
           "bytesbuf_io": { "changeType": "patch", "manualReview": false }
+        },
+        "macroContracts": {
+          "templated_uri_macros": {
+            "verdict": "compatible",
+            "reviewedPackages": [
+              "templated_uri_macros",
+              "templated_uri_macros_impl"
+            ],
+            "channels": {
+              "exportedMacros": "unchanged",
+              "acceptedSyntax": "unchanged",
+              "compileBehavior": "unchanged",
+              "generatedApi": "unchanged",
+              "generatedRuntimePaths": "unchanged",
+              "hygiene": "unchanged"
+            },
+            "evidence": ["Expansion snapshots and compile fixtures are unchanged."]
+          }
         },
         "force": false
       }
@@ -82,22 +100,150 @@ function Get-StrongerChangeType {
     return $Right
 }
 
+function Get-RequestValue {
+        param(
+            [AllowNull()]$Container,
+            [Parameter(Mandatory = $true)]$Fact
+        )
+
+        if ($null -eq $Container) { return $null }
+        $property = $Container.PSObject.Properties[$Fact.folder]
+        if ($null -eq $property) {
+            $property = $Container.PSObject.Properties[$Fact.name]
+        }
+        if ($null -eq $property) { return $null }
+        return $property.Value
+}
+
+function Get-MacroContract {
+        param(
+            [Parameter(Mandatory = $true)]$Fact,
+            [Parameter(Mandatory = $true)]$Request
+        )
+
+        if (-not [bool]$Fact.procMacroOnly) { return $null }
+        $value = Get-RequestValue -Container $Request.macroContracts -Fact $Fact
+        if ($null -eq $value) { return $null }
+
+        $verdict = if ($value -is [string]) { $value } else { $value.verdict }
+        $changeType = switch (($verdict ?? '').ToString().ToLowerInvariant()) {
+            'compatible'  { 'patch' }
+            'nonbreaking' { 'non-breaking' }
+            'non-breaking' { 'non-breaking' }
+            'breaking'    { 'breaking' }
+            default {
+                throw "Unknown macro-contract verdict '$verdict' for '$($Fact.folder)'."
+            }
+        }
+
+        if ($value -is [string]) {
+            throw "Macro contract '$($Fact.folder)' must include reviewedPackages, channels, and evidence."
+        }
+        foreach ($requiredProperty in @('reviewedPackages', 'channels', 'evidence')) {
+            if (
+                $null -eq $value.PSObject.Properties[$requiredProperty] -or
+                $null -eq $value.$requiredProperty
+            ) {
+                throw "Macro contract '$($Fact.folder)' must include reviewedPackages, channels, and evidence."
+            }
+        }
+        $reviewedPackages = @(
+            $value.reviewedPackages |
+                Where-Object { $null -ne $_ } |
+                ForEach-Object { $_.ToString().Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+        if ($reviewedPackages.Count -eq 0) {
+            throw "Macro contract '$($Fact.folder)' must include at least one reviewed package."
+        }
+
+        $requiredChannels = @(
+            'exportedMacros',
+            'acceptedSyntax',
+            'compileBehavior',
+            'generatedApi',
+            'generatedRuntimePaths',
+            'hygiene'
+        )
+        foreach ($channel in $requiredChannels) {
+            $property = $value.channels.PSObject.Properties[$channel]
+            if ($null -eq $property -or
+                $null -eq $property.Value -or
+                $property.Value.ToString().ToLowerInvariant() -notin @('unchanged', 'changed', 'notapplicable')) {
+                throw "Macro contract '$($Fact.folder)' must classify channel '$channel' as unchanged, changed, or notApplicable."
+            }
+        }
+
+        $evidence = @(
+            $value.evidence |
+                Where-Object { $null -ne $_ } |
+                ForEach-Object { $_.ToString().Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+        if ($evidence.Count -eq 0) {
+            throw "Macro contract '$($Fact.folder)' must include evidence."
+        }
+
+        return [pscustomobject]@{
+            Verdict         = $verdict.ToString().ToLowerInvariant().Replace('-', '')
+            ChangeType      = $changeType
+            ReviewedPackages = $reviewedPackages
+            Channels        = $value.channels
+            Evidence        = $evidence
+        }
+}
+
+function Get-MacroReviewScope {
+        param(
+            [Parameter(Mandatory = $true)]$Fact,
+            [Parameter(Mandatory = $true)][object[]]$Facts,
+            [AllowNull()]$TriggerFact
+        )
+
+        $scope = New-Object 'System.Collections.Generic.List[string]'
+        $scope.Add($Fact.name) | Out-Null
+        $closure = @($Fact.macroImplementationClosure)
+        foreach ($candidate in $Facts) {
+            $normalizedName = $candidate.name.Replace('-', '_')
+            if (
+                ($closure -contains $normalizedName -and [bool]$candidate.workspaceModified) -or
+                (@($Fact.macroRuntimePartners) -contains $normalizedName -and [bool]$candidate.workspaceModified)
+            ) {
+                $scope.Add($candidate.name) | Out-Null
+            }
+        }
+        if ($null -ne $TriggerFact) {
+            $scope.Add($TriggerFact.name) | Out-Null
+        }
+        return @($scope | Sort-Object -Unique)
+}
+
+function Test-MacroContractCoversScope {
+        param(
+            [Parameter(Mandatory = $true)]$Contract,
+            [Parameter(Mandatory = $true)][string[]]$Scope
+        )
+
+        $reviewed = @(
+            $Contract.ReviewedPackages |
+                Where-Object { $null -ne $_ } |
+                ForEach-Object { $_.ToString().Replace('-', '_') }
+        )
+        foreach ($identifier in $Scope) {
+            if ($reviewed -notcontains $identifier.Replace('-', '_')) {
+                return $false
+            }
+        }
+        return $true
+}
+
 function Get-Classification {
     param(
         [Parameter(Mandatory = $true)]$Fact,
         [Parameter(Mandatory = $true)]$Request
     )
 
-    $value = $null
-    if ($null -ne $Request.classifications) {
-        $property = $Request.classifications.PSObject.Properties[$Fact.folder]
-        if ($null -eq $property) {
-            $property = $Request.classifications.PSObject.Properties[$Fact.name]
-        }
-        if ($null -ne $property) {
-            $value = $property.Value
-        }
-    }
+    $value = Get-RequestValue -Container $Request.classifications -Fact $Fact
 
     $manualReview = [bool]$Fact.procMacroOnly
     $changeType = $null
@@ -124,6 +270,15 @@ function Get-Classification {
         } else {
             throw "Missing objective classification for published package '$($Fact.folder)'."
         }
+    }
+
+    $macroContract = Get-MacroContract -Fact $Fact -Request $Request
+    if ($null -ne $macroContract) {
+        if ($null -ne $value -and $changeType -ne $macroContract.ChangeType) {
+            throw "Classification '$changeType' for proc macro '$($Fact.folder)' conflicts with macro-contract verdict '$($macroContract.ChangeType)'."
+        }
+        $changeType = $macroContract.ChangeType
+        $manualReview = $true
     }
 
     return [pscustomobject]@{
@@ -193,9 +348,24 @@ function Assert-PinSatisfiesRequirement {
 
 $factsDocument = Get-Content -LiteralPath (Resolve-Path $FactsPath) -Raw | ConvertFrom-Json
 $request = Get-Content -LiteralPath (Resolve-Path $RequestPath) -Raw | ConvertFrom-Json
+if ($factsDocument.schemaVersion -ne 2) {
+    throw 'The facts document uses an unsupported schema. Rerun release-facts.ps1.'
+}
 $facts = @($factsDocument.packages)
 if ($facts.Count -eq 0) {
     throw 'The facts document contains no workspace packages.'
+}
+foreach ($fact in $facts) {
+    foreach ($requiredProperty in @(
+            'macroPublicDeps',
+            'macroImplementationClosure',
+            'macroRuntimePartners',
+            'workspaceModified'
+        )) {
+        if ($null -eq $fact.PSObject.Properties[$requiredProperty]) {
+            throw "Package fact '$($fact.folder)' is missing '$requiredProperty'. Rerun release-facts.ps1."
+        }
+    }
 }
 
 $mode = if ([string]::IsNullOrWhiteSpace($request.mode)) { 'targeted' } else { $request.mode.ToLowerInvariant() }
@@ -210,8 +380,111 @@ if ($tokens.Count -eq 0) {
 
 $force = [bool]$request.force
 $warnings = New-Object 'System.Collections.Generic.List[string]'
+$ambiguities = New-Object 'System.Collections.Generic.List[object]'
+$ambiguityKeys = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
+$usedMacroContracts = @{}
 $plan = @{}
 $queue = New-Object 'System.Collections.Generic.Queue[string]'
+
+function Get-ModifiedMacroScopeMember {
+    param([Parameter(Mandatory = $true)]$Fact)
+
+    $scopeNames = @($Fact.macroImplementationClosure) +
+        @($Fact.macroRuntimePartners)
+    return @(
+        $facts |
+            Where-Object {
+                [bool]$_.workspaceModified -and
+                $scopeNames -contains $_.name.Replace('-', '_')
+            }
+    )
+}
+
+function Require-MacroContract {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [AllowNull()]$TriggerFact,
+        [Parameter(Mandatory = $true)][string]$Trigger
+    )
+
+    $scope = @(Get-MacroReviewScope `
+            -Fact $Fact `
+            -Facts $facts `
+            -TriggerFact $TriggerFact)
+    $contract = Get-MacroContract -Fact $Fact -Request $request
+    $triggerFolder = if ($null -eq $TriggerFact) { '' } else { $TriggerFact.folder }
+    $key = "$($Fact.folder)|$Trigger|$triggerFolder"
+    if ($null -eq $contract) {
+        if ($ambiguityKeys.Add($key)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'macroContractUnreviewed'
+                    package       = $Fact.folder
+                    trigger       = $Trigger
+                    reviewScope   = $scope
+                    requiredInput = "macroContracts.$($Fact.folder)"
+                }) | Out-Null
+        }
+        return $null
+    }
+
+    if (-not (Test-MacroContractCoversScope -Contract $contract -Scope $scope)) {
+        if ($ambiguityKeys.Add($key)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'macroContractIncomplete'
+                    package       = $Fact.folder
+                    trigger       = $Trigger
+                    reviewScope   = $scope
+                    reviewed      = @($contract.ReviewedPackages)
+                    requiredInput = "macroContracts.$($Fact.folder).reviewedPackages"
+                }) | Out-Null
+        }
+        return $null
+    }
+
+    if (
+        $contract.Channels.generatedRuntimePaths.ToString().ToLowerInvariant() -eq 'changed' -and
+        @($Fact.macroRuntimePartners | Where-Object { $_ }).Count -eq 0
+    ) {
+        $runtimeKey = "$($Fact.folder)|macroRuntimeUnknown"
+        if ($ambiguityKeys.Add($runtimeKey)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'macroRuntimeUnknown'
+                    package       = $Fact.folder
+                    trigger       = $Trigger
+                    reviewScope   = $scope
+                    requiredInput = 'Expose the macro from its runtime facade, emit a literal workspace path, or declare package.metadata.oxidizer_release.macro_runtime.'
+                }) | Out-Null
+        }
+        return $null
+    }
+
+    $usedMacroContracts[$Fact.folder] = $contract
+    return $contract
+}
+
+function Write-BlockedPlan {
+    [ordered]@{
+        status         = 'blocked'
+        mode           = $mode
+        releases       = @()
+        macroContracts = @(
+            $usedMacroContracts.GetEnumerator() |
+                Sort-Object Key |
+                ForEach-Object {
+                    [ordered]@{
+                        package  = $_.Key
+                        verdict  = $_.Value.Verdict
+                        reviewed = @($_.Value.ReviewedPackages)
+                        evidence = @($_.Value.Evidence)
+                    }
+                }
+        )
+        ambiguities    = @($ambiguities | Sort-Object package, kind, trigger)
+        warnings       = @($warnings)
+    } | ConvertTo-Json -Depth 10
+}
 
 foreach ($tokenValue in $tokens) {
     $token = $tokenValue.ToString()
@@ -254,6 +527,40 @@ foreach ($tokenValue in $tokens) {
         $effectiveChangeType = 'patch'
     }
 
+    $macroContract = Get-MacroContract -Fact $fact -Request $request
+    if ([bool]$fact.procMacroOnly) {
+        $modifiedScope = @(Get-ModifiedMacroScopeMember -Fact $fact)
+        $needsMacroReview =
+            [bool]$fact.modified -or
+            $modifiedScope.Count -gt 0 -or
+            $classification.ChangeType -ne 'patch' -or
+            $requestedChangeType -in @('non-breaking', 'breaking') -or
+            -not [string]::IsNullOrWhiteSpace($requestedPin)
+        if ($needsMacroReview) {
+            $trigger = if ([bool]$fact.modified) {
+                'macroPackageModified'
+            } elseif ($modifiedScope.Count -gt 0) {
+                'implementationClosureModified'
+            } else {
+                'macroContractChangeRequested'
+            }
+            $macroContract = Require-MacroContract `
+                -Fact $fact `
+                -TriggerFact $null `
+                -Trigger $trigger
+            if ($null -eq $macroContract) { continue }
+        } elseif ($null -ne $macroContract) {
+            $usedMacroContracts[$fact.folder] = $macroContract
+        }
+        if (
+            $null -ne $macroContract -and
+            $script:ChangeTypeRank[$requestedChangeType] -gt
+                $script:ChangeTypeRank[$macroContract.ChangeType]
+        ) {
+            throw "Requested change '$requestedChangeType' for proc macro '$($fact.folder)' conflicts with its '$($macroContract.ChangeType)' contract verdict. Use an exact version pin for a compatible version-line change."
+        }
+    }
+
     $entry = [pscustomobject]@{
         Fact                = $fact
         Source              = 'user'
@@ -261,6 +568,15 @@ foreach ($tokenValue in $tokens) {
         EffectiveChangeType = $effectiveChangeType
         TargetVersion       = $null
         ManualReview        = [bool]$classification.ManualReview
+        MacroContractReviewed = $null -ne $macroContract
+        ContractBreaking    = [bool](
+            [bool]$fact.procMacroOnly -and
+            (
+                ($null -ne $macroContract -and $macroContract.ChangeType -eq 'breaking') -or
+                ($null -eq $macroContract -and
+                    ($classification.ChangeType -eq 'breaking' -or $requestedChangeType -eq 'breaking'))
+            )
+        )
         Reasons             = @{}
     }
     Assert-PinSatisfiesRequirement `
@@ -273,11 +589,16 @@ foreach ($tokenValue in $tokens) {
     $queue.Enqueue($fact.folder)
 }
 
+if ($ambiguities.Count -gt 0) {
+    Write-BlockedPlan
+    return
+}
+
 while ($queue.Count -gt 0) {
     $dependencyFolder = $queue.Dequeue()
     $dependencyEntry = $plan[$dependencyFolder]
     $dependencyName = $dependencyEntry.Fact.name.Replace('-', '_')
-    $dependencyBreaksConsumers =
+    $dependencyVersionBreaking =
         [bool]$dependencyEntry.Fact.everReleased -and
         (Compare-SemanticVersions `
             -version1 $dependencyEntry.TargetVersion `
@@ -285,6 +606,9 @@ while ($queue.Count -gt 0) {
         (Test-IsBreakingChange `
             -oldVersion $dependencyEntry.Fact.version `
             -ChangeType $dependencyEntry.EffectiveChangeType)
+    $dependencyContractBreaking =
+        [bool]$dependencyEntry.Fact.procMacroOnly -and
+        [bool]$dependencyEntry.ContractBreaking
 
     $dependents = @(
         $facts |
@@ -295,8 +619,14 @@ while ($queue.Count -gt 0) {
                 (
                     @($_.deps) -contains $dependencyName -or
                     (
-                        $dependencyBreaksConsumers -and
+                        -not [bool]$dependencyEntry.Fact.procMacroOnly -and
+                        $dependencyVersionBreaking -and
                         @($_.exposedDeps) -contains $dependencyName
+                    ) -or
+                    (
+                        [bool]$dependencyEntry.Fact.procMacroOnly -and
+                        $dependencyContractBreaking -and
+                        @($_.macroPublicDeps) -contains $dependencyName
                     )
                 )
             } |
@@ -305,11 +635,76 @@ while ($queue.Count -gt 0) {
 
     foreach ($dependentFact in $dependents) {
         $classification = Get-Classification -Fact $dependentFact -Request $request
+        $macroContract = $null
+        if ([bool]$dependentFact.procMacroOnly) {
+            $modifiedScope = @(Get-ModifiedMacroScopeMember -Fact $dependentFact)
+            $needsMacroReview =
+                $dependencyVersionBreaking -or
+                [bool]$dependentFact.modified -or
+                $modifiedScope.Count -gt 0 -or
+                $classification.ChangeType -ne 'patch'
+            if ($needsMacroReview) {
+                $macroContract = Require-MacroContract `
+                    -Fact $dependentFact `
+                    -TriggerFact $dependencyEntry.Fact `
+                    -Trigger 'implementationDependencyChanged'
+                if ($null -eq $macroContract) { continue }
+            } else {
+                $macroContract = Get-MacroContract `
+                    -Fact $dependentFact `
+                    -Request $request
+                if ($null -ne $macroContract) {
+                    $usedMacroContracts[$dependentFact.folder] = $macroContract
+                }
+            }
+        }
+
         $isDirectDependent = @($dependentFact.deps) -contains $dependencyName
-        $exposesDependency =
-            ($isDirectDependent -and [bool]$dependentFact.exposureUnknown) -or
-            (@($dependentFact.exposedDeps) -contains $dependencyName)
-        $edgeBreaking = $dependencyBreaksConsumers -and $exposesDependency
+        if ([bool]$dependentFact.procMacroOnly) {
+            $edgeClass = 'macroImplementation'
+            $edgeBreaking =
+                $null -ne $macroContract -and
+                $macroContract.ChangeType -eq 'breaking'
+            $judgment = if ($edgeBreaking) {
+                'contractBreaking'
+            } elseif ($null -ne $macroContract) {
+                'contractCompatible'
+            } else {
+                'patchFloor'
+            }
+            $judgmentSource = if ($null -ne $macroContract) {
+                'macroContracts'
+            } else {
+                'dependencyRequirement'
+            }
+        } elseif ([bool]$dependencyEntry.Fact.procMacroOnly) {
+            $macroIsPublic = @($dependentFact.macroPublicDeps) -contains $dependencyName
+            $edgeClass = if ($macroIsPublic) { 'macroPublic' } else { 'macroPrivate' }
+            $edgeBreaking = $dependencyContractBreaking -and $macroIsPublic
+            $judgment = if ($edgeBreaking) {
+                'contractBreaking'
+            } elseif ($macroIsPublic -and [bool]$dependencyEntry.MacroContractReviewed) {
+                'contractCompatible'
+            } elseif ($macroIsPublic) {
+                'patchFloor'
+            } else {
+                'privateDependency'
+            }
+            $judgmentSource = if ([bool]$dependencyEntry.MacroContractReviewed) {
+                'macroContracts'
+            } else {
+                'dependencyRequirement'
+            }
+        } else {
+            $exposesDependency =
+                ($isDirectDependent -and [bool]$dependentFact.exposureUnknown) -or
+                (@($dependentFact.exposedDeps) -contains $dependencyName)
+            $edgeClass = 'type'
+            $edgeBreaking = $dependencyVersionBreaking -and $exposesDependency
+            $judgment = if ($edgeBreaking) { 'typeExposed' } else { 'encapsulated' }
+            $judgmentSource = 'releaseFacts'
+        }
+
         $cascadeChangeType = Get-StrongerChangeType `
             -Left 'patch' `
             -Right $classification.ChangeType
@@ -326,6 +721,12 @@ while ($queue.Count -gt 0) {
                 EffectiveChangeType = $cascadeChangeType
                 TargetVersion       = $null
                 ManualReview        = [bool]$classification.ManualReview
+                MacroContractReviewed = $null -ne $macroContract
+                ContractBreaking    = [bool](
+                    [bool]$dependentFact.procMacroOnly -and
+                    $null -ne $macroContract -and
+                    $macroContract.ChangeType -eq 'breaking'
+                )
                 Reasons             = @{}
             }
             $dependentEntry.TargetVersion = Get-EntryTargetVersion -Entry $dependentEntry
@@ -338,6 +739,9 @@ while ($queue.Count -gt 0) {
             Target   = $dependencyEntry.Fact.name
             Version  = $dependencyEntry.TargetVersion
             Breaking = [bool]$edgeBreaking
+            EdgeClass = $edgeClass
+            Judgment = $judgment
+            JudgmentSource = $judgmentSource
         }
 
         $stronger = Get-StrongerChangeType `
@@ -346,6 +750,13 @@ while ($queue.Count -gt 0) {
         $strengthened = $stronger -ne $dependentEntry.EffectiveChangeType
         if ($strengthened) {
             $dependentEntry.EffectiveChangeType = $stronger
+            if (
+                [bool]$dependentFact.procMacroOnly -and
+                $null -ne $macroContract -and
+                $macroContract.ChangeType -eq 'breaking'
+            ) {
+                $dependentEntry.ContractBreaking = $true
+            }
             Assert-PinSatisfiesRequirement `
                 -Entry $dependentEntry `
                 -RequiredChangeType $stronger `
@@ -358,6 +769,82 @@ while ($queue.Count -gt 0) {
             $queue.Enqueue($dependentFact.folder)
         }
     }
+
+    if (-not [bool]$dependencyEntry.Fact.procMacroOnly -and $dependencyVersionBreaking) {
+        $runtimeMacros = @(
+            $facts |
+                Where-Object {
+                    [bool]$_.published -and
+                    [bool]$_.everReleased -and
+                    [bool]$_.procMacroOnly -and
+                    @($_.macroRuntimePartners) -contains $dependencyName
+                } |
+                Sort-Object folder
+        )
+        foreach ($macroFact in $runtimeMacros) {
+            $macroContract = Require-MacroContract `
+                -Fact $macroFact `
+                -TriggerFact $dependencyEntry.Fact `
+                -Trigger 'generatedRuntimeChanged'
+            if ($null -eq $macroContract -or $macroContract.ChangeType -eq 'patch') {
+                continue
+            }
+
+            $classification = Get-Classification -Fact $macroFact -Request $request
+            $cascadeChangeType = Get-StrongerChangeType `
+                -Left $classification.ChangeType `
+                -Right $macroContract.ChangeType
+            $isNew = -not $plan.ContainsKey($macroFact.folder)
+            if ($isNew) {
+                $macroEntry = [pscustomobject]@{
+                    Fact                = $macroFact
+                    Source              = 'cascade'
+                    RequestedPin        = $null
+                    EffectiveChangeType = $cascadeChangeType
+                    TargetVersion       = $null
+                    ManualReview        = $true
+                    MacroContractReviewed = $true
+                    ContractBreaking    = $macroContract.ChangeType -eq 'breaking'
+                    Reasons             = @{}
+                }
+                $macroEntry.TargetVersion = Get-EntryTargetVersion -Entry $macroEntry
+                $plan[$macroFact.folder] = $macroEntry
+            } else {
+                $macroEntry = $plan[$macroFact.folder]
+            }
+
+            $macroEntry.Reasons[$dependencyFolder] = [pscustomobject]@{
+                Target         = $dependencyEntry.Fact.name
+                Version        = $dependencyEntry.TargetVersion
+                Breaking       = $macroContract.ChangeType -eq 'breaking'
+                EdgeClass      = 'macroRuntime'
+                Judgment       = if ($macroContract.ChangeType -eq 'breaking') {
+                    'contractBreaking'
+                } else {
+                    'contractNonbreaking'
+                }
+                JudgmentSource = 'macroContracts'
+            }
+
+            $stronger = Get-StrongerChangeType `
+                -Left $macroEntry.EffectiveChangeType `
+                -Right $cascadeChangeType
+            $strengthened = $stronger -ne $macroEntry.EffectiveChangeType
+            if ($strengthened) {
+                $macroEntry.EffectiveChangeType = $stronger
+                $macroEntry.ContractBreaking = $macroContract.ChangeType -eq 'breaking'
+                $macroEntry.TargetVersion = Get-EntryTargetVersion -Entry $macroEntry
+            }
+            if ($isNew -or $strengthened) {
+                $queue.Enqueue($macroFact.folder)
+            }
+        }
+    }
+}
+
+if ($ambiguities.Count -gt 0) {
+    Write-BlockedPlan
+    return
 }
 
 $indegree = @{}
@@ -408,6 +895,7 @@ $releases = foreach ($folder in $orderedFolders) {
         changeType     = $entry.EffectiveChangeType.Replace('-', '')
         source         = $entry.Source
         manualReview   = [bool]$entry.ManualReview
+        contractBreaking = [bool]$entry.ContractBreaking
         cascadeReasons = @(
             $entry.Reasons.Values |
                 Sort-Object Target |
@@ -416,6 +904,9 @@ $releases = foreach ($folder in $orderedFolders) {
                         target   = $_.Target
                         version  = $_.Version
                         breaking = [bool]$_.Breaking
+                        edgeClass = $_.EdgeClass
+                        judgment = $_.Judgment
+                        judgmentSource = $_.JudgmentSource
                     }
                 }
         )
@@ -423,7 +914,21 @@ $releases = foreach ($folder in $orderedFolders) {
 }
 
 [ordered]@{
-    mode     = $mode
-    releases = @($releases)
-    warnings = @($warnings)
+    status         = 'resolved'
+    mode           = $mode
+    releases       = @($releases)
+    macroContracts = @(
+        $usedMacroContracts.GetEnumerator() |
+            Sort-Object Key |
+            ForEach-Object {
+                [ordered]@{
+                    package  = $_.Key
+                    verdict  = $_.Value.Verdict
+                    reviewed = @($_.Value.ReviewedPackages)
+                    evidence = @($_.Value.Evidence)
+                }
+            }
+    )
+    ambiguities    = @()
+    warnings       = @($warnings)
 } | ConvertTo-Json -Depth 8

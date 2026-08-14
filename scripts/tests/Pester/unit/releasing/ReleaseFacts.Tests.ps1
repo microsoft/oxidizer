@@ -45,6 +45,55 @@ Describe 'release-facts.ps1' {
                     AllowedExternalTypes = @('gamma_macros::*')
                 }
                 @{
+                    Name = 'macro_runtime'
+                    Version = '0.3.0'
+                    Deps = @(@{ Name = 'gamma_macros' })
+                    AllowedExternalTypes = @('gamma_macros::derive_gamma')
+                }
+                @{
+                    Name = 'wildcard_macro_user'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'gamma_macros' })
+                    AllowedExternalTypes = @('*')
+                }
+                @{
+                    Name = 'macro_intermediate'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'gamma_macros' })
+                }
+                @{
+                    Name = 'transitive_wildcard_macro_user'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'macro_intermediate' })
+                    AllowedExternalTypes = @('*')
+                }
+                @{
+                    Name = 'renamed_macro_user'
+                    Version = '0.1.0'
+                    Deps = @(@{
+                            Name = 'gamma_macros'
+                            Rename = 'gamma_alias'
+                        })
+                    AllowedExternalTypes = @('gamma_macros::derive_gamma')
+                }
+                @{
+                    Name = 'private_macro_user'
+                    Version = '0.1.0'
+                    Published = $false
+                    Deps = @(@{ Name = 'gamma_macros' })
+                    AllowedExternalTypes = @('gamma_macros::derive_gamma')
+                }
+                @{
+                    Name = 'detached_macros'
+                    Version = '0.1.0'
+                    ProcMacro = $true
+                    MacroRuntime = @('detached_runtime')
+                }
+                @{
+                    Name = 'detached_runtime'
+                    Version = '0.1.0'
+                }
+                @{
                     Name = 'devonly'
                     Version = '0.1.0'
                     Deps = @(@{ Name = 'beta'; Kind = 'dev' })
@@ -67,7 +116,6 @@ Describe 'release-facts.ps1' {
             )
         }
         $script:Ws = New-SyntheticWorkspace -Spec $spec -Path $script:WsRoot
-
         # Create an explicit version-bump commit for 'beta' so it has a real
         # baseline commit (parent 0.2.0 -> commit 0.5.0).
         $script:Ws.SetVersion('beta', '0.5.0')
@@ -96,12 +144,20 @@ Describe 'release-facts.ps1' {
         $folders | Should -Be @(
             'alpha',
             'beta',
+            'detached_macros',
+            'detached_runtime',
             'devonly',
             'dual_dep',
             'empty_exposer',
             'exposer',
             'gamma_macros',
-            'priv_pkg'
+            'macro_intermediate',
+            'macro_runtime',
+            'priv_pkg',
+            'private_macro_user',
+            'renamed_macro_user',
+            'transitive_wildcard_macro_user',
+            'wildcard_macro_user'
         )
     }
 
@@ -147,9 +203,43 @@ Describe 'release-facts.ps1' {
         $script:ByFolder['beta'].procMacroOnly | Should -BeFalse
     }
 
-    It 'ignores unenforced proc-macro exposure metadata conservatively' {
-        $script:ByFolder['gamma_macros'].exposureUnknown | Should -BeTrue
-        @($script:ByFolder['gamma_macros'].exposedDeps) | Should -Be @('beta')
+    It 'does not treat proc-macro implementation dependencies as type exposure' {
+        $script:ByFolder['gamma_macros'].exposureUnknown | Should -BeFalse
+        @($script:ByFolder['gamma_macros'].exposedDeps).Count | Should -Be 0
+        @($script:ByFolder['gamma_macros'].macroImplementationClosure) |
+            Should -Be @('beta')
+    }
+
+    It 'records public proc-macro edges separately from type exposure' {
+        @($script:ByFolder['macro_runtime'].macroPublicDeps) |
+            Should -Be @('gamma_macros')
+        @($script:ByFolder['macro_runtime'].exposedDeps) |
+            Should -Not -Contain 'gamma_macros'
+    }
+
+    It 'infers a generated-runtime partner from a public macro edge' {
+        @($script:ByFolder['gamma_macros'].macroRuntimePartners) |
+            Should -Be @('macro_runtime')
+    }
+
+    It 'does not infer macro publication from wildcard or unpublished consumers' {
+        @($script:ByFolder['wildcard_macro_user'].macroPublicDeps).Count |
+            Should -Be 0
+        @($script:ByFolder['transitive_wildcard_macro_user'].macroPublicDeps).Count |
+            Should -Be 0
+        @($script:ByFolder['renamed_macro_user'].macroPublicDeps).Count |
+            Should -Be 0
+        @($script:ByFolder['gamma_macros'].macroRuntimePartners) |
+            Should -Not -Contain 'private_macro_user'
+        @($script:ByFolder['gamma_macros'].macroRuntimePartners) |
+            Should -Not -Contain 'transitive_wildcard_macro_user'
+        @($script:ByFolder['gamma_macros'].macroRuntimePartners) |
+            Should -Not -Contain 'renamed_macro_user'
+    }
+
+    It 'retains an explicit exceptional runtime relationship' {
+        @($script:ByFolder['detached_macros'].macroRuntimePartners) |
+            Should -Be @('detached_runtime')
     }
 
     It 'resolves a baseline commit sha for a package with a prior version bump' {
@@ -184,6 +274,7 @@ Describe 'release-facts.ps1' {
         # Get-PackagesWithUnreleasedChanges skips it because it is unpublished. If
         # the published filter were removed, this assertion would fail.
         $script:ByFolder['priv_pkg'].modified | Should -BeFalse
+        $script:ByFolder['priv_pkg'].workspaceModified | Should -BeTrue
     }
 
     It 'fails loudly for an unresolvable base ref instead of reporting no baseline' {

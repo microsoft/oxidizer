@@ -515,6 +515,7 @@ Describe 'Test-PackageAllowlistNamesTarget' {
             param($Allowed, $DepAliases = @{})
             [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
         }
+
     }
 
     It 'reports a match when an entry is rooted at the target package' {
@@ -593,6 +594,19 @@ Describe 'Test-PackageAllowlistNamesTarget' {
                     -TargetPackageName 'recoverable' | Should -BeTrue -Because "'$pattern' may expand to the target"
             }
         }
+
+        It 'ignores wildcard roots when concrete evidence is required' {
+            foreach ($allowed in @(
+                    @('*', 'recoverable::Recovery'),
+                    @('recoverable::Recovery', '*')
+                )) {
+                Test-PackageAllowlistNamesTarget `
+                    -Dependent (New-Dependent -Allowed $allowed) `
+                    -TargetPackageName 'recoverable' `
+                    -WildcardIsEvidence $false |
+                    Should -BeTrue
+            }
+        }
     }
 
     It 'reports no match for an explicit empty allowlist' {
@@ -603,5 +617,76 @@ Describe 'Test-PackageAllowlistNamesTarget' {
     It 'tolerates a package record that predates the DepAliases field' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('recoverable::Recovery') }
         Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+    }
+}
+
+Describe 'Test-PackageAllowlistNamesDirectTarget' {
+    It 'requires positive allowlist evidence' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepAliases = @{}
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'recognizes a renamed proc-macro dependency' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('derive_alias::derive_item')
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'does not accept the hidden package name on a renamed dependency' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeFalse
+    }
+
+    It 'accepts every nameable root when renamed and unrenamed edges coexist' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepRoots = @{ macro_crate = @('derive_alias', 'macro_crate') }
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+
+        $dependent.AllowedExternalTypes = @('derive_alias::derive_item')
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'does not infer macro publication from missing or malformed metadata' {
+        foreach ($allowed in @($null, @(), @($null), @(''), @('*'))) {
+            $dependent = [pscustomobject]@{
+                AllowedExternalTypes = $allowed
+                DepAliases = @{}
+            }
+
+            Test-PackageAllowlistNamesDirectTarget `
+                -Dependent $dependent `
+                -TargetPackageName 'macro-crate' |
+                Should -BeFalse
+        }
     }
 }

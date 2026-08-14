@@ -20,6 +20,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_u
 [package.metadata.docs.rs]
 all-features = true
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["proc_macro2::*"]
+
 [dependencies]
 chumsky = { workspace = true, features = ["std"] }
 darling = { workspace = true }

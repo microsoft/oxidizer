@@ -187,6 +187,12 @@ function Write-PackageCargoToml {
         $entries = ($Package.AllowedExternalTypes | ForEach-Object { "`"$_`"" }) -join ', '
         $lines += "allowed_external_types = [$entries]"
     }
+    if ($Package.ContainsKey('MacroRuntime') -and $null -ne $Package.MacroRuntime) {
+        $lines += ''
+        $lines += '[package.metadata.oxidizer_release]'
+        $entries = ($Package.MacroRuntime | ForEach-Object { "`"$_`"" }) -join ', '
+        $lines += "macro_runtime = [$entries]"
+    }
     if ($Package.ContainsKey('ProcMacro') -and $Package.ProcMacro) {
         $lines += ''
         $lines += '[lib]'

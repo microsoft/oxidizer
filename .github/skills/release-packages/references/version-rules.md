@@ -18,9 +18,14 @@ These rules are intentional:
 
 - On `0.y.z`, nonbreaking and patch produce the same number but retain distinct
   classifications.
-- Every `0.0.z` transition is breaking under Cargo compatibility. If a dependent
-  exposes that crate, even a patch-classified `0.0.z` release gives the dependent
-  a breaking cascade floor.
+- Every `0.0.z` transition is breaking under Cargo compatibility. Across an
+  ordinary Rust type-exposure edge, even a patch-classified `0.0.z` release
+  gives the dependent a breaking cascade floor.
+- Proc-macro edges propagate reviewed macro-contract impact, not Cargo version
+  compatibility. A contract-compatible `0.0.z` proc-macro release therefore
+  gives a direct dependent only a patch floor.
 - Explicit pins retain their exact prerelease/build spelling, but comparisons use
   SemVer precedence and ignore build metadata.
+- An exact proc-macro pin still requires a macro-contract attestation; changing
+  the version line does not prove behavioral compatibility.
 - Generated non-pinned target versions are clean three-component SemVer values.

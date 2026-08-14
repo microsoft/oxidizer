@@ -495,6 +495,8 @@ function Reset-ReleaseScriptCaches {
 #                           alias, or the dependency's own `[lib] name`. An entry does not say
 #                           whether a separate unrenamed declaration also exists, so this is
 #                           not a complete or exclusive set of reachable roots.
+#   DepRoots              - hashtable mapping a normalized dependency name to every
+#                           crate root actually nameable through its declared edges.
 #   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
 #                           sets one, else its normalized package name), or $null when the
 #                           package has no library target at all. This is the name a crate's
@@ -502,6 +504,8 @@ function Reset-ReleaseScriptCaches {
 #                           is the root an allowlist carries for a re-exported type.
 #   AllowedExternalTypes  - array from [package.metadata.cargo_check_external_types]
 #   ExposureMetadataKnown - $true when allowed_external_types is explicitly present
+#   MacroRuntimePartners  - normalized workspace package names from
+#                           [package.metadata.oxidizer_release].macro_runtime
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
@@ -540,6 +544,7 @@ function Get-WorkspacePackages {
 
         $deps = @()
         $depAliases = @{}
+        $depRoots = @{}
         foreach ($dep in $package.dependencies) {
             if ($dep.kind -eq 'dev') {
                 continue
@@ -559,6 +564,8 @@ function Get-WorkspacePackages {
                 # aliases (per-target or per-feature), so collect them all.
                 $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $alias |
                         Where-Object { $_ } | Sort-Object -Unique)
+                $depRoots[$depCargoName] = @(@($depRoots[$depCargoName]) + $alias |
+                        Where-Object { $_ } | Sort-Object -Unique)
             }
             else {
                 # No `package = "..."`, so the crate root is whatever the
@@ -571,6 +578,9 @@ function Get-WorkspacePackages {
                 # `foo = { package = "bar" }` makes the crate nameable as `foo`
                 # regardless of what bar calls its lib target.
                 $crateRoot = $crateRootByPackage[$depCargoName]
+                $declaredRoot = if ($crateRoot) { $crateRoot } else { $depCargoName }
+                $depRoots[$depCargoName] = @(@($depRoots[$depCargoName]) + $declaredRoot |
+                        Where-Object { $_ } | Sort-Object -Unique)
                 if ($crateRoot -and $crateRoot -ne $depCargoName) {
                     $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $crateRoot |
                             Where-Object { $_ } | Sort-Object -Unique)
@@ -580,6 +590,7 @@ function Get-WorkspacePackages {
 
         $allowedExternalTypes = $null
         $exposureMetadataKnown = $false
+        $macroRuntimePartners = @()
         $packageMetadata = $package.PSObject.Properties['metadata']
         if ($packageMetadata -and $null -ne $packageMetadata.Value) {
             $externalTypesMetadata = $packageMetadata.Value.PSObject.Properties['cargo_check_external_types']
@@ -588,6 +599,19 @@ function Get-WorkspacePackages {
                 if ($allowedTypes -and $null -ne $allowedTypes.Value) {
                     $allowedExternalTypes = @($allowedTypes.Value)
                     $exposureMetadataKnown = $true
+                }
+            }
+
+            $releaseMetadata = $packageMetadata.Value.PSObject.Properties['oxidizer_release']
+            if ($releaseMetadata -and $null -ne $releaseMetadata.Value) {
+                $macroRuntime = $releaseMetadata.Value.PSObject.Properties['macro_runtime']
+                if ($macroRuntime -and $null -ne $macroRuntime.Value) {
+                    $macroRuntimePartners = @(
+                        $macroRuntime.Value |
+                            ForEach-Object { ([string]$_).Replace('-', '_') } |
+                            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                            Sort-Object -Unique
+                    )
                 }
             }
         }
@@ -602,9 +626,11 @@ function Get-WorkspacePackages {
             Published               = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                    = @($deps | Sort-Object -Unique)
             DepAliases              = $depAliases
+            DepRoots                = $depRoots
             CrateRoot               = $crateRootByPackage[$package.name.Replace('-', '_')]
             AllowedExternalTypes    = $allowedExternalTypes
             ExposureMetadataKnown   = $exposureMetadataKnown
+            MacroRuntimePartners    = $macroRuntimePartners
             HasLibraryTarget        = $hasLibraryTarget
             IsProcMacroOnly         = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
@@ -737,6 +763,64 @@ function Test-PackageExposesTarget {
     return $false
 }
 
+# Returns $true only when a declared dependency's allowlist positively names
+# the target. Unlike Test-PackageExposesTarget, absent or malformed metadata is
+# not exposure evidence. This is used for proc-macro publication: depending on
+# a macro does not make it part of a crate's public contract unless the crate
+# explicitly re-exports it.
+function Test-PackageAllowlistNamesDirectTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $false
+    }
+
+    $normalizedTarget = $TargetPackageName.Replace('-', '_')
+    $acceptedRoots = @()
+    if (
+        $null -ne $Dependent.PSObject.Properties['DepRoots'] -and
+        $null -ne $Dependent.DepRoots
+    ) {
+        $acceptedRoots = @(
+            $Dependent.DepRoots[$normalizedTarget] |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    } elseif (
+        $null -ne $Dependent.PSObject.Properties['DepAliases'] -and
+        $null -ne $Dependent.DepAliases
+    ) {
+        $acceptedRoots = @(
+            $Dependent.DepAliases[$normalizedTarget] |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    }
+    if ($acceptedRoots.Count -eq 0) {
+        $acceptedRoots = @($normalizedTarget)
+    }
+
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            continue
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            continue
+        }
+        if ($acceptedRoots -contains $root) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 # Returns $true when the dependent's allowlist is positive evidence that its
 # public API names types rooted at $TargetPackageName.
 #
@@ -774,7 +858,8 @@ function Test-PackageAllowlistNamesTarget {
         # Matters most on this path: a crate reached indirectly declares no edge
         # to the target, so it has no DepAliases entry for it. The target's own
         # crate root is the only place the diverted name can come from.
-        [string]$TargetCrateRoot
+        [string]$TargetCrateRoot,
+        [bool]$WildcardIsEvidence = $true
     )
 
     if ($null -eq $Dependent.AllowedExternalTypes) {
@@ -801,7 +886,10 @@ function Test-PackageAllowlistNamesTarget {
 
         $root = ($entry -split '::', 2)[0]
         if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
-            return $true
+            if ($WildcardIsEvidence) {
+                return $true
+            }
+            continue
         }
         if ($acceptedRoots -contains $root) {
             return $true
@@ -987,7 +1075,8 @@ function Get-PackageCommittedChanges {
 # committed diff is served from Get-PackageCommittedChanges' session cache.
 function Get-PackagesWithUnreleasedChanges {
     param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$IncludeUnpublished
     )
 
     $result = @{}
@@ -1008,7 +1097,7 @@ function Get-PackagesWithUnreleasedChanges {
     }
 
     foreach ($package in $packages) {
-        if (-not $package.Published) { continue }
+        if (-not $IncludeUnpublished -and -not $package.Published) { continue }
 
         $folder = $package.Folder
         $files = [System.Collections.Generic.HashSet[string]]::new()
