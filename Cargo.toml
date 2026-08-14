@@ -141,7 +141,7 @@ matchit = { version = "0.9.2", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
-multitude = { path = "crates/multitude", default-features = false, version = "0.8.0" }
+multitude = { path = "crates/multitude", default-features = false, version = "0.8.1" }
 multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "0.1.1" }
 multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "0.1.1" }
 mutants = { version = "0.0.3", default-features = false }
