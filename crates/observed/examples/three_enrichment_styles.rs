@@ -87,12 +87,7 @@ async fn handle_request(sink: &Sink, route: HttpRoute) {
         (|| {
             emit!(sink, HttpRequest { status: 2 });
         })
-        .enrich(
-            sink,
-            MethodContext {
-                method: HttpMethod("GET"),
-            },
-        )(); // EnrichFnExt on closure
+        .enrich(sink, MethodContext { method: HttpMethod("GET") })(); // EnrichFnExt on closure
     }
     .enrich(
         sink,
