@@ -39,21 +39,20 @@ impl<'a> Referenceable<'a> {
         self.0.iter().copied().find(|member| member_name(member) == name)
     }
 
-    /// The fields a diagnostic offers, backticked and comma separated.
+    /// The fields a diagnostic offers, backticked and comma separated, or why it offers none.
     fn available(&self) -> String {
-        self.0
-            .iter()
-            .map(|member| format!("`{}`", member_name(member)))
-            .collect::<Vec<_>>()
-            .join(", ")
+        if self.0.is_empty() {
+            return "the error type has no fields that can be referenced".to_owned();
+        }
+
+        let names = self.0.iter().map(|member| format!("`{}`", member_name(member))).collect::<Vec<_>>();
+
+        format!("available fields: {}", names.join(", "))
     }
 
     /// The diagnostic for a name that is not one of these fields.
     fn unknown(&self, name: &str) -> String {
-        format!(
-            "unknown field `{name}` in `#[display(...)]`, available fields: {}",
-            self.available()
-        )
+        format!("unknown field `{name}` in `#[display(...)]`, {}", self.available())
     }
 }
 
@@ -123,6 +122,8 @@ fn scope_to_self(expr: &Expr, fields: &Referenceable<'_>, errors: &mut Errors) -
     match argument::root(expr) {
         argument::Root::SelfKeyword(term) => errors.add(term, argument::SELF_PREFIXED),
         argument::Root::Unsupported => errors.add(expr, argument::UNSUPPORTED_ROOT),
+        // A method of `self` names no field, so there is nothing to resolve.
+        argument::Root::Method => {}
         // The root term is the smallest thing carrying the fault, so it is what the diagnostic
         // underlines.
         argument::Root::Name(name, term) | argument::Root::Index(name, term) => {
@@ -230,6 +231,22 @@ mod tests {
         insta::assert_snapshot!(lowered(parse_quote! {
             #[display("{0} and {}", 1.abs())]
             struct T(String, i32, ohno::OhnoCore);
+        }));
+    }
+
+    #[test]
+    fn an_argument_may_call_a_method_of_self() {
+        insta::assert_snapshot!(lowered(parse_quote! {
+            #[display("{}", describe())]
+            struct T { path: String, inner: ohno::OhnoCore }
+        }));
+    }
+
+    #[test]
+    fn nothing_is_referenceable_when_every_field_is_generated() {
+        insta::assert_snapshot!(lowered(parse_quote! {
+            #[display("bad path: {path}")]
+            struct T(#[doc = " ohno::generated-core@7f3d9c2a"] ohno::OhnoCore);
         }));
     }
 

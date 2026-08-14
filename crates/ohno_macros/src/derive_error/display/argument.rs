@@ -4,8 +4,9 @@
 //! Rooting a `#[display(...)]` positional argument in a field of `self`.
 //!
 //! An argument is written without the `self.` prefix, so the prefix is applied here. An argument is
-//! scoped by its leftmost term, and that term is the one that has to name a field: `count * 2` is
-//! rooted at `count`, and `t.0.message()` at `t`.
+//! scoped by its leftmost term, and that term is the one that has to name a field, or call a method
+//! of `self`: `count * 2` is rooted at `count`, `t.0.message()` at `t`, and `describe()` calls a
+//! method.
 
 use syn::{Expr, Lit};
 
@@ -20,6 +21,8 @@ pub(crate) enum Root<'a> {
     /// A float root is a nested tuple access: `0.1` lexes as one literal, and only its leading
     /// component names a field of `self`.
     Index(String, &'a Expr),
+    /// A method of `self`, called without a prefix, such as `describe()`. It names no field.
+    Method,
     /// Nothing that can legally follow `self.`.
     Unsupported,
 }
@@ -30,7 +33,7 @@ impl Root<'_> {
     fn field_name(&self) -> Option<&str> {
         match self {
             Self::Name(name, _) | Self::Index(name, _) => Some(name),
-            Self::SelfKeyword(_) | Self::Unsupported => None,
+            Self::SelfKeyword(_) | Self::Method | Self::Unsupported => None,
         }
     }
 }
@@ -46,7 +49,8 @@ pub(crate) const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional argument
 /// Finds the leftmost term of `expr`.
 ///
 /// Field access, method calls, indexing, binary operators, casts, `await`, `?` and ranges all keep
-/// a term in leftmost position, which is where the prefix lands.
+/// a term in leftmost position, which is where the prefix lands. A call in that position is a
+/// method of `self` rather than a field.
 pub(crate) fn root(expr: &Expr) -> Root<'_> {
     match expr {
         // A qualified path such as `<T>::VALUE` is rejected here too: `Path::get_ident` returns
@@ -73,6 +77,14 @@ pub(crate) fn root(expr: &Expr) -> Root<'_> {
         },
         Expr::Field(inner) => root(&inner.base),
         Expr::MethodCall(inner) => root(&inner.receiver),
+        // A call rooted in a bare name is a method of `self`: `describe()` becomes
+        // `self.describe()`, which names no field.
+        Expr::Call(inner) => match root(&inner.func) {
+            Root::Name(..) => Root::Method,
+            other => other,
+        },
+        // A call rooted in a bare name is a method of `self`: `describe()` becomes
+        // `self.describe()`, which names no field.
         Expr::Index(inner) => root(&inner.expr),
         Expr::Binary(inner) => root(&inner.left),
         Expr::Cast(inner) => root(&inner.expr),
@@ -132,6 +144,13 @@ mod tests {
     fn a_float_literal_is_a_nested_tuple_access() {
         assert_eq!(root_name(&parse_quote!(0.1)).as_deref(), Some("0"));
         assert_eq!(root_name(&parse_quote!(2.0)).as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_bare_call_is_a_method_of_self() {
+        assert!(matches!(root(&parse_quote!(describe())), Root::Method));
+        assert!(matches!(root(&parse_quote!(describe().len())), Root::Method));
+        assert_eq!(root_name(&parse_quote!(describe())), None);
     }
 
     #[test]

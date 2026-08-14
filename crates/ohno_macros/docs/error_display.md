@@ -35,9 +35,10 @@ crate differs from `thiserror`.
 | `.path.display()` | no, not valid Rust |
 
 An argument is scoped by its leftmost term, so that term is the one that has to
-name a field: `count * 2` is rooted at `count`, and `t.0.message()` at `t`. An
-argument rooted anywhere else — a constant, an associated function, a string
-literal — names no field of `self` and is rejected.
+name a field, or call a method of `self`: `count * 2` is rooted at `count`,
+`t.0.message()` at `t`, and `describe()` calls a method. An argument rooted
+anywhere else — a constant, an associated function, a string literal — reaches
+nothing on `self` and is rejected.
 
 A numeric literal is the exception, because that is how a tuple field is named.
 `0` is a field root, so `{0}` and `0.abs()` are both rooted at field `0`, and a
@@ -108,8 +109,9 @@ would multiply it.
 
 **Roots are found by walking left.** Field access, method calls, indexing,
 binary operators, casts, `await`, `?` and ranges all keep a term in leftmost
-position, which is where the prefix lands. A `self` root is reported separately,
-because it would otherwise expand to `self.self`.
+position, which is where the prefix lands. A call in that position is a method
+of `self`, so it is prefixed without being looked up as a field. A `self` root
+is reported separately, because it would otherwise expand to `self.self`.
 
 **A nested tuple index arrives as a float.** `0.1` lexes as one literal, and only
 its leading component names a field of `self`; the rest reaches into that
