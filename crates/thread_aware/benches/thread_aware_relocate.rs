@@ -15,7 +15,9 @@
 //! * `storm` — every thread relocates at once after a barrier release, which is
 //!   what a fanout across all cores looks like.
 //! * `handoff` — two threads exchange messages and relocate each one on the
-//!   receiving thread, which is what a request pipeline looks like.
+//!   receiving thread, which is what a request pipeline looks like. The channel
+//!   dominates this shape, so each variant is paired with a `_transport`
+//!   control that omits the relocation.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
 //! `miss_path` under instruction-count measurement. The multithreaded groups
@@ -38,7 +40,7 @@ use std::time::{Duration, Instant};
 use std::{sync, thread};
 
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkGroup, Criterion, SamplingMode, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
 use new_zealand::nz;
 use par_bench::{Run, ThreadPool};
@@ -168,10 +170,10 @@ fn bench_miss_path(c: &mut Criterion) {
 ///
 /// Each worker times its own loop and the round reports the median of those
 /// durations. Timing the round from the controller would instead measure how
-/// the operating system happened to schedule an oversubscribed machine, and the
-/// mean would let a single descheduled worker move the whole sample. The median
-/// is on the same scale as how `par_bench` reports the `handoff` group: cost per
-/// relocation as seen by one participating thread.
+/// long the operating system took to wake several hundred threads, and the mean
+/// over workers would let one stalled worker move the whole sample. The median
+/// is robust to both while still reflecting what a participating thread pays
+/// per relocation.
 struct RelocationStorm {
     start: sync::Arc<Barrier>,
     end: sync::Arc<Barrier>,
@@ -274,9 +276,25 @@ impl Drop for RelocationStorm {
 fn bench_storm(c: &mut Criterion) {
     let mut group = c.benchmark_group("thread_aware_relocate/storm");
 
-    // The single-threaded case runs through the same barrier harness as the
-    // oversubscribed one, so the two numbers differ only by contention.
-    for (name, thread_count) in [("threads_1", 1_usize), ("threads_250", STORM_THREADS)] {
+    // Contention is a property of the round, not of its length, so the cost per
+    // relocation is not linear in the iteration count that Criterion's default
+    // sampling assumes. Flat sampling holds the shape of every sample constant.
+    group.sampling_mode(SamplingMode::Flat);
+
+    let saturated = SystemHardware::current().processors().len();
+
+    // Three points, because the two failure modes have to be told apart. One
+    // thread gives the uncontended cost. One thread per processor gives the
+    // contention the lock actually has to survive. The oversubscribed case adds
+    // the queue of threads waiting for a processor, which is what a machine
+    // running more tasks than it has cores looks like.
+    let shapes = [
+        ("threads_1", 1_usize),
+        ("threads_saturated", saturated),
+        ("threads_250", STORM_THREADS),
+    ];
+
+    for (name, thread_count) in shapes {
         let storm = RelocationStorm::new(thread_count);
 
         group.bench_function(name, |b| {
@@ -316,11 +334,22 @@ impl Mailbox {
 
 /// Registers one handoff benchmark over `participant_count` threads.
 ///
-/// Each participant sends one message per iteration to the next participant and
-/// relocates the message it receives to its own affinity. With a single
-/// participant the message is sent to itself, which isolates the transport and
-/// relocation cost from any cross-thread traffic.
-fn bench_handoff_shape(pool: &mut ThreadPool, group: &mut BenchmarkGroup<'_, WallTime>, name: &str, participant_count: usize) {
+/// Each participant sends one message per iteration to the next participant and,
+/// when `relocate` is set, relocates the message it receives to its own affinity.
+/// With a single participant the message is sent to itself, which isolates the
+/// transport from any cross-thread traffic.
+///
+/// The transport dominates this shape: a channel round trip costs tens of times
+/// what an uncontended relocation does. The `relocate = false` variant measures
+/// that floor, so the relocation cost is the difference between the two variants
+/// rather than a fraction of either.
+fn bench_handoff_shape(
+    pool: &mut ThreadPool,
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    name: &str,
+    participant_count: usize,
+    relocate: bool,
+) {
     let affinities = pinned_affinities(&[participant_count]);
     let template = materialized(&affinities);
     let mailboxes = (0..participant_count).map(|_| Mailbox::new()).collect::<Vec<_>>();
@@ -335,7 +364,11 @@ fn bench_handoff_shape(pool: &mut ThreadPool, group: &mut BenchmarkGroup<'_, Wal
             mailboxes[peer].sender.send(template.clone()).unwrap();
 
             let mut message = mailboxes[own].receiver.lock().unwrap().recv().unwrap();
-            message.relocate(Some(affinities[peer]), affinities[own]);
+
+            if relocate {
+                message.relocate(Some(affinities[peer]), affinities[own]);
+            }
+
             black_box(message.id);
 
             // Returned as cleanup state so the drop lands outside the measured region.
@@ -362,8 +395,10 @@ fn bench_handoff(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("thread_aware_relocate/handoff");
 
-    bench_handoff_shape(&mut single, &mut group, "threads_1", 1);
-    bench_handoff_shape(&mut pair, &mut group, "threads_2", 2);
+    bench_handoff_shape(&mut single, &mut group, "threads_1", 1, true);
+    bench_handoff_shape(&mut single, &mut group, "threads_1_transport", 1, false);
+    bench_handoff_shape(&mut pair, &mut group, "threads_2", 2, true);
+    bench_handoff_shape(&mut pair, &mut group, "threads_2_transport", 2, false);
 
     group.finish();
 }

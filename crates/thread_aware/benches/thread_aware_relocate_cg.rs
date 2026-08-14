@@ -9,10 +9,12 @@
 //! measure lock contention across threads, which the single-threaded Callgrind
 //! simulator cannot model.
 //!
-//! The headline number is the instruction count of `hit_path_pre_materialized`.
-//! That is what every cross-affinity spawn pays for every reachable
-//! `Arc<_, PerCore>`, and it is the branch a shared-lock probe is meant to keep
-//! cheap.
+//! The instruction counts here are a regression guard, not a demonstration of
+//! the shared-lock probe. An uncontended shared acquisition and an uncontended
+//! exclusive acquisition cost nearly the same number of instructions, so the
+//! benefit of the probe only appears under contention, which the simulator
+//! cannot model. What this file does catch is the extra probe the miss path
+//! pays, and any future growth of either branch.
 //!
 //! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate_cg`
 //! on a Linux host with Valgrind installed.

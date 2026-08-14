@@ -80,4 +80,12 @@ is on the hot path.
 | `handoff`   | Two threads passing values to each other, relocating on receipt.      |
 
 `storm` and `handoff` are Criterion-only. Callgrind counts instructions on a
-serialized execution, so it cannot observe lock contention at all.
+serialized execution, so it cannot observe lock contention at all. It also
+cannot show the benefit of the shared-lock probe, because an uncontended shared
+acquisition costs about as many instructions as an uncontended exclusive one;
+its role is to catch regressions in either branch.
+
+`storm` is where the shared-lock probe shows up. `handoff` is dominated by its
+channel transport, so it carries `_transport` control variants that omit the
+relocation; the relocation cost is the difference between a variant and its
+control, not a fraction of either.
