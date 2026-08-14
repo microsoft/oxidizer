@@ -163,5 +163,9 @@ mod tests {
         // `Text` hashes its contents, so a literal and an owned string with the
         // same bytes are interchangeable as hash-map keys.
         assert_eq!(hash_of(&Text::from("same")), hash_of(&Text::from(String::from("same"))));
+
+        // Distinct contents must reach the hasher, otherwise every `Text` would
+        // land in one bucket and equality would be the only discriminator.
+        assert_ne!(hash_of(&Text::from("same")), hash_of(&Text::from("other")));
     }
 }

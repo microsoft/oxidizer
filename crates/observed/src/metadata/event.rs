@@ -112,6 +112,8 @@ impl EventDescription {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::metric::InstrumentKind;
+    use crate::severity::Severity;
 
     #[test]
     fn event_description_type_id_roundtrips() {
@@ -120,5 +122,50 @@ mod tests {
 
         let without = EventDescription::new("e", None, None, None, false, false);
         assert_eq!(without.type_id(), None);
+    }
+
+    #[test]
+    fn event_description_reports_each_signal_independently() {
+        // A description is what a processor selects on, so every accessor must
+        // report its own field: a signal answered from the wrong field (or from
+        // a constant) silently mis-routes the event.
+        let plain = EventDescription::new("plain", None, None, None, false, false);
+        assert_eq!(plain.name(), "plain");
+        assert!(plain.metric().is_none());
+        assert!(!plain.is_log());
+        assert!(!plain.is_disabled());
+        assert!(!plain.contains_metrics());
+
+        let logged = EventDescription::new(
+            "logged",
+            None,
+            Some(LogDescription::new("logged", Severity::Info, None)),
+            None,
+            false,
+            false,
+        );
+        assert!(logged.is_log());
+
+        assert!(EventDescription::new("off", None, None, None, false, true).is_disabled());
+    }
+
+    #[test]
+    fn an_event_level_or_field_level_metric_alone_makes_the_event_metric_producing() {
+        // The two metric sources are alternatives, not requirements: an event
+        // carrying only one of them still produces metric data points.
+        let event_metric = EventDescription::new(
+            "event.metric",
+            None,
+            None,
+            Some(MetricDescription::new("m", InstrumentKind::Counter, "", "")),
+            false,
+            false,
+        );
+        assert_eq!(event_metric.metric().expect("metric is set").instrument_name(), "m");
+        assert!(event_metric.contains_metrics());
+
+        let field_metric = EventDescription::new("field.metric", None, None, None, true, false);
+        assert!(field_metric.metric().is_none());
+        assert!(field_metric.contains_metrics());
     }
 }

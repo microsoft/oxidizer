@@ -103,3 +103,83 @@ pub trait DynEvent: Send + Sync {
 pub fn emit_dyn_event(sink: &Sink, event: &dyn DynEvent) {
     sink.emit_impl(IntermediateEvent::dynamic(event));
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tick::SimpleClock;
+
+    use super::*;
+    use crate::FlushError;
+    use crate::processing::{EventProcessor, EventView};
+
+    struct Bridged;
+
+    impl DynEvent for Bridged {
+        fn name(&self) -> &'static str {
+            "bridged.event"
+        }
+
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+
+        fn description(&self) -> EventDescription {
+            EventDescription::new("bridged.event", None, None, None, false, false)
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingProcessor {
+        seen: AtomicUsize,
+    }
+
+    impl EventProcessor for RecordingProcessor {
+        fn is_interested(&self, _description: &EventDescription) -> bool {
+            true
+        }
+
+        fn process(&self, _event: &EventView<'_>) {
+            _ = self.seen.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn flush(&self) -> Result<(), FlushError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn emit_dyn_event_dispatches_through_the_sink_pipeline() {
+        // The bridge entry point must actually reach the processors; dropping
+        // the dispatch would silently lose every foreign event.
+        let processor = Arc::new(RecordingProcessor::default());
+        let sink = Sink::new(
+            "bridge",
+            vec![Arc::clone(&processor) as Arc<dyn EventProcessor>],
+            SimpleClock::new_frozen(),
+        );
+
+        emit_dyn_event(&sink, &Bridged);
+
+        assert_eq!(processor.seen.load(Ordering::Relaxed), 1);
+    }
+}

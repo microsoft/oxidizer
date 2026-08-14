@@ -368,6 +368,21 @@ mod tests {
     }
 
     #[test]
+    fn from_redacted_retains_a_buffer_at_the_retention_limit() {
+        // The limit is inclusive: a buffer grown to exactly `MAX_RETAINED_BUFFER`
+        // is kept for reuse, and only a larger one is released.
+        let engine = data_privacy::RedactionEngine::builder()
+            .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::new())
+            .build();
+        let exact = "x".repeat(MAX_RETAINED_BUFFER);
+        let classified = data_privacy::Sensitive::new(exact.as_str(), data_privacy::DataClass::new("test", "unclassified"));
+
+        let value = Value::from_redacted(&classified, &engine);
+        assert_eq!(value.to_string().len(), exact.len());
+        REDACTION_BUFFER.with(|cell| assert_eq!(cell.borrow().capacity(), MAX_RETAINED_BUFFER));
+    }
+
+    #[test]
     fn value_from_text_is_stored_as_is() {
         assert_eq!(Value::from(Text::Static("kept")), Value::String(Text::Static("kept")));
     }

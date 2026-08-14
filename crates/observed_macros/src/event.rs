@@ -2460,4 +2460,27 @@ mod coverage_tests {
         assert!(stripped.attrs.is_empty());
         assert!(stripped.fields.iter().all(|field| field.attrs.is_empty()));
     }
+
+    #[test]
+    fn every_severity_attribute_maps_to_its_own_variant() {
+        // A dropped arm would leave the attribute unrecognized, silently
+        // demoting the event to "no log signal" instead of failing to build.
+        for (attribute, expected) in [
+            ("trace", "Trace"),
+            ("debug", "Debug"),
+            ("info", "Info"),
+            ("warning", "Warn"),
+            ("error", "Error"),
+            ("fatal", "Fatal"),
+        ] {
+            let parsed = SeverityKind::from_ident(&format_ident!("{attribute}")).expect("known severity attribute");
+            assert_eq!(
+                parsed.to_token_stream().to_string(),
+                expected,
+                "`#[{attribute}]` mapped to the wrong severity"
+            );
+        }
+
+        assert!(SeverityKind::from_ident(&format_ident!("bogus")).is_none());
+    }
 }

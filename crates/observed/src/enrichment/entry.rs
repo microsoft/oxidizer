@@ -175,4 +175,17 @@ mod tests {
         let targeted = EnrichmentEntry::unclassified("k", 1_i64).with_target(SinkId::new("s"));
         assert!(targeted.target().is_some());
     }
+
+    #[test]
+    fn log_exclusion_and_metric_dimension_are_opt_in() {
+        let plain = EnrichmentEntry::unclassified("k", 1_i64);
+        assert!(!plain.is_excluded_from_logs());
+        assert!(plain.metric_key().is_none());
+
+        let excluded = EnrichmentEntry::unclassified("k", 1_i64).exclude_from_logs();
+        assert!(excluded.is_excluded_from_logs());
+
+        let dimension = EnrichmentEntry::unclassified("k", 1_i64).with_metric_dimension("region");
+        assert_eq!(dimension.metric_key().expect("dimension key is set").as_str(), "region");
+    }
 }

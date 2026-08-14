@@ -162,4 +162,19 @@ mod field_tests {
         // the bare key without any wrapper formatting.
         assert_eq!(LogFieldEntry::new("http.request.id").to_string(), "http.request.id");
     }
+
+    #[test]
+    fn descriptor_and_metric_entry_report_their_own_keys() {
+        // The metric key may differ from the field name, so neither accessor
+        // may answer with the other's string (or with a constant).
+        let metric = MetricFieldEntry::dimension("region");
+        assert_eq!(metric.key(), "region");
+
+        let descriptor = FieldDescriptor::new("duration_ms", None, Some(metric));
+        assert_eq!(descriptor.field_name(), "duration_ms");
+        assert_eq!(descriptor.metric().expect("metric routing is set").key(), "region");
+
+        // A log-only field carries no metric routing at all.
+        assert!(FieldDescriptor::log_only("msg").metric().is_none());
+    }
 }

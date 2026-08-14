@@ -213,6 +213,74 @@ impl std::fmt::Debug for EnrichmentTransfer {
 mod coverage_tests {
     use super::*;
 
+    struct TestEnrichment(&'static str);
+
+    impl Enrichment for TestEnrichment {
+        fn into_entries(self) -> Vec<EnrichmentEntry> {
+            vec![EnrichmentEntry::unclassified(self.0, 1_i64)]
+        }
+    }
+
+    /// Flattens a chain into its entries, innermost node first.
+    fn chain_entries(head: &OptEnrichmentNode) -> Vec<EnrichmentEntry> {
+        let mut entries = Vec::new();
+        let mut cursor = head.as_ref();
+        while let Some(node) = cursor {
+            entries.extend(node.entries.iter().cloned());
+            cursor = node.parent.as_ref();
+        }
+        entries
+    }
+
+    #[test]
+    fn ptr_eq_identifies_shared_thread_local_storage() {
+        // Slot identity is what lets a transfer address the same chain after a
+        // `Sink::clone`, so a clone must compare equal and a fresh slot must not.
+        let slot = Slot::new();
+
+        assert!(slot.ptr_eq(&slot.clone()));
+        assert!(!slot.ptr_eq(&Slot::new()));
+    }
+
+    #[test]
+    fn guard_restores_the_previous_head_on_drop() {
+        let slot = Slot::new();
+        assert!(slot.current().is_none());
+
+        {
+            let _guard = slot.push(Arc::from(vec![EnrichmentEntry::unclassified("k", 1_i64)]));
+            assert!(slot.current().is_some());
+        }
+
+        assert!(slot.current().is_none(), "dropping the guard must pop the pushed node");
+    }
+
+    #[test]
+    fn transfer_captures_a_slot_and_layers_further_enrichment_onto_it() {
+        let slot = Slot::new();
+        let mut transfer = EnrichmentTransfer::default();
+        transfer.add_slot(&slot);
+
+        transfer.push(TestEnrichment("global"));
+        transfer.push_for(SinkId::new("target"), TestEnrichment("targeted"));
+
+        let guard = transfer.apply();
+        let entries = chain_entries(&slot.current());
+
+        assert_eq!(entries.len(), 2, "both pushes must reach the captured slot");
+        assert!(
+            entries.iter().any(|entry| entry.target().is_none()),
+            "`push` must add an untargeted entry"
+        );
+        assert!(
+            entries.iter().any(|entry| entry.target() == Some(SinkId::new("target"))),
+            "`push_for` must mark its entry as targeted"
+        );
+
+        drop(guard);
+        assert!(slot.current().is_none());
+    }
+
     #[test]
     fn debug_impls_and_relocate() {
         let mut slot = Slot::new();

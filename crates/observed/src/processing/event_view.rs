@@ -258,3 +258,56 @@ impl std::fmt::Debug for EventView<'_> {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::processing::FieldVisitorFn;
+
+    /// An event that reports a distinct value from every accessor, so a view
+    /// that answers from the wrong one (or from a constant) is visible.
+    struct SourcedEvent;
+
+    impl DynEvent for SourcedEvent {
+        fn name(&self) -> &'static str {
+            "test.event"
+        }
+
+        fn body(&self) -> Option<Cow<'static, str>> {
+            Some(Cow::Borrowed("a message"))
+        }
+
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            Some(Cow::Borrowed("crates/observed/src/lib.rs"))
+        }
+
+        fn source_line(&self) -> Option<u32> {
+            Some(42)
+        }
+
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            Some(Cow::Borrowed("observed"))
+        }
+
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+
+        fn description(&self) -> EventDescription {
+            EventDescription::new("test.event", None, None, None, false, false)
+        }
+    }
+
+    #[test]
+    fn view_forwards_the_event_identity_and_source_location() {
+        let event = SourcedEvent;
+        let view = EventView::new_synthetic(&event, SystemTime::UNIX_EPOCH);
+
+        assert_eq!(view.name(), "test.event");
+        assert_eq!(view.source_file(), Some(Cow::Borrowed("crates/observed/src/lib.rs")));
+        assert_eq!(view.source_line(), Some(42));
+        assert_eq!(view.source_crate(), Some(Cow::Borrowed("observed")));
+        assert_eq!(view.body(), Some(Cow::Borrowed("a message")));
+    }
+}

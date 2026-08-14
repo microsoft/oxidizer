@@ -150,3 +150,31 @@ impl Event for NoopEvent {
         unreachable!("NoopEvent should never have its fields accessed")
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestEvent;
+
+    impl Event for TestEvent {
+        const DESCRIPTION: EventDescription = EventDescription::new("test.event", None, None, None, false, false);
+
+        fn visit_fields(&self, _visitor: &mut FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+
+    #[test]
+    fn a_typed_event_reports_its_name_and_captured_source_location() {
+        // `emit!` captures the call site and the evaluated event is what carries
+        // it to a processor, so each accessor must report its own part of it.
+        let evaluated = EvaluatedEvent::Typed(TestEvent, SourceLocation::new("observed", "crates/observed/src/lib.rs", 42));
+
+        assert_eq!(evaluated.name(), "test.event");
+        assert_eq!(evaluated.source_file(), Some(Cow::Borrowed("crates/observed/src/lib.rs")));
+        assert_eq!(evaluated.source_line(), Some(42));
+        assert_eq!(evaluated.source_crate(), Some(Cow::Borrowed("observed")));
+    }
+}

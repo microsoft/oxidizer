@@ -650,4 +650,32 @@ mod tests {
         assert_eq!(uninterested.processed.load(Ordering::Relaxed), 0);
         assert_eq!(interested.processed.load(Ordering::Relaxed), 1);
     }
+
+    /// A leaf sink is interested only if one of its processors is: the check is
+    /// a real query over the processors, not an unconditional yes.
+    #[test]
+    fn single_sink_is_not_interested_when_no_processor_is() {
+        let sink = Sink::new(
+            "uninterested",
+            vec![Arc::new(NeverInterestedProcessor::default()) as Arc<dyn EventProcessor>],
+            SimpleClock::new_frozen(),
+        );
+
+        assert!(!sink.is_interested_in(&dummy_description()));
+    }
+
+    #[test]
+    fn current_enrichments_reports_the_pushed_entries() {
+        let sink = Sink::noop();
+        let _guard = sink.push_enrichment(Arc::from(vec![
+            EnrichmentEntry::unclassified("outer", 1_i64),
+            EnrichmentEntry::unclassified("inner", 2_i64),
+        ]));
+
+        let entries = sink.current_enrichments();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key().as_str(), "outer");
+        assert_eq!(entries[1].key().as_str(), "inner");
+    }
 }

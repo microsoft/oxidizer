@@ -111,4 +111,14 @@ mod tests {
             assert!(seen.insert(rendered.clone()), "duplicate Display output {rendered:?} for {kind:?}");
         }
     }
+
+    #[test]
+    fn metric_description_reports_description_and_unit_verbatim() {
+        // Both reach the exported instrument as-is, and they must not be
+        // transposed with one another or with the instrument name.
+        let desc = MetricDescription::new("http.server.duration", InstrumentKind::Histogram, "server duration", "ms");
+
+        assert_eq!(desc.description(), "server duration");
+        assert_eq!(desc.unit(), "ms");
+    }
 }

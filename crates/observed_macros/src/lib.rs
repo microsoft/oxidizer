@@ -31,6 +31,7 @@ use proc_macro::TokenStream;
 /// lint attribute that cannot be used as a custom attribute.
 #[proc_macro_attribute]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // a proc-macro entry point cannot be invoked from this crate's own tests
 pub fn event(attr: TokenStream, item: TokenStream) -> TokenStream {
     match crate::event::event_attr(attr.into(), item.into()) {
         Ok(tokens) => tokens.into(),
@@ -42,6 +43,7 @@ pub fn event(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// crate for full documentation.
 #[proc_macro_derive(Enrichment, attributes(dimension, unredacted, data_class, if_none))]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // a proc-macro entry point cannot be invoked from this crate's own tests
 pub fn derive_enrichment(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     match crate::enrichment::derive_enrichment(&input) {
