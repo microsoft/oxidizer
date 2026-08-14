@@ -392,6 +392,44 @@ mod tests {
     }
 
     #[test]
+    fn from_redacted_erases_a_value_whose_reentrant_redaction_fails() {
+        // The two edge cases together: the scratch buffer is already borrowed
+        // by an outer call, so the nested call allocates its own, AND that
+        // nested redaction fails part-way. The erase-on-failure rule has to
+        // hold on the fallback path too, otherwise the partial text escapes
+        // through exactly the route the buffer contention opens up.
+        struct FailsMidway;
+
+        impl data_privacy::RedactedDisplay for FailsMidway {
+            fn fmt(&self, _redactor: &dyn data_privacy::Redactor, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("prefix-")?;
+                Err(fmt::Error)
+            }
+        }
+
+        struct ReentrantFailure;
+
+        impl data_privacy::RedactedDisplay for ReentrantFailure {
+            fn fmt(&self, _redactor: &dyn data_privacy::Redactor, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let engine = data_privacy::RedactionEngine::builder()
+                    .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::with_mode(
+                        data_privacy::simple_redactor::SimpleRedactorMode::Passthrough,
+                    ))
+                    .build();
+                write!(f, "[{}]", Value::from_redacted(&FailsMidway, &engine))
+            }
+        }
+
+        let engine = data_privacy::RedactionEngine::builder()
+            .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::with_mode(
+                data_privacy::simple_redactor::SimpleRedactorMode::Passthrough,
+            ))
+            .build();
+
+        assert_eq!(Value::from_redacted(&ReentrantFailure, &engine), Value::String(Text::from("[]")),);
+    }
+
+    #[test]
     fn from_redacted_releases_an_outsized_scratch_buffer() {
         let engine = data_privacy::RedactionEngine::builder()
             .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::new())
