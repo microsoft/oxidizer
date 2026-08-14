@@ -83,7 +83,7 @@ canonical rules.
 folder, name, version, published, procMacroOnly, hasLibraryTarget,
 deps, exposedDeps, macroPublicDeps, macroImplementationClosure,
 macroRuntimePartners, exposureUnknown, baselineSha, hasBaseline,
-everReleased, modified, modifiedFileCount, workspaceModified
+everReleased, modified, modifiedFiles, modifiedFileCount, workspaceModified
 ```
 
 `deps` contains normalized normal and build dependencies; dev dependencies are
@@ -92,6 +92,10 @@ excluded.
 `modified` remains publishable-only for changed-mode selection.
 `workspaceModified` also records unpublished workspace changes so proc-macro
 review cannot skip a private implementation helper that changed.
+`modifiedFiles` records the sorted baseline-diff paths and lets the resolver
+reject a first release justified only by tests, benchmarks, or generated files.
+The paths come from one frozen published/unpublished workspace scan and are
+ordered ordinally.
 
 For ordinary libraries, public exposure is derived from
 `package.metadata.cargo_check_external_types.allowed_external_types`. Fact
@@ -123,7 +127,7 @@ generated-runtime relationships without a public façade edge.
 If a macro attestation marks generated runtime paths as changed but no partner
 was inferred or declared, resolution blocks with `macroRuntimeUnknown`.
 
-Facts use `schemaVersion: 2`. The resolver rejects older or incomplete facts
+Facts use `schemaVersion: 3`. The resolver rejects older or incomplete facts
 instead of silently disabling macro-contract checks; regenerate facts after
 updating the release tooling.
 
@@ -185,6 +189,13 @@ Proc-macro compile compatibility is measured with the same consumer fixture
 against baseline and current packages. A baseline pass that becomes a current
 failure is breaking; parser acceptance without end-to-end evidence is not a
 separate contract.
+
+Compatibility classification follows implemented API and verified consumer
+behavior, not TODO/design claims. A passing SemVer check plus an
+`impl Trait`-to-concrete return refinement remains nonbreaking when the concrete
+type implements the same trait and consumer probes show no regression.
+The concrete type must also preserve prior auto-trait and lifetime-capture
+guarantees.
 
 ## Cascade rules
 

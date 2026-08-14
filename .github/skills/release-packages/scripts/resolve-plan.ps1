@@ -167,6 +167,34 @@ function Get-SelectionDecision {
     ) {
         throw "Selection reason 'explicit-release' is only valid for an unchanged package in all mode."
     }
+    if ($decision -eq 'accept' -and -not [bool]$Fact.everReleased) {
+        if ($reason -ne 'first-release') {
+            throw "Never-released package '$($Fact.folder)' must use selection reason 'first-release'."
+        }
+        $packagePrefix = "crates/$($Fact.folder)/"
+        $releaseWorthyFiles = @(
+            $Fact.modifiedFiles |
+                ForEach-Object { $_.ToString().Replace('\', '/') } |
+                Where-Object {
+                    if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
+                        return $false
+                    }
+                    $relative = $_.Substring($packagePrefix.Length)
+                    return (
+                        $relative.StartsWith('src/', [StringComparison]::Ordinal) -or
+                        $relative.StartsWith('examples/', [StringComparison]::Ordinal) -or
+                        (
+                            $relative.StartsWith('docs/', [StringComparison]::Ordinal) -and
+                            $relative.EndsWith('.md', [StringComparison]::OrdinalIgnoreCase)
+                        ) -or
+                        $relative -eq 'build.rs'
+                    )
+                }
+        )
+        if ($releaseWorthyFiles.Count -eq 0) {
+            throw "Selection reason 'first-release' for '$($Fact.folder)' requires a changed packaged file outside tests, benchmarks, and generated artifacts."
+        }
+    }
 
     $evidence = @(
         $value.evidence |
@@ -321,8 +349,11 @@ function Get-Classification {
         $changeType = ConvertTo-InternalChangeType -Value $value
     } elseif ($null -ne $value) {
         $changeType = ConvertTo-InternalChangeType -Value $value.changeType
-        if ($null -ne $value.manualReview) {
-            $manualReview = [bool]$value.manualReview
+        if (
+            $null -ne $value.PSObject.Properties['manualReview'] -and
+            [bool]$value.manualReview -ne $manualReview
+        ) {
+            throw "manualReview for '$($Fact.folder)' is resolver-owned and must be '$manualReview'."
         }
     }
 
@@ -418,7 +449,7 @@ function Assert-PinSatisfiesRequirement {
 
 $factsDocument = Get-Content -LiteralPath (Resolve-Path $FactsPath) -Raw | ConvertFrom-Json
 $request = Get-Content -LiteralPath (Resolve-Path $RequestPath) -Raw | ConvertFrom-Json
-if ($factsDocument.schemaVersion -ne 2) {
+if ($factsDocument.schemaVersion -ne 3) {
     throw 'The facts document uses an unsupported schema. Rerun release-facts.ps1.'
 }
 $facts = @($factsDocument.packages)
@@ -430,6 +461,7 @@ foreach ($fact in $facts) {
             'macroPublicDeps',
             'macroImplementationClosure',
             'macroRuntimePartners',
+            'modifiedFiles',
             'workspaceModified'
         )) {
         if ($null -eq $fact.PSObject.Properties[$requiredProperty]) {

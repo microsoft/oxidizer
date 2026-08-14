@@ -440,6 +440,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
     }
 
     It 'reports committed source edits as unreleased' {
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $script:Ws.Path
+        $files['b'] | Should -Contain 'crates/b/src/lib.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $script:Ws.Path
         $changes.ContainsKey('b') | Should -BeTrue
         $changes['b'] | Should -BeGreaterOrEqual 1
@@ -450,6 +452,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w2 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedworking')
         # Uncommitted source edit on c.
         $w2.ModifySource('c')
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $w2.Path
+        $files['c'] | Should -Contain 'crates/c/src/lib.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w2.Path
         $changes.ContainsKey('c') | Should -BeTrue
     }
@@ -459,6 +463,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w3 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleaseduntracked')
         $newFile = Join-Path $w3.Path 'crates\a\src\new_file.rs'
         Set-Content -Path $newFile -Value '// new'
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $w3.Path
+        $files['a'] | Should -Contain 'crates/a/src/new_file.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w3.Path
         $changes.ContainsKey('a') | Should -BeTrue
     }
@@ -470,6 +476,30 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w4.AddCommit('utility edit')
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w4.Path
         $changes.ContainsKey('utility') | Should -BeFalse
+    }
+
+    It 'orders changed paths ordinally across cultures' {
+        Reset-ReleaseScriptCaches
+        $w5 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'unreleased-order')
+        $folder = (Get-WorkspacePackages -repoRoot $w5.Path)[0].Folder
+        $source = Join-Path $w5.Path "crates\$folder\src"
+        Set-Content -Path (Join-Path $source 'I.rs') -Value '// I'
+        Set-Content -Path (Join-Path $source "$([char]0x131).rs") -Value '// dotless i'
+        $originalCulture = [Globalization.CultureInfo]::CurrentCulture
+        try {
+            [Globalization.CultureInfo]::CurrentCulture = 'tr-TR'
+            $turkish = @((
+                    Get-PackageUnreleasedChangeFiles -RepoRoot $w5.Path
+                )[$folder])
+            [Globalization.CultureInfo]::CurrentCulture = 'en-US'
+            Reset-ReleaseScriptCaches
+            $english = @((
+                    Get-PackageUnreleasedChangeFiles -RepoRoot $w5.Path
+                )[$folder])
+            $turkish | Should -Be $english
+        } finally {
+            [Globalization.CultureInfo]::CurrentCulture = $originalCulture
+        }
     }
 }
 

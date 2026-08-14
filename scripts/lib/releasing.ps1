@@ -1059,8 +1059,8 @@ function Get-PackageCommittedChanges {
     return $result
 }
 
-# For each published workspace package, returns a hashtable folder -> ChangedFileCount
-# where the count is the number of distinct repo-relative paths under crates/<folder>/
+# For each workspace package, returns a hashtable folder -> ChangedFiles where
+# ChangedFiles is the sorted array of distinct repo-relative paths under crates/<folder>/
 # that have changed since the package's last release baseline (see
 # Get-PackageLastReleaseBaseline). Considers:
 #
@@ -1068,12 +1068,10 @@ function Get-PackageCommittedChanges {
 #   - tracked working-tree edits (staged + unstaged) vs HEAD,
 #   - untracked files (e.g. new source files added during a release run).
 #
-# Packages with zero modifications are omitted from the result.
-#
 # Working-tree edits and untracked files are queried once globally and bucketed
 # per package to avoid spawning O(packages) extra git processes. The per-package
 # committed diff is served from Get-PackageCommittedChanges' session cache.
-function Get-PackagesWithUnreleasedChanges {
+function Get-PackageUnreleasedChangeFiles {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [switch]$IncludeUnpublished
@@ -1111,10 +1109,29 @@ function Get-PackagesWithUnreleasedChanges {
         }
 
         if ($files.Count -gt 0) {
-            $result[$folder] = $files.Count
+            $sortedFiles = [string[]]@($files)
+            [Array]::Sort($sortedFiles, [StringComparer]::Ordinal)
+            $result[$folder] = $sortedFiles
         }
     }
 
+    return $result
+}
+
+# For each published workspace package, returns a hashtable folder -> ChangedFileCount.
+function Get-PackagesWithUnreleasedChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$IncludeUnpublished
+    )
+
+    $result = @{}
+    $filesByPackage = Get-PackageUnreleasedChangeFiles `
+        -RepoRoot $RepoRoot `
+        -IncludeUnpublished:$IncludeUnpublished
+    foreach ($folder in $filesByPackage.Keys) {
+        $result[$folder] = @($filesByPackage[$folder]).Count
+    }
     return $result
 }
 

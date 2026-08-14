@@ -23,8 +23,13 @@ BeforeAll {
             [bool]$EverReleased = $true,
             [bool]$ProcMacroOnly = $false,
             [bool]$Modified = $true,
+            [string[]]$ModifiedFiles = @(),
             [bool]$WorkspaceModified = $Modified
         )
+
+        if ($Modified -and $ModifiedFiles.Count -eq 0) {
+            $ModifiedFiles = @("crates/$Name/src/lib.rs")
+        }
 
         return [ordered]@{
             folder           = $Name
@@ -43,7 +48,8 @@ BeforeAll {
             hasBaseline      = $EverReleased
             everReleased     = $EverReleased
             modified         = $Modified
-            modifiedFileCount = if ($Modified) { 1 } else { 0 }
+            modifiedFiles    = @($ModifiedFiles)
+            modifiedFileCount = $ModifiedFiles.Count
             workspaceModified = $WorkspaceModified
         }
     }
@@ -75,7 +81,7 @@ BeforeAll {
         param(
             [Parameter(Mandatory = $true)][object[]]$Facts,
             [Parameter(Mandatory = $true)][hashtable]$Request,
-            [int]$SchemaVersion = 2
+            [int]$SchemaVersion = 3
         )
 
         $caseDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -763,7 +769,7 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     tokens = @('package')
                     classifications = @{ package = 'patch' }
                 } `
-                -SchemaVersion 1
+                -SchemaVersion 2
         } | Should -Throw '*unsupported schema*'
 
         $fact = New-ReleaseFact -Name package
@@ -777,6 +783,18 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
         } | Should -Throw "*missing 'macroPublicDeps'*"
+
+        $fact = New-ReleaseFact -Name package
+        $fact.Remove('modifiedFiles')
+        {
+            Invoke-ReleasePlan `
+                -Facts @($fact) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*missing 'modifiedFiles'*"
     }
 
     It 'rejects malformed and contradictory macro contracts clearly' {
@@ -983,6 +1001,119 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
         } | Should -Throw "*only valid for an unchanged package in all mode*"
+    }
+
+    It 'rejects a first release justified only by tests' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact -Name package -EverReleased $false `
+                        -ModifiedFiles @('crates/package/tests/behavior.rs')
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision -Reason first-release
+                    }
+                    classifications = @{}
+                }
+        } | Should -Throw "*requires a changed packaged file outside tests*"
+    }
+
+    It 'accepts a first release with changed packaged source' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name package -EverReleased $false `
+                    -ModifiedFiles @('crates/package/src/lib.rs')
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('package')
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Reason first-release
+                }
+                classifications = @{}
+            }
+
+        $plan.releases[0].to | Should -Be '1.0.0'
+    }
+
+    It 'requires every accepted never-released package to use first-release' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact -Name package -EverReleased $false `
+                        -ModifiedFiles @('crates/package/tests/behavior.rs')
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision -Reason behavior-fix
+                    }
+                    classifications = @{}
+                }
+        } | Should -Throw "*must use selection reason 'first-release'*"
+    }
+
+    It 'rejects non-packaged or generated first-release evidence' {
+        foreach ($path in @(
+                'crates/package/logo.png',
+                'crates/package/Cargo.toml',
+                'crates/package/README.md'
+            )) {
+            {
+                Invoke-ReleasePlan `
+                    -Facts @(
+                        New-ReleaseFact -Name package -EverReleased $false `
+                            -ModifiedFiles @($path)
+                    ) `
+                    -Request @{
+                        mode = 'changed'
+                        tokens = @('package')
+                        selectionDecisions = @{
+                            package = New-SelectionDecision -Reason first-release
+                        }
+                        classifications = @{}
+                    }
+            } | Should -Throw "*requires a changed packaged file outside tests*"
+        }
+    }
+
+    It 'matches first-release paths ordinally instead of as wildcard patterns' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name '[package]' -EverReleased $false `
+                    -ModifiedFiles @('crates/[package]/src/lib.rs')
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('[package]')
+                selectionDecisions = @{
+                    '[package]' = New-SelectionDecision -Reason first-release
+                }
+                classifications = @{}
+            }
+
+        $plan.releases[0].folder | Should -Be '[package]'
+    }
+
+    It 'rejects request-owned manual review flags' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'targeted'
+                    tokens = @('package')
+                    classifications = @{
+                        package = @{
+                            changeType = 'patch'
+                            manualReview = $true
+                        }
+                    }
+                }
+        } | Should -Throw "*manualReview for 'package' is resolver-owned*"
     }
 
     It 'rejects changed-mode tokens for non-candidates' {

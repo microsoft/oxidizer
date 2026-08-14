@@ -57,6 +57,8 @@ Never reproduce their work by hand.
      `references/planning.md`. Record an evidenced `selectionDecisions` entry
      for every candidate; never omit a package because its changes look
      mechanical.
+   - Classify implemented source and verified consumer behavior. TODOs, design
+     notes, and roadmap text are not compatibility evidence.
    - If resolution reports missing classifications, classify the complete
      dependent closure it names and rerun with the same frozen facts.
    - Invoke the resolver with the complete decision map even when every
@@ -92,5 +94,7 @@ Never reproduce their work by hand.
 7. **Report**
    - Emit the canonical JSON plan and a concise table.
    - Include manual-review flags, warnings, and consensus status.
+   - Copy normalized release fields and resolver warnings directly from
+     `plan.json`; keep environment or methodology notes separate.
 
 Do not publish packages unless the user explicitly requests publication.

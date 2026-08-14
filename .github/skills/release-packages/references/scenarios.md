@@ -9,7 +9,7 @@ The matrix covers:
 |---|---|
 | Version lines | stable, `0.x`, `0.0.x` |
 | Change types | breaking, nonbreaking, patch |
-| Package state | previously released, first release, unpublished |
+| Package state | previously released, first release, test-only first-release rejection, unpublished |
 | Graphs | single, linear, diamond, duplicate normal/build edge, transitive exposure |
 | Exposure | exposed, encapsulated, wildcard/unknown, empty/missing, stale roots |
 | Proc-macros | implementation dependency, compatible/breaking contract, public/private use, major pin, generated runtime, blocked review |

@@ -266,6 +266,10 @@ Describe 'release-facts.ps1' {
     It 'detects unreleased (working-tree) modifications' {
         $script:ByFolder['alpha'].modified | Should -BeTrue
         $script:ByFolder['alpha'].modifiedFileCount | Should -BeGreaterThan 0
+        @($script:ByFolder['alpha'].modifiedFiles).Count |
+            Should -Be $script:ByFolder['alpha'].modifiedFileCount
+        $script:ByFolder['alpha'].modifiedFiles |
+            Should -Contain 'crates/alpha/src/lib.rs'
         $script:ByFolder['beta'].modified | Should -BeFalse
     }
 
@@ -275,6 +279,8 @@ Describe 'release-facts.ps1' {
         # the published filter were removed, this assertion would fail.
         $script:ByFolder['priv_pkg'].modified | Should -BeFalse
         $script:ByFolder['priv_pkg'].workspaceModified | Should -BeTrue
+        $script:ByFolder['priv_pkg'].modifiedFiles |
+            Should -Contain 'crates/priv_pkg/src/lib.rs'
     }
 
     It 'fails loudly for an unresolvable base ref instead of reporting no baseline' {

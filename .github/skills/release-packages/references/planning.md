@@ -25,14 +25,14 @@ Run:
 ./.github/skills/release-packages/scripts/release-facts.ps1 > facts.json
 ```
 
-Facts use `schemaVersion: 2`; regenerate them when the release tooling changes.
+Facts use `schemaVersion: 3`; regenerate them when the release tooling changes.
 The resolver rejects stale or incomplete facts rather than silently skipping
 macro-contract checks. Each package fact contains:
 
 `folder, name, version, published, procMacroOnly, hasLibraryTarget, deps,
 exposedDeps, macroPublicDeps, macroImplementationClosure,
 macroRuntimePartners, exposureUnknown, baselineSha, hasBaseline, everReleased,
-modified, modifiedFileCount, workspaceModified`.
+modified, modifiedFiles, modifiedFileCount, workspaceModified`.
 
 - `deps` contains normalized non-dev dependency names.
 - `exposedDeps` contains direct or transitively reachable workspace packages
@@ -47,6 +47,8 @@ modified, modifiedFileCount, workspaceModified`.
 - `workspaceModified` includes unpublished workspace packages. `modified`
   remains publishable-only for release selection, while proc-macro review uses
   the broader fact so private implementation helpers cannot bypass attestation.
+- `modifiedFiles` is the sorted, repo-relative baseline diff used to audit and
+  mechanically constrain selection reasons.
 - `macroRuntimePartners` is inferred by reversing `macroPublicDeps`: every
   package that publicly exposes a proc macro becomes its runtime façade.
   `[package.metadata.oxidizer_release].macro_runtime` is an optional escape
@@ -207,6 +209,10 @@ use `dev-dependency-only`. If nothing remains, use `release-metadata-only` when
 metadata changed, or `generated-artifact-only` when only generated files
 changed. Never accept a first release merely because `everReleased = false`;
 its own diff must contain release-worthy packaged content.
+The resolver rejects `first-release` when every changed path is under `tests/`
+or `benches/`, is outside the package allowlist, or is only Cargo/release
+metadata or a generated README/changelog. A never-released accepted package must
+use the `first-release` reason.
 
 For proc macros, "compile behavior changed" means the end-to-end result changed
 for a representative consumer fixture. Parser acceptance alone is not the
@@ -222,6 +228,14 @@ Do not infer that an old invocation failed merely because its generated code
 looks difficult to construct. Record the actual baseline/current command and
 exit result in macro evidence. A tool failure or fixture whose prior support
 status cannot be established is inconclusive and blocks the plan.
+
+Classify implemented API, not aspirations in TODO, design, or roadmap files.
+Such documents can direct investigation but cannot prove a compatibility break.
+When `cargo-semver-checks` passes and an `impl Trait` return is replaced by a
+newly public concrete type that implements the same trait, treat the new named
+type and its additive methods as `nonbreaking` only when it preserves the prior
+opaque type's trait, auto-trait (`Send`, `Sync`, `Unpin`), and lifetime-capture
+guarantees. Verify uncertain bounds with baseline/current consumer fixtures.
 
 ## Resolve the plan
 
@@ -327,6 +341,10 @@ Before writing repository files:
 3. Compare normalized tuples:
    `folder, to, changeType, source, manualReview, contractBreaking,
    cascadeReasons`, plus top-level selection decisions and macro attestations.
+   Copy these tuple fields from `plan.json`; do not restate or override
+   `manualReview`, warnings, or change types in a separate result summary.
+   `manualReview` is resolver-owned: true for proc-macro-only packages and false
+   otherwise. Omit it from classifications, or supply only the matching value.
 4. Continue only on unanimous agreement.
 
 On divergence, stop and report:

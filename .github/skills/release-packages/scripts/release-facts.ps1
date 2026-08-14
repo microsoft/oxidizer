@@ -25,8 +25,8 @@
                                            names normalised with '-' -> '_').
       - Get-PreviousVersionBumpCommit  -> baseline commit sha for
                                           cargo-semver-checks (--baseline-rev).
-      - Get-PackagesWithUnreleasedChanges -> which packages have unreleased
-                                          modifications under crates/<folder>/.
+      - Get-PackageUnreleasedChangeFiles -> exact paths changed under
+                                           crates/<folder>/.
 
     Version-bump arithmetic, cascade resolution, change-type classification, and
     all file writes are intentionally NOT done here -- those belong to the skill
@@ -79,8 +79,7 @@ if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
 }
 
 $packages = @(Get-WorkspacePackages -repoRoot $RepoRoot)
-$modified = Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
-$workspaceModified = Get-PackagesWithUnreleasedChanges `
+$workspaceModifiedFiles = Get-PackageUnreleasedChangeFiles `
     -RepoRoot $RepoRoot `
     -IncludeUnpublished
 
@@ -218,9 +217,19 @@ $factPackages = foreach ($package in $packages) {
         # pre-publication churn as breaking. The release skill's Step 3 branches on
         # this fact.
         everReleased      = [bool](Invoke-Git -Arguments @('tag', '--list', "$($package.Name)-v*") -RepoRoot $RepoRoot)
-        modified          = $modified.ContainsKey($package.Folder)
-        modifiedFileCount = if ($modified.ContainsKey($package.Folder)) { [int]$modified[$package.Folder] } else { 0 }
-        workspaceModified = $workspaceModified.ContainsKey($package.Folder)
+        modified          = [bool]$package.Published -and
+            $workspaceModifiedFiles.ContainsKey($package.Folder)
+        modifiedFiles     = if ($workspaceModifiedFiles.ContainsKey($package.Folder)) {
+            @($workspaceModifiedFiles[$package.Folder])
+        } else {
+            @()
+        }
+        modifiedFileCount = if ($workspaceModifiedFiles.ContainsKey($package.Folder)) {
+            @($workspaceModifiedFiles[$package.Folder]).Count
+        } else {
+            0
+        }
+        workspaceModified = $workspaceModifiedFiles.ContainsKey($package.Folder)
     }
 }
 
@@ -242,7 +251,7 @@ foreach ($dependent in $factPackages) {
 }
 
 [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     repoRoot = $RepoRoot
     baseRef  = $BaseRef
     packages = @($factPackages)
