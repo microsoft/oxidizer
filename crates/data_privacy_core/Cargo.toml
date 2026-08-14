@@ -33,6 +33,7 @@ serde_core = { workspace = true, optional = true, default-features = false, feat
 [dev-dependencies]
 insta.workspace = true
 mutants.workspace = true
+serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 
 # >>> anvil-managed: anvil-lints

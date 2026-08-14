@@ -45,7 +45,7 @@ loom = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-allocator-api2 = { workspace = true, features = ["alloc"] }
+allocator-api2 = { workspace = true, features = ["alloc", "std"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 infinity_pool = { workspace = true }

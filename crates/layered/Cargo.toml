@@ -41,6 +41,7 @@ criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
+plurality = { path = "../plurality" }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }
