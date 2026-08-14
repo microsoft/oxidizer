@@ -325,7 +325,7 @@ fn u64_counter_preserves_values_above_i64_max() {
     // A metric value field is not a dimension, so read it back off the
     // instrument. Folding `u64` into `I64` would have wrapped this to -1.
     let recorded = processor.single_event().field_metrics()[0].value();
-    assert!(recorded > 1.8e19, "u64::MAX must not be truncated through i64, got {recorded}",);
+    assert!(recorded > 1.8e19, "u64::MAX must not be truncated through i64, got {recorded}");
 }
 
 /// Every integer width `Value` accepts round-trips through a gauge.

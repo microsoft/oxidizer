@@ -668,6 +668,9 @@ callsites
 callsite's
 Callgrind
 matcher
+matchers
+stringified
+stringifying
 AST
 WinHTTP
 ALPN
