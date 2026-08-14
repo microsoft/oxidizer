@@ -52,7 +52,7 @@ mod linux {
     // Mirrors the payload used by the criterion counterpart so the two files
     // measure the same object.
     #[derive(Debug)]
-    pub struct Payload {
+    pub(crate) struct Payload {
         id: u64,
     }
 

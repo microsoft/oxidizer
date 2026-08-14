@@ -166,18 +166,18 @@ fn bench_miss_path(c: &mut Criterion) {
 /// the controller releases `start`, every worker performs exactly the requested
 /// number of relocations, and `end` releases once they are all done.
 ///
-/// Each worker times its own loop and the round reports the mean of those
-/// durations. Reporting the slowest worker instead would measure how the
-/// operating system happened to schedule an oversubscribed machine rather than
-/// the cost of the operation. The mean also matches how `par_bench` reports the
-/// `handoff` group, so the two multithreaded groups are on the same scale.
+/// Each worker times its own loop and the round reports the median of those
+/// durations. Timing the round from the controller would instead measure how
+/// the operating system happened to schedule an oversubscribed machine, and the
+/// mean would let a single descheduled worker move the whole sample. The median
+/// is on the same scale as how `par_bench` reports the `handoff` group: cost per
+/// relocation as seen by one participating thread.
 struct RelocationStorm {
     start: sync::Arc<Barrier>,
     end: sync::Arc<Barrier>,
     iterations: sync::Arc<AtomicU64>,
-    elapsed_nanos: sync::Arc<AtomicU64>,
+    elapsed_nanos: sync::Arc<Mutex<Vec<u64>>>,
     shutdown: sync::Arc<AtomicBool>,
-    thread_count: u64,
     workers: Vec<JoinHandle<()>>,
 }
 
@@ -189,7 +189,7 @@ impl RelocationStorm {
         let start = sync::Arc::new(Barrier::new(thread_count.saturating_add(1)));
         let end = sync::Arc::new(Barrier::new(thread_count.saturating_add(1)));
         let iterations = sync::Arc::new(AtomicU64::new(0));
-        let elapsed_nanos = sync::Arc::new(AtomicU64::new(0));
+        let elapsed_nanos = sync::Arc::new(Mutex::new(Vec::with_capacity(thread_count)));
         let shutdown = sync::Arc::new(AtomicBool::new(false));
 
         let workers = affinities
@@ -224,7 +224,7 @@ impl RelocationStorm {
                         }
 
                         let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-                        elapsed_nanos.fetch_add(elapsed, Ordering::Relaxed);
+                        elapsed_nanos.lock().unwrap().push(elapsed);
 
                         end.wait();
                     }
@@ -238,23 +238,25 @@ impl RelocationStorm {
             iterations,
             elapsed_nanos,
             shutdown,
-            thread_count: u64::try_from(thread_count).expect("benchmark thread counts fit in u64"),
             workers,
         }
     }
 
     /// Runs one round in which every worker performs `iterations` relocations.
     ///
-    /// The returned duration is the mean over workers, so dividing by the
+    /// The returned duration is the median over workers, so dividing by the
     /// iteration count yields the per-relocation cost under full contention.
     fn run(&self, iterations: u64) -> Duration {
         self.iterations.store(iterations, Ordering::Release);
-        self.elapsed_nanos.store(0, Ordering::Release);
+        self.elapsed_nanos.lock().unwrap().clear();
 
         self.start.wait();
         self.end.wait();
 
-        Duration::from_nanos(self.elapsed_nanos.load(Ordering::Acquire) / self.thread_count)
+        let mut samples = self.elapsed_nanos.lock().unwrap();
+        samples.sort_unstable();
+
+        Duration::from_nanos(samples[samples.len() / 2])
     }
 }
 
