@@ -9,6 +9,7 @@
 
 use proc_macro2::{Delimiter, Spacing, TokenTree};
 use syn::buffer::Cursor;
+use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Data, DeriveInput, Expr, Fields, Index, Member, Meta, Token, Type};
@@ -104,20 +105,7 @@ struct FromEntry(FromAttr);
 
 impl Parse for FromEntry {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        // The type is collected token by token rather than handed straight to `Type::parse`,
-        // because a following `(kind: ...)` group is not a parenthesized generic argument list and
-        // would make that parse fail. A parenthesis group that holds no `key: value` pair is part
-        // of the type instead — a tuple, or a function's parameter list — so it is collected.
-        let mut tokens = proc_macro2::TokenStream::new();
-        while !input.is_empty() && !input.peek(Token![,]) && !holds_overrides(input) {
-            tokens.extend(std::iter::once(input.parse::<TokenTree>()?));
-        }
-
-        if tokens.is_empty() {
-            return Err(input.error("expected a type"));
-        }
-
-        let source = syn::parse2::<Type>(tokens)?;
+        let source = source_type(input)?;
 
         let overrides = if input.peek(syn::token::Paren) {
             let content;
@@ -132,6 +120,35 @@ impl Parse for FromEntry {
 
         Ok(Self(FromAttr { source, overrides }))
     }
+}
+
+/// The source type of one `#[from(...)]` entry.
+///
+/// `syn` decides where the type ends, so a generic argument list keeps its commas and a type macro
+/// keeps its parentheses. It cannot decide when a `(member: expression)` override list follows a
+/// plain path, because that group reads as a parenthesized generic argument list and fails to
+/// parse; the type is then collected token by token up to the override list.
+fn source_type(input: ParseStream<'_>) -> syn::Result<Type> {
+    if !holds_overrides(input) {
+        let speculative = input.fork();
+        if let Ok(source) = speculative.parse::<Type>()
+            && (speculative.is_empty() || speculative.peek(Token![,]) || holds_overrides(&speculative))
+        {
+            input.advance_to(&speculative);
+            return Ok(source);
+        }
+    }
+
+    let mut tokens = proc_macro2::TokenStream::new();
+    while !input.is_empty() && !input.peek(Token![,]) && !holds_overrides(input) {
+        tokens.extend(std::iter::once(input.parse::<TokenTree>()?));
+    }
+
+    if tokens.is_empty() {
+        return Err(input.error("expected a type"));
+    }
+
+    syn::parse2::<Type>(tokens)
 }
 
 /// Whether a parenthesis group opens at `input` and holds field overrides rather than type syntax.
@@ -462,12 +479,24 @@ mod tests {
             parse_quote! { #[from((u32, String))] struct T { inner: ohno::OhnoCore, } },
             parse_quote! { #[from(fn() -> std::io::Error)] struct T { inner: ohno::OhnoCore, } },
             parse_quote! { #[from(Box<dyn Fn() -> u8>)] struct T { inner: ohno::OhnoCore, } },
+            parse_quote! { #[from(error_type!(kind: io))] struct T { inner: ohno::OhnoCore, } },
         ] {
             let mut errors = Errors::default();
             let ast = parse(input, &mut errors).expect("the input parses");
             assert!(errors.is_empty(), "{}", errors.into_compile_error());
             assert_eq!(ast.conversions.len(), 1);
         }
+    }
+
+    #[test]
+    fn reads_a_source_type_carrying_several_generic_arguments() {
+        // A comma inside `<...>` separates generic arguments, not `#[from(...)]` entries.
+        let ast = parse_ok(parse_quote! {
+            #[from(PairError<u32, String>)]
+            struct T { inner: ohno::OhnoCore, }
+        });
+
+        assert_eq!(ast.conversions.len(), 1);
     }
 
     #[test]
