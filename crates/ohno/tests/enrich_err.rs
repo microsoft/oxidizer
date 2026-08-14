@@ -126,7 +126,7 @@ fn an_opaque_ok_type_is_supported() {
         Ok([1u8, 2].into_iter())
     }
 
-    assert_eq!(list(false).expect("a list").collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(list(false).unwrap().collect::<Vec<_>>(), vec![1, 2]);
 
     let Err(error) = list(true) else {
         panic!("an error");

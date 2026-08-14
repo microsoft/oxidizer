@@ -83,8 +83,6 @@ pub(crate) fn root(expr: &Expr) -> Root<'_> {
             Root::Name(..) => Root::Method,
             other => other,
         },
-        // A call rooted in a bare name is a method of `self`: `describe()` becomes
-        // `self.describe()`, which names no field.
         Expr::Index(inner) => root(&inner.expr),
         Expr::Binary(inner) => root(&inner.left),
         Expr::Cast(inner) => root(&inner.expr),
