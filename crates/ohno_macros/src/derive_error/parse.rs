@@ -7,9 +7,8 @@
 //! reported here and left out of the `Ast`, so validation has nothing to check for it and reports
 //! only faults it can actually see.
 
-use proc_macro2::{Delimiter, Spacing, TokenTree};
+use proc_macro2::{Delimiter, Spacing};
 use syn::buffer::Cursor;
-use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Data, DeriveInput, Expr, Fields, Index, Member, Meta, Token, Type};
@@ -124,31 +123,16 @@ impl Parse for FromEntry {
 
 /// The source type of one `#[from(...)]` entry.
 ///
-/// `syn` decides where the type ends, so a generic argument list keeps its commas and a type macro
-/// keeps its parentheses. It cannot decide when a `(member: expression)` override list follows a
-/// plain path, because that group reads as a parenthesized generic argument list and fails to
-/// parse; the type is then collected token by token up to the override list.
+/// `syn` decides where the type ends, so a generic argument list keeps its commas, a type macro
+/// keeps its parentheses, and a following `(member: expression)` override list is left for the
+/// caller. Only an entry that opens with that override list has to be rejected here, because a
+/// type is what an entry has to start with.
 fn source_type(input: ParseStream<'_>) -> syn::Result<Type> {
-    if !holds_overrides(input) {
-        let speculative = input.fork();
-        if let Ok(source) = speculative.parse::<Type>()
-            && (speculative.is_empty() || speculative.peek(Token![,]) || holds_overrides(&speculative))
-        {
-            input.advance_to(&speculative);
-            return Ok(source);
-        }
-    }
-
-    let mut tokens = proc_macro2::TokenStream::new();
-    while !input.is_empty() && !input.peek(Token![,]) && !holds_overrides(input) {
-        tokens.extend(std::iter::once(input.parse::<TokenTree>()?));
-    }
-
-    if tokens.is_empty() {
+    if holds_overrides(input) {
         return Err(input.error("expected a type"));
     }
 
-    syn::parse2::<Type>(tokens)
+    input.parse::<Type>()
 }
 
 /// Whether a parenthesis group opens at `input` and holds field overrides rather than type syntax.
