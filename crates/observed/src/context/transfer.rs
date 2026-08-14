@@ -106,31 +106,28 @@ impl Transfer {
     /// the type system: dropping it restores *the current thread's* slot heads,
     /// so a guard dropped on another thread would wipe that thread's live
     /// enrichment and strand the entries it applied on the origin thread.
-    #[must_use]
-    pub fn apply_current_thread(&self) -> impl Drop {
+    #[must_use = "the enrichment is removed as soon as the returned guard is dropped"]
+    pub fn apply_current_thread(&self) -> impl Sized {
         ThreadBoundGuard {
-            guard: Some(self.enrichment.apply()),
+            _guard: self.enrichment.apply(),
             _not_send: PhantomData,
         }
     }
 }
 
-/// Restores the thread-local enrichment chain on drop.
+/// Holds an applied enrichment guard, and nothing else.
 ///
-/// Wraps the enrichment guard purely to make it `!Send`: the restore is
-/// expressed against whichever thread the drop runs on, so the guard is only
-/// meaningful on the thread that created it.
+/// This exists only to make the guard `!Send`: the restore is expressed against
+/// whichever thread the drop runs on, so the guard is meaningful only on the
+/// thread that created it.
+///
+/// It deliberately has **no `Drop` impl of its own**. Dropping the wrapper drops
+/// the inner [`Guard`], whose own `Drop` pops each captured slot back to its
+/// prior head; a wrapper `Drop` could only repeat what field-drop order already
+/// guarantees, so it would be unobservable code.
 struct ThreadBoundGuard {
-    guard: Option<Guard>,
+    /// Restores the enrichment chain via its own `Drop`; never read.
+    _guard: Guard,
     /// `Rc` is neither `Send` nor `Sync`, which is inherited by this struct.
     _not_send: PhantomData<Rc<()>>,
-}
-
-impl Drop for ThreadBoundGuard {
-    fn drop(&mut self) {
-        // Dropping the inner guard is what pops each captured slot back to its
-        // prior head; do it explicitly so the restore is not left implicit in
-        // field-drop order.
-        drop(self.guard.take());
-    }
 }
