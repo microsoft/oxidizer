@@ -67,9 +67,11 @@ pub(crate) fn root(expr: &Expr) -> Root<'_> {
             }
         }
         Expr::Lit(literal) => match &literal.lit {
-            Lit::Int(value) => Root::Index(value.base10_digits().to_owned(), expr),
+            // A suffix is not part of a tuple index, so a suffixed literal names no field:
+            // `self.0u8` does not parse.
+            Lit::Int(value) if value.suffix().is_empty() => Root::Index(value.base10_digits().to_owned(), expr),
             // `0.1` is a nested tuple access, and only its leading component names a field.
-            Lit::Float(value) => value
+            Lit::Float(value) if value.suffix().is_empty() => value
                 .base10_digits()
                 .split_once('.')
                 .map_or(Root::Unsupported, |(leading, _)| Root::Index(leading.to_owned(), expr)),
@@ -142,6 +144,23 @@ mod tests {
     fn a_float_literal_is_a_nested_tuple_access() {
         assert_eq!(root_name(&parse_quote!(0.1)).as_deref(), Some("0"));
         assert_eq!(root_name(&parse_quote!(2.0)).as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_suffixed_numeric_literal_is_not_a_tuple_field() {
+        // A suffix is not part of a tuple index, and `base10_digits` drops it, so accepting one
+        // would validate against a field the expansion never reaches: `self.0u8` does not parse.
+        let expressions: Vec<Expr> = vec![
+            parse_quote!(0u8),
+            parse_quote!(1usize.abs()),
+            parse_quote!(0.1f32),
+            parse_quote!(2.0f64),
+        ];
+
+        for expr in &expressions {
+            let rendered = quote::quote!(#expr).to_string();
+            assert!(matches!(root(expr), Root::Unsupported), "expected unsupported: {rendered}");
+        }
     }
 
     #[test]

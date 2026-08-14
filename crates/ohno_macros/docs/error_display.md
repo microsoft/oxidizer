@@ -40,9 +40,10 @@ name a field, or call a method of `self`: `count * 2` is rooted at `count`,
 anywhere else — a constant, an associated function, a string literal — reaches
 nothing on `self` and is rejected.
 
-A numeric literal is the exception, because that is how a tuple field is named.
-`0` is a field root, so `{0}` and `0.abs()` are both rooted at field `0`, and a
-float root is read as nested tuple access (see below).
+An unsuffixed numeric literal is the exception, because that is how a tuple field
+is named. `0` is a field root, so `{0}` and `0.abs()` are both rooted at field
+`0`, and a float root is read as nested tuple access (see below). A suffix is not
+part of a tuple index, so `0u8` is rooted nowhere and is rejected.
 
 The operator applies to the field's value, not to a reference to it, so
 `count as u64` casts the field and `count * 2` uses the value's `Mul`.
