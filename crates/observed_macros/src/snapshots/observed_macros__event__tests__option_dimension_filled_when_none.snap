@@ -23,20 +23,23 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "region",
                     ::core::option::Option::None,
-                    ::core::option::Option::Some(MetricFieldEntry::dimension("region")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::dimension("region"),
+                    ),
                 );
                 match self.region.as_ref() {
                     ::core::option::Option::Some(__val) => {
-                        visitor(&FIELD_DESC, &|_engine| Value::from(__val.clone()))?;
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from(__val.clone()),
+                        )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| Value::from("n/a"))?;
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
                     }
                 }
             }

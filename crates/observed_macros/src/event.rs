@@ -15,6 +15,7 @@
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
+use syn::ext::IdentExt as _;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Error, Field, Fields, Generics, Ident, ItemStruct, LitStr, Meta, Result, Token};
@@ -245,9 +246,13 @@ struct FieldDef {
 impl FieldDef {
     /// Returns the field's log key, or `None` when the field is excluded from
     /// the log signal. A field is logged under its own name by default.
+    ///
+    /// The name is unraw-ed, so a field written as `r#type` is logged under the
+    /// domain key `type` rather than leaking Rust's raw-identifier escape into
+    /// telemetry.
     fn log_key(&self) -> Option<String> {
         match &self.log {
-            LogRouting::Default => Some(self.ident.to_string()),
+            LogRouting::Default => Some(self.ident.unraw().to_string()),
             LogRouting::Rename(name) => Some(name.clone()),
             LogRouting::Exclude => None,
         }
@@ -935,8 +940,6 @@ fn generate_event_impl(def: &EventDef) -> TokenStream {
                     &self,
                     visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
                 ) -> ::core::ops::ControlFlow<()> {
-                    use ::observed::Value;
-                    use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
                     #visit_fields_body
                     ::core::ops::ControlFlow::Continue(())
                 }
@@ -952,12 +955,14 @@ fn generate_visit_fields_body(fields: &[FieldDef], has_log: bool) -> TokenStream
 
 fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     let field_ident = &field.ident;
-    let default_key = field.ident.to_string();
+    // Unraw-ed so a field written as `r#type` is exported under the domain key
+    // `type`; `field_ident` keeps the raw form because it addresses the field.
+    let default_key = field.ident.unraw().to_string();
 
     // Log routing
     let log_key = if has_log { field.log_key() } else { None };
     let log_entry = if let Some(key) = &log_key {
-        quote! { ::core::option::Option::Some(LogFieldEntry::new(#key)) }
+        quote! { ::core::option::Option::Some(::observed::metadata::LogFieldEntry::new(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -969,7 +974,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
         let description = decl.description.as_deref().unwrap_or("");
         let unit = decl.unit.as_deref().unwrap_or("");
         quote! {
-            ::core::option::Option::Some(MetricFieldEntry::instrument(
+            ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::instrument(
                 #default_key,
                 ::observed::metadata::MetricDescription::new(
                     #name,
@@ -980,7 +985,7 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
             ))
         }
     } else if let Some(key) = field.metric_dimension.resolve_key(&default_key) {
-        quote! { ::core::option::Option::Some(MetricFieldEntry::dimension(#key)) }
+        quote! { ::core::option::Option::Some(::observed::metadata::MetricFieldEntry::dimension(#key)) }
     } else {
         quote! { ::core::option::Option::None }
     };
@@ -992,8 +997,8 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     }
 
     let field_desc = quote! {
-        const FIELD_DESC: FieldDescriptor =
-            FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
+        const FIELD_DESC: ::observed::metadata::FieldDescriptor =
+            ::observed::metadata::FieldDescriptor::new(#default_key, #log_entry, #metric_entry);
     };
 
     // `Option<T>` fields dispatch on `#[if_none(...)]`: a `None` value is
@@ -1026,7 +1031,11 @@ fn generate_field_visit(field: &FieldDef, has_log: bool) -> TokenStream {
     }
 }
 
-/// Builds the `Value::…` expression for a field value.
+/// Builds the `::observed::Value::…` expression for a field value.
+///
+/// All generated paths are fully qualified: the consumer's `#[data_class(...)]`
+/// expression is interpolated into this output, so importing `Value` here would
+/// shadow a consumer type of the same name and break otherwise valid input.
 ///
 /// `owned` are tokens evaluating to an owned `T` (for the `Into<Value>` path);
 /// `by_ref` are tokens evaluating to `&T` (for both redaction paths); `engine`
@@ -1044,20 +1053,20 @@ fn value_expr(
         // A borrowed `&str` cannot be stored by reference, so the macro spells
         // out the copy that `Value` has no `From<&str>` impl to hide.
         FieldRedaction::Unredacted if borrowed_str => {
-            quote! { Value::from(::std::sync::Arc::<str>::from(#by_ref)) }
+            quote! { ::observed::Value::from(::std::sync::Arc::<str>::from(#by_ref)) }
         }
-        FieldRedaction::Unredacted => quote! { Value::from(#owned) },
+        FieldRedaction::Unredacted => quote! { ::observed::Value::from(#owned) },
         // `Sensitive<T>` is `RedactedDisplay` whenever `T: Display`, and a
         // reference to a `Display` type is itself `Display`, so the classified
         // value can be borrowed rather than cloned. `from_redacted` only
         // borrows the temporary `Sensitive`, so nothing needs to own the value.
         FieldRedaction::DataClass(expr) => quote! {
-            Value::from_redacted(
+            ::observed::Value::from_redacted(
                 &::observed::__private::Sensitive::new(#by_ref, #expr),
                 #engine)
         },
         FieldRedaction::Default => quote! {
-            Value::from_redacted(#by_ref, #engine)
+            ::observed::Value::from_redacted(#by_ref, #engine)
         },
     }
 }
@@ -1103,7 +1112,7 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
                         visitor(&FIELD_DESC, &|_engine| #some_value )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| Value::from(#placeholder))?;
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from(#placeholder))?;
                     }
                 }
             }

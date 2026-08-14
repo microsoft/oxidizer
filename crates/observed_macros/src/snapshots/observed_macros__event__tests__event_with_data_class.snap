@@ -22,17 +22,17 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "username",
-                    ::core::option::Option::Some(LogFieldEntry::new("username")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("username"),
+                    ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|engine| Value::from_redacted(
+                    &|engine| ::observed::Value::from_redacted(
                         &::observed::__private::Sensitive::new(
                             &self.username,
                             DataTaxonomy::Euii,
@@ -42,12 +42,14 @@ const _: () = {
                 )?;
             }
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "status",
-                    ::core::option::Option::Some(LogFieldEntry::new("status")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
                     ::core::option::Option::None,
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.status.clone()))?;
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

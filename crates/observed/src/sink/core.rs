@@ -311,16 +311,22 @@ impl Sink {
             return;
         }
 
-        let Some(_guard) = super::try_acquire_reentrancy_guard() else {
-            return;
-        };
-
         let description = state.description();
         if !self.is_interested_in(&description) {
             return;
         }
 
+        // Build the event value BEFORE taking the reentrancy guard. `evaluate`
+        // runs ordinary user code - a field initializer may call a helper that
+        // legitimately emits telemetry of its own, often to an unrelated sink.
+        // The hazard the guard exists for starts when processors run, so
+        // holding it across construction would silently drop that telemetry.
         let event = state.evaluate();
+
+        let Some(_guard) = super::try_acquire_reentrancy_guard() else {
+            return;
+        };
+
         self.dispatch_to_processors(&event, &description);
     }
 
@@ -339,7 +345,7 @@ impl Sink {
     /// sink, delegates dispatch to each child leaf so every leaf constructs its
     /// own `EventView` rooted at itself (which walks its own enrichment slot).
     ///
-    /// The reentrancy guard acquired in [`Sink::emit`] is held across all
+    /// The reentrancy guard acquired in [`Sink::emit_impl`] is held across all
     /// sibling dispatches, so composites safely iterate children without the
     /// guard falsely tripping.
     fn dispatch_to_processors(&self, event: &dyn DynEvent, description: &EventDescription) {

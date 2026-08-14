@@ -22,8 +22,6 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             ::core::ops::ControlFlow::Continue(())
         }
     }

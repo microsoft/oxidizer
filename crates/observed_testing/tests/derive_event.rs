@@ -16,7 +16,7 @@ use std::ops::ControlFlow;
 use observed::metadata::InstrumentKind;
 use observed::{Event, Severity, Value, event};
 use observed_testing::types::{PiiString, PublicString};
-use observed_testing::{ExpectedEventDescription, passthrough_redaction_engine};
+use observed_testing::{ExpectedEventDescription, MicrosoftEnterpriseDataTaxonomy, passthrough_redaction_engine};
 
 /// Collected field entry from `visit_fields`.
 struct CollectedField {
@@ -939,4 +939,69 @@ fn parenthesized_reference_to_redactable_type() {
             },
         ],
     );
+}
+
+// ================================================================================================
+// Generated-code hygiene
+// ================================================================================================
+
+/// A field written with a raw identifier is exported under its domain key.
+///
+/// `Ident::to_string` preserves Rust's `r#` escape, so deriving the default key
+/// from it would leak a language detail into telemetry as `"r#type"`.
+#[test]
+fn raw_identifier_field_uses_its_plain_name() {
+    #[event("http.request")]
+    #[info]
+    struct RawIdentifierField {
+        #[unredacted]
+        r#type: i64,
+    }
+
+    let engine = passthrough_redaction_engine();
+    let fields = collect_fields(&RawIdentifierField { r#type: 1 }, &engine);
+
+    sort_and_compare(
+        &fields,
+        &[ExpectedField {
+            field_name: "type",
+            log_key: Some("type"),
+            metric_key: None,
+            value: Value::from(1_i64),
+        }],
+    );
+}
+
+/// A consumer type named `Value` must survive the expansion.
+///
+/// The `#[data_class(...)]` expression is interpolated into the generated
+/// `visit_fields` body, so importing `observed::Value` there would shadow a
+/// consumer type of the same name and reject otherwise valid input.
+#[test]
+fn consumer_type_named_value_is_not_shadowed() {
+    struct Value;
+
+    impl Value {
+        fn class() -> data_privacy::DataClass {
+            MicrosoftEnterpriseDataTaxonomy::Eupi.data_class()
+        }
+    }
+
+    #[event("hygiene.probe")]
+    #[info]
+    struct HygieneProbe {
+        #[data_class(Value::class())]
+        user: PublicString,
+    }
+
+    let engine = passthrough_redaction_engine();
+    let fields = collect_fields(
+        &HygieneProbe {
+            user: PublicString("alice".into()),
+        },
+        &engine,
+    );
+
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].field_name, "user");
 }

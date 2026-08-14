@@ -22,34 +22,36 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "method",
-                    ::core::option::Option::Some(LogFieldEntry::new("method")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("method"),
+                    ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.method, engine),
+                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
                 )?;
             }
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "user_agent",
-                    ::core::option::Option::Some(LogFieldEntry::new("user_agent")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("user_agent"),
+                    ),
                     ::core::option::Option::None,
                 );
                 match self.user_agent.as_ref() {
                     ::core::option::Option::Some(__val) => {
                         visitor(
                             &FIELD_DESC,
-                            &|_engine| Value::from_redacted(__val, _engine),
+                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
                         )?;
                     }
                     ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| Value::from("unknown"))?;
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("unknown"))?;
                     }
                 }
             }

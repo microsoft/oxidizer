@@ -22,15 +22,18 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "internal_flag",
-                    ::core::option::Option::Some(LogFieldEntry::new("internal_flag")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("internal_flag"),
+                    ),
                     ::core::option::Option::None,
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.internal_flag.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.internal_flag.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

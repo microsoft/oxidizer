@@ -355,3 +355,21 @@ fn entry_order_is_preserved_and_duplicate_keys_are_kept() {
         .collect();
     assert_eq!(tenants, [Some(1.0), Some(2.0)]);
 }
+
+/// A field written with a raw identifier is exported under its domain key.
+///
+/// `Ident::to_string` preserves Rust's `r#` escape, so deriving the default key
+/// from it would leak a language detail into telemetry as `"r#type"`.
+#[test]
+fn raw_identifier_entry_uses_its_plain_name() {
+    #[derive(Debug, Enrichment)]
+    struct RawIdentifierCtx {
+        #[unredacted]
+        r#type: i64,
+    }
+
+    let entries = RawIdentifierCtx { r#type: 1 }.into_entries();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0], ExpectedEnrichmentEntry::new("type", 1i64));
+}

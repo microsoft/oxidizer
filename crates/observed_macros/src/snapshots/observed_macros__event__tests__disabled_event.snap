@@ -22,24 +22,27 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "queue_depth",
-                    ::core::option::Option::Some(LogFieldEntry::new("queue_depth")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("queue_depth"),
+                    ),
                     ::core::option::Option::None,
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.queue_depth.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.queue_depth.clone()),
+                )?;
             }
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "queue_depth_metric",
                     ::core::option::Option::Some(
-                        LogFieldEntry::new("queue_depth_metric"),
+                        ::observed::metadata::LogFieldEntry::new("queue_depth_metric"),
                     ),
                     ::core::option::Option::Some(
-                        MetricFieldEntry::instrument(
+                        ::observed::metadata::MetricFieldEntry::instrument(
                             "queue_depth_metric",
                             ::observed::metadata::MetricDescription::new(
                                 "debug.queue_depth",
@@ -50,7 +53,10 @@ const _: () = {
                         ),
                     ),
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.queue_depth_metric.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.queue_depth_metric.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

@@ -28,15 +28,15 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "value",
-                    ::core::option::Option::Some(LogFieldEntry::new("value")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("value"),
+                    ),
                     ::core::option::Option::None,
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.value.clone()))?;
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.value.clone()))?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

@@ -33,6 +33,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::ext::IdentExt as _;
 use syn::{Data, DeriveInput, Error, Field, Fields, Generics, Ident, Result};
 
 use crate::field_attrs::{FieldRedaction, IfNone, LogRouting, SharedFieldAttrs, is_borrowed_str, option_inner_type};
@@ -174,7 +175,9 @@ fn generate_enrichment_impl(def: &EnrichmentDef) -> TokenStream {
 /// a placeholder string (default `"n/a"`).
 fn generate_entry_stmt(field: &EnrichmentFieldDef) -> TokenStream {
     let field_ident = &field.ident;
-    let own_name = field.ident.to_string();
+    // Unraw-ed so a field written as `r#type` is exported under the domain key
+    // `type`; `field_ident` keeps the raw form because it addresses the field.
+    let own_name = field.ident.unraw().to_string();
     let redaction = field.shared.redaction.as_ref().unwrap_or(&FieldRedaction::Default);
 
     // The unified `#[dimension(...)]` attribute controls both the log key /

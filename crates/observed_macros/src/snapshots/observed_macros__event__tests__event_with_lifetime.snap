@@ -24,17 +24,19 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "message",
-                    ::core::option::Option::Some(LogFieldEntry::new("message")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("message"),
+                    ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|_| Value::from(::std::sync::Arc::<str>::from(self.message)),
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.message),
+                    ),
                 )?;
             }
             ::core::ops::ControlFlow::Continue(())

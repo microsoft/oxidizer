@@ -9,7 +9,7 @@
 //! - Source location capture
 //! - Zero-cost when inactive (noop sink)
 
-use observed::{Severity, Sink, emit, event};
+use observed::{Severity, Sink, SinkId, emit, event};
 use observed_testing::events::ProbeEvent;
 use observed_testing::types::{PiiString, PublicBool, PublicI64, PublicString};
 use observed_testing::{ExpectedEvent, TEST_ID, test_emitter};
@@ -304,5 +304,37 @@ fn borrowed_classified_fields() {
             .dimension("label", "click")
             .dimension("name", "alice")
             .log(),
+    );
+}
+
+// ================================================================================================
+// Reentrancy guard scope: event construction is not part of an "emission in progress"
+// ================================================================================================
+
+/// Telemetry emitted while an event's fields are being built must still reach
+/// its own sink.
+///
+/// The reentrancy guard exists to stop a *processor* re-entering the pipeline.
+/// A field initializer is ordinary user code that may call a helper which emits
+/// telemetry of its own, so the guard is taken only for processor dispatch --
+/// taking it earlier would silently drop that helper's events, even when they
+/// target a completely unrelated sink.
+#[test]
+fn helper_telemetry_during_field_initialization_is_not_dropped() {
+    fn compute_value(helper: &Sink) -> i64 {
+        emit!(helper, ProbeEvent::new(1));
+        7
+    }
+
+    let (outer, outer_processor) = test_emitter(TEST_ID);
+    let (helper, helper_processor) = test_emitter(SinkId::new("helper"));
+
+    emit!(outer, ProbeEvent::new(compute_value(&helper)));
+
+    assert_eq!(outer_processor.len(), 1, "the outer event itself was dropped");
+    assert_eq!(
+        helper_processor.len(),
+        1,
+        "telemetry emitted while building the outer event's fields was dropped",
     );
 }

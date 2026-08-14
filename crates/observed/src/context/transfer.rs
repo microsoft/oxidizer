@@ -4,9 +4,11 @@
 //! Captured enrichment context that can cross a thread or task boundary.
 
 use std::any::type_name;
+use std::marker::PhantomData;
+use std::rc::Rc;
 
 use crate::SinkId;
-use crate::enrichment::{Enrichment, EnrichmentTransfer};
+use crate::enrichment::{Enrichment, EnrichmentTransfer, Guard};
 
 /// Captured sink context (enrichment) for cross-thread transfer.
 ///
@@ -99,8 +101,36 @@ impl Transfer {
     /// [`EnrichFutureExt::attach`](crate::enrichment::EnrichFutureExt::attach),
     /// which re-applies the transfer on each poll and drops the guard before the
     /// future yields.
+    ///
+    /// The returned guard is `!Send` so that this thread-affinity is enforced by
+    /// the type system: dropping it restores *the current thread's* slot heads,
+    /// so a guard dropped on another thread would wipe that thread's live
+    /// enrichment and strand the entries it applied on the origin thread.
     #[must_use]
     pub fn apply_current_thread(&self) -> impl Drop {
-        self.enrichment.apply()
+        ThreadBoundGuard {
+            guard: Some(self.enrichment.apply()),
+            _not_send: PhantomData,
+        }
+    }
+}
+
+/// Restores the thread-local enrichment chain on drop.
+///
+/// Wraps the enrichment guard purely to make it `!Send`: the restore is
+/// expressed against whichever thread the drop runs on, so the guard is only
+/// meaningful on the thread that created it.
+struct ThreadBoundGuard {
+    guard: Option<Guard>,
+    /// `Rc` is neither `Send` nor `Sync`, which is inherited by this struct.
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl Drop for ThreadBoundGuard {
+    fn drop(&mut self) {
+        // Dropping the inner guard is what pops each captured slot back to its
+        // prior head; do it explicitly so the restore is not left implicit in
+        // field-drop order.
+        drop(self.guard.take());
     }
 }

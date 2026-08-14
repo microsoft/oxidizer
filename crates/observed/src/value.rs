@@ -63,20 +63,34 @@ impl Value {
     ///
     /// This is the only way to turn a classified value into a `Value`, and it
     /// is what the derive macros generate for a classified field.
+    ///
+    /// A [`RedactedDisplay`](data_privacy::RedactedDisplay) implementation that
+    /// fails part-way through has already written an unknown prefix of its
+    /// output. That prefix was never approved by the redactor, so exporting it
+    /// could widen what reaches telemetry; a failed redaction therefore yields
+    /// the erased (empty) value rather than the partial text.
     pub fn from_redacted(value: &(impl data_privacy::RedactedDisplay + ?Sized), engine: &data_privacy::RedactionEngine) -> Self {
         let rendered = fmt::from_fn(|f| data_privacy::RedactedDisplay::fmt(value, engine, f));
 
         REDACTION_BUFFER.with(|cell| {
             // A `RedactedDisplay` impl may emit an event of its own, re-entering
             // this function while the buffer is already borrowed. That is too
-            // rare to optimize for, but it must not panic.
+            // rare to optimize for, but it must not panic - which rules out
+            // `to_string`, since that panics when the impl returns an error.
             let Ok(mut buffer) = cell.try_borrow_mut() else {
-                return Self::String(Text::from(rendered.to_string()));
+                let mut scratch = String::new();
+                if write!(&mut scratch, "{rendered}").is_err() {
+                    scratch.clear();
+                }
+                return Self::String(Text::from(scratch));
             };
 
             buffer.clear();
-            // Writing to a `String` cannot fail and redaction is infallible.
-            _ = write!(&mut *buffer, "{rendered}");
+            // Writing to a `String` cannot itself fail, but the redaction it
+            // drives can. Discard whatever prefix was already emitted.
+            if write!(&mut *buffer, "{rendered}").is_err() {
+                buffer.clear();
+            }
 
             let text = if buffer.is_empty() {
                 // An erasing redactor writes nothing; no allocation can hold
@@ -352,6 +366,29 @@ mod tests {
             .build();
 
         assert_eq!(Value::from_redacted(&Reentrant, &engine), Value::String(Text::from("***")));
+    }
+
+    #[test]
+    fn from_redacted_erases_a_value_whose_redaction_fails() {
+        // A `RedactedDisplay` impl can fail after writing part of its output.
+        // That prefix was never approved by the redactor, so exporting it could
+        // widen what reaches telemetry: the value must be erased instead.
+        struct FailsMidway;
+
+        impl data_privacy::RedactedDisplay for FailsMidway {
+            fn fmt(&self, _redactor: &dyn data_privacy::Redactor, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("prefix-")?;
+                Err(fmt::Error)
+            }
+        }
+
+        let engine = data_privacy::RedactionEngine::builder()
+            .set_fallback_redactor(data_privacy::simple_redactor::SimpleRedactor::with_mode(
+                data_privacy::simple_redactor::SimpleRedactorMode::Passthrough,
+            ))
+            .build();
+
+        assert_eq!(Value::from_redacted(&FailsMidway, &engine), Value::String(Text::Static("")));
     }
 
     #[test]

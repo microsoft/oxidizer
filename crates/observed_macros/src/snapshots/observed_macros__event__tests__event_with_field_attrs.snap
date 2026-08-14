@@ -22,26 +22,31 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "request_id",
-                    ::core::option::Option::Some(LogFieldEntry::new("custom_key")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("custom_key"),
+                    ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.request_id, engine),
+                    &|engine| ::observed::Value::from_redacted(&self.request_id, engine),
                 )?;
             }
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "latency",
-                    ::core::option::Option::Some(LogFieldEntry::new("latency")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("latency"),
+                    ),
                     ::core::option::Option::None,
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.latency.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.latency.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

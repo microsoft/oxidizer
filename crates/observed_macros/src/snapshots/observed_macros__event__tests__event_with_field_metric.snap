@@ -22,47 +22,53 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "method",
-                    ::core::option::Option::Some(LogFieldEntry::new("method")),
-                    ::core::option::Option::None,
-                );
-                visitor(
-                    &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.method, engine),
-                )?;
-            }
-            {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
-                    "request_id",
-                    ::core::option::Option::Some(LogFieldEntry::new("request_id")),
-                    ::core::option::Option::None,
-                );
-                visitor(
-                    &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.request_id, engine),
-                )?;
-            }
-            {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
-                    "operation",
-                    ::core::option::Option::Some(LogFieldEntry::new("operation")),
-                    ::core::option::Option::None,
-                );
-                visitor(
-                    &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.operation, engine),
-                )?;
-            }
-            {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
-                    "duration",
-                    ::core::option::Option::Some(LogFieldEntry::new("duration")),
                     ::core::option::Option::Some(
-                        MetricFieldEntry::instrument(
+                        ::observed::metadata::LogFieldEntry::new("method"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "request_id",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("request_id"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.request_id, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "operation",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("operation"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.operation, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "duration",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("duration"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
                             "duration",
                             ::observed::metadata::MetricDescription::new(
                                 "request_duration",
@@ -73,7 +79,10 @@ const _: () = {
                         ),
                     ),
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.duration.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.duration.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

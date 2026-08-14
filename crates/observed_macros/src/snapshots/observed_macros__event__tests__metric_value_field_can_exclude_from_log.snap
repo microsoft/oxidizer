@@ -22,25 +22,25 @@ const _: () = {
             &self,
             visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
         ) -> ::core::ops::ControlFlow<()> {
-            use ::observed::Value;
-            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "method",
-                    ::core::option::Option::Some(LogFieldEntry::new("method")),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("method"),
+                    ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|engine| Value::from_redacted(&self.method, engine),
+                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
                 )?;
             }
             {
-                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
                     "duration",
                     ::core::option::Option::None,
                     ::core::option::Option::Some(
-                        MetricFieldEntry::instrument(
+                        ::observed::metadata::MetricFieldEntry::instrument(
                             "duration",
                             ::observed::metadata::MetricDescription::new(
                                 "outgoing_request",
@@ -51,7 +51,10 @@ const _: () = {
                         ),
                     ),
                 );
-                visitor(&FIELD_DESC, &|_| Value::from(self.duration.clone()))?;
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.duration.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }
