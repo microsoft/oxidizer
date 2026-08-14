@@ -1053,9 +1053,9 @@ dependencies = [
 
 [[package]]
 name = "cpulist"
-version = "1.1.5"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b10407054931040ddf211a3d04cc4b55de4dd7bc07f82e551ca3404e42306e69"
+checksum = "328c0b8c9cc1756ac8179a70ed4adab2ce7d317e9142a0db6d139b540fafdaff"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
@@ -2686,18 +2686,18 @@ dependencies = [
 
 [[package]]
 name = "many_cpus"
-version = "2.4.14"
+version = "2.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb678064d9bcb4b58d2e28a164617220387594b33d5fad5a83c40ff404fbb043"
+checksum = "7dfce02adde6c46611a4fad32f5cbfe296e710ecdec61ee2873a6076a22c14ae"
 dependencies = [
  "many_cpus_impl",
 ]
 
 [[package]]
 name = "many_cpus_impl"
-version = "2.4.14"
+version = "2.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec974d5be06ed7cba4bfbbe420117f1d103a6dea54fb65e83b016a5898c985e0"
+checksum = "8ed5dc92df5274d0f0c0b5bc8edbb1807acf8b5761267c8235987cc42d5bbd2d"
 dependencies = [
  "cpulist",
  "derive_more",
@@ -2900,9 +2900,9 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "new_zealand"
-version = "1.0.7"
+version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cf6121a4c6dd6898a645cfd54cb7d7fc4e537932afcbe1b39012d34e7b3c039"
+checksum = "6a1a6f5fd5c95c0c913af85fa74168f6bd49f467c3fd6b479521a2791101128f"
 
 [[package]]
 name = "nm"
@@ -3062,12 +3062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "oneshot"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfe21416a02c693fb9f980befcb230ecc70b0b3d1cc4abf88b9675c4c1457f0c"
-
-[[package]]
 name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3190,20 +3184,6 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "par_bench"
-version = "0.2.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdb8295d9f59bd3f8e75237efc15c13a8952aa9642e4bbfb3a7590069fb7fe0e"
-dependencies = [
- "criterion",
- "derive_more",
- "many_cpus",
- "new_zealand",
- "num-integer",
- "oneshot",
 ]
 
 [[package]]
@@ -4695,8 +4675,6 @@ dependencies = [
  "jiff",
  "many_cpus",
  "mutants",
- "new_zealand",
- "par_bench",
  "static_assertions",
  "thread_aware_macros",
  "uuid",
