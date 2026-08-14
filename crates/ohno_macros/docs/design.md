@@ -422,20 +422,28 @@ pub(crate) fn caused_by(
 **`From<T>`** is emitted once per `Conversion`, zipping `shape.data()` with
 `conversion.initializers()`, and building the core with `OhnoCore::from(error)`.
 The binding is named `error`, which is the name a field expression refers to.
-Each data initializer is bound to a local first, because it may borrow `error`
-while the core consumes it, and a struct literal evaluates its fields in the
-order they are written:
+The data initializers are evaluated into one tuple first, because they may
+borrow `error` while the core consumes it, and a struct literal evaluates its
+fields in the order they are written:
 
 ```rust
 impl #impl_generics ::core::convert::From<#source>
     for #ident #ty_generics #where_clause
 {
     fn from(error: #source) -> Self {
-        #(let #binding = #initializer;)*
-        Self { #(#member: #binding,)* #core: ::ohno::OhnoCore::from(error) }
+        let __ohno_fields = (#(#initializer,)*);
+        Self { #(#member: __ohno_fields.#index,)* #core: ::ohno::OhnoCore::from(error) }
     }
 }
 ```
+
+One tuple rather than one local per field. A generated name is not hygienic, so
+a local per field would be in scope while the next initializer is evaluated, and
+an initializer naming an outer item the derive happened to shadow would read the
+generated local instead — silently, or as an error in generated code when the
+outer item is a `const`, which turns the `let` into a pattern. The tuple's
+elements are all evaluated before its binding exists, so only the one name is
+ever in scope, and never during an initializer.
 
 Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
 itself, which declares `extern crate self as ohno`.

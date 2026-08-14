@@ -4,7 +4,7 @@
 //! The generated conversions: one `From<T>` per `#[from(...)]` entry, and `From<Infallible>`.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 
 use super::construct;
 use crate::derive_error::model::Model;
@@ -24,21 +24,20 @@ pub(crate) fn generate(model: &Model) -> TokenStream {
 /// One `From<T>`, building the core from the source error and every other field from its
 /// initializer.
 ///
-/// The data initializers are bound to locals first, because they may borrow `error` while the core
-/// consumes it, and a struct literal evaluates its fields in the order they are written.
+/// The data initializers are evaluated into a single tuple first, because they may borrow `error`
+/// while the core consumes it, and a struct literal evaluates its fields in the order they are
+/// written. One tuple rather than one local per field, so that no generated name is in scope while
+/// a later initializer is evaluated: an initializer naming an outer item cannot be captured by a
+/// binding the derive introduced.
 fn from_type(model: &Model, conversion: &crate::derive_error::model::Conversion) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
     let source = &conversion.source;
     let core_path = paths::ohno_core();
     let core_member = &model.shape.core().member;
-
-    let bindings: Vec<_> = (0..conversion.initializers().len())
-        .map(|index| format_ident!("__ohno_field_{index}"))
-        .collect();
     let values = conversion.initializers();
 
-    let mut data = bindings.iter();
+    let mut data = (0..values.len()).map(syn::Index::from);
     let initializers: Vec<TokenStream> = model
         .shape
         .all()
@@ -46,8 +45,8 @@ fn from_type(model: &Model, conversion: &crate::derive_error::model::Conversion)
             if field.member == *core_member {
                 quote!(#core_path::from(error))
             } else {
-                let binding = data.next().expect("one binding per non-core field");
-                quote!(#binding)
+                let index = data.next().expect("one tuple element per non-core field");
+                quote!(__ohno_fields.#index)
             }
         })
         .collect();
@@ -58,7 +57,7 @@ fn from_type(model: &Model, conversion: &crate::derive_error::model::Conversion)
         #[automatically_derived]
         impl #impl_generics ::core::convert::From<#source> for #ident #ty_generics #where_clause {
             fn from(error: #source) -> Self {
-                #(let #bindings = #values;)*
+                let __ohno_fields = (#(#values,)*);
                 #body
             }
         }

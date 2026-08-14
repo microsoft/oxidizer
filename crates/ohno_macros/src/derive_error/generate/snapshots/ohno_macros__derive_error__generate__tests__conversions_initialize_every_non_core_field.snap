@@ -72,9 +72,9 @@ impl MyError {
 #[automatically_derived]
 impl ::core::convert::From<std::io::Error> for MyError {
     fn from(error: std::io::Error) -> Self {
-        let __ohno_field_0 = error.kind();
+        let __ohno_fields = (error.kind(),);
         Self {
-            kind: __ohno_field_0,
+            kind: __ohno_fields.0,
             inner: ::ohno::OhnoCore::from(error),
         }
     }
@@ -82,9 +82,9 @@ impl ::core::convert::From<std::io::Error> for MyError {
 #[automatically_derived]
 impl ::core::convert::From<std::fmt::Error> for MyError {
     fn from(error: std::fmt::Error) -> Self {
-        let __ohno_field_0 = ::core::default::Default::default();
+        let __ohno_fields = (::core::default::Default::default(),);
         Self {
-            kind: __ohno_field_0,
+            kind: __ohno_fields.0,
             inner: ::ohno::OhnoCore::from(error),
         }
     }

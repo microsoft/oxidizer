@@ -89,9 +89,9 @@ impl T {
 #[automatically_derived]
 impl ::core::convert::From<std::io::Error> for T {
     fn from(error: std::io::Error) -> Self {
-        let __ohno_field_0 = ::core::default::Default::default();
+        let __ohno_fields = (::core::default::Default::default(),);
         Self {
-            path: __ohno_field_0,
+            path: __ohno_fields.0,
             inner: ::ohno::OhnoCore::from(error),
         }
     }

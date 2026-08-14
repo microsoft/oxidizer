@@ -113,3 +113,24 @@ fn test_from_attribute_generic_source_type() {
     assert_error_message!(generic_err, "pair error 7 and true");
     assert!(generic_err.note.is_empty());
 }
+
+#[test]
+fn test_from_attribute_initializer_reaches_an_outer_item() {
+    // The locals the derive binds initializers to must not shadow an item a later initializer
+    // names. `__ohno_field_0` is the name the first local would take.
+    #[expect(non_upper_case_globals, reason = "the name is what the test is about")]
+    const __ohno_field_0: u32 = 99;
+
+    #[derive(Error)]
+    #[from(std::io::Error(first: 1, second: __ohno_field_0))]
+    struct ShadowError {
+        first: u32,
+        second: u32,
+        inner: OhnoCore,
+    }
+
+    let shadow_err: ShadowError = std::io::Error::other("shadow").into();
+
+    assert_eq!(shadow_err.first, 1);
+    assert_eq!(shadow_err.second, 99);
+}
