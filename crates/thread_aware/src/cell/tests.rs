@@ -710,6 +710,74 @@ fn factory_closure_debug() {
 }
 
 #[test]
+fn concurrent_relocation_to_same_affinity_materializes_once() {
+    // Races many threads into the same empty destination slot to exercise both hit branches of
+    // the two-stage relocation lock: the shared-lock probe and the re-probe that follows the
+    // escalation to the exclusive lock.
+    // Ref: docs/implementation.md, "Relocation locking".
+
+    // Enough racers that the exclusive-lock queue is populated on any machine that can run more
+    // than a couple of threads, while staying cheap enough for a unit test.
+    const RACERS: usize = 8;
+
+    // Repeated because which stage a racer lands in is decided by the operating system
+    // scheduler; repetition makes it near-certain that both branches are taken across the run.
+    const ROUNDS: usize = 32;
+
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    for _ in 0..ROUNDS {
+        let origin = PerCore::new(Counter::new);
+        origin.increment_by(7);
+
+        let storage = sync::Arc::clone(&origin.storage);
+        let barrier = sync::Arc::new(sync::Barrier::new(RACERS.saturating_add(1)));
+
+        // Holding a shared guard lets every racer complete its probe and queue up on the
+        // exclusive lock before any of them can materialize the destination slot.
+        let shared_guard = storage.read().unwrap();
+
+        let mut racers = Vec::with_capacity(RACERS);
+
+        for _ in 0..RACERS {
+            let mut racer = origin.clone();
+            let barrier = sync::Arc::clone(&barrier);
+
+            racers.push(std::thread::spawn(move || {
+                barrier.wait();
+                racer.relocate(Some(source), destination);
+                racer.into_arc()
+            }));
+        }
+
+        barrier.wait();
+
+        // Bounded busy-work, not a timed wait: it gives the racers released above a chance to
+        // reach the exclusive lock while the shared guard still blocks them.
+        for _ in 0..10_000 {
+            std::hint::spin_loop();
+        }
+
+        drop(shared_guard);
+
+        let values = racers.into_iter().map(|racer| racer.join().unwrap()).collect::<Vec<_>>();
+        let (first, rest) = values.split_first().expect("RACERS is nonzero");
+
+        for other in rest {
+            assert!(
+                sync::Arc::ptr_eq(first, other),
+                "every racer must adopt the single value materialized for the destination affinity"
+            );
+        }
+
+        assert_eq!(first.value(), 0, "the destination value is freshly relocated, not the source value");
+        assert_eq!(origin.value(), 7, "the source value is left intact");
+    }
+}
+
+#[test]
 fn new_boxed_relocate() {
     // Exercises Ctor<T>::relocate (the no-op ThreadAware impl inside new_boxed)
     let affinities = pinned_affinities(&[2]);

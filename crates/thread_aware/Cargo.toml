@@ -103,6 +103,8 @@ http = { version = "1.4.1", default-features = false, features = ["std"] }
 jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
+new_zealand = { workspace = true }
+par_bench = { workspace = true, features = ["criterion"] }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
 uuid = { version = "1.21.0", default-features = false }
@@ -126,6 +128,16 @@ required-features = ["bytes", "http", "jiff02", "uuid"]
 name = "gungraun_third_party"
 harness = false
 required-features = ["bytes", "http", "jiff02", "uuid"]
+
+[[bench]]
+name = "thread_aware_relocate"
+harness = false
+required-features = ["std"]
+
+[[bench]]
+name = "thread_aware_relocate_cg"
+harness = false
+required-features = ["std"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
