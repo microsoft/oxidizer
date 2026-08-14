@@ -24,9 +24,11 @@ this discipline shapes the whole design.
 ```
 
 - **Allocation is single-threaded.** Growing the pool and popping free slots
-  happen on exactly one thread at a time. The pool object can be *moved* between
-  threads, but only one thread ever holds it, so these operations are
-  uncontended and need no locking among themselves.
+  happen on exactly one thread at a time. This is not a convention the caller
+  must uphold: the pool is `Send` but `!Sync`, so the shared reference every
+  allocation entry point takes can never be observed from two threads at once.
+  The pool object can be *moved* between threads and resumed there; what the
+  type system forbids is two allocations overlapping in time.
 - **Frees are concurrent.** Handles whose `Send` bounds are satisfied may be
   dropped on many threads simultaneously; non-`Send` handles remain local to
   their thread.
@@ -38,6 +40,13 @@ entirely with atomics — **there is no mutex anywhere in the pool**. State touc
 only by the single allocator thread (notably the directory of chunks) needs no
 synchronization at all; its confinement to that one thread is itself the
 soundness argument. The [free list](./memory.md) is where the hand-off happens.
+
+That confinement does more than avoid a lock. The chunk directory is a growable
+vector of chunk pointers, so acquiring a chunk may reallocate it. Reclamation
+therefore never consults the directory: it recovers the slot, the chunk and the
+pool's shared state from the value pointer alone ([handles](./handles.md)). The
+allocator thread reads the directory when it turns a free-list index into an
+address, and teardown reads it once more, with the pool quiescent.
 
 "Single-threaded allocation" is a rule about the pool object, not a prescription
 for how programs are written. Serving several threads from one pool is ordinary

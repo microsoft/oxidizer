@@ -138,7 +138,8 @@ resources:
 
 - A **per-slot count** governs a single value: how many shared handles point at
   it. When it reaches zero, the value's destructor runs and the slot returns to
-  the free list.
+  the free list. It is bounded by the same ceiling the standard library's `Arc`
+  uses, and exceeding that ceiling aborts the process.
 - A **pool-level count** governs the pool's memory as a whole — every chunk plus
   the shared state. Each detachable allocation holds one unit of it, which is
   exactly what allows handles to outlive the pool object.
@@ -164,6 +165,11 @@ destroyed on its own handle's drop, exactly once. Dropping the pool object is no
 synchronous with respect to outstanding handles: it merely relinquishes the pool
 object's own claim, and the backing memory survives until the last handle
 departs.
+
+Forgetting a handle instead of dropping it is sound, and its slot stays occupied
+for as long as the pool's memory exists. A detachable handle also keeps its unit
+of the pool-level count, so the pool's memory outlives the forgotten handle
+along with the slot.
 
 Teardown may run on whatever thread happens to drop the last handle, which need
 not be the allocator thread. This is sound because a zero pool-level count

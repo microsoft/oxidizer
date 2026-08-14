@@ -235,6 +235,7 @@ fn general_usage_reports_cached_medium_spans() {
     let layout = Layout::from_size_align(128 * 1024, 16).unwrap();
     with_hint(Hint::new().with_heap(&heap), || unsafe {
         let address = alloc(layout);
+        std::hint::black_box(address);
         dealloc(address, layout);
     });
 

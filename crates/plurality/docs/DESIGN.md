@@ -77,7 +77,8 @@ invariants:
    pops slots, and the directory of chunks is confined to that thread. This is a
    "no concurrent allocation" rule, not a thread-affinity rule: the pool may be
    moved to and resumed on a different thread, so long as allocations never
-   overlap in time.
+   overlap in time. It is enforced statically by the pool being `!Sync`, not by
+   caller discipline.
 2. **Chunks are immortal until teardown.** They never move and are never freed
    individually, so back-references from chunks to pool state can never dangle.
 3. **The slot counter is context-typed.** Occupied shared slots read it as a

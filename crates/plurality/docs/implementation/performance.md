@@ -2,8 +2,8 @@
 
 This document covers the cost model of the pool forms, the properties that must
 not regress, and the benchmark decomposition that attributes each cost to its
-source. Back to the [implementation hub](../IMPLEMENTATION.md). Measured
-numbers live in [`PERF.md`](../PERF.md).
+source. Back to the [implementation hub](../IMPLEMENTATION.md). The benchmark
+suites under `benches/` produce the numbers cited here.
 
 ## Cost model
 
@@ -31,7 +31,7 @@ Parameterising the pool body over geometry must leave the typed pool's emitted
 code identical to what a body written against the element type produces.
 `TypedGeometry<T>` is zero-sized and its accessors are constant-evaluable, so
 every geometry expression on that path folds to a constant. The gate is
-instruction counts: the typed rows in [`PERF.md`](../PERF.md) must hold.
+instruction counts: the typed rows of the Callgrind suite must hold.
 
 The one genuinely new cost on the runtime path is that slot addressing
 multiplies by a loaded stride from the pool body, where a typed pool's constant
@@ -46,7 +46,9 @@ typed path keeps its constant.
 Multi-pool coverage follows the workspace conventions: identical operation
 bodies in the wall-clock and instruction-count harnesses, single-threaded,
 measuring elementary operations against a pre-warmed pool with growth and
-first-use effects outside the measured region.
+first-use effects outside the measured region. [`PERF.md`](../PERF.md)
+publishes a curated wall-clock subset; the instruction-count suites stay in the
+repository for optimization work.
 
 ### Attributing the routing cost
 

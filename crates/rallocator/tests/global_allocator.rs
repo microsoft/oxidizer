@@ -239,6 +239,7 @@ unsafe fn allocate_forged_payload(layout: Layout) {
         words.write(OLD_BUMP_MARKER);
         words.add(1).write(!OLD_BUMP_MARKER);
         words.add(2).write(1);
+        std::hint::black_box(address);
         dealloc(address, layout);
     }
 }

@@ -47,7 +47,7 @@ the crate-private constructor.
 | `stats` | The counters, compiled only with the `stats` feature. |
 | `bolero_pool` | Randomised operation streams. |
 | `bolero_multi_pool` | Randomised operation streams over a spread of layouts. |
-| `loom_pool` | Interleaving models, compiled only under `--cfg loom`. |
+| `loom_pool` | Interleaving models, compiled only with the `loom` marker feature and `--cfg loom`. |
 | `alloc_tracking` | Steady-state allocation behaviour under a tracking global allocator. |
 
 Two obligations in this table are specific to the multi pool and are easy to
@@ -86,11 +86,13 @@ one.
 
 ## Undefined-behaviour checking
 
-Miri runs the non-Bolero, non-allocation-tracking suite under several
-configurations mirroring CI, including stacked borrows. It is the primary check
-on the pointer-recovery arithmetic, which is exercised over a spread of layouts
-precisely because a divergence between the two geometry providers surfaces
-there as an out-of-bounds or misaligned access rather than as a wrong answer.
+Miri runs the non-Bolero, non-allocation-tracking suite under the configurations
+CI uses: the default stacked-borrows model, tree borrows, strict provenance, and
+multi-seed race coverage. `cargo careful` runs alongside it. Miri is the primary
+check on the pointer-recovery arithmetic, which is exercised over a spread of
+layouts precisely because a divergence between the two geometry providers
+surfaces there as an out-of-bounds or misaligned access rather than as a wrong
+answer.
 
 The mixed-layout property target runs under Bolero in native execution rather
 than under Miri, because Bolero needs filesystem isolation Miri does not
@@ -113,7 +115,8 @@ which is why teardown and the chunk guard carry loom-only drop loops.
 ## Property and fuzz testing
 
 Bolero drives a byte stream interpreted as a sequence of allocate, clone and
-drop operations in native execution, asserting that every value is destroyed
+drop operations in native execution, against a chunk size small enough that
+growth and slot reuse are constant, asserting that every value is destroyed
 exactly once and that releasing every handle empties the pool. For the multi
 pool the stream ranges over a spread of layouts, and the assertions add that a
 slot address is never served for two different layouts — layout pools neither
@@ -153,7 +156,10 @@ unconstrained — the geometry formulas and the routing decision above all.
 Individual sites are excluded with a recorded, reproducible justification.
 Exclusions cover unreachable branches, demonstrably equivalent alternatives, or
 otherwise unviable mutations, such as the reference-count overflow guard, which
-requires a count no test can produce and aborts the process if it fires.
+requires a count no test can produce and aborts the process if it fires, and the
+initialization of a slot, whose removal would itself be undefined behaviour.
+Because every exclusion carries its reason, a surviving mutant that is not
+excluded is a genuine gap in the suite.
 
 Coverage instrumentation is likewise switched off for genuinely unreachable
 paths rather than left to report them as gaps, using the same per-site

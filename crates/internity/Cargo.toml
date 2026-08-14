@@ -3,7 +3,7 @@
 
 [package]
 name = "internity"
-version = "0.1.0"
+version = "0.2.0"
 description = "Blazingly fast string interning with compact handles, compact storage, and concurrent fill support"
 readme = "README.md"
 keywords = ["intern", "interner", "string", "symbol", "concurrent"]

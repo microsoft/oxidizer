@@ -32,6 +32,14 @@ Two properties of this layout are load-bearing:
   chunk header is fixed-offset arithmetic. No per-object bookkeeping table is
   consulted on the hot path.
 
+Capacity is monotonic. A pool acquires chunks as it grows and releases them all
+at teardown, so it neither shrinks nor compacts, and the capacity it reports is
+a high-water mark rather than a measure of what is in use. Growth stops at the
+configured chunk cap or, for an unbounded pool, at the ceiling the slot index
+imposes: indices are 32 bits wide, and on targets with narrower pointers the
+pool-level reference count is the tighter bound. The equivalent statement for a
+pool serving many layouts is in [multi pool](./multi-pool.md).
+
 ### The slot and its dual-purpose counter
 
 Each slot holds three things: storage for the value, a small counter, and its
@@ -61,7 +69,8 @@ concurrency hand-off point:
 - **Popping** a slot happens only on the single allocator thread, so there is
   exactly one free-slot consumer. This eliminates the classic ABA hazard by
   construction — a free slot is never simultaneously popped by two threads or
-  re-pushed while still free.
+  re-pushed while still free — so the design carries neither tag counters nor
+  hazard pointers.
 - **Pushing** a freed slot can happen on any reclaimer thread. Free-slot
   producers race only on the head of the stack, resolved with a compare-and-swap
   retry loop.
