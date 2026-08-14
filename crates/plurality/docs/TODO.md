@@ -485,7 +485,10 @@ alignment, so the packing has one producer.
 
 The measured cost of the scan is a few instructions per entry examined, and the
 entries a program presents are few, so this trades readability for a win that
-only appears at directory sizes the design does not expect. Nothing reads a
+only appears at directory sizes the design does not expect. Wall clock is
+weaker still: at sixteen entries the longer scan does not separate from the
+one-entry case, because the processor overlaps a predictable walk over a
+contiguous vector with the pool's own pointer chasing. Nothing reads a
 stored key back as a `Layout` today — the vector is only pushed to, compared
 against and counted — so the change is confined to the key type and its one
 producer, with `install` taking the unpacked layout it already receives.

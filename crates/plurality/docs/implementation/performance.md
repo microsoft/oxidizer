@@ -113,6 +113,18 @@ the value write cost the same on both paths.
 The per-entry slope is what the linear scan actually stakes its case on, and it
 is the part that scales. The intercept is a fixed toll on the routed path only.
 
+Instructions are not time, and for the scan the gap is wide. Sixteen layouts
+run roughly twice the instructions of one, yet the wall-clock rows for the two
+land within a few percent of each other, with the longer scan sometimes the
+faster of the two. The scan is a predictable walk over a contiguous key vector
+with no dependency on the pool's own pointer chasing, so the processor overlaps
+it; what is left is below the swing that heap and code placement produce
+between builds. This is why the routing cost is stated in instructions, why the
+published wall-clock report prices type erasure at the whole step from the
+typed pool rather than at the difference between layout counts, and why work on
+shortening the scan is worth judging by the intercept it removes rather than by
+the slope.
+
 Reclamation is the same code on both paths and contributes equally to every
 row, so it cancels in the differences. That also gives the design's claim that
 reclamation costs what it costs in a typed pool a way to fail — a divergence

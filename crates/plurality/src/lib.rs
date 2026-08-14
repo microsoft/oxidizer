@@ -45,9 +45,9 @@
 //! # Performance
 //!
 //! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/docs/PERF.md)
-//! for measured wall-clock numbers: the cost of each handle type, a churn
-//! workload against the system allocator, and head-to-head comparisons with the
-//! other Rust pooling crates.
+//! for measured wall-clock numbers: the cost of each handle type, the cost of
+//! serving many types from one pool, a churn workload against the system
+//! allocator, and head-to-head comparisons with the other Rust pooling crates.
 //!
 //! # Concurrency model
 //!
