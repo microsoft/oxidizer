@@ -649,11 +649,7 @@ fn allocator_reentry_during_growth_yields_distinct_slots() {
     // same slot to two live handles.
     // Ref: docs/implementation/reentrancy.md, "Growth".
     let outer = pool.alloc_box(1);
-    let nested = state
-        .reentrant
-        .borrow_mut()
-        .take()
-        .expect("the allocator must have re-entered the pool");
+    let nested = state.reentrant.borrow_mut().take().unwrap();
 
     assert_eq!(state.reentries.get(), 1);
     assert_eq!(pool.chunks_allocated(), 2, "each of the two allocations grew its own chunk");
@@ -685,11 +681,7 @@ fn allocator_reentry_during_growth_does_not_overshoot_the_chunk_cap() {
     // reach the `FREE_END` sentinel.
     // Ref: docs/implementation/reentrancy.md, "Growth".
     let err = pool.try_alloc_box(1).unwrap_err();
-    let nested = state
-        .reentrant
-        .borrow_mut()
-        .take()
-        .expect("the allocator must have re-entered the pool");
+    let nested = state.reentrant.borrow_mut().take().unwrap();
 
     assert!(err.is_capacity_exhausted());
     assert_eq!(state.reentries.get(), 1);
@@ -706,11 +698,7 @@ fn a_full_pool_hands_out_a_slot_a_reentrant_allocation_left_free() {
     // exhaustion means no slot is available rather than no chunk is.
     // Ref: docs/implementation/reentrancy.md, "Growth".
     let outer = pool.alloc_box(1);
-    let nested = state
-        .reentrant
-        .borrow_mut()
-        .take()
-        .expect("the allocator must have re-entered the pool");
+    let nested = state.reentrant.borrow_mut().take().unwrap();
 
     assert_eq!(state.reentries.get(), 1);
     assert_eq!(pool.chunks_allocated(), 1, "the cap held");

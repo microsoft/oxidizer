@@ -1751,11 +1751,7 @@ fn allocator_reentry_during_chunk_growth_yields_distinct_slots() {
     // must not claim the global slot indices the outer chunk is about to.
     // Ref: docs/implementation/reentrancy.md, "Growth".
     let outer = pool.alloc_box(1_u64);
-    let nested = state
-        .reentrant
-        .borrow_mut()
-        .take()
-        .expect("the allocator must have re-entered the pool");
+    let nested = state.reentrant.borrow_mut().take().unwrap();
 
     assert_eq!(state.reentries.get(), 1);
     assert_eq!(pool.chunks_allocated_of::<u64>(), 2, "each allocation grew its own chunk");

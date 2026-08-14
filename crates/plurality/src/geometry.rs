@@ -502,7 +502,7 @@ mod tests {
         for &(size, align) in &[(0_usize, 1_usize), (1, 1), (3, 1), (8, 8), (12, 4), (1, 64), (8192, 4096)] {
             let geometry = RuntimeGeometry::new(Layout::from_size_align(size, align).unwrap());
             let slots = 5;
-            let layout = geometry.chunk_layout(slots).expect("layout fits");
+            let layout = geometry.chunk_layout(slots).unwrap();
 
             assert_eq!(layout.align(), chunk_align(align));
             assert!(layout.align() >= align_of::<ChunkHeader>());
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn chunk_layout_accepts_a_zero_slot_chunk() {
         let geometry = RuntimeGeometry::new(Layout::new::<u64>());
-        let layout = geometry.chunk_layout(0).expect("layout fits");
+        let layout = geometry.chunk_layout(0).unwrap();
         assert!(layout.size() >= size_of::<ChunkHeader>());
     }
 

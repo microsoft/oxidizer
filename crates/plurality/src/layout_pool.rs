@@ -291,7 +291,7 @@ mod tests {
     /// Only a target whose largest object reaches this far can produce such a
     /// layout from `Layout::new::<T>()`, so the layout is built directly.
     fn unpoolable_layout() -> Layout {
-        Layout::from_size_align(isize::MAX as usize, 1).expect("a value layout at the size ceiling")
+        Layout::from_size_align(isize::MAX as usize, 1).unwrap()
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn a_layout_leaving_room_for_one_slot_is_clamped_to_it() {
         // Half the address space per value: a chunk holds exactly one slot.
-        let layout = Layout::from_size_align(1 << (usize::BITS - 2), 1).expect("half the address space");
+        let layout = Layout::from_size_align(1 << (usize::BITS - 2), 1).unwrap();
         assert_eq!(effective_chunk_size(layout, 64), 1);
     }
 }
