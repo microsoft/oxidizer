@@ -38,7 +38,7 @@ thread_local! {
 ///
 /// Returns `Some(guard)` when no emission is in progress on this thread; the
 /// slot is released when the returned guard is dropped. Returns `None` when a
-/// guard is already held, signalling a reentrant sink invocation that the
+/// guard is already held, signaling a reentrant sink invocation that the
 /// caller must skip to avoid unbounded recursion.
 ///
 /// The slot is shared across all sinks on the thread, so a `None` here means
