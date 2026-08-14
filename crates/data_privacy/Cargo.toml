@@ -47,8 +47,10 @@ derive_more = { workspace = true, features = ["constructor", "from"] }
 insta.workspace = true
 mutants.workspace = true
 once_cell = { workspace = true, features = ["std"] }
+rapidhash = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+xxhash-rust = { workspace = true, features = ["xxh3"] }
 
 [[example]]
 name = "employees"

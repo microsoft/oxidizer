@@ -1,0 +1,5 @@
+error: `#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` is an implementation detail with no stable name or position, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly
+  --> tests/ui/ohno_error_no_constructors.rs:11:1
+   |
+11 | #[no_constructors]
+   | ^^^^^^^^^^^^^^^^^^

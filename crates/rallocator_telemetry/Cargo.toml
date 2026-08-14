@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rallocator_telemetry"
+version = "0.1.0"
+description = "Portable telemetry snapshot types for rallocator."
+readme = "README.md"
+keywords = ["allocator", "memory", "telemetry", "diagnostics"]
+categories = ["development-tools::debugging", "memory-management"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_telemetry"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["rallocator_wire::*"]
+
+[dependencies]
+rallocator_wire.workspace = true
+
+[lints]
+workspace = true

@@ -47,6 +47,7 @@ bolero = { workspace = true, features = ["std"] }
 # because bolero-libfuzzer references `bolero_engine::any::run` but does
 # not itself activate that feature on `bolero-engine`.
 criterion = { workspace = true }
+itoa = { workspace = true }
 matchit = { workspace = true }
 mutants = { workspace = true }
 path-tree = { workspace = true }

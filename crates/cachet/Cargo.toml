@@ -71,10 +71,12 @@ alloc_tracker = { workspace = true }
 benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf" }
 cachet_memory = { path = "../cachet_memory" }
+cachet_service = { path = "../cachet_service" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 dashmap = { workspace = true }
+layered = { path = "../layered" }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }

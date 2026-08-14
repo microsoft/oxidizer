@@ -33,6 +33,13 @@
 //! general allocator for heterogeneous, long-lived values or an arena when
 //! values can all be reclaimed together.
 //!
+//! # Performance
+//!
+//! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/docs/PERF.md)
+//! for measured wall-clock numbers: the cost of each handle type, a churn
+//! workload against the system allocator, and head-to-head comparisons with the
+//! other Rust pooling crates.
+//!
 //! # Concurrency model
 //!
 //! [`Pool<T>`] is `Send + !Sync`: allocating takes `&Pool`, so exactly one

@@ -171,8 +171,17 @@ jobs:
         if: success() || failure()
         run: rustup toolchain install ${{ env.RUST_NIGHTLY }} --profile minimal --component rustfmt
       - name: Source Format (nightly)
-        if: success() || failure()
+        if: (success() || failure()) && runner.os != 'Windows'
         run: cargo +${{ env.RUST_NIGHTLY }} fmt --all -- --config-path ./unstable-rustfmt.toml --check
+      - name: Source Format (nightly, Windows)
+        if: (success() || failure()) && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packages = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages.name
+          foreach ($package in $packages) {
+            cargo "+${{ env.RUST_NIGHTLY }}" fmt --package $package -- --config-path ./unstable-rustfmt.toml --check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
@@ -391,7 +400,10 @@ jobs:
         run: just bolero 60s
 
   mutation-testing:
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    # Pull requests are covered by the diff-scoped, cross-platform anvil-pr
+    # mutation matrix. Keep this legacy job for merge-group validation without
+    # duplicating hours of mutation work on unusually large pull requests.
+    if: github.event_name == 'merge_group'
     needs: [testing]
     runs-on: ubuntu-latest
     steps:
