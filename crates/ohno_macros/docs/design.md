@@ -281,7 +281,8 @@ literal rather than as a one-argument `format!`, so a static `#[display("...")]`
 costs no allocation at run time.
 
 By the time a `Message` built by the derive reaches `generate`, every field it
-names exists and every argument is rooted in a field (R1.5) — the latter because
+names exists and every argument is rooted in a field or a method of `self`
+(R1.5) — the latter because
 `expand` emits nothing but diagnostics once a fault was recorded, not because
 `Message` could not hold such an argument. Each argument is already wrapped as
 `&(self.<arg>)` — the parentheses being load-bearing, so `count as u64` casts
@@ -471,8 +472,8 @@ body:
 
 ```rust
 {
-    let __ohno_result = (|| #output #block)();          // sync
-    let __ohno_result: #ty = async #block.await;        // async
+    let __ohno_result = (|| #block)();                  // sync
+    let __ohno_result = async #block.await;             // async
     __ohno_result.map_err(|mut error| {
         ::ohno::Enrichable::add_enrichment(
             &mut error,
@@ -488,6 +489,12 @@ result directly, because the return type is not always a `Result`: an
 implemented `Future::poll` returns `Poll<Result<..>>`, which carries `map_err`
 but is not itself `Enrichable`.
 
+Neither arm names the declared return type. The wrapper's tail is the function's
+return expression, so inference reaches it from the signature, and naming the
+type would put it in a closure return type or a `let` annotation — positions an
+opaque type is not allowed in, which would cost every function returning
+`Result<impl Trait, E>`.
+
 The closure is not `move`. Capture is left to inference, so a body that consumes
 `self` takes it by value while a body that only reads it borrows, and the
 message can still name a parameter the body did not consume.
@@ -502,24 +509,24 @@ function beside the `compile_error!`, so `rustc` reports the one fault the macro
 found rather than that fault plus every call site of a function that no longer
 exists.
 
-**Limits.** The closure rewrite is not usable in a `const fn`. `const` is
-re-emitted faithfully, so such a function is rejected by `rustc` rather than by
-the macro. No test exercises the combination; if one is added, the macro should
-reject `const` itself, with a message, rather than let the expansion fail.
+## Limits
 
-Neither arm names the declared return type. The wrapper's tail is the function's
-return expression, so inference reaches it from the signature, and naming the
-type would put it in a closure return type or a `let` annotation — positions an
-opaque type is not allowed in, which would cost every function returning
-`Result<impl Trait, E>`.
+Two inputs reach `rustc` as an error instead of being reported by a macro, which
+is where the R4 guarantee stops being structural. Both are recorded rather than
+closed.
+
+**A `const fn` under `#[enrich_err(...)]`.** The closure rewrite is not usable in
+a `const fn`, and `const` is re-emitted faithfully, so such a function is
+rejected by `rustc` rather than by the macro. No test exercises the combination;
+if one is added, the macro should reject `const` itself, with a message, rather
+than let the expansion fail.
 
 **A `#[display(...)]` format spec is not checked.** The text after the `:` is
 carried into the generated `format!` as written, so a spec that refers to another
 argument — a width or precision naming something the generated code does not
 have — is reported by `rustc` against the derive rather than by the macro against
-the template. That is the one place the R4 guarantee is not structural. Checking
-it would mean parsing the format grammar a second time, which is what lowering to
-`format!` exists to avoid, so the gap is recorded rather than closed.
+the template. Checking it would mean parsing the format grammar a second time,
+which is what lowering to `format!` exists to avoid.
 
 ## Diagnostics
 
@@ -598,6 +605,7 @@ fixture may be added for any of them without changing the text.
 | R1.2 | no marker, no `OhnoCore` field | ``No field holds the OhnoCore. Declare one, mark it with `#[error]` if its type is spelled through an alias, or use `#[ohno::error]`, which adds the field itself`` | `ident` |
 | R1.2 | no marker, several `OhnoCore` fields | ``Several fields hold an OhnoCore and none is marked. Mark the one holding the error representation with `#[error]``` | `ident` |
 | R1.5 | placeholder names no field | ``unknown field `pth` in `#[display(...)]`, available fields: `path`, `code``` | template literal |
+| R1.5 | the same, on a type with nothing referenceable | ``unknown field `pth` in `#[display(...)]`, the error type has no fields that can be referenced`` | template literal |
 | R1.5 | argument root names no field | the same message | the root term |
 | R1.5 | `{}` with no argument left | ``` `#[display(...)]` template has more `{}` placeholders than arguments ``` | template literal |
 | R1.5 | an argument no `{}` consumes | ``` `#[display(...)]` argument is not consumed by any `{}` placeholder ``` | the argument |

@@ -105,7 +105,8 @@ is a `format!` string.
 | `{{`, `}}` | a literal brace |
 
 Positional arguments are implicitly scoped to `self`: a field is written by its
-bare name, and the argument's leftmost term is the one that has to name a field.
+bare name, and the argument's leftmost term is the one that has to name a field
+or call a method of `self`.
 The scoped argument is emitted as `&(self.<arg>)` — the parentheses are
 load-bearing, so that `count as u64` casts the field rather than a reference to
 it.
@@ -186,12 +187,18 @@ still returns from the closure, `.await`ed when the function is `async`. Every
 part of the signature has to survive: visibility, `const`, `unsafe`, `extern`
 ABI, generics, lifetimes, bounds, where clauses, `impl Trait` and `dyn Trait`
 parameters, `self` receivers in every form, doc comments, and other attributes.
+`const` survives faithfully enough that a `const fn` is then rejected by `rustc`
+rather than by the macro, which `design.md` records under Limits.
 
 ## R4 — Diagnostics
 
 A macro reports what it can rather than emitting code that fails to compile.
 Errors reach the user as `compile_error!` at a span in their own source, never
-as a panic and never as a `rustc` error pointing into generated code.
+as a panic and never as a `rustc` error pointing into generated code. Two
+exceptions survive from the implementation this replaces, both recorded in
+`design.md` under Limits: a `const fn` under `#[enrich_err]`, and a
+`#[display(...)]` format spec naming an argument the generated code does not
+have.
 
 Where an input breaks several rules, all of them are reported at once rather
 than one per compile cycle.
@@ -203,6 +210,6 @@ Wherever a diagnostic covers more than one token it is spanned with
 
 The crate has to keep passing what the workspace already runs against it:
 `cargo check`, `clippy` at workspace lint level, `cargo doc`, `cargo fmt
---check`, `cargo machete`, license boilerplate, and `cargo mutants` on the
-rewritten modules. The `ohno` crate's doc tests and examples exercise the
-macros and have to keep compiling.
+--check`, `cargo machete`, license boilerplate, and `cargo mutants` on
+`validate.rs` and `display/`, where the rules live. The `ohno` crate's doc tests
+and examples exercise the macros and have to keep compiling.
