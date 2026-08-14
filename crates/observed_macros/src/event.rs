@@ -664,11 +664,13 @@ fn enforce_value_type(kind: InstrumentKindValue, field: &FieldDef, attr: &syn::A
         ));
     };
 
-    let required = match kind {
-        InstrumentKindValue::Counter => NumericKind::UnsignedInt,
-        InstrumentKindValue::UpDownCounter => NumericKind::SignedInt,
-        // Width- and signedness-agnostic: both accept every supported numeric
-        // type, so the checks above are the whole contract.
+    // Counter and up-down counter narrow the accepted set by signedness;
+    // gauge and histogram accept every supported numeric, so the checks above
+    // are their whole contract. Pairing each kind with its diagnostic wording
+    // here keeps the match exhaustive without a fourth, unreachable arm.
+    let (required, word, examples) = match kind {
+        InstrumentKindValue::Counter => (NumericKind::UnsignedInt, "unsigned", "u8, u16, u32, u64, usize"),
+        InstrumentKindValue::UpDownCounter => (NumericKind::SignedInt, "signed", "i8, i16, i32, i64, isize"),
         InstrumentKindValue::Gauge | InstrumentKindValue::Histogram => return Ok(()),
     };
 
@@ -676,11 +678,6 @@ fn enforce_value_type(kind: InstrumentKindValue, field: &FieldDef, attr: &syn::A
         return Ok(());
     }
 
-    let (word, examples) = match required {
-        NumericKind::UnsignedInt => ("unsigned", "u8, u16, u32, u64, usize"),
-        NumericKind::SignedInt => ("signed", "i8, i16, i32, i64, isize"),
-        NumericKind::Float => unreachable!("gauge and histogram return early"),
-    };
     Err(Error::new_spanned(
         attr,
         format!("`#[{attr_name}(...)]` requires field `{field_ident}` to be a {word} integer type ({examples})"),
