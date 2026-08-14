@@ -14,7 +14,7 @@ The matrix covers:
 | Exposure | exposed, encapsulated, wildcard/unknown, empty/missing, stale roots |
 | Proc-macros | implementation dependency, compatible/breaking contract, public/private use, major pin, generated runtime, blocked review |
 | Pins | valid, first release, build metadata, equal/downgrade rejection, satisfied cascade, conflict, force |
-| Modes | targeted, changed, all |
+| Modes | targeted, changed, all, complete selection decisions, token consistency |
 | Output | topological order, merged reasons, breaking flags, warnings |
 | Changelogs | maintenance, breaking, multiple sorted reasons |
 | Cargo APIs | internal edit, addition, removal, signatures, fields, traits, enums |
@@ -23,3 +23,7 @@ The matrix covers:
 The test matrix is the hard oracle for mechanical behavior. Diff interpretation,
 proc-macro semantics, and evidence-based elevation remain judgment-dependent and
 must pass the multi-model consensus gate.
+
+Selection review also covers generated README/changelog exclusion,
+test/benchmark/dev-dependency-only declines, runtime dependency-feature patch
+seeds, and baseline-pass/current-fail proc-macro fixtures.

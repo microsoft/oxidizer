@@ -17,10 +17,12 @@
     JSON emitted by release-facts.ps1.
 
 .PARAMETER RequestPath
-    JSON with mode, tokens, classifications, macroContracts, and optional force:
+    JSON with mode, tokens, selectionDecisions, classifications,
+    macroContracts, and optional force:
       {
         "mode": "targeted",
         "tokens": ["bytesbuf@breaking"],
+        "selectionDecisions": {},
         "classifications": {
           "bytesbuf": "patch",
           "bytesbuf_io": { "changeType": "patch", "manualReview": false }
@@ -113,6 +115,74 @@ function Get-RequestValue {
         }
         if ($null -eq $property) { return $null }
         return $property.Value
+}
+
+function Get-SelectionDecision {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [Parameter(Mandatory = $true)]$Request,
+        [Parameter(Mandatory = $true)][string]$Mode
+    )
+
+    $value = $Request.selectionDecisions.PSObject.Properties[$Fact.folder].Value
+    if ($null -eq $value -or $value -is [string]) {
+        throw "Selection decision '$($Fact.folder)' must include decision, reason, and evidence."
+    }
+
+    $decision = ($value.decision ?? '').ToString().ToLowerInvariant()
+    if ($decision -notin @('accept', 'decline')) {
+        throw "Selection decision '$($Fact.folder)' must be accept or decline."
+    }
+
+    $reason = ($value.reason ?? '').ToString().ToLowerInvariant()
+    $acceptedReasons = @(
+        'breaking',
+        'nonbreaking-api',
+        'behavior-fix',
+        'authored-doc-fix',
+        'runtime-manifest-change',
+        'first-release',
+        'explicit-release'
+    )
+    $declinedReasons = @(
+        'test-only',
+        'benchmark-only',
+        'dev-dependency-only',
+        'release-metadata-only',
+        'generated-artifact-only',
+        'internal-only',
+        'unchanged'
+    )
+    $allowedReasons = if ($decision -eq 'accept') {
+        $acceptedReasons
+    } else {
+        $declinedReasons
+    }
+    if ($reason -notin $allowedReasons) {
+        throw "Selection decision '$($Fact.folder)' has invalid $decision reason '$reason'."
+    }
+    if (
+        $reason -eq 'explicit-release' -and
+        ($Mode -ne 'all' -or [bool]$Fact.modified)
+    ) {
+        throw "Selection reason 'explicit-release' is only valid for an unchanged package in all mode."
+    }
+
+    $evidence = @(
+        $value.evidence |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($evidence.Count -eq 0) {
+        throw "Selection decision '$($Fact.folder)' must include evidence."
+    }
+
+    return [pscustomobject]@{
+        Decision = $decision
+        Reason   = $reason
+        Evidence = $evidence
+    }
 }
 
 function Get-MacroContract {
@@ -373,12 +443,43 @@ if ($mode -notin @('targeted', 'changed', 'all')) {
     throw "Unknown release mode '$mode'."
 }
 
+$force = [bool]$request.force
+$selectionDecisions = @{}
+if ($mode -in @('changed', 'all')) {
+    $selectionCandidates = @(
+        $facts |
+            Where-Object {
+                [bool]$_.published -and
+                ($mode -eq 'all' -or [bool]$_.modified)
+            }
+    )
+    if ($null -eq $request.selectionDecisions) {
+        throw "Release mode '$mode' requires selectionDecisions."
+    }
+    $candidateFolders = @($selectionCandidates.folder | Sort-Object)
+    $decisionKeys = @(
+        $request.selectionDecisions.PSObject.Properties.Name |
+            Sort-Object
+    )
+    $unknownKeys = @($decisionKeys | Where-Object { $_ -notin $candidateFolders })
+    if ($unknownKeys.Count -gt 0) {
+        throw "Selection decisions contain unknown or non-candidate packages: $($unknownKeys -join ', '). Use canonical folder identifiers."
+    }
+    $missingKeys = @($candidateFolders | Where-Object { $_ -notin $decisionKeys })
+    if ($missingKeys.Count -gt 0) {
+        throw "Selection decisions are missing candidate packages: $($missingKeys -join ', ')."
+    }
+    foreach ($fact in $selectionCandidates) {
+        $selectionDecisions[$fact.folder] = Get-SelectionDecision `
+            -Fact $fact `
+            -Request $request `
+            -Mode $mode
+    }
+}
 $tokens = @($request.tokens)
-if ($tokens.Count -eq 0) {
+if ($tokens.Count -eq 0 -and $mode -eq 'targeted') {
     throw "Release mode '$mode' requires at least one accepted package token."
 }
-
-$force = [bool]$request.force
 $warnings = New-Object 'System.Collections.Generic.List[string]'
 $ambiguities = New-Object 'System.Collections.Generic.List[object]'
 $ambiguityKeys = [System.Collections.Generic.HashSet[string]]::new(
@@ -387,6 +488,9 @@ $ambiguityKeys = [System.Collections.Generic.HashSet[string]]::new(
 $usedMacroContracts = @{}
 $plan = @{}
 $queue = New-Object 'System.Collections.Generic.Queue[string]'
+$tokenFolders = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
 
 function Get-ModifiedMacroScopeMember {
     param([Parameter(Mandatory = $true)]$Fact)
@@ -468,6 +572,18 @@ function Write-BlockedPlan {
     [ordered]@{
         status         = 'blocked'
         mode           = $mode
+        selectionDecisions = @(
+            $selectionDecisions.GetEnumerator() |
+                Sort-Object Key |
+                ForEach-Object {
+                    [ordered]@{
+                        package  = $_.Key
+                        decision = $_.Value.Decision
+                        reason   = $_.Value.Reason
+                        evidence = @($_.Value.Evidence)
+                    }
+                }
+        )
         releases       = @()
         macroContracts = @(
             $usedMacroContracts.GetEnumerator() |
@@ -495,6 +611,15 @@ foreach ($tokenValue in $tokens) {
     }
     if ($plan.ContainsKey($fact.folder)) {
         throw "Package '$($fact.folder)' appears more than once in the release tokens."
+    }
+    if (-not $tokenFolders.Add($fact.folder)) {
+        throw "Package '$($fact.folder)' appears more than once in the release tokens."
+    }
+    if ($mode -in @('changed', 'all') -and -not $selectionDecisions.ContainsKey($fact.folder)) {
+        throw "Release token '$($fact.folder)' is not a candidate in $mode mode."
+    }
+    if ($mode -in @('changed', 'all') -and $selectionDecisions[$fact.folder].Decision -ne 'accept') {
+        throw "Release token '$($fact.folder)' conflicts with its decline selection decision."
     }
 
     $classification = Get-Classification -Fact $fact -Request $request
@@ -587,6 +712,17 @@ foreach ($tokenValue in $tokens) {
     $entry.TargetVersion = Get-EntryTargetVersion -Entry $entry
     $plan[$fact.folder] = $entry
     $queue.Enqueue($fact.folder)
+}
+
+if ($mode -in @('changed', 'all')) {
+    foreach ($candidate in $selectionDecisions.GetEnumerator()) {
+        if (
+            $candidate.Value.Decision -eq 'accept' -and
+            -not $tokenFolders.Contains($candidate.Key)
+        ) {
+            throw "Accepted selection decision '$($candidate.Key)' is missing a release token."
+        }
+    }
 }
 
 if ($ambiguities.Count -gt 0) {
@@ -916,6 +1052,18 @@ $releases = foreach ($folder in $orderedFolders) {
 [ordered]@{
     status         = 'resolved'
     mode           = $mode
+    selectionDecisions = @(
+        $selectionDecisions.GetEnumerator() |
+            Sort-Object Key |
+            ForEach-Object {
+                [ordered]@{
+                    package  = $_.Key
+                    decision = $_.Value.Decision
+                    reason   = $_.Value.Reason
+                    evidence = @($_.Value.Evidence)
+                }
+            }
+    )
     releases       = @($releases)
     macroContracts = @(
         $usedMacroContracts.GetEnumerator() |

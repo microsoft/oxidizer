@@ -94,6 +94,20 @@ BeforeAll {
             -RequestPath $requestPath
         return ($json | ConvertFrom-Json)
     }
+
+    function New-SelectionDecision {
+        param(
+            [ValidateSet('accept', 'decline')]
+            [string]$Decision = 'accept',
+            [string]$Reason = 'behavior-fix'
+        )
+
+        return @{
+            decision = $Decision
+            reason = $Reason
+            evidence = @('Reviewed the package diff from its release baseline.')
+        }
+    }
 }
 
 Describe 'resolve-plan.ps1 version arithmetic' {
@@ -804,10 +818,184 @@ Describe 'resolve-plan.ps1 pins and validation' {
                 -Request @{
                     mode = $mode
                     tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision
+                    }
                     classifications = @{ package = 'patch' }
                 }
             $plan.mode | Should -Be $mode
         }
+    }
+
+    It 'requires complete selection decisions in changed mode' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(
+                    New-ReleaseFact -Name accepted
+                    New-ReleaseFact -Name omitted
+                ) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('accepted')
+                    selectionDecisions = @{
+                        accepted = New-SelectionDecision
+                    }
+                    classifications = @{
+                        accepted = 'patch'
+                        omitted = 'patch'
+                    }
+                }
+        } | Should -Throw '*missing candidate packages: omitted*'
+    }
+
+    It 'requires tokens to exactly match accepted changed-mode decisions' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision `
+                            -Decision decline `
+                            -Reason test-only
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*conflicts with its decline selection decision*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name accepted) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        accepted = New-SelectionDecision
+                    }
+                    classifications = @{ accepted = 'patch' }
+                }
+        } | Should -Throw "*Accepted selection decision 'accepted' is missing*"
+    }
+
+    It 'emits normalized selection decisions' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name accepted
+                New-ReleaseFact -Name declined
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('accepted')
+                selectionDecisions = @{
+                    accepted = New-SelectionDecision
+                    declined = New-SelectionDecision `
+                        -Decision decline `
+                        -Reason generated-artifact-only
+                }
+                classifications = @{
+                    accepted = 'patch'
+                    declined = 'patch'
+                }
+            }
+
+        @($plan.selectionDecisions.package) |
+            Should -Be @('accepted', 'declined')
+        $plan.selectionDecisions[1].reason |
+            Should -Be 'generated-artifact-only'
+    }
+
+    It 'resolves a complete all-declined request as an empty plan' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name package) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    package = New-SelectionDecision `
+                        -Decision decline `
+                        -Reason test-only
+                }
+                classifications = @{ package = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases.Count | Should -Be 0
+        $plan.selectionDecisions[0].decision | Should -Be 'decline'
+    }
+
+    It 'rejects extra or aliased selection decision keys' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision
+                        package_alias = New-SelectionDecision
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*unknown or non-candidate packages: package_alias*'
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package-name) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package-name')
+                    selectionDecisions = @{
+                        package_name = New-SelectionDecision
+                    }
+                    classifications = @{ package_name = 'patch' }
+                }
+        } | Should -Throw '*Use canonical folder identifiers*'
+    }
+
+    It 'supports an explicit unchanged release only in all mode' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name package -Modified $false
+            ) `
+            -Request @{
+                mode = 'all'
+                tokens = @('package')
+                selectionDecisions = @{
+                    package = New-SelectionDecision `
+                        -Reason explicit-release
+                }
+                classifications = @{ package = 'patch' }
+            }
+
+        @($plan.releases.folder) | Should -Be @('package')
+
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{
+                        package = New-SelectionDecision `
+                            -Reason explicit-release
+                    }
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw "*only valid for an unchanged package in all mode*"
+    }
+
+    It 'rejects changed-mode tokens for non-candidates' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package -Modified $false) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{}
+                    classifications = @{ package = 'patch' }
+                }
+        } | Should -Throw '*is not a candidate in changed mode*'
     }
 
     Describe 'resolve-plan.ps1 generated exposure matrix' {

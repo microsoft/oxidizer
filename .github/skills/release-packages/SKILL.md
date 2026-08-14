@@ -53,22 +53,26 @@ Never reproduce their work by hand.
    - Record a `macroContracts` attestation covering exported macros, accepted
      syntax, compile behavior, generated API, runtime paths, and hygiene.
    - Retain `manualReview: true`.
-   - Review modified packages according to the elevation rules in
-     `references/planning.md`.
+   - Review every candidate according to the deterministic selection table in
+     `references/planning.md`. Record an evidenced `selectionDecisions` entry
+     for every candidate; never omit a package because its changes look
+     mechanical.
    - If resolution reports missing classifications, classify the complete
      dependent closure it names and rerun with the same frozen facts.
+   - Invoke the resolver with the complete decision map even when every
+     candidate is declined; the canonical result is an empty resolved plan.
 
 4. **Resolve mechanically**
-   - Write request JSON containing `mode`, accepted `tokens`, `classifications`,
-     required `macroContracts`, and optional `force`.
+   - Write request JSON containing `mode`, accepted `tokens`,
+     `selectionDecisions`, `classifications`, required `macroContracts`, and
+     optional `force`.
    - Run `.github/skills/release-packages/scripts/resolve-plan.ps1 -FactsPath
      <facts.json> -RequestPath <request.json>`.
    - Treat its release set, versions, cascade reasons, and ordering as canonical.
    - If it returns `status: blocked`, review every package named in
      `ambiguities` and rerun with the same frozen facts. Never convert an
      unresolved macro contract into a conservative breaking guess.
-   - In changed or all mode, stop without invoking the resolver when every
-     reviewed candidate is declined.
+   - In changed or all mode, do not apply an empty resolved plan.
 
 5. **Consensus**
    - Freeze the facts, classifications, reviewed evidence, request, and resolved

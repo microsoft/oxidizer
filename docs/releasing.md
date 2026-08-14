@@ -173,6 +173,19 @@ packages, channel decisions, and concrete evidence. Diagnostic wording and token
 formatting are patch unless they alter documented behavior. `manualReview`
 remains true.
 
+For changed/all selection, the request records an evidenced accept/decline
+decision for every candidate under its canonical folder key. Generated crate READMEs and changelogs, tests,
+benchmarks, dev dependencies, and release-only metadata do not seed releases.
+Normal/build dependency declaration or feature changes do seed a patch because
+they change the published manifest. Authored Rust docs may seed a patch.
+Selection considers only the package's own diff; cascades are resolver-owned.
+An all-declined decision set is still resolved and emitted as an empty plan.
+
+Proc-macro compile compatibility is measured with the same consumer fixture
+against baseline and current packages. A baseline pass that becomes a current
+failure is breaking; parser acceptance without end-to-end evidence is not a
+separate contract.
+
 ## Cascade rules
 
 Every released dependency gives each previously released, publishable direct
