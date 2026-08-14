@@ -29,25 +29,24 @@ Build it if bounded-memory deployments ask for it. The two caps are the right
 default either way, because they are the bounds that map onto the existing
 per-pool machinery with no shared state at all.
 
-## 0b. Inlining the routing helper
+## 0b. Packed routing key for the `MultiPool` directory
 
-Every multi-pool allocation entry point funnels through one routing helper that
-takes the value, or its constructor, as a closure. The compiler emits that
-helper out of line, and the resulting call — frame, argument setup, a `Result`
-returned through memory, and a second copy of the payload into the closure's
-slot — is the larger part of what the routed path costs over the typed path.
-Ref: [performance](./implementation/performance.md), "Attributing the routing
-cost".
+The router scans a `Vec<Layout>` of routing keys, comparing 16 bytes per entry
+on a 64-bit target even though a key only carries a size and one of a handful of
+alignments. Packing each key into a `u64` — size in the low bits, the base-two
+logarithm of the cell alignment in the high bits — halves the bytes the scan
+touches, so a directory of sixteen entries spans two cache lines instead of
+four. The keys are produced by `geometry::routing_key`, which already normalizes
+alignment, so the packing has one producer.
 
-Forcing it inline removes roughly a sixth of the routed path's instruction
-count in a static probe, and leaves the typed path untouched. The cost is code
-size: the helper carries the directory scan, and inlining replicates it per
-entry point per element type, in a crate whose entry points already multiply
-across four handle flavors and their uninitialised and pinned variants.
-
-Build it if the routed path's fixed cost ever matters more than the size of the
-binary that pays it. The measurement stands either way; what is missing is a
-size budget to weigh it against.
+The measured cost of the scan is a few instructions per entry examined, and the
+entries a program presents are few, so this trades readability for a win that
+only appears at directory sizes the design does not expect. Take it if profiles
+of a wide directory ask for it, and confirm with the spread benchmark rather
+than by reasoning about cache lines. Nothing reads a stored key back as a
+`Layout` today — the vector is only pushed to, compared against and counted — so
+the change is confined to the key type and its one producer, with `install`
+taking the unpacked layout it already receives.
 
 ## 1. `KeyedPool` — copyable generational keys (`keys` feature)
 

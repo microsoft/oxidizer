@@ -345,7 +345,19 @@ impl<A: Allocator + Clone> MultiPool<A> {
     ///
     /// Every allocation entry point funnels through here, so the router's
     /// ordering discipline is stated once.
-    #[inline]
+    ///
+    /// Inlined unconditionally: left to its own judgment the compiler emits
+    /// this helper out of line, and the resulting call frame, argument setup,
+    /// `Result` returned through memory and second copy of the payload into the
+    /// closure's slot cost more than everything the helper does. The typed path
+    /// does not route and is unaffected. The price is code size, since the
+    /// directory scan is replicated per entry point per element type.
+    /// Ref: docs/implementation/performance.md, "Attributing the routing cost".
+    #[expect(
+        clippy::inline_always,
+        reason = "measured: out of line, the call costs more than the routing it wraps"
+    )]
+    #[inline(always)]
     fn with_pool<T, R>(&self, f: impl FnOnce(LayoutPoolRef<A>) -> Result<R, AllocError>) -> Result<R, AllocError> {
         // Step 8: allocate through a view that borrows nothing.
         f(self.pool_for::<T>()?)

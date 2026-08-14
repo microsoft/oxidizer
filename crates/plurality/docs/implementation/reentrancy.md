@@ -95,7 +95,10 @@ across an allocation:
 
 1. Sample the length and capacity, releasing the borrow immediately. Return at
    once if there is already room.
-2. Allocate a fresh buffer with one more slot, with no borrow live.
+2. Allocate a fresh buffer with room for at least one more element, with no
+   borrow live. The target doubles the current capacity, with a floor, so
+   repeated reservation stays amortized constant rather than reallocating on
+   every growth.
 3. Re-read the length. The allocation released control, so a nested push may
    have grown the vector. Copying from the pre-allocation sample would silently
    drop that entry. If the vector has outgrown the buffer prepared for it,

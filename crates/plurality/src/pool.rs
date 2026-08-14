@@ -485,7 +485,7 @@ impl<T, A: Allocator> Pool<T, A> {
         match self.alloc_slot() {
             Ok(slot) => {
                 // SAFETY: `slot` was just popped and is owned exclusively here.
-                unsafe { self.occupy_local(slot, value) };
+                unsafe { occupy_local(slot, value) };
                 Ok(Alloc::from_slot(slot))
             }
             Err(err) => Err(err),
@@ -782,22 +782,6 @@ impl<T, A: Allocator> Pool<T, A> {
         self.inner().core.bump_pool_ref();
     }
 
-    /// Occupies a slot for an `Alloc` without touching either refcount. Its
-    /// borrow keeps the pool alive, and `push_free` overwrites the unused slot
-    /// refcount on drop.
-    ///
-    /// # Safety
-    /// `slot` must have just been popped off the free list.
-    #[inline]
-    #[expect(
-        clippy::unused_self,
-        reason = "kept as a method for symmetry with `occupy`; the `Alloc` path deliberately skips `pool_refcount` and the slot refcount"
-    )]
-    unsafe fn occupy_local(&self, slot: NonNull<SlotCell<T>>, value: T) {
-        // SAFETY: exclusive ownership of the freshly popped slot.
-        unsafe { occupy_local(slot, value) };
-    }
-
     /// Pops a free slot, growing the pool if necessary. Returns `Err` only if
     /// allocation fails (see [`AllocError`] for the cause).
     #[inline]
@@ -955,6 +939,16 @@ impl<A: Allocator, G: SlotGeometry> PoolInner<A, G> {
             return unsafe { self.discard_chunk(ptr, AllocError::CAPACITY_EXHAUSTED) };
         }
         let base_index = chunks * n;
+
+        // Mirrors the assertion in `MultiPool::install`: if the reservation
+        // above ever stopped covering the push below, the push would reallocate
+        // under a live `&mut` rather than fail loudly, and that is an aliasing
+        // violation no test in the suite observes.
+        debug_assert!(
+            // SAFETY: no directory borrow is live here.
+            unsafe { directory::has_room(&self.directory) },
+            "the reservation above must leave room for this push"
+        );
 
         // SAFETY: `ptr` is a fresh, exclusively owned allocation sized for one
         // chunk; the header and all slots are initialized before publishing.
