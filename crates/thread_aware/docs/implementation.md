@@ -77,15 +77,53 @@ is on the hot path.
 | `hit_path`  | Relocation into an already-populated slot, single-threaded.           |
 | `miss_path` | Relocation that has to materialize a slot, single-threaded.           |
 | `storm`     | Many threads relocating into distinct affinities at the same time.    |
-| `handoff`   | Two threads passing values to each other, relocating on receipt.      |
 
-`storm` and `handoff` are Criterion-only. Callgrind counts instructions on a
-serialized execution, so it cannot observe lock contention at all. It also
-cannot show the benefit of the shared-lock probe, because an uncontended shared
-acquisition costs about as many instructions as an uncontended exclusive one;
-its role is to catch regressions in either branch.
+The suite measures two subjects: a bare `Arc<Payload, PerCore>`, which isolates
+one relocation, and a five-layer object tree, which is what actually crosses
+affinities in a consumer. Relocation is a graph walk, so a caller pays for every
+thread-aware node reachable from the message rather than for a single call.
 
-`storm` is where the shared-lock probe shows up. `handoff` is dominated by its
-channel transport, so it carries `_transport` control variants that omit the
-relocation; the relocation cost is the difference between a variant and its
-control, not a fraction of either.
+The two subjects exercise the locking policy at very different rates. Each
+thread-aware node owns a separate slot table with its own lock, and the derived
+walk visits fields in sequence rather than nested, so the tree does not hold any
+one lock for longer — it takes roughly one acquisition per layer instead of one
+in total. That multiplies how often a message collides with another thread.
+
+`hit_path` and `miss_path` measure both subjects, the bare one being a meaningful
+isolation of a single relocation. `storm` measures only the tree: at one
+acquisition per message the bare subject collides too rarely for its run-to-run
+spread to resolve any difference between locking policies.
+
+`storm` covers one thread, one thread per processor, and
+`STORM_OVERSUBSCRIPTION` threads per processor. The oversubscribed shape is the
+one that exposes a thread preempted while holding an exclusive lock, since only
+then are there runnable threads queued behind it. Thread counts far above the
+processor count are deliberately *not* used: barrier release costs roughly a
+millisecond per few threads and lands inside the measured round, so by a few
+hundred threads the shape measures thread wake-up instead of relocation.
+
+Processor count here means logical processors, so on a machine with simultaneous
+multithreading the saturated shape runs two workers per physical core. The
+affinities the workers relocate between are fabricated values used to select
+slots; no thread is pinned.
+
+A shape whose workers do not actually run at the same time quietly reports
+uncontended timings under a contended name, so `storm` both arranges for the
+overlap and then checks it. Each worker relocates untimed until every worker is
+awake, and again after closing its own timing window until every worker has
+closed one, so the timed region is bracketed by full load rather than by the
+ragged edges of barrier release. Each round then asserts that the windows really
+did overlap. The assertion is skipped for rounds too short to outlast the spread
+in start times that remains after the lead-in, which is a condition only
+Criterion's first ramp-up rounds meet.
+
+`storm` is Criterion-only. Callgrind counts instructions on a serialized
+execution, so it cannot observe lock contention at all. It also cannot show the
+benefit of the shared-lock probe, because an uncontended shared acquisition costs
+about as many instructions as an uncontended exclusive one; its role is to catch
+regressions in either branch.
+
+`storm` reports the median over its workers rather than the elapsed time of the
+round. Timing the round from the controller would measure how long the operating
+system took to wake the workers, and a mean would let one stalled worker move the
+whole sample.

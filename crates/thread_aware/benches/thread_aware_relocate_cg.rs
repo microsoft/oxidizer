@@ -4,10 +4,9 @@
 //! Callgrind benchmarks for `thread_aware::Arc<T, S>::relocate`.
 //!
 //! Paired with `thread_aware_relocate.rs`, which covers the same operations
-//! under wall-clock measurement. Only the uncontended `hit_path` and
-//! `miss_path` subgroups appear here: the `storm` and `handoff` subgroups
-//! measure lock contention across threads, which the single-threaded Callgrind
-//! simulator cannot model.
+//! under wall-clock measurement. Only the uncontended `hit_path` and `miss_path`
+//! subgroups appear here: the `storm` subgroup measures lock contention across
+//! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
 //! the shared-lock probe. An uncontended shared acquisition and an uncontended
@@ -47,9 +46,9 @@ mod linux {
 
     use gungraun::{library_benchmark, library_benchmark_group};
     use thread_aware::affinity::{Affinity, pinned_affinities};
-    use thread_aware::{Arc, PerCore, ThreadAware};
+    use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
 
-    static NEXT_PAYLOAD_ID: AtomicU64 = AtomicU64::new(0);
+    static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
 
     // Mirrors the payload used by the criterion counterpart so the two files
     // measure the same object.
@@ -61,8 +60,77 @@ mod linux {
     impl Payload {
         fn new() -> Self {
             Self {
-                id: NEXT_PAYLOAD_ID.fetch_add(1, Ordering::Relaxed),
+                id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
             }
+        }
+    }
+
+    // Mirrors the object tree used by the criterion counterpart. Every layer owns
+    // a separate slot table, so relocating the tree acquires one lock per layer
+    // and its instruction count scales with the reachable graph rather than with
+    // the cost of a single call.
+    const TREE_DEPTH: usize = 5;
+
+    #[derive(Debug)]
+    pub(crate) struct Leaf {
+        id: u64,
+    }
+
+    impl Leaf {
+        fn new() -> Self {
+            Self {
+                id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, ThreadAware)]
+    pub(crate) struct Layer {
+        id: u64,
+        name: &'static str,
+        flags: Unaware<u32>,
+        shared: Arc<Leaf, PerCore>,
+        child: Option<Box<Self>>,
+    }
+
+    #[derive(Debug, Clone, ThreadAware)]
+    pub(crate) struct Tree {
+        root: Box<Layer>,
+    }
+
+    impl Tree {
+        fn new() -> Self {
+            let mut layer = None;
+
+            for depth in 0..TREE_DEPTH {
+                layer = Some(Box::new(Layer {
+                    id: depth as u64,
+                    name: "layer",
+                    flags: Unaware(0),
+                    shared: Arc::<Leaf, PerCore>::new(Leaf::new),
+                    child: layer,
+                }));
+            }
+
+            Self {
+                root: layer.expect("the loop runs at least once because TREE_DEPTH is nonzero"),
+            }
+        }
+
+        fn leaf_id(&self) -> u64 {
+            self.root.shared.id
+        }
+
+        fn leaf_ids(&self) -> Vec<u64> {
+            let mut ids = Vec::with_capacity(TREE_DEPTH);
+            let mut layer = Some(&self.root);
+
+            while let Some(current) = layer {
+                ids.push(current.shared.id);
+                layer = current.child.as_ref();
+            }
+
+            ids
         }
     }
 
@@ -88,6 +156,35 @@ mod linux {
         let affinities = affinities();
 
         (Arc::<Payload, PerCore>::new(Payload::new), affinities[1])
+    }
+
+    // Every layer of the tree already holds a value for both affinities.
+    fn materialized_tree() -> (Tree, Affinity, Affinity) {
+        let affinities = affinities();
+        let tree = Tree::new();
+        let mut ids = Vec::new();
+
+        for &affinity in &affinities {
+            let mut probe = tree.clone();
+            probe.relocate(None, affinity);
+            ids.extend(probe.leaf_ids());
+        }
+
+        // Proves the tree really has one independent slot table per layer, which
+        // is the only reason its instruction count differs from the bare payload.
+        ids.sort_unstable();
+        let distinct = ids.len();
+        ids.dedup();
+        assert_eq!(ids.len(), distinct, "every layer of every affinity must hold its own value");
+
+        (tree, affinities[0], affinities[1])
+    }
+
+    // No layer of the tree holds a value yet.
+    fn empty_tree() -> (Tree, Affinity) {
+        let affinities = affinities();
+
+        (Tree::new(), affinities[1])
     }
 
     #[library_benchmark]
@@ -120,14 +217,34 @@ mod linux {
         black_box(arc.id)
     }
 
+    #[library_benchmark]
+    #[bench::run(materialized_tree())]
+    fn hit_path_tree(input: (Tree, Affinity, Affinity)) -> u64 {
+        let (mut tree, source, destination) = input;
+
+        tree.relocate(black_box(Some(source)), black_box(destination));
+
+        black_box(tree.leaf_id())
+    }
+
+    #[library_benchmark]
+    #[bench::run(empty_tree())]
+    fn miss_path_tree(input: (Tree, Affinity)) -> u64 {
+        let (mut tree, destination) = input;
+
+        tree.relocate(black_box(None), black_box(destination));
+
+        black_box(tree.leaf_id())
+    }
+
     library_benchmark_group!(
         name = hit_path;
-        benchmarks = hit_path_pre_materialized, hit_path_same_affinity
+        benchmarks = hit_path_pre_materialized, hit_path_same_affinity, hit_path_tree
     );
 
     library_benchmark_group!(
         name = miss_path;
-        benchmarks = miss_path_new_affinity
+        benchmarks = miss_path_new_affinity, miss_path_tree
     );
 }
 
