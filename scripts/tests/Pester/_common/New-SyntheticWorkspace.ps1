@@ -257,10 +257,32 @@ function Write-PackageCargoToml {
 function Format-DependencyLine {
     param([Parameter(Mandatory = $true)][hashtable]$Dep)
 
+    # A dep marked External lives outside crates/, so it is not a workspace
+    # member and cannot use workspace inheritance. Used by tests that need a
+    # non-member dependency sharing a member's package name.
+    if ($Dep.ContainsKey('External') -and $Dep.External) {
+        if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
+            return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../../external/$($Dep.Name)`" }"
+        }
+        return "$($Dep.Name) = { path = `"../../external/$($Dep.Name)`" }"
+    }
+
     if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
         return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../$($Dep.Name)`" }"
     }
     return "$($Dep.Name).workspace = true"
+}
+
+# Returns the spec's non-member packages, or an empty array when it declares none.
+# A spec may be a hashtable or a psd1-loaded object, so membership is probed
+# rather than assumed.
+function Get-SpecExternalPackages {
+    param([Parameter(Mandatory = $true)]$Spec)
+
+    if ($Spec -isnot [hashtable]) { return @() }
+    if (-not $Spec.ContainsKey('ExternalPackages')) { return @() }
+    if ($null -eq $Spec.ExternalPackages) { return @() }
+    return @($Spec.ExternalPackages)
 }
 
 function Write-RootCargoToml {
@@ -274,6 +296,12 @@ function Write-RootCargoToml {
         'resolver = "2"'
         'members = ["crates/*"]'
     )
+    # Non-member packages sit under external/, which is inside the workspace
+    # directory, so cargo would otherwise reject them as unlisted members.
+    $externals = @(Get-SpecExternalPackages -Spec $Spec)
+    if ($externals.Count -gt 0) {
+        $lines += 'exclude = ["external"]'
+    }
     # Optional [workspace.package] inheritance block. Tests that exercise
     # `publish.workspace = true` / `version.workspace = true` need the
     # workspace root to define a default; expose this via Spec.WorkspacePackage.
@@ -347,6 +375,19 @@ function New-SyntheticWorkspace {
         Write-PackageCargoToml -Package $package -Path (Join-Path $packageDir 'Cargo.toml')
         Set-Content -Path (Join-Path $srcDir 'lib.rs') -Value "// $($package.Name)" -NoNewline
         Set-Content -Path (Join-Path $packageDir 'CHANGELOG.md') -Value "# Changelog`n`n## [Unreleased]" -NoNewline
+    }
+
+    # Packages under external/, deliberately outside `members = ["crates/*"]`
+    # and named in the root `exclude` list so cargo treats them as their own
+    # thing rather than as unlisted members. They exist so a member can declare
+    # a path dependency that is NOT a workspace member -- the only shape that
+    # tells name matching apart from identity matching.
+    foreach ($external in @(Get-SpecExternalPackages -Spec $Spec)) {
+        $externalDir = Join-Path $Path "external\$($external.Name)"
+        $externalSrc = Join-Path $externalDir 'src'
+        New-Item -ItemType Directory -Path $externalSrc -Force | Out-Null
+        Write-PackageCargoToml -Package $external -Path (Join-Path $externalDir 'Cargo.toml')
+        Set-Content -Path (Join-Path $externalSrc 'lib.rs') -Value "// $($external.Name)" -NoNewline
     }
 
     Initialize-GitRepo -Path $Path

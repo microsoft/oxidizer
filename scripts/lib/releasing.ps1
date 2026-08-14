@@ -570,12 +570,17 @@ function Get-CrateRequiredChangeType {
 #   Name                  - cargo package name
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
-#   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   Deps                  - array of normalized names of the WORKSPACE MEMBERS this package
+#                           depends on (kind 'normal' or 'build', not 'dev'). Membership is
+#                           decided by the dependency's resolved path, not its name, so a
+#                           registry crate or an out-of-workspace path dependency is excluded
+#                           even when it shares a member's package name.
 #   DepAliases            - hashtable mapping a normalized dependency name to additional
 #                           normalized crate roots observed for it -- a `package = "..."`
 #                           alias, or the dependency's own `[lib] name`. An entry does not say
 #                           whether a separate unrenamed declaration also exists, so this is
-#                           not a complete or exclusive set of reachable roots.
+#                           not a complete or exclusive set of reachable roots. Covers the same
+#                           workspace-member dependencies as Deps.
 #   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
 #                           sets one, else its normalized package name), or $null when the
 #                           package has no library target at all. This is the name a crate's
@@ -613,6 +618,26 @@ function Get-WorkspacePackages {
         $crateRootByPackage[$package.name.Replace('-', '_')] = ([string]$libTarget.name).Replace('-', '_')
     }
 
+    # Manifest directories of the packages this function returns, used to decide
+    # whether a dependency is a workspace edge.
+    #
+    # Cargo reports a dependency's package name but nothing that distinguishes a
+    # workspace member from a registry crate or a path dependency outside the
+    # workspace. Every consumer of Deps asks a workspace-reachability question --
+    # which crates can carry a released package's types to their own public API --
+    # so matching on the text name alone lets an unrelated external crate stand in
+    # for a workspace conduit and fabricate a path that does not exist.
+    #
+    # Identity therefore comes from the resolved path, not the name.
+    $memberDirs = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($package in $metadata.packages) {
+        $memberDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
+        if ($memberDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            [void]$memberDirs.Add($memberDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar))
+        }
+    }
+
     foreach ($package in $metadata.packages) {
         $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -623,6 +648,23 @@ function Get-WorkspacePackages {
         $depAliases = @{}
         foreach ($dep in $package.dependencies) {
             if ($dep.kind -eq 'dev') {
+                continue
+            }
+
+            # A dependency joins the workspace graph only when its `path`
+            # resolves to a member directory. `path` is absent for a registry
+            # dependency and points outside crates/ for a non-member path
+            # dependency; in neither case can the edge carry a workspace
+            # package's types, so it must not participate in reachability --
+            # nor contribute an alias, which would let an external crate's
+            # rename supply an allowlist root for a same-named member.
+            $depPathProp = $dep.PSObject.Properties['path']
+            if (-not $depPathProp -or [string]::IsNullOrWhiteSpace($depPathProp.Value)) {
+                continue
+            }
+            $depDir = [System.IO.Path]::GetFullPath([string]$depPathProp.Value).
+                TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            if (-not $memberDirs.Contains($depDir)) {
                 continue
             }
 
