@@ -61,8 +61,8 @@ Never reproduce their work by hand.
 4. **Resolve mechanically**
    - Write request JSON containing `mode`, accepted `tokens`, `classifications`,
      required `macroContracts`, and optional `force`.
-   - Run `scripts/resolve-plan.ps1 -FactsPath <facts.json> -RequestPath
-     <request.json>`.
+   - Run `.github/skills/release-packages/scripts/resolve-plan.ps1 -FactsPath
+     <facts.json> -RequestPath <request.json>`.
    - Treat its release set, versions, cascade reasons, and ordering as canonical.
    - If it returns `status: blocked`, review every package named in
      `ambiguities` and rerun with the same frozen facts. Never convert an
@@ -81,7 +81,8 @@ Never reproduce their work by hand.
      classifications or rules diverge.
 
 6. **Apply atomically**
-   - Run `scripts/apply-plan.ps1 -PlanPath <plan.json>`.
+   - Run `.github/skills/release-packages/scripts/apply-plan.ps1 -PlanPath
+     <plan.json>`.
    - Never reproduce its writes or rollback behavior by hand.
 
 7. **Report**

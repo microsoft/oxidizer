@@ -2,7 +2,8 @@
 
 This reference contains the model-owned parts of an Oxidizer release. Mechanical
 token parsing, version arithmetic, dependency closure, pin reconciliation, and
-topological ordering belong to `scripts/resolve-plan.ps1`.
+topological ordering belong to
+`.github/skills/release-packages/scripts/resolve-plan.ps1`.
 
 ## Inputs
 
