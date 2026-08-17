@@ -23,14 +23,14 @@ use crate::metadata::FieldDescriptor;
 
 /// Getter closure passed to [`FieldVisitorFn`].
 ///
-/// Takes a [`data_privacy::RedactionEngine`] reference and returns the
+/// Takes a [`data_privacy::Redactor`] reference and returns the
 /// redacted [`Value`]. Only call it when the processor actually needs the value.
-pub type FieldValueFn<'a> = dyn Fn(&data_privacy::RedactionEngine) -> Value + 'a;
+pub type FieldValueFn<'a> = dyn Fn(&dyn data_privacy::Redactor) -> Value + 'a;
 
 /// Visitor callback for lazily iterating over event fields or enrichment entries.
 ///
 /// Each invocation receives a [`FieldDescriptor`] and a [`FieldValueFn`] getter.
-/// The getter takes a [`data_privacy::RedactionEngine`] reference and returns the
+/// The getter takes a [`data_privacy::Redactor`] reference and returns the
 /// redacted [`Value`] - it is only called if the processor needs the value.
 ///
 /// Return [`ControlFlow::Continue`] to keep iterating, or

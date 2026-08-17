@@ -43,7 +43,7 @@ pub trait Event: Send + Sync {
     /// Lazily visits all fields on this event.
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`](crate::metadata::FieldDescriptor) and a getter
-    /// closure. The getter takes a `&RedactionEngine` and returns the redacted
+    /// closure. The getter takes a `&dyn Redactor` and returns the redacted
     /// [`Value`](crate::Value). It is only invoked if the processor wants the value.
     ///
     /// Fields follow one of three redaction paths:

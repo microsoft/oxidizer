@@ -83,7 +83,7 @@ impl EventEnrichment {
                     (!entry.is_excluded_from_logs()).then(|| LogFieldEntry::new(entry.key().as_str())),
                     entry.metric_key().map(|key| MetricFieldEntry::dimension(key.as_str())),
                 );
-                let getter = |engine: &data_privacy::RedactionEngine| -> Value { entry.redacted_value_inner(engine) };
+                let getter = |redactor: &dyn data_privacy::Redactor| -> Value { entry.redacted_value_inner(redactor) };
                 visitor(&desc, &getter)?;
             }
         }
@@ -223,7 +223,7 @@ impl<'a> EventView<'a> {
     ///
     /// For each field, the visitor receives a [`FieldDescriptor`] and a getter
     /// closure. The getter is only invoked if the processor wants the value -
-    /// it takes a `&RedactionEngine` and returns the redacted [`Value`].
+    /// it takes a `&dyn Redactor` and returns the redacted [`Value`].
     ///
     /// The visitor returns [`ControlFlow::Continue`] to keep iterating or
     /// [`ControlFlow::Break`] to stop early.

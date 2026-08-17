@@ -49,7 +49,7 @@
   2. **`data_class = <expr>`** - wraps the value in `Sensitive::new(value, expr)` before redaction, for types without built-in classification.
   3. **`unredacted`** - bypasses redaction entirely; the type must implement `Into<Value>`.
 - **Redaction** - `Sensitive<T>` + `RedactionEngine` enforce privacy-by-construction
-- **Per-processor redaction** - each processor owns its own `RedactionEngine` privately, passing it to getter closures during `visit_fields`/`visit_enrichments`
+- **Per-processor redaction** - each processor owns its own `RedactionEngine` privately, passing it to getter closures during `visit_fields`/`visit_enrichments`; the getters accept any `&dyn Redactor`
 
 ```text
 emit!(sink, MyEvent { a: expensive() })

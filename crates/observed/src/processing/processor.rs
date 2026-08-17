@@ -17,7 +17,7 @@ use crate::metadata::EventDescription;
 /// A processor that receives lazy event views.
 ///
 /// One processor typically represents one target (e.g. one log destination or
-/// one metric destination). Each processor owns its own redaction engine
+/// one metric destination). Each processor owns its own redactor
 /// (typically a [`data_privacy::RedactionEngine`]) privately.
 ///
 /// The emission infrastructure builds an [`EventView`] and passes it to

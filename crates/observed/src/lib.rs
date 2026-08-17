@@ -454,7 +454,7 @@ pub use value::Value;
 #[doc(hidden)]
 pub mod __private {
     // data_privacy re-exports (no public path in this crate).
-    pub use ::data_privacy::{RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
+    pub use ::data_privacy::{RedactedDisplay, RedactedToString, Sensitive};
 
     pub use crate::enrichment::EnrichmentEntry;
 }

@@ -91,8 +91,8 @@ impl Value {
     /// output. That prefix was never approved by the redactor, so exporting it
     /// could widen what reaches telemetry; a failed redaction therefore yields
     /// the erased (empty) value rather than the partial text.
-    pub fn from_redacted(value: &(impl data_privacy::RedactedDisplay + ?Sized), engine: &data_privacy::RedactionEngine) -> Self {
-        let rendered = fmt::from_fn(|f| data_privacy::RedactedDisplay::fmt(value, engine, f));
+    pub fn from_redacted(value: &(impl data_privacy::RedactedDisplay + ?Sized), redactor: &dyn data_privacy::Redactor) -> Self {
+        let rendered = fmt::from_fn(|f| data_privacy::RedactedDisplay::fmt(value, redactor, f));
 
         REDACTION_BUFFER.with(|cell| {
             // A `RedactedDisplay` impl may emit an event of its own, re-entering
@@ -401,6 +401,17 @@ mod tests {
             Value::from_redacted(&classified, &engine),
             Value::String(Text::from(data_privacy::RedactedToString::to_redacted_string(&classified, &engine)))
         );
+    }
+
+    #[test]
+    fn from_redacted_accepts_a_bare_redactor() {
+        // The parameter is `&dyn Redactor`, not `&RedactionEngine`, so a
+        // standalone redaction strategy drives it without an engine wrapping.
+        let redactor =
+            data_privacy::simple_redactor::SimpleRedactor::with_mode(data_privacy::simple_redactor::SimpleRedactorMode::Passthrough);
+        let classified = data_privacy::Sensitive::new("secret", data_privacy::DataClass::new("test", "unclassified"));
+
+        assert_eq!(Value::from_redacted(&classified, &redactor), Value::String(Text::from("secret")));
     }
 
     #[test]

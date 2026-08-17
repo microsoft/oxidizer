@@ -144,20 +144,20 @@ impl EnrichmentEntry {
         self.metric_key.as_ref()
     }
 
-    /// Returns the value, applying redaction through the engine.
+    /// Returns the value, applying redaction through the redactor.
     ///
     /// This is gated behind the `test-util` feature for test assertions.
     #[cfg(any(test, feature = "test-util"))]
     #[must_use]
-    pub fn redacted_value(&self, engine: &data_privacy::RedactionEngine) -> Value {
-        self.redacted_value_inner(engine)
+    pub fn redacted_value(&self, redactor: &dyn data_privacy::Redactor) -> Value {
+        self.redacted_value_inner(redactor)
     }
 
-    /// Returns the value, applying redaction through the engine.
-    pub(crate) fn redacted_value_inner(&self, engine: &data_privacy::RedactionEngine) -> Value {
+    /// Returns the value, applying redaction through the redactor.
+    pub(crate) fn redacted_value_inner(&self, redactor: &dyn data_privacy::Redactor) -> Value {
         match &self.stored {
             UnredactedValue::Primitive(value) => value.clone(),
-            UnredactedValue::Unredacted(classified) => Value::from_redacted(&**classified, engine),
+            UnredactedValue::Unredacted(classified) => Value::from_redacted(&**classified, redactor),
         }
     }
 }
