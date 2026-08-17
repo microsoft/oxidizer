@@ -42,11 +42,48 @@
               "generatedRuntimePaths": "unchanged",
               "hygiene": "unchanged"
             },
-            "evidence": ["Expansion snapshots and compile fixtures are unchanged."]
+            "evidence": ["Expansion snapshots and compile fixtures are unchanged."],
+            "compileEvidence": [
+              {
+                "ownerPackage": "templated_uri",
+                "path": "crates/templated_uri/tests/ui/bad_template.rs",
+                "baseline": { "revision": "<sha>", "result": "fail", "exitCode": 101 },
+                "current":  { "revision": "worktree", "result": "fail", "exitCode": 101 }
+              }
+            ]
           }
         },
         "force": false
       }
+
+    compileEvidence is required for every fixture the facts report changed in the
+    macro's review scope (macroCompileFixtureChanges). Measured outcomes derive a
+    verdict floor -- pass to fail is breaking, fail to pass is nonbreaking, an
+    unchanged outcome is compatible -- and a declared verdict below that floor
+    blocks the plan.
+
+    regressionEvidence is required for every selection decision whose reason is
+    behavior-fix (changed/all mode):
+      "selectionDecisions": {
+        "cachet_tier": {
+          "decision": "accept",
+          "reason": "behavior-fix",
+          "evidence": ["Eviction now honors the configured tier bound."],
+          "regressionEvidence": [
+            {
+              "kind": "consumer-runtime",
+              "probe": "cargo test -p cachet_tier --test eviction",
+              "baseline": { "revision": "<sha>", "result": "fail", "exitCode": 101 },
+              "current":  { "revision": "worktree", "result": "pass", "exitCode": 0 }
+            }
+          ]
+        }
+      }
+
+    Each entry pairs one consumer-runtime, consumer-compile, or packaged-artifact
+    probe measured at the release baseline and at the current revision; only a
+    baseline failure that now passes demonstrates the fix. Any other outcome, or
+    a measurement that cannot be read, blocks the plan.
 #>
 [CmdletBinding()]
 param(
@@ -117,6 +154,132 @@ function Get-RequestValue {
         return $property.Value
 }
 
+# The measured half of a before/after probe: which revision was exercised, what
+# it did, and the exit status that proves it. Compile fixtures and behaviour
+# probes share this parser so they cannot drift apart on what counts as a usable
+# measurement.
+function Get-MeasuredOutcome {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value -or $Value -is [string]) {
+        return [pscustomobject]@{
+            Result = $null; Revision = $null; ExitCode = $null; Complete = $false
+        }
+    }
+
+    $result = ($Value.result ?? '').ToString().Trim().ToLowerInvariant()
+    $revision = ($Value.revision ?? '').ToString().Trim()
+    $exitCodeValue = $Value.exitCode
+    $exitCode = $null
+    if ($null -ne $exitCodeValue -and $exitCodeValue -is [ValueType]) {
+        $exitCode = [int]$exitCodeValue
+    } elseif (
+        $exitCodeValue -is [string] -and
+        [int]::TryParse($exitCodeValue, [ref]$null)
+    ) {
+        $exitCode = [int]$exitCodeValue
+    }
+
+    $complete = (
+        $result -in @('pass', 'fail') -and
+        -not [string]::IsNullOrWhiteSpace($revision) -and
+        $null -ne $exitCode
+    )
+    return [pscustomobject]@{
+        Result   = if ($complete) { $result } else { $null }
+        Revision = $revision
+        ExitCode = $exitCode
+        Complete = $complete
+    }
+}
+
+$script:RegressionEvidenceKinds = @(
+    'consumer-runtime',
+    'consumer-compile',
+    'packaged-artifact'
+)
+
+# A behaviour fix is a claim about observable behaviour, so it is only credible
+# when the same probe is shown failing at the release baseline and passing now.
+# Each entry pairs the two runs of one probe, which is what makes "the same
+# probe" mechanically checkable rather than a narrative assertion.
+function Get-RegressionEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$Package,
+        [AllowNull()]$Value
+    )
+
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $issues = New-Object 'System.Collections.Generic.List[string]'
+    $demonstrated = $false
+
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string]) {
+            throw "Regression evidence in selection decision '$Package' must be an object with kind, probe, baseline, and current."
+        }
+        $probe = ($item.probe ?? '').ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($probe)) {
+            throw "Regression evidence in selection decision '$Package' must name the probe it exercised."
+        }
+        $kind = ($item.kind ?? '').ToString().Trim().ToLowerInvariant()
+        if ($kind -notin $script:RegressionEvidenceKinds) {
+            throw "Regression evidence '$probe' in selection decision '$Package' must use kind $($script:RegressionEvidenceKinds -join ', ')."
+        }
+
+        $baseline = Get-MeasuredOutcome -Value $item.baseline
+        $current = Get-MeasuredOutcome -Value $item.current
+        foreach ($side in @(
+                [pscustomobject]@{ Name = 'baseline'; Outcome = $baseline },
+                [pscustomobject]@{ Name = 'current'; Outcome = $current }
+            )) {
+            if (-not $side.Outcome.Complete) {
+                $issues.Add("Regression evidence '$probe' in selection decision '$Package' does not record a $($side.Name) pass/fail result with a revision and exit code.") |
+                    Out-Null
+                continue
+            }
+            # An exit code that contradicts the recorded result means the
+            # measurement was mis-transcribed; neither half can be trusted.
+            if (($side.Outcome.Result -eq 'pass') -ne ($side.Outcome.ExitCode -eq 0)) {
+                $issues.Add("Regression evidence '$probe' in selection decision '$Package' records a $($side.Name) result of '$($side.Outcome.Result)' with exit code $($side.Outcome.ExitCode).") |
+                    Out-Null
+            }
+        }
+
+        $outcome = $null
+        if (
+            $baseline.Complete -and $current.Complete -and
+            ($baseline.Result -eq 'pass') -eq ($baseline.ExitCode -eq 0) -and
+            ($current.Result -eq 'pass') -eq ($current.ExitCode -eq 0)
+        ) {
+            if ($baseline.Revision -eq $current.Revision) {
+                # One revision measured twice compares nothing.
+                $issues.Add("Regression evidence '$probe' in selection decision '$Package' measures revision '$($baseline.Revision)' on both sides.") |
+                    Out-Null
+            } else {
+                $outcome = "$($baseline.Result)->$($current.Result)"
+                if ($baseline.Result -eq 'fail' -and $current.Result -eq 'pass') {
+                    $demonstrated = $true
+                }
+            }
+        }
+
+        $entries.Add([ordered]@{
+                kind    = $kind
+                probe   = $probe
+                outcome = $outcome ?? 'inconclusive'
+            }) | Out-Null
+    }
+
+    $ordered = $entries.ToArray() |
+        Sort-Object -Property @{ Expression = { "$($_.kind)`u{0000}$($_.probe)" } }
+    return [pscustomobject]@{
+        Entries      = @($ordered)
+        Issues       = @($issues | Sort-Object -Unique)
+        Demonstrated = $demonstrated
+    }
+}
+
 function Get-SelectionDecision {
     param(
         [Parameter(Mandatory = $true)]$Fact,
@@ -182,6 +345,7 @@ function Get-SelectionDecision {
     $packagePrefix = "crates/$($Fact.folder)/"
     $otherFiles = @(
         $Fact.modifiedFiles |
+            Where-Object { $null -ne $_ } |
             ForEach-Object { $_.ToString().Replace('\', '/') } |
             Where-Object {
                 if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
@@ -229,6 +393,7 @@ function Get-SelectionDecision {
         $packagePrefix = "crates/$($Fact.folder)/"
         $releaseWorthyFiles = @(
             $Fact.modifiedFiles |
+                Where-Object { $null -ne $_ } |
                 ForEach-Object { $_.ToString().Replace('\', '/') } |
                 Where-Object {
                     if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
@@ -261,10 +426,173 @@ function Get-SelectionDecision {
         throw "Selection decision '$($Fact.folder)' must include evidence."
     }
 
+    $regression = Get-RegressionEvidence `
+        -Package $Fact.folder `
+        -Value $value.regressionEvidence
+
     return [pscustomobject]@{
-        Decision = $decision
-        Reason   = $reason
-        Evidence = $evidence
+        Fact               = $Fact
+        Decision           = $decision
+        Reason             = $reason
+        Evidence           = $evidence
+        RegressionEvidence = $regression.Entries
+        EvidenceIssues     = $regression.Issues
+        RegressionShown    = $regression.Demonstrated
+    }
+}
+
+function Get-CompileFixtureKey {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    # A `.stderr`/`.stdout` file is the recorded outcome of its `.rs` sibling, so
+    # both collapse onto the fixture that was actually compiled. One measurement
+    # of that fixture therefore discharges the whole group.
+    $normalized = $Path.ToString().Trim().Replace('\', '/')
+    foreach ($extension in @('.stderr', '.stdout')) {
+        if ($normalized.EndsWith($extension, [StringComparison]::OrdinalIgnoreCase)) {
+            return $normalized.Substring(0, $normalized.Length - $extension.Length) + '.rs'
+        }
+    }
+    return $normalized
+}
+
+function ConvertTo-MacroVerdictName {
+    param([Parameter(Mandatory = $true)][string]$ChangeType)
+
+    switch ($ChangeType) {
+        'breaking'     { return 'breaking' }
+        'non-breaking' { return 'nonbreaking' }
+        default        { return 'compatible' }
+    }
+}
+
+function Get-CompileEvidenceOutcome {
+    param(
+        [Parameter(Mandatory = $true)][string]$Baseline,
+        [Parameter(Mandatory = $true)][string]$Current
+    )
+
+    # The only mechanical reading of a compile fixture: what the same consumer
+    # program did before the change versus after it.
+    if ($Baseline -eq 'pass' -and $Current -eq 'fail') { return 'breaking' }
+    if ($Baseline -eq 'fail' -and $Current -eq 'pass') { return 'non-breaking' }
+    return 'patch'
+}
+
+function ConvertTo-CompileEvidenceSide {
+    param(
+        [Parameter(Mandatory = $true)][string]$Package,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Side,
+        [AllowNull()]$Value
+    )
+
+    $issue = "Compile evidence for '$Path' in macro contract '$Package' does not record a $Side pass/fail result with a revision and exit code."
+    $outcome = Get-MeasuredOutcome -Value $Value
+    if (-not $outcome.Complete) {
+        return [pscustomobject]@{
+            Result   = $null
+            Revision = $outcome.Revision
+            ExitCode = $outcome.ExitCode
+            Issue    = $issue
+        }
+    }
+
+    return [pscustomobject]@{
+        Result   = $outcome.Result
+        Revision = $outcome.Revision
+        ExitCode = $outcome.ExitCode
+        Issue    = $null
+    }
+}
+
+function Get-MacroCompileEvidence {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [AllowNull()]$Value
+    )
+
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $issues = New-Object 'System.Collections.Generic.List[string]'
+    $floor = 'patch'
+    $deciding = New-Object 'System.Collections.Generic.List[string]'
+
+    # A fixture owned by a published implementation dependency is a consumer
+    # program for that crate, not for this macro: that crate carries its own
+    # release classification, and letting its fixture set this macro's floor
+    # would break every macro that merely depends on it. Everything else -- the
+    # macro itself, the facades that re-export it, and unpublished helpers with
+    # no release identity of their own -- can only be speaking about this macro.
+    $nonFloorKeys = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($obligation in @($Fact.macroCompileFixtureChanges)) {
+        if (
+            ($obligation.scopeRole ?? '').ToString() -eq 'implementationClosure' -and
+            [bool]$obligation.ownerPublished
+        ) {
+            $owner = ($obligation.ownerPackage ?? '').ToString().Replace('-', '_')
+            [void]$nonFloorKeys.Add(
+                "$owner|$(Get-CompileFixtureKey -Path ($obligation.path ?? ''))"
+            )
+        }
+    }
+
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string]) {
+            throw "Compile evidence in macro contract '$($Fact.folder)' must be an object with ownerPackage, path, baseline, and current."
+        }
+        $ownerPackage = ($item.ownerPackage ?? '').ToString().Trim()
+        $path = ($item.path ?? '').ToString().Trim()
+        if (
+            [string]::IsNullOrWhiteSpace($ownerPackage) -or
+            [string]::IsNullOrWhiteSpace($path)
+        ) {
+            throw "Compile evidence in macro contract '$($Fact.folder)' must name ownerPackage and path."
+        }
+
+        $baseline = ConvertTo-CompileEvidenceSide `
+            -Package $Fact.folder -Path $path -Side 'baseline' -Value $item.baseline
+        $current = ConvertTo-CompileEvidenceSide `
+            -Package $Fact.folder -Path $path -Side 'current' -Value $item.current
+        foreach ($side in @($baseline, $current)) {
+            if ($null -ne $side.Issue) { $issues.Add($side.Issue) | Out-Null }
+        }
+
+        $outcome = $null
+        if ($null -ne $baseline.Result -and $null -ne $current.Result) {
+            $outcome = Get-CompileEvidenceOutcome `
+                -Baseline $baseline.Result `
+                -Current $current.Result
+            $evidenceKey = "$($ownerPackage.Replace('-', '_'))|$(Get-CompileFixtureKey -Path $path)"
+            if (-not $nonFloorKeys.Contains($evidenceKey)) {
+                $stronger = Get-StrongerChangeType -Left $floor -Right $outcome
+                if ($stronger -ne $floor) {
+                    $floor = $stronger
+                    $deciding.Clear()
+                }
+                if ($outcome -eq $floor -and $outcome -ne 'patch') {
+                    $deciding.Add($path) | Out-Null
+                }
+            }
+        }
+
+        $entries.Add([pscustomobject]@{
+                OwnerPackage = $ownerPackage.Replace('-', '_')
+                Path         = $path.Replace('\', '/')
+                Key          = Get-CompileFixtureKey -Path $path
+                Baseline     = $baseline
+                Current      = $current
+                Outcome      = $outcome
+            }) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        Entries      = $entries.ToArray()
+        Issues       = @($issues | Sort-Object -Unique)
+        DerivedFloor = $floor
+        Deciding     = @($deciding | Sort-Object -Unique)
     }
 }
 
@@ -337,12 +665,20 @@ function Get-MacroContract {
             throw "Macro contract '$($Fact.folder)' must include evidence."
         }
 
+        $compileEvidence = Get-MacroCompileEvidence `
+            -Fact $Fact `
+            -Value $value.compileEvidence
+
         return [pscustomobject]@{
             Verdict         = $verdict.ToString().ToLowerInvariant().Replace('-', '')
             ChangeType      = $changeType
             ReviewedPackages = $reviewedPackages
             Channels        = $value.channels
             Evidence        = $evidence
+            CompileEvidence = $compileEvidence.Entries
+            EvidenceIssues  = $compileEvidence.Issues
+            DerivedFloor    = $compileEvidence.DerivedFloor
+            DecidingFixtures = $compileEvidence.Deciding
         }
 }
 
@@ -504,7 +840,7 @@ function Assert-PinSatisfiesRequirement {
 
 $factsDocument = Get-Content -LiteralPath (Resolve-Path $FactsPath) -Raw | ConvertFrom-Json
 $request = Get-Content -LiteralPath (Resolve-Path $RequestPath) -Raw | ConvertFrom-Json
-if ($factsDocument.schemaVersion -ne 4) {
+if ($factsDocument.schemaVersion -ne 5) {
     throw 'The facts document uses an unsupported schema. Rerun release-facts.ps1.'
 }
 $facts = @($factsDocument.packages)
@@ -516,6 +852,10 @@ foreach ($fact in $facts) {
             'macroPublicDeps',
             'macroImplementationClosure',
             'macroRuntimePartners',
+            'macroCompileFixtureChanges',
+            'externalDepChanges',
+            'externalExposedDeps',
+            'rustImplementationChanged',
             'modifiedFiles',
             'manifestDependencyScopes',
             'manifestOtherChanged',
@@ -595,6 +935,283 @@ function Get-ModifiedMacroScopeMember {
     )
 }
 
+# The external dependency requirements a crate publishes are resolved by its
+# consumers, so moving one to another compatibility line while the crate's
+# public API names that dependency's types changes those types' identity for
+# every consumer -- under unchanged paths, and invisibly to a
+# cargo-semver-checks run that only sees this workspace's own rustdoc.
+#
+# The floor is deliberately narrow. A private dependency bump reaches no
+# consumer, and a proc macro exports behaviour rather than foreign type
+# identity, so neither can raise it; both are already excluded from
+# externalExposedDeps by release-facts.ps1.
+function Get-ExternalBreakingExposure {
+    param([Parameter(Mandatory = $true)]$Fact)
+
+    if (-not [bool]$Fact.everReleased) { return @() }
+
+    $exposed = @($Fact.externalExposedDeps)
+    return @(
+        @($Fact.externalDepChanges) |
+            Where-Object { [bool]$_.breaking -and $exposed -contains $_.name } |
+            Sort-Object -Property name
+    )
+}
+
+function Format-ExternalExposureProbe {
+    param([Parameter(Mandatory = $true)]$Changes)
+
+    return @(
+        foreach ($change in @($Changes)) {
+            [ordered]@{
+                name        = $change.name
+                baselineReq = $change.baselineReq
+                currentReq  = $change.currentReq
+            }
+        }
+    )
+}
+
+function Register-ExternalExposure {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ChangeType
+    )
+
+    $flooring = @(Get-ExternalBreakingExposure -Fact $Fact)
+    if ($flooring.Count -eq 0) { return }
+    if (
+        -not [string]::IsNullOrWhiteSpace($ChangeType) -and
+        $script:ChangeTypeRank[$ChangeType] -ge $script:ChangeTypeRank['breaking']
+    ) {
+        return
+    }
+
+    $key = "$($Fact.folder)|externalExposureUnderclassified"
+    if (-not $ambiguityKeys.Add($key)) { return }
+    $ambiguities.Add([ordered]@{
+            kind          = 'externalExposureUnderclassified'
+            package       = $Fact.folder
+            classified    = $ChangeType
+            derivedFloor  = 'breaking'
+            dependencies  = @(Format-ExternalExposureProbe -Changes $flooring)
+            requiredInput = "classifications.$($Fact.folder)"
+        }) | Out-Null
+}
+
+# A previously released ordinary library may only be classified breaking or
+# nonbreaking on its own account when its own packaged Rust source actually
+# changed. Doc comments, tests, benchmarks, examples, README/CHANGELOG, and
+# manifest edits are not an own-diff basis for elevation above patch, and a
+# re-exported macro contract or an exposed dependency bump is a cascade the
+# resolver applies -- not something the crate declares about itself. The
+# external-exposure lane already forces breaking up when a foreign type break is
+# exposed, so it is exempt here; proc macros are classified by their contract,
+# and first releases have no prior surface to break.
+function Register-OwnDiffFloor {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ChangeType
+    )
+
+    if (-not [bool]$Fact.everReleased) { return }
+    if ([bool]$Fact.procMacroOnly) { return }
+    if ([string]::IsNullOrWhiteSpace($ChangeType)) { return }
+    if ($script:ChangeTypeRank[$ChangeType] -le $script:ChangeTypeRank['patch']) { return }
+    if ([bool]$Fact.rustImplementationChanged) { return }
+    if (@(Get-ExternalBreakingExposure -Fact $Fact).Count -gt 0) { return }
+
+    $key = "$($Fact.folder)|ownClassificationUnsupported"
+    if (-not $ambiguityKeys.Add($key)) { return }
+    $ambiguities.Add([ordered]@{
+            kind          = 'ownClassificationUnsupported'
+            package       = $Fact.folder
+            classified    = $ChangeType
+            requiredInput = "classifications.$($Fact.folder)"
+        }) | Out-Null
+}
+
+# A behaviour fix must be demonstrated, not asserted: some consumer-visible
+# probe has to fail at the release baseline and pass at the current revision.
+# Anything else -- no probe at all, an unchanged outcome, a newly broken probe,
+# or a measurement that cannot be read -- blocks the plan instead of seeding a
+# release, because an internal adaptation that preserves behaviour is
+# indistinguishable from a fix once the reason is written down.
+function Register-SelectionEvidence {
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)]$Decision
+    )
+
+    $exposureFlooring = @(Get-ExternalBreakingExposure -Fact $Decision.Fact)
+    if ($exposureFlooring.Count -gt 0 -and $Decision.Reason -ne 'breaking') {
+        # Declining, or accepting under any softer reason, records a judgement
+        # the manifest contradicts. The selection reason has to agree with the
+        # derived floor or the plan cannot be trusted to size the bump.
+        $key = "$Folder|externalExposureUnderselected"
+        if ($ambiguityKeys.Add($key)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'externalExposureUnderselected'
+                    package       = $Folder
+                    decision      = $Decision.Decision
+                    reason        = $Decision.Reason
+                    derivedFloor  = 'breaking'
+                    dependencies  = @(Format-ExternalExposureProbe -Changes $exposureFlooring)
+                    requiredInput = "selectionDecisions.$Folder.reason"
+                }) | Out-Null
+        }
+    }
+
+    if ($Decision.Reason -eq 'breaking') {
+        $classification = Get-Classification -Fact $Decision.Fact -Request $request
+        if ($classification.ChangeType -ne 'breaking') {
+            $key = "$Folder|breakingSelectionUnderclassified"
+            if ($ambiguityKeys.Add($key)) {
+                $ambiguities.Add([ordered]@{
+                        kind                    = 'breakingSelectionUnderclassified'
+                        package                 = $Folder
+                        reason                  = $Decision.Reason
+                        objectiveClassification = ConvertTo-MacroVerdictName `
+                            -ChangeType $classification.ChangeType
+                        requiredInput           = "selectionDecisions.$Folder.reason"
+                    }) | Out-Null
+            }
+        }
+    }
+
+    if ($Decision.Reason -ne 'behavior-fix') { return }
+
+    if (@($Decision.EvidenceIssues).Count -gt 0) {
+        $inconclusiveKey = "$Folder|behaviorEvidenceInconclusive"
+        if ($ambiguityKeys.Add($inconclusiveKey)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'behaviorEvidenceInconclusive'
+                    package       = $Folder
+                    reason        = $Decision.Reason
+                    issues        = @($Decision.EvidenceIssues)
+                    requiredInput = "selectionDecisions.$Folder.regressionEvidence"
+                }) | Out-Null
+        }
+    }
+
+    if (-not $Decision.RegressionShown) {
+        $undemonstratedKey = "$Folder|behaviorFixUndemonstrated"
+        if ($ambiguityKeys.Add($undemonstratedKey)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'behaviorFixUndemonstrated'
+                    package       = $Folder
+                    reason        = $Decision.Reason
+                    probes        = @($Decision.RegressionEvidence)
+                    requiredInput = "selectionDecisions.$Folder.regressionEvidence"
+                }) | Out-Null
+        }
+    }
+}
+
+function Register-MacroContract {
+    param(
+        [Parameter(Mandatory = $true)]$Fact,
+        [Parameter(Mandatory = $true)]$Contract,
+        [Parameter(Mandatory = $true)][string]$Trigger
+    )
+
+    $blocked = $false
+
+    # Every fixture the facts saw change in this macro's review scope is an
+    # obligation: the contract must say what that consumer program did before
+    # the change and what it does now. Without it a compile-contract break in a
+    # fixture owned by a runtime partner is indistinguishable from a test-only
+    # edit, which is precisely how a rejected input can ship as a patch.
+    $obligations = @($Fact.macroCompileFixtureChanges)
+    if ($obligations.Count -gt 0) {
+        $evidenceKeys = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::Ordinal
+        )
+        foreach ($entry in @($Contract.CompileEvidence)) {
+            [void]$evidenceKeys.Add("$($entry.OwnerPackage)|$($entry.Key)")
+        }
+        $missing = @(
+            foreach ($obligation in $obligations) {
+                $owner = ($obligation.ownerPackage ?? '').ToString().Replace('-', '_')
+                $key = Get-CompileFixtureKey -Path ($obligation.path ?? '')
+                if (-not $evidenceKeys.Contains("$owner|$key")) {
+                    $obligation.path
+                }
+            }
+        ) | Sort-Object -Unique
+        if ($missing.Count -gt 0) {
+            $missingKey = "$($Fact.folder)|macroCompileFixtureUnevidenced"
+            if ($ambiguityKeys.Add($missingKey)) {
+                $ambiguities.Add([ordered]@{
+                        kind          = 'macroCompileFixtureUnevidenced'
+                        package       = $Fact.folder
+                        trigger       = $Trigger
+                        fixtures      = @($missing)
+                        requiredInput = "macroContracts.$($Fact.folder).compileEvidence"
+                    }) | Out-Null
+            }
+            $blocked = $true
+        }
+    }
+
+    if (@($Contract.EvidenceIssues).Count -gt 0) {
+        $inconclusiveKey = "$($Fact.folder)|macroCompileEvidenceInconclusive"
+        if ($ambiguityKeys.Add($inconclusiveKey)) {
+            $ambiguities.Add([ordered]@{
+                    kind          = 'macroCompileEvidenceInconclusive'
+                    package       = $Fact.folder
+                    trigger       = $Trigger
+                    issues        = @($Contract.EvidenceIssues)
+                    requiredInput = "macroContracts.$($Fact.folder).compileEvidence"
+                }) | Out-Null
+        }
+        $blocked = $true
+    }
+
+    # The verdict is a checked assertion, not a declaration. Measured outcomes
+    # set a floor; a declared verdict may sit at or above it, never below.
+    if (
+        $script:ChangeTypeRank[$Contract.ChangeType] -lt
+            $script:ChangeTypeRank[$Contract.DerivedFloor]
+    ) {
+        $underKey = "$($Fact.folder)|macroVerdictUnderclassified"
+        if ($ambiguityKeys.Add($underKey)) {
+            $ambiguities.Add([ordered]@{
+                    kind             = 'macroVerdictUnderclassified'
+                    package          = $Fact.folder
+                    trigger          = $Trigger
+                    declaredVerdict  = $Contract.Verdict
+                    derivedVerdict   = ConvertTo-MacroVerdictName -ChangeType $Contract.DerivedFloor
+                    decidingFixtures = @($Contract.DecidingFixtures)
+                    requiredInput    = "macroContracts.$($Fact.folder).verdict"
+                }) | Out-Null
+        }
+        $blocked = $true
+    } elseif ($selectionDecisions.ContainsKey($Fact.folder)) {
+        # A measured compile-contract change also has to be the reason the
+        # package was selected, so a "behaviour fix" cannot carry a break.
+        $decision = $selectionDecisions[$Fact.folder]
+        $requiredReasons = switch ($Contract.DerivedFloor) {
+            'breaking'     { @('breaking') }
+            'non-breaking' { @('breaking', 'nonbreaking-api', 'behavior-fix') }
+            default        { @() }
+        }
+        if ($requiredReasons.Count -gt 0) {
+            $derivedName = ConvertTo-MacroVerdictName -ChangeType $Contract.DerivedFloor
+            if ($decision.Decision -ne 'accept') {
+                throw "Selection decision '$($Fact.folder)' declines a package whose compile evidence derives a '$derivedName' macro contract."
+            }
+            if ($decision.Reason -notin $requiredReasons) {
+                throw "Selection reason '$($decision.Reason)' for '$($Fact.folder)' conflicts with the '$derivedName' macro contract derived from its compile evidence. Use $($requiredReasons -join ' or ')."
+            }
+        }
+    }
+
+    $usedMacroContracts[$Fact.folder] = $Contract
+    if ($blocked) { return $null }
+    return $Contract
+}
+
 function Require-MacroContract {
     param(
         [Parameter(Mandatory = $true)]$Fact,
@@ -653,8 +1270,10 @@ function Require-MacroContract {
         return $null
     }
 
-    $usedMacroContracts[$Fact.folder] = $contract
-    return $contract
+    return Register-MacroContract `
+        -Fact $Fact `
+        -Contract $contract `
+        -Trigger $Trigger
 }
 
 function Write-BlockedPlan {
@@ -670,6 +1289,7 @@ function Write-BlockedPlan {
                         decision = $_.Value.Decision
                         reason   = $_.Value.Reason
                         evidence = @($_.Value.Evidence)
+                        regressionEvidence = @($_.Value.RegressionEvidence)
                     }
                 }
         )
@@ -681,6 +1301,7 @@ function Write-BlockedPlan {
                     [ordered]@{
                         package  = $_.Key
                         verdict  = $_.Value.Verdict
+                        derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
                         reviewed = @($_.Value.ReviewedPackages)
                         evidence = @($_.Value.Evidence)
                     }
@@ -689,6 +1310,14 @@ function Write-BlockedPlan {
         ambiguities    = @($ambiguities | Sort-Object package, kind, trigger)
         warnings       = @($warnings)
     } | ConvertTo-Json -Depth 10
+}
+
+# Selection evidence is graded before any token is expanded, so a plan whose
+# reasons are not demonstrated can never reach the release loop.
+foreach ($selectionFolder in @($selectionDecisions.Keys | Sort-Object)) {
+    Register-SelectionEvidence `
+        -Folder $selectionFolder `
+        -Decision $selectionDecisions[$selectionFolder]
 }
 
 foreach ($tokenValue in $tokens) {
@@ -712,6 +1341,8 @@ foreach ($tokenValue in $tokens) {
     }
 
     $classification = Get-Classification -Fact $fact -Request $request
+    Register-ExternalExposure -Fact $fact -ChangeType $classification.ChangeType
+    Register-OwnDiffFloor -Fact $fact -ChangeType $classification.ChangeType
     $requestedChangeType = 'none'
     $requestedPin = $null
     if ($parts.Count -eq 2) {
@@ -764,7 +1395,11 @@ foreach ($tokenValue in $tokens) {
                 -Trigger $trigger
             if ($null -eq $macroContract) { continue }
         } elseif ($null -ne $macroContract) {
-            $usedMacroContracts[$fact.folder] = $macroContract
+            $macroContract = Register-MacroContract `
+                -Fact $fact `
+                -Contract $macroContract `
+                -Trigger 'macroContractSupplied'
+            if ($null -eq $macroContract) { continue }
         }
         if (
             $null -ne $macroContract -and
@@ -811,6 +1446,24 @@ if ($mode -in @('changed', 'all')) {
         ) {
             throw "Accepted selection decision '$($candidate.Key)' is missing a release token."
         }
+    }
+
+    # A declined proc macro never reaches the token loop, so its compile-fixture
+    # obligations would otherwise go unreviewed. Requiring the contract here
+    # keeps the decline honest without forcing a release: a measured
+    # fail -> fail outcome leaves the decline standing, while a measured break
+    # cannot be declined at all.
+    foreach ($candidate in $selectionDecisions.GetEnumerator()) {
+        if ($candidate.Value.Decision -ne 'decline') { continue }
+        $candidateFact = @($facts | Where-Object { $_.folder -eq $candidate.Key })[0]
+        if ($null -eq $candidateFact -or -not [bool]$candidateFact.procMacroOnly) {
+            continue
+        }
+        if (@($candidateFact.macroCompileFixtureChanges).Count -eq 0) { continue }
+        [void](Require-MacroContract `
+                -Fact $candidateFact `
+                -TriggerFact $null `
+                -Trigger 'macroCompileFixtureChanged')
     }
 }
 
@@ -860,6 +1513,12 @@ while ($queue.Count -gt 0) {
 
     foreach ($dependentFact in $dependents) {
         $classification = Get-Classification -Fact $dependentFact -Request $request
+        Register-ExternalExposure `
+            -Fact $dependentFact `
+            -ChangeType $classification.ChangeType
+        Register-OwnDiffFloor `
+            -Fact $dependentFact `
+            -ChangeType $classification.ChangeType
         $macroContract = $null
         if ([bool]$dependentFact.procMacroOnly) {
             $modifiedScope = @(Get-ModifiedMacroScopeMember -Fact $dependentFact)
@@ -879,7 +1538,10 @@ while ($queue.Count -gt 0) {
                     -Fact $dependentFact `
                     -Request $request
                 if ($null -ne $macroContract) {
-                    $usedMacroContracts[$dependentFact.folder] = $macroContract
+                    $macroContract = Register-MacroContract `
+                        -Fact $dependentFact `
+                        -Contract $macroContract `
+                        -Trigger 'macroContractSupplied'
                 }
             }
         }
@@ -1016,6 +1678,9 @@ while ($queue.Count -gt 0) {
             }
 
             $classification = Get-Classification -Fact $macroFact -Request $request
+            Register-ExternalExposure `
+                -Fact $macroFact `
+                -ChangeType $classification.ChangeType
             $cascadeChangeType = Get-StrongerChangeType `
                 -Left $classification.ChangeType `
                 -Right $macroContract.ChangeType
@@ -1150,6 +1815,7 @@ $releases = foreach ($folder in $orderedFolders) {
                     decision = $_.Value.Decision
                     reason   = $_.Value.Reason
                     evidence = @($_.Value.Evidence)
+                    regressionEvidence = @($_.Value.RegressionEvidence)
                 }
             }
     )
@@ -1161,6 +1827,7 @@ $releases = foreach ($folder in $orderedFolders) {
                 [ordered]@{
                     package  = $_.Key
                     verdict  = $_.Value.Verdict
+                    derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
                     reviewed = @($_.Value.ReviewedPackages)
                     evidence = @($_.Value.Evidence)
                 }

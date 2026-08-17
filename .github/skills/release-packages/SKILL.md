@@ -52,11 +52,26 @@ Never reproduce their work by hand.
      `macroImplementationClosure` and `macroRuntimePartners`.
    - Record a `macroContracts` attestation covering exported macros, accepted
      syntax, compile behavior, generated API, runtime paths, and hygiene.
+   - Measure every fixture the facts list in `macroCompileFixtureChanges` by
+     compiling it at `baselineRev` and at the current revision, and record each
+     result in `macroContracts.<package>.compileEvidence`. The resolver derives
+     the verdict floor from those measurements and blocks a weaker verdict.
    - Retain `manualReview: true`.
    - Review every candidate according to the deterministic selection table in
      `references/planning.md`. Record an evidenced `selectionDecisions` entry
      for every candidate; never omit a package because its changes look
      mechanical.
+   - For a `behavior-fix` reason, measure a consumer-runtime, consumer-compile,
+     or packaged-artifact probe at the release baseline and at the current
+     revision, and record both runs in
+     `selectionDecisions.<package>.regressionEvidence`. Only a baseline failure
+     that now passes demonstrates the fix; a preserved-behavior refactor is
+     `internal-only`.
+   - Check `externalDepChanges` against `externalExposedDeps`. A breaking
+     external requirement change on a publicly exposed dependency forces a
+     `breaking` classification and a `breaking` selection reason; the resolver
+     blocks anything weaker. Private external dependencies and proc-macro-only
+     packages are unaffected.
    - Classify implemented source and verified consumer behavior. TODOs, design
      notes, and roadmap text are not compatibility evidence.
    - If resolution reports missing classifications, classify the complete

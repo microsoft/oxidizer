@@ -27,6 +27,9 @@
                                           cargo-semver-checks (--baseline-rev).
       - Get-PackageUnreleasedChangeFiles -> exact paths changed under
                                            crates/<folder>/.
+      - Get-PackageLastReleaseBaseline -> the rev those paths were diffed
+                                          against, recorded per compile-fixture
+                                          obligation as baselineRev.
 
     Version-bump arithmetic, cascade resolution, change-type classification, and
     all file writes are intentionally NOT done here -- those belong to the skill
@@ -109,6 +112,224 @@ function Get-ReachableWorkspacePackages {
     }
 
     return @($seen | Sort-Object)
+}
+
+# A compile fixture is a consumer program whose *compile result* is the
+# assertion: trybuild-style `tests/ui` and `tests/compile_fail` cases plus the
+# sibling `.stderr`/`.stdout` files that record the expected failure. Their
+# arrival, departure, or edit is the one mechanically visible trace a proc
+# macro's compile contract leaves, and it frequently lands in the macro's
+# runtime facade rather than in the macro crate itself -- which is exactly why
+# it must be gathered across the whole macro review scope and not per package.
+$script:CompileFixturePattern =
+    '^crates/[^/]+/tests/(?:ui|compile_fail)/.+\.(?:rs|stderr|stdout)$'
+
+function Get-CompileFixtureKind {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ($Path.EndsWith('.rs', [StringComparison]::Ordinal)) { return 'uiFixture' }
+    return 'uiExpectation'
+}
+
+# Returns the sibling expectation paths for a fixture, or the fixture path for
+# an expectation. Used to decide expectedResult and, in the resolver, to let one
+# evidence entry discharge a fixture and its expectation files together.
+function Get-CompileFixtureSiblings {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ($Path.EndsWith('.rs', [StringComparison]::Ordinal)) {
+        $stem = $Path.Substring(0, $Path.Length - 3)
+        return @("$stem.stderr", "$stem.stdout")
+    }
+    $stem = $Path.Substring(0, $Path.LastIndexOf('.'))
+    return @("$stem.rs")
+}
+
+function Test-WorkingTreeFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    return Test-Path -LiteralPath (
+        Join-Path $RepoRoot $RelativePath.Replace('/', '\')
+    )
+}
+
+# Compile-fixture changes owned by one package, derived from the same diff that
+# produced modifiedFiles. Status comes from presence at the baseline rev versus
+# presence in the working tree, so a fixture added in an uncommitted edit and a
+# fixture added in a commit are reported identically.
+function Get-PackageCompileFixtureChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageFolder,
+        [Parameter(Mandatory = $true)][bool]$OwnerPublished,
+        [AllowNull()]$ModifiedFiles
+    )
+
+    $candidates = @(
+        @($ModifiedFiles) |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Replace('\', '/') } |
+            Where-Object { $_ -match $script:CompileFixturePattern } |
+            Sort-Object -Unique
+    )
+    if ($candidates.Count -eq 0) { return @() }
+
+    $baselineRev = Get-PackageLastReleaseBaseline `
+        -RepoRoot $RepoRoot `
+        -PackageFolder $PackageFolder
+    $baselineFiles = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    if (-not [string]::IsNullOrWhiteSpace($baselineRev)) {
+        $tracked = Invoke-Git -Arguments @(
+            'ls-tree',
+            '-r',
+            '--name-only',
+            $baselineRev,
+            '--',
+            "crates/$PackageFolder/tests"
+        ) -RepoRoot $RepoRoot -AllowFailure
+        foreach ($line in @($tracked)) {
+            $entry = $line.ToString().Trim().Replace('\', '/')
+            if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                [void]$baselineFiles.Add($entry)
+            }
+        }
+    }
+
+    $items = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($path in $candidates) {
+        $inBaseline = $baselineFiles.Contains($path)
+        $inCurrent = Test-WorkingTreeFile -RepoRoot $RepoRoot -RelativePath $path
+        $status = if (-not $inBaseline -and $inCurrent) {
+            'added'
+        } elseif ($inBaseline -and -not $inCurrent) {
+            'removed'
+        } elseif ($inBaseline -and $inCurrent) {
+            'modified'
+        } else {
+            # Neither side has it: a transient path that came and went inside the
+            # unreleased window. It asserts nothing about either revision.
+            continue
+        }
+
+        $kind = Get-CompileFixtureKind -Path $path
+        # A `.stderr`/`.stdout` file *is* a recorded compile failure; a `.rs`
+        # case is only known to be compile-fail when such a sibling exists on
+        # either side. Anything else stays null rather than guessing.
+        $expectedResult = if ($kind -eq 'uiExpectation') {
+            'fail'
+        } else {
+            $hasExpectation = $false
+            foreach ($sibling in Get-CompileFixtureSiblings -Path $path) {
+                if (
+                    $baselineFiles.Contains($sibling) -or
+                    (Test-WorkingTreeFile -RepoRoot $RepoRoot -RelativePath $sibling)
+                ) {
+                    $hasExpectation = $true
+                    break
+                }
+            }
+            if ($hasExpectation) { 'fail' } else { $null }
+        }
+
+        $items.Add([ordered]@{
+                ownerPackage    = $PackageFolder
+                ownerPublished  = $OwnerPublished
+                path            = $path
+                kind            = $kind
+                status          = $status
+                expectedResult  = $expectedResult
+                baselineRev     = $baselineRev
+            }) | Out-Null
+    }
+
+    # Hand back a materialised array: a List[object] is not safely wrapped by
+    # @() on PowerShell 7.4. Dictionaries do not unroll in the pipeline, so the
+    # caller's @(...) sees the items themselves.
+    return $items.ToArray()
+}
+
+# True when the crate's own diff changes Rust implementation: any added or
+# removed line in a packaged `.rs` file (src, build.rs, or a custom library
+# path -- never under tests/, benches/, or examples/) that is not a doc
+# comment, line comment, or blank. Doc-comment-only edits, README/CHANGELOG/
+# Cargo.toml edits, and test/bench/example edits leave this false. A previously
+# released library with no implementation change of its own therefore cannot be
+# classified breaking or nonbreaking on its own account -- any elevation above
+# patch must come from a cascade the resolver owns, not from a re-exported macro
+# contract or a dependency bump the model read into the crate's own diff.
+#
+# Conservative by construction: a missing baseline or a brand-new untracked
+# source file counts as an implementation change, so the guard downstream only
+# ever fires on an unambiguous doc-only diff. Block comments (`/* ... */`) also
+# read as implementation, keeping the fire condition to lines that unambiguously
+# begin with `//`.
+function Get-PackageRustImplementationChanged {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageFolder,
+        [AllowNull()]$ModifiedFiles
+    )
+
+    $prefix = "crates/$PackageFolder/"
+    $candidates = @(
+        @($ModifiedFiles) |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Replace('\', '/') } |
+            Where-Object {
+                $_.EndsWith('.rs', [StringComparison]::OrdinalIgnoreCase) -and
+                $_.StartsWith($prefix, [StringComparison]::Ordinal)
+            } |
+            Where-Object {
+                $relative = $_.Substring($prefix.Length)
+                -not (
+                    $relative.StartsWith('tests/', [StringComparison]::Ordinal) -or
+                    $relative.StartsWith('benches/', [StringComparison]::Ordinal) -or
+                    $relative.StartsWith('examples/', [StringComparison]::Ordinal)
+                )
+            } |
+            Sort-Object -Unique
+    )
+    if ($candidates.Count -eq 0) { return $false }
+
+    $baselineRev = Get-PackageLastReleaseBaseline `
+        -RepoRoot $RepoRoot `
+        -PackageFolder $PackageFolder
+    if ([string]::IsNullOrWhiteSpace($baselineRev)) { return $true }
+
+    foreach ($path in $candidates) {
+        $diff = @(
+            Invoke-Git -Arguments @(
+                'diff',
+                '--no-ext-diff',
+                '--no-color',
+                '--unified=0',
+                $baselineRev,
+                '--',
+                $path
+            ) -RepoRoot $RepoRoot -AllowFailure
+        )
+        # A file listed as modified whose baseline-to-worktree diff is empty is an
+        # untracked new source file (git diff cannot see it): an implementation
+        # change by construction.
+        if ($diff.Count -eq 0) { return $true }
+
+        foreach ($line in $diff) {
+            $text = $line.ToString()
+            if ($text.Length -eq 0) { continue }
+            $marker = $text[0]
+            if ($marker -ne '+' -and $marker -ne '-') { continue }
+            if ($text.StartsWith('+++') -or $text.StartsWith('---')) { continue }
+            $content = $text.Substring(1).Trim()
+            if ($content.Length -eq 0) { continue }
+            if ($content.StartsWith('//')) { continue }
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Get-ManifestChanges {
@@ -333,8 +554,116 @@ function Get-ManifestChanges {
     }
 }
 
+# An external dependency's requirement is part of the published manifest, so a
+# consumer resolves against it directly. When the crate also names that
+# dependency's types in its own public API, moving the requirement to another
+# compatibility line hands consumers a different type identity under the same
+# paths -- a break no cargo-semver-checks run on this workspace can see, because
+# nothing in THIS crate's rustdoc changed.
+#
+# The current side comes from cargo metadata, which has already resolved
+# [workspace.dependencies] inheritance. The baseline side has to be read out of
+# Git text: cargo cannot be pointed at a historical revision without
+# materialising a whole workspace checkout, and every package has its own
+# baseline commit.
+$script:BaselineWorkspaceRequirementsCache = @{}
+
+function Get-BaselineWorkspaceRequirements {
+    param([Parameter(Mandatory = $true)][string]$BaselineSha)
+
+    if ($script:BaselineWorkspaceRequirementsCache.ContainsKey($BaselineSha)) {
+        return $script:BaselineWorkspaceRequirementsCache[$BaselineSha]
+    }
+
+    $text = @(
+        Invoke-Git -Arguments @('show', "${BaselineSha}:Cargo.toml") `
+            -RepoRoot $RepoRoot -AllowFailure
+    ) -join "`n"
+    $requirements = Get-CargoWorkspaceRequirements -ManifestText $text
+    $script:BaselineWorkspaceRequirementsCache[$BaselineSha] = $requirements
+    return $requirements
+}
+
+function Get-ExternalDependencyChanges {
+    param(
+        [AllowNull()][string]$BaselineSha,
+        [Parameter(Mandatory = $true)][string]$PackageFolder,
+        [Parameter(Mandatory = $true)]$CurrentExternalDeps,
+        [Parameter(Mandatory = $true)][System.Collections.Generic.HashSet[string]]$WorkspaceMemberNames
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BaselineSha)) { return @() }
+
+    $manifestText = @(
+        Invoke-Git -Arguments @(
+            'show',
+            "${BaselineSha}:crates/$PackageFolder/Cargo.toml"
+        ) -RepoRoot $RepoRoot -AllowFailure
+    ) -join "`n"
+    # No manifest at the baseline means the crate did not exist then; there is
+    # no released requirement any change could invalidate.
+    if ([string]::IsNullOrWhiteSpace($manifestText)) { return @() }
+
+    $baselineDeps = Get-CargoManifestDependencies `
+        -ManifestText $manifestText `
+        -WorkspaceRequirements (Get-BaselineWorkspaceRequirements -BaselineSha $BaselineSha)
+
+    $names = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($name in $baselineDeps.Keys) { [void]$names.Add($name) }
+    foreach ($name in $CurrentExternalDeps.Keys) { [void]$names.Add($name) }
+
+    $items = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($name in @($names | Sort-Object { $_ } -CaseSensitive)) {
+        # A workspace member is released by this same plan, so its version
+        # requirement is the cascade's business, not this lane's. Membership is
+        # judged on the current workspace on both sides: a crate that moved
+        # between the registry and the workspace changes identity for reasons
+        # this comparison cannot express.
+        if ($WorkspaceMemberNames.Contains($name)) { continue }
+
+        $baselineRaw = $null
+        if ($baselineDeps.Contains($name)) { $baselineRaw = $baselineDeps[$name].Requirement }
+        $currentRaw = $null
+        if ($CurrentExternalDeps.Contains($name)) { $currentRaw = $CurrentExternalDeps[$name].Requirement }
+
+        $baselineReq = Get-NormalizedCargoRequirement -Requirement $baselineRaw
+        $currentReq = Get-NormalizedCargoRequirement -Requirement $currentRaw
+        if ($null -eq $baselineReq -and $null -eq $currentReq) { continue }
+        if ($baselineReq -ceq $currentReq) { continue }
+
+        $kinds = if ($CurrentExternalDeps.Contains($name)) {
+            @($CurrentExternalDeps[$name].Kinds)
+        } elseif ($baselineDeps.Contains($name)) {
+            @($baselineDeps[$name].Kinds)
+        } else {
+            @()
+        }
+
+        $items.Add([ordered]@{
+                name        = $name
+                baselineReq = $baselineReq
+                currentReq  = $currentReq
+                kinds       = @($kinds)
+                breaking    = [bool](Test-CargoRequirementBreaking `
+                        -BaselineRequirement $baselineReq `
+                        -CurrentRequirement $currentReq)
+                baselineRev = $BaselineSha
+            }) | Out-Null
+    }
+
+    return $items.ToArray()
+}
+
+$workspaceMemberNames = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
+foreach ($package in $packages) {
+    [void]$workspaceMemberNames.Add($package.Name.Replace('-', '_'))
+}
+
 $factPackages = foreach ($package in $packages) {
-    $baselineSha = $null
     if (
         @($package.MacroRuntimePartners).Count -gt 0 -and
         -not [bool]$package.IsProcMacroOnly
@@ -417,6 +746,59 @@ $factPackages = foreach ($package in $packages) {
         }
     }
 
+    $externalDepChanges = @(
+        Get-ExternalDependencyChanges `
+            -BaselineSha $baselineSha `
+            -PackageFolder $package.Folder `
+            -CurrentExternalDeps $package.ExternalDeps `
+            -WorkspaceMemberNames $workspaceMemberNames
+    )
+    # Proc macros export behavior, not foreign type identity: a macro's public
+    # surface is the syntax it accepts and the code it generates, and nothing a
+    # consumer writes can name `syn::Error` through it. Its own dependency bumps
+    # are therefore private by construction, and the compile-fixture lane is what
+    # governs its contract.
+    $externalExposedDeps = if ([bool]$package.IsProcMacroOnly) {
+        @()
+    } elseif ($uncheckedTarget) {
+        @($package.ExternalDeps.Keys)
+    } else {
+        @(
+            foreach ($externalName in $package.ExternalDeps.Keys) {
+                $exposed = Test-PackageExposesTarget `
+                    -Dependent $package `
+                    -TargetPackageName $externalName
+                if ($exposed) { $externalName }
+            }
+        )
+    }
+
+    # A requirement inherited from [workspace.dependencies] changes the crate's
+    # PUBLISHED manifest -- cargo publish inlines the resolved value -- while
+    # leaving every file under crates/<folder>/ untouched. Without this
+    # promotion such a crate looks unmodified and never enters review at all.
+    $externalScopes = @(
+        @(
+            foreach ($change in $externalDepChanges) { @($change.kinds) }
+        ) | Where-Object { $_ } | Sort-Object -Unique
+    )
+    $hasExternalDepChange = $externalDepChanges.Count -gt 0
+
+    # Whether the crate's own packaged Rust source (not tests/benches/examples,
+    # not docs or manifests) actually changed. A previously released library with
+    # only doc-comment, test, or manifest edits has no own-diff basis for a
+    # breaking or nonbreaking classification -- the resolver still cascades one in
+    # when a dependency or re-exported macro contract requires it.
+    $rustImplementationChanged = if (
+        $workspaceModifiedFiles.ContainsKey($package.Folder)
+    ) {
+        Get-PackageRustImplementationChanged `
+            -PackageFolder $package.Folder `
+            -ModifiedFiles $workspaceModifiedFiles[$package.Folder]
+    } else {
+        $false
+    }
+
     [ordered]@{
         folder            = $package.Folder
         name              = $package.Name
@@ -450,7 +832,7 @@ $factPackages = foreach ($package in $packages) {
         # this fact.
         everReleased      = [bool](Invoke-Git -Arguments @('tag', '--list', "$($package.Name)-v*") -RepoRoot $RepoRoot)
         modified          = [bool]$package.Published -and
-            $workspaceModifiedFiles.ContainsKey($package.Folder)
+            ($workspaceModifiedFiles.ContainsKey($package.Folder) -or $hasExternalDepChange)
         modifiedFiles     = if ($workspaceModifiedFiles.ContainsKey($package.Folder)) {
             @($workspaceModifiedFiles[$package.Folder])
         } else {
@@ -461,9 +843,38 @@ $factPackages = foreach ($package in $packages) {
         } else {
             0
         }
-        manifestDependencyScopes = @($manifestChanges.DependencyScopes)
+        manifestDependencyScopes = @(
+            # Keeps Get-ManifestChanges' scope order, then appends whatever the
+            # external-dependency lane adds, so the existing sequence is stable.
+            $(
+                $seenScopes = [System.Collections.Generic.HashSet[string]]::new(
+                    [System.StringComparer]::Ordinal
+                )
+                foreach ($scope in @($manifestChanges.DependencyScopes)) {
+                    if ($seenScopes.Add($scope)) { $scope }
+                }
+                foreach ($scope in $externalScopes) {
+                    if ($seenScopes.Add($scope)) { $scope }
+                }
+            )
+        )
         manifestOtherChanged = [bool]$manifestChanges.OtherChanged
-        workspaceModified = $workspaceModifiedFiles.ContainsKey($package.Folder)
+        # True only when packaged Rust source changed beyond doc comments; gates
+        # an own-diff breaking/nonbreaking classification (see resolve-plan.ps1).
+        rustImplementationChanged = [bool]$rustImplementationChanged
+        workspaceModified = $workspaceModifiedFiles.ContainsKey($package.Folder) -or
+            $hasExternalDepChange
+        # Effective non-dev external dependency requirement changes between this
+        # crate's release baseline and the working tree, inheritance resolved.
+        externalDepChanges = @($externalDepChanges)
+        # The subset of current external dependencies whose types this crate's
+        # public API may name. Fail-closed: absent or unreadable exposure
+        # metadata counts as exposed.
+        externalExposedDeps = @($externalExposedDeps | Sort-Object -Unique)
+        # Filled in by the macro review-scope pass below, once macroRuntimePartners
+        # is complete. Always present so the resolver can validate the schema
+        # uniformly; only proc-macro packages ever carry entries.
+        macroCompileFixtureChanges = @()
     }
 }
 
@@ -484,9 +895,77 @@ foreach ($dependent in $factPackages) {
     }
 }
 
+# Compile-fixture obligations are gathered per proc macro across the SAME review
+# scope the resolver already enforces (the macro itself, its modified
+# implementation closure, and its modified runtime partners). Running after the
+# runtime-partner back-fill is what lets a fixture added in the facade crate --
+# where it is otherwise indistinguishable from an ordinary test-only edit --
+# reach the macro whose compile contract it actually documents.
+#
+# scopeRole records WHY a fixture is in scope, because the two roles answer
+# different questions. A fixture owned by the macro or by a facade that
+# re-exports it is a consumer program for that macro, so its outcome speaks for
+# the macro's compile contract. A fixture owned by a published implementation
+# dependency is a consumer program for THAT crate, which carries its own release
+# classification; it is still reported so the review cannot miss it, but the
+# resolver does not let it set the macro's verdict floor.
+$fixtureChangesByFolder = @{}
+foreach ($fact in $factPackages) {
+    $fixtureChangesByFolder[$fact.folder] = @(
+        Get-PackageCompileFixtureChanges `
+            -PackageFolder $fact.folder `
+            -OwnerPublished ([bool]$fact.published) `
+            -ModifiedFiles $fact.modifiedFiles
+    )
+}
+foreach ($fact in $factPackages) {
+    if (-not [bool]$fact.procMacroOnly) { continue }
+
+    $partnerNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($partner in @($fact.macroRuntimePartners)) {
+        [void]$partnerNames.Add($partner)
+    }
+    $closureNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($member in @($fact.macroImplementationClosure)) {
+        [void]$closureNames.Add($member)
+    }
+
+    $scopeRoleByFolder = [ordered]@{}
+    $scopeRoleByFolder[$fact.folder] = 'self'
+    foreach ($candidate in $factPackages) {
+        if ($candidate.folder -eq $fact.folder) { continue }
+        if (-not [bool]$candidate.workspaceModified) { continue }
+        $normalizedName = $candidate.name.Replace('-', '_')
+        if ($partnerNames.Contains($normalizedName)) {
+            $scopeRoleByFolder[$candidate.folder] = 'runtimePartner'
+        } elseif ($closureNames.Contains($normalizedName)) {
+            $scopeRoleByFolder[$candidate.folder] = 'implementationClosure'
+        }
+    }
+
+    $byKey = @{}
+    foreach ($folder in $scopeRoleByFolder.Keys) {
+        foreach ($item in @($fixtureChangesByFolder[$folder])) {
+            $scoped = [ordered]@{}
+            foreach ($property in $item.Keys) { $scoped[$property] = $item[$property] }
+            $scoped['scopeRole'] = $scopeRoleByFolder[$folder]
+            $byKey["$($item.ownerPackage)`u{0000}$($item.path)"] = $scoped
+        }
+    }
+    $orderedKeys = [string[]]@($byKey.Keys)
+    [Array]::Sort($orderedKeys, [StringComparer]::Ordinal)
+    $fact['macroCompileFixtureChanges'] = @(
+        foreach ($key in $orderedKeys) { $byKey[$key] }
+    )
+}
+
 [ordered]@{
-    schemaVersion = 4
+    schemaVersion = 5
     repoRoot = $RepoRoot
     baseRef  = $BaseRef
     packages = @($factPackages)
-} | ConvertTo-Json -Depth 6
+} | ConvertTo-Json -Depth 8

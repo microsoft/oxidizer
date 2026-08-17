@@ -284,6 +284,414 @@ function Test-IsBreakingChange {
 # compare against) and ranks below every real change type.
 $script:ChangeTypeRank = @{ 'none' = 0; 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
 
+# The Cargo compatibility line a concrete version belongs to: the leading
+# non-zero component and everything above it, which is exactly the span a caret
+# requirement admits. `1.4.2` and `1.9.0` share line `1`; `0.5.3` and `0.5.9`
+# share line `0.5`; `0.0.3` is its own line. Two requirements pinned to
+# different lines can never resolve to the same crate version, so a dependency
+# whose line moved has a different type identity for every consumer that names
+# its types.
+function Get-CargoCompatibilityLine {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Version)
+
+    $core = ($Version.Trim() -split '[-+]', 2)[0]
+    $parts = @($core -split '\.')
+    $numbers = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($part in $parts) {
+        $value = 0
+        if (-not [int]::TryParse($part.Trim(), [ref]$value)) { return $null }
+        $numbers.Add($value) | Out-Null
+    }
+    if ($numbers.Count -eq 0) { return $null }
+
+    if ($numbers[0] -ne 0) { return $numbers[0].ToString() }
+    if ($numbers.Count -eq 1) { return '0' }
+    if ($numbers[1] -ne 0) { return "0.$($numbers[1])" }
+    if ($numbers.Count -eq 2) { return '0.0' }
+    return "0.0.$($numbers[2])"
+}
+
+# The set of compatibility lines a Cargo requirement admits, or $null when the
+# requirement is not understood well enough to answer. $null is a deliberate
+# "unknown" that callers must fail closed on: guessing here would ship a
+# dependency major bump as a compatible release.
+#
+# Comma-separated comparators are an AND, so they describe one line only when
+# every comparator names it. A wildcard, an unbounded range, or a mix of lines
+# is unknown.
+function Get-CargoRequirementLines {
+    param([AllowNull()][AllowEmptyString()][string]$Requirement)
+
+    if ([string]::IsNullOrWhiteSpace($Requirement)) { return $null }
+
+    $lines = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
+    foreach ($comparator in @($Requirement -split ',')) {
+        $text = $comparator.Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+
+        $match = [regex]::Match($text, '^(\^|~|=|>=|<=|>|<)?\s*(.+)$')
+        if (-not $match.Success) { return $null }
+        $operator = $match.Groups[1].Value
+        $version = $match.Groups[2].Value.Trim()
+        # `*`, `1.*` and friends span whatever the registry offers, and an
+        # inequality bound names a line it deliberately excludes.
+        if ($operator -in @('>=', '>', '<=', '<')) { return $null }
+        if ($version.Contains('*') -or $version.ToLowerInvariant().Contains('x')) {
+            return $null
+        }
+
+        $line = Get-CargoCompatibilityLine -Version $version
+        if ($null -eq $line) { return $null }
+        [void]$lines.Add($line)
+    }
+
+    if ($lines.Count -ne 1) { return $null }
+    return @($lines | Sort-Object)
+}
+
+# Cargo's own spelling of a requirement: a bare version means caret. Comparing
+# raw strings would report a change between a manifest's `3.0.2` and cargo
+# metadata's `^3.0.2`, which are the same requirement.
+function Get-NormalizedCargoRequirement {
+    param([AllowNull()][AllowEmptyString()][string]$Requirement)
+
+    if ([string]::IsNullOrWhiteSpace($Requirement)) { return $null }
+
+    # Idempotent over the ' || ' join below, so a requirement that has already
+    # been through Join-CargoRequirements normalizes to itself rather than to a
+    # second, differently spelled form.
+    $alternatives = @(
+        foreach ($alternative in ($Requirement -split '\|\|')) {
+            $terms = @(
+                foreach ($comparator in @($alternative -split ',')) {
+                    $text = $comparator.Trim()
+                    if ([string]::IsNullOrWhiteSpace($text)) { continue }
+                    if ([regex]::IsMatch($text, '^[0-9]')) {
+                        "^$($text -replace '\s+', '')"
+                    } else {
+                        $text -replace '\s+', ''
+                    }
+                }
+            )
+            if ($terms.Count -eq 0) { continue }
+            ($terms -join ', ')
+        }
+    )
+    if ($alternatives.Count -eq 0) { return $null }
+    return ($alternatives -join ' || ')
+}
+
+# Whether an external dependency requirement moved off the compatibility line it
+# was released against. Anything the requirement grammar above cannot decide is
+# breaking: an unreadable requirement change must not be able to ship a foreign
+# type-identity change as a patch.
+function Test-CargoRequirementBreaking {
+    param(
+        [AllowNull()][AllowEmptyString()][string]$BaselineRequirement,
+        [AllowNull()][AllowEmptyString()][string]$CurrentRequirement
+    )
+
+    $hasBaseline = -not [string]::IsNullOrWhiteSpace($BaselineRequirement)
+    $hasCurrent = -not [string]::IsNullOrWhiteSpace($CurrentRequirement)
+    # A newly declared dependency adds public surface; it cannot invalidate a
+    # type identity the released version never had.
+    if (-not $hasBaseline) { return $false }
+    # A dropped dependency removes whatever its types described.
+    if (-not $hasCurrent) { return $true }
+    if ($BaselineRequirement.Trim() -ceq $CurrentRequirement.Trim()) { return $false }
+
+    $baselineLines = Get-CargoRequirementLines -Requirement $BaselineRequirement
+    $currentLines = Get-CargoRequirementLines -Requirement $CurrentRequirement
+    if ($null -eq $baselineLines -or $null -eq $currentLines) { return $true }
+
+    foreach ($line in $baselineLines) {
+        if ($currentLines -notcontains $line) { return $true }
+    }
+    return $false
+}
+
+# Splits manifest text into logical lines: a physical line, or the run of lines
+# an unterminated inline table or array spans. Multi-line dependency entries are
+# ordinary in this workspace (`syn = { workspace = true, features = [\n ... ] }`)
+# and a per-physical-line reader would see only fragments of them.
+function ConvertTo-CargoManifestLogicalLines {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText)
+
+    $logical = New-Object 'System.Collections.Generic.List[string]'
+    $buffer = $null
+    $depth = 0
+    foreach ($rawLine in ($ManifestText -split "`r?`n")) {
+        $line = $rawLine
+        if ($null -eq $buffer -and $line.Trim() -match '^\[[^\[\]]*\]$|^\[\[[^\[\]]*\]\]$') {
+            $logical.Add($line.Trim()) | Out-Null
+            continue
+        }
+
+        $inString = $false
+        $quote = ''
+        $escaped = $false
+        $cut = -1
+        for ($i = 0; $i -lt $line.Length; $i++) {
+            $character = $line[$i]
+            if ($inString) {
+                if ($escaped) { $escaped = $false; continue }
+                if ($character -eq '\') { $escaped = $true; continue }
+                if ($character -eq $quote) { $inString = $false }
+                continue
+            }
+            switch -CaseSensitive ($character) {
+                '"' { $inString = $true; $quote = '"' }
+                "'" { $inString = $true; $quote = "'" }
+                '{' { $depth++ }
+                '[' { $depth++ }
+                '}' { if ($depth -gt 0) { $depth-- } }
+                ']' { if ($depth -gt 0) { $depth-- } }
+                '#' { $cut = $i }
+            }
+            if ($cut -ge 0) { break }
+        }
+        if ($cut -ge 0) { $line = $line.Substring(0, $cut) }
+
+        if ($null -eq $buffer) {
+            $buffer = $line.Trim()
+        } else {
+            $buffer = "$buffer $($line.Trim())"
+        }
+        if ($depth -le 0) {
+            $depth = 0
+            if (-not [string]::IsNullOrWhiteSpace($buffer)) {
+                $logical.Add($buffer.Trim()) | Out-Null
+            }
+            $buffer = $null
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($buffer)) {
+        $logical.Add($buffer.Trim()) | Out-Null
+    }
+    return $logical.ToArray()
+}
+
+# Pulls the version requirement, workspace-inheritance flag and `package = "..."`
+# rename out of one dependency value, in any of the forms Cargo accepts:
+# `"1.2"`, `{ version = "1.2" }`, `{ workspace = true }`.
+function ConvertFrom-CargoDependencyValue {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+
+    $text = $Value.Trim()
+    $result = [pscustomobject]@{
+        Requirement = $null
+        Inherited   = $false
+        Package     = $null
+        HasPath     = $false
+    }
+    if ($text.StartsWith('"', [StringComparison]::Ordinal) -or
+        $text.StartsWith("'", [StringComparison]::Ordinal)) {
+        $result.Requirement = $text.Trim('"', "'")
+        return $result
+    }
+
+    $version = [regex]::Match($text, '(?<![\w-])version\s*=\s*"([^"]*)"')
+    if ($version.Success) { $result.Requirement = $version.Groups[1].Value }
+    if ([regex]::IsMatch($text, '(?<![\w-])workspace\s*=\s*true')) {
+        $result.Inherited = $true
+    }
+    $package = [regex]::Match($text, '(?<![\w-])package\s*=\s*"([^"]*)"')
+    if ($package.Success) { $result.Package = $package.Groups[1].Value }
+    if ([regex]::IsMatch($text, '(?<![\w-])path\s*=\s*"')) { $result.HasPath = $true }
+    return $result
+}
+
+# Reads dependency declarations out of a Cargo manifest's text at some revision.
+# Cargo metadata is the authority for the working tree, but a released baseline
+# exists only as manifest text in Git history, where no cargo invocation can
+# reach it without materialising a whole workspace checkout.
+#
+# -Section selects which tables are read: 'package' walks
+# [dependencies] / [build-dependencies] plus their target-specific and
+# sub-table forms, and 'workspace' walks [workspace.dependencies]. Dev
+# dependencies are never read: they are not part of the published manifest.
+#
+# Returns an ordered map of normalized dependency name -> requirement record.
+function Get-CargoManifestDependencies {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText,
+        [ValidateSet('package', 'workspace')][string]$Section = 'package',
+        [hashtable]$WorkspaceRequirements
+    )
+
+    $sectionPattern = if ($Section -eq 'workspace') {
+        '^workspace\.dependencies(?:\.(?<entry>.+))?$'
+    } else {
+        '^(?:target\..+\.)?(?<kind>dependencies|build-dependencies)(?:\.(?<entry>.+))?$'
+    }
+
+    $entries = [ordered]@{}
+    function Add-DependencyObservation {
+        param(
+            [Parameter(Mandatory = $true)][string]$Key,
+            [Parameter(Mandatory = $true)][string]$Kind,
+            [Parameter(Mandatory = $true)]$Parsed
+        )
+
+        if ($Parsed.HasPath -and [string]::IsNullOrWhiteSpace($Parsed.Requirement) -and
+            -not $Parsed.Inherited) {
+            return
+        }
+        $name = if (-not [string]::IsNullOrWhiteSpace($Parsed.Package)) {
+            $Parsed.Package
+        } else {
+            $Key
+        }
+        $normalized = $name.Replace('-', '_')
+        $requirement = $Parsed.Requirement
+        if ($Parsed.Inherited) {
+            $requirement = $null
+            if ($null -ne $WorkspaceRequirements -and
+                $WorkspaceRequirements.ContainsKey($normalized)) {
+                $requirement = $WorkspaceRequirements[$normalized]
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($requirement)) { return }
+
+        if (-not $entries.Contains($normalized)) {
+            $entries[$normalized] = [pscustomobject]@{
+                Name         = $normalized
+                Requirements = New-Object 'System.Collections.Generic.List[string]'
+                Kinds        = New-Object 'System.Collections.Generic.List[string]'
+            }
+        }
+        $record = $entries[$normalized]
+        if (-not $record.Requirements.Contains($requirement)) {
+            $record.Requirements.Add($requirement) | Out-Null
+        }
+        if (-not $record.Kinds.Contains($Kind)) { $record.Kinds.Add($Kind) | Out-Null }
+    }
+
+    $currentSection = ''
+    $pendingEntry = $null
+    foreach ($line in ConvertTo-CargoManifestLogicalLines -ManifestText $ManifestText) {
+        $header = [regex]::Match($line, '^\[\s*([^\]]+?)\s*\]$')
+        if ($header.Success) {
+            if ($null -ne $pendingEntry) {
+                Add-DependencyObservation `
+                    -Key $pendingEntry.Key `
+                    -Kind $pendingEntry.Kind `
+                    -Parsed (ConvertFrom-CargoDependencyValue -Value "{ $($pendingEntry.Fields -join ', ') }")
+                $pendingEntry = $null
+            }
+            $currentSection = $header.Groups[1].Value.Trim()
+            $match = [regex]::Match($currentSection, $sectionPattern)
+            if ($match.Success -and $match.Groups['entry'].Success) {
+                # `[dependencies.syn]` collects its fields across the following
+                # lines, so the rename and the version are read together.
+                $pendingEntry = [pscustomobject]@{
+                    Key    = $match.Groups['entry'].Value.Trim().Trim('"', "'")
+                    Kind   = if ($Section -eq 'workspace') {
+                        'normal'
+                    } elseif ($match.Groups['kind'].Value -eq 'build-dependencies') {
+                        'build'
+                    } else {
+                        'normal'
+                    }
+                    Fields = New-Object 'System.Collections.Generic.List[string]'
+                }
+            }
+            continue
+        }
+
+        $assignment = [regex]::Match($line, '^([^=]+?)\s*=\s*(.+)$')
+        if (-not $assignment.Success) { continue }
+        $key = $assignment.Groups[1].Value.Trim().Trim('"', "'")
+        $value = $assignment.Groups[2].Value.Trim()
+
+        if ($null -ne $pendingEntry) {
+            $pendingEntry.Fields.Add("$key = $value") | Out-Null
+            continue
+        }
+
+        $match = [regex]::Match($currentSection, $sectionPattern)
+        if (-not $match.Success -or $match.Groups['entry'].Success) { continue }
+        $kind = if ($Section -eq 'workspace') {
+            'normal'
+        } elseif ($match.Groups['kind'].Value -eq 'build-dependencies') {
+            'build'
+        } else {
+            'normal'
+        }
+
+        $dotted = $key.IndexOf('.', [StringComparison]::Ordinal)
+        if ($dotted -gt 0) {
+            # `syn.workspace = true` and `syn.version = "1"` are the dotted-key
+            # spelling of the inline table.
+            $depName = $key.Substring(0, $dotted).Trim().Trim('"', "'")
+            $field = $key.Substring($dotted + 1).Trim()
+            $parsed = ConvertFrom-CargoDependencyValue -Value "{ $field = $value }"
+            Add-DependencyObservation -Key $depName -Kind $kind -Parsed $parsed
+            continue
+        }
+
+        $parsed = ConvertFrom-CargoDependencyValue -Value $value
+        Add-DependencyObservation -Key $key -Kind $kind -Parsed $parsed
+    }
+    if ($null -ne $pendingEntry) {
+        Add-DependencyObservation `
+            -Key $pendingEntry.Key `
+            -Kind $pendingEntry.Kind `
+            -Parsed (ConvertFrom-CargoDependencyValue -Value "{ $($pendingEntry.Fields -join ', ') }")
+    }
+
+    $result = [ordered]@{}
+    foreach ($name in @($entries.Keys | Sort-Object { $_ } -CaseSensitive)) {
+        $record = $entries[$name]
+        $kinds = [string[]]@($record.Kinds.ToArray())
+        [Array]::Sort($kinds, [StringComparer]::Ordinal)
+        $result[$name] = [pscustomobject]@{
+            Name        = $name
+            Requirement = Join-CargoRequirements -Requirements ([string[]]$record.Requirements.ToArray())
+            Kinds       = $kinds
+        }
+    }
+    return $result
+}
+
+# Flattens the requirement records above into `name -> requirement string`,
+# which is what [workspace.dependencies] inheritance needs.
+function Get-CargoWorkspaceRequirements {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText)
+
+    $table = @{}
+    $entries = Get-CargoManifestDependencies `
+        -ManifestText $ManifestText `
+        -Section 'workspace'
+    foreach ($name in $entries.Keys) {
+        $requirement = $entries[$name].Requirement
+        if ([string]::IsNullOrWhiteSpace($requirement)) { continue }
+        $table[$name] = $requirement
+    }
+    return $table
+}
+
+# One package may declare the same dependency more than once -- a normal and a
+# build edge, or per-target variants. Joining the distinct requirements keeps a
+# single deterministic entry per dependency; a package that really does declare
+# two different requirements yields a string no requirement grammar accepts,
+# which the breaking rule then treats as unknown and fails closed on.
+function Join-CargoRequirements {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Requirements)
+
+    $distinct = [string[]]@(
+        $Requirements |
+            ForEach-Object { Get-NormalizedCargoRequirement -Requirement $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($distinct.Count -eq 0) { return $null }
+    [Array]::Sort($distinct, [StringComparer]::Ordinal)
+    return ($distinct -join ' || ')
+}
+
 # Reads the [package] table's `version = "..."` from a Cargo.toml on disk.
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
@@ -504,6 +912,10 @@ function Reset-ReleaseScriptCaches {
 #                           is the root an allowlist carries for a re-exported type.
 #   AllowedExternalTypes  - array from [package.metadata.cargo_check_external_types]
 #   ExposureMetadataKnown - $true when allowed_external_types is explicitly present
+#   ExternalDeps          - ordered map of normalized non-workspace dependency name ->
+#                           @{ Requirement; Kinds }, with workspace inheritance already
+#                           resolved by cargo. Dev dependencies are excluded: they never
+#                           reach the published manifest.
 #   MacroRuntimePartners  - normalized workspace package names from
 #                           [package.metadata.oxidizer_release].macro_runtime
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
@@ -528,7 +940,11 @@ function Get-WorkspacePackages {
     # cascade only ever asks about workspace packages, since a registry crate
     # is never a release target.
     $crateRootByPackage = @{}
+    $memberNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
     foreach ($package in $metadata.packages) {
+        [void]$memberNames.Add($package.name.Replace('-', '_'))
         $libTarget = $package.targets |
             Where-Object { @($_.kind) -contains 'lib' -or @($_.kind) -contains 'proc-macro' } |
             Select-Object -First 1
@@ -545,6 +961,7 @@ function Get-WorkspacePackages {
         $deps = @()
         $depAliases = @{}
         $depRoots = @{}
+        $externalDeps = [ordered]@{}
         foreach ($dep in $package.dependencies) {
             if ($dep.kind -eq 'dev') {
                 continue
@@ -552,6 +969,31 @@ function Get-WorkspacePackages {
 
             $depCargoName = $dep.name.Replace('-', '_')
             $deps += $depCargoName
+
+            # Cargo has already resolved [workspace.dependencies] inheritance
+            # into `req`, so this is the effective requirement the published
+            # manifest will carry -- the same value a consumer resolves against.
+            if (-not $memberNames.Contains($depCargoName)) {
+                if (-not $externalDeps.Contains($depCargoName)) {
+                    $externalDeps[$depCargoName] = [pscustomobject]@{
+                        Name         = $depCargoName
+                        Requirements = New-Object 'System.Collections.Generic.List[string]'
+                        Kinds        = New-Object 'System.Collections.Generic.List[string]'
+                    }
+                }
+                $externalRecord = $externalDeps[$depCargoName]
+                $requirement = ([string]$dep.req).Trim()
+                if (
+                    -not [string]::IsNullOrWhiteSpace($requirement) -and
+                    -not $externalRecord.Requirements.Contains($requirement)
+                ) {
+                    $externalRecord.Requirements.Add($requirement) | Out-Null
+                }
+                $externalKind = if ($dep.kind -eq 'build') { 'build' } else { 'normal' }
+                if (-not $externalRecord.Kinds.Contains($externalKind)) {
+                    $externalRecord.Kinds.Add($externalKind) | Out-Null
+                }
+            }
 
             # `rename` is the `package = "..."` form in Cargo.toml: the crate is
             # declared under one name but reachable in Rust source -- and hence
@@ -619,6 +1061,18 @@ function Get-WorkspacePackages {
         $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
         $hasLibraryTarget = $targetKinds -contains 'lib'
 
+        $externalDepRecords = [ordered]@{}
+        foreach ($externalName in @($externalDeps.Keys | Sort-Object { $_ } -CaseSensitive)) {
+            $record = $externalDeps[$externalName]
+            $kinds = [string[]]@($record.Kinds.ToArray())
+            [Array]::Sort($kinds, [StringComparer]::Ordinal)
+            $externalDepRecords[$externalName] = [pscustomobject]@{
+                Name        = $externalName
+                Requirement = Join-CargoRequirements -Requirements ([string[]]$record.Requirements.ToArray())
+                Kinds       = $kinds
+            }
+        }
+
         $packages += [pscustomobject]@{
             Name                    = $package.name
             Folder                  = Split-Path $manifestDir -Leaf
@@ -630,6 +1084,7 @@ function Get-WorkspacePackages {
             CrateRoot               = $crateRootByPackage[$package.name.Replace('-', '_')]
             AllowedExternalTypes    = $allowedExternalTypes
             ExposureMetadataKnown   = $exposureMetadataKnown
+            ExternalDeps            = $externalDepRecords
             MacroRuntimePartners    = $macroRuntimePartners
             HasLibraryTarget        = $hasLibraryTarget
             IsProcMacroOnly         = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')

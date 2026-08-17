@@ -25,15 +25,17 @@ Run:
 ./.github/skills/release-packages/scripts/release-facts.ps1 > facts.json
 ```
 
-Facts use `schemaVersion: 4`; regenerate them when the release tooling changes.
+Facts use `schemaVersion: 5`; regenerate them when the release tooling changes.
 The resolver rejects stale or incomplete facts rather than silently skipping
 macro-contract checks. Each package fact contains:
 
 `folder, name, version, published, procMacroOnly, hasLibraryTarget, deps,
 exposedDeps, macroPublicDeps, macroImplementationClosure,
-macroRuntimePartners, exposureUnknown, baselineSha, hasBaseline, everReleased,
-modified, modifiedFiles, modifiedFileCount, manifestDependencyScopes,
-manifestOtherChanged, workspaceModified`.
+macroRuntimePartners, macroCompileFixtureChanges, externalDepChanges,
+externalExposedDeps, exposureUnknown, baselineSha,
+hasBaseline, everReleased, modified, modifiedFiles, modifiedFileCount,
+manifestDependencyScopes, manifestOtherChanged, rustImplementationChanged,
+workspaceModified`.
 
 - `deps` contains normalized non-dev dependency names.
 - `exposedDeps` contains direct or transitively reachable workspace packages
@@ -59,6 +61,17 @@ manifestOtherChanged, workspaceModified`.
   excluding lints and `[package.metadata]`. This distinguishes mixed manifest
   edits from a pure dev-dependency change without deciding whether the other
   edit itself requires a release.
+- `rustImplementationChanged` is true only when the crate's own packaged Rust
+  source changed beyond doc comments -- an added or removed non-comment line in a
+  `.rs` file under `src/`, a custom `[lib]` path, or `build.rs`, never under
+  `tests/`, `benches/`, or `examples/`. Doc-comment, test, benchmark, README,
+  changelog, and manifest edits leave it false. A previously released ordinary
+  library with this false and no exposed breaking external dependency change has
+  no own-diff basis for a `breaking` or `nonbreaking` classification; any
+  elevation above patch must come from a resolver-owned cascade, not from a
+  re-exported macro contract or a dependency bump read into the crate's own diff.
+  It fails safe: a missing baseline or a brand-new untracked source file counts
+  as an implementation change.
 - `macroRuntimePartners` is inferred by reversing `macroPublicDeps`: every
   package that publicly exposes a proc macro becomes its runtime façade.
   `[package.metadata.oxidizer_release].macro_runtime` is an optional escape
@@ -66,6 +79,43 @@ manifestOtherChanged, workspaceModified`.
   A macro attestation that marks `generatedRuntimePaths` as changed blocks
   resolution when no partner was inferred or declared, preventing a new macro
   crate from silently omitting the relationship.
+- `macroCompileFixtureChanges` lists, for each proc-macro package, every
+  compile-fixture path that changed in its review scope: `tests/ui/**` and
+  `tests/compile_fail/**` `.rs` cases plus their `.stderr`/`.stdout`
+  expectations, gathered from the macro itself, its modified
+  `macroImplementationClosure`, and its modified `macroRuntimePartners`. This
+  crosses package boundaries on purpose: a fixture that proves a macro now
+  rejects previously accepted input usually lives in the runtime façade, where
+  it is otherwise indistinguishable from an ordinary test-only edit. Each item
+  carries `ownerPackage`, `ownerPublished`, `path`, `kind`
+  (`uiFixture`/`uiExpectation`), `status` (`added`/`modified`/`removed`),
+  `expectedResult` (`fail` when a recorded expectation exists on either side,
+  otherwise null), `baselineRev` (the revision the diff was taken against), and
+  `scopeRole` (`self`, `runtimePartner`, or `implementationClosure`). Items are
+  sorted ordinally by owner then path.
+- `externalDepChanges` lists every effective non-dev **external** (registry)
+  dependency requirement that differs between the package's release baseline
+  and the working tree, with `name`, `baselineReq`, `currentReq`, `kinds`
+  (`normal`/`build`), `breaking`, and `baselineRev`, sorted ordinally by name.
+  Requirements are compared after cargo's own normalization, and
+  `[workspace.dependencies]` inheritance is resolved on both sides, so a root
+  `Cargo.toml` bump is attributed to every crate that inherits it.
+  `breaking` is true when the requirement leaves the Cargo compatibility line
+  it was released against (`^2.0.111` to `^3.0.2`, `^0.5.1` to `^0.6.0`), when
+  the dependency was dropped, or when either requirement cannot be read well
+  enough to decide. A move within one line (`^2.0.111` to `^2.9.0`) and a newly
+  added dependency are not breaking.
+  A package whose only change is an inherited requirement is promoted to
+  `modified`/`workspaceModified` with the affected scope added to
+  `manifestDependencyScopes`: `cargo publish` inlines the inherited value, so
+  its published manifest really did change even though no file under
+  `crates/<folder>/` was touched.
+- `externalExposedDeps` lists the current external dependencies whose types the
+  package's public API may name, derived from
+  `[package.metadata.cargo_check_external_types].allowed_external_types` with
+  the same fail-closed rules as `exposedDeps`. It is always empty for
+  proc-macro-only packages: a macro exports behavior, and rustc keeps foreign
+  type identity from crossing the macro boundary.
 - `exposureUnknown` remains true for unchecked non-library targets. Proc-macro
   packages set it false because rustc prevents dependency types from crossing
   a proc-macro boundary.
@@ -133,12 +183,71 @@ Record `macroContracts.<package>` with:
 - all required contract channels classified as `unchanged`, `changed`, or
   `notApplicable`;
 - concrete evidence such as normalized expansion snapshots, trybuild pass/fail
-  fixtures, generated-runtime compile tests, and exported entry-point review.
+  fixtures, generated-runtime compile tests, and exported entry-point review;
+- `compileEvidence`: one measured entry per fixture in
+  `macroCompileFixtureChanges`.
+
+### Compile evidence
+
+Every fixture the facts report is an obligation the contract must discharge.
+Each `compileEvidence` entry is:
+
+```json
+{
+  "ownerPackage": "ohno",
+  "path": "crates/ohno/tests/ui/ohno_error_no_constructors.rs",
+  "baseline": { "result": "pass", "revision": "<baselineRev>", "exitCode": 0 },
+  "current":  { "result": "fail", "revision": "<HEAD>", "exitCode": 101 }
+}
+```
+
+Measure each fixture by compiling it at both revisions; `result` is `pass` or
+`fail` and must be accompanied by the revision measured and the compiler exit
+code. A `.stderr`/`.stdout` obligation is discharged by measuring its `.rs`
+sibling, so one measurement covers the whole fixture group.
+
+The resolver reads those two outcomes mechanically:
+
+| Baseline | Current | Derived verdict floor |
+|---|---|---|
+| pass | fail | `breaking` |
+| fail | pass | `nonbreaking` |
+| pass | pass | `compatible` |
+| fail | fail | `compatible` |
+
+The declared `verdict` may sit at or above the strongest derived floor, never
+below it. Fixtures owned by a *published* member of `macroImplementationClosure`
+are still reported and must still be measured, but do not set the floor: that
+crate carries its own independent classification.
 
 The verdict is the objective classification for the proc-macro contract.
 `manualReview` always remains true. A published implementation library still
 receives its own independent Rust API classification; `#[doc(hidden)]` does not
 remove its SemVer obligations.
+
+### External dependency exposure
+
+A crate's external dependency requirements are part of its published manifest,
+so a consumer resolves against them directly. Moving one to another
+compatibility line while the crate's public API names that dependency's types
+hands every consumer a different type identity under unchanged paths --
+invisibly to `cargo semver-checks`, which only sees this workspace's rustdoc.
+
+The resolver derives the floor mechanically, with no judgement to record:
+
+| `externalDepChanges` entry | In `externalExposedDeps` | Derived floor |
+|---|---|---|
+| `breaking: true` | yes | `breaking` |
+| `breaking: true` | no (private dependency) | none |
+| `breaking: false` | either | none |
+| any (proc-macro-only package) | never (always empty) | none |
+
+A classification below that floor blocks with `externalExposureUnderclassified`;
+a selection reason other than `breaking` -- including any decline -- blocks with
+`externalExposureUnderselected`. Both list the dependencies and both
+requirements, and neither can be argued away: raise the classification and the
+reason, or revert the requirement. Crates with `everReleased: false` are exempt,
+because a first release has no prior requirement to invalidate.
 
 ## Selecting packages
 
@@ -185,6 +294,10 @@ Judge only the package's own diff when selecting it. Dependency pickup,
 exposure, macro-public, and runtime-partner effects belong to the resolver.
 Decline a package with no release-worthy own diff even when it will later appear
 in the plan with `source: cascade`.
+Accordingly, a `breaking` selection reason must agree with that package's own
+objective classification. A runtime facade must not label itself breaking only
+because a re-exported macro contract breaks; the resolver applies that cascade.
+Such a mismatch blocks as `breakingSelectionUnderclassified`.
 
 Use the first matching rule:
 
@@ -216,6 +329,10 @@ inferring it from a `Cargo.toml` path or prose evidence.
 The resolver requires normal/build dependency and package-feature changes to be
 accepted, and gives a pure dev-dependency-only manifest edit exactly one valid
 outcome: decline with `dev-dependency-only`.
+A package promoted solely by an inherited `[workspace.dependencies]` change
+carries no `modifiedFiles`, so read `externalDepChanges` for its diff: when the
+change is not in `externalExposedDeps`, `runtime-manifest-change` is the reason;
+when it is, only `breaking` is accepted.
 
 When several non-release categories are mixed, ignore generated artifacts and
 release metadata while classifying the remaining diff. Use `test-only` or
@@ -228,6 +345,50 @@ The resolver rejects `first-release` when every changed path is under `tests/`
 or `benches/`, is outside the package allowlist, or is only Cargo/release
 metadata or a generated README/changelog. A never-released accepted package must
 use the `first-release` reason.
+
+### Behavior-fix evidence
+
+`behavior-fix` is the only accepted reason that asserts observable behavior
+changed, so the resolver requires it to be demonstrated rather than described.
+Record `regressionEvidence` on the decision: one entry per probe, measured at
+the release baseline and at the current revision.
+
+```json
+"regressionEvidence": [
+  {
+    "kind": "consumer-runtime",
+    "probe": "cargo test -p cachet_tier --test eviction",
+    "baseline": { "result": "fail", "revision": "<baselineRev>", "exitCode": 101 },
+    "current":  { "result": "pass", "revision": "<HEAD>", "exitCode": 0 }
+  }
+]
+```
+
+`kind` is `consumer-runtime` (behavior a consumer observes at run time),
+`consumer-compile` (a consumer fixture that must build), or `packaged-artifact`
+(what the published `.crate` contains). Both sides must name the revision
+measured, a `pass`/`fail` result, and the process exit code; `pass` pairs with
+exit code 0 and `fail` with a non-zero code.
+
+Only `fail` then `pass` on the same probe demonstrates a fix. Everything else
+blocks the plan with zero releases:
+
+| Observation | Ambiguity |
+|---|---|
+| No `regressionEvidence` recorded | `behaviorFixUndemonstrated` |
+| pass then pass (behavior preserved) | `behaviorFixUndemonstrated` |
+| fail then fail (still broken) | `behaviorFixUndemonstrated` |
+| pass then fail (newly broken) | `behaviorFixUndemonstrated` |
+| Missing result, revision, or exit code | `behaviorEvidenceInconclusive` |
+| Exit code contradicts the result | `behaviorEvidenceInconclusive` |
+| Both sides measured the same revision | `behaviorEvidenceInconclusive` |
+
+Additional probes that did not move are allowed as long as one probe
+demonstrates the fix. A refactor that preserves behavior cannot produce that
+measurement, which is the point: classify it `internal-only` and decline.
+Malformed entries -- prose instead of an object, a blank `probe`, an unknown
+`kind` -- are rejected outright. Other reasons are unaffected;
+`regressionEvidence` is ignored everywhere else.
 
 For proc macros, "compile behavior changed" means the end-to-end result changed
 for a representative consumer fixture. Parser acceptance alone is not the
@@ -285,6 +446,22 @@ Write request JSON:
       },
       "evidence": [
         "Normalized expansion snapshots and compile fixtures are unchanged."
+      ],
+      "compileEvidence": [
+        {
+          "ownerPackage": "templated_uri",
+          "path": "crates/templated_uri/tests/ui/bad_placeholder.rs",
+          "baseline": {
+            "result": "fail",
+            "revision": "7c185b447c5c1c94db36c6176d42093aa67b83a2",
+            "exitCode": 101
+          },
+          "current": {
+            "result": "fail",
+            "revision": "HEAD",
+            "exitCode": 101
+          }
+        }
       ]
     }
   },
@@ -315,6 +492,12 @@ The resolver guarantees:
 - breaking propagation through ordinary type exposure and reviewed public macro
   contracts;
 - structured blocking when a required macro contract is absent or incomplete;
+- structured blocking when a changed compile fixture in a macro's review scope
+  is unmeasured, inconclusive, or contradicts the declared verdict;
+- structured blocking when a `behavior-fix` selection reason is not demonstrated
+  by a probe that failed at the baseline and passes now;
+- structured blocking when a breaking external dependency requirement change
+  reaches a dependency the package's public API exposes;
 - fixed-point propagation through chains and diamonds;
 - proc-macro manual-review preservation;
 - pin-versus-requirement rejection unless `force` is true;
@@ -332,10 +515,40 @@ The resolver has three independent cascade lanes:
    breaks a dependent only when the contract verdict is breaking and the
    dependent lists it in `macroPublicDeps`.
 
+The declared verdict is a checked assertion, not a declaration. The resolver
+derives a floor from `compileEvidence` and blocks any verdict below it with
+`macroVerdictUnderclassified`, reporting `declaredVerdict`, `derivedVerdict`,
+and the `decidingFixtures`. A derived floor above `compatible` is also coupled
+to selection: a package whose fixtures prove a break cannot be declined, and its
+selection reason must be `breaking` (or, for a nonbreaking floor, one of
+`breaking`, `nonbreaking-api`, `behavior-fix`). Every resolved plan echoes the
+`derivedVerdict` next to the declared `verdict` in `macroContracts`.
+
 A compatible proc-macro contract stays at the patch floor even when its
 implementation dependency or exact pinned version crosses a Cargo major line.
 An unresolved required contract returns `status: blocked` with sorted
-`ambiguities`; no partial release plan may be applied.
+`ambiguities`; no partial release plan may be applied. The compile-evidence
+ambiguity kinds are:
+
+| Kind | Meaning |
+|---|---|
+| `macroCompileFixtureUnevidenced` | A changed fixture has no `compileEvidence` entry |
+| `macroCompileEvidenceInconclusive` | An entry lacks a pass/fail result, revision, or exit code |
+| `macroVerdictUnderclassified` | The declared verdict is weaker than the derived floor |
+
+Selection evidence blocks the same way. `behaviorFixUndemonstrated` means no
+probe moved from failing to passing; `behaviorEvidenceInconclusive` means a
+probe's measurement cannot be read or contradicts itself. Both name the missing
+`requiredInput` and emit zero releases.
+
+External exposure blocks the same way, without any recorded evidence to weigh:
+
+| Kind | Meaning |
+|---|---|
+| `externalExposureUnderclassified` | A classification is weaker than the floor a breaking exposed external dependency change forces |
+| `externalExposureUnderselected` | The selection reason for such a package is not `breaking` |
+| `breakingSelectionUnderclassified` | A package selected as breaking has a weaker own objective classification |
+| `ownClassificationUnsupported` | A previously released library is classified breaking/nonbreaking though only its doc comments, tests, or manifest changed and no exposed external dependency break forces it |
 
 When a breaking runtime release matches a proc macro's
 `macroRuntimePartners`, the resolver requires a macro-contract review. A
@@ -414,5 +627,37 @@ restores every file it touched if any operation fails.
     "models": ["model-a", "model-b", "model-c"],
     "agreement": "unanimous"
   }
+}
+```
+
+Each `macroContracts` entry echoes the reviewed `verdict` alongside the
+`derivedVerdict` the resolver computed from `compileEvidence`:
+
+```json
+{
+  "package": "ohno_macros",
+  "verdict": "breaking",
+  "derivedVerdict": "breaking",
+  "reviewed": ["ohno", "ohno_macros"],
+  "evidence": ["#[no_constructors] under #[ohno::error] is now rejected."]
+}
+```
+
+Each `selectionDecisions` entry echoes the graded probes so the consensus review
+compares measurements, not prose:
+
+```json
+{
+  "package": "cachet_tier",
+  "decision": "accept",
+  "reason": "behavior-fix",
+  "evidence": ["Eviction now honors the configured tier bound."],
+  "regressionEvidence": [
+    {
+      "kind": "consumer-runtime",
+      "probe": "cargo test -p cachet_tier --test eviction",
+      "outcome": "fail->pass"
+    }
+  ]
 }
 ```

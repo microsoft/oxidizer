@@ -690,3 +690,234 @@ Describe 'Test-PackageAllowlistNamesDirectTarget' {
         }
     }
 }
+
+Describe 'Get-CargoCompatibilityLine' {
+    It 'returns the leading non-zero component span' {
+        Get-CargoCompatibilityLine -Version '1.4.2' | Should -Be '1'
+        Get-CargoCompatibilityLine -Version '2.0.0' | Should -Be '2'
+        Get-CargoCompatibilityLine -Version '0.5.3' | Should -Be '0.5'
+        Get-CargoCompatibilityLine -Version '0.0.3' | Should -Be '0.0.3'
+        Get-CargoCompatibilityLine -Version '0' | Should -Be '0'
+        Get-CargoCompatibilityLine -Version '0.0' | Should -Be '0.0'
+    }
+
+    It 'ignores pre-release and build metadata' {
+        Get-CargoCompatibilityLine -Version '1.2.3-beta.1' | Should -Be '1'
+        Get-CargoCompatibilityLine -Version '0.5.0+build.7' | Should -Be '0.5'
+    }
+
+    It 'returns null for versions it cannot read' {
+        Get-CargoCompatibilityLine -Version '1.x' | Should -BeNullOrEmpty
+        Get-CargoCompatibilityLine -Version '*' | Should -BeNullOrEmpty
+        Get-CargoCompatibilityLine -Version '' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-CargoRequirementLines' {
+    It 'reads caret, bare, tilde and exact requirements' {
+        Get-CargoRequirementLines -Requirement '^3.0.2' | Should -Be @('3')
+        Get-CargoRequirementLines -Requirement '3.0.2' | Should -Be @('3')
+        Get-CargoRequirementLines -Requirement '~1.2.3' | Should -Be @('1')
+        Get-CargoRequirementLines -Requirement '=0.5.1' | Should -Be @('0.5')
+    }
+
+    It 'returns null for requirements whose line cannot be decided' {
+        foreach ($requirement in @('*', '1.*', '>=1, <3', '>1.0', 'x.y', '', $null)) {
+            Get-CargoRequirementLines -Requirement $requirement | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'accepts comma-separated comparators only when they agree on one line' {
+        Get-CargoRequirementLines -Requirement '^1.2, ^1.4' | Should -Be @('1')
+        Get-CargoRequirementLines -Requirement '^1.2, ^2.0' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-NormalizedCargoRequirement' {
+    It 'spells a bare version the way cargo does' {
+        Get-NormalizedCargoRequirement -Requirement '3.0.2' | Should -Be '^3.0.2'
+        Get-NormalizedCargoRequirement -Requirement ' 3.0.2 ' | Should -Be '^3.0.2'
+        Get-NormalizedCargoRequirement -Requirement '^3.0.2' | Should -Be '^3.0.2'
+    }
+
+    It 'is idempotent over multi-declaration joins' {
+        $joined = Join-CargoRequirements -Requirements @('0.2', '^0.4.0')
+        Get-NormalizedCargoRequirement -Requirement $joined | Should -Be $joined
+    }
+
+    It 'returns null for an absent requirement' {
+        Get-NormalizedCargoRequirement -Requirement $null | Should -BeNullOrEmpty
+        Get-NormalizedCargoRequirement -Requirement '  ' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Join-CargoRequirements' {
+    It 'normalizes and orders the declarations deterministically' {
+        Join-CargoRequirements -Requirements @('^0.4.0', '0.2') |
+            Should -Be (Join-CargoRequirements -Requirements @('0.2', '^0.4.0'))
+    }
+
+    It 'collapses repeated declarations of one requirement' {
+        Join-CargoRequirements -Requirements @('1.0', '^1.0') | Should -Be '^1.0'
+    }
+
+    It 'produces a requirement no grammar admits when declarations disagree' {
+        $joined = Join-CargoRequirements -Requirements @('0.2', '0.4.0')
+        Get-CargoRequirementLines -Requirement $joined | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Test-CargoRequirementBreaking' {
+    It 'is breaking when the compatibility line moves' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^2.0.111' -CurrentRequirement '^3.0.2' |
+            Should -BeTrue
+        Test-CargoRequirementBreaking -BaselineRequirement '^0.5.1' -CurrentRequirement '^0.6.0' |
+            Should -BeTrue
+    }
+
+    It 'is not breaking within one compatibility line' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^2.0.111' -CurrentRequirement '^2.9.0' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '2.0.111' -CurrentRequirement '^2.0.111' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '^0.5.1' -CurrentRequirement '^0.5.9' |
+            Should -BeFalse
+    }
+
+    It 'treats a newly declared dependency as non-breaking and a dropped one as breaking' {
+        Test-CargoRequirementBreaking -BaselineRequirement $null -CurrentRequirement '^1.0' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '^1.0' -CurrentRequirement $null |
+            Should -BeTrue
+    }
+
+    It 'fails closed on a requirement it cannot read' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^1.0' -CurrentRequirement '*' |
+            Should -BeTrue
+        Test-CargoRequirementBreaking -BaselineRequirement '>=1, <3' -CurrentRequirement '^1.0' |
+            Should -BeTrue
+    }
+}
+
+Describe 'Get-CargoManifestDependencies' {
+    It 'resolves workspace inheritance from the root requirements' {
+        $root = @(
+            '[workspace.dependencies]'
+            'syn = { version = "2.0.111" }'
+            'quote = "1.0.42"'
+        ) -join "`n"
+        $package = @(
+            '[package]'
+            'name = "alpha"'
+            ''
+            '[dependencies]'
+            'syn = { workspace = true, features = ['
+            '    "full",'
+            '] }'
+            'quote.workspace = true'
+        ) -join "`n"
+
+        $requirements = Get-CargoWorkspaceRequirements -ManifestText $root
+        $deps = Get-CargoManifestDependencies `
+            -ManifestText $package `
+            -WorkspaceRequirements $requirements
+
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+        $deps['quote'].Requirement | Should -Be '^1.0.42'
+    }
+
+    It 'drops an inherited dependency the workspace does not declare' {
+        $package = @(
+            '[dependencies]'
+            'syn = { workspace = true }'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys).Count | Should -Be 0
+    }
+
+    It 'never reads dev-dependencies' {
+        $package = @(
+            '[dependencies]'
+            'serde = "1.0"'
+            ''
+            '[dev-dependencies]'
+            'proptest = "1.5"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('serde')
+    }
+
+    It 'records normal and build declarations of one dependency together' {
+        $package = @(
+            '[dependencies]'
+            'syn = "2.0.111"'
+            ''
+            '[build-dependencies]'
+            'syn = "2.0.111"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        $deps['syn'].Kinds | Should -Be @('build', 'normal')
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+    }
+
+    It 'reads target-specific and sub-table declarations' {
+        $package = @(
+            "[target.'cfg(unix)'.dependencies]"
+            'libc = "0.2.178"'
+            ''
+            '[dependencies.serde]'
+            'version = "1.0.200"'
+            'features = ["derive"]'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        $deps['libc'].Requirement | Should -Be '^0.2.178'
+        $deps['serde'].Requirement | Should -Be '^1.0.200'
+    }
+
+    It 'keys a renamed dependency by its real package name' {
+        $package = @(
+            '[dependencies]'
+            'allocator-api2-02 = { package = "allocator-api2", version = "0.2" }'
+            ''
+            '[dependencies.syn2]'
+            'package = "syn"'
+            'version = "2.0.111"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Sort-Object | Should -Be @('allocator_api2', 'syn')
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+    }
+
+    It 'ignores comments and path-only declarations' {
+        $package = @(
+            '[dependencies]'
+            '# syn = "9.9.9"'
+            'sibling = { path = "../sibling" }'
+            'serde = "1.0" # trailing'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('serde')
+        $deps['serde'].Requirement | Should -Be '^1.0'
+    }
+
+    It 'normalizes dependency names ordinally' {
+        $package = @(
+            '[dependencies]'
+            'proc-macro2 = "1.0.103"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('proc_macro2')
+    }
+
+    It 'returns an empty map for an absent manifest' {
+        $deps = Get-CargoManifestDependencies -ManifestText ''
+        @($deps.Keys).Count | Should -Be 0
+    }
+}

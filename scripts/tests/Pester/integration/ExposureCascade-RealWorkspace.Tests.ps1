@@ -51,6 +51,35 @@ BeforeAll {
         $macroContracts = @{}
         foreach ($fact in $factsForPlan.packages) {
             if (-not [bool]$fact.procMacroOnly) { continue }
+            # This test exercises cascade mechanics with macro contracts held
+            # constant, so every compile-fixture obligation the facts report is
+            # discharged with an unchanged outcome. Mirroring the two sides is
+            # what "held constant" means mechanically; a real review measures
+            # them instead.
+            $compileEvidence = @(
+                foreach ($obligation in @($fact.macroCompileFixtureChanges)) {
+                    $result = if ($obligation.expectedResult -eq 'fail') {
+                        'fail'
+                    } else {
+                        'pass'
+                    }
+                    $exitCode = if ($result -eq 'fail') { 101 } else { 0 }
+                    @{
+                        ownerPackage = $obligation.ownerPackage
+                        path = $obligation.path
+                        baseline = @{
+                            result = $result
+                            revision = $obligation.baselineRev
+                            exitCode = $exitCode
+                        }
+                        current = @{
+                            result = $result
+                            revision = 'HEAD'
+                            exitCode = $exitCode
+                        }
+                    }
+                }
+            )
             $macroContracts[$fact.folder] = @{
                 verdict = 'compatible'
                 reviewedPackages = $allFolders
@@ -63,6 +92,7 @@ BeforeAll {
                     hygiene = 'unchanged'
                 }
                 evidence = @('Live topology tests hold macro contracts constant.')
+                compileEvidence = $compileEvidence
             }
         }
         @{
@@ -179,5 +209,86 @@ Describe 'Exposure cascades over the live workspace' {
         $impl.changeType | Should -Be 'patch'
         $macros.changeType | Should -Be 'patch'
         $runtime.changeType | Should -Be 'breaking'
+    }
+
+    Context 'external dependency exposure' {
+        It 'reports syn exposure for the macro implementation crates that name its types' {
+            foreach ($folder in @(
+                    'thread_aware_macros_impl',
+                    'data_privacy_macros_impl',
+                    'fundle_macros_impl'
+                )) {
+                @($script:FactsByFolder[$folder].externalExposedDeps) |
+                    Should -Contain 'syn' -Because "$folder allowlists syn:: entries"
+            }
+        }
+
+        It 'reports no syn exposure for crates that only use it privately' {
+            foreach ($folder in @('templated_uri_macros_impl', 'routerama_build')) {
+                @($script:FactsByFolder[$folder].externalExposedDeps) |
+                    Should -Not -Contain 'syn' -Because "$folder allowlists no syn:: entry"
+            }
+        }
+
+        It 'never reports external exposure for a proc-macro-only crate' {
+            foreach ($fact in $script:Facts.packages) {
+                if (-not [bool]$fact.procMacroOnly) { continue }
+                @($fact.externalExposedDeps).Count |
+                    Should -Be 0 -Because "$($fact.folder) exports behaviour, not foreign types"
+            }
+        }
+
+        It 'emits both lane properties for every workspace package' {
+            foreach ($fact in $script:Facts.packages) {
+                $fact.PSObject.Properties['externalDepChanges'] |
+                    Should -Not -BeNullOrEmpty
+                $fact.PSObject.Properties['externalExposedDeps'] |
+                    Should -Not -BeNullOrEmpty
+            }
+        }
+
+        It 'reports only external crates, never workspace members' {
+            $members = @($script:Facts.packages | ForEach-Object { $_.name.Replace('-', '_') })
+            foreach ($fact in $script:Facts.packages) {
+                foreach ($change in @($fact.externalDepChanges)) {
+                    $members | Should -Not -Contain $change.name
+                }
+            }
+        }
+
+        It 'orders every package lane deterministically' {
+            foreach ($fact in $script:Facts.packages) {
+                $names = @($fact.externalDepChanges | ForEach-Object { $_.name })
+                $sorted = [string[]]@($names)
+                [Array]::Sort($sorted, [StringComparer]::Ordinal)
+                $names | Should -Be $sorted
+            }
+        }
+
+        It 'blocks a patch plan for any crate whose exposed dependency line moved' {
+            $floored = @(
+                foreach ($fact in $script:Facts.packages) {
+                    if (-not [bool]$fact.published) { continue }
+                    $exposed = @($fact.externalExposedDeps)
+                    $breaking = @(
+                        @($fact.externalDepChanges) |
+                            Where-Object { [bool]$_.breaking -and $exposed -contains $_.name }
+                    )
+                    if ($breaking.Count -gt 0) { $fact }
+                }
+            )
+            if ($floored.Count -eq 0) {
+                Set-ItResult -Skipped -Because 'no exposed external break is pending in this tree'
+                return
+            }
+
+            # Invoke-LivePlan classifies every published package as patch, which
+            # is exactly the judgement the derived floor has to refuse.
+            $plan = Invoke-LivePlan -Token $floored[0].folder
+            $plan.status | Should -Be 'blocked'
+            @($plan.releases).Count | Should -Be 0
+            @($plan.ambiguities | ForEach-Object { $_.kind }) |
+                Should -Contain 'externalExposureUnderclassified'
+        }
     }
 }

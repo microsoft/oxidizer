@@ -250,11 +250,24 @@ function Write-PackageCargoToml {
 # it cannot express an alias without also rewriting that table. Path-only is
 # sufficient here because these fixtures are read via `cargo metadata` and never
 # packaged.
+#
+# A dep carrying `External = $true` names a registry crate rather than a
+# workspace member. It inherits from [workspace.dependencies] unless it also
+# carries `Version`, which pins it inline in the member manifest.
 function Format-DependencyLine {
     param([Parameter(Mandatory = $true)][hashtable]$Dep)
 
     if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
+        if ($Dep.ContainsKey('External') -and $Dep.External) {
+            return "$($Dep.Rename) = { package = `"$($Dep.Name)`", version = `"$($Dep.Version)`" }"
+        }
         return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../$($Dep.Name)`" }"
+    }
+    if (
+        $Dep.ContainsKey('External') -and $Dep.External -and
+        $Dep.ContainsKey('Version') -and -not [string]::IsNullOrWhiteSpace($Dep.Version)
+    ) {
+        return "$($Dep.Name) = { version = `"$($Dep.Version)`" }"
     }
     return "$($Dep.Name).workspace = true"
 }
@@ -285,6 +298,13 @@ function Write-RootCargoToml {
     $lines += '[workspace.dependencies]'
     foreach ($package in $Spec.Packages) {
         $lines += "$($package.Name) = { path = `"crates/$($package.Name)`", version = `"$($package.Version)`" }"
+    }
+    # Registry crates the members may inherit. Keyed by crate name, valued by
+    # requirement string, e.g. @{ syn = '2.0.111' }.
+    if ($Spec.ContainsKey('ExternalDependencies') -and $null -ne $Spec.ExternalDependencies) {
+        foreach ($name in @($Spec.ExternalDependencies.Keys | Sort-Object)) {
+            $lines += "$name = { version = `"$($Spec.ExternalDependencies[$name])`" }"
+        }
     }
 
     Set-Content -Path $Path -Value ($lines -join "`n") -NoNewline
@@ -404,6 +424,30 @@ function New-SyntheticWorkspace {
         } else {
             $content = [regex]::Replace($content, '(?m)^(version\s*=\s*"[^"]+")', "`$1`npublish = false")
         }
+        Set-Content -Path $packagePath -Value $content -NoNewline
+    }
+
+    $ws | Add-Member -MemberType ScriptMethod -Name 'SetWorkspaceDependencyVersion' -Value {
+        param([string]$Name, [string]$NewVersion)
+        $rootPath = Join-Path $this.Path 'Cargo.toml'
+        $content = Get-Content $rootPath -Raw
+        $pattern = "(?m)^$([regex]::Escape($Name))\s*=\s*\{\s*version\s*=\s*`"[^`"]+`"\s*\}"
+        if ($content -notmatch $pattern) {
+            throw "SetWorkspaceDependencyVersion: '$Name' is not a workspace dependency."
+        }
+        $content = [regex]::Replace($content, $pattern, "$Name = { version = `"$NewVersion`" }")
+        Set-Content -Path $rootPath -Value $content -NoNewline
+    }
+
+    $ws | Add-Member -MemberType ScriptMethod -Name 'SetPackageDependencyVersion' -Value {
+        param([string]$Package, [string]$Name, [string]$NewVersion)
+        $packagePath = Join-Path $this.Path "crates\$Package\Cargo.toml"
+        $content = Get-Content $packagePath -Raw
+        $pattern = "(?m)^$([regex]::Escape($Name))\s*=\s*\{\s*version\s*=\s*`"[^`"]+`"\s*\}"
+        if ($content -notmatch $pattern) {
+            throw "SetPackageDependencyVersion: '$Name' is not an inline dependency of '$Package'."
+        }
+        $content = [regex]::Replace($content, $pattern, "$Name = { version = `"$NewVersion`" }")
         Set-Content -Path $packagePath -Value $content -NoNewline
     }
 

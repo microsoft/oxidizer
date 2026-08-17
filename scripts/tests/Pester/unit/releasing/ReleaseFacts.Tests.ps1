@@ -126,7 +126,13 @@ Describe 'release-facts.ps1' {
         & git -C $script:Ws.Path tag 'beta-v0.5.0' 2>&1 | Out-Null
 
         # Leave an uncommitted source edit on 'alpha' so it registers as modified.
+        # The default suffix is a `// edit` comment, so alpha's own Rust source
+        # change is doc/comment-only -- rustImplementationChanged must stay false.
         $script:Ws.ModifySource('alpha')
+
+        # 'exposer' gets a real code addition, so its rustImplementationChanged
+        # must be true, distinguishing an implementation edit from a comment one.
+        $script:Ws.ModifySource('exposer', 'pub fn newly_added() -> i32 { 42 }')
 
         # Also modify the UNPUBLISHED 'priv_pkg'. This makes the "publish=false is
         # never surfaced" assertion meaningful: priv_pkg now has a real working-tree
@@ -140,7 +146,7 @@ Describe 'release-facts.ps1' {
     }
 
     It 'emits every workspace package under crates/' {
-        $script:Facts.schemaVersion | Should -Be 4
+        $script:Facts.schemaVersion | Should -Be 5
         $folders = @($script:Facts.packages | ForEach-Object { $_.folder }) | Sort-Object
         $folders | Should -Be @(
             'alpha',
@@ -275,6 +281,15 @@ Describe 'release-facts.ps1' {
         @($script:ByFolder['alpha'].manifestDependencyScopes).Count |
             Should -Be 0
         $script:ByFolder['beta'].modified | Should -BeFalse
+    }
+
+    It 'distinguishes a doc-comment-only edit from a real implementation edit' {
+        # alpha's only source change is a `// edit` comment line.
+        $script:ByFolder['alpha'].rustImplementationChanged | Should -BeFalse
+        # exposer added a real `pub fn`.
+        $script:ByFolder['exposer'].rustImplementationChanged | Should -BeTrue
+        # An unmodified crate reports no implementation change.
+        $script:ByFolder['beta'].rustImplementationChanged | Should -BeFalse
     }
 
     It 'handles dependency table variants without inheriting unrelated TOML sections' {
@@ -499,5 +514,280 @@ path = "examples/demo.rs"
     It 'fails loudly for an unresolvable base ref instead of reporting no baseline' {
         { & $script:FactsScript -RepoRoot $script:WsRoot -BaseRef 'refs/heads/no-such-ref-xyz' } |
             Should -Throw '*could not be resolved*'
+    }
+}
+
+Describe 'release-facts.ps1 compile-fixture obligations' {
+    BeforeAll {
+        # A proc macro whose compile fixtures live in its runtime partner -- the
+        # shape that let a rejected-input break ship as a patch, because in the
+        # partner the fixture reads as an ordinary test-only edit.
+        $script:FixWsRoot = Join-Path $TestDrive 'fixture-ws'
+        $spec = @{
+            Packages = @(
+                @{
+                    Name = 'gamma_macros'
+                    Version = '0.3.0'
+                    ProcMacro = $true
+                    AllowedExternalTypes = @('gamma_macros::*')
+                }
+                @{
+                    Name = 'macro_runtime'
+                    Version = '0.3.0'
+                    Deps = @(@{ Name = 'gamma_macros' })
+                    AllowedExternalTypes = @('gamma_macros::derive_gamma')
+                }
+                @{
+                    Name = 'detached_macros'
+                    Version = '0.1.0'
+                    ProcMacro = $true
+                    MacroRuntime = @('detached_runtime')
+                }
+                @{ Name = 'detached_runtime'; Version = '0.1.0' }
+            )
+        }
+        $script:FixWs = New-SyntheticWorkspace -Spec $spec -Path $script:FixWsRoot
+
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/existing.rs', 'fn main() {}')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/existing.stderr', 'error: old')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/gone.rs', 'fn main() {}')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/gone.stderr', 'error: gone')
+        $script:FixWs.AddCommit('add ui fixtures')
+
+        # The version bump is the release baseline every obligation is diffed
+        # against, and the fixtures above predate it.
+        $script:FixWs.SetVersion('macro_runtime', '0.4.0')
+        $script:FixWs.AddCommit('bump macro_runtime to 0.4.0')
+        $script:FixBaselineRev = $script:FixWs.GitSha('HEAD')
+
+        # Unreleased window: one expectation rewritten, one case newly rejected,
+        # one fixture deleted, one case with no recorded expectation at all.
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/existing.stderr', 'error: new')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/reject_case.rs', 'fn main() {}')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/reject_case.stderr', 'error: rejected')
+        $script:FixWs.WriteFile('crates/macro_runtime/tests/ui/plain_case.rs', 'fn main() {}')
+        Remove-Item -LiteralPath (
+            Join-Path $script:FixWsRoot 'crates\macro_runtime\tests\ui\gone.rs'
+        )
+        Remove-Item -LiteralPath (
+            Join-Path $script:FixWsRoot 'crates\macro_runtime\tests\ui\gone.stderr'
+        )
+
+        $script:FixFacts = Invoke-ReleaseFacts -RepoRoot $script:FixWsRoot
+        $script:FixByFolder = @{}
+        foreach ($p in $script:FixFacts.packages) { $script:FixByFolder[$p.folder] = $p }
+        $script:MacroFixtures = @(
+            $script:FixByFolder['gamma_macros'].macroCompileFixtureChanges
+        )
+    }
+
+    It 'collects fixture changes owned by a runtime partner onto the macro' {
+        $script:FixByFolder['gamma_macros'].macroRuntimePartners |
+            Should -Contain 'macro_runtime'
+        @($script:MacroFixtures | ForEach-Object { $_.ownerPackage }) |
+            Should -Not -Contain 'gamma_macros'
+        @($script:MacroFixtures | ForEach-Object { $_.ownerPackage }) |
+            Sort-Object -Unique |
+            Should -Be @('macro_runtime')
+        @($script:MacroFixtures | ForEach-Object { $_.scopeRole }) |
+            Sort-Object -Unique |
+            Should -Be @('runtimePartner')
+    }
+
+    It 'classifies added, modified and removed fixture paths' {
+        $byPath = @{}
+        foreach ($item in $script:MacroFixtures) { $byPath[$item.path] = $item }
+
+        $byPath['crates/macro_runtime/tests/ui/existing.stderr'].status |
+            Should -Be 'modified'
+        $byPath['crates/macro_runtime/tests/ui/reject_case.rs'].status |
+            Should -Be 'added'
+        $byPath['crates/macro_runtime/tests/ui/reject_case.stderr'].status |
+            Should -Be 'added'
+        $byPath['crates/macro_runtime/tests/ui/gone.rs'].status |
+            Should -Be 'removed'
+        $byPath['crates/macro_runtime/tests/ui/plain_case.rs'].status |
+            Should -Be 'added'
+        # existing.rs itself never changed, so it is not an obligation.
+        $byPath.ContainsKey('crates/macro_runtime/tests/ui/existing.rs') |
+            Should -BeFalse
+    }
+
+    It 'derives expectedResult only where a recorded expectation exists' {
+        $byPath = @{}
+        foreach ($item in $script:MacroFixtures) { $byPath[$item.path] = $item }
+
+        $byPath['crates/macro_runtime/tests/ui/reject_case.rs'].kind |
+            Should -Be 'uiFixture'
+        $byPath['crates/macro_runtime/tests/ui/reject_case.rs'].expectedResult |
+            Should -Be 'fail'
+        $byPath['crates/macro_runtime/tests/ui/reject_case.stderr'].kind |
+            Should -Be 'uiExpectation'
+        $byPath['crates/macro_runtime/tests/ui/reject_case.stderr'].expectedResult |
+            Should -Be 'fail'
+        # No sibling expectation on either side: the outcome is not mechanically
+        # discoverable, so the fact refuses to guess.
+        $byPath['crates/macro_runtime/tests/ui/plain_case.rs'].expectedResult |
+            Should -BeNullOrEmpty
+    }
+
+    It 'records the owner package, published flag and baseline revision' {
+        foreach ($item in $script:MacroFixtures) {
+            $item.ownerPackage | Should -Be 'macro_runtime'
+            $item.ownerPublished | Should -BeTrue
+            $item.baselineRev | Should -Be $script:FixBaselineRev
+        }
+    }
+
+    It 'emits obligations in a deterministic ordinal order' {
+        $paths = @($script:MacroFixtures | ForEach-Object { $_.path })
+        $sorted = [string[]]@($paths)
+        [Array]::Sort($sorted, [StringComparer]::Ordinal)
+        $paths | Should -Be $sorted
+
+        $again = Invoke-ReleaseFacts -RepoRoot $script:FixWsRoot
+        $againMacro = $again.packages | Where-Object folder -eq 'gamma_macros'
+        @($againMacro.macroCompileFixtureChanges | ForEach-Object { $_.path }) |
+            Should -Be $paths
+    }
+
+    It 'leaves unrelated packages without obligations' {
+        @($script:FixByFolder['macro_runtime'].macroCompileFixtureChanges).Count |
+            Should -Be 0
+        @($script:FixByFolder['detached_macros'].macroCompileFixtureChanges).Count |
+            Should -Be 0
+    }
+}
+
+Describe 'release-facts.ps1 external dependency exposure' {
+    BeforeAll {
+        # `syn` is inherited from [workspace.dependencies] by four crates that
+        # differ only in what they expose, so one root-manifest edit produces
+        # every outcome the lane has to tell apart.
+        $script:ExtWsRoot = Join-Path $TestDrive 'external-ws'
+        $spec = @{
+            ExternalDependencies = @{
+                syn   = '2.0.111'
+                serde = '1.0.200'
+            }
+            Packages = @(
+                @{
+                    Name = 'exposing_impl'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'syn'; External = $true })
+                    AllowedExternalTypes = @('syn::error::*')
+                }
+                @{
+                    Name = 'private_user'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'syn'; External = $true })
+                    AllowedExternalTypes = @('serde::Serialize')
+                }
+                @{
+                    Name = 'syn_macros'
+                    Version = '0.1.0'
+                    ProcMacro = $true
+                    Deps = @(@{ Name = 'syn'; External = $true })
+                }
+                @{
+                    Name = 'unknown_exposure'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'syn'; External = $true })
+                }
+                @{
+                    Name = 'dev_only_user'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'syn'; External = $true; Kind = 'dev' })
+                    AllowedExternalTypes = @()
+                }
+                @{
+                    Name = 'inline_user'
+                    Version = '0.1.0'
+                    Deps = @(@{ Name = 'serde'; External = $true; Version = '1.0.200' })
+                    AllowedExternalTypes = @('serde::Serialize')
+                }
+            )
+        }
+        $script:ExtWs = New-SyntheticWorkspace -Spec $spec -Path $script:ExtWsRoot
+        $script:ExtWs.AddCommit('baseline release state')
+
+        # Unreleased window: the workspace-inherited requirement crosses a
+        # compatibility line, and one crate pins its own inline requirement.
+        $script:ExtWs.SetWorkspaceDependencyVersion('syn', '3.0.2')
+        $script:ExtWs.SetPackageDependencyVersion('inline_user', 'serde', '2.0.0')
+
+        $script:ExtFacts = Invoke-ReleaseFacts -RepoRoot $script:ExtWsRoot
+        $script:ExtByFolder = @{}
+        foreach ($p in $script:ExtFacts.packages) { $script:ExtByFolder[$p.folder] = $p }
+    }
+
+    It 'detects a workspace-inherited requirement change against the package baseline' {
+        $changes = @($script:ExtByFolder['exposing_impl'].externalDepChanges)
+        $changes.Count | Should -Be 1
+        $changes[0].name | Should -Be 'syn'
+        $changes[0].baselineReq | Should -Be '^2.0.111'
+        $changes[0].currentReq | Should -Be '^3.0.2'
+        $changes[0].breaking | Should -BeTrue
+        $changes[0].kinds | Should -Be @('normal')
+    }
+
+    It 'detects a directly declared requirement change' {
+        $changes = @($script:ExtByFolder['inline_user'].externalDepChanges)
+        $changes.Count | Should -Be 1
+        $changes[0].name | Should -Be 'serde'
+        $changes[0].baselineReq | Should -Be '^1.0.200'
+        $changes[0].currentReq | Should -Be '^2.0.0'
+        $changes[0].breaking | Should -BeTrue
+    }
+
+    It 'reports exposure only where the allowlist admits the dependency' {
+        $script:ExtByFolder['exposing_impl'].externalExposedDeps |
+            Should -Be @('syn')
+        @($script:ExtByFolder['private_user'].externalExposedDeps) |
+            Should -Not -Contain 'syn'
+    }
+
+    It 'never exposes a foreign type identity through a proc macro' {
+        @($script:ExtByFolder['syn_macros'].externalDepChanges).Count |
+            Should -BeGreaterThan 0
+        @($script:ExtByFolder['syn_macros'].externalExposedDeps).Count |
+            Should -Be 0
+    }
+
+    It 'fails closed when the crate declares no exposure metadata' {
+        $script:ExtByFolder['unknown_exposure'].externalExposedDeps |
+            Should -Be @('syn')
+    }
+
+    It 'ignores dev-only external dependencies' {
+        @($script:ExtByFolder['dev_only_user'].externalDepChanges).Count |
+            Should -Be 0
+        @($script:ExtByFolder['dev_only_user'].externalExposedDeps).Count |
+            Should -Be 0
+    }
+
+    It 'promotes a package whose only change is the inherited requirement' {
+        # Nothing under crates/private_user/ was touched, so without the
+        # promotion the crate would never reach review at all.
+        $script:ExtByFolder['private_user'].modifiedFileCount | Should -Be 0
+        $script:ExtByFolder['private_user'].modified | Should -BeTrue
+        $script:ExtByFolder['private_user'].workspaceModified | Should -BeTrue
+        $script:ExtByFolder['private_user'].manifestDependencyScopes |
+            Should -Contain 'normal'
+    }
+
+    It 'emits changes in a deterministic ordinal order' {
+        foreach ($fact in $script:ExtFacts.packages) {
+            $names = @($fact.externalDepChanges | ForEach-Object { $_.name })
+            $sorted = [string[]]@($names)
+            [Array]::Sort($sorted, [StringComparer]::Ordinal)
+            $names | Should -Be $sorted
+        }
+    }
+
+    It 'reports the same facts on a repeated run' {
+        $again = Invoke-ReleaseFacts -RepoRoot $script:ExtWsRoot
+        ($again.packages | ConvertTo-Json -Depth 8) |
+            Should -Be ($script:ExtFacts.packages | ConvertTo-Json -Depth 8)
     }
 }

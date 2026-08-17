@@ -26,6 +26,10 @@ BeforeAll {
             [string[]]$ModifiedFiles = @(),
             [string[]]$ManifestDependencyScopes = @(),
             [bool]$ManifestOtherChanged = $false,
+            [object[]]$MacroCompileFixtureChanges = @(),
+            [object[]]$ExternalDepChanges = @(),
+            [string[]]$ExternalExposedDeps = @(),
+            [bool]$RustImplementationChanged = $true,
             [bool]$WorkspaceModified = $Modified
         )
 
@@ -54,7 +58,87 @@ BeforeAll {
             modifiedFileCount = $ModifiedFiles.Count
             manifestDependencyScopes = @($ManifestDependencyScopes)
             manifestOtherChanged = $ManifestOtherChanged
+            rustImplementationChanged = $RustImplementationChanged
+            macroCompileFixtureChanges = @($MacroCompileFixtureChanges)
+            externalDepChanges = @($ExternalDepChanges)
+            externalExposedDeps = @($ExternalExposedDeps)
             workspaceModified = $WorkspaceModified
+        }
+    }
+
+    # A fact-side external dependency requirement change, shaped exactly as
+    # release-facts.ps1 emits it.
+    function New-ExternalDepChange {
+        param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [AllowNull()][string]$BaselineReq = '^2.0.111',
+            [AllowNull()][string]$CurrentReq = '^3.0.2',
+            [string[]]$Kinds = @('normal'),
+            [bool]$Breaking = $true,
+            [string]$BaselineRev = '0123456789012345678901234567890123456789'
+        )
+
+        return [ordered]@{
+            name        = $Name
+            baselineReq = $BaselineReq
+            currentReq  = $CurrentReq
+            kinds       = @($Kinds)
+            breaking    = $Breaking
+            baselineRev = $BaselineRev
+        }
+    }
+
+    # A fact-side compile-fixture obligation, shaped exactly as release-facts.ps1
+    # emits it.
+    function New-CompileFixtureChange {
+        param(
+            [Parameter(Mandatory = $true)][string]$OwnerPackage,
+            [Parameter(Mandatory = $true)][string]$Path,
+            [ValidateSet('added', 'modified', 'removed')]
+            [string]$Status = 'added',
+            [ValidateSet('self', 'runtimePartner', 'implementationClosure')]
+            [string]$ScopeRole = 'runtimePartner',
+            [bool]$OwnerPublished = $true,
+            [AllowNull()][string]$ExpectedResult = 'fail',
+            [string]$BaselineRev = '0123456789012345678901234567890123456789'
+        )
+
+        return [ordered]@{
+            ownerPackage   = $OwnerPackage
+            ownerPublished = $OwnerPublished
+            path           = $Path
+            kind           = if ($Path.EndsWith('.rs')) { 'uiFixture' } else { 'uiExpectation' }
+            status         = $Status
+            expectedResult = $ExpectedResult
+            baselineRev    = $BaselineRev
+            scopeRole      = $ScopeRole
+        }
+    }
+
+    # A contract-side measurement of one fixture, keyed to the obligation above.
+    function New-CompileEvidence {
+        param(
+            [Parameter(Mandatory = $true)][string]$OwnerPackage,
+            [Parameter(Mandatory = $true)][string]$Path,
+            [ValidateSet('pass', 'fail')][string]$Baseline = 'pass',
+            [ValidateSet('pass', 'fail')][string]$Current = 'pass',
+            [string]$BaselineRev = '0123456789012345678901234567890123456789',
+            [string]$CurrentRev = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+        )
+
+        return @{
+            ownerPackage = $OwnerPackage
+            path         = $Path
+            baseline     = @{
+                result   = $Baseline
+                revision = $BaselineRev
+                exitCode = if ($Baseline -eq 'pass') { 0 } else { 101 }
+            }
+            current      = @{
+                result   = $Current
+                revision = $CurrentRev
+                exitCode = if ($Current -eq 'pass') { 0 } else { 101 }
+            }
         }
     }
 
@@ -63,10 +147,11 @@ BeforeAll {
             [ValidateSet('compatible', 'nonbreaking', 'breaking')]
             [string]$Verdict = 'compatible',
             [string[]]$ReviewedPackages = @('macros'),
-            [string[]]$Evidence = @('Reviewed macro exports, compile fixtures, and generated API.')
+            [string[]]$Evidence = @('Reviewed macro exports, compile fixtures, and generated API.'),
+            [object[]]$CompileEvidence = @()
         )
 
-        return @{
+        $contract = @{
             verdict = $Verdict
             reviewedPackages = @($ReviewedPackages)
             channels = @{
@@ -79,13 +164,17 @@ BeforeAll {
             }
             evidence = @($Evidence)
         }
+        if ($CompileEvidence.Count -gt 0) {
+            $contract['compileEvidence'] = @($CompileEvidence)
+        }
+        return $contract
     }
 
     function Invoke-ReleasePlan {
         param(
             [Parameter(Mandatory = $true)][object[]]$Facts,
             [Parameter(Mandatory = $true)][hashtable]$Request,
-            [int]$SchemaVersion = 4
+            [int]$SchemaVersion = 5
         )
 
         $caseDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -105,18 +194,60 @@ BeforeAll {
         return ($json | ConvertFrom-Json)
     }
 
+    function New-RegressionEvidence {
+        param(
+            [string]$Kind = 'consumer-runtime',
+            [string]$Probe = 'cargo test -p package --test regression',
+            [string]$Baseline = 'fail',
+            [string]$Current = 'pass',
+            [string]$BaselineRevision = 'baseline-sha',
+            [string]$CurrentRevision = 'worktree',
+            [object]$BaselineExitCode,
+            [object]$CurrentExitCode
+        )
+
+        $baselineExit = if ($PSBoundParameters.ContainsKey('BaselineExitCode')) {
+            $BaselineExitCode
+        } elseif ($Baseline -eq 'pass') { 0 } else { 101 }
+        $currentExit = if ($PSBoundParameters.ContainsKey('CurrentExitCode')) {
+            $CurrentExitCode
+        } elseif ($Current -eq 'pass') { 0 } else { 101 }
+
+        return @{
+            kind = $Kind
+            probe = $Probe
+            baseline = @{
+                revision = $BaselineRevision
+                result = $Baseline
+                exitCode = $baselineExit
+            }
+            current = @{
+                revision = $CurrentRevision
+                result = $Current
+                exitCode = $currentExit
+            }
+        }
+    }
+
     function New-SelectionDecision {
         param(
             [ValidateSet('accept', 'decline')]
             [string]$Decision = 'accept',
-            [string]$Reason = 'behavior-fix'
+            [string]$Reason = 'behavior-fix',
+            [AllowNull()][AllowEmptyCollection()][object[]]$RegressionEvidence
         )
 
-        return @{
+        $value = @{
             decision = $Decision
             reason = $Reason
             evidence = @('Reviewed the package diff from its release baseline.')
         }
+        if ($PSBoundParameters.ContainsKey('RegressionEvidence')) {
+            $value.regressionEvidence = @($RegressionEvidence)
+        } elseif ($Reason -eq 'behavior-fix') {
+            $value.regressionEvidence = @(New-RegressionEvidence)
+        }
+        return $value
     }
 }
 
@@ -594,6 +725,735 @@ Describe 'resolve-plan.ps1 cascades' {
     }
 }
 
+Describe 'resolve-plan.ps1 macro compile evidence' {
+    BeforeAll {
+        # The run-8 shape: a proc macro that newly rejects an input it used to
+        # accept, where the compile fixture proving it lives in the runtime
+        # partner rather than in the macro crate.
+        function New-RejectionFacts {
+            param([bool]$Modified = $true)
+
+            return @(
+                New-ReleaseFact -Name macros -Version '0.4.0' -ProcMacroOnly $true `
+                    -MacroRuntimePartners @('runtime') -Modified $Modified `
+                    -MacroCompileFixtureChanges @(
+                        New-CompileFixtureChange -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' -Status 'added'
+                        New-CompileFixtureChange -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.stderr' -Status 'added'
+                    )
+                New-ReleaseFact -Name runtime -Version '0.4.0' -Deps macros `
+                    -MacroPublicDeps macros `
+                    -ModifiedFiles @('crates/runtime/tests/ui/reject_case.rs')
+            )
+        }
+    }
+
+    It 'blocks a compatible verdict contradicted by a pass to fail fixture' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'macroVerdictUnderclassified'
+        $ambiguity | Should -Not -BeNullOrEmpty
+        $ambiguity.package | Should -Be 'macros'
+        $ambiguity.declaredVerdict | Should -Be 'compatible'
+        $ambiguity.derivedVerdict | Should -Be 'breaking'
+        @($ambiguity.decidingFixtures) |
+            Should -Contain 'crates/runtime/tests/ui/reject_case.rs'
+    }
+
+    It 'accepts a breaking verdict backed by the same evidence and cascades it' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@breaking')
+            classifications = @{ macros = 'breaking'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'breaking' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $macros = $plan.releases | Where-Object folder -eq macros
+        $macros.to | Should -Be '0.5.0'
+        ($plan.macroContracts | Where-Object package -eq macros).derivedVerdict |
+            Should -Be 'breaking'
+        # The macro is a public dependency of its runtime facade, so the break
+        # has to reach the facade too.
+        $runtime = $plan.releases | Where-Object folder -eq runtime
+        $runtime.changeType | Should -Be 'breaking'
+    }
+
+    It 'lets a compatible verdict stand when the fixture failed before and after' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                            -Baseline 'fail' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $macros = $plan.releases | Where-Object folder -eq macros
+        $macros.to | Should -Be '0.4.1'
+        $macros.changeType | Should -Be 'patch'
+        ($plan.macroContracts | Where-Object package -eq macros).derivedVerdict |
+            Should -Be 'compatible'
+    }
+
+    It 'treats a fail to pass fixture as a non-breaking floor' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                            -Baseline 'fail' -Current 'pass'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'macroVerdictUnderclassified'
+        $ambiguity.derivedVerdict | Should -Be 'nonbreaking'
+    }
+
+    It 'blocks a contract that leaves a changed fixture unmeasured' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros', 'runtime')
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'macroCompileFixtureUnevidenced'
+        $ambiguity | Should -Not -BeNullOrEmpty
+        $ambiguity.requiredInput | Should -Be 'macroContracts.macros.compileEvidence'
+        @($ambiguity.fixtures) |
+            Should -Contain 'crates/runtime/tests/ui/reject_case.rs'
+    }
+
+    It 'discharges an expectation file through its compiled sibling' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@breaking')
+            classifications = @{ macros = 'breaking'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'breaking' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.stderr' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        # One measurement of the fixture answers for both the .rs case and its
+        # recorded .stderr expectation.
+        $plan.status | Should -Be 'resolved'
+        ($plan.macroContracts | Where-Object package -eq macros).derivedVerdict |
+            Should -Be 'breaking'
+    }
+
+    It 'blocks evidence that does not record a usable measurement' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch'; runtime = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros', 'runtime') `
+                    -CompileEvidence @(
+                        @{
+                            ownerPackage = 'runtime'
+                            path = 'crates/runtime/tests/ui/reject_case.rs'
+                            baseline = @{ result = 'pass'; revision = 'abc123'; exitCode = 0 }
+                            current = @{ result = 'unknown'; revision = ''; exitCode = $null }
+                        }
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        ($plan.ambiguities | Where-Object kind -eq 'macroCompileEvidenceInconclusive') |
+            Should -Not -BeNullOrEmpty
+    }
+
+    It 'rejects evidence that names no fixture' {
+        {
+            Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+                mode = 'targeted'
+                tokens = @('macros@patch')
+                classifications = @{ macros = 'patch'; runtime = 'patch' }
+                macroContracts = @{
+                    macros = New-MacroContract -Verdict 'compatible' `
+                        -ReviewedPackages @('macros', 'runtime') `
+                        -CompileEvidence @(@{ path = 'crates/runtime/tests/ui/reject_case.rs' })
+                }
+            }
+        } | Should -Throw '*must name ownerPackage and path*'
+    }
+
+    It 'refuses a behavior-fix selection reason for a derived break' {
+        {
+            Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+                mode = 'changed'
+                tokens = @('macros@breaking', 'runtime@patch')
+                selectionDecisions = @{
+                    macros = New-SelectionDecision -Reason 'behavior-fix'
+                    runtime = New-SelectionDecision -Reason 'behavior-fix'
+                }
+                classifications = @{ macros = 'breaking'; runtime = 'patch' }
+                macroContracts = @{
+                    macros = New-MacroContract -Verdict 'breaking' `
+                        -ReviewedPackages @('macros', 'runtime') `
+                        -CompileEvidence @(
+                            New-CompileEvidence -OwnerPackage 'runtime' `
+                                -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                                -Baseline 'pass' -Current 'fail'
+                        )
+                }
+            }
+        } | Should -Throw "*conflicts with the 'breaking' macro contract*"
+    }
+
+    It 'refuses to decline a proc macro whose fixtures prove a break' {
+        {
+            Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+                mode = 'changed'
+                tokens = @('runtime@patch')
+                selectionDecisions = @{
+                    macros = New-SelectionDecision -Decision 'decline' -Reason 'test-only'
+                    runtime = New-SelectionDecision -Reason 'behavior-fix'
+                }
+                classifications = @{ runtime = 'patch' }
+                macroContracts = @{
+                    macros = New-MacroContract -Verdict 'breaking' `
+                        -ReviewedPackages @('macros', 'runtime') `
+                        -CompileEvidence @(
+                            New-CompileEvidence -OwnerPackage 'runtime' `
+                                -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                                -Baseline 'pass' -Current 'fail'
+                        )
+                }
+            }
+        } | Should -Throw '*declines a package whose compile evidence*'
+    }
+
+    It 'blocks a declined proc macro that never explains its fixture changes' {
+        $plan = Invoke-ReleasePlan -Facts (New-RejectionFacts) -Request @{
+            mode = 'changed'
+            tokens = @('runtime@patch')
+            selectionDecisions = @{
+                macros = New-SelectionDecision -Decision 'decline' -Reason 'test-only'
+                runtime = New-SelectionDecision -Reason 'behavior-fix'
+            }
+            classifications = @{ runtime = 'patch' }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        ($plan.ambiguities | Where-Object kind -eq 'macroContractUnreviewed') |
+            Should -Not -BeNullOrEmpty
+    }
+
+    It 'reports but does not derive a floor from a published dependency fixture' {
+        # The fixture belongs to a published implementation dependency, which
+        # carries its own classification; it must not silently reclassify every
+        # macro that merely depends on that crate.
+        $facts = @(
+            New-ReleaseFact -Name helper -Version '0.4.0' `
+                -ModifiedFiles @('crates/helper/tests/ui/reject_case.rs')
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps helper `
+                -ProcMacroOnly $true -MacroImplementationClosure helper `
+                -MacroCompileFixtureChanges @(
+                    New-CompileFixtureChange -OwnerPackage 'helper' `
+                        -Path 'crates/helper/tests/ui/reject_case.rs' -Status 'added' `
+                        -ScopeRole 'implementationClosure' -OwnerPublished $true
+                )
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('helper@patch')
+            classifications = @{ helper = 'patch'; macros = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('helper', 'macros') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'helper' `
+                            -Path 'crates/helper/tests/ui/reject_case.rs' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        ($plan.macroContracts | Where-Object package -eq macros).derivedVerdict |
+            Should -Be 'compatible'
+    }
+
+    It 'derives a floor from an unpublished helper fixture' {
+        # An unpublished helper has no release identity of its own, so its
+        # fixtures can only be speaking about the macro that consumes it.
+        $facts = @(
+            New-ReleaseFact -Name helper -Version '0.4.0' -Published $false `
+                -ModifiedFiles @('crates/helper/tests/ui/reject_case.rs')
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps helper `
+                -ProcMacroOnly $true -MacroImplementationClosure helper `
+                -MacroCompileFixtureChanges @(
+                    New-CompileFixtureChange -OwnerPackage 'helper' `
+                        -Path 'crates/helper/tests/ui/reject_case.rs' -Status 'added' `
+                        -ScopeRole 'implementationClosure' -OwnerPublished $false
+                )
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('helper', 'macros') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'helper' `
+                            -Path 'crates/helper/tests/ui/reject_case.rs' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        ($plan.ambiguities | Where-Object kind -eq 'macroVerdictUnderclassified').derivedVerdict |
+            Should -Be 'breaking'
+    }
+
+    It 'raises the floor from evidence for a fixture the facts did not flag' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '0.4.0' -ProcMacroOnly $true `
+                -MacroRuntimePartners @('runtime')
+            New-ReleaseFact -Name runtime -Version '0.4.0' -Deps macros `
+                -MacroPublicDeps macros -Modified $false
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros@patch')
+            classifications = @{ macros = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -Verdict 'compatible' `
+                    -ReviewedPackages @('macros') `
+                    -CompileEvidence @(
+                        New-CompileEvidence -OwnerPackage 'runtime' `
+                            -Path 'crates/runtime/tests/ui/reject_case.rs' `
+                            -Baseline 'pass' -Current 'fail'
+                    )
+            }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        ($plan.ambiguities | Where-Object kind -eq 'macroVerdictUnderclassified').derivedVerdict |
+            Should -Be 'breaking'
+    }
+}
+
+Describe 'resolve-plan.ps1 breaking selection evidence' {
+    It 'blocks a breaking selection whose own objective classification is patch' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('facade@breaking')
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Reason breaking
+                }
+                classifications = @{ facade = 'patch' }
+            }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'breakingSelectionUnderclassified'
+        $ambiguity.package | Should -Be 'facade'
+        $ambiguity.objectiveClassification | Should -Be 'compatible'
+    }
+
+    It 'accepts a breaking selection supported by its own classification' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name package) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('package@breaking')
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Reason breaking
+                }
+                classifications = @{ package = 'breaking' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].changeType | Should -Be 'breaking'
+    }
+}
+
+Describe 'resolve-plan.ps1 own-diff classification floor' {
+    It 'blocks a breaking classification when only doc comments changed' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('facade@breaking')
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Reason breaking
+                }
+                classifications = @{ facade = 'breaking' }
+            }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'ownClassificationUnsupported'
+        $ambiguity.package | Should -Be 'facade'
+        $ambiguity.requiredInput | Should -Be 'classifications.facade'
+    }
+
+    It 'blocks a nonbreaking classification when only doc comments changed' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('facade@nonbreaking')
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Reason nonbreaking-api
+                }
+                classifications = @{ facade = 'nonbreaking' }
+            }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.ambiguities | Where-Object kind -eq 'ownClassificationUnsupported') |
+            Should -Not -BeNullOrEmpty
+    }
+
+    It 'allows an authored-doc-fix patch when only doc comments changed' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('facade')
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Reason authored-doc-fix
+                }
+                classifications = @{ facade = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].changeType | Should -Be 'patch'
+    }
+
+    It 'allows a breaking classification when Rust implementation changed' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name package -RustImplementationChanged $true) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('package@breaking')
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Reason breaking
+                }
+                classifications = @{ package = 'breaking' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].changeType | Should -Be 'breaking'
+    }
+
+    It 'exempts a package whose breaking is forced by an exposed external dep' {
+        $facts = @(
+            New-ReleaseFact -Name macro_impl -Version '0.2.0' `
+                -RustImplementationChanged $false `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'changed'
+            tokens = @('macro_impl@breaking')
+            selectionDecisions = @{
+                macro_impl = New-SelectionDecision -Decision accept -Reason breaking
+            }
+            classifications = @{ macro_impl = 'breaking' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.ambiguities | Where-Object kind -eq 'ownClassificationUnsupported') |
+            Should -BeNullOrEmpty
+        $plan.releases[0].changeType | Should -Be 'breaking'
+    }
+
+    It 'does not constrain the own classification of a first release' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name fresh -Version '0.1.0' `
+                    -EverReleased $false -RustImplementationChanged $false `
+                    -ModifiedFiles @('crates/fresh/src/lib.rs')) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('fresh')
+                selectionDecisions = @{
+                    fresh = New-SelectionDecision -Reason first-release
+                }
+                classifications = @{}
+            }
+
+        @($plan.ambiguities | Where-Object kind -eq 'ownClassificationUnsupported') |
+            Should -BeNullOrEmpty
+    }
+}
+
+Describe 'resolve-plan.ps1 behavior-fix evidence' {
+    BeforeAll {
+        function Invoke-BehaviorFixPlan {
+            param(
+                [AllowNull()][AllowEmptyCollection()][object[]]$RegressionEvidence,
+                [switch]$OmitRegressionEvidence,
+                [string]$Reason = 'behavior-fix'
+            )
+
+            $decision = if ($OmitRegressionEvidence) {
+                New-SelectionDecision -Reason $Reason -RegressionEvidence @()
+            } elseif ($PSBoundParameters.ContainsKey('RegressionEvidence')) {
+                New-SelectionDecision -Reason $Reason -RegressionEvidence $RegressionEvidence
+            } else {
+                New-SelectionDecision -Reason $Reason
+            }
+
+            return Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name package -Version '1.2.3') `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('package')
+                    selectionDecisions = @{ package = $decision }
+                    classifications = @{ package = 'patch' }
+                }
+        }
+    }
+
+    It 'releases a behavior fix whose probe failed at the baseline and now passes' {
+        $plan = Invoke-BehaviorFixPlan
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 1
+        $plan.releases[0].folder | Should -Be 'package'
+        $plan.selectionDecisions[0].regressionEvidence[0].outcome | Should -Be 'fail->pass'
+    }
+
+    It 'blocks a behavior fix that records no probe at all' {
+        $plan = Invoke-BehaviorFixPlan -OmitRegressionEvidence
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'behaviorFixUndemonstrated'
+        $ambiguity | Should -Not -BeNullOrEmpty
+        $ambiguity.package | Should -Be 'package'
+        $ambiguity.requiredInput |
+            Should -Be 'selectionDecisions.package.regressionEvidence'
+    }
+
+    BeforeDiscovery {
+        $unchangedCases = @(
+            @{ Name = 'preserved behavior'; Baseline = 'pass'; Current = 'pass' }
+            @{ Name = 'still broken behavior'; Baseline = 'fail'; Current = 'fail' }
+            @{ Name = 'newly broken behavior'; Baseline = 'pass'; Current = 'fail' }
+        )
+        $kindCases = @(
+            @{ Kind = 'consumer-runtime' }
+            @{ Kind = 'consumer-compile' }
+            @{ Kind = 'packaged-artifact' }
+        )
+    }
+
+    It 'blocks a behavior fix whose probe shows <Name>' -ForEach $unchangedCases {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -Baseline $Baseline -Current $Current
+        )
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'behaviorFixUndemonstrated'
+        $ambiguity | Should -Not -BeNullOrEmpty
+        $ambiguity.probes[0].outcome | Should -Be "$Baseline->$Current"
+    }
+
+    It 'accepts a demonstrated fix measured by a <Kind> probe' -ForEach $kindCases {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -Kind $Kind
+        )
+
+        $plan.status | Should -Be 'resolved'
+        $plan.selectionDecisions[0].regressionEvidence[0].kind | Should -Be $Kind
+    }
+
+    It 'keeps a demonstrated probe alongside probes that did not move' {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -Probe 'cargo test --test unaffected' `
+                -Baseline 'pass' -Current 'pass'
+            New-RegressionEvidence -Kind 'packaged-artifact' `
+                -Probe 'cargo package --list'
+        )
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.selectionDecisions[0].regressionEvidence).Count | Should -Be 2
+    }
+
+    It 'blocks a probe whose baseline was never measured' {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -BaselineRevision ''
+        )
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'behaviorEvidenceInconclusive'
+        $ambiguity | Should -Not -BeNullOrEmpty
+        $ambiguity.issues -join ' ' | Should -BeLike '*baseline pass/fail result*'
+    }
+
+    It 'blocks a probe with no exit code' {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -CurrentExitCode $null
+        )
+
+        $plan.status | Should -Be 'blocked'
+        ($plan.ambiguities | Where-Object kind -eq 'behaviorEvidenceInconclusive') |
+            Should -Not -BeNullOrEmpty
+    }
+
+    It 'blocks a probe whose exit code contradicts its result' {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -CurrentExitCode 101
+        )
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        $ambiguity = $plan.ambiguities |
+            Where-Object kind -eq 'behaviorEvidenceInconclusive'
+        $ambiguity.issues -join ' ' | Should -BeLike "*result of 'pass' with exit code 101*"
+        ($plan.ambiguities | Where-Object kind -eq 'behaviorFixUndemonstrated') |
+            Should -Not -BeNullOrEmpty
+    }
+
+    It 'blocks a probe that measured one revision twice' {
+        $plan = Invoke-BehaviorFixPlan -RegressionEvidence @(
+            New-RegressionEvidence -BaselineRevision 'worktree'
+        )
+
+        $plan.status | Should -Be 'blocked'
+        ($plan.ambiguities | Where-Object kind -eq 'behaviorEvidenceInconclusive').issues -join ' ' |
+            Should -BeLike '*on both sides*'
+    }
+
+    It 'rejects a probe that names no command' {
+        { Invoke-BehaviorFixPlan -RegressionEvidence @(New-RegressionEvidence -Probe ' ') } |
+            Should -Throw '*must name the probe it exercised*'
+    }
+
+    It 'rejects a probe measured by an unrecognized kind' {
+        { Invoke-BehaviorFixPlan -RegressionEvidence @(New-RegressionEvidence -Kind 'vibes') } |
+            Should -Throw '*must use kind consumer-runtime, consumer-compile, packaged-artifact*'
+    }
+
+    It 'rejects regression evidence written as prose' {
+        { Invoke-BehaviorFixPlan -RegressionEvidence @('The bug is fixed.') } |
+            Should -Throw '*must be an object with kind, probe, baseline, and current*'
+    }
+
+    It 'leaves other accepted reasons unaffected' {
+        $plan = Invoke-BehaviorFixPlan -Reason 'nonbreaking-api' -OmitRegressionEvidence
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 1
+    }
+
+    It 'leaves declined packages unaffected' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name package -Version '1.2.3'
+                New-ReleaseFact -Name other -Version '1.0.0'
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('package')
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Reason 'nonbreaking-api'
+                    other = New-SelectionDecision -Decision 'decline' -Reason 'internal-only'
+                }
+                classifications = @{ package = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 1
+    }
+
+    It 'blocks every undemonstrated behavior fix in the same plan' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(
+                New-ReleaseFact -Name first -Version '1.2.3'
+                New-ReleaseFact -Name second -Version '1.2.3'
+            ) `
+            -Request @{
+                mode = 'changed'
+                tokens = @('first', 'second')
+                selectionDecisions = @{
+                    first = New-SelectionDecision -RegressionEvidence @(
+                        New-RegressionEvidence -Baseline 'pass' -Current 'pass'
+                    )
+                    second = New-SelectionDecision -RegressionEvidence @()
+                }
+                classifications = @{ first = 'patch'; second = 'patch' }
+            }
+
+        $plan.status | Should -Be 'blocked'
+        @($plan.releases).Count | Should -Be 0
+        @($plan.ambiguities | Where-Object kind -eq 'behaviorFixUndemonstrated').Count |
+            Should -Be 2
+    }
+}
+
 Describe 'resolve-plan.ps1 pins and validation' {
     It 'honors a pin that already satisfies a breaking cascade floor' {
         $facts = @(
@@ -823,6 +1683,26 @@ Describe 'resolve-plan.ps1 pins and validation' {
                     classifications = @{ package = 'patch' }
                 }
         } | Should -Throw "*missing 'manifestOtherChanged'*"
+    }
+
+    It 'treats a JSON null modifiedFiles field as an empty file list' {
+        $fact = New-ReleaseFact -Name package
+        $fact.modifiedFiles = $null
+        $fact.modifiedFileCount = 0
+
+        $plan = Invoke-ReleasePlan `
+            -Facts @($fact) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    package = New-SelectionDecision -Decision decline -Reason internal-only
+                }
+                classifications = @{}
+            }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 0
     }
 
     It 'rejects malformed and contradictory macro contracts clearly' {
@@ -1645,5 +2525,320 @@ Describe 'resolve-plan.ps1 pins and validation' {
                 classifications = @{ left = 'patch'; right = 'patch' }
             }
         } | Should -Throw '*dependency cycle*'
+    }
+}
+
+Describe 'resolve-plan.ps1 external dependency exposure' {
+    It 'blocks a breaking exposed dependency bump declared as a patch' {
+        # The run-8 shape for manifests: nothing in the crate's own rustdoc
+        # moved, so cargo-semver-checks reports patch, while every consumer that
+        # names syn::Error now sees a different type.
+        $facts = @(
+            New-ReleaseFact -Name macro_impl `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macro_impl')
+            classifications = @{ macro_impl = 'patch' }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.releases.Count | Should -Be 0
+        @($plan.ambiguities | ForEach-Object { $_.kind }) |
+            Should -Contain 'externalExposureUnderclassified'
+    }
+
+    It 'blocks a nonbreaking classification just as it blocks a patch' {
+        $facts = @(
+            New-ReleaseFact -Name macro_impl `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macro_impl')
+            classifications = @{ macro_impl = 'nonbreaking' }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.releases.Count | Should -Be 0
+    }
+
+    It 'reports the dependency, both requirements and the derived floor' {
+        $facts = @(
+            New-ReleaseFact -Name macro_impl `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macro_impl')
+            classifications = @{ macro_impl = 'patch' }
+        }
+
+        $ambiguity = @(
+            $plan.ambiguities |
+                Where-Object { $_.kind -eq 'externalExposureUnderclassified' }
+        )[0]
+        $ambiguity.package | Should -Be 'macro_impl'
+        $ambiguity.classified | Should -Be 'patch'
+        $ambiguity.derivedFloor | Should -Be 'breaking'
+        $ambiguity.dependencies[0].name | Should -Be 'syn'
+        $ambiguity.dependencies[0].baselineReq | Should -Be '^2.0.111'
+        $ambiguity.dependencies[0].currentReq | Should -Be '^3.0.2'
+        $ambiguity.requiredInput | Should -Be 'classifications.macro_impl'
+    }
+
+    It 'resolves once the classification meets the derived floor' {
+        $facts = @(
+            New-ReleaseFact -Name macro_impl -Version '0.2.0' `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macro_impl')
+            classifications = @{ macro_impl = 'breaking' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].folder | Should -Be 'macro_impl'
+        $plan.releases[0].to | Should -Be '0.3.0'
+    }
+
+    It 'does not break on a private external dependency bump' {
+        $facts = @(
+            New-ReleaseFact -Name private_user -Version '1.2.3' `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('serde')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('private_user')
+            classifications = @{ private_user = 'patch' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].to | Should -Be '1.2.4'
+    }
+
+    It 'does not break on a non-breaking requirement change to an exposed dependency' {
+        $facts = @(
+            New-ReleaseFact -Name exposer -Version '1.2.3' `
+                -ExternalDepChanges @(
+                    New-ExternalDepChange -Name syn `
+                        -BaselineReq '^2.0.111' -CurrentReq '^2.9.0' -Breaking $false
+                ) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('exposer')
+            classifications = @{ exposer = 'patch' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].to | Should -Be '1.2.4'
+    }
+
+    It 'does not break a proc macro, whose exposure set is always empty' {
+        $facts = @(
+            New-ReleaseFact -Name macros -Version '0.4.0' -ProcMacroOnly $true `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @()
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macros')
+            classifications = @{ macros = 'patch' }
+            macroContracts = @{ macros = New-MacroContract -ReviewedPackages @('macros') }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].to | Should -Be '0.4.1'
+    }
+
+    It 'never floors a crate that has never been released' {
+        $facts = @(
+            New-ReleaseFact -Name newcomer -Version '0.1.0' -EverReleased $false `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('newcomer')
+            classifications = @{}
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].to | Should -Be '0.1.0'
+    }
+
+    It 'never floors on a dropped dependency, which cannot be exposed any more' {
+        $facts = @(
+            New-ReleaseFact -Name dropper -Version '1.2.3' `
+                -ExternalDepChanges @(
+                    New-ExternalDepChange -Name anyhow `
+                        -BaselineReq '^1.0.100' -CurrentReq $null -Breaking $true
+                ) `
+                -ExternalExposedDeps @('serde')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('dropper')
+            classifications = @{ dropper = 'patch' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.releases[0].to | Should -Be '1.2.4'
+    }
+
+    It 'cascades the derived break to workspace dependents that expose it' {
+        $facts = @(
+            New-ReleaseFact -Name macro_impl -Version '0.2.0' `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+            New-ReleaseFact -Name facade -Version '0.2.0' -Deps macro_impl `
+                -ExposedDeps macro_impl -Modified $false
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('macro_impl')
+            classifications = @{ macro_impl = 'breaking'; facade = 'patch' }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $byPackage = @{}
+        foreach ($release in $plan.releases) { $byPackage[$release.folder] = $release }
+        $byPackage['macro_impl'].to | Should -Be '0.3.0'
+        $byPackage['facade'].to | Should -Be '0.3.0'
+    }
+
+    It 'blocks a dependent that carries its own exposed break at a patch floor' {
+        $facts = @(
+            New-ReleaseFact -Name core -Version '0.2.0'
+            New-ReleaseFact -Name dependent -Version '0.2.0' -Deps core `
+                -ExposedDeps core -Modified $false `
+                -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                -ExternalExposedDeps @('syn')
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'breaking'; dependent = 'patch' }
+        }
+
+        $plan.status | Should -Be 'blocked'
+        $plan.releases.Count | Should -Be 0
+        @($plan.ambiguities | ForEach-Object { $_.kind }) |
+            Should -Contain 'externalExposureUnderclassified'
+    }
+
+    Context 'selection reason coupling' {
+        It 'blocks a declined package whose exposed dependency break is real' {
+            $facts = @(
+                New-ReleaseFact -Name macro_impl `
+                    -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                    -ExternalExposedDeps @('syn')
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'changed'
+                tokens = @()
+                classifications = @{ macro_impl = 'patch' }
+                selectionDecisions = @{
+                    macro_impl = New-SelectionDecision `
+                        -Decision 'decline' -Reason 'internal-only'
+                }
+            }
+
+            $plan.status | Should -Be 'blocked'
+            $plan.releases.Count | Should -Be 0
+            @($plan.ambiguities | ForEach-Object { $_.kind }) |
+                Should -Contain 'externalExposureUnderselected'
+        }
+
+        It 'blocks an accepted package whose reason is softer than the derived floor' {
+            $facts = @(
+                New-ReleaseFact -Name macro_impl `
+                    -ManifestDependencyScopes @('normal') `
+                    -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                    -ExternalExposedDeps @('syn')
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'changed'
+                tokens = @('macro_impl')
+                classifications = @{ macro_impl = 'breaking' }
+                selectionDecisions = @{
+                    macro_impl = New-SelectionDecision `
+                        -Decision 'accept' -Reason 'runtime-manifest-change'
+                }
+            }
+
+            $plan.status | Should -Be 'blocked'
+            $plan.releases.Count | Should -Be 0
+            $ambiguity = @(
+                $plan.ambiguities |
+                    Where-Object { $_.kind -eq 'externalExposureUnderselected' }
+            )[0]
+            $ambiguity.reason | Should -Be 'runtime-manifest-change'
+            $ambiguity.derivedFloor | Should -Be 'breaking'
+            $ambiguity.requiredInput | Should -Be 'selectionDecisions.macro_impl.reason'
+        }
+
+        It 'resolves when both the reason and the classification meet the floor' {
+            $facts = @(
+                New-ReleaseFact -Name macro_impl -Version '0.2.0' `
+                    -ExternalDepChanges @(New-ExternalDepChange -Name syn) `
+                    -ExternalExposedDeps @('syn')
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'changed'
+                tokens = @('macro_impl')
+                classifications = @{ macro_impl = 'breaking' }
+                selectionDecisions = @{
+                    macro_impl = New-SelectionDecision -Decision 'accept' -Reason 'breaking'
+                }
+            }
+
+            $plan.status | Should -Be 'resolved'
+            $plan.releases[0].to | Should -Be '0.3.0'
+        }
+
+        It 'leaves an unaffected package free to decline' {
+            $facts = @(
+                New-ReleaseFact -Name plain `
+                    -ExternalDepChanges @(
+                        New-ExternalDepChange -Name syn -Breaking $false `
+                            -BaselineReq '^2.0.111' -CurrentReq '^2.9.0'
+                    ) `
+                    -ExternalExposedDeps @('syn')
+            )
+            $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+                mode = 'changed'
+                tokens = @()
+                classifications = @{ plain = 'patch' }
+                selectionDecisions = @{
+                    plain = New-SelectionDecision -Decision 'decline' -Reason 'internal-only'
+                }
+            }
+
+            $plan.status | Should -Be 'resolved'
+            $plan.releases.Count | Should -Be 0
+        }
+    }
+
+    It 'rejects facts that predate the external dependency lane' {
+        $fact = New-ReleaseFact -Name package
+        $fact.Remove('externalDepChanges')
+
+        {
+            Invoke-ReleasePlan -Facts @($fact) -Request @{
+                mode = 'targeted'
+                tokens = @('package@patch')
+                classifications = @{ package = 'patch' }
+            }
+        } | Should -Throw "*missing 'externalDepChanges'*"
     }
 }
