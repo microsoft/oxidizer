@@ -37,12 +37,6 @@ use crate::text::Text;
 /// | `usize` | [`U64`](Self::U64) | exact on every supported target |
 /// | `f32`, `f64` | [`F64`](Self::F64) | widening, lossless |
 ///
-/// `u64` has its own variant rather than being folded into `I64` because more
-/// than half its range does not fit there, and byte and request counters live
-/// exactly in that half. Exporters therefore need a `U64` arm; this enum is
-/// `#[non_exhaustive]`, so adding one is a source-compatible change for
-/// matchers outside this crate.
-///
 /// `u128` and `i128` have **no** conversion. No telemetry backend represents
 /// them, so the only options would be truncating or stringifying a number the
 /// caller believes was recorded; `#[event(...)]` rejects them at compile time
@@ -55,9 +49,6 @@ pub enum Value {
     /// A signed 64-bit integer.
     I64(i64),
     /// An unsigned 64-bit integer.
-    ///
-    /// Separate from [`I64`](Self::I64) because values above `i64::MAX` cannot
-    /// be represented there.
     U64(u64),
     /// A 64-bit float.
     F64(f64),
