@@ -4,8 +4,15 @@
 //! Primitives for thread-aware data storage.
 
 #[cfg(not(test))]
+use alloc::boxed::Box;
+#[cfg(not(test))]
 use alloc::vec::Vec;
 use std::marker::PhantomData;
+#[cfg(test)]
+use std::sync::RwLockReadGuard;
+use std::sync::{OnceLock, RwLock, RwLockWriteGuard};
+
+use crossbeam_utils::CachePadded;
 
 use crate::affinity::Affinity;
 
@@ -18,12 +25,26 @@ pub trait Strategy {
     fn count(affinity: Affinity) -> usize;
 }
 
-/// Type used for storing data in a affinity-aware manner.
+/// Message used when a slot lock is found poisoned by a panic in another thread.
+const POISONED: &str = "storage slot lock poisoned by a panic in another thread";
+
+/// One affinity's independently-locked, cache-line-isolated storage slot.
+type Slot<T> = CachePadded<RwLock<Option<T>>>;
+
+/// Affinity-partitioned storage: one independently-locked slot per affinity.
 ///
-/// This type is used to manage the data for each affinity, depending on the chosen strategy.
+/// Each affinity owns its own `RwLock`, so relocations targeting different
+/// affinities never touch the same lock or the same cache line. The slots are
+/// cache-line padded so that neighboring affinities do not share a line.
+///
+/// The slot array is sized once, on first use, to `S::count(affinity)` — a value
+/// fixed for the process lifetime — so there is no growth path and therefore no
+/// table-wide lock guarding it. After initialization, reaching a slot is a plain
+/// atomic load of the `OnceLock` pointer, which stays resident and shared in
+/// every core's cache and generates no coherence traffic.
 #[derive(Debug)]
 pub struct Storage<T, S: Strategy> {
-    data: Vec<Option<T>>,
+    slots: OnceLock<Box<[Slot<T>]>>,
     _marker: PhantomData<S>,
 }
 
@@ -32,25 +53,51 @@ impl<T, S: Strategy> Storage<T, S> {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            data: Vec::new(),
+            slots: OnceLock::new(),
             _marker: PhantomData,
         }
+    }
+
+    /// Returns the slot array, sizing it on first use to hold every affinity.
+    fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
+        self.slots.get_or_init(|| {
+            (0..S::count(affinity))
+                .map(|_| CachePadded::new(RwLock::new(None)))
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        })
+    }
+
+    /// Returns the lock guarding the slot for `affinity`.
+    fn slot(&self, affinity: Affinity) -> &RwLock<Option<T>> {
+        &self.slots(affinity)[S::index(affinity)]
     }
 
     /// Replaces the data for the given affinity with the provided value.
     ///
     /// Returns the previous value if it existed, otherwise returns `None`.
-    pub fn replace(&mut self, affinity: Affinity, value: T) -> Option<T> {
-        self.resize(S::count(affinity));
-
-        self.data[S::index(affinity)].replace(value)
+    #[cfg(test)]
+    pub(crate) fn replace(&self, affinity: Affinity, value: T) -> Option<T> {
+        self.slot(affinity).write().expect(POISONED).replace(value)
     }
 
-    #[cfg_attr(test, mutants::skip)] // Mutates < to <= which does not change observable behavior.
-    fn resize(&mut self, num_affinities: usize) {
-        if self.data.len() < num_affinities {
-            self.data.resize_with(num_affinities, || None);
-        }
+    /// Acquires the exclusive lock on the slot for `affinity`.
+    ///
+    /// The caller drives the miss path with this: re-probe the slot, materialize
+    /// the value, and store it, all while holding the returned guard so that only
+    /// this affinity is affected and no other thread can materialize it in the
+    /// meantime.
+    pub(crate) fn write(&self, affinity: Affinity) -> RwLockWriteGuard<'_, Option<T>> {
+        self.slot(affinity).write().expect(POISONED)
+    }
+
+    /// Acquires the shared lock on the slot for `affinity`.
+    ///
+    /// Used by tests to pin a slot so racing relocations pile up on its exclusive
+    /// lock; production relocation reads through [`get_clone`](Self::get_clone).
+    #[cfg(test)]
+    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<T>> {
+        self.slot(affinity).read().expect(POISONED)
     }
 }
 
@@ -67,15 +114,25 @@ where
     /// Clone and gets the data for the given affinity if it exists.
     /// Returns `None` if the data does not exist for that affinity.
     #[must_use]
-    pub fn get_clone(&self, affinity: Affinity) -> Option<T> {
-        self.data.get(S::index(affinity)).and_then(std::clone::Clone::clone)
+    pub(crate) fn get_clone(&self, affinity: Affinity) -> Option<T> {
+        self.slot(affinity).read().expect(POISONED).clone()
     }
 }
 
 impl<T, S: Strategy> Storage<T, S> {
     /// Counts how many stored entries satisfy the given predicate.
+    ///
+    /// The slots are read one at a time rather than under a single consistent
+    /// snapshot, so the count is an estimate under concurrent relocation — which
+    /// matches the inherently racy nature of a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&T) -> bool) -> usize {
-        self.data.iter().filter(|opt| opt.as_ref().is_some_and(&predicate)).count()
+        match self.slots.get() {
+            None => 0,
+            Some(slots) => slots
+                .iter()
+                .filter(|slot| slot.read().expect(POISONED).as_ref().is_some_and(&predicate))
+                .count(),
+        }
     }
 }
 
@@ -88,7 +145,7 @@ mod tests {
     #[test]
     fn replace_returns_previous_value() {
         let affinities = pinned_affinities(&[1]);
-        let mut storage = Storage::<String, PerCore>::default();
+        let storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -108,7 +165,7 @@ mod tests {
     fn get_clone() {
         let affinities = pinned_affinities(&[1]);
 
-        let mut storage = Storage::<String, PerCore>::default();
+        let storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -157,7 +214,7 @@ mod tests {
         let affinities = pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let mut storage = Storage::<String, PerCore>::default();
+        let storage = Storage::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)

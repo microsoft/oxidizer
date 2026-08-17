@@ -15,7 +15,7 @@ use alloc::boxed::Box;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
-use std::sync::{self, RwLock};
+use std::sync::{self};
 
 pub use builtin::{PerCore, PerNuma, PerProcess};
 pub(crate) use storage::{Storage, Strategy};
@@ -108,7 +108,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// ```
 #[derive(Debug)]
 pub struct Arc<T: ?Sized, S: Strategy> {
-    storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>,
+    storage: sync::Arc<Storage<sync::Arc<T>, S>>,
     value: sync::Arc<T>,
     factory: Factory<T>,
 }
@@ -395,7 +395,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
@@ -457,7 +457,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
@@ -495,7 +495,7 @@ where
         let value = sync::Arc::clone(erased.arc());
 
         Self {
-            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::ErasedCloneFn(erased),
         }
@@ -518,7 +518,7 @@ where
         let value = sync::Arc::from(closure.clone().call_once());
 
         Self {
-            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
@@ -531,12 +531,8 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>, current_affinity: Affinity) -> Self {
-        let value = storage
-            .read()
-            .expect("Failed to acquire read lock")
-            .get_clone(current_affinity)
-            .expect("No data found for the current affinity");
+    pub fn from_storage(storage: sync::Arc<Storage<sync::Arc<T>, S>>, current_affinity: Affinity) -> Self {
+        let value = storage.get_clone(current_affinity).expect("No data found for the current affinity");
 
         Self {
             storage,
@@ -567,11 +563,9 @@ impl<T, S: Strategy> Arc<T, S> {
     /// assert_eq!(Arc::strong_count(&arc2), 2);
     /// ```
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "this code only panics when the lock is poisoned")]
     pub fn strong_count(this: &Self) -> usize {
         let raw = sync::Arc::strong_count(&this.value);
-        let guard = this.storage.read().expect("Failed to acquire read lock");
-        let internal = guard.count_where(|stored| sync::Arc::ptr_eq(stored, &this.value));
+        let internal = this.storage.count_where(|stored| sync::Arc::ptr_eq(stored, &this.value));
         raw - internal
     }
 
@@ -584,85 +578,94 @@ impl<T, S: Strategy> Arc<T, S> {
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        // Relocation is a two-stage locking operation: a shared-lock probe of the destination
-        // slot, escalating to an exclusive lock only when the slot turns out to be empty.
+        // Relocation is a two-stage locking operation, scoped to a single affinity's slot: a
+        // shared-lock probe of the destination slot, escalating to that slot's exclusive lock only
+        // when it turns out to be empty.
         //
         // The steady state of any affinity is "already materialized", so the probe is the
-        // overwhelmingly common outcome and it only reads an already-published slot. Taking an
-        // exclusive lock for it would serialize every clone of every `Arc` in the process on one
-        // lock, on the hot path of every cross-affinity spawn.
+        // overwhelmingly common outcome and it only reads an already-published slot. Because each
+        // affinity owns its own lock, relocations targeting different affinities never contend, and
+        // even a miss blocks only the affinity it materializes.
         // Ref: docs/implementation.md, "Relocation locking".
-        {
-            let guard = self.storage.read().expect("storage lock poisoned by a panic in another thread");
-
-            if let Some(value) = guard.get_clone(destination) {
-                self.value = value;
-                return;
-            }
-        }
-
-        let mut guard = self.storage.write().expect("storage lock poisoned by a panic in another thread");
-
-        // The slot is re-probed because the lock was released between the two stages, during
-        // which another thread may have materialized this same destination affinity.
-        if let Some(value) = guard.get_clone(destination) {
+        if let Some(value) = self.storage.get_clone(destination) {
             self.value = value;
             return;
         }
 
-        // We need to transfer or recreate the data
-        let (data, new_factory) = match &self.factory {
-            // We can use the closure to create new data
-            Factory::Closure(factory, factory_source_affinity) => {
-                let mut factory_clone = (**factory).clone();
+        // The destination slot's exclusive lock is held across the whole materialization so that
+        // exactly one thread populates this affinity. The source slot is deliberately not locked
+        // here: it is restored afterwards, under its own lock, so that no two slot locks are ever
+        // held at once and a pair of threads relocating in opposite directions cannot deadlock.
+        let old_value = {
+            let mut destination_slot = self.storage.write(destination);
 
-                // In case factory source is stored in factory, use that - it means we already transferred the factory
-                // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                // time we're transferring the Arc, so source is the source affinity of the factory as well.
-                let factory_source = factory_source_affinity.or(source);
-
-                factory_clone.relocate(factory_source, destination);
-                (
-                    sync::Arc::from(factory_clone.call_once()),
-                    Factory::Closure(sync::Arc::clone(factory), factory_source),
-                )
+            // The slot is re-probed because the lock was released between the two stages, during
+            // which another thread may have materialized this same destination affinity.
+            if let Some(value) = destination_slot.clone() {
+                self.value = value;
+                return;
             }
 
-            // We can clone and transfer the data
-            Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+            // We need to transfer or recreate the data
+            let (data, new_factory) = match &self.factory {
+                // We can use the closure to create new data
+                Factory::Closure(factory, factory_source_affinity) => {
+                    let mut factory_clone = (**factory).clone();
 
-            // We can clone the data and closure it
-            Factory::ErasedCloneFn(erased) => {
-                let cloned = erased.clone_and_relocate(source, destination);
-                (cloned, self.factory.clone())
-            }
+                    // In case factory source is stored in factory, use that - it means we already transferred the factory
+                    // once, so we know the original source affinity. Otherwise, use source as that means this is the first
+                    // time we're transferring the Arc, so source is the source affinity of the factory as well.
+                    let factory_source = factory_source_affinity.or(source);
 
-            Factory::Manual => {
-                // If we are in manual mode, we just clone the data
-                // This effectively makes it behave like `sync::Arc<T>`
-                (sync::Arc::clone(&self.value), self.factory.clone())
-            }
+                    factory_clone.relocate(factory_source, destination);
+                    (
+                        sync::Arc::from(factory_clone.call_once()),
+                        Factory::Closure(sync::Arc::clone(factory), factory_source),
+                    )
+                }
+
+                // We can clone and transfer the data
+                Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+
+                // We can clone the data and closure it
+                Factory::ErasedCloneFn(erased) => {
+                    let cloned = erased.clone_and_relocate(source, destination);
+                    (cloned, self.factory.clone())
+                }
+
+                Factory::Manual => {
+                    // If we are in manual mode, we just clone the data
+                    // This effectively makes it behave like `sync::Arc<T>`
+                    (sync::Arc::clone(&self.value), self.factory.clone())
+                }
+            };
+
+            let old_value = std::mem::replace(&mut self.value, data);
+
+            let old_data = destination_slot.replace(sync::Arc::<T>::clone(&self.value));
+            assert!(
+                old_data.is_none(),
+                "Data already exists for the destination affinity. This should be unreachable because the slot was re-probed while holding the write lock."
+            );
+
+            self.factory = new_factory;
+
+            old_value
         };
 
-        let old_value = std::mem::replace(&mut self.value, data);
-
-        let old_data = guard.replace(destination, sync::Arc::<T>::clone(&self.value));
-        assert!(
-            old_data.is_none(),
-            "Data already exists for the destination affinity. This should be unreachable because the slot was re-probed while holding the write lock."
-        );
-
         if let Some(source) = source {
-            // Only restore the value to the source slot when source and destination differ.
-            // If they are the same slot, the replacement above already stored the new value
-            // there; overwriting it here would corrupt storage with the stale pre-relocation value.
+            // Only restore the value to the source slot when source and destination differ. If they
+            // are the same slot, the replacement above already stored the new value there.
             if source != destination {
-                guard.replace(source, old_value);
+                let mut source_slot = self.storage.write(source);
+
+                // Store only if the source affinity is not already materialized. Another thread may
+                // have populated it while this one held the destination lock; its value is the same
+                // per-affinity value this would store, so leaving it in place is correct.
+                if source_slot.is_none() {
+                    *source_slot = Some(old_value);
+                }
             }
         }
-
-        self.factory = new_factory;
-
-        drop(guard);
     }
 }

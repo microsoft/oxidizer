@@ -7,28 +7,36 @@ value. The `Strategy` type parameter maps an `Affinity` to a slot index and to
 the number of slots the table needs, so `PerCore`, `PerNuma` and `PerProcess`
 differ only in that mapping.
 
-A slot holds the value materialized for one affinity. The table is filled
-lazily: a slot is populated the first time a clone of the value is relocated
-into the affinity that owns it, and it stays populated for the lifetime of the
-shared table.
+Each slot holds the value materialized for one affinity and is guarded by its
+own reader-writer lock, on its own cache line. Relocations targeting different
+affinities therefore touch different locks on different lines and never contend;
+a relocation only ever synchronizes with other relocations into the *same*
+affinity.
+
+The table is sized once, on first use, to the slot count the strategy reports —
+a value fixed for the process lifetime — so there is no growth path and no
+table-wide lock guarding the array. After that first initialization, reaching a
+slot is a plain atomic load of a pointer that stays resident and shared in every
+core's cache, generating no coherence traffic. Slots are filled lazily: a slot
+is populated the first time a clone is relocated into the affinity that owns it,
+and stays populated for the lifetime of the shared table.
 
 ## Relocation locking
 
-`ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity.
-The slot table is guarded by a reader-writer lock and relocation acquires it in
-two stages.
+`ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
+locks only the destination affinity's slot, and acquires it in two stages.
 
 ```text
     relocate(source, destination)
              |
-      [ shared lock ]
+      [ shared lock: slot[destination] ]
        read slot[destination]
              |
       populated? --- yes ---> adopt value, done
              |
              no
              |
-    [ exclusive lock ]
+    [ exclusive lock: slot[destination] ]
        read slot[destination]        (re-probe)
              |
       populated? --- yes ---> adopt value, done
@@ -37,20 +45,25 @@ two stages.
              |
        materialize value
        publish to slot[destination]
-       restore old value to slot[source]
+             |
+      [ release slot[destination] ]
+             |
+      [ exclusive lock: slot[source] ]
+       restore old value if slot[source] is empty
 ```
 
 The first stage is the one that matters for throughput. Slots are populated
 lazily but never emptied, so once a process has warmed up, essentially every
 relocation into a given affinity finds the slot already populated and does
-nothing but clone a reference out of it. Serving that case under an exclusive
-lock would funnel every relocation of every clone of the value through a single
-writer, turning a read-only lookup into a process-wide serialization point on
-the hot path of cross-affinity work handoff.
+nothing but clone a reference out of it. Because each affinity owns its own lock,
+these hot-path reads scale with the number of affinities instead of funnelling
+through one lock: a fanout that hands work to every core relocates into a
+different slot per core and the cores do not contend.
 
 The second stage exists for the cold case, where the destination slot has to be
 materialized. Materialization runs the value's factory and publishes the result,
-which requires exclusive access.
+which requires exclusive access to that slot — and only that slot, so a cold miss
+on one affinity does not block hits on any other.
 
 The re-probe at the start of the second stage is load-bearing rather than an
 optimization. The lock is released between the stages, so several threads can
@@ -60,10 +73,14 @@ adopt it, otherwise they would each materialize a competing value and overwrite
 the one already published, handing different threads different values for the
 same affinity.
 
-Materialization holds the exclusive lock for the duration of the factory call.
-This keeps the slot table and the published value consistent without a second
-synchronization mechanism, at the cost of blocking concurrent relocations into
-other affinities of the same value while a cold slot is being filled.
+The source slot is restored in a separate step, under its own lock, only after
+the destination lock has been released. Holding both a destination and a source
+lock at once would let two threads relocating in opposite directions —
+`X → Y` and `Y → X` — deadlock, each holding the lock the other needs. Restoring
+the source afterwards, and only when its slot is still empty, avoids that: no two
+slot locks are ever held simultaneously, and a source affinity that another
+thread has already materialized keeps its value rather than being overwritten
+with an equivalent one.
 
 ## Benchmarks
 

@@ -238,17 +238,17 @@ fn test_trc_relocated_reuses_existing_value() {
 
 #[test]
 fn test_from_storage() {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from the storage at affinity1
     // This should call line 400 (from_storage method)
@@ -324,17 +324,17 @@ fn test_factory_clone_with_closure_boxed() {
 fn test_factory_clone_with_manual() {
     // This test covers line 143: Self::Manual => Self::Manual
     // We create a Trc from storage (Factory::Manual), clone it, and verify the factory is properly cloned
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(200);
     storage.replace(affinity1, Arc::clone(&value));
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
     let trc1 = PerCore::from_storage(Arc::clone(&storage_arc), affinity1);
@@ -355,18 +355,18 @@ fn test_factory_manual_relocated() {
     // This test covers line 453: Factory::Manual branch in relocated()
     // When a Trc is created from storage (Factory::Manual) and relocated to a new affinity,
     // it should behave like sync::Arc<T> and just clone the value without creating new data
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
     let affinity2 = affinities[1];
 
     // Create a storage with a value at affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
     let trc = PerCore::from_storage(Arc::clone(&storage_arc), affinity1);
@@ -688,14 +688,11 @@ fn factory_data_debug() {
 #[test]
 fn factory_manual_debug() {
     // Exercises Factory::Manual debug branch (from_storage)
-    use std::sync::{self, RwLock};
+    use std::sync::{self};
 
     let affinities = pinned_affinities(&[1]);
-    let storage = sync::Arc::new(RwLock::new(super::storage::Storage::new()));
-    storage
-        .write()
-        .expect("lock should not be poisoned")
-        .replace(affinities[0], sync::Arc::new(42));
+    let storage = sync::Arc::new(super::storage::Storage::new());
+    storage.replace(affinities[0], sync::Arc::new(42));
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");
     assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
@@ -737,7 +734,7 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
 
         // Holding a shared guard lets every racer complete its probe and queue up on the
         // exclusive lock before any of them can materialize the destination slot.
-        let shared_guard = storage.read().unwrap();
+        let shared_guard = storage.read(destination);
 
         let mut racers = Vec::with_capacity(RACERS);
 
