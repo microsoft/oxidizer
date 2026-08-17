@@ -570,12 +570,17 @@ function Get-CrateRequiredChangeType {
 #   Name                  - cargo package name
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
-#   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   Deps                  - array of normalized names of the WORKSPACE MEMBERS this package
+#                           depends on (kind 'normal' or 'build', not 'dev'). Membership is
+#                           decided by the dependency's resolved path, not its name, so a
+#                           registry crate or an out-of-workspace path dependency is excluded
+#                           even when it shares a member's package name.
 #   DepAliases            - hashtable mapping a normalized dependency name to additional
 #                           normalized crate roots observed for it -- a `package = "..."`
 #                           alias, or the dependency's own `[lib] name`. An entry does not say
 #                           whether a separate unrenamed declaration also exists, so this is
-#                           not a complete or exclusive set of reachable roots.
+#                           not a complete or exclusive set of reachable roots. Covers the same
+#                           workspace-member dependencies as Deps.
 #   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
 #                           sets one, else its normalized package name), or $null when the
 #                           package has no library target at all. This is the name a crate's
@@ -613,6 +618,26 @@ function Get-WorkspacePackages {
         $crateRootByPackage[$package.name.Replace('-', '_')] = ([string]$libTarget.name).Replace('-', '_')
     }
 
+    # Manifest directories of the packages this function returns, used to decide
+    # whether a dependency is a workspace edge.
+    #
+    # Cargo reports a dependency's package name but nothing that distinguishes a
+    # workspace member from a registry crate or a path dependency outside the
+    # workspace. Every consumer of Deps asks a workspace-reachability question --
+    # which crates can carry a released package's types to their own public API --
+    # so matching on the text name alone lets an unrelated external crate stand in
+    # for a workspace conduit and fabricate a path that does not exist.
+    #
+    # Identity therefore comes from the resolved path, not the name.
+    $memberDirs = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($package in $metadata.packages) {
+        $memberDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
+        if ($memberDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            [void]$memberDirs.Add($memberDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar))
+        }
+    }
+
     foreach ($package in $metadata.packages) {
         $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -623,6 +648,23 @@ function Get-WorkspacePackages {
         $depAliases = @{}
         foreach ($dep in $package.dependencies) {
             if ($dep.kind -eq 'dev') {
+                continue
+            }
+
+            # A dependency joins the workspace graph only when its `path`
+            # resolves to a member directory. `path` is absent for a registry
+            # dependency and points outside crates/ for a non-member path
+            # dependency; in neither case can the edge carry a workspace
+            # package's types, so it must not participate in reachability --
+            # nor contribute an alias, which would let an external crate's
+            # rename supply an allowlist root for a same-named member.
+            $depPathProp = $dep.PSObject.Properties['path']
+            if (-not $depPathProp -or [string]::IsNullOrWhiteSpace($depPathProp.Value)) {
+                continue
+            }
+            $depDir = [System.IO.Path]::GetFullPath([string]$depPathProp.Value).
+                TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            if (-not $memberDirs.Contains($depDir)) {
                 continue
             }
 
@@ -665,7 +707,24 @@ function Get-WorkspacePackages {
             $externalTypes = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
             if ($externalTypes -and $null -ne $externalTypes.Value) {
                 $allowed = $externalTypes.Value.PSObject.Properties['allowed_external_types']
-                if ($allowed -and $null -ne $allowed.Value) {
+                # Only a genuine array is a declared policy. The schema demands
+                # one, so any other shape is malformed metadata -- and leaving
+                # $allowedTypes as $null routes it to the absent-metadata branch
+                # in Test-PackageExposesTarget, which fails closed.
+                #
+                # Wrapping instead would be a fail-OPEN: `@("std::*")` turns the
+                # malformed scalar `allowed_external_types = "std::*"` into a
+                # well-formed one-entry allowlist that matches nothing, so the
+                # crate reads as provably exposing nothing. `[package.metadata]`
+                # is arbitrary TOML that cargo passes through unvalidated, so
+                # such a value reaches the planner intact.
+                #
+                # A string is itself IEnumerable (over its characters), so it
+                # must be excluded explicitly or it would read as an array of
+                # single-character entries.
+                if ($allowed -and $null -ne $allowed.Value -and
+                    $allowed.Value -is [System.Collections.IEnumerable] -and
+                    $allowed.Value -isnot [string]) {
                     $allowedTypes = @($allowed.Value)
                 }
             }
@@ -715,11 +774,13 @@ function Get-WorkspacePackages {
 # crate-root parameter.
 #
 # A third diversion exists but is not this function's problem: the same
-# `[lib] name` seen from a crate that does NOT declare the edge. A re-exported
-# type is attributed to its defining crate, so a dependent several hops away
-# names it without depending on it -- and having no edge, it has no DepAliases
-# entry for it either. Test-PackageAllowlistNamesTarget handles that case,
-# building its roots from the target's own record instead.
+# `[lib] name` carried by an allowlist entry earned on an INDIRECT path. A
+# re-exported type is attributed to its defining crate, so a dependent several
+# hops away names it under that root -- and having crossed no edge to the
+# target, no alias applies to it. Test-PackageAllowlistNamesTarget handles that
+# case, building its roots from the target's own record instead. A crate can
+# hold both kinds of path at once, so the two are evaluated independently
+# rather than as alternatives; see Get-PublishedDependentsExposingTarget.
 #
 # The real package name below is a known over-acceptance, not a considered
 # exception to that rule: a rename shadows the package name exactly as it
@@ -827,15 +888,18 @@ function Test-PackageExposesTarget {
 # closed.
 #
 # This function answers "does this crate claim to name the target's types?" for
-# an INDIRECT dependency. cargo-check-external-types attributes a re-exported
+# an INDIRECT path. cargo-check-external-types attributes a re-exported
 # type to its DEFINING crate, so a crate that reaches `a::T` through `b`
 # allowlists `a` while depending only on `b` (fetch_azure documents exactly this
-# for typespec_client_core). Such an edge is invisible to a direct-dependency
+# for typespec_client_core). Such a path is invisible to a direct-dependency
 # scan, so it needs its own check.
 #
-# Because there is no declared edge, the name the allowlist carries comes from
-# the target itself -- its crate root -- and never from a rename, which only a
-# crate that declares the dependency can apply. Hence -TargetCrateRoot.
+# Because the path crosses no edge to the target, the name the allowlist
+# carries comes from the target itself -- its crate root -- and never from a
+# rename, which only a crate that declares the dependency can apply. Hence
+# -TargetCrateRoot. That holds even when the same crate separately declares a
+# direct edge: the two paths are judged independently, since a crate can hold
+# both and earn a root on one that the other cannot supply.
 #
 # It must not inherit the fail-closed branches, because "no allowlist" would
 # then match every transitive dependency in the graph and force unrelated
@@ -849,8 +913,8 @@ function Test-PackageAllowlistNamesTarget {
     param(
         [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
-        # Matters most on this path: a crate reached indirectly declares no edge
-        # to the target, so it has no DepAliases entry for it. The target's own
+        # Matters most on this path: a crate reached indirectly crosses no edge
+        # to the target, so no DepAliases entry applies to it. The target's own
         # crate root is the only place the diverted name can come from.
         [string]$TargetCrateRoot
     )
@@ -859,13 +923,18 @@ function Test-PackageAllowlistNamesTarget {
         return $false
     }
 
-    # This predicate is called only when no dependency edge to the target
-    # exists. DepAliases is therefore irrelevant: production can populate an
-    # alias only while processing a declared edge, which would take the direct
-    # branch instead. When the target's crate root is known it is exclusive:
-    # `[lib] name` replaces the package name as the usable Rust root. The
-    # package name remains only as compatibility for older synthetic records
-    # that predate CrateRoot.
+    # This predicate judges an INDIRECT path, which crosses no edge to the
+    # target. DepAliases is therefore not consulted even when the dependent
+    # also declares a direct edge: an alias applies only to the edge that
+    # declares it, and a type arriving re-exported through a conduit is
+    # attributed to the target's own crate root regardless of what any direct
+    # edge renames it to. The direct edge is judged separately, by
+    # Test-PackageExposesTarget, against its own aliases.
+    #
+    # When the target's crate root is known it is exclusive: `[lib] name`
+    # replaces the package name as the usable Rust root. The package name
+    # remains only as compatibility for older synthetic records that predate
+    # CrateRoot.
     if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
         $acceptedRoots = @($TargetCrateRoot.Replace('-', '_'))
     } else {

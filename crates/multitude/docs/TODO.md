@@ -7,72 +7,10 @@ shipped architecture is documented in [`DESIGN.md`](./DESIGN.md).
 
 ## Contents
 
-### Performance
-- [P1](#p1) — Encode allocation-resident slice lengths with a variable-width integer
-- [P2](#p2) — Make the growable-collection freeze prefix opt-in
-
 ### Features
 - [F1](#f1) — Provide an owning `IntoIterator` for `Box<[T]>`
 - [F2](#f2) — Add guaranteed in-place initialization (`alloc_*_emplace`)
 - [F3](#f3) — Add `ArenaSnapshot<T>` for single-owner immutable graphs
-
-## Performance
-
-<a id="p1"></a>
-### P1 — Encode allocation-resident slice lengths with a variable-width integer
-
-**Area:** chunk layout · **Priority:** Low · **Effort:** Medium
-
-Consider storing the length of arrays in the chunk using a variable integer encoding instead
-of always storing a usize. This would save RAM and CPU cache space, at the cost of a bit of computation
-whenever getting the length.
-
-**Done when:** slice-like allocations store their length in a variable-width
-encoding, the decode cost on the resolution path is benchmarked against the
-current fixed-width read, and the memory saving is measured on a
-representative small-slice workload.
-
----
-
-<a id="p2"></a>
-### P2 — Make the growable-collection freeze prefix opt-in
-
-**Area:** `vec`, `strings` · **Priority:** Medium · **Effort:** Medium
-
-Every growable buffer currently reserves the `Arc<[T]>` freeze prefix
-(`[strong][len]`) unconditionally, so `into_arc` / `into_boxed_slice` are
-zero-copy (see `vec/freeze.rs`, `internal::constants::buffer_freezable`,
-`ArenaBuf::freeze_prefix`). That costs a few prefix bytes (and the
-`arc_block_align` rounding) on every buffer — even ones that are never
-frozen.
-
-Let the caller choose, at construction time, whether to reserve the prefix,
-based on how they intend to use the collection: buffers that won't be frozen
-skip the prefix and pack tighter, while freeze-bound buffers keep O(1)
-`into_arc` / `into_boxed_slice`.
-
-Two shapes (same underlying "buffer may or may not carry the prefix" work,
-which already exists via the `freeze_prefix` flag and the const
-`buffer_freezable` gate):
-
-- **Runtime flag on the builders** (`alloc_vec*` / `alloc_string*` /
-  `alloc_utf16_string*`): record the choice in `ArenaBuf` next to the
-  existing `freeze_prefix` flag and branch in `Vec::try_grow_to`. Smallest
-  API; one branch in the cold growth path; freeze falls back to the O(n)
-  copy when the prefix is absent (the `can_freeze_in_place` check already
-  handles this).
-- **Zero-cost marker type parameter on `Vec`**: a sealed marker selecting
-  prefix-vs-no-prefix, with `into_arc` / `into_boxed_slice` O(1) only on the
-  freeze-ready variant. No runtime branch and a compile-time freeze
-  guarantee; cost is generic noise in signatures, mitigated by defaulting to
-  today's behavior plus type aliases.
-
-`String` / `Utf16String` wrap `Vec`, so the choice propagates for free.
-
-**Done when:** one of the two shapes is implemented, a buffer constructed
-without the prefix demonstrably occupies fewer bytes, freeze on a
-prefix-less buffer still succeeds via the copy fallback, and the default
-construction path keeps today's zero-copy freeze behavior.
 
 ## Features
 

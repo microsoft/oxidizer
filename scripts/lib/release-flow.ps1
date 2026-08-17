@@ -211,6 +211,58 @@ function Parse-ReleaseTokens {
     return $results.ToArray()
 }
 
+# BFS over a workspace baseline collecting every transitive dependent of a
+# cargo package (identified by its underscore-normalized cargo name), in the
+# two shapes the cascade needs:
+#
+#   PublishedFolders    - folders of the published dependents only. What joins
+#                         a release set.
+#   DependentCargoNames - cargo names of ALL dependents, published or not.
+#                         Used to decide whether a crate reaches the target
+#                         through some *other* package, which requires seeing
+#                         unpublished conduits too.
+#
+# The target itself appears in neither: it is seeded into the visited set so
+# the walk terminates, but it is not its own dependent.
+#
+# Operates against an in-memory baseline snapshot rather than disk, so it
+# produces deterministic answers even after disk state changes.
+function Get-TransitiveDependentClosureFromBaseline {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Baseline,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName
+    )
+
+    $toVisit = [System.Collections.Generic.Queue[string]]::new()
+    $toVisit.Enqueue($TargetCargoName)
+    $visited = [System.Collections.Generic.HashSet[string]]::new()
+    [void]$visited.Add($TargetCargoName)
+
+    $dependents = New-Object 'System.Collections.Generic.List[string]'
+    $dependentNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    while ($toVisit.Count -gt 0) {
+        $current = $toVisit.Dequeue()
+        foreach ($candidate in $Baseline) {
+            $candidateNorm = $candidate.Name.Replace('-', '_')
+            if ($visited.Contains($candidateNorm)) { continue }
+            if ($candidate.Deps -contains $current) {
+                [void]$visited.Add($candidateNorm)
+                [void]$dependentNames.Add($candidateNorm)
+                $toVisit.Enqueue($candidateNorm)
+                if ($candidate.Published) {
+                    $dependents.Add($candidate.Folder)
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        PublishedFolders    = @($dependents)
+        DependentCargoNames = $dependentNames
+    }
+}
+
 # BFS over a workspace baseline to find all published transitive dependents of
 # a cargo package (identified by its underscore-normalized cargo name). Mirrors
 # Get-AllTransitiveDependents but operates against an in-memory baseline
@@ -225,28 +277,8 @@ function Get-TransitivePublishedDependentsFromBaseline {
         [Parameter(Mandatory = $true)][string]$TargetCargoName
     )
 
-    $toVisit = [System.Collections.Generic.Queue[string]]::new()
-    $toVisit.Enqueue($TargetCargoName)
-    $visited = [System.Collections.Generic.HashSet[string]]::new()
-    [void]$visited.Add($TargetCargoName)
-
-    $dependents = New-Object 'System.Collections.Generic.List[string]'
-    while ($toVisit.Count -gt 0) {
-        $current = $toVisit.Dequeue()
-        foreach ($candidate in $Baseline) {
-            $candidateNorm = $candidate.Name.Replace('-', '_')
-            if ($visited.Contains($candidateNorm)) { continue }
-            if ($candidate.Deps -contains $current) {
-                [void]$visited.Add($candidateNorm)
-                $toVisit.Enqueue($candidateNorm)
-                if ($candidate.Published) {
-                    $dependents.Add($candidate.Folder)
-                }
-            }
-        }
-    }
-
-    return @($dependents)
+    return @((Get-TransitiveDependentClosureFromBaseline `
+                -Baseline $Baseline -TargetCargoName $TargetCargoName).PublishedFolders)
 }
 
 # Raises a resolved release-set entry's EffectiveChangeType to at least
@@ -394,25 +426,78 @@ function Test-EntryPlansBreakingRelease {
     return Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $plannedChangeType
 }
 
+# Returns $true when a package reaches $TargetCargoName through some package
+# other than the target itself -- that is, when a path of length two or more
+# exists, independently of any direct edge.
+#
+# The cascade needs this separately from plain reachability because the two
+# exposure predicates accept different allowlist roots, and which roots are
+# legitimate depends on how the crate reaches the target rather than on whether
+# a direct edge happens to exist. A crate holding both kinds of path may
+# legitimately name the target's own crate root, earned on the indirect path,
+# even though the direct edge renames the target and so cannot supply it.
+#
+# $DependentCargoNames is the closure of everything that transitively depends
+# on the target, so a dependency listed there is a package the target's types
+# can travel through.
+function Test-PackageReachesTargetIndirectly {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName,
+        # AllowEmptyCollection: a target with no dependents at all yields an
+        # empty set, which PowerShell would otherwise reject as a missing
+        # mandatory argument.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$DependentCargoNames
+    )
+
+    foreach ($dep in @($Dependent.Deps)) {
+        # Belt and braces: the target seeds the BFS visited set, so it is never
+        # added to its own dependent closure and the Contains test below would
+        # reject it anyway. Skipping it explicitly keeps "some package other
+        # than the target" true by construction rather than by a property of a
+        # different function.
+        if ($dep -eq $TargetCargoName) { continue }
+        if ($DependentCargoNames.Contains($dep)) { return $true }
+    }
+
+    return $false
+}
+
 # Returns the baseline packages that must inherit a breaking bump from
 # $TargetPackage: those already in the release set that reach it and name its
 # types in their own public API.
 #
-# Two kinds of edge qualify:
+# Two kinds of edge qualify, and they are tested independently rather than as
+# alternatives, because one crate can hold both:
 #
 #   * A DIRECT dependency that may expose the target. "May" is the operative
 #     word: an absent or malformed allowlist fails closed here, because an
 #     unknown must not ship a break as compatible.
-#   * An INDIRECT dependency whose allowlist explicitly names the target.
+#   * An INDIRECT path whose allowlist explicitly names the target.
 #     cargo-check-external-types attributes a re-exported type to its defining
 #     crate, so a crate reaching `a::T` through `b` allowlists `a` while
 #     depending only on `b`. Requiring a direct edge missed these entirely.
 #     The root matched here is the target's own crate root (its [lib] name),
-#     not a rename alias: renames live on edges, and an indirect dependent
-#     declares no edge to the target to rename.
+#     not a rename alias: renames live on edges, and an indirect path crosses
+#     no edge to the target that could rename it.
 #     This branch demands positive evidence rather than failing closed, so it
 #     cannot drag in transitive dependents that merely lack metadata -- those
 #     are already covered by their own direct edges, walked up by the fixpoint.
+#
+# Testing only one of the two would lose a mixed topology: a crate that imports
+# the target directly under a rename *and* also reaches it through a conduit
+# that re-exports its types. The direct predicate deliberately refuses the
+# target's global crate root on a renamed edge -- the rename shadows it, so an
+# allowlist entry carrying that root cannot have been earned there and would
+# be a false match. But the indirect path can earn exactly that root, so
+# judging such a crate solely on its direct edge reports "not exposed" and
+# leaves it on the patch floor while its API is the target's types.
+#
+# The indirect test therefore keys off a path that exists independently of the
+# direct edge, not merely off reachability: plain reachability counts the
+# direct edge itself, which would readmit the renamed root the direct
+# predicate just rejected and reintroduce that false match.
 #
 # Proc-macro-only dependents are excluded because they have no rustdoc API to
 # expose anything through; they reach the release set via the manual-review
@@ -426,10 +511,10 @@ function Get-PublishedDependentsExposingTarget {
         # [ordered], which is not a Hashtable -- PowerShell would satisfy a
         # [hashtable] annotation by silently substituting a converted copy.
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Resolved,
-        # Optional memo of target cargo name -> reachable published dependent
-        # folders. The baseline is fixed for the duration of a resolve, so the
-        # BFS answer is stable; the fixpoint would otherwise recompute it for
-        # every breaking source on every pass.
+        # Optional memo of target cargo name -> dependent closure. The baseline
+        # is fixed for the duration of a resolve, so the BFS answer is stable;
+        # the fixpoint would otherwise recompute it for every breaking source on
+        # every pass.
         [System.Collections.IDictionary]$TransitiveDependentCache
     )
 
@@ -437,31 +522,53 @@ function Get-PublishedDependentsExposingTarget {
     $targetCargoName = $TargetPackage.Name.Replace('-', '_')
 
     if ($null -ne $TransitiveDependentCache -and $TransitiveDependentCache.Contains($targetCargoName)) {
-        $reachable = $TransitiveDependentCache[$targetCargoName]
+        $closure = $TransitiveDependentCache[$targetCargoName]
     } else {
-        $reachable = [System.Collections.Generic.HashSet[string]]::new(
-            [string[]]@(Get-TransitivePublishedDependentsFromBaseline `
-                    -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoName),
-            [System.StringComparer]::Ordinal)
+        $closure = Get-TransitiveDependentClosureFromBaseline `
+            -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoName
         if ($null -ne $TransitiveDependentCache) {
-            $TransitiveDependentCache[$targetCargoName] = $reachable
+            $TransitiveDependentCache[$targetCargoName] = $closure
         }
     }
+
+    $dependentNames = $closure.DependentCargoNames
 
     return @($WorkspaceBaseline | Where-Object {
             $_.Published -and
             -not $_.IsProcMacroOnly -and
             $Resolved.Contains($_.Folder) -and
-            $(
-                if ($_.Deps -contains $targetCargoName) {
-                    Test-PackageExposesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name
-                } else {
-                    $reachable.Contains($_.Folder) -and
-                    (Test-PackageAllowlistNamesTarget -Dependent $_ -TargetPackageName $TargetPackage.Name `
-                        -TargetCrateRoot $TargetPackage.CrateRoot)
-                }
-            )
+            (Test-PackageExposesTargetOnAnyEdge -Dependent $_ -TargetPackage $TargetPackage `
+                -TargetCargoName $targetCargoName -DependentCargoNames $dependentNames)
         })
+}
+
+# Returns $true when either qualifying exposure relationship holds between a
+# candidate and the target. Split out of Get-PublishedDependentsExposingTarget's
+# filter so each edge is evaluated on its own terms, and so neither nested
+# pipeline shadows the enclosing $_.
+function Test-PackageExposesTargetOnAnyEdge {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][pscustomobject]$TargetPackage,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName,
+        # AllowEmptyCollection: see Test-PackageReachesTargetIndirectly.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$DependentCargoNames
+    )
+
+    if (($Dependent.Deps -contains $TargetCargoName) -and
+        (Test-PackageExposesTarget -Dependent $Dependent -TargetPackageName $TargetPackage.Name)) {
+        return $true
+    }
+
+    if ((Test-PackageReachesTargetIndirectly -Dependent $Dependent `
+                -TargetCargoName $TargetCargoName -DependentCargoNames $DependentCargoNames) -and
+        (Test-PackageAllowlistNamesTarget -Dependent $Dependent -TargetPackageName $TargetPackage.Name `
+                -TargetCrateRoot $TargetPackage.CrateRoot)) {
+        return $true
+    }
+
+    return $false
 }
 
 # Raises one dependent entry to 'breaking' because it exposes an incompatibly

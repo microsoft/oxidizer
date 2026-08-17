@@ -237,31 +237,45 @@ is floored at `breaking`. The planner repeats this check to a fixpoint so
 the result propagates through chains such as `bytesbuf` → `bytesbuf_io` →
 another facade.
 
-Two kinds of edge are considered, and they treat missing evidence
-differently:
+Two kinds of path are considered. They treat missing evidence
+differently, and a crate that holds both is judged on each in turn rather
+than on whichever one is found first:
 
 - **Direct dependency edges** fail closed. Absent metadata, a malformed
   entry, or a wildcard root all count as possible exposure, because an
   unknown must not ship a break as compatible.
 
-- **Indirect edges to a transitive dependency** require positive allowlist
+- **Indirect paths to a transitive dependency** require positive allowlist
   evidence: either a literal root naming the dependency under the crate root
   it defines (`[lib] name = "..."` when set, otherwise its package name), or
   a wildcard root that may expand to it. A `package = "..."` alias cannot apply
   here -- only a crate that *declares* a dependency can rename it, and an
-  indirect dependent declares no edge to the target at all. This exists
+  indirect path crosses no edge to the target to carry a rename. This exists
   because `cargo-check-external-types` attributes a
   re-exported type to the crate that *defines* it: `fetch_azure`
   allowlists `typespec_client_core::*` for a trait `azure_core`
-  re-exports, while depending only on `azure_core`. Such an edge is
+  re-exports, while depending only on `azure_core`. Such a path is
   invisible to a direct-dependency scan.
 
   Here absent or malformed metadata is *not* read as exposure. Failing
-  closed on an indirect edge would match every transitive dependency of
+  closed on an indirect path would match every transitive dependency of
   every crate that declares no allowlist, forcing unrelated crates to
   breaking. Nothing is missed: a crate with no allowlist that really does
   expose the type still fails closed on its direct edge to whichever
   intermediate carries it, and the fixpoint propagates that upward.
+
+Both are tested because the roots they accept differ. A crate that imports
+the target directly under a `package = "..."` rename, and *also* reaches it
+through a conduit that re-exports its types, legitimately carries the
+target's own crate root — earned on the indirect path, and one the renamed
+direct edge could never supply. Judging it on the direct edge alone reports
+"not exposed" and leaves it on the patch floor while its public API is the
+target's types.
+
+The indirect test therefore asks whether a path exists through *some other
+package*, not merely whether the crate is reachable from the target.
+Plain reachability would count the direct edge itself and readmit the
+renamed root that the direct predicate deliberately rejected.
 
 The policy must remain validated by `cargo-check-external-types`: an
 extra allowlist entry can cause an unnecessary breaking bump, while

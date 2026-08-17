@@ -4,6 +4,7 @@
 examine_globs = ["crates/**"]
 exclude_globs = [
     "crates/automation/**",
+    "crates/observed_testing/**",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",
     "crates/testing_aids/**",
