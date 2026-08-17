@@ -126,13 +126,18 @@ Describe 'release-facts.ps1' {
         & git -C $script:Ws.Path tag 'beta-v0.5.0' 2>&1 | Out-Null
 
         # Leave an uncommitted source edit on 'alpha' so it registers as modified.
-        # The default suffix is a `// edit` comment, so alpha's own Rust source
-        # change is doc/comment-only -- rustImplementationChanged must stay false.
+        # The default suffix is a plain `// edit` line comment (not a doc
+        # comment), so alpha's rustImplementationChanged AND docCommentChanged
+        # must both stay false.
         $script:Ws.ModifySource('alpha')
 
         # 'exposer' gets a real code addition, so its rustImplementationChanged
         # must be true, distinguishing an implementation edit from a comment one.
         $script:Ws.ModifySource('exposer', 'pub fn newly_added() -> i32 { 42 }')
+
+        # 'dual_dep' gets a rustdoc-visible doc comment, so docCommentChanged must
+        # be true while rustImplementationChanged stays false.
+        $script:Ws.ModifySource('dual_dep', '/// A documentation comment.')
 
         # Also modify the UNPUBLISHED 'priv_pkg'. This makes the "publish=false is
         # never surfaced" assertion meaningful: priv_pkg now has a real working-tree
@@ -284,12 +289,18 @@ Describe 'release-facts.ps1' {
     }
 
     It 'distinguishes a doc-comment-only edit from a real implementation edit' {
-        # alpha's only source change is a `// edit` comment line.
+        # alpha's only source change is a plain `// edit` line comment.
         $script:ByFolder['alpha'].rustImplementationChanged | Should -BeFalse
+        $script:ByFolder['alpha'].docCommentChanged | Should -BeFalse
         # exposer added a real `pub fn`.
         $script:ByFolder['exposer'].rustImplementationChanged | Should -BeTrue
-        # An unmodified crate reports no implementation change.
+        $script:ByFolder['exposer'].docCommentChanged | Should -BeFalse
+        # dual_dep added a rustdoc-visible `///` doc comment.
+        $script:ByFolder['dual_dep'].rustImplementationChanged | Should -BeFalse
+        $script:ByFolder['dual_dep'].docCommentChanged | Should -BeTrue
+        # An unmodified crate reports neither.
         $script:ByFolder['beta'].rustImplementationChanged | Should -BeFalse
+        $script:ByFolder['beta'].docCommentChanged | Should -BeFalse
     }
 
     It 'handles dependency table variants without inheriting unrelated TOML sections' {

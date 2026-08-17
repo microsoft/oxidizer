@@ -342,6 +342,13 @@ function Get-SelectionDecision {
     if ($decision -eq 'decline' -and $hasRuntimeDependencyChange) {
         throw "Selection decision '$($Fact.folder)' cannot decline a changed normal/build dependency or package feature declaration."
     }
+    # A published manifest dependency change is more consequential than a doc
+    # tweak, so it owns the reason: `authored-doc-fix` cannot be paired with a
+    # normal/build/features change. (A real API addition still elevates to
+    # nonbreaking-api, and an exposed breaking dependency to breaking.)
+    if ($reason -eq 'authored-doc-fix' -and $hasRuntimeDependencyChange) {
+        throw "Selection reason 'authored-doc-fix' for '$($Fact.folder)' cannot be used alongside a normal/build dependency or package feature change; use 'runtime-manifest-change'."
+    }
     $packagePrefix = "crates/$($Fact.folder)/"
     $otherFiles = @(
         $Fact.modifiedFiles |
@@ -409,6 +416,31 @@ function Get-SelectionDecision {
     }
     if ($reason -eq 'release-metadata-only' -and $isGeneratedOnly) {
         throw "Selection reason 'release-metadata-only' for '$($Fact.folder)' cannot classify a change to only a generated README.md or CHANGELOG.md; use 'generated-artifact-only'."
+    }
+    # A rustdoc-visible doc comment changed (facts field docCommentChanged) while
+    # rustImplementationChanged is false: the crate's own diff is documentation
+    # only, which ships in rustdoc and is consumer-visible. With no
+    # runtime-manifest change and no exposed breaking external dependency to
+    # elevate it, the one canonical outcome is accept `authored-doc-fix` -- it is
+    # not an `internal-only` refactor (the docs did change) nor any other
+    # decline. A plain `//` comment or whitespace edit leaves docCommentChanged
+    # false and stays eligible for `internal-only`. Proc macros are governed by
+    # their contract, not this rule.
+    if (
+        [bool]$Fact.everReleased -and
+        -not [bool]$Fact.procMacroOnly -and
+        [bool]$Fact.docCommentChanged -and
+        -not [bool]$Fact.rustImplementationChanged -and
+        -not $hasRuntimeDependencyChange -and
+        @(
+            @($Fact.externalDepChanges) |
+                Where-Object {
+                    [bool]$_.breaking -and @($Fact.externalExposedDeps) -contains $_.name
+                }
+        ).Count -eq 0 -and
+        -not ($decision -eq 'accept' -and $reason -eq 'authored-doc-fix')
+    ) {
+        throw "Selection decision '$($Fact.folder)' changes a rustdoc-visible doc comment with no implementation change; a consumer-visible doc change must be accepted as 'authored-doc-fix', not '$reason'."
     }
     if ($decision -eq 'accept' -and -not [bool]$Fact.everReleased) {
         if ($reason -ne 'first-release') {
@@ -894,6 +926,7 @@ foreach ($fact in $facts) {
             'externalDepChanges',
             'externalExposedDeps',
             'rustImplementationChanged',
+            'docCommentChanged',
             'modifiedFiles',
             'manifestDependencyScopes',
             'manifestOtherChanged',

@@ -30,6 +30,7 @@ BeforeAll {
             [object[]]$ExternalDepChanges = @(),
             [string[]]$ExternalExposedDeps = @(),
             [bool]$RustImplementationChanged = $true,
+            [bool]$DocCommentChanged = $false,
             [bool]$WorkspaceModified = $Modified
         )
 
@@ -59,6 +60,7 @@ BeforeAll {
             manifestDependencyScopes = @($ManifestDependencyScopes)
             manifestOtherChanged = $ManifestOtherChanged
             rustImplementationChanged = $RustImplementationChanged
+            docCommentChanged = $DocCommentChanged
             macroCompileFixtureChanges = @($MacroCompileFixtureChanges)
             externalDepChanges = @($ExternalDepChanges)
             externalExposedDeps = @($ExternalExposedDeps)
@@ -1225,14 +1227,16 @@ Describe 'resolve-plan.ps1 review-scope normalization' {
     }
 }
 
-Describe 'resolve-plan.ps1 own-diff classification floor' {    It 'blocks a breaking classification when only doc comments changed' {
+Describe 'resolve-plan.ps1 own-diff classification floor' {
+    It 'blocks a breaking classification when only doc comments changed' {
         $plan = Invoke-ReleasePlan `
-            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Facts @(New-ReleaseFact -Name facade `
+                    -RustImplementationChanged $false -DocCommentChanged $true) `
             -Request @{
                 mode = 'changed'
                 tokens = @('facade@breaking')
                 selectionDecisions = @{
-                    facade = New-SelectionDecision -Reason breaking
+                    facade = New-SelectionDecision -Reason authored-doc-fix
                 }
                 classifications = @{ facade = 'breaking' }
             }
@@ -1247,12 +1251,13 @@ Describe 'resolve-plan.ps1 own-diff classification floor' {    It 'blocks a brea
 
     It 'blocks a nonbreaking classification when only doc comments changed' {
         $plan = Invoke-ReleasePlan `
-            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Facts @(New-ReleaseFact -Name facade `
+                    -RustImplementationChanged $false -DocCommentChanged $true) `
             -Request @{
                 mode = 'changed'
                 tokens = @('facade@nonbreaking')
                 selectionDecisions = @{
-                    facade = New-SelectionDecision -Reason nonbreaking-api
+                    facade = New-SelectionDecision -Reason authored-doc-fix
                 }
                 classifications = @{ facade = 'nonbreaking' }
             }
@@ -1264,7 +1269,8 @@ Describe 'resolve-plan.ps1 own-diff classification floor' {    It 'blocks a brea
 
     It 'allows an authored-doc-fix patch when only doc comments changed' {
         $plan = Invoke-ReleasePlan `
-            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
+            -Facts @(New-ReleaseFact -Name facade `
+                    -RustImplementationChanged $false -DocCommentChanged $true) `
             -Request @{
                 mode = 'changed'
                 tokens = @('facade')
@@ -1276,6 +1282,73 @@ Describe 'resolve-plan.ps1 own-diff classification floor' {    It 'blocks a brea
 
         $plan.status | Should -Be 'resolved'
         $plan.releases[0].changeType | Should -Be 'patch'
+    }
+
+    It 'rejects declining a doc-only authored change as internal-only' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name facade `
+                        -RustImplementationChanged $false -DocCommentChanged $true) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        facade = New-SelectionDecision -Decision decline -Reason internal-only
+                    }
+                    classifications = @{ facade = 'patch' }
+                }
+        } | Should -Throw "*must be accepted as 'authored-doc-fix'*"
+    }
+
+    It 'rejects pairing authored-doc-fix with a runtime-manifest change' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name pkg `
+                        -RustImplementationChanged $false -DocCommentChanged $true `
+                        -ModifiedFiles @('crates/pkg/src/lib.rs', 'crates/pkg/Cargo.toml') `
+                        -ManifestDependencyScopes @('normal')) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @('pkg')
+                    selectionDecisions = @{
+                        pkg = New-SelectionDecision -Reason authored-doc-fix
+                    }
+                    classifications = @{ pkg = 'patch' }
+                }
+        } | Should -Throw "*use 'runtime-manifest-change'*"
+    }
+
+    It 'allows internal-only for a non-doc comment or whitespace source edit' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade `
+                    -RustImplementationChanged $false -DocCommentChanged $false) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Decision decline -Reason internal-only
+                }
+                classifications = @{ facade = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 0
+    }
+
+    It 'does not force authored-doc-fix when the source change is real implementation' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $true) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    facade = New-SelectionDecision -Decision decline -Reason internal-only
+                }
+                classifications = @{ facade = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        @($plan.releases).Count | Should -Be 0
     }
 
     It 'allows a breaking classification when Rust implementation changed' {

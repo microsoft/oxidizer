@@ -35,7 +35,7 @@ macroRuntimePartners, macroCompileFixtureChanges, externalDepChanges,
 externalExposedDeps, exposureUnknown, baselineSha,
 hasBaseline, everReleased, modified, modifiedFiles, modifiedFileCount,
 manifestDependencyScopes, manifestOtherChanged, rustImplementationChanged,
-workspaceModified`.
+docCommentChanged, workspaceModified`.
 
 - `deps` contains normalized non-dev dependency names.
 - `exposedDeps` contains direct or transitively reachable workspace packages
@@ -72,6 +72,14 @@ workspaceModified`.
   re-exported macro contract or a dependency bump read into the crate's own diff.
   It fails safe: a missing baseline or a brand-new untracked source file counts
   as an implementation change.
+- `docCommentChanged` is true only when a rustdoc-visible doc comment (`///` or
+  `//!`) was added or removed in a doc-eligible source file (`src/` or a custom
+  `[lib]` path, never `build.rs`, `tests/`, `benches/`, or `examples/`). It
+  positively identifies a consumer-visible documentation change, so a plain `//`
+  comment or a whitespace reflow -- which also leave `rustImplementationChanged`
+  false -- do not force a release. With `rustImplementationChanged` false and no
+  runtime-manifest or exposed breaking external dependency change, it makes the
+  crate's own diff an `authored-doc-fix`.
 - `macroRuntimePartners` is inferred by reversing `macroPublicDeps`: every
   package that publicly exposes a proc macro becomes its runtime façade.
   `[package.metadata.oxidizer_release].macro_runtime` is an optional escape
@@ -301,6 +309,18 @@ Accordingly, a `breaking` selection reason must agree with that package's own
 objective classification. A runtime facade must not label itself breaking only
 because a re-exported macro contract breaks; the resolver applies that cascade.
 Such a mismatch blocks as `breakingSelectionUnderclassified`.
+
+When a package's own authored packaged source changed such that a
+rustdoc-visible doc comment (`///` or `//!`) was added or removed
+(`docCommentChanged`) while `rustImplementationChanged` is false, the crate's
+own diff is documentation only. Doc comments ship in rustdoc and are
+consumer-visible, so with no runtime-manifest change and no exposed breaking
+external dependency the one canonical outcome is accept `authored-doc-fix`. The
+resolver rejects declining such a change as `internal-only` (the documentation
+did change) or any other reason. A plain `//` comment or whitespace edit leaves
+`docCommentChanged` false and stays eligible for `internal-only`. A published
+normal/build/features manifest change takes precedence over a doc tweak: a
+package with both uses `runtime-manifest-change`, not `authored-doc-fix`.
 
 Use the first matching rule:
 

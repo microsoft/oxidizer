@@ -86,7 +86,7 @@ macroRuntimePartners, macroCompileFixtureChanges, externalDepChanges,
 externalExposedDeps, exposureUnknown,
 baselineSha, hasBaseline, everReleased, modified, modifiedFiles,
 modifiedFileCount, manifestDependencyScopes, manifestOtherChanged,
-rustImplementationChanged, workspaceModified
+rustImplementationChanged, docCommentChanged, workspaceModified
 ```
 
 `deps` contains normalized normal and build dependencies; dev dependencies are
@@ -114,6 +114,13 @@ breaking external dependency change cannot be classified `breaking` or
 `nonbreaking` on its own account -- a re-exported macro contract break or a
 dependency bump reaches it only as a resolver-owned cascade. It fails safe: a
 missing baseline or an untracked new source file counts as changed.
+`docCommentChanged` is true only when a rustdoc-visible doc comment (`///` or
+`//!`) changed in a doc-eligible file (not `build.rs`/tests/benches/examples).
+It positively identifies a consumer-visible documentation change: with
+`rustImplementationChanged` false and no runtime-manifest or exposed breaking
+external dependency change, the resolver requires the selection to be
+`authored-doc-fix`, while a plain `//` comment or whitespace edit stays eligible
+for `internal-only`.
 
 For ordinary libraries, public exposure is derived from
 `package.metadata.cargo_check_external_types.allowed_external_types`. Fact

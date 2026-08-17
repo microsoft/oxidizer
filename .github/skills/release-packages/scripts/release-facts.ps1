@@ -251,29 +251,36 @@ function Get-PackageCompileFixtureChanges {
     # caller's @(...) sees the items themselves.
     return $items.ToArray()
 }
-
-# True when the crate's own diff changes Rust implementation: any added or
-# removed line in a packaged `.rs` file (src, build.rs, or a custom library
-# path -- never under tests/, benches/, or examples/) that is not a doc
-# comment, line comment, or blank. Doc-comment-only edits, README/CHANGELOG/
-# Cargo.toml edits, and test/bench/example edits leave this false. A previously
-# released library with no implementation change of its own therefore cannot be
-# classified breaking or nonbreaking on its own account -- any elevation above
-# patch must come from a cascade the resolver owns, not from a re-exported macro
-# contract or a dependency bump the model read into the crate's own diff.
+# Classifies the crate's own diff to authored packaged `.rs` files (src,
+# build.rs, or a custom library path -- never tests/benches/examples) into two
+# independent signals:
 #
-# Conservative by construction: a missing baseline or a brand-new untracked
-# source file counts as an implementation change, so the guard downstream only
-# ever fires on an unambiguous doc-only diff. Block comments (`/* ... */`) also
-# read as implementation, keeping the fire condition to lines that unambiguously
-# begin with `//`.
-function Get-PackageRustImplementationChanged {
+#   Implementation -- true when any added/removed line is real code: not a doc
+#     comment (`///`/`//!`), not a plain line comment (`//`), not blank. This
+#     gates whether a package may be classified breaking/nonbreaking on its own.
+#     Conservative: a missing baseline or a brand-new untracked source file
+#     counts as an implementation change, and block comments (`/* ... */`) read
+#     as implementation too.
+#
+#   DocComment -- true when a rustdoc-visible doc comment (`///` or `//!`)
+#     was added or removed in a doc-eligible file (src or a custom lib path, but
+#     NOT build.rs, whose comments never reach rustdoc). This positively
+#     identifies a consumer-visible documentation change; the resolver requires
+#     `authored-doc-fix` only when it is set, so a plain `//` comment or a
+#     whitespace reflow -- which leave Implementation false too -- stay eligible
+#     for `internal-only`.
+function Get-PackageSourceChangeKind {
     param(
         [Parameter(Mandatory = $true)][string]$PackageFolder,
         [AllowNull()]$ModifiedFiles
     )
 
     $prefix = "crates/$PackageFolder/"
+    # Only packaged library source counts: files under `src/` (rustdoc-visible)
+    # and the crate's `build.rs` (compiled, but never rustdoc). Everything else a
+    # crate may carry -- `tests/`, `benches/`, `examples/`, helper `scripts/`,
+    # `xtask/` -- is excluded from the include allowlist and never ships, so a
+    # change there must not drive an own-diff classification or a doc release.
     $candidates = @(
         @($ModifiedFiles) |
             Where-Object { $null -ne $_ } |
@@ -284,22 +291,28 @@ function Get-PackageRustImplementationChanged {
             } |
             Where-Object {
                 $relative = $_.Substring($prefix.Length)
-                -not (
-                    $relative.StartsWith('tests/', [StringComparison]::Ordinal) -or
-                    $relative.StartsWith('benches/', [StringComparison]::Ordinal) -or
-                    $relative.StartsWith('examples/', [StringComparison]::Ordinal)
-                )
+                $relative.StartsWith('src/', [StringComparison]::Ordinal) -or
+                $relative -eq 'build.rs'
             } |
             Sort-Object -Unique
     )
-    if ($candidates.Count -eq 0) { return $false }
+    if ($candidates.Count -eq 0) {
+        return [pscustomobject]@{ Implementation = $false; DocComment = $false }
+    }
 
     $baselineRev = Get-PackageLastReleaseBaseline `
         -RepoRoot $RepoRoot `
         -PackageFolder $PackageFolder
-    if ([string]::IsNullOrWhiteSpace($baselineRev)) { return $true }
+    if ([string]::IsNullOrWhiteSpace($baselineRev)) {
+        return [pscustomobject]@{ Implementation = $true; DocComment = $false }
+    }
 
+    $implementation = $false
+    $docComment = $false
     foreach ($path in $candidates) {
+        # build.rs is packaged source but its comments never reach rustdoc, so it
+        # can raise Implementation but never DocComment.
+        $docEligible = $path.Substring($prefix.Length) -ne 'build.rs'
         $diff = @(
             Invoke-Git -Arguments @(
                 'diff',
@@ -314,7 +327,10 @@ function Get-PackageRustImplementationChanged {
         # A file listed as modified whose baseline-to-worktree diff is empty is an
         # untracked new source file (git diff cannot see it): an implementation
         # change by construction.
-        if ($diff.Count -eq 0) { return $true }
+        if ($diff.Count -eq 0) {
+            $implementation = $true
+            continue
+        }
 
         foreach ($line in $diff) {
             $text = $line.ToString()
@@ -324,12 +340,22 @@ function Get-PackageRustImplementationChanged {
             if ($text.StartsWith('+++') -or $text.StartsWith('---')) { continue }
             $content = $text.Substring(1).Trim()
             if ($content.Length -eq 0) { continue }
-            if ($content.StartsWith('//')) { continue }
-            return $true
+            if (
+                (
+                    $content.StartsWith('///', [StringComparison]::Ordinal) -and
+                    -not $content.StartsWith('////', [StringComparison]::Ordinal)
+                ) -or
+                $content.StartsWith('//!', [StringComparison]::Ordinal)
+            ) {
+                if ($docEligible) { $docComment = $true }
+                continue
+            }
+            if ($content.StartsWith('//', [StringComparison]::Ordinal)) { continue }
+            $implementation = $true
         }
     }
 
-    return $false
+    return [pscustomobject]@{ Implementation = $implementation; DocComment = $docComment }
 }
 
 function Get-ManifestChanges {
@@ -784,19 +810,17 @@ $factPackages = foreach ($package in $packages) {
     )
     $hasExternalDepChange = $externalDepChanges.Count -gt 0
 
-    # Whether the crate's own packaged Rust source (not tests/benches/examples,
-    # not docs or manifests) actually changed. A previously released library with
-    # only doc-comment, test, or manifest edits has no own-diff basis for a
-    # breaking or nonbreaking classification -- the resolver still cascades one in
-    # when a dependency or re-exported macro contract requires it.
-    $rustImplementationChanged = if (
+    # Classify the crate's own authored source diff: whether real implementation
+    # changed (gates own breaking/nonbreaking classification) and whether a
+    # rustdoc-visible doc comment changed (gates authored-doc-fix selection).
+    $sourceChange = if (
         $workspaceModifiedFiles.ContainsKey($package.Folder)
     ) {
-        Get-PackageRustImplementationChanged `
+        Get-PackageSourceChangeKind `
             -PackageFolder $package.Folder `
             -ModifiedFiles $workspaceModifiedFiles[$package.Folder]
     } else {
-        $false
+        [pscustomobject]@{ Implementation = $false; DocComment = $false }
     }
 
     [ordered]@{
@@ -859,9 +883,12 @@ $factPackages = foreach ($package in $packages) {
             )
         )
         manifestOtherChanged = [bool]$manifestChanges.OtherChanged
-        # True only when packaged Rust source changed beyond doc comments; gates
-        # an own-diff breaking/nonbreaking classification (see resolve-plan.ps1).
-        rustImplementationChanged = [bool]$rustImplementationChanged
+        # True only when packaged Rust source changed beyond comments; gates an
+        # own-diff breaking/nonbreaking classification (see resolve-plan.ps1).
+        rustImplementationChanged = [bool]$sourceChange.Implementation
+        # True only when a rustdoc-visible doc comment (`///`/`//!`) changed in a
+        # doc-eligible source file; gates the authored-doc-fix selection rule.
+        docCommentChanged = [bool]$sourceChange.DocComment
         workspaceModified = $workspaceModifiedFiles.ContainsKey($package.Folder) -or
             $hasExternalDepChange
         # Effective non-dev external dependency requirement changes between this
