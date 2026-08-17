@@ -21,12 +21,12 @@
 //! The suite covers these shapes:
 //!
 //! * `hit_path` / `miss_path` — uncontended cost of the two branches.
-//! * `storm` — every thread relocates at once after a barrier release, which is
-//!   what a fanout across all cores looks like.
+//! * `concurrent` — the cost of one relocation while every core relocates at
+//!   once, which is what a fanout across all cores looks like.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
-//! `miss_path` under instruction-count measurement. The `storm` subgroup has no
-//! Callgrind counterpart because it measures lock contention across threads,
+//! `miss_path` under instruction-count measurement. The `concurrent` subgroup has
+//! no Callgrind counterpart because it measures lock contention across threads,
 //! which the single-threaded simulator cannot model.
 //!
 //! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate`
@@ -37,32 +37,29 @@
 #![allow(clippy::std_instead_of_core, reason = "benchmark code")]
 
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Barrier, Mutex, MutexGuard, PoisonError};
+use std::sync::Barrier;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{sync, thread};
 
-use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
 use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
 
-/// How far the oversubscribed case of the `storm` group exceeds the processor count.
+/// How far the oversubscribed case of the `concurrent` group exceeds the
+/// processor count.
 ///
-/// Oversubscription is the point of that shape: it puts runnable threads in the
+/// Oversubscription is the point of that shape: it puts runnable workers in the
 /// scheduler queue behind the ones holding a processor, which is the regime a
 /// thread-per-core runtime reaches whenever it has more runnable work than cores,
-/// and the regime in which a thread preempted while holding an exclusive lock
+/// and the regime in which a worker preempted while holding an exclusive lock
 /// stalls everyone behind it.
 ///
-/// The factor is small deliberately. Releasing a barrier costs roughly a
-/// millisecond per few threads, and that cost lands inside the measured round; by
-/// a few hundred threads it dwarfs the relocation work by orders of magnitude and
-/// the shape measures thread wake-up rather than relocation. Two-times
-/// oversubscription reaches the queued-behind regime while the barrier release
-/// stays a minority of the round.
-const STORM_OVERSUBSCRIPTION: usize = 2;
+/// Two is enough to reach that regime. Higher factors pile on scheduler queueing
+/// without changing the contention the lock itself sees.
+const CONCURRENT_OVERSUBSCRIPTION: usize = 2;
 
 /// Source of distinct per-affinity identities.
 static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
@@ -295,68 +292,56 @@ fn bench_miss_path(c: &mut Criterion) {
 }
 
 // =========================================================================
-// storm — every thread relocates the same subject at once.
+// concurrent — the cost of one relocation while every core relocates at once.
 // =========================================================================
 
-/// Persistent worker pool that relocates one shared subject from every thread
-/// simultaneously.
+/// Persistent worker pool that measures a relocation performed concurrently from
+/// every worker.
 ///
-/// Threads are created once and reused for every Criterion sample. Spawning
-/// hundreds of threads per sample would cost orders of magnitude more than the
-/// operation under test and would drown out the signal entirely.
+/// The workers are created once and reused for every Criterion sample; spawning
+/// them per sample would cost orders of magnitude more than the work measured.
 ///
-/// A round is driven by barriers rather than by any real-time wait: the
-/// controller releases `start`, every worker performs exactly the requested
-/// number of relocations, and `end` releases once they are all done.
+/// A round hands every worker a batch of relocations, releases them together, and
+/// measures the wall-clock time until the last one finishes. The batch is what
+/// makes the measurement possible. A single relocation is a handful of
+/// nanoseconds, while releasing the workers and waking them onto their cores is
+/// tens of microseconds, so a round must contain enough relocations to dwarf that
+/// fixed cost. Criterion drives the batch size up until a sample fills its target
+/// time and fits round duration against batch size, so the fixed release cost
+/// lands in the regression intercept and the reported per-iteration time is the
+/// slope: the cost of one relocation under full contention.
 ///
-/// Workers bracket their timed region with untimed load on both sides: they
-/// relocate until every worker is awake before starting the clock, and again
-/// after stopping it until every worker has stopped. Without that the shape
-/// silently stops measuring what it claims. A Criterion sample gives each worker
-/// far less work than a scheduler timeslice, so releasing the barrier is not
-/// instantaneous relative to the work: the workers woken first would otherwise
-/// time a machine that has not yet reached the advertised thread count, and on an
-/// oversubscribed machine the first batch would run to completion and park before
-/// the rest were ever scheduled. Each worker would then time a machine running at
-/// the processor count rather than at the thread count, and the oversubscribed
-/// shape would merely be a noisier copy of the saturated one. `run` asserts that
-/// the windows really did overlap, so the flaw cannot return unnoticed.
-///
-/// Each worker times its own loop and the round reports the median of those
-/// durations. A mean would let one stalled worker move the whole sample, and the
-/// median still reflects what a participating thread pays per relocation.
-struct RelocationStorm {
+/// Readiness is proven before the clock starts. Every worker parks on `ready`,
+/// the controller waits there too, and only once all of them have arrived does it
+/// start the clock and release `start`. Timing therefore excludes the time spent
+/// waiting for stragglers to reach the barrier.
+struct ConcurrentRelocation {
+    ready: sync::Arc<Barrier>,
     start: sync::Arc<Barrier>,
     end: sync::Arc<Barrier>,
-    iterations: sync::Arc<AtomicU64>,
-    awake: sync::Arc<AtomicUsize>,
-    finished: sync::Arc<AtomicUsize>,
-    windows: sync::Arc<Mutex<Vec<(Instant, Instant)>>>,
+    batch: sync::Arc<AtomicU64>,
     shutdown: sync::Arc<AtomicBool>,
     workers: Vec<JoinHandle<()>>,
-    thread_count: usize,
 }
 
-impl RelocationStorm {
-    /// Creates a storm of `thread_count` workers, each relocating its own clone of
+impl ConcurrentRelocation {
+    /// Creates a pool of `thread_count` workers, each relocating its own clone of
     /// the subject that `make` materializes across all participating affinities.
     fn new<T>(thread_count: usize, make: impl FnOnce(&[Affinity]) -> T) -> Self
     where
         T: ThreadAware + Clone + Send + 'static,
     {
-        // At least two affinities even for the single-threaded shape, so that every
+        // At least two affinities even for the single-worker case, so that every
         // shape performs a cross-affinity relocation. A worker whose source equals
         // its destination would be measuring a different operation.
         let affinity_count = thread_count.max(2);
         let affinities = pinned_affinities(&[affinity_count]);
         let subject = make(&affinities);
 
+        let ready = sync::Arc::new(Barrier::new(thread_count.saturating_add(1)));
         let start = sync::Arc::new(Barrier::new(thread_count.saturating_add(1)));
         let end = sync::Arc::new(Barrier::new(thread_count.saturating_add(1)));
-        let iterations = sync::Arc::new(AtomicU64::new(0));
-        let awake = sync::Arc::new(AtomicUsize::new(0));
-        let finished = sync::Arc::new(AtomicUsize::new(0));
-        let windows = sync::Arc::new(Mutex::new(Vec::with_capacity(thread_count)));
+        let batch = sync::Arc::new(AtomicU64::new(0));
         let shutdown = sync::Arc::new(AtomicBool::new(false));
 
         let workers = (0..thread_count)
@@ -368,55 +353,25 @@ impl RelocationStorm {
                 let source = affinities[index.wrapping_add(1) % affinity_count];
                 let mut subject = subject.clone();
 
+                let ready = sync::Arc::clone(&ready);
                 let start = sync::Arc::clone(&start);
                 let end = sync::Arc::clone(&end);
-                let iterations = sync::Arc::clone(&iterations);
-                let awake = sync::Arc::clone(&awake);
-                let finished = sync::Arc::clone(&finished);
-                let windows = sync::Arc::clone(&windows);
+                let batch = sync::Arc::clone(&batch);
                 let shutdown = sync::Arc::clone(&shutdown);
 
                 thread::spawn(move || {
                     loop {
+                        ready.wait();
                         start.wait();
 
                         if shutdown.load(Ordering::Acquire) {
                             break;
                         }
 
-                        let rounds = iterations.load(Ordering::Acquire);
-
-                        // Lead-in load: releasing a barrier is not instantaneous, so
-                        // without this the workers woken first would time part of a
-                        // round during which the machine has not yet reached the
-                        // thread count the shape advertises. Contend untimed until
-                        // every worker is awake.
-                        _ = awake.fetch_add(1, Ordering::AcqRel);
-
-                        while awake.load(Ordering::Acquire) < thread_count {
+                        for _ in 0..batch.load(Ordering::Acquire) {
                             subject.relocate(Some(source), destination);
                             black_box(&subject);
                         }
-
-                        let started = Instant::now();
-
-                        for _ in 0..rounds {
-                            subject.relocate(Some(source), destination);
-                            black_box(&subject);
-                        }
-
-                        let stopped = Instant::now();
-
-                        // Tail load: keep contending until every worker has closed its
-                        // window, so nobody measures a machine that has gone quiet.
-                        _ = finished.fetch_add(1, Ordering::AcqRel);
-
-                        while finished.load(Ordering::Acquire) < thread_count {
-                            subject.relocate(Some(source), destination);
-                            black_box(&subject);
-                        }
-
-                        windows.lock().unwrap_or_else(PoisonError::into_inner).push((started, stopped));
 
                         end.wait();
                     }
@@ -425,109 +380,43 @@ impl RelocationStorm {
             .collect();
 
         Self {
+            ready,
             start,
             end,
-            iterations,
-            awake,
-            finished,
-            windows,
+            batch,
             shutdown,
             workers,
-            thread_count,
         }
     }
 
-    /// Borrows the recorded windows, tolerating a mutex poisoned by a worker panic.
+    /// Runs one round of `batch` relocations per worker and returns the wall-clock
+    /// time until the last worker finished.
     ///
-    /// The worker's own panic message is the useful diagnostic in that case, so
-    /// this must not mask it with a poisoning panic from the controller.
-    fn lock_windows(&self) -> MutexGuard<'_, Vec<(Instant, Instant)>> {
-        self.windows.lock().unwrap_or_else(PoisonError::into_inner)
-    }
+    /// Dividing by `batch` gives the cost of one relocation under contention from
+    /// every worker. Criterion does that division, and its regression discards the
+    /// fixed per-round release cost as the intercept.
+    fn run(&self, batch: u64) -> Duration {
+        self.batch.store(batch, Ordering::Release);
 
-    /// Runs one round in which every worker performs `iterations` relocations.
-    ///
-    /// The returned duration is the median over workers, so dividing by the
-    /// iteration count yields the per-relocation cost under full contention.
-    fn run(&self, iterations: u64) -> Duration {
-        self.iterations.store(iterations, Ordering::Release);
-        self.awake.store(0, Ordering::Release);
-        self.finished.store(0, Ordering::Release);
-        self.lock_windows().clear();
+        // Wait for every worker to park before starting the clock, so the timed
+        // region is the relocation work rather than the barrier arrival skew.
+        self.ready.wait();
 
+        let started = Instant::now();
         self.start.wait();
         self.end.wait();
-
-        let windows = self.lock_windows();
-
-        let first_start = windows.iter().map(|&(started, _)| started).min();
-        let last_start = windows.iter().map(|&(started, _)| started).max();
-        let last_stop = windows.iter().map(|&(_, stopped)| stopped).max();
-
-        let span = last_stop
-            .zip(first_start)
-            .map(|(stop, start)| stop.duration_since(start))
-            .unwrap_or_default();
-
-        // What the lead-in load failed to absorb: how far apart the workers still
-        // entered their timed regions.
-        let start_spread = last_start
-            .zip(first_start)
-            .map(|(last, first)| last.duration_since(first))
-            .unwrap_or_default();
-
-        let mut durations = windows
-            .iter()
-            .map(|&(started, stopped)| stopped.duration_since(started))
-            .collect::<Vec<_>>();
-
-        durations.sort_unstable();
-
-        let Some(&median) = durations.get(durations.len() / 2) else {
-            // Only reachable if a worker never recorded a window, which means it
-            // panicked. Its own panic message is the useful diagnostic, so do not
-            // bury it under an indexing panic from the controller.
-            return Duration::ZERO;
-        };
-
-        // How many workers held an open timing window at once, averaged over the
-        // round. The lead-in and tail loads bracket the timed region with full
-        // load, so on a healthy round every window covers nearly the whole span
-        // and this approaches the thread count.
-        //
-        // Half the advertised threads is the floor. Reaching it requires every
-        // window to overlap every other one for at least half the round, which a
-        // shape that has degenerated into a sequence of solo runs cannot do at any
-        // thread count: contiguous windows sum to exactly one span no matter how
-        // many workers there are.
-        //
-        // The check applies only once the timed work dominates the spread in start
-        // times that the lead-in leaves behind, because a round shorter than that
-        // spread cannot overlap however the code under test behaves. Expressing
-        // the precondition as a ratio between two quantities the round measures
-        // itself keeps it independent of the machine and of how Criterion sized
-        // the round. In practice this separates cleanly: the rounds Criterion
-        // measures clear the ratio by more than an order of magnitude, and only
-        // its first ramp-up rounds fall short.
-        let busy = durations.iter().sum::<Duration>().as_nanos();
-        let expected = u128::try_from(self.thread_count).expect("a thread count always fits in u128");
-        let aligned = median > start_spread.saturating_mul(10);
-
-        assert!(
-            self.thread_count == 1 || !aligned || busy.saturating_mul(2) >= span.as_nanos().saturating_mul(expected),
-            "workers did not overlap: {busy} ns of open timing windows spread over a {} ns round \
-             is far fewer than {expected} concurrent workers, so this sample measures a less \
-             contended machine than the shape claims",
-            span.as_nanos()
-        );
-
-        median
+        started.elapsed()
     }
 }
 
-impl Drop for RelocationStorm {
+impl Drop for ConcurrentRelocation {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Release);
+
+        // Release the workers from both barriers so they observe the shutdown flag
+        // and leave the loop. They do not reach `end` on this pass, so the
+        // controller must not wait on it.
+        self.ready.wait();
         self.start.wait();
 
         for worker in self.workers.drain(..) {
@@ -536,43 +425,40 @@ impl Drop for RelocationStorm {
     }
 }
 
-fn bench_storm(c: &mut Criterion) {
-    let mut group = c.benchmark_group("thread_aware_relocate/storm");
-
-    // Contention is a property of the round, not of its length, so the cost per
-    // relocation is not linear in the iteration count that Criterion's default
-    // sampling assumes. Flat sampling holds the shape of every sample constant.
-    group.sampling_mode(SamplingMode::Flat);
+fn bench_concurrent(c: &mut Criterion) {
+    let mut group = c.benchmark_group("thread_aware_relocate/concurrent");
 
     let saturated = SystemHardware::current().processors().len();
 
-    // Three points, because the two failure modes have to be told apart. One
-    // thread gives the uncontended cost. One thread per processor gives the
-    // contention the lock actually has to survive. The oversubscribed case adds
-    // the queue of threads waiting for a processor, which is what a machine
-    // running more tasks than it has cores looks like.
+    // A sweep over contention: one worker per processor, then more workers than
+    // processors. The reported per-relocation time shows how the lock policy holds
+    // up as contention rises. The uncontended cost is `hit_path`'s job, so it is
+    // deliberately absent here: a single worker measures no contention and only
+    // adds this harness's thread-handoff overhead to the same number.
     //
-    // All of them relocate an object tree. A bare `Arc` was measured here too and
-    // dropped: one acquisition per message collides so rarely that its run-to-run
-    // spread exceeded any difference between locking policies, so it reported
-    // noise. The `tree_` prefix is kept so the subject stays legible in stored
-    // baselines and in benchmark output.
+    // The subject is the object tree, which is what actually crosses affinities in
+    // a consumer. It locks one slot table per layer, so a message collides with
+    // other workers several times over, which is what makes the lock policy
+    // visible; a bare `Arc` collides once and shows nothing.
     let shapes = [
-        ("threads_1", 1_usize),
         ("threads_saturated", saturated),
-        ("threads_oversubscribed", saturated * STORM_OVERSUBSCRIPTION),
+        ("threads_oversubscribed", saturated * CONCURRENT_OVERSUBSCRIPTION),
     ];
 
     for (name, thread_count) in shapes {
-        let storm = RelocationStorm::new(thread_count, materialized_tree);
+        // One relocation per worker per counted element, so Criterion reports
+        // aggregate relocation throughput alongside the per-relocation time.
+        group.throughput(Throughput::Elements(thread_count as u64));
 
-        group.bench_function(format!("tree_{name}"), |b| {
-            b.iter_custom(|iterations| storm.run(iterations));
+        let pool = ConcurrentRelocation::new(thread_count, materialized_tree);
+
+        group.bench_function(name, |b| {
+            b.iter_custom(|batch| pool.run(batch));
         });
     }
 
     group.finish();
 }
 
-criterion_group!(benches, bench_hit_path, bench_miss_path, bench_storm);
+criterion_group!(benches, bench_hit_path, bench_miss_path, bench_concurrent);
 criterion_main!(benches);

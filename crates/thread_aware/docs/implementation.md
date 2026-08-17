@@ -72,11 +72,11 @@ other affinities of the same value while a cold slot is being filled.
 the two stages, because they have opposite cost profiles and only the first one
 is on the hot path.
 
-| Group       | What it measures                                                     |
-| ----------- | -------------------------------------------------------------------- |
-| `hit_path`  | Relocation into an already-populated slot, single-threaded.           |
-| `miss_path` | Relocation that has to materialize a slot, single-threaded.           |
-| `storm`     | Many threads relocating into distinct affinities at the same time.    |
+| Group        | What it measures                                                    |
+| ------------ | ------------------------------------------------------------------- |
+| `hit_path`   | Relocation into an already-populated slot, single-threaded.          |
+| `miss_path`  | Relocation that has to materialize a slot, single-threaded.          |
+| `concurrent` | Cost of one relocation while every core relocates at once.           |
 
 The suite measures two subjects: a bare `Arc<Payload, PerCore>`, which isolates
 one relocation, and a five-layer object tree, which is what actually crosses
@@ -90,40 +90,46 @@ one lock for longer — it takes roughly one acquisition per layer instead of on
 in total. That multiplies how often a message collides with another thread.
 
 `hit_path` and `miss_path` measure both subjects, the bare one being a meaningful
-isolation of a single relocation. `storm` measures only the tree: at one
-acquisition per message the bare subject collides too rarely for its run-to-run
-spread to resolve any difference between locking policies.
+isolation of a single relocation. `concurrent` measures only the tree: at one
+acquisition per message the bare subject collides too rarely to resolve any
+difference between locking policies.
 
-`storm` covers one thread, one thread per processor, and
-`STORM_OVERSUBSCRIPTION` threads per processor. The oversubscribed shape is the
-one that exposes a thread preempted while holding an exclusive lock, since only
-then are there runnable threads queued behind it. Thread counts far above the
-processor count are deliberately *not* used: barrier release costs roughly a
-millisecond per few threads and lands inside the measured round, so by a few
-hundred threads the shape measures thread wake-up instead of relocation.
+### The concurrent benchmark
 
-Processor count here means logical processors, so on a machine with simultaneous
+`concurrent` answers a single question: what does one relocation cost while every
+core is relocating at once? A pool of workers is created once and reused. Each
+round hands every worker a batch of relocations, releases them together, and
+measures the wall-clock time until the last worker finishes.
+
+The batch is the crux. A relocation is a handful of nanoseconds, while releasing
+the workers and waking them onto their cores is tens of microseconds; a
+per-operation timing at that ratio measures the scheduler, not the lock. Batching
+many relocations behind one release amortizes the fixed cost to nothing. Criterion
+drives the batch size up until a sample fills its target time and fits round
+duration against batch size, so the fixed release cost falls into the regression
+intercept and the reported per-iteration time is the slope — the cost of one
+relocation under contention. Throughput is reported per worker, so the group also
+prints aggregate relocations per second.
+
+Readiness is proven before the clock starts: every worker parks on a barrier, the
+controller waits there too, and only once all have arrived does it start timing
+and release them. Timing therefore excludes barrier arrival skew, and there is no
+per-operation synchronization inside the batch to distort the measurement.
+
+The group sweeps contention with one worker per processor and
+`CONCURRENT_OVERSUBSCRIPTION` workers per processor. The oversubscribed shape is
+the one that exposes a worker preempted while holding an exclusive lock, since
+only then are there runnable workers queued behind it. The uncontended cost is
+`hit_path`'s job and is deliberately absent here, where a single worker would
+measure no contention and only add the pool's thread-handoff overhead.
+
+Processor count means logical processors, so on a machine with simultaneous
 multithreading the saturated shape runs two workers per physical core. The
 affinities the workers relocate between are fabricated values used to select
 slots; no thread is pinned.
 
-A shape whose workers do not actually run at the same time quietly reports
-uncontended timings under a contended name, so `storm` both arranges for the
-overlap and then checks it. Each worker relocates untimed until every worker is
-awake, and again after closing its own timing window until every worker has
-closed one, so the timed region is bracketed by full load rather than by the
-ragged edges of barrier release. Each round then asserts that the windows really
-did overlap. The assertion is skipped for rounds too short to outlast the spread
-in start times that remains after the lead-in, which is a condition only
-Criterion's first ramp-up rounds meet.
-
-`storm` is Criterion-only. Callgrind counts instructions on a serialized
+`concurrent` is Criterion-only. Callgrind counts instructions on a serialized
 execution, so it cannot observe lock contention at all. It also cannot show the
 benefit of the shared-lock probe, because an uncontended shared acquisition costs
 about as many instructions as an uncontended exclusive one; its role is to catch
 regressions in either branch.
-
-`storm` reports the median over its workers rather than the elapsed time of the
-round. Timing the round from the controller would measure how long the operating
-system took to wake the workers, and a mean would let one stalled worker move the
-whole sample.
