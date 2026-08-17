@@ -296,9 +296,18 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
     let methods = ["GET", "POST", "DELETE"];
     let verbs = ["", ":archive", ":other"];
 
+    // The path space grows as `segments.len() ^ depth`, so depth 4 enumerates
+    // 7_381 paths and ~66_000 request checks. That breadth is worth it natively,
+    // but under Miri it re-interprets the same few resolver code paths tens of
+    // thousands of times for no additional aliasing coverage, so cap the depth.
+    #[cfg(miri)]
+    let (max_depth, min_checked) = (2, 800);
+    #[cfg(not(miri))]
+    let (max_depth, min_checked) = (4, 50_000);
+
     let mut checked = 0_u64;
     for method in methods {
-        for depth in 0..=4 {
+        for depth in 0..=max_depth {
             let mut indices = vec![0_usize; depth];
             loop {
                 let mut path = String::new();
@@ -355,7 +364,7 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
             }
         }
     }
-    assert!(checked > 50_000, "expected a large path space, checked {checked}");
+    assert!(checked > min_checked, "expected a large path space, checked {checked}");
 }
 
 fn exotic_resolver() -> ExoticRouteResolver {
