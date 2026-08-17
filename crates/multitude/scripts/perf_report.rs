@@ -22,6 +22,7 @@ ohno = { path = "../../ohno", features = ["app-err"] }
 //!   `scripts/perf_report.rs`                                       — full run (30 samples, 2s measurement)
 //!   `scripts/perf_report.rs --fast`                                — quick run (10 samples, 1s)
 //!   `scripts/perf_report.rs --samples 50 --measurement-time 3`     — custom criterion settings
+//!   `scripts/perf_report.rs --comparison-repetitions 5`            — repeat paired comparisons
 //!   `scripts/perf_report.rs --cpu 4`                               — pin benchmark processes to CPU 4
 //!
 //! The group tables below select which benchmark variants are measured and
@@ -63,10 +64,10 @@ struct Args {
     #[arg(long)]
     cpu: Option<u32>,
 
-    /// Number of independently warmed runs for each Serde and teardown variant
-    /// (default: 3).
-    #[arg(long, default_value_t = 3)]
-    serde_repetitions: u32,
+    /// Number of independently warmed runs for each differential allocation,
+    /// Serde, and teardown group (default: 3).
+    #[arg(long, alias = "serde-repetitions", default_value_t = 3)]
+    comparison_repetitions: u32,
 }
 
 /// `(criterion_group, published_variants_in_report_order)`.
@@ -116,9 +117,36 @@ const ALLOC_GROUPS: &[Group] = &[
 ];
 
 const TEARDOWN_GROUPS: &[Group] = &[
-    ("multitude_teardown/free_1", &["standard", "multitude", "bumpalo"]),
-    ("multitude_teardown/free_32", &["standard", "multitude", "bumpalo"]),
-    ("multitude_teardown/free_1000", &["standard", "multitude", "bumpalo"]),
+    (
+        "multitude_teardown/free_1",
+        &[
+            "standard",
+            "multitude",
+            "bumpalo",
+            "multitude_reset_allocate",
+            "bumpalo_reset_allocate",
+        ],
+    ),
+    (
+        "multitude_teardown/free_32",
+        &[
+            "standard",
+            "multitude",
+            "bumpalo",
+            "multitude_reset_allocate",
+            "bumpalo_reset_allocate",
+        ],
+    ),
+    (
+        "multitude_teardown/free_1000",
+        &[
+            "standard",
+            "multitude",
+            "bumpalo",
+            "multitude_reset_allocate",
+            "bumpalo_reset_allocate",
+        ],
+    ),
 ];
 
 const SERDE_GROUPS: &[Group] = &[
@@ -445,7 +473,7 @@ fn fmt_speedup(candidate: Option<f64>, baseline: Option<f64>) -> String {
 
 fn build_report(
     crit: &[(String, f64)],
-    serde_repetitions: u32,
+    comparison_repetitions: u32,
     criterion_samples: u32,
     criterion_warmup_secs: u32,
     criterion_measurement_secs: u32,
@@ -479,16 +507,17 @@ fn build_report(
         let _ = writeln!(out, "Benchmark processes were pinned to logical CPU {cpu}.");
     }
     out.push_str(
-        "Each scenario runs in its own warmed process, with the implementations \
-         being compared measured adjacently to limit host-load and frequency drift.\n",
+        "Each comparison group runs in a freshly warmed process. Compared implementations \
+         are invoked adjacently to limit host-load and frequency drift.\n",
     );
-    if serde_repetitions == 1 {
-        out.push_str("Serde and teardown timings come from one independently warmed run.\n\n");
+    if comparison_repetitions == 1 {
+        out.push_str("Differential allocation, Serde, and teardown timings come from one independently warmed paired run.\n\n");
     } else {
         let _ = writeln!(
             out,
-            "Serde and teardown timings are the median of {serde_repetitions} independently \
-             warmed runs, with variant order alternated between runs.\n"
+            "Differential allocation, Serde, and teardown timings are the median of \
+             {comparison_repetitions} independently warmed paired runs. Compared \
+             variants run in the same process, with group order alternated between rounds.\n"
         );
     }
 
@@ -573,6 +602,32 @@ fn build_report(
                 fmt_delta(time, standard_time),
             );
         }
+    }
+    out.push('\n');
+
+    out.push_str("### Reset plus the next allocation\n\n");
+    out.push_str(
+        "This extends the pure-reset diagnostic through the first 64-byte \
+         allocation of the next generation. Both allocators start with the \
+         same warmed state, and backing-allocation assertions enforce that the \
+         measured boundary only rewinds and reuses existing storage.\n\n",
+    );
+    out.push_str("| Previous allocations | Multitude | Bumpalo | Δ |\n");
+    out.push_str("|---:|---:|---:|---:|\n");
+    for (count, group) in [
+        (1, "multitude_teardown/free_1"),
+        (32, "multitude_teardown/free_32"),
+        (1_000, "multitude_teardown/free_1000"),
+    ] {
+        let multitude = lookup_time(crit, &format!("{group}/multitude_reset_allocate"));
+        let bumpalo = lookup_time(crit, &format!("{group}/bumpalo_reset_allocate"));
+        let _ = writeln!(
+            out,
+            "| {count} | {} | {} | {} |",
+            fmt_ns(multitude),
+            fmt_ns(bumpalo),
+            fmt_delta(multitude, bumpalo),
+        );
     }
     out.push('\n');
 
@@ -755,11 +810,12 @@ fn run_groups(
     Ok(combined)
 }
 
-/// Run every benchmark variant independently, alternating order between rounds.
+/// Run every benchmark group in an independent process, alternating group order
+/// between rounds.
 ///
-/// This is reserved for cross-implementation lifecycle benchmarks whose setup
-/// has materially different global allocator effects. Alternating order and
-/// reporting the median across rounds reduces host-load and frequency bias.
+/// Keeping compared variants in one process makes their CPU state adjacent;
+/// alternating group order and reporting the median across rounds reduces
+/// longer-term host-load and frequency bias.
 fn run_repeated_variants(
     cwd: &Path,
     bench: &str,
@@ -771,27 +827,25 @@ fn run_repeated_variants(
 ) -> Result<String, AppError> {
     let mut combined = String::new();
     for round in 0..repetitions {
-        for (group, variants) in groups {
-            let indices: Vec<usize> = if round.is_multiple_of(2) {
-                (0..variants.len()).collect()
-            } else {
-                (0..variants.len()).rev().collect()
-            };
-            for index in indices {
-                let variant = variants[index];
-                let filter = format!("^{group}/{variant}$");
-                let mut args = Vec::with_capacity(common_args.len() + 1);
-                args.push(filter.as_str());
-                args.extend_from_slice(common_args);
-                combined.push_str(&run_bench(
-                    cwd,
-                    bench,
-                    features,
-                    &args,
-                    &format!("{bench} ({group}/{variant}, round {}/{repetitions})", round + 1),
-                    cpu,
-                )?);
-            }
+        let indices: Vec<usize> = if round.is_multiple_of(2) {
+            (0..groups.len()).collect()
+        } else {
+            (0..groups.len()).rev().collect()
+        };
+        for index in indices {
+            let (group, variants) = groups[index];
+            let filter = group_filter(group, variants);
+            let mut args = Vec::with_capacity(common_args.len() + 1);
+            args.push(filter.as_str());
+            args.extend_from_slice(common_args);
+            combined.push_str(&run_bench(
+                cwd,
+                bench,
+                features,
+                &args,
+                &format!("{bench} ({group}, round {}/{repetitions})", round + 1),
+                cpu,
+            )?);
         }
     }
     Ok(combined)
@@ -836,14 +890,22 @@ fn run(args: &Args) -> Result<(), AppError> {
         &crit_args,
         args.cpu,
     )?;
-    let alloc_log = run_groups(&crate_dir, "criterion_alloc", &[], ALLOC_GROUPS, &crit_args, args.cpu)?;
+    let alloc_log = run_repeated_variants(
+        &crate_dir,
+        "criterion_alloc",
+        &[],
+        ALLOC_GROUPS,
+        &crit_args,
+        args.comparison_repetitions,
+        args.cpu,
+    )?;
     let teardown_log = run_repeated_variants(
         &crate_dir,
         "multitude_teardown",
         &[],
         TEARDOWN_GROUPS,
         &crit_args,
-        args.serde_repetitions,
+        args.comparison_repetitions,
         args.cpu,
     )?;
     let serde_log = run_repeated_variants(
@@ -852,7 +914,7 @@ fn run(args: &Args) -> Result<(), AppError> {
         &["serde_json"],
         SERDE_GROUPS,
         &crit_args,
-        args.serde_repetitions,
+        args.comparison_repetitions,
         args.cpu,
     )?;
     let record_batch_log = run_groups(
@@ -874,7 +936,7 @@ fn run(args: &Args) -> Result<(), AppError> {
 
     let report = build_report(
         &crit,
-        args.serde_repetitions,
+        args.comparison_repetitions,
         samples,
         warmup_secs,
         measurement_secs,

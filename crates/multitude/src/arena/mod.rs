@@ -365,7 +365,12 @@ impl<A: Allocator + Clone> Arena<A> {
         // outstanding handles). Fold in the currently-active chunk's free
         // tail so the reported value also reflects the slack that would
         // become wasted if the next alloc forced a refill right now.
-        let current_free = u64::from(self.current.borrow().wasted_tail_for_stats());
+        let current_is_active = self.current_has_reference.get() || self.local_shared_count.get() != 0;
+        let current_free = if current_is_active {
+            u64::from(self.current.borrow().wasted_tail_for_stats())
+        } else {
+            0
+        };
         ArenaStats {
             total_bytes_allocated: self.provider.bytes_allocated(),
             peak_bytes_allocated: self.provider.peak_bytes_allocated(),
@@ -397,8 +402,11 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Reset the arena for a new allocation phase.
     ///
-    /// The current and retired chunks return their bytes to the chunk cache,
-    /// unless outstanding smart pointers keep them alive.
+    /// Retired chunks return their bytes to the chunk cache unless outstanding
+    /// smart pointers keep them alive. A current chunk used only for
+    /// arena-lifetime allocations is retained and rewound in place; a current
+    /// chunk that handed out owning pointers is detached so those owners keep
+    /// their prior-generation values alive.
     ///
     /// Given that this takes `&mut self`, the borrow checker ensures no
     /// outstanding [`Alloc`](crate::Alloc) handles can still be live — each one
@@ -406,8 +414,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// dropped, so all reference destructors have already run by the time
     /// `reset` is callable. Outstanding `Arc`/`Rc`/`Box` handles allocated before
     /// the reset keep their backing chunks alive independently. `reset` itself
-    /// runs no destructors; it is purely a bulk cursor rewind. After reset the
-    /// next allocation installs a fresh chunk.
+    /// runs no destructors; it is purely a bulk cursor rewind and
+    /// ownership-state transition.
     ///
     /// # Example
     ///
@@ -421,30 +429,55 @@ impl<A: Allocator + Clone> Arena<A> {
     /// assert_eq!(*arena.alloc(8), 8);
     /// ```
     pub fn reset(&mut self) {
+        if self.local_shared_count.get() != 0 {
+            self.reset_slow();
+            return;
+        }
+        if !self.retired_local.is_empty() {
+            self.reset_slow();
+            return;
+        }
+
+        // The common local-only generation has no retired chunks to release
+        // and no owning pointers to detach.
+        let _ = self.current.borrow().rewind();
+        self.current_has_reference.set(false);
+        self.record_reset();
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn reset_slow(&mut self) {
         self.retired_local.clear();
         let local = self.local_shared_count.replace(0);
-        let displaced = self.current.replace_mut(ChunkMutator::<A>::empty());
-        // Return the unused pre-credited surplus and the mutator's +1 with
-        // one atomic operation. No reference destructors run here (the
-        // `Alloc` handles already ran them).
-        let refund = (LARGE_SHARED_REF_SURPLUS - local) as usize;
-        // SAFETY: `local` counts every surplus reference handed out from the
-        // current chunk, so the remainder is exactly the unused pre-credit.
-        unsafe { displaced.release_with_refund(refund) };
+        if local == 0 {
+            // No owning pointer escaped from the current chunk. The exclusive
+            // arena borrow also proves every arena-lifetime handle is gone, so
+            // retaining the pre-credited mutator and rewinding it is safe.
+            let _ = self.current.borrow().rewind();
+        } else {
+            let displaced = self.current.replace_mut(ChunkMutator::<A>::empty());
+            // Return the unused pre-credited surplus and the mutator's +1 with
+            // one atomic operation. No reference destructors run here (the
+            // `Alloc` handles already ran them).
+            let refund = (LARGE_SHARED_REF_SURPLUS - local) as usize;
+            // SAFETY: `local` counts every surplus reference handed out from
+            // the current chunk, so the remainder is exactly the unused
+            // pre-credit.
+            unsafe { displaced.release_with_refund(refund) };
+        }
         self.current_has_reference.set(false);
+        self.record_reset();
+    }
+
+    #[inline]
+    fn record_reset(&self) {
         #[cfg(feature = "stats")]
         {
             self.provider.reset_generation_stats();
             self.relocations_since_reset.set(0);
             self.resets.set(self.resets.get() + 1);
         }
-    }
-
-    /// Records that the current chunk has handed out an arena-lifetime
-    /// reference, so it will be pinned (not reclaimed early) when rotated out.
-    #[inline(always)]
-    fn mark_reference_handout(&self) {
-        self.current_has_reference.set(true);
     }
 
     /// Returns a [`ZerocopyView`](crate::zerocopy::ZerocopyView)
