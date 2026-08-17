@@ -244,7 +244,7 @@ fn test_from_storage() {
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let storage = super::storage::Storage::new();
+    let storage = super::storage::SharedStorage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -330,7 +330,7 @@ fn test_factory_clone_with_manual() {
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let storage = super::storage::Storage::new();
+    let storage = super::storage::SharedStorage::new();
     let value = Arc::new(200);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -362,7 +362,7 @@ fn test_factory_manual_relocated() {
     let affinity2 = affinities[1];
 
     // Create a storage with a value at affinity1
-    let storage = super::storage::Storage::new();
+    let storage = super::storage::SharedStorage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -691,7 +691,7 @@ fn factory_manual_debug() {
     use std::sync::{self};
 
     let affinities = pinned_affinities(&[1]);
-    let storage = sync::Arc::new(super::storage::Storage::new());
+    let storage = sync::Arc::new(super::storage::SharedStorage::new());
     storage.replace(affinities[0], sync::Arc::new(42));
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");

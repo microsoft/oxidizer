@@ -18,7 +18,7 @@ use std::ops::Deref;
 use std::sync::{self};
 
 pub use builtin::{PerCore, PerNuma, PerProcess};
-pub(crate) use storage::{Storage, Strategy};
+pub(crate) use storage::{SharedStorage, Strategy};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
@@ -108,7 +108,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// ```
 #[derive(Debug)]
 pub struct Arc<T: ?Sized, S: Strategy> {
-    storage: sync::Arc<Storage<sync::Arc<T>, S>>,
+    storage: sync::Arc<SharedStorage<T, S>>,
     value: sync::Arc<T>,
     factory: Factory<T>,
 }
@@ -395,7 +395,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(storage::SharedStorage::new()),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
@@ -457,7 +457,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(storage::SharedStorage::new()),
             value,
             factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
@@ -495,7 +495,7 @@ where
         let value = sync::Arc::clone(erased.arc());
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(storage::SharedStorage::new()),
             value,
             factory: Factory::ErasedCloneFn(erased),
         }
@@ -518,7 +518,7 @@ where
         let value = sync::Arc::from(closure.clone().call_once());
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(storage::SharedStorage::new()),
             value,
             factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
@@ -531,7 +531,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: sync::Arc<Storage<sync::Arc<T>, S>>, current_affinity: Affinity) -> Self {
+    pub fn from_storage(storage: sync::Arc<SharedStorage<T, S>>, current_affinity: Affinity) -> Self {
         let value = storage.get_clone(current_affinity).expect("No data found for the current affinity");
 
         Self {

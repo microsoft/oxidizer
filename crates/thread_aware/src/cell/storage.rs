@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use std::marker::PhantomData;
 #[cfg(test)]
 use std::sync::RwLockReadGuard;
-use std::sync::{OnceLock, RwLock, RwLockWriteGuard};
+use std::sync::{self, OnceLock, RwLock, RwLockWriteGuard};
 
 use crossbeam_utils::CachePadded;
 
@@ -33,6 +33,10 @@ type Slot<T> = CachePadded<RwLock<Option<T>>>;
 
 /// Affinity-partitioned storage: one independently-locked slot per affinity.
 ///
+/// This is the raw slot table. [`SharedStorage`] wraps it as the handle an
+/// `Arc` actually holds; the two are separate so this can be unit-tested with a
+/// plain value type while the wrapper pins the stored type to `Arc<T>`.
+///
 /// Each affinity owns its own `RwLock`, so relocations targeting different
 /// affinities never touch the same lock or the same cache line. The slots are
 /// cache-line padded so that neighboring affinities do not share a line.
@@ -43,7 +47,7 @@ type Slot<T> = CachePadded<RwLock<Option<T>>>;
 /// atomic load of the `OnceLock` pointer, which stays resident and shared in
 /// every core's cache and generates no coherence traffic.
 #[derive(Debug)]
-pub struct Storage<T, S: Strategy> {
+pub(crate) struct Storage<T, S: Strategy> {
     slots: OnceLock<Box<[Slot<T>]>>,
     _marker: PhantomData<S>,
 }
@@ -51,7 +55,7 @@ pub struct Storage<T, S: Strategy> {
 impl<T, S: Strategy> Storage<T, S> {
     /// Creates a new empty `Storage` instance.
     #[must_use]
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             slots: OnceLock::new(),
             _marker: PhantomData,
@@ -133,6 +137,50 @@ impl<T, S: Strategy> Storage<T, S> {
                 .filter(|slot| slot.read().expect(POISONED).as_ref().is_some_and(&predicate))
                 .count(),
         }
+    }
+}
+
+/// Opaque handle to an `Arc`'s per-affinity storage, shared by its clones.
+///
+/// Hides the per-slot locking so the representation can change without breaking
+/// callers. `T` is `?Sized` because a slot stores an `Arc<T>`, which is a sized
+/// value even when `T` is not.
+#[derive(Debug)]
+pub struct SharedStorage<T: ?Sized, S: Strategy> {
+    inner: Storage<sync::Arc<T>, S>,
+}
+
+impl<T: ?Sized, S: Strategy> SharedStorage<T, S> {
+    /// Creates an empty handle, with no affinity populated.
+    pub(crate) const fn new() -> Self {
+        Self { inner: Storage::new() }
+    }
+
+    /// Clones out the value published for `affinity`, if any.
+    pub(crate) fn get_clone(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
+        self.inner.get_clone(affinity)
+    }
+
+    /// Acquires the exclusive lock on the slot for `affinity`.
+    pub(crate) fn write(&self, affinity: Affinity) -> RwLockWriteGuard<'_, Option<sync::Arc<T>>> {
+        self.inner.write(affinity)
+    }
+
+    /// Counts published values for which `predicate` holds.
+    pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
+        self.inner.count_where(predicate)
+    }
+
+    /// Acquires the shared lock on the slot for `affinity`.
+    #[cfg(test)]
+    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
+        self.inner.read(affinity)
+    }
+
+    /// Publishes `value` for `affinity`, returning any previous value.
+    #[cfg(test)]
+    pub(crate) fn replace(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
+        self.inner.replace(affinity, value)
     }
 }
 
