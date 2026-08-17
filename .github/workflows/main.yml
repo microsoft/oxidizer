@@ -357,7 +357,15 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
       - name: Miri (stacked borrows)
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
+        # The `*_macros_impl` crates are proc-macro implementation crates: they
+        # manipulate token streams and contain no `unsafe`, so Miri has no
+        # aliasing or provenance violations to find in them. Their tests are
+        # snapshot comparisons of generated token streams, and any `unsafe` they
+        # *emit* is executed -- and therefore checked by Miri -- in the consuming
+        # crate's own tests, which are still covered here. Interpreting them
+        # anyway cost ~52 min of the ~3h16m step (multitude_macros_impl alone ran
+        # 30 tests in 45 min), so they are excluded to keep PR feedback usable.
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --exclude data_privacy_macros_impl --exclude fundle_macros_impl --exclude internity_macros_impl --exclude multitude_macros_impl --exclude templated_uri_macros_impl --exclude thread_aware_macros_impl --lib --tests
 
   model-checking:
     if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
