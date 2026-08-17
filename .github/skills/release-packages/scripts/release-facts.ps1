@@ -809,16 +809,20 @@ $factPackages = foreach ($package in $packages) {
         ) | Where-Object { $_ } | Sort-Object -Unique
     )
     $hasExternalDepChange = $externalDepChanges.Count -gt 0
+    $hasPackageModifiedFiles = $workspaceModifiedFiles.ContainsKey($package.Folder)
+    $packageModifiedFiles = if ($hasPackageModifiedFiles) {
+        @($workspaceModifiedFiles[$package.Folder])
+    } else {
+        @()
+    }
 
     # Classify the crate's own authored source diff: whether real implementation
     # changed (gates own breaking/nonbreaking classification) and whether a
     # rustdoc-visible doc comment changed (gates authored-doc-fix selection).
-    $sourceChange = if (
-        $workspaceModifiedFiles.ContainsKey($package.Folder)
-    ) {
+    $sourceChange = if ($hasPackageModifiedFiles) {
         Get-PackageSourceChangeKind `
             -PackageFolder $package.Folder `
-            -ModifiedFiles $workspaceModifiedFiles[$package.Folder]
+            -ModifiedFiles $packageModifiedFiles
     } else {
         [pscustomobject]@{ Implementation = $false; DocComment = $false }
     }
@@ -856,17 +860,11 @@ $factPackages = foreach ($package in $packages) {
         # this fact.
         everReleased      = [bool](Invoke-Git -Arguments @('tag', '--list', "$($package.Name)-v*") -RepoRoot $RepoRoot)
         modified          = [bool]$package.Published -and
-            ($workspaceModifiedFiles.ContainsKey($package.Folder) -or $hasExternalDepChange)
-        modifiedFiles     = if ($workspaceModifiedFiles.ContainsKey($package.Folder)) {
-            @($workspaceModifiedFiles[$package.Folder])
-        } else {
-            @()
-        }
-        modifiedFileCount = if ($workspaceModifiedFiles.ContainsKey($package.Folder)) {
-            @($workspaceModifiedFiles[$package.Folder]).Count
-        } else {
-            0
-        }
+            ($hasPackageModifiedFiles -or $hasExternalDepChange)
+        # Note: the if/else empty branch serializes as JSON null (a PowerShell
+        # ConvertTo-Json quirk), which is the established shape the resolver reads.
+        modifiedFiles     = if ($hasPackageModifiedFiles) { @($packageModifiedFiles) } else { @() }
+        modifiedFileCount = $packageModifiedFiles.Count
         manifestDependencyScopes = @(
             # Keeps Get-ManifestChanges' scope order, then appends whatever the
             # external-dependency lane adds, so the existing sequence is stable.
@@ -889,8 +887,7 @@ $factPackages = foreach ($package in $packages) {
         # True only when a rustdoc-visible doc comment (`///`/`//!`) changed in a
         # doc-eligible source file; gates the authored-doc-fix selection rule.
         docCommentChanged = [bool]$sourceChange.DocComment
-        workspaceModified = $workspaceModifiedFiles.ContainsKey($package.Folder) -or
-            $hasExternalDepChange
+        workspaceModified = $hasPackageModifiedFiles -or $hasExternalDepChange
         # Effective non-dev external dependency requirement changes between this
         # crate's release baseline and the working tree, inheritance resolved.
         externalDepChanges = @($externalDepChanges)

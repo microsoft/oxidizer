@@ -280,6 +280,27 @@ function Get-RegressionEvidence {
     }
 }
 
+function ConvertTo-CleanStringList {
+    param([AllowNull()]$Values)
+
+    return @(
+        $Values |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+}
+
+function Get-NormalizedModifiedFiles {
+    param([Parameter(Mandatory = $true)]$Fact)
+
+    return @(
+        $Fact.modifiedFiles |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Replace('\', '/') }
+    )
+}
+
 function Get-SelectionDecision {
     param(
         [Parameter(Mandatory = $true)]$Fact,
@@ -351,9 +372,7 @@ function Get-SelectionDecision {
     }
     $packagePrefix = "crates/$($Fact.folder)/"
     $otherFiles = @(
-        $Fact.modifiedFiles |
-            Where-Object { $null -ne $_ } |
-            ForEach-Object { $_.ToString().Replace('\', '/') } |
+        Get-NormalizedModifiedFiles -Fact $Fact |
             Where-Object {
                 if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
                     return $true
@@ -398,11 +417,7 @@ function Get-SelectionDecision {
     # one of those: it forces `generated-artifact-only` and forbids it once any
     # Cargo.toml (metadata) or other path is present, so the two decline reasons
     # are mutually exclusive and each diff shape has one canonical reason.
-    $changedFiles = @(
-        $Fact.modifiedFiles |
-            Where-Object { $null -ne $_ } |
-            ForEach-Object { $_.ToString().Replace('\', '/') }
-    )
+    $changedFiles = @(Get-NormalizedModifiedFiles -Fact $Fact)
     $isGeneratedOnly = $changedFiles.Count -gt 0 -and @(
         $changedFiles | Where-Object {
             -not (
@@ -446,11 +461,8 @@ function Get-SelectionDecision {
         if ($reason -ne 'first-release') {
             throw "Never-released package '$($Fact.folder)' must use selection reason 'first-release'."
         }
-        $packagePrefix = "crates/$($Fact.folder)/"
         $releaseWorthyFiles = @(
-            $Fact.modifiedFiles |
-                Where-Object { $null -ne $_ } |
-                ForEach-Object { $_.ToString().Replace('\', '/') } |
+            Get-NormalizedModifiedFiles -Fact $Fact |
                 Where-Object {
                     if (-not $_.StartsWith($packagePrefix, [StringComparison]::Ordinal)) {
                         return $false
@@ -472,12 +484,7 @@ function Get-SelectionDecision {
         }
     }
 
-    $evidence = @(
-        $value.evidence |
-            Where-Object { $null -ne $_ } |
-            ForEach-Object { $_.ToString().Trim() } |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-    )
+    $evidence = ConvertTo-CleanStringList -Values $value.evidence
     if ($evidence.Count -eq 0) {
         throw "Selection decision '$($Fact.folder)' must include evidence."
     }
@@ -673,9 +680,6 @@ function Get-MacroContract {
             }
         }
 
-        if ($value -is [string]) {
-            throw "Macro contract '$($Fact.folder)' must include reviewedPackages, channels, and evidence."
-        }
         foreach ($requiredProperty in @('reviewedPackages', 'channels', 'evidence')) {
             if (
                 $null -eq $value.PSObject.Properties[$requiredProperty] -or
@@ -684,12 +688,7 @@ function Get-MacroContract {
                 throw "Macro contract '$($Fact.folder)' must include reviewedPackages, channels, and evidence."
             }
         }
-        $reviewedPackages = @(
-            $value.reviewedPackages |
-                Where-Object { $null -ne $_ } |
-                ForEach-Object { $_.ToString().Trim() } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        )
+        $reviewedPackages = ConvertTo-CleanStringList -Values $value.reviewedPackages
         if ($reviewedPackages.Count -eq 0) {
             throw "Macro contract '$($Fact.folder)' must include at least one reviewed package."
         }
@@ -711,12 +710,7 @@ function Get-MacroContract {
             }
         }
 
-        $evidence = @(
-            $value.evidence |
-                Where-Object { $null -ne $_ } |
-                ForEach-Object { $_.ToString().Trim() } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        )
+        $evidence = ConvertTo-CleanStringList -Values $value.evidence
         if ($evidence.Count -eq 0) {
             throw "Macro contract '$($Fact.folder)' must include evidence."
         }
@@ -748,11 +742,12 @@ function Get-MacroReviewScope {
         $scope = New-Object 'System.Collections.Generic.List[string]'
         $scope.Add($Fact.name) | Out-Null
         $closure = @($Fact.macroImplementationClosure)
+        $partners = @($Fact.macroRuntimePartners)
         foreach ($candidate in $Facts) {
             $normalizedName = $candidate.name.Replace('-', '_')
             if (
-                ($closure -contains $normalizedName -and [bool]$candidate.workspaceModified) -or
-                (@($Fact.macroRuntimePartners) -contains $normalizedName -and [bool]$candidate.workspaceModified)
+                [bool]$candidate.workspaceModified -and
+                ($closure -contains $normalizedName -or $partners -contains $normalizedName)
             ) {
                 $scope.Add($candidate.name) | Out-Null
             }
@@ -1347,37 +1342,45 @@ function Require-MacroContract {
         -Trigger $Trigger
 }
 
+function Format-SelectionDecisionOutput {
+    @(
+        $selectionDecisions.GetEnumerator() |
+            Sort-Object Key |
+            ForEach-Object {
+                [ordered]@{
+                    package  = $_.Key
+                    decision = $_.Value.Decision
+                    reason   = $_.Value.Reason
+                    evidence = @($_.Value.Evidence)
+                    regressionEvidence = @($_.Value.RegressionEvidence)
+                }
+            }
+    )
+}
+
+function Format-MacroContractOutput {
+    @(
+        $usedMacroContracts.GetEnumerator() |
+            Sort-Object Key |
+            ForEach-Object {
+                [ordered]@{
+                    package  = $_.Key
+                    verdict  = $_.Value.Verdict
+                    derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
+                    reviewed = @(Get-EmittedReviewScope -Folder $_.Key)
+                    evidence = @($_.Value.Evidence)
+                }
+            }
+    )
+}
+
 function Write-BlockedPlan {
     [ordered]@{
         status         = 'blocked'
         mode           = $mode
-        selectionDecisions = @(
-            $selectionDecisions.GetEnumerator() |
-                Sort-Object Key |
-                ForEach-Object {
-                    [ordered]@{
-                        package  = $_.Key
-                        decision = $_.Value.Decision
-                        reason   = $_.Value.Reason
-                        evidence = @($_.Value.Evidence)
-                        regressionEvidence = @($_.Value.RegressionEvidence)
-                    }
-                }
-        )
+        selectionDecisions = @(Format-SelectionDecisionOutput)
         releases       = @()
-        macroContracts = @(
-            $usedMacroContracts.GetEnumerator() |
-                Sort-Object Key |
-                ForEach-Object {
-                    [ordered]@{
-                        package  = $_.Key
-                        verdict  = $_.Value.Verdict
-                        derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
-                        reviewed = @(Get-EmittedReviewScope -Folder $_.Key)
-                        evidence = @($_.Value.Evidence)
-                    }
-                }
-        )
+        macroContracts = @(Format-MacroContractOutput)
         ambiguities    = @($ambiguities | Sort-Object package, kind, trigger)
         warnings       = @($warnings)
     } | ConvertTo-Json -Depth 10
@@ -1397,9 +1400,6 @@ foreach ($tokenValue in $tokens) {
     $fact = Find-PackageFact -Identifier $parts[0] -Facts $facts
     if (-not [bool]$fact.published) {
         throw "Package '$($fact.folder)' is not publishable."
-    }
-    if ($plan.ContainsKey($fact.folder)) {
-        throw "Package '$($fact.folder)' appears more than once in the release tokens."
     }
     if (-not $tokenFolders.Add($fact.folder)) {
         throw "Package '$($fact.folder)' appears more than once in the release tokens."
@@ -1877,33 +1877,9 @@ $releases = foreach ($folder in $orderedFolders) {
 [ordered]@{
     status         = 'resolved'
     mode           = $mode
-    selectionDecisions = @(
-        $selectionDecisions.GetEnumerator() |
-            Sort-Object Key |
-            ForEach-Object {
-                [ordered]@{
-                    package  = $_.Key
-                    decision = $_.Value.Decision
-                    reason   = $_.Value.Reason
-                    evidence = @($_.Value.Evidence)
-                    regressionEvidence = @($_.Value.RegressionEvidence)
-                }
-            }
-    )
+    selectionDecisions = @(Format-SelectionDecisionOutput)
     releases       = @($releases)
-    macroContracts = @(
-        $usedMacroContracts.GetEnumerator() |
-            Sort-Object Key |
-            ForEach-Object {
-                [ordered]@{
-                    package  = $_.Key
-                    verdict  = $_.Value.Verdict
-                    derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
-                    reviewed = @(Get-EmittedReviewScope -Folder $_.Key)
-                    evidence = @($_.Value.Evidence)
-                }
-            }
-    )
+    macroContracts = @(Format-MacroContractOutput)
     ambiguities    = @()
     warnings       = @($warnings)
 } | ConvertTo-Json -Depth 8
