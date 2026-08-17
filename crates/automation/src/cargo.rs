@@ -11,6 +11,7 @@ use ohno::AppError;
 pub const INTERNAL_CRATES: &[&str] = &[
     "automation",
     "benchmarking",
+    "observed_testing",
     "testing_aids",
     "rest_over_grpc_examples",
     "rest_over_grpc_tests",

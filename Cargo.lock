@@ -39,6 +39,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "all_the_time"
+version = "0.4.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8efe8e1956623a0fb39d4f54bc19710ba54c62203715c2dcec0fc7a39ca7fefc"
+dependencies = [
+ "cpu-time",
+]
+
+[[package]]
 name = "alloc_tracker"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1041,6 +1050,16 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "cpu-time"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9e393a7668fe1fad3075085b86c781883000b4ede868f43627b34a87c8b7ded"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -2999,6 +3018,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ceffa2e6ccecd71e60a0f06b655df2c66acd1c0c892dafefc96fd49d65f71d53"
 dependencies = [
  "parking_lot",
+]
+
+[[package]]
+name = "observed"
+version = "0.24.0"
+dependencies = [
+ "all_the_time",
+ "alloc_tracker",
+ "criterion",
+ "data_privacy",
+ "observed_macros",
+ "ohno 0.4.0",
+ "opentelemetry",
+ "opentelemetry-stdout",
+ "opentelemetry_sdk",
+ "pin-project",
+ "smallvec",
+ "static_assertions",
+ "thread_aware",
+ "thread_local",
+ "tick",
+ "tokio",
+]
+
+[[package]]
+name = "observed_macros"
+version = "0.24.0"
+dependencies = [
+ "insta",
+ "mutants",
+ "prettyplease 0.3.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "observed_testing"
+version = "0.0.0"
+dependencies = [
+ "data_privacy",
+ "observed",
+ "testing_aids",
+ "tick",
+ "tokio",
 ]
 
 [[package]]
