@@ -386,6 +386,30 @@ function Get-SelectionDecision {
             throw "Selection reason 'dev-dependency-only' for '$($Fact.folder)' cannot ignore changed source, tests, benchmarks, or authored documentation."
         }
     }
+    # A generated artifact is exactly this crate's own README or CHANGELOG.
+    # "Generated-only" means at least one file changed and every changed file is
+    # one of those: it forces `generated-artifact-only` and forbids it once any
+    # Cargo.toml (metadata) or other path is present, so the two decline reasons
+    # are mutually exclusive and each diff shape has one canonical reason.
+    $changedFiles = @(
+        $Fact.modifiedFiles |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { $_.ToString().Replace('\', '/') }
+    )
+    $isGeneratedOnly = $changedFiles.Count -gt 0 -and @(
+        $changedFiles | Where-Object {
+            -not (
+                $_.StartsWith($packagePrefix, [StringComparison]::Ordinal) -and
+                $_.Substring($packagePrefix.Length) -in @('README.md', 'CHANGELOG.md')
+            )
+        }
+    ).Count -eq 0
+    if ($reason -eq 'generated-artifact-only' -and -not $isGeneratedOnly) {
+        throw "Selection reason 'generated-artifact-only' for '$($Fact.folder)' requires that only this crate's generated README.md or CHANGELOG.md changed; a Cargo.toml or other edit is 'release-metadata-only'."
+    }
+    if ($reason -eq 'release-metadata-only' -and $isGeneratedOnly) {
+        throw "Selection reason 'release-metadata-only' for '$($Fact.folder)' cannot classify a change to only a generated README.md or CHANGELOG.md; use 'generated-artifact-only'."
+    }
     if ($decision -eq 'accept' -and -not [bool]$Fact.everReleased) {
         if ($reason -ne 'first-release') {
             throw "Never-released package '$($Fact.folder)' must use selection reason 'first-release'."
@@ -705,6 +729,20 @@ function Get-MacroReviewScope {
             $scope.Add($TriggerFact.name) | Out-Null
         }
         return @($scope | Sort-Object -Unique)
+}
+
+# The canonical review scope emitted in the plan: exactly self plus every
+# modified implementation-closure member and modified runtime partner. The
+# resolver validates that a supplied contract COVERS this scope, so a model may
+# review more; emitting the computed scope rather than the model's list keeps the
+# output identical regardless of any extra, unmodified packages a model chose to
+# name.
+function Get-EmittedReviewScope {
+    param([Parameter(Mandatory = $true)][string]$Folder)
+
+    $fact = @($facts | Where-Object { $_.folder -eq $Folder })[0]
+    if ($null -eq $fact) { return @() }
+    return @(Get-MacroReviewScope -Fact $fact -Facts $facts -TriggerFact $null)
 }
 
 function Test-MacroContractCoversScope {
@@ -1302,7 +1340,7 @@ function Write-BlockedPlan {
                         package  = $_.Key
                         verdict  = $_.Value.Verdict
                         derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
-                        reviewed = @($_.Value.ReviewedPackages)
+                        reviewed = @(Get-EmittedReviewScope -Folder $_.Key)
                         evidence = @($_.Value.Evidence)
                     }
                 }
@@ -1828,7 +1866,7 @@ $releases = foreach ($folder in $orderedFolders) {
                     package  = $_.Key
                     verdict  = $_.Value.Verdict
                     derivedVerdict = ConvertTo-MacroVerdictName -ChangeType $_.Value.DerivedFloor
-                    reviewed = @($_.Value.ReviewedPackages)
+                    reviewed = @(Get-EmittedReviewScope -Folder $_.Key)
                     evidence = @($_.Value.Evidence)
                 }
             }

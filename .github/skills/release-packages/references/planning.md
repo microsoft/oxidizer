@@ -179,7 +179,10 @@ not a contract; judge behavior-equivalent, not byte-equivalent, expansion.
 Record `macroContracts.<package>` with:
 
 - `verdict`: `compatible`, `nonbreaking`, or `breaking`;
-- `reviewedPackages`: every package in the resolver's review scope;
+- `reviewedPackages`: at least every package in the resolver's review scope
+  (self plus each modified implementation-closure member and modified runtime
+  partner). Reviewing more is allowed, but the plan's emitted `reviewed` field is
+  the resolver-computed scope, so unmodified extras never affect the output;
 - all required contract channels classified as `unchanged`, `changed`, or
   `notApplicable`;
 - concrete evidence such as normalized expansion snapshots, trybuild pass/fail
@@ -339,7 +342,11 @@ release metadata while classifying the remaining diff. Use `test-only` or
 `benchmark-only` when their support edits include dev dependencies; otherwise
 use `dev-dependency-only`. If nothing remains, use `release-metadata-only` when
 metadata changed, or `generated-artifact-only` when only generated files
-changed. Never accept a first release merely because `everReleased = false`;
+changed. Metadata takes precedence: `generated-artifact-only` is valid only when
+the sole changed files are a generated `README.md` or `CHANGELOG.md`. The
+resolver rejects it when a `Cargo.toml` (or any other path) also changed, so a
+lint or metadata edit beside a regenerated README is `release-metadata-only`.
+Never accept a first release merely because `everReleased = false`;
 its own diff must contain release-worthy packaged content.
 The resolver rejects `first-release` when every changed path is under `tests/`
 or `benches/`, is outside the package allowlist, or is only Cargo/release

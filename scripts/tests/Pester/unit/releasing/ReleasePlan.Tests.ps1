@@ -1132,8 +1132,100 @@ Describe 'resolve-plan.ps1 breaking selection evidence' {
     }
 }
 
-Describe 'resolve-plan.ps1 own-diff classification floor' {
-    It 'blocks a breaking classification when only doc comments changed' {
+Describe 'resolve-plan.ps1 decline-reason precedence' {
+    It 'rejects generated-artifact-only when a Cargo.toml also changed' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name pkg `
+                        -ModifiedFiles @('crates/pkg/Cargo.toml', 'crates/pkg/README.md')) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        pkg = New-SelectionDecision -Decision decline -Reason generated-artifact-only
+                    }
+                    classifications = @{ pkg = 'patch' }
+                }
+        } | Should -Throw "*only this crate's generated README.md or CHANGELOG.md*"
+    }
+
+    It 'accepts generated-artifact-only when only generated files changed' {
+        $plan = Invoke-ReleasePlan `
+            -Facts @(New-ReleaseFact -Name pkg `
+                    -ModifiedFiles @('crates/pkg/README.md', 'crates/pkg/CHANGELOG.md')) `
+            -Request @{
+                mode = 'changed'
+                tokens = @()
+                selectionDecisions = @{
+                    pkg = New-SelectionDecision -Decision decline -Reason generated-artifact-only
+                }
+                classifications = @{ pkg = 'patch' }
+            }
+
+        $plan.status | Should -Be 'resolved'
+        $plan.selectionDecisions[0].reason | Should -Be 'generated-artifact-only'
+    }
+
+    It 'rejects release-metadata-only when only a generated file changed' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name pkg `
+                        -ModifiedFiles @('crates/pkg/README.md')) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        pkg = New-SelectionDecision -Decision decline -Reason release-metadata-only
+                    }
+                    classifications = @{ pkg = 'patch' }
+                }
+        } | Should -Throw "*use 'generated-artifact-only'*"
+    }
+
+    It 'rejects generated-artifact-only for an out-of-package README path' {
+        {
+            Invoke-ReleasePlan `
+                -Facts @(New-ReleaseFact -Name pkg `
+                        -ModifiedFiles @('crates/other/README.md')) `
+                -Request @{
+                    mode = 'changed'
+                    tokens = @()
+                    selectionDecisions = @{
+                        pkg = New-SelectionDecision -Decision decline -Reason generated-artifact-only
+                    }
+                    classifications = @{ pkg = 'patch' }
+                }
+        } | Should -Throw "*only this crate's generated README.md or CHANGELOG.md*"
+    }
+}
+
+Describe 'resolve-plan.ps1 review-scope normalization' {
+    It 'emits the computed review scope, not a model-supplied superset' {
+        $facts = @(
+            New-ReleaseFact -Name core
+            New-ReleaseFact -Name macros -Version '0.4.0' -Deps core `
+                -MacroImplementationClosure core -MacroRuntimePartners runtime `
+                -ProcMacroOnly $true
+            New-ReleaseFact -Name runtime -Modified $false -WorkspaceModified $false
+        )
+        $plan = Invoke-ReleasePlan -Facts $facts -Request @{
+            mode = 'targeted'
+            tokens = @('core@breaking')
+            classifications = @{ core = 'patch' }
+            macroContracts = @{
+                macros = New-MacroContract -ReviewedPackages @('core', 'macros', 'runtime')
+            }
+        }
+
+        $plan.status | Should -Be 'resolved'
+        $macros = $plan.macroContracts | Where-Object package -eq macros
+        # 'runtime' is an unmodified partner: not in the required scope, so the
+        # emitted scope drops it even though the model listed it.
+        @($macros.reviewed) | Should -Be @('core', 'macros')
+    }
+}
+
+Describe 'resolve-plan.ps1 own-diff classification floor' {    It 'blocks a breaking classification when only doc comments changed' {
         $plan = Invoke-ReleasePlan `
             -Facts @(New-ReleaseFact -Name facade -RustImplementationChanged $false) `
             -Request @{
@@ -2033,7 +2125,8 @@ Describe 'resolve-plan.ps1 pins and validation' {
         $plan = Invoke-ReleasePlan `
             -Facts @(
                 New-ReleaseFact -Name accepted
-                New-ReleaseFact -Name declined
+                New-ReleaseFact -Name declined `
+                    -ModifiedFiles @('crates/declined/README.md')
             ) `
             -Request @{
                 mode = 'changed'
