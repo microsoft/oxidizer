@@ -17,7 +17,7 @@
 
 BeforeAll {
     . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
-    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\changelog.ps1')
 }
 
 Describe 'Write-Changelog cascade emission' {

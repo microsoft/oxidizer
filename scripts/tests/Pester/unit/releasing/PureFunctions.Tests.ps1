@@ -166,54 +166,6 @@ Describe 'Test-IsBreakingChange' {
     }
 }
 
-Describe 'Test-ValidVersion' {
-    It 'accepts SemVer triples' {
-        Test-ValidVersion -version '1.2.3' | Should -BeTrue
-        Test-ValidVersion -version '0.0.0' | Should -BeTrue
-        Test-ValidVersion -version '99.999.9999' | Should -BeTrue
-    }
-
-    It 'accepts empty string (optional)' {
-        Test-ValidVersion -version '' | Should -BeTrue
-        Test-ValidVersion -version $null | Should -BeTrue
-    }
-
-    It 'accepts SemVer 2.0 pre-release identifiers' {
-        Test-ValidVersion -version '1.2.3-alpha'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3-pre01'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3-rc.1'       | Should -BeTrue
-        Test-ValidVersion -version '1.0.0-alpha.beta' | Should -BeTrue
-    }
-
-    It 'accepts SemVer 2.0 build metadata' {
-        Test-ValidVersion -version '1.2.3+build'      | Should -BeTrue
-        Test-ValidVersion -version '1.2.3+exp.sha.5'  | Should -BeTrue
-        Test-ValidVersion -version '1.0.0-rc.1+meta'  | Should -BeTrue
-    }
-
-    It 'rejects short / long forms' {
-        Test-ValidVersion -version '1.2'    | Should -BeFalse
-        Test-ValidVersion -version '1'      | Should -BeFalse
-        Test-ValidVersion -version '1.2.3.4'| Should -BeFalse
-    }
-
-    It 'rejects non-numeric components' {
-        Test-ValidVersion -version '1.x.3' | Should -BeFalse
-    }
-
-    It 'rejects leading-zero numeric components (per SemVer 2.0)' {
-        Test-ValidVersion -version '01.2.3' | Should -BeFalse
-        Test-ValidVersion -version '1.02.3' | Should -BeFalse
-        Test-ValidVersion -version '1.2.03' | Should -BeFalse
-    }
-
-    It 'rejects malformed pre-release / build suffixes' {
-        Test-ValidVersion -version '1.2.3-'     | Should -BeFalse
-        Test-ValidVersion -version '1.2.3+'     | Should -BeFalse
-        Test-ValidVersion -version '1.2.3-01'   | Should -BeFalse  # leading zero in numeric pre-release identifier
-    }
-}
-
 Describe 'Split-SemanticVersion' {
     It 'splits a plain SemVer triple' {
         $parts = Split-SemanticVersion -version '1.2.3'
@@ -243,35 +195,6 @@ Describe 'Split-SemanticVersion' {
         { Split-SemanticVersion -version '1.2'     } | Should -Throw '*Invalid SemVer*'
         { Split-SemanticVersion -version '01.2.3'  } | Should -Throw '*Invalid SemVer*'
         { Split-SemanticVersion -version 'bogus'   } | Should -Throw '*Invalid SemVer*'
-    }
-}
-
-Describe 'Test-ValidPackageName' {
-    It 'accepts simple alpha names' {
-        Test-ValidPackageName -packageName 'foo'   | Should -BeTrue
-        Test-ValidPackageName -packageName 'foo_bar' | Should -BeTrue
-        Test-ValidPackageName -packageName 'foo-bar' | Should -BeTrue
-    }
-
-    It 'accepts digits inside' {
-        Test-ValidPackageName -packageName 'crate1' | Should -BeTrue
-        Test-ValidPackageName -packageName '1crate' | Should -BeTrue
-    }
-
-    It 'rejects empty and overly long names' {
-        Test-ValidPackageName -packageName '' | Should -BeFalse
-        Test-ValidPackageName -packageName ('a' * 65) | Should -BeFalse
-    }
-
-    It 'rejects edge underscores/hyphens' {
-        Test-ValidPackageName -packageName '-foo' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo-' | Should -BeFalse
-    }
-
-    It 'rejects whitespace and special chars' {
-        Test-ValidPackageName -packageName 'foo bar' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo.bar' | Should -BeFalse
-        Test-ValidPackageName -packageName 'foo/bar' | Should -BeFalse
     }
 }
 
@@ -312,30 +235,6 @@ Describe 'ConvertFrom-SemverChecksOutput' {
     }
 }
 
-Describe 'Get-StrongerChangeType' {
-    It 'returns the higher-ranked change type' {
-        Get-StrongerChangeType 'patch' 'breaking'     | Should -Be 'breaking'
-        Get-StrongerChangeType 'breaking' 'patch'     | Should -Be 'breaking'
-        Get-StrongerChangeType 'patch' 'non-breaking' | Should -Be 'non-breaking'
-        Get-StrongerChangeType 'non-breaking' 'patch' | Should -Be 'non-breaking'
-    }
-
-    It 'treats none as below patch' {
-        Get-StrongerChangeType 'patch' 'none' | Should -Be 'patch'
-        Get-StrongerChangeType 'none' 'patch' | Should -Be 'patch'
-        Get-StrongerChangeType 'none' 'none' | Should -Be 'none'
-    }
-
-    It 'treats unknown/empty inputs as none (rank 0)' {
-        Get-StrongerChangeType 'breaking' '' | Should -Be 'breaking'
-        Get-StrongerChangeType $null 'patch' | Should -Be 'patch'
-    }
-
-    It 'returns the first argument on a tie' {
-        Get-StrongerChangeType 'non-breaking' 'non-breaking' | Should -Be 'non-breaking'
-    }
-}
-
 Describe 'Get-PackageFolderForPath' {
     It 'returns package folder for files under crates/<x>/' {
         Get-PackageFolderForPath -Path 'crates/foo/src/lib.rs' | Should -Be 'foo'
@@ -361,7 +260,7 @@ Describe 'Get-PackageFolderForPath' {
 
 Describe 'Sort-KeysByPreferredOrder' {
     BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\changelog.ps1')
     }
 
     It 'places preferred keys first in declared order' {
@@ -387,7 +286,7 @@ Describe 'Sort-KeysByPreferredOrder' {
 
 Describe 'Format-ConventionalCommits' {
     BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\changelog.ps1')
     }
 
     It 'returns an empty array for no commits' {
@@ -458,74 +357,6 @@ Describe 'Format-ConventionalCommits' {
         $msgs = @('totally unstructured commit message')
         $r = Format-ConventionalCommits -rawCommitMessages $msgs -prBaseUrl ''
         ($r -join "`n") | Should -Match 'totally unstructured commit message'
-    }
-}
-
-Describe 'Reduce-DependencyChains' {
-    It 'returns an empty array when given no chains' {
-        $out = Reduce-DependencyChains -Chains @()
-        @($out).Count | Should -Be 0
-    }
-
-    It 'keeps a single chain unchanged' {
-        $out = Reduce-DependencyChains -Chains @(, @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'foo|bar|baz'
-    }
-
-    It 'deduplicates identical chains' {
-        $out = Reduce-DependencyChains -Chains @(@('a', 'b'), @('a', 'b'))
-        @($out).Count | Should -Be 1
-    }
-
-    It 'drops a chain that is a strict suffix of another chain' {
-        # 'bar -> baz' is fully contained as the tail of 'foo -> bar -> baz'.
-        $out = Reduce-DependencyChains -Chains @(@('bar', 'baz'), @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'foo|bar|baz'
-    }
-
-    It 'preserves multiple non-subsuming chains with different roots and intermediates' {
-        $out = Reduce-DependencyChains -Chains @(
-            @('foo', 'bar', 'baz'),
-            @('quu', 'nuu', 'baz'),
-            @('lurk', 'baz')
-        )
-        @($out).Count | Should -Be 3
-        # Output is sorted alphabetically by joined chain text.
-        ($out | ForEach-Object { $_ -join ' -> ' }) -join '|' |
-            Should -Be 'foo -> bar -> baz|lurk -> baz|quu -> nuu -> baz'
-    }
-
-    It 'does NOT drop a shorter chain that is NOT a tail-aligned suffix' {
-        # 'b -> c' is not a suffix of 'a -> b -> d' (last element differs).
-        $out = Reduce-DependencyChains -Chains @(@('a', 'b', 'd'), @('b', 'c'))
-        @($out).Count | Should -Be 2
-    }
-
-    It 'does NOT drop a shorter chain that overlaps the head, not the tail, of a longer chain' {
-        # 'foo -> bar' overlaps the head of 'foo -> bar -> baz' but is not a suffix.
-        $out = Reduce-DependencyChains -Chains @(@('foo', 'bar'), @('foo', 'bar', 'baz'))
-        @($out).Count | Should -Be 2
-    }
-
-    It 'collapses several chains into one when all are nested suffixes' {
-        $out = Reduce-DependencyChains -Chains @(
-            @('d'),
-            @('c', 'd'),
-            @('b', 'c', 'd'),
-            @('a', 'b', 'c', 'd')
-        )
-        @($out).Count | Should -Be 1
-        $out[0] -join '|' | Should -Be 'a|b|c|d'
-    }
-
-    It 'returns chains in stable alphabetical order regardless of input order' {
-        $a = Reduce-DependencyChains -Chains @(@('z', 'baz'), @('a', 'baz'))
-        $b = Reduce-DependencyChains -Chains @(@('a', 'baz'), @('z', 'baz'))
-        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' |
-            Should -Be (($b | ForEach-Object { $_ -join ' -> ' }) -join '|')
-        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' | Should -Be 'a -> baz|z -> baz'
     }
 }
 
@@ -684,6 +515,7 @@ Describe 'Test-PackageAllowlistNamesTarget' {
             param($Allowed, $DepAliases = @{})
             [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
         }
+
     }
 
     It 'reports a match when an entry is rooted at the target package' {
@@ -762,6 +594,19 @@ Describe 'Test-PackageAllowlistNamesTarget' {
                     -TargetPackageName 'recoverable' | Should -BeTrue -Because "'$pattern' may expand to the target"
             }
         }
+
+        It 'ignores wildcard roots when concrete evidence is required' {
+            foreach ($allowed in @(
+                    @('*', 'recoverable::Recovery'),
+                    @('recoverable::Recovery', '*')
+                )) {
+                Test-PackageAllowlistNamesTarget `
+                    -Dependent (New-Dependent -Allowed $allowed) `
+                    -TargetPackageName 'recoverable' `
+                    -WildcardIsEvidence $false |
+                    Should -BeTrue
+            }
+        }
     }
 
     It 'reports no match for an explicit empty allowlist' {
@@ -772,5 +617,307 @@ Describe 'Test-PackageAllowlistNamesTarget' {
     It 'tolerates a package record that predates the DepAliases field' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('recoverable::Recovery') }
         Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+    }
+}
+
+Describe 'Test-PackageAllowlistNamesDirectTarget' {
+    It 'requires positive allowlist evidence' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepAliases = @{}
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'recognizes a renamed proc-macro dependency' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('derive_alias::derive_item')
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'does not accept the hidden package name on a renamed dependency' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeFalse
+    }
+
+    It 'accepts every nameable root when renamed and unrenamed edges coexist' {
+        $dependent = [pscustomobject]@{
+            AllowedExternalTypes = @('macro_crate::derive_item')
+            DepRoots = @{ macro_crate = @('derive_alias', 'macro_crate') }
+            DepAliases = @{ macro_crate = @('derive_alias') }
+        }
+
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+
+        $dependent.AllowedExternalTypes = @('derive_alias::derive_item')
+        Test-PackageAllowlistNamesDirectTarget `
+            -Dependent $dependent `
+            -TargetPackageName 'macro-crate' |
+            Should -BeTrue
+    }
+
+    It 'does not infer macro publication from missing or malformed metadata' {
+        foreach ($allowed in @($null, @(), @($null), @(''), @('*'))) {
+            $dependent = [pscustomobject]@{
+                AllowedExternalTypes = $allowed
+                DepAliases = @{}
+            }
+
+            Test-PackageAllowlistNamesDirectTarget `
+                -Dependent $dependent `
+                -TargetPackageName 'macro-crate' |
+                Should -BeFalse
+        }
+    }
+}
+
+Describe 'Get-CargoCompatibilityLine' {
+    It 'returns the leading non-zero component span' {
+        Get-CargoCompatibilityLine -Version '1.4.2' | Should -Be '1'
+        Get-CargoCompatibilityLine -Version '2.0.0' | Should -Be '2'
+        Get-CargoCompatibilityLine -Version '0.5.3' | Should -Be '0.5'
+        Get-CargoCompatibilityLine -Version '0.0.3' | Should -Be '0.0.3'
+        Get-CargoCompatibilityLine -Version '0' | Should -Be '0'
+        Get-CargoCompatibilityLine -Version '0.0' | Should -Be '0.0'
+    }
+
+    It 'ignores pre-release and build metadata' {
+        Get-CargoCompatibilityLine -Version '1.2.3-beta.1' | Should -Be '1'
+        Get-CargoCompatibilityLine -Version '0.5.0+build.7' | Should -Be '0.5'
+    }
+
+    It 'returns null for versions it cannot read' {
+        Get-CargoCompatibilityLine -Version '1.x' | Should -BeNullOrEmpty
+        Get-CargoCompatibilityLine -Version '*' | Should -BeNullOrEmpty
+        Get-CargoCompatibilityLine -Version '' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-CargoRequirementLines' {
+    It 'reads caret, bare, tilde and exact requirements' {
+        Get-CargoRequirementLines -Requirement '^3.0.2' | Should -Be @('3')
+        Get-CargoRequirementLines -Requirement '3.0.2' | Should -Be @('3')
+        Get-CargoRequirementLines -Requirement '~1.2.3' | Should -Be @('1')
+        Get-CargoRequirementLines -Requirement '=0.5.1' | Should -Be @('0.5')
+    }
+
+    It 'returns null for requirements whose line cannot be decided' {
+        foreach ($requirement in @('*', '1.*', '>=1, <3', '>1.0', 'x.y', '', $null)) {
+            Get-CargoRequirementLines -Requirement $requirement | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'accepts comma-separated comparators only when they agree on one line' {
+        Get-CargoRequirementLines -Requirement '^1.2, ^1.4' | Should -Be @('1')
+        Get-CargoRequirementLines -Requirement '^1.2, ^2.0' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-NormalizedCargoRequirement' {
+    It 'spells a bare version the way cargo does' {
+        Get-NormalizedCargoRequirement -Requirement '3.0.2' | Should -Be '^3.0.2'
+        Get-NormalizedCargoRequirement -Requirement ' 3.0.2 ' | Should -Be '^3.0.2'
+        Get-NormalizedCargoRequirement -Requirement '^3.0.2' | Should -Be '^3.0.2'
+    }
+
+    It 'is idempotent over multi-declaration joins' {
+        $joined = Join-CargoRequirements -Requirements @('0.2', '^0.4.0')
+        Get-NormalizedCargoRequirement -Requirement $joined | Should -Be $joined
+    }
+
+    It 'returns null for an absent requirement' {
+        Get-NormalizedCargoRequirement -Requirement $null | Should -BeNullOrEmpty
+        Get-NormalizedCargoRequirement -Requirement '  ' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Join-CargoRequirements' {
+    It 'normalizes and orders the declarations deterministically' {
+        Join-CargoRequirements -Requirements @('^0.4.0', '0.2') |
+            Should -Be (Join-CargoRequirements -Requirements @('0.2', '^0.4.0'))
+    }
+
+    It 'collapses repeated declarations of one requirement' {
+        Join-CargoRequirements -Requirements @('1.0', '^1.0') | Should -Be '^1.0'
+    }
+
+    It 'produces a requirement no grammar admits when declarations disagree' {
+        $joined = Join-CargoRequirements -Requirements @('0.2', '0.4.0')
+        Get-CargoRequirementLines -Requirement $joined | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Test-CargoRequirementBreaking' {
+    It 'is breaking when the compatibility line moves' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^2.0.111' -CurrentRequirement '^3.0.2' |
+            Should -BeTrue
+        Test-CargoRequirementBreaking -BaselineRequirement '^0.5.1' -CurrentRequirement '^0.6.0' |
+            Should -BeTrue
+    }
+
+    It 'is not breaking within one compatibility line' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^2.0.111' -CurrentRequirement '^2.9.0' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '2.0.111' -CurrentRequirement '^2.0.111' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '^0.5.1' -CurrentRequirement '^0.5.9' |
+            Should -BeFalse
+    }
+
+    It 'treats a newly declared dependency as non-breaking and a dropped one as breaking' {
+        Test-CargoRequirementBreaking -BaselineRequirement $null -CurrentRequirement '^1.0' |
+            Should -BeFalse
+        Test-CargoRequirementBreaking -BaselineRequirement '^1.0' -CurrentRequirement $null |
+            Should -BeTrue
+    }
+
+    It 'fails closed on a requirement it cannot read' {
+        Test-CargoRequirementBreaking -BaselineRequirement '^1.0' -CurrentRequirement '*' |
+            Should -BeTrue
+        Test-CargoRequirementBreaking -BaselineRequirement '>=1, <3' -CurrentRequirement '^1.0' |
+            Should -BeTrue
+    }
+}
+
+Describe 'Get-CargoManifestDependencies' {
+    It 'resolves workspace inheritance from the root requirements' {
+        $root = @(
+            '[workspace.dependencies]'
+            'syn = { version = "2.0.111" }'
+            'quote = "1.0.42"'
+        ) -join "`n"
+        $package = @(
+            '[package]'
+            'name = "alpha"'
+            ''
+            '[dependencies]'
+            'syn = { workspace = true, features = ['
+            '    "full",'
+            '] }'
+            'quote.workspace = true'
+        ) -join "`n"
+
+        $requirements = Get-CargoWorkspaceRequirements -ManifestText $root
+        $deps = Get-CargoManifestDependencies `
+            -ManifestText $package `
+            -WorkspaceRequirements $requirements
+
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+        $deps['quote'].Requirement | Should -Be '^1.0.42'
+    }
+
+    It 'drops an inherited dependency the workspace does not declare' {
+        $package = @(
+            '[dependencies]'
+            'syn = { workspace = true }'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys).Count | Should -Be 0
+    }
+
+    It 'never reads dev-dependencies' {
+        $package = @(
+            '[dependencies]'
+            'serde = "1.0"'
+            ''
+            '[dev-dependencies]'
+            'proptest = "1.5"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('serde')
+    }
+
+    It 'records normal and build declarations of one dependency together' {
+        $package = @(
+            '[dependencies]'
+            'syn = "2.0.111"'
+            ''
+            '[build-dependencies]'
+            'syn = "2.0.111"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        $deps['syn'].Kinds | Should -Be @('build', 'normal')
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+    }
+
+    It 'reads target-specific and sub-table declarations' {
+        $package = @(
+            "[target.'cfg(unix)'.dependencies]"
+            'libc = "0.2.178"'
+            ''
+            '[dependencies.serde]'
+            'version = "1.0.200"'
+            'features = ["derive"]'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        $deps['libc'].Requirement | Should -Be '^0.2.178'
+        $deps['serde'].Requirement | Should -Be '^1.0.200'
+    }
+
+    It 'keys a renamed dependency by its real package name' {
+        $package = @(
+            '[dependencies]'
+            'allocator-api2-02 = { package = "allocator-api2", version = "0.2" }'
+            ''
+            '[dependencies.syn2]'
+            'package = "syn"'
+            'version = "2.0.111"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Sort-Object | Should -Be @('allocator_api2', 'syn')
+        $deps['syn'].Requirement | Should -Be '^2.0.111'
+    }
+
+    It 'ignores comments and path-only declarations' {
+        $package = @(
+            '[dependencies]'
+            '# syn = "9.9.9"'
+            'sibling = { path = "../sibling" }'
+            'serde = "1.0" # trailing'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('serde')
+        $deps['serde'].Requirement | Should -Be '^1.0'
+    }
+
+    It 'normalizes dependency names ordinally' {
+        $package = @(
+            '[dependencies]'
+            'proc-macro2 = "1.0.103"'
+        ) -join "`n"
+
+        $deps = Get-CargoManifestDependencies -ManifestText $package
+        @($deps.Keys) | Should -Be @('proc_macro2')
+    }
+
+    It 'returns an empty map for an absent manifest' {
+        $deps = Get-CargoManifestDependencies -ManifestText ''
+        @($deps.Keys).Count | Should -Be 0
     }
 }

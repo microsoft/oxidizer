@@ -7,8 +7,7 @@
 
 .DESCRIPTION
     Provides Get-OxiRepoRoot for deterministic path resolution from any
-    test file. Test files dot-source the shared script libraries
-    (scripts/lib/release-flow.ps1 etc.) directly using
+    test file. Test files dot-source the shared script libraries directly using
     Join-Path (Get-OxiRepoRoot) 'scripts\lib\<file>.ps1'.
 
     Also provides Get-BytesBufIoAllowlist, the one canonical copy of a real

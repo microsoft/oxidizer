@@ -125,21 +125,6 @@ function Get-FileLineEnding {
     return "`n"
 }
 
-# --- VERSION HELPERS ---
-
-function Test-ValidPackageName {
-    param([string]$packageName)
-    return $packageName -match '^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$' -and $packageName.Length -le 64
-}
-
-function Test-ValidVersion {
-    param([string]$version)
-    if ([string]::IsNullOrEmpty($version)) {
-        return $true
-    }
-    return $script:SemanticVersionRegex.IsMatch($version)
-}
-
 # Strict SemVer 2.0 splitter — validates with $script:SemanticVersionRegex and
 # returns a hashtable with keys Major/Minor/Patch (all [int]) plus PreRelease
 # and Build (strings, possibly empty). Throws on invalid input. Pre-release
@@ -190,8 +175,8 @@ function Compare-SemanticVersions {
 #
 #   * CHANGE TYPE — the semantic intent of a release: 'breaking' /
 #     'non-breaking' / 'patch'. This is what the user thinks about; the change
-#     type for each released package is supplied in the `-Packages` argument
-#     to `release-packages.ps1` (e.g. `mypkg@breaking`, `mypkg@nonbreaking`).
+#     type for each released package is supplied by the release skill
+#     (e.g. `mypkg@breaking`, `mypkg@nonbreaking`).
 #     Internally the same vocabulary is used for the `$changeType` enum (and
 #     for `-ChangeType` parameters throughout the release tooling).
 #
@@ -207,8 +192,7 @@ function Compare-SemanticVersions {
 #   - For 0.0.x          : every change -> 0.0.(x+1) (every change is breaking).
 #
 # DO NOT leak the internal `breaking|non-breaking|patch` enum directly into
-# user-visible output without a translation step — use `Get-ChangeTypeLabel`
-# in release-flow.ps1 to get a user-friendly noun phrase.
+# user-visible output without translating `non-breaking` to `nonbreaking`.
 function Get-NextVersion {
     param(
         [string]$currentVersion,
@@ -300,17 +284,412 @@ function Test-IsBreakingChange {
 # compare against) and ranks below every real change type.
 $script:ChangeTypeRank = @{ 'none' = 0; 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
 
-# Returns whichever of two change types is the stronger (higher-ranked). Unknown
-# or empty inputs are treated as 'none' (rank 0). Ties return $A.
-function Get-StrongerChangeType {
-    param(
-        [AllowNull()][AllowEmptyString()][string]$A,
-        [AllowNull()][AllowEmptyString()][string]$B
+# The Cargo compatibility line a concrete version belongs to: the leading
+# non-zero component and everything above it, which is exactly the span a caret
+# requirement admits. `1.4.2` and `1.9.0` share line `1`; `0.5.3` and `0.5.9`
+# share line `0.5`; `0.0.3` is its own line. Two requirements pinned to
+# different lines can never resolve to the same crate version, so a dependency
+# whose line moved has a different type identity for every consumer that names
+# its types.
+function Get-CargoCompatibilityLine {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Version)
+
+    $core = ($Version.Trim() -split '[-+]', 2)[0]
+    $parts = @($core -split '\.')
+    $numbers = New-Object 'System.Collections.Generic.List[int]'
+    foreach ($part in $parts) {
+        $value = 0
+        if (-not [int]::TryParse($part.Trim(), [ref]$value)) { return $null }
+        $numbers.Add($value) | Out-Null
+    }
+    if ($numbers.Count -eq 0) { return $null }
+
+    if ($numbers[0] -ne 0) { return $numbers[0].ToString() }
+    if ($numbers.Count -eq 1) { return '0' }
+    if ($numbers[1] -ne 0) { return "0.$($numbers[1])" }
+    if ($numbers.Count -eq 2) { return '0.0' }
+    return "0.0.$($numbers[2])"
+}
+
+# The set of compatibility lines a Cargo requirement admits, or $null when the
+# requirement is not understood well enough to answer. $null is a deliberate
+# "unknown" that callers must fail closed on: guessing here would ship a
+# dependency major bump as a compatible release.
+#
+# Comma-separated comparators are an AND, so they describe one line only when
+# every comparator names it. A wildcard, an unbounded range, or a mix of lines
+# is unknown.
+function Get-CargoRequirementLines {
+    param([AllowNull()][AllowEmptyString()][string]$Requirement)
+
+    if ([string]::IsNullOrWhiteSpace($Requirement)) { return $null }
+
+    $lines = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
     )
-    $ra = $script:ChangeTypeRank[$A]; if ($null -eq $ra) { $ra = 0 }
-    $rb = $script:ChangeTypeRank[$B]; if ($null -eq $rb) { $rb = 0 }
-    if ($rb -gt $ra) { return $B }
-    return $A
+    foreach ($comparator in @($Requirement -split ',')) {
+        $text = $comparator.Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) { continue }
+
+        $match = [regex]::Match($text, '^(\^|~|=|>=|<=|>|<)?\s*(.+)$')
+        if (-not $match.Success) { return $null }
+        $operator = $match.Groups[1].Value
+        $version = $match.Groups[2].Value.Trim()
+        # `*`, `1.*` and friends span whatever the registry offers, and an
+        # inequality bound names a line it deliberately excludes.
+        if ($operator -in @('>=', '>', '<=', '<')) { return $null }
+        if ($version.Contains('*') -or $version.ToLowerInvariant().Contains('x')) {
+            return $null
+        }
+
+        $line = Get-CargoCompatibilityLine -Version $version
+        if ($null -eq $line) { return $null }
+        [void]$lines.Add($line)
+    }
+
+    if ($lines.Count -ne 1) { return $null }
+    return @($lines | Sort-Object)
+}
+
+# Cargo's own spelling of a requirement: a bare version means caret. Comparing
+# raw strings would report a change between a manifest's `3.0.2` and cargo
+# metadata's `^3.0.2`, which are the same requirement.
+function Get-NormalizedCargoRequirement {
+    param([AllowNull()][AllowEmptyString()][string]$Requirement)
+
+    if ([string]::IsNullOrWhiteSpace($Requirement)) { return $null }
+
+    # Idempotent over the ' || ' join below, so a requirement that has already
+    # been through Join-CargoRequirements normalizes to itself rather than to a
+    # second, differently spelled form.
+    $alternatives = @(
+        foreach ($alternative in ($Requirement -split '\|\|')) {
+            $terms = @(
+                foreach ($comparator in @($alternative -split ',')) {
+                    $text = $comparator.Trim()
+                    if ([string]::IsNullOrWhiteSpace($text)) { continue }
+                    if ([regex]::IsMatch($text, '^[0-9]')) {
+                        "^$($text -replace '\s+', '')"
+                    } else {
+                        $text -replace '\s+', ''
+                    }
+                }
+            )
+            if ($terms.Count -eq 0) { continue }
+            ($terms -join ', ')
+        }
+    )
+    if ($alternatives.Count -eq 0) { return $null }
+    return ($alternatives -join ' || ')
+}
+
+# Whether an external dependency requirement moved off the compatibility line it
+# was released against. Anything the requirement grammar above cannot decide is
+# breaking: an unreadable requirement change must not be able to ship a foreign
+# type-identity change as a patch.
+function Test-CargoRequirementBreaking {
+    param(
+        [AllowNull()][AllowEmptyString()][string]$BaselineRequirement,
+        [AllowNull()][AllowEmptyString()][string]$CurrentRequirement
+    )
+
+    $hasBaseline = -not [string]::IsNullOrWhiteSpace($BaselineRequirement)
+    $hasCurrent = -not [string]::IsNullOrWhiteSpace($CurrentRequirement)
+    # A newly declared dependency adds public surface; it cannot invalidate a
+    # type identity the released version never had.
+    if (-not $hasBaseline) { return $false }
+    # A dropped dependency removes whatever its types described.
+    if (-not $hasCurrent) { return $true }
+    if ($BaselineRequirement.Trim() -ceq $CurrentRequirement.Trim()) { return $false }
+
+    $baselineLines = Get-CargoRequirementLines -Requirement $BaselineRequirement
+    $currentLines = Get-CargoRequirementLines -Requirement $CurrentRequirement
+    if ($null -eq $baselineLines -or $null -eq $currentLines) { return $true }
+
+    foreach ($line in $baselineLines) {
+        if ($currentLines -notcontains $line) { return $true }
+    }
+    return $false
+}
+
+# Splits manifest text into logical lines: a physical line, or the run of lines
+# an unterminated inline table or array spans. Multi-line dependency entries are
+# ordinary in this workspace (`syn = { workspace = true, features = [\n ... ] }`)
+# and a per-physical-line reader would see only fragments of them.
+function ConvertTo-CargoManifestLogicalLines {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText)
+
+    $logical = New-Object 'System.Collections.Generic.List[string]'
+    $buffer = $null
+    $depth = 0
+    foreach ($rawLine in ($ManifestText -split "`r?`n")) {
+        $line = $rawLine
+        if ($null -eq $buffer -and $line.Trim() -match '^\[[^\[\]]*\]$|^\[\[[^\[\]]*\]\]$') {
+            $logical.Add($line.Trim()) | Out-Null
+            continue
+        }
+
+        $inString = $false
+        $quote = ''
+        $escaped = $false
+        $cut = -1
+        for ($i = 0; $i -lt $line.Length; $i++) {
+            $character = $line[$i]
+            if ($inString) {
+                if ($escaped) { $escaped = $false; continue }
+                if ($character -eq '\') { $escaped = $true; continue }
+                if ($character -eq $quote) { $inString = $false }
+                continue
+            }
+            switch -CaseSensitive ($character) {
+                '"' { $inString = $true; $quote = '"' }
+                "'" { $inString = $true; $quote = "'" }
+                '{' { $depth++ }
+                '[' { $depth++ }
+                '}' { if ($depth -gt 0) { $depth-- } }
+                ']' { if ($depth -gt 0) { $depth-- } }
+                '#' { $cut = $i }
+            }
+            if ($cut -ge 0) { break }
+        }
+        if ($cut -ge 0) { $line = $line.Substring(0, $cut) }
+
+        if ($null -eq $buffer) {
+            $buffer = $line.Trim()
+        } else {
+            $buffer = "$buffer $($line.Trim())"
+        }
+        if ($depth -le 0) {
+            $depth = 0
+            if (-not [string]::IsNullOrWhiteSpace($buffer)) {
+                $logical.Add($buffer.Trim()) | Out-Null
+            }
+            $buffer = $null
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($buffer)) {
+        $logical.Add($buffer.Trim()) | Out-Null
+    }
+    return $logical.ToArray()
+}
+
+# Pulls the version requirement, workspace-inheritance flag and `package = "..."`
+# rename out of one dependency value, in any of the forms Cargo accepts:
+# `"1.2"`, `{ version = "1.2" }`, `{ workspace = true }`.
+function ConvertFrom-CargoDependencyValue {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+
+    $text = $Value.Trim()
+    $result = [pscustomobject]@{
+        Requirement = $null
+        Inherited   = $false
+        Package     = $null
+        HasPath     = $false
+    }
+    if ($text.StartsWith('"', [StringComparison]::Ordinal) -or
+        $text.StartsWith("'", [StringComparison]::Ordinal)) {
+        $result.Requirement = $text.Trim('"', "'")
+        return $result
+    }
+
+    $version = [regex]::Match($text, '(?<![\w-])version\s*=\s*"([^"]*)"')
+    if ($version.Success) { $result.Requirement = $version.Groups[1].Value }
+    if ([regex]::IsMatch($text, '(?<![\w-])workspace\s*=\s*true')) {
+        $result.Inherited = $true
+    }
+    $package = [regex]::Match($text, '(?<![\w-])package\s*=\s*"([^"]*)"')
+    if ($package.Success) { $result.Package = $package.Groups[1].Value }
+    if ([regex]::IsMatch($text, '(?<![\w-])path\s*=\s*"')) { $result.HasPath = $true }
+    return $result
+}
+
+# Reads dependency declarations out of a Cargo manifest's text at some revision.
+# Cargo metadata is the authority for the working tree, but a released baseline
+# exists only as manifest text in Git history, where no cargo invocation can
+# reach it without materialising a whole workspace checkout.
+#
+# -Section selects which tables are read: 'package' walks
+# [dependencies] / [build-dependencies] plus their target-specific and
+# sub-table forms, and 'workspace' walks [workspace.dependencies]. Dev
+# dependencies are never read: they are not part of the published manifest.
+#
+# Returns an ordered map of normalized dependency name -> requirement record.
+function Get-CargoManifestDependencies {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText,
+        [ValidateSet('package', 'workspace')][string]$Section = 'package',
+        [hashtable]$WorkspaceRequirements
+    )
+
+    $sectionPattern = if ($Section -eq 'workspace') {
+        '^workspace\.dependencies(?:\.(?<entry>.+))?$'
+    } else {
+        '^(?:target\..+\.)?(?<kind>dependencies|build-dependencies)(?:\.(?<entry>.+))?$'
+    }
+
+    $entries = [ordered]@{}
+    function Add-DependencyObservation {
+        param(
+            [Parameter(Mandatory = $true)][string]$Key,
+            [Parameter(Mandatory = $true)][string]$Kind,
+            [Parameter(Mandatory = $true)]$Parsed
+        )
+
+        if ($Parsed.HasPath -and [string]::IsNullOrWhiteSpace($Parsed.Requirement) -and
+            -not $Parsed.Inherited) {
+            return
+        }
+        $name = if (-not [string]::IsNullOrWhiteSpace($Parsed.Package)) {
+            $Parsed.Package
+        } else {
+            $Key
+        }
+        $normalized = $name.Replace('-', '_')
+        $requirement = $Parsed.Requirement
+        if ($Parsed.Inherited) {
+            $requirement = $null
+            if ($null -ne $WorkspaceRequirements -and
+                $WorkspaceRequirements.ContainsKey($normalized)) {
+                $requirement = $WorkspaceRequirements[$normalized]
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($requirement)) { return }
+
+        if (-not $entries.Contains($normalized)) {
+            $entries[$normalized] = [pscustomobject]@{
+                Name         = $normalized
+                Requirements = New-Object 'System.Collections.Generic.List[string]'
+                Kinds        = New-Object 'System.Collections.Generic.List[string]'
+            }
+        }
+        $record = $entries[$normalized]
+        if (-not $record.Requirements.Contains($requirement)) {
+            $record.Requirements.Add($requirement) | Out-Null
+        }
+        if (-not $record.Kinds.Contains($Kind)) { $record.Kinds.Add($Kind) | Out-Null }
+    }
+
+    $currentSection = ''
+    $pendingEntry = $null
+    foreach ($line in ConvertTo-CargoManifestLogicalLines -ManifestText $ManifestText) {
+        $header = [regex]::Match($line, '^\[\s*([^\]]+?)\s*\]$')
+        if ($header.Success) {
+            if ($null -ne $pendingEntry) {
+                Add-DependencyObservation `
+                    -Key $pendingEntry.Key `
+                    -Kind $pendingEntry.Kind `
+                    -Parsed (ConvertFrom-CargoDependencyValue -Value "{ $($pendingEntry.Fields -join ', ') }")
+                $pendingEntry = $null
+            }
+            $currentSection = $header.Groups[1].Value.Trim()
+            $match = [regex]::Match($currentSection, $sectionPattern)
+            if ($match.Success -and $match.Groups['entry'].Success) {
+                # `[dependencies.syn]` collects its fields across the following
+                # lines, so the rename and the version are read together.
+                $pendingEntry = [pscustomobject]@{
+                    Key    = $match.Groups['entry'].Value.Trim().Trim('"', "'")
+                    Kind   = if ($Section -eq 'workspace') {
+                        'normal'
+                    } elseif ($match.Groups['kind'].Value -eq 'build-dependencies') {
+                        'build'
+                    } else {
+                        'normal'
+                    }
+                    Fields = New-Object 'System.Collections.Generic.List[string]'
+                }
+            }
+            continue
+        }
+
+        $assignment = [regex]::Match($line, '^([^=]+?)\s*=\s*(.+)$')
+        if (-not $assignment.Success) { continue }
+        $key = $assignment.Groups[1].Value.Trim().Trim('"', "'")
+        $value = $assignment.Groups[2].Value.Trim()
+
+        if ($null -ne $pendingEntry) {
+            $pendingEntry.Fields.Add("$key = $value") | Out-Null
+            continue
+        }
+
+        $match = [regex]::Match($currentSection, $sectionPattern)
+        if (-not $match.Success -or $match.Groups['entry'].Success) { continue }
+        $kind = if ($Section -eq 'workspace') {
+            'normal'
+        } elseif ($match.Groups['kind'].Value -eq 'build-dependencies') {
+            'build'
+        } else {
+            'normal'
+        }
+
+        $dotted = $key.IndexOf('.', [StringComparison]::Ordinal)
+        if ($dotted -gt 0) {
+            # `syn.workspace = true` and `syn.version = "1"` are the dotted-key
+            # spelling of the inline table.
+            $depName = $key.Substring(0, $dotted).Trim().Trim('"', "'")
+            $field = $key.Substring($dotted + 1).Trim()
+            $parsed = ConvertFrom-CargoDependencyValue -Value "{ $field = $value }"
+            Add-DependencyObservation -Key $depName -Kind $kind -Parsed $parsed
+            continue
+        }
+
+        $parsed = ConvertFrom-CargoDependencyValue -Value $value
+        Add-DependencyObservation -Key $key -Kind $kind -Parsed $parsed
+    }
+    if ($null -ne $pendingEntry) {
+        Add-DependencyObservation `
+            -Key $pendingEntry.Key `
+            -Kind $pendingEntry.Kind `
+            -Parsed (ConvertFrom-CargoDependencyValue -Value "{ $($pendingEntry.Fields -join ', ') }")
+    }
+
+    $result = [ordered]@{}
+    foreach ($name in @($entries.Keys | Sort-Object { $_ } -CaseSensitive)) {
+        $record = $entries[$name]
+        $kinds = [string[]]@($record.Kinds.ToArray())
+        [Array]::Sort($kinds, [StringComparer]::Ordinal)
+        $result[$name] = [pscustomobject]@{
+            Name        = $name
+            Requirement = Join-CargoRequirements -Requirements ([string[]]$record.Requirements.ToArray())
+            Kinds       = $kinds
+        }
+    }
+    return $result
+}
+
+# Flattens the requirement records above into `name -> requirement string`,
+# which is what [workspace.dependencies] inheritance needs.
+function Get-CargoWorkspaceRequirements {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$ManifestText)
+
+    $table = @{}
+    $entries = Get-CargoManifestDependencies `
+        -ManifestText $ManifestText `
+        -Section 'workspace'
+    foreach ($name in $entries.Keys) {
+        $requirement = $entries[$name].Requirement
+        if ([string]::IsNullOrWhiteSpace($requirement)) { continue }
+        $table[$name] = $requirement
+    }
+    return $table
+}
+
+# One package may declare the same dependency more than once -- a normal and a
+# build edge, or per-target variants. Joining the distinct requirements keeps a
+# single deterministic entry per dependency; a package that really does declare
+# two different requirements yields a string no requirement grammar accepts,
+# which the breaking rule then treats as unknown and fails closed on.
+function Join-CargoRequirements {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Requirements)
+
+    $distinct = [string[]]@(
+        $Requirements |
+            ForEach-Object { Get-NormalizedCargoRequirement -Requirement $_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($distinct.Count -eq 0) { return $null }
+    [Array]::Sort($distinct, [StringComparer]::Ordinal)
+    return ($distinct -join ' || ')
 }
 
 # Reads the [package] table's `version = "..."` from a Cargo.toml on disk.
@@ -467,7 +846,7 @@ function Get-PreviousVersionBumpCommit {
 $script:CachedWorkspaceMetadata = $null
 
 # Caches for git-derived data that is invariant for the entire script run.
-# These are valid for the whole release-packages.ps1 invocation because:
+# These are valid for the whole release-skill invocation because:
 #   - $BaseRef is fixed by the caller for the entire run, and
 #   - the script never makes git commits (HEAD does not move).
 # Therefore the per-package baseline commit, the per-package committed-changes
@@ -499,19 +878,6 @@ function Get-WorkspaceMetadata {
     return $script:CachedWorkspaceMetadata
 }
 
-# Invalidates the cached metadata. Call this after editing any Cargo.toml in the
-# workspace so subsequent analyses see fresh deps/versions.
-#
-# Intentionally does NOT clear the git-derived caches
-# (PackageLastReleaseBaselineCache, PackageCommittedChangesCache,
-# PackageVersionAtRefCache) — those are keyed on git history, which the
-# release script never mutates (no commits are made). Test isolation
-# between scenarios should call Reset-ReleaseScriptCaches instead, which
-# clears every cache including this one.
-function Invalidate-WorkspaceMetadataCache {
-    $script:CachedWorkspaceMetadata = $null
-}
-
 # Clears every script-scoped cache used by the release tooling: workspace
 # metadata AND the git-derived per-package caches (baseline commit, committed
 # changes, version-at-BaseRef). Intended for test isolation between
@@ -527,45 +893,6 @@ function Reset-ReleaseScriptCaches {
     $script:CrateSemverVerdictCache         = $null
 }
 
-# Memoised, mockable classifier: returns the minimum change type a crate's
-# current working-tree public API requires versus its previous version-bump
-# commit ('breaking' / 'non-breaking' / 'patch' / 'none' when there is no prior
-# bump to compare against). Ordinary library crates are classified by running
-# cargo-semver-checks once per crate. Proc-macro-only crates have no supported
-# cargo-semver-checks API surface, so they return the explicit 'manual' result
-# before the tool is invoked; the interactive planner owns that decision.
-# Resolve-ReleaseSet is invoked many times during the interactive review loop, so
-# results are cached per cargo name for the run. Test suites Mock this function to
-# supply deterministic verdicts without invoking the real tool (see the scenario
-# harness).
-function Get-CrateRequiredChangeType {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$Folder,
-        [Parameter(Mandatory = $true)][string]$CargoName,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
-    )
-
-    if ($null -eq $script:CrateSemverVerdictCache) { $script:CrateSemverVerdictCache = @{} }
-    if ($script:CrateSemverVerdictCache.ContainsKey($CargoName)) {
-        return $script:CrateSemverVerdictCache[$CargoName]
-    }
-
-    $workspacePackage = Get-WorkspacePackages -repoRoot $RepoRoot |
-        Where-Object { $_.Folder -eq $Folder -or $_.Name -eq $CargoName } |
-        Select-Object -First 1
-    if ($null -ne $workspacePackage -and $workspacePackage.IsProcMacroOnly) {
-        Write-Host "cargo semver-checks: '$CargoName' is proc-macro-only; manual SemVer review is required." -ForegroundColor Yellow
-        $script:CrateSemverVerdictCache[$CargoName] = 'manual'
-        return 'manual'
-    }
-
-    Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its previous version-bump commit..." -ForegroundColor Cyan
-    $result = Invoke-CrateSemverCheck -PackageName $CargoName -PackageFolder $Folder -RepoRoot $RepoRoot
-    $script:CrateSemverVerdictCache[$CargoName] = $result
-    return $result
-}
-
 # Returns information about all workspace packages as an array of objects with:
 #   Name                  - cargo package name
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
@@ -576,13 +903,21 @@ function Get-CrateRequiredChangeType {
 #                           alias, or the dependency's own `[lib] name`. An entry does not say
 #                           whether a separate unrenamed declaration also exists, so this is
 #                           not a complete or exclusive set of reachable roots.
+#   DepRoots              - hashtable mapping a normalized dependency name to every
+#                           crate root actually nameable through its declared edges.
 #   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
 #                           sets one, else its normalized package name), or $null when the
 #                           package has no library target at all. This is the name a crate's
 #                           types are written under by anything that does not rename it, so it
 #                           is the root an allowlist carries for a re-exported type.
-#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
-#                           or $null if the package does not declare them
+#   AllowedExternalTypes  - array from [package.metadata.cargo_check_external_types]
+#   ExposureMetadataKnown - $true when allowed_external_types is explicitly present
+#   ExternalDeps          - ordered map of normalized non-workspace dependency name ->
+#                           @{ Requirement; Kinds }, with workspace inheritance already
+#                           resolved by cargo. Dev dependencies are excluded: they never
+#                           reach the published manifest.
+#   MacroRuntimePartners  - normalized workspace package names from
+#                           [package.metadata.oxidizer_release].macro_runtime
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
@@ -605,7 +940,11 @@ function Get-WorkspacePackages {
     # cascade only ever asks about workspace packages, since a registry crate
     # is never a release target.
     $crateRootByPackage = @{}
+    $memberNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal
+    )
     foreach ($package in $metadata.packages) {
+        [void]$memberNames.Add($package.name.Replace('-', '_'))
         $libTarget = $package.targets |
             Where-Object { @($_.kind) -contains 'lib' -or @($_.kind) -contains 'proc-macro' } |
             Select-Object -First 1
@@ -621,6 +960,8 @@ function Get-WorkspacePackages {
 
         $deps = @()
         $depAliases = @{}
+        $depRoots = @{}
+        $externalDeps = [ordered]@{}
         foreach ($dep in $package.dependencies) {
             if ($dep.kind -eq 'dev') {
                 continue
@@ -628,6 +969,31 @@ function Get-WorkspacePackages {
 
             $depCargoName = $dep.name.Replace('-', '_')
             $deps += $depCargoName
+
+            # Cargo has already resolved [workspace.dependencies] inheritance
+            # into `req`, so this is the effective requirement the published
+            # manifest will carry -- the same value a consumer resolves against.
+            if (-not $memberNames.Contains($depCargoName)) {
+                if (-not $externalDeps.Contains($depCargoName)) {
+                    $externalDeps[$depCargoName] = [pscustomobject]@{
+                        Name         = $depCargoName
+                        Requirements = New-Object 'System.Collections.Generic.List[string]'
+                        Kinds        = New-Object 'System.Collections.Generic.List[string]'
+                    }
+                }
+                $externalRecord = $externalDeps[$depCargoName]
+                $requirement = ([string]$dep.req).Trim()
+                if (
+                    -not [string]::IsNullOrWhiteSpace($requirement) -and
+                    -not $externalRecord.Requirements.Contains($requirement)
+                ) {
+                    $externalRecord.Requirements.Add($requirement) | Out-Null
+                }
+                $externalKind = if ($dep.kind -eq 'build') { 'build' } else { 'normal' }
+                if (-not $externalRecord.Kinds.Contains($externalKind)) {
+                    $externalRecord.Kinds.Add($externalKind) | Out-Null
+                }
+            }
 
             # `rename` is the `package = "..."` form in Cargo.toml: the crate is
             # declared under one name but reachable in Rust source -- and hence
@@ -639,6 +1005,8 @@ function Get-WorkspacePackages {
                 # A package may be depended on more than once under different
                 # aliases (per-target or per-feature), so collect them all.
                 $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $alias |
+                        Where-Object { $_ } | Sort-Object -Unique)
+                $depRoots[$depCargoName] = @(@($depRoots[$depCargoName]) + $alias |
                         Where-Object { $_ } | Sort-Object -Unique)
             }
             else {
@@ -652,6 +1020,9 @@ function Get-WorkspacePackages {
                 # `foo = { package = "bar" }` makes the crate nameable as `foo`
                 # regardless of what bar calls its lib target.
                 $crateRoot = $crateRootByPackage[$depCargoName]
+                $declaredRoot = if ($crateRoot) { $crateRoot } else { $depCargoName }
+                $depRoots[$depCargoName] = @(@($depRoots[$depCargoName]) + $declaredRoot |
+                        Where-Object { $_ } | Sort-Object -Unique)
                 if ($crateRoot -and $crateRoot -ne $depCargoName) {
                     $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $crateRoot |
                             Where-Object { $_ } | Sort-Object -Unique)
@@ -659,14 +1030,30 @@ function Get-WorkspacePackages {
             }
         }
 
-        $allowedTypes = $null
-        $pkgMeta = $package.PSObject.Properties['metadata']
-        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
-            $externalTypes = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
-            if ($externalTypes -and $null -ne $externalTypes.Value) {
-                $allowed = $externalTypes.Value.PSObject.Properties['allowed_external_types']
-                if ($allowed -and $null -ne $allowed.Value) {
-                    $allowedTypes = @($allowed.Value)
+        $allowedExternalTypes = $null
+        $exposureMetadataKnown = $false
+        $macroRuntimePartners = @()
+        $packageMetadata = $package.PSObject.Properties['metadata']
+        if ($packageMetadata -and $null -ne $packageMetadata.Value) {
+            $externalTypesMetadata = $packageMetadata.Value.PSObject.Properties['cargo_check_external_types']
+            if ($externalTypesMetadata -and $null -ne $externalTypesMetadata.Value) {
+                $allowedTypes = $externalTypesMetadata.Value.PSObject.Properties['allowed_external_types']
+                if ($allowedTypes -and $null -ne $allowedTypes.Value) {
+                    $allowedExternalTypes = @($allowedTypes.Value)
+                    $exposureMetadataKnown = $true
+                }
+            }
+
+            $releaseMetadata = $packageMetadata.Value.PSObject.Properties['oxidizer_release']
+            if ($releaseMetadata -and $null -ne $releaseMetadata.Value) {
+                $macroRuntime = $releaseMetadata.Value.PSObject.Properties['macro_runtime']
+                if ($macroRuntime -and $null -ne $macroRuntime.Value) {
+                    $macroRuntimePartners = @(
+                        $macroRuntime.Value |
+                            ForEach-Object { ([string]$_).Replace('-', '_') } |
+                            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                            Sort-Object -Unique
+                    )
                 }
             }
         }
@@ -674,17 +1061,33 @@ function Get-WorkspacePackages {
         $targetKinds = @($package.targets | ForEach-Object { @($_.kind) } | Sort-Object -Unique)
         $hasLibraryTarget = $targetKinds -contains 'lib'
 
+        $externalDepRecords = [ordered]@{}
+        foreach ($externalName in @($externalDeps.Keys | Sort-Object { $_ } -CaseSensitive)) {
+            $record = $externalDeps[$externalName]
+            $kinds = [string[]]@($record.Kinds.ToArray())
+            [Array]::Sort($kinds, [StringComparer]::Ordinal)
+            $externalDepRecords[$externalName] = [pscustomobject]@{
+                Name        = $externalName
+                Requirement = Join-CargoRequirements -Requirements ([string[]]$record.Requirements.ToArray())
+                Kinds       = $kinds
+            }
+        }
+
         $packages += [pscustomobject]@{
-            Name                 = $package.name
-            Folder               = Split-Path $manifestDir -Leaf
-            Version              = $package.version
-            Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
-            Deps                 = $deps
-            DepAliases           = $depAliases
-            CrateRoot            = $crateRootByPackage[$package.name.Replace('-', '_')]
-            AllowedExternalTypes = $allowedTypes
-            HasLibraryTarget     = $hasLibraryTarget
-            IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
+            Name                    = $package.name
+            Folder                  = Split-Path $manifestDir -Leaf
+            Version                 = $package.version
+            Published               = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
+            Deps                    = @($deps | Sort-Object -Unique)
+            DepAliases              = $depAliases
+            DepRoots                = $depRoots
+            CrateRoot               = $crateRootByPackage[$package.name.Replace('-', '_')]
+            AllowedExternalTypes    = $allowedExternalTypes
+            ExposureMetadataKnown   = $exposureMetadataKnown
+            ExternalDeps            = $externalDepRecords
+            MacroRuntimePartners    = $macroRuntimePartners
+            HasLibraryTarget        = $hasLibraryTarget
+            IsProcMacroOnly         = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
     }
 
@@ -815,6 +1218,64 @@ function Test-PackageExposesTarget {
     return $false
 }
 
+# Returns $true only when a declared dependency's allowlist positively names
+# the target. Unlike Test-PackageExposesTarget, absent or malformed metadata is
+# not exposure evidence. This is used for proc-macro publication: depending on
+# a macro does not make it part of a crate's public contract unless the crate
+# explicitly re-exports it.
+function Test-PackageAllowlistNamesDirectTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $false
+    }
+
+    $normalizedTarget = $TargetPackageName.Replace('-', '_')
+    $acceptedRoots = @()
+    if (
+        $null -ne $Dependent.PSObject.Properties['DepRoots'] -and
+        $null -ne $Dependent.DepRoots
+    ) {
+        $acceptedRoots = @(
+            $Dependent.DepRoots[$normalizedTarget] |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    } elseif (
+        $null -ne $Dependent.PSObject.Properties['DepAliases'] -and
+        $null -ne $Dependent.DepAliases
+    ) {
+        $acceptedRoots = @(
+            $Dependent.DepAliases[$normalizedTarget] |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+    }
+    if ($acceptedRoots.Count -eq 0) {
+        $acceptedRoots = @($normalizedTarget)
+    }
+
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            continue
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            continue
+        }
+        if ($acceptedRoots -contains $root) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 # Returns $true when the dependent's allowlist is positive evidence that its
 # public API names types rooted at $TargetPackageName.
 #
@@ -852,7 +1313,8 @@ function Test-PackageAllowlistNamesTarget {
         # Matters most on this path: a crate reached indirectly declares no edge
         # to the target, so it has no DepAliases entry for it. The target's own
         # crate root is the only place the diverted name can come from.
-        [string]$TargetCrateRoot
+        [string]$TargetCrateRoot,
+        [bool]$WildcardIsEvidence = $true
     )
 
     if ($null -eq $Dependent.AllowedExternalTypes) {
@@ -879,7 +1341,10 @@ function Test-PackageAllowlistNamesTarget {
 
         $root = ($entry -split '::', 2)[0]
         if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
-            return $true
+            if ($WildcardIsEvidence) {
+                return $true
+            }
+            continue
         }
         if ($acceptedRoots -contains $root) {
             return $true
@@ -887,68 +1352,6 @@ function Test-PackageAllowlistNamesTarget {
     }
 
     return $false
-}
-
-# Runs `cargo semver-checks` for a single crate against its previous version-bump
-# commit in git history. The baseline commit is located with
-# Get-PreviousVersionBumpCommit and passed to cargo-semver-checks as
-# `--baseline-rev <sha>`, which rebuilds the baseline rustdoc from the crate's
-# source at that commit — so the comparison source is what the repository last
-# *declared*, with no registry access. This works identically in OSS and
-# enterprise/offline environments and treats a declared-but-unpublished version as
-# the baseline (unlike the former registry lookup).
-#
-# $BaseRef selects which bump counts as "previous"; the planner uses HEAD (the
-# last committed version bump = the previous release). Returns the minimum change
-# type the current working-tree API requires: 'breaking', 'non-breaking', 'patch',
-# or 'none' when there is no prior version-bump commit to compare against (a
-# brand-new crate).
-#
-# The current API is analysed from the working tree, not from HEAD, so a
-# coordinated release's in-progress source edits are reflected rather than only
-# what has been committed.
-#
-# That is necessary but NOT sufficient for exposed-dependency breaks, and this
-# function must not be read as covering them. When a dependency's version bump
-# is incompatible without its type *shapes* changing, this crate's rustdoc is
-# identical on both sides of the comparison, so semver-checks correctly reports
-# no required bump — yet releasing this crate compatibly is still wrong, because
-# type identity in Rust is per-version: a consumer cannot hand a `dep 0.7` type
-# to an API expecting `dep 0.8`. Nothing in a rustdoc diff can show that.
-#
-# Exposure is therefore decided separately, from the crate's declared
-# allowed_external_types (Test-PackageExposesTarget), and propagated to a
-# fixpoint by Resolve-ReleaseSet. The two are complementary: semver-checks
-# supplies each crate's own floor, the exposure cascade supplies the floor its
-# dependencies impose on it.
-function Invoke-CrateSemverCheck {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$PackageName,
-        [Parameter(Mandatory = $true)][string]$PackageFolder,
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [string]$BaseRef = 'HEAD'
-    )
-
-    # Locate the previous version-bump commit. No such commit => brand-new crate:
-    # nothing to compare against, so it imposes no change-type floor.
-    $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageFolder
-    if ($null -eq $bump) {
-        return 'none'
-    }
-
-    Push-Location $RepoRoot
-    try {
-        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
-        # bump is required, which is expected and not an error for our purposes.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --baseline-rev $bump.Sha --all-features --color never 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-
-    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
@@ -982,50 +1385,6 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build. Output:`n$Output"
-}
-
-# BFS over the reverse dependency graph. Returns the folder names of all published
-# workspace packages that depend on the given target (transitively) via [dependencies]
-# or [build-dependencies]. The target itself is not included.
-function Get-AllTransitiveDependents {
-    param(
-        [string]$packageName,
-        [string]$repoRoot
-    )
-
-    $packages = Get-WorkspacePackages -repoRoot $repoRoot
-
-    $targetPackage = $packages | Where-Object { $_.Folder -eq $packageName -or $_.Name -eq $packageName } | Select-Object -First 1
-    if ($null -eq $targetPackage) {
-        Write-Warning "Package '$packageName' not found in workspace metadata; cannot compute dependents."
-        return @()
-    }
-    $normalizedTarget = $targetPackage.Name.Replace('-', '_')
-
-    $toVisit = [System.Collections.Generic.Queue[string]]::new()
-    $toVisit.Enqueue($normalizedTarget)
-    $visited = [System.Collections.Generic.HashSet[string]]::new()
-    [void]$visited.Add($normalizedTarget)
-
-    $dependents = @()
-    while ($toVisit.Count -gt 0) {
-        $current = $toVisit.Dequeue()
-        foreach ($candidate in $packages) {
-            $candidateNorm = $candidate.Name.Replace('-', '_')
-            if ($visited.Contains($candidateNorm)) {
-                continue
-            }
-            if ($candidate.Deps -contains $current) {
-                [void]$visited.Add($candidateNorm)
-                $toVisit.Enqueue($candidateNorm)
-                if ($candidate.Published) {
-                    $dependents += $candidate.Folder
-                }
-            }
-        }
-    }
-
-    return $dependents
 }
 
 # Returns the published workspace packages that directly depend on a cargo
@@ -1155,8 +1514,8 @@ function Get-PackageCommittedChanges {
     return $result
 }
 
-# For each published workspace package, returns a hashtable folder -> ChangedFileCount
-# where the count is the number of distinct repo-relative paths under crates/<folder>/
+# For each workspace package, returns a hashtable folder -> ChangedFiles where
+# ChangedFiles is the sorted array of distinct repo-relative paths under crates/<folder>/
 # that have changed since the package's last release baseline (see
 # Get-PackageLastReleaseBaseline). Considers:
 #
@@ -1164,14 +1523,13 @@ function Get-PackageCommittedChanges {
 #   - tracked working-tree edits (staged + unstaged) vs HEAD,
 #   - untracked files (e.g. new source files added during a release run).
 #
-# Packages with zero modifications are omitted from the result.
-#
 # Working-tree edits and untracked files are queried once globally and bucketed
 # per package to avoid spawning O(packages) extra git processes. The per-package
 # committed diff is served from Get-PackageCommittedChanges' session cache.
-function Get-PackagesWithUnreleasedChanges {
+function Get-PackageUnreleasedChangeFiles {
     param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$IncludeUnpublished
     )
 
     $result = @{}
@@ -1192,7 +1550,7 @@ function Get-PackagesWithUnreleasedChanges {
     }
 
     foreach ($package in $packages) {
-        if (-not $package.Published) { continue }
+        if (-not $IncludeUnpublished -and -not $package.Published) { continue }
 
         $folder = $package.Folder
         $files = [System.Collections.Generic.HashSet[string]]::new()
@@ -1206,10 +1564,29 @@ function Get-PackagesWithUnreleasedChanges {
         }
 
         if ($files.Count -gt 0) {
-            $result[$folder] = $files.Count
+            $sortedFiles = [string[]]@($files)
+            [Array]::Sort($sortedFiles, [StringComparer]::Ordinal)
+            $result[$folder] = $sortedFiles
         }
     }
 
+    return $result
+}
+
+# For each published workspace package, returns a hashtable folder -> ChangedFileCount.
+function Get-PackagesWithUnreleasedChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$IncludeUnpublished
+    )
+
+    $result = @{}
+    $filesByPackage = Get-PackageUnreleasedChangeFiles `
+        -RepoRoot $RepoRoot `
+        -IncludeUnpublished:$IncludeUnpublished
+    foreach ($folder in $filesByPackage.Keys) {
+        $result[$folder] = @($filesByPackage[$folder]).Count
+    }
     return $result
 }
 
@@ -1249,572 +1626,4 @@ function Get-PackagesWithVersionChanges {
     # PowerShell pipeline collapses an empty HashSet to $null on return; -NoEnumerate
     # preserves it so callers' .Contains() calls still work.
     Write-Output -NoEnumerate $changed
-}
-
-# Returns a sorted array of pending-release records for every published workspace
-# package whose on-disk Cargo.toml version differs from the version at $BaseRef. Each
-# record exposes the data the announcement formatter and base-relative re-invocation
-# logic need:
-#
-#   [pscustomobject]@{
-#     Folder         = '<package folder under crates/>'
-#     Name           = '<package name from Cargo.toml [package].name>'
-#     BaseVersion    = '<version at BaseRef>'
-#     CurrentVersion = '<version on disk>'
-#   }
-#
-# New packages not present at $BaseRef are NOT included — they have no "base version"
-# to compare against, and the rest of the script's flow treats them as fresh
-# releases anyway (Invoke-PackageRelease writes the initial Cargo.toml + changelog
-# entry). Only packages that genuinely have a prior committed version with a
-# different on-disk version qualify as "pending" in the cross-invocation sense.
-#
-# Sorted ascending by Folder for deterministic output (the announcement order
-# must be stable across runs / hosts / etc.).
-function Get-PendingReleases {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
-    )
-
-    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
-    $pending = New-Object System.Collections.Generic.List[object]
-
-    foreach ($package in $packages) {
-        if (-not $package.Published) { continue }
-
-        $cargoToml = Join-Path $RepoRoot "crates/$($package.Folder)/Cargo.toml"
-        if (-not (Test-Path $cargoToml)) { continue }
-
-        $currentVersion = Get-CurrentVersion -cargoTomlPath $cargoToml
-        $baseVersion    = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
-
-        # New package at base: skip (no base version to be pending against).
-        if ($null -eq $baseVersion) { continue }
-        if ($currentVersion -eq $baseVersion) { continue }
-
-        $pending.Add([pscustomobject]@{
-            Folder         = $package.Folder
-            Name           = $package.Name
-            BaseVersion    = $baseVersion
-            CurrentVersion = $currentVersion
-        }) | Out-Null
-    }
-
-    return @($pending | Sort-Object -Property Folder)
-}
-
-# Builds a ResolvedReleaseSet (folder -> resolved entry) from base-ref vs disk
-# version diffing. Used as a test utility to synthesise a release set from a
-# synthetic-workspace git diff without having to construct one entry-by-entry;
-# production code uses Resolve-ReleaseSet in release-flow.ps1 (driven by
-# explicit user input).
-#
-# Every member is marked Source='cascade' so the elevation-surface predicate
-# in Get-UnreleasedModifiedDependencies treats every release-set member as
-# potentially-elevatable. This matches the bundled-input semantics: in
-# the absence of explicit user intent, every below-breaking release-set
-# member is surfaced for review.
-#
-# New packages (no version at $BaseRef) are tagged 'breaking' so the
-# elevation predicate skips them — they have no prior version transition to
-# elevate. This matches the pre-refactor null-base-version guard behavior.
-function New-ResolvedReleaseSetFromBaseRef {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
-    )
-
-    $resolved = @{}
-    $folders = Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef
-    if ($null -eq $folders -or $folders.Count -eq 0) { return $resolved }
-
-    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
-    $pkgByFolder = @{}
-    foreach ($p in $packages) { $pkgByFolder[$p.Folder] = $p }
-
-    foreach ($folder in $folders) {
-        if (-not $pkgByFolder.ContainsKey($folder)) { continue }
-        $pkg = $pkgByFolder[$folder]
-        $baseVersion = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $folder
-        $changeType = if ($null -eq $baseVersion) {
-            # New package: no semantically-meaningful prior version to elevate from.
-            'breaking'
-        } else {
-            Get-ChangeTypeFromVersions -oldVersion $baseVersion -newVersion $pkg.Version
-        }
-        $resolved[$folder] = [pscustomobject]@{
-            Folder                  = $folder
-            Name                    = $pkg.Name
-            CurrentVersion          = $baseVersion
-            EffectiveChangeType     = $changeType
-            EffectiveTargetVersion  = $pkg.Version
-            Source                  = 'cascade'
-            AutoUpgraded            = $false
-            CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
-        }
-    }
-
-    return $resolved
-}
-
-# --- CORE ANALYSIS ---
-#
-# Upholds the CASCADE-ORGANIZATION INVARIANTS documented in docs/releasing.md
-# under "Cascade Organisation Invariants":
-#   (A) A cascade toward dependents never introduces items to the user-review
-#       queue. Honored via the optional -ModifiedSnapshot parameter: when
-#       callers capture the modifications set BEFORE the primary release
-#       runs and pass it in, cascade-only targets (those whose only
-#       modification is the cascade-written Cargo.toml / CHANGELOG.md) never
-#       enter the snapshot and so cannot surface as findings on later
-#       iterations.
-#   (B) A release-set member whose cascade-applied change type is below the
-#       semantic maximum (breaking) and which has pre-existing modifications
-#       is reported so the user can still elevate the change type after
-#       reviewing the changes. User-source members (Source='user' in the
-#       resolved set) carry an explicit decision and are NOT re-prompted —
-#       elevation review applies only to cascade-source members.
-#
-# For each package in the "resolved release set" (passed in by the caller as a
-# folder -> resolved-entry hashtable produced by Resolve-ReleaseSet, or by
-# tests via the New-ResolvedReleaseSetFromBaseRef helper), walk its transitive
-# normal/build workspace dependencies. Report any workspace dependency that
-#
-#   1. has source modifications since its own last release baseline (i.e. since the
-#      most recent commit that touched its `version =` or `publish =` line — see
-#      Get-PackageLastReleaseBaseline), and
-#   2. is either (a) NOT itself in the release set, OR (b) IS in the release set
-#      as a cascade-source member whose EffectiveChangeType is below "breaking"
-#      (so the user might still want to elevate it after reviewing the changes), and
-#   3. is published (publish != false),
-#
-# along with the shortest dependency chain that reaches it from a released package.
-#
-# A BFS root only counts as "released" for this analysis when the release-set
-# member itself has source modifications past its release baseline (i.e. is
-# in the modifications map). A pure-cascade member (version bump only, no
-# source changes of its own) cannot have started consuming unreleased
-# features in its dependencies because nothing in its source changed — BFS
-# from such a member would only produce false positives, so it is skipped.
-#
-# Per-package baselines (rather than a global PR-vs-base-ref diff) are required to
-# detect transitive dependency changes that were merged to main in earlier PRs without
-# a version change and are now being depended on by a release-set package in this PR.
-# Comparing the working tree only against the PR base ref would miss those.
-#
-# Returns @() when there are no findings, otherwise an array of objects:
-#   Folder            - package folder under crates/
-#   PackageName       - cargo package name
-#   CurrentVersion    - package's current version (Cargo.toml [package].version)
-#   InReleaseSet      - $true when the finding is also a release-set member
-#                       surfaced for cascade elevation review (Source='cascade'
-#                       with below-breaking change type); $false otherwise.
-#                       The caller uses this to distinguish "needs review for
-#                       elevation" from "needs review for primary release".
-#   PlannedCurrentVersion    - release plan's starting version, or $null when
-#                              the package is not yet in the release set
-#   EffectiveChangeType      - release level already in the plan, or $null
-#   EffectiveTargetVersion   - target version already in the plan, or $null
-#   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
-#   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
-#                       - chains rooted in release-set members (or, in
-#                       -IncludeAllModifiedAsRoots mode, also in other
-#                       modified-published packages) that transitively reach
-#                       `this_dep`. Used by the interactive review prompt to
-#                       highlight what is at risk in the current release plan
-#                       specifically.
-#   WorkspaceDependencyChains  - @( @('top_dependent', ..., 'this_dep'), ... )
-#                       - every path in the workspace dep graph ending at
-#                       `this_dep`, irrespective of release-set membership.
-#                       Used by the interactive per-package menu to give the
-#                       reviewer a release-set-independent "big picture" view
-#                       of what could be affected by releasing this package.
-#
-# The BFS traverses past every node (including release-set members) so a chain
-# like 'foo -> bar -> baz' is recorded even when 'bar' is itself being
-# released. Chains are then reduced (deduped + suffix-subsumed) so a shorter
-# chain that is a strict suffix of a longer one (e.g. 'bar -> baz' vs
-# 'foo -> bar -> baz') is dropped to keep the prompt focused on the longest
-# path from each release-set entry point.
-function Get-UnreleasedModifiedDependencies {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
-        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
-        # When set, treats every modified-published package as an additional BFS
-        # root (in addition to ResolvedReleaseSet members) so chains BETWEEN
-        # changed packages surface naturally, AND sweeps any modified-published
-        # package the surfacing predicate accepts but no BFS run reached as a
-        # dep, adding it as a "stub" finding (DependencyChains = @()). Used by
-        # the guided changed-packages workflow (release-packages.ps1 -Changed / -All).
-        [switch]$IncludeAllModifiedAsRoots
-    )
-
-    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
-    # Use the caller-provided snapshot when present so Invariant A holds across
-    # cascade writes (which would otherwise pollute Get-PackagesWithUnreleasedChanges's
-    # working-tree query and surface cascade-only targets as findings).
-    $modifiedMap = if ($PSBoundParameters.ContainsKey('ModifiedSnapshot') -and $null -ne $ModifiedSnapshot) {
-        $ModifiedSnapshot
-    } else {
-        Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
-    }
-
-    if ($IncludeAllModifiedAsRoots) {
-        if ($ResolvedReleaseSet.Count -eq 0 -and $modifiedMap.Count -eq 0) { return @() }
-    } else {
-        if ($ResolvedReleaseSet.Count -eq 0) { return @() }
-    }
-
-    # Build folder -> package lookup and normalized-name -> folder lookup.
-    $byFolder = @{}
-    $folderByNormName = @{}
-    foreach ($c in $packages) {
-        $byFolder[$c.Folder] = $c
-        $folderByNormName[$c.Name.Replace('-', '_')] = $c.Folder
-    }
-
-    # Local closure: decide whether a modified-published package should surface
-    # as a finding given its release-set membership. Centralised so the BFS
-    # body (which checks a *visited dep*) and the Phase B sweep (which checks
-    # a *root*) share the same predicate. Surface when (modified + published)
-    # AND either:
-    #   - not a release-set member (classic case), OR
-    #   - a release-set member with Source='cascade' whose EffectiveChangeType
-    #     is below "breaking" (Invariant B — elevation review). Source='user'
-    #     members carry an explicit decision from the CLI input and are NOT
-    #     re-prompted.
-    $shouldSurface = {
-        param([string]$folder)
-        $pkg = $byFolder[$folder]
-        if ($null -eq $pkg) { return $false }
-        if (-not ($modifiedMap.ContainsKey($folder) -and $pkg.Published)) { return $false }
-        $entry = $ResolvedReleaseSet[$folder]
-        if ($null -eq $entry) { return $true }
-        return ($entry.Source -eq 'cascade' -and $entry.EffectiveChangeType -ne 'breaking')
-    }.GetNewClosure()
-
-    # Aggregate findings: folder -> { Folder; PackageName; ChangedFileCount; DependencyChains }.
-    # Ordered so the BFS insertion order is preserved when iterating .Values; matters because
-    # the post-release scan prompts the user in this order and a non-deterministic order
-    # makes the UX flaky and tests unreliable.
-    $findings = [ordered]@{}
-
-    # Compute BFS roots. In the default (targeted) mode they're the
-    # release-set members WHOSE SOURCE/FILES HAVE BEEN MODIFIED past their
-    # per-package release baseline. Pure-cascade members (no source changes
-    # of their own, version bump only) cannot have started consuming
-    # unreleased features in their dependencies, so BFS from them is
-    # categorically incapable of producing a real finding — only false
-    # positives — and is skipped. The same modified-precondition applies in
-    # -IncludeAllModifiedAsRoots mode, where it's redundant with the
-    # modifiedMap union below (release-set membership adds nothing once
-    # modified-published already covers it) but kept for symmetry / clarity.
-    # When -IncludeAllModifiedAsRoots is set we also add every
-    # modified-published package so chains between changed packages can be
-    # recorded (e.g. 'bytesbuf_io -> bytesbuf' when both are changed and
-    # bytesbuf_io depends on bytesbuf). Sorted for deterministic prompt order.
-    $rootFolders = if ($IncludeAllModifiedAsRoots) {
-        $set = [System.Collections.Generic.HashSet[string]]::new()
-        foreach ($k in $ResolvedReleaseSet.Keys) {
-            if ($modifiedMap.ContainsKey($k)) { [void]$set.Add($k) }
-        }
-        foreach ($k in $modifiedMap.Keys) {
-            $pkg = $byFolder[$k]
-            if ($null -ne $pkg -and $pkg.Published) { [void]$set.Add($k) }
-        }
-        @($set | Sort-Object)
-    } else {
-        @($ResolvedReleaseSet.Keys | Where-Object { $modifiedMap.ContainsKey($_) } | Sort-Object)
-    }
-
-    foreach ($releasedFolder in $rootFolders) {
-        if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
-
-        # BFS forward over normal+build deps. Track shortest path to each visited
-        # node within this start-package's traversal (avoids cycles and keeps the
-        # recorded chain to the SHORTEST path from this entry point).
-        $visited = [System.Collections.Generic.HashSet[string]]::new()
-        [void]$visited.Add($releasedFolder)
-        $queue = [System.Collections.Generic.Queue[object]]::new()
-        $queue.Enqueue([pscustomobject]@{ Folder = $releasedFolder; Chain = @($releasedFolder) })
-
-        while ($queue.Count -gt 0) {
-            $node = $queue.Dequeue()
-            $package = $byFolder[$node.Folder]
-            if ($null -eq $package) { continue }
-
-            foreach ($depNorm in $package.Deps) {
-                if (-not $folderByNormName.ContainsKey($depNorm)) { continue } # external package
-                $depFolder = $folderByNormName[$depNorm]
-                if ($visited.Contains($depFolder)) { continue }
-                [void]$visited.Add($depFolder)
-
-                $depPackage = $byFolder[$depFolder]
-                $depChain = $node.Chain + $depFolder
-
-                if (& $shouldSurface $depFolder) {
-                    $depEntry = $ResolvedReleaseSet[$depFolder]
-                    $isInReleaseSet = $null -ne $depEntry
-                    if (-not $findings.Contains($depFolder)) {
-                        $findings[$depFolder] = [pscustomobject]@{
-                            Folder                     = $depFolder
-                            PackageName                = $depPackage.Name
-                            CurrentVersion             = $depPackage.Version
-                            InReleaseSet               = $isInReleaseSet
-                            PlannedCurrentVersion      = if ($isInReleaseSet) { $depEntry.CurrentVersion } else { $null }
-                            EffectiveChangeType        = if ($isInReleaseSet) { $depEntry.EffectiveChangeType } else { $null }
-                            EffectiveTargetVersion     = if ($isInReleaseSet) { $depEntry.EffectiveTargetVersion } else { $null }
-                            ChangedFileCount           = $modifiedMap[$depFolder]
-                            DependencyChains           = @(, $depChain)
-                            RequiresManualSemverReview = [bool]$depPackage.IsProcMacroOnly
-                        }
-                    }
-                    else {
-                        $existing = $findings[$depFolder]
-                        $existing.DependencyChains = @($existing.DependencyChains) + @(, $depChain)
-                    }
-                }
-
-                # Traverse past every node — release-set members, unchanged
-                # intermediates, and recorded findings alike. This lets us
-                # surface chains that thread through release-set members to a
-                # deeper modified-and-unreleased target (e.g. 'foo -> bar -> baz'
-                # where 'bar' is being released and 'baz' is not).
-                $queue.Enqueue([pscustomobject]@{ Folder = $depFolder; Chain = $depChain })
-            }
-        }
-    }
-
-    # Phase B sweep: every BFS root the surfacing predicate accepts but no
-    # BFS run reached as a dep gets added as a stub finding (empty chains).
-    # Two reasons this matters:
-    #
-    #   1. -IncludeAllModifiedAsRoots mode: every modified-published package
-    #      that isn't BFS-reachable from another root surfaces as a stub.
-    #      Renders as "No dependents in release set" in the menu — the
-    #      "imaginary `*` package depends on every changed package" UX
-    #      without introducing a sentinel.
-    #
-    #   2. Targeted mode (Invariant B — release-set elevation review):
-    #      release-set members that are themselves modified BUT whose
-    #      cascade-applied change type is below "breaking" need to surface
-    #      for elevation review. With the LIVE filter applied to BFS root
-    #      selection, only release-set members IN modifiedMap are roots,
-    #      so this sweep over rootFolders is exactly the set of candidates
-    #      that qualify for Invariant B. The shouldSurface predicate
-    #      filters out user-source members and breaking-cascade members,
-    #      leaving only cascade-source below-breaking entries — i.e.
-    #      release-set members the user may want to elevate after diff
-    #      review.
-    foreach ($folder in $rootFolders) {
-        if ($findings.Contains($folder)) { continue }
-        if (-not (& $shouldSurface $folder)) { continue }
-        $pkg = $byFolder[$folder]
-        $entry = $ResolvedReleaseSet[$folder]
-        $findings[$folder] = [pscustomobject]@{
-            Folder                     = $folder
-            PackageName                = $pkg.Name
-            CurrentVersion             = $pkg.Version
-            InReleaseSet               = $null -ne $entry
-            PlannedCurrentVersion      = if ($null -ne $entry) { $entry.CurrentVersion } else { $null }
-            EffectiveChangeType        = if ($null -ne $entry) { $entry.EffectiveChangeType } else { $null }
-            EffectiveTargetVersion     = if ($null -ne $entry) { $entry.EffectiveTargetVersion } else { $null }
-            ChangedFileCount           = $modifiedMap[$folder]
-            DependencyChains           = @()
-            RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly
-        }
-    }
-
-    if ($findings.Count -eq 0) { return @() }
-
-    # Reduce each finding's chains: drop duplicates and shorter chains that are
-    # strict suffixes of a longer chain, so the user sees only the longest
-    # caller-rooted path through each branch.
-    foreach ($f in $findings.Values) {
-        if ($null -ne $f.DependencyChains -and @($f.DependencyChains).Count -gt 0) {
-            $f.DependencyChains = Reduce-DependencyChains -Chains $f.DependencyChains
-        }
-    }
-
-    # Populate WorkspaceDependencyChains: every path in the workspace dep graph
-    # of the form `[root, ..., target]` ending at this finding's folder. Used
-    # by the interactive menu to give the user a release-set-independent
-    # picture of what could be affected by releasing the package under review
-    # (cascading can pull more dependents into the release set after the
-    # review prompt, so the release-set-rooted DependencyChains list would
-    # otherwise be misleadingly narrow). Computed here (not at menu render
-    # time) so $packages is reused and no extra cargo metadata invocations
-    # happen per prompt.
-    foreach ($f in $findings.Values) {
-        $f | Add-Member -NotePropertyName WorkspaceDependencyChains -NotePropertyValue (
-            Get-InWorkspaceDependencyChains -Packages $packages -TargetFolder $f.Folder
-        ) -Force
-    }
-
-    return @($findings.Values)
-}
-
-# Deduplicates dependency chains and drops chains that are strict suffixes of
-# any other kept chain. Returns a stable-sorted array (alphabetical by joined
-# chain text) so the UX prompt and the PR comment render deterministically.
-#
-# A chain X is "subsumed by" chain Y when Y is strictly longer than X and X
-# equals the tail of Y element-for-element. Subsumption is one-directional —
-# we keep the LONGER chain because it carries strictly more context for the
-# reviewer (the same suffix plus its caller ancestry).
-function Reduce-DependencyChains {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyCollection()]
-        [object[]]$Chains
-    )
-
-    if ($null -eq $Chains -or $Chains.Count -eq 0) { return @() }
-
-    # Step 1: dedupe by canonical string key (preserves the first occurrence).
-    $seen = [ordered]@{}
-    foreach ($c in $Chains) {
-        $arr = @($c)
-        $key = $arr -join "`u{2192}" # rightwards arrow as a separator unlikely to collide
-        if (-not $seen.Contains($key)) { $seen[$key] = $arr }
-    }
-    $unique = @($seen.Values)
-
-    # Step 2: sort by length descending and keep each chain only when no
-    # already-kept (longer) chain has it as a strict suffix.
-    $sortedByLengthDesc = @($unique | Sort-Object @{ Expression = { $_.Length }; Descending = $true })
-    $kept = New-Object System.Collections.Generic.List[object]
-    foreach ($c in $sortedByLengthDesc) {
-        $isSuffix = $false
-        foreach ($k in $kept) {
-            if ($c.Length -ge $k.Length) { continue } # strict suffix requires shorter length
-            $offset = $k.Length - $c.Length
-            $match = $true
-            for ($i = 0; $i -lt $c.Length; $i++) {
-                if ($c[$i] -ne $k[$offset + $i]) { $match = $false; break }
-            }
-            if ($match) { $isSuffix = $true; break }
-        }
-        if (-not $isSuffix) { [void]$kept.Add($c) }
-    }
-
-    # Step 3: stable alphabetical sort by joined chain text so output order
-    # is deterministic across runs and across release-set iteration order.
-    $finalSorted = @($kept | Sort-Object { ($_ -join ' -> ') })
-    # IMPORTANT: prefix the return with `,` to prevent PowerShell from
-    # unwrapping a single-element array-of-arrays into its inner array,
-    # which would silently corrupt $finding.DependencyChains[0] when only
-    # one chain survives reduction (caller would see a flat string array
-    # instead of an array containing one chain).
-    return ,$finalSorted
-}
-
-# Computes the set of in-workspace dependency chains that end at $TargetFolder
-# - i.e. every path through the workspace package dep graph of the form
-# `[root, ..., target]` where `root` is some workspace package that
-# transitively depends on `target` and `root` itself has no in-workspace
-# dependent (the chain reaches as far up the dependency tree as possible).
-# Used by `Format-PackageMenu` to give the user a "big picture" view of what
-# could be affected by releasing the package under review - independent of
-# which packages are in the current release set, since cascading can bring
-# in more dependents after the review prompt is shown.
-#
-# `$Packages` is the already-loaded workspace package list (output of
-# `Get-WorkspacePackages`); pass it in to avoid re-running `cargo metadata`
-# when the caller already has it.
-#
-# Returns @() when $TargetFolder is unknown, or when no other workspace
-# package transitively depends on it. Otherwise returns chains reduced via
-# `Reduce-DependencyChains` (suffix-subsumed shorter chains dropped). Dev
-# dependencies and non-`crates/` workspace members are NOT included, since
-# `Get-WorkspacePackages` already filters them out - this matches the
-# release-impact semantics we care about (dev-dep changes don't affect a
-# package's published-API consumers).
-function Get-InWorkspaceDependencyChains {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyCollection()]
-        [object[]]$Packages,
-        [Parameter(Mandatory = $true)][string]$TargetFolder
-    )
-
-    # PowerShell unwraps a bare `return @()` to $null at the function
-    # boundary (the empty array contributes 0 items to the output stream).
-    # Prefix returns with `,` to force an array-preserving single-item
-    # output - the receiver sees the array (possibly empty), not $null.
-    if ($null -eq $Packages -or $Packages.Count -eq 0) { return ,@() }
-
-    # Build folder -> package and normalized-name -> folder lookups (same shape
-    # the BFS in Get-UnreleasedModifiedDependencies builds for forward edges).
-    $byFolder = @{}
-    $folderByNormName = @{}
-    foreach ($p in $Packages) {
-        $byFolder[$p.Folder] = $p
-        $folderByNormName[$p.Name.Replace('-', '_')] = $p.Folder
-    }
-    if (-not $byFolder.ContainsKey($TargetFolder)) { return ,@() }
-
-    # Reverse adjacency: depFolder -> list of folders that depend on depFolder.
-    $reverse = @{}
-    foreach ($p in $Packages) {
-        foreach ($depNorm in $p.Deps) {
-            if (-not $folderByNormName.ContainsKey($depNorm)) { continue } # external
-            $depFolder = $folderByNormName[$depNorm]
-            if (-not $reverse.ContainsKey($depFolder)) {
-                $reverse[$depFolder] = New-Object 'System.Collections.Generic.List[string]'
-            }
-            [void]$reverse[$depFolder].Add($p.Folder)
-        }
-    }
-
-    # Iterative DFS over reverse edges starting at $TargetFolder. Each stack
-    # entry carries the path-so-far in REVERSE order (target first, current
-    # frontier last) so cycle detection is a quick membership check. When a
-    # frontier has no further dependents (workspace root reached), we emit the
-    # reversed path as a chain `[root, ..., target]`. Cycles can't exist in a
-    # valid Cargo workspace, but defensive `notcontains` keeps the loop safe
-    # if metadata ever yields one.
-    $chains = New-Object 'System.Collections.Generic.List[object]'
-    $stack = [System.Collections.Generic.Stack[object]]::new()
-    $stack.Push([pscustomobject]@{
-        Folder       = $TargetFolder
-        ReversedPath = @($TargetFolder)
-    })
-
-    while ($stack.Count -gt 0) {
-        $node = $stack.Pop()
-        $candidates = @()
-        if ($reverse.ContainsKey($node.Folder)) {
-            foreach ($d in $reverse[$node.Folder]) {
-                if ($node.ReversedPath -notcontains $d) { $candidates += $d }
-            }
-        }
-
-        if ($candidates.Count -eq 0) {
-            # Reached a top-level dependent (or all further dependents would
-            # cycle). Skip the trivial single-element [target] "chain" - there
-            # is nothing to display when target has no in-workspace dependents.
-            if ($node.ReversedPath.Length -gt 1) {
-                $chain = New-Object 'System.Collections.Generic.List[string]'
-                for ($i = $node.ReversedPath.Length - 1; $i -ge 0; $i--) {
-                    [void]$chain.Add($node.ReversedPath[$i])
-                }
-                [void]$chains.Add(@($chain))
-            }
-        } else {
-            foreach ($d in $candidates) {
-                $stack.Push([pscustomobject]@{
-                    Folder       = $d
-                    ReversedPath = $node.ReversedPath + $d
-                })
-            }
-        }
-    }
-
-    if ($chains.Count -eq 0) { return ,@() }
-    # Reduce-DependencyChains already returns ,$finalSorted, so its non-empty
-    # array structure survives this forward.
-    return Reduce-DependencyChains -Chains $chains
 }

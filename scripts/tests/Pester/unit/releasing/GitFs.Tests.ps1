@@ -428,60 +428,6 @@ Describe 'Get-WorkspacePackages: proc-macro target classification' {
         $library.IsProcMacroOnly | Should -BeFalse
         $library.HasLibraryTarget | Should -BeTrue
     }
-
-    It 'returns manual without invoking cargo-semver-checks for a proc-macro-only package' {
-        Reset-ReleaseScriptCaches
-        Mock -CommandName Invoke-CrateSemverCheck -MockWith {
-            throw 'Invoke-CrateSemverCheck must not run for proc-macro-only packages.'
-        }
-
-        Get-CrateRequiredChangeType `
-            -Folder 'macros' `
-            -CargoName 'macros' `
-            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'manual'
-
-        Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 0 -Exactly
-    }
-
-    It 'continues invoking cargo-semver-checks for an ordinary library package' {
-        Reset-ReleaseScriptCaches
-        Mock -CommandName Invoke-CrateSemverCheck -MockWith { 'patch' }
-
-        Get-CrateRequiredChangeType `
-            -Folder 'library' `
-            -CargoName 'library' `
-            -RepoRoot $script:ProcMacroWorkspace.Path | Should -Be 'patch'
-
-        Should -Invoke -CommandName Invoke-CrateSemverCheck -Times 1 -Exactly
-    }
-}
-
-Describe 'Get-AllTransitiveDependents' {
-    BeforeAll {
-        Reset-ReleaseScriptCaches
-        $script:Ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'transitive-diamond')
-        # Diamond4: top -> {left, right}; left -> bottom; right -> bottom. Dependents of bottom are {left, right, top}.
-    }
-
-    It 'finds dependents through both diamond legs (deduped)' {
-        $deps = Get-AllTransitiveDependents -packageName 'bottom' -repoRoot $script:Ws.Path
-        ($deps | Sort-Object) | Should -Be @('left', 'right', 'top')
-    }
-
-    It 'returns no dependents for a leaf (top) package' {
-        # 'top' is the top of the diamond; nothing depends on it.
-        $deps = @(Get-AllTransitiveDependents -packageName 'top' -repoRoot $script:Ws.Path)
-        $deps.Count | Should -Be 0
-    }
-
-    It 'excludes publish=false packages from the result' {
-        # Use Mixed6 — utility is publish=false and depends on dependent_y.
-        Reset-ReleaseScriptCaches
-        $mixed = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'transitive-mixed')
-        $deps = Get-AllTransitiveDependents -packageName 'dependent_y' -repoRoot $mixed.Path
-        # utility depends on dependent_y but is publish=false; should not appear.
-        $deps | Should -Not -Contain 'utility'
-    }
 }
 
 Describe 'Get-PackagesWithUnreleasedChanges' {
@@ -494,6 +440,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
     }
 
     It 'reports committed source edits as unreleased' {
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $script:Ws.Path
+        $files['b'] | Should -Contain 'crates/b/src/lib.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $script:Ws.Path
         $changes.ContainsKey('b') | Should -BeTrue
         $changes['b'] | Should -BeGreaterOrEqual 1
@@ -504,6 +452,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w2 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedworking')
         # Uncommitted source edit on c.
         $w2.ModifySource('c')
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $w2.Path
+        $files['c'] | Should -Contain 'crates/c/src/lib.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w2.Path
         $changes.ContainsKey('c') | Should -BeTrue
     }
@@ -513,6 +463,8 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w3 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleaseduntracked')
         $newFile = Join-Path $w3.Path 'crates\a\src\new_file.rs'
         Set-Content -Path $newFile -Value '// new'
+        $files = Get-PackageUnreleasedChangeFiles -RepoRoot $w3.Path
+        $files['a'] | Should -Contain 'crates/a/src/new_file.rs'
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w3.Path
         $changes.ContainsKey('a') | Should -BeTrue
     }
@@ -524,6 +476,30 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
         $w4.AddCommit('utility edit')
         $changes = Get-PackagesWithUnreleasedChanges -RepoRoot $w4.Path
         $changes.ContainsKey('utility') | Should -BeFalse
+    }
+
+    It 'orders changed paths ordinally across cultures' {
+        Reset-ReleaseScriptCaches
+        $w5 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'unreleased-order')
+        $folder = (Get-WorkspacePackages -repoRoot $w5.Path)[0].Folder
+        $source = Join-Path $w5.Path "crates\$folder\src"
+        Set-Content -Path (Join-Path $source 'I.rs') -Value '// I'
+        Set-Content -Path (Join-Path $source "$([char]0x131).rs") -Value '// dotless i'
+        $originalCulture = [Globalization.CultureInfo]::CurrentCulture
+        try {
+            [Globalization.CultureInfo]::CurrentCulture = 'tr-TR'
+            $turkish = @((
+                    Get-PackageUnreleasedChangeFiles -RepoRoot $w5.Path
+                )[$folder])
+            [Globalization.CultureInfo]::CurrentCulture = 'en-US'
+            Reset-ReleaseScriptCaches
+            $english = @((
+                    Get-PackageUnreleasedChangeFiles -RepoRoot $w5.Path
+                )[$folder])
+            $turkish | Should -Be $english
+        } finally {
+            [Globalization.CultureInfo]::CurrentCulture = $originalCulture
+        }
     }
 }
 
@@ -567,70 +543,6 @@ Describe 'Get-PackagesWithVersionChanges' {
         $changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $script:Ws.Path -BaseRef 'HEAD~1') | Sort-Object)
         $changedFolders.Count | Should -Be 1
         $changedFolders[0] | Should -Be 'a'
-    }
-}
-
-Describe 'Get-PendingReleases' {
-    BeforeEach {
-        Reset-ReleaseScriptCaches
-    }
-
-    It 'returns an empty array when no version diffs against the base ref' {
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ('pend-empty-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
-        $pending.Count | Should -Be 0
-    }
-
-    It 'reports one record per pending package with Folder/Name/BaseVersion/CurrentVersion' {
-        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-single-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Change version of 'b' on top of HEAD baseline (uncommitted — that's the "pending" state).
-        $ws.SetVersion('b', '0.2.2')
-
-        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
-        $pending.Count             | Should -Be 1
-        $pending[0].Folder         | Should -Be 'b'
-        $pending[0].Name           | Should -Be 'b'
-        $pending[0].BaseVersion    | Should -Be '0.2.0'
-        $pending[0].CurrentVersion | Should -Be '0.2.2'
-    }
-
-    It 'sorts pending records by Folder ascending so the announcement is deterministic' {
-        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-sort-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Change versions in reverse Folder order — the helper must still emit them in alphabetical order.
-        $ws.SetVersion('c', '0.3.1')
-        $ws.SetVersion('a', '0.1.1')
-        $ws.SetVersion('b', '0.2.1')
-
-        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
-        ($pending | ForEach-Object { $_.Folder }) -join ',' | Should -Be 'a,b,c'
-    }
-
-    It 'skips new-at-base packages (no base version to compare against)' {
-        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-new-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Change version of existing 'a' so we have at least one genuinely-pending entry to compare against.
-        $ws.SetVersion('a', '0.1.1')
-
-        # Manually scaffold a brand-new package that doesn't exist at HEAD (no add+commit).
-        $newPackage = Join-Path $ws.Path 'crates\brandnew'
-        New-Item -ItemType Directory -Path $newPackage -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $newPackage 'src') -Force | Out-Null
-        Set-Content -Path (Join-Path $newPackage 'Cargo.toml') -Value @"
-[package]
-name = "brandnew"
-version = "0.1.0"
-edition = "2021"
-"@ -NoNewline
-        Set-Content -Path (Join-Path $newPackage 'src\lib.rs') -Value '' -NoNewline
-
-        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
-        ($pending | ForEach-Object { $_.Folder }) | Should -Be @('a')
-    }
-
-    It 'rejects empty BaseRef (mandatory parameter)' {
-        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-norefs-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        $ws.SetVersion('a', '0.1.1')
-
-        { Get-PendingReleases -RepoRoot $ws.Path -BaseRef '' } | Should -Throw
     }
 }
 
@@ -765,13 +677,4 @@ Describe 'Session-scoped git caches' {
         }
     }
 
-    Context 'Invalidate-WorkspaceMetadataCache' {
-        It 'does NOT clear git-derived caches (production cascade calls must not undo the speed-up)' {
-            $v1 = Get-PackageVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -PackageFolder 'b'
-            Invalidate-WorkspaceMetadataCache
-            Mock -CommandName Invoke-Git -MockWith { throw "Invalidate-WorkspaceMetadataCache must leave git caches intact" }
-            $v2 = Get-PackageVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -PackageFolder 'b'
-            $v2 | Should -Be $v1
-        }
-    }
 }
