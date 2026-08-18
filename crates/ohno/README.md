@@ -64,8 +64,17 @@ pub struct MyError {
 ## `ohno::error`
 
 The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 without manually managing the error infrastructure.
+
+The attribute always adds that field and always generates the error representation from it, so
+no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use
+`#[derive(Error)]` directly to place the core by hand.
+
+A field of type `OhnoCore` may still be declared, and is then treated as data rather than as the
+error: it is passed to the generated constructors like any other field, appears in the generated
+`Debug`, and can be referenced from a `#[display(...)]` template — but it is never read for
+`source()`, the backtrace, or enrichment, which all come from the injected field.
 
 ```rust
 // Simple error without extra fields
@@ -82,7 +91,7 @@ pub struct NetworkError {
 
 ## Display Error Override
 
-The `#[display("...")]` attribute allows you to customize the main error message
+The `#[display("...")]` attribute customizes the main error message
 while preserving the underlying error as a cause in the error chain.
 
 ```rust
@@ -104,6 +113,32 @@ The template string supports field interpolation using `{field_name}` syntax. Th
 error (if any) is automatically shown as “Caused by:” in the error chain. If the inner error
 has no source, only the custom message is displayed.
 
+Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
+
+### Format Arguments
+
+Anything that is not a plain field reference is passed as a positional argument, with
+`format!`’s placeholder and argument-counting semantics:
+
+```rust
+use std::path::PathBuf;
+
+#[ohno::error]
+#[display("failed to read config: {}", path.display())]
+pub struct ConfigError {
+    pub path: PathBuf,
+}
+```
+
+Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
+name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+
+|Argument|Accepted|
+|--------|--------|
+|`path.display()`|yes|
+|`self.path.display()`|no, the `self.` prefix is implicit|
+|`.path.display()`|no, not a valid expression|
+
 ## Automatic Constructors
 
 By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:
@@ -115,16 +150,29 @@ struct ConfigError {
 }
 
 // The derive macro automatically generates:
-// - ConfigError::new(path: String) -> Self
-// - ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+//
+// impl ConfigError {
+//     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+// }
 
 let error = ConfigError::new("/etc/config.toml");
 let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
 ```
 
+**The generated constructors are `pub(crate)`, regardless of the visibility of the error type
+itself.** They are an implementation convenience for the crate that defines the error, not part
+of its public API, so a `pub struct` error exported from a library cannot be constructed with
+`new()` or `caused_by()` by a downstream crate. This is deliberate: it keeps the set of ways an
+error can be built under the control of the crate that owns it, so adding a field is not a
+breaking change for callers.
+
 **Disabling Automatic Constructors:**
 
-Use `#[no_constructors]` to disable automatic generation when you need custom constructors:
+`#[no_constructors]` disables the generated constructors, leaving the names `new` and
+`caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+hand-written constructor has to initialize:
 
 ```rust
 use ohno::{Error, OhnoCore};
@@ -137,7 +185,7 @@ struct CustomError {
 
 impl CustomError {
     pub fn new(custom_logic: bool) -> Self {
-        // Your custom constructor logic here
+        // Custom constructor logic here
         Self {
             inner_error: OhnoCore::default(),
         }
@@ -292,25 +340,25 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbrCd9xja6IUYbReuvcH7u-4wbH1ETqam4eFAbE9V6cT1GHJphZIKCZG9obm9lMC4zLjmCa29obm9fbWFjcm9zZTAuMy41
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv-Hzd015wccb3QHVUUNfzdYbgkSSUDnsKTUbn3uKf5ryHu1hZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
- [__link11]: https://docs.rs/ohno_macros/0.3.5/ohno_macros/?search=enrich_err
- [__link12]: https://docs.rs/ohno_macros/0.3.5/ohno_macros/?search=enrich_err
- [__link13]: https://docs.rs/ohno/0.3.9/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link15]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link16]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel
- [__link17]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel::from_error_chain
+ [__link11]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link12]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
+ [__link14]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link15]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
  [__link18]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link19]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorLabel
- [__link2]: https://docs.rs/ohno/0.3.9/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.3.9/ohno/?search=Labeled
- [__link21]: https://docs.rs/ohno/0.3.9/ohno/?search=Labeled::label
- [__link3]: https://docs.rs/ohno/0.3.9/ohno/?search=OhnoCore
- [__link4]: https://docs.rs/ohno/0.3.9/ohno/?search=AppError
- [__link5]: https://docs.rs/ohno/0.3.9/ohno/?search=OhnoCore
+ [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link2]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt
+ [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
+ [__link21]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
+ [__link3]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
+ [__link4]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link5]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
  [__link6]: https://doc.rust-lang.org/stable/std/?search=error::Error
  [__link7]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link8]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug

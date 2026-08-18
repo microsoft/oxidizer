@@ -3,7 +3,7 @@
 
 [package]
 name = "plurality"
-version = "0.2.0"
+version = "0.2.1"
 description = "A highly efficient pooling memory allocator"
 readme = "README.md"
 keywords = ["pool", "memory", "allocator"]
@@ -45,7 +45,7 @@ loom = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
-allocator-api2 = { workspace = true, features = ["alloc"] }
+allocator-api2 = { workspace = true, features = ["alloc", "std"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 infinity_pool = { workspace = true }
@@ -79,6 +79,13 @@ harness = false
 
 [[bench]]
 name = "pool_comparison"
+harness = false
+
+# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
+[[bench]]
+name = "pool_comparison_cg"
 harness = false
 
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`

@@ -8,6 +8,15 @@ BeforeAll {
     # Helper that builds a baseline package record. Underscore-only cargo
     # names by default so the test stays focused on the cascade/resolve logic
     # rather than name normalization.
+    #
+    # AllowedExternalTypes defaults to @() -- "this crate's public API names
+    # nothing foreign" -- and NOT to $null. $null is the fail-closed branch
+    # (absent metadata => assume exposure), so defaulting to it would make
+    # every package in every baseline expose every dependency for free. That
+    # masks the signal under test: a cascade assertion would pass on the
+    # fallback even when the behaviour it is meant to pin is broken. @() is
+    # inert, so a test that needs exposure has to ask for it -- either with a
+    # real allowlist entry or by passing $null explicitly.
     function New-BaselinePackage {
         param(
             [string]   $Folder,
@@ -15,16 +24,28 @@ BeforeAll {
             [string]   $Version = '0.1.0',
             [string[]] $Deps = @(),
             [bool]     $Published = $true,
-            [bool]     $IsProcMacroOnly = $false
+            [bool]     $IsProcMacroOnly = $false,
+            [hashtable] $DepAliases = @{},
+            # The crate's rustdoc name -- its [lib] name, which defaults to the
+            # normalized package name. Allowlist entries earned on an INDIRECT
+            # path are rooted at this, never at a rename alias: a rename exists
+            # only on an edge the renaming crate declares, and an indirect path
+            # crosses no such edge to the target.
+            [string]   $CrateRoot = $null,
+            [AllowNull()][string[]] $AllowedExternalTypes = @()
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
+        if ([string]::IsNullOrEmpty($CrateRoot)) { $CrateRoot = $Name.Replace('-', '_') }
         return [pscustomobject]@{
             Folder    = $Folder
             Name      = $Name
             Version   = $Version
             Published = $Published
             Deps      = $Deps
+            DepAliases = $DepAliases
+            CrateRoot = $CrateRoot
             IsProcMacroOnly = $IsProcMacroOnly
+            AllowedExternalTypes = $AllowedExternalTypes
         }
     }
 
@@ -402,7 +423,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking')
@@ -430,7 +452,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@patch')
@@ -439,6 +462,146 @@ Describe 'Resolve-ReleaseSet' {
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveChangeType | Should -Be 'non-breaking'
             $byFolder['c'].EffectiveChangeType | Should -Be 'patch'
+        }
+
+        It 'raises an unchanged dependent when it exposes an incompatibly bumped dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'bytesbuf' -Version '0.7.0')
+                (New-BaselinePackage -Folder 'bytesbuf_io' -Version '0.7.0' -Deps @('bytesbuf') `
+                    -AllowedExternalTypes @('bytesbuf::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('bytesbuf@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['bytesbuf_io'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['bytesbuf_io'].EffectiveTargetVersion | Should -Be '0.8.0'
+            $byFolder['bytesbuf_io'].CascadeReasons[0].Breaking | Should -BeTrue
+        }
+
+        It 'keeps an unchanged dependent at patch when it does not expose the bumped dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('other_crate::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'patch'
+            $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+        }
+
+        It 'treats missing external-type metadata conservatively' {
+            # $null is passed explicitly: this test is *about* absent metadata,
+            # so the signal must come from the arguments and not from a helper
+            # default. New-BaselinePackage defaults to @() precisely so that no
+            # other test silently depends on the fail-closed branch.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes $null)
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'treats wildcard external-type metadata as possible exposure' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'propagates exposed incompatible dependency versions through multiple direct edges' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['b'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['c'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['c'].CascadeReasons.Target | Should -Contain 'b'
+        }
+
+        It 'cascades through an allowlist entry rooted at a renamed dependency alias' {
+            # `dependent` declares `dependency` under `package = "..."` as
+            # `aliased_dep`, so its allowlist can only name the alias. Matching
+            # on the real package name alone would miss it and ship the break.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -DepAliases @{ dependency = @('aliased_dep') } `
+                    -AllowedExternalTypes @('aliased_dep::Handle'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType    | Should -Be 'breaking'
+            $dependent.EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'does not cascade when the alias in the allowlist belongs to a different dependency' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -DepAliases @{ other_crate = @('aliased_dep') } `
+                    -AllowedExternalTypes @('aliased_dep::Handle'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $dependent = $resolved | Where-Object { $_.Folder -eq 'dependent' }
+
+            $dependent.EffectiveChangeType    | Should -Be 'patch'
+            $dependent.EffectiveTargetVersion | Should -Be '1.0.1'
+        }
+
+        It 'uses a self-floor breaking verdict before cascading exposed dependency versions' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependency' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'dependent' -Version '1.0.0' -Deps @('dependency') `
+                    -AllowedExternalTypes @('dependency::*'))
+            )
+            $classifier = New-StubClassifier @{ dependency = 'breaking' }
+            $parsed = Parse-ReleaseTokens -Tokens @('dependency@patch')
+
+            $resolved = Resolve-ReleaseSet `
+                -ParsedTokens $parsed `
+                -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier
+            $byFolder = @{}
+            foreach ($entry in $resolved) { $byFolder[$entry.Folder] = $entry }
+
+            $byFolder['dependency'].EffectiveChangeType | Should -Be 'breaking'
+            $byFolder['dependent'].EffectiveChangeType | Should -Be 'breaking'
         }
 
         It 'adds a proc-macro-only cascade dependent at the mechanical patch floor for manual review' {
@@ -567,7 +730,8 @@ Describe 'Resolve-ReleaseSet' {
         It '-Force honors the explicit pin verbatim when a higher version is required' {
             # b's own API broke => normally requires 2.0.0; user pinned b at
             # 1.1.0. With -Force, b stays at 1.1.0 but the change-type tag is
-            # upgraded so any further cascade decisions for b would be correct.
+            # upgraded to record the unmet requirement. Further exposure
+            # propagation follows the actual 1.0.0 -> 1.1.0 transition.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
@@ -581,6 +745,110 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].RequestedTargetVersion    | Should -Be '1.1.0'
             $byFolder['b'].EffectiveChangeType       | Should -Be 'breaking'
             $byFolder['b'].PinHonoredAgainstCascade  | Should -BeTrue
+        }
+
+        It '-Force does not stop the exposure cascade at the pinned crate' {
+            # Exposed chain a -> b -> c. a@breaking drives b breaking, but b is
+            # pinned to 1.1.0 -- numerically compatible from 1.0.0. The pin
+            # changes b's version, not b's API: b@1.1.0 is still built against
+            # a@2.0.0 and exposes `a::*`, so its public API names different
+            # types than b@1.0.0 did, and a consumer of `b = "1.0"` upgrades
+            # into that silently. c must inherit the break even though b's own
+            # version transition looks compatible.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            # The pin is still honored verbatim -- -Force writes the number the
+            # user asked for, and only the propagation decision changes.
+            $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.1.0'
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'breaking'
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeTrue
+
+            $byFolder['c'].EffectiveChangeType      | Should -Be 'breaking'
+            $byFolder['c'].EffectiveTargetVersion   | Should -Be '2.0.0'
+        }
+
+        It 'resumes the exposure cascade past a pinned crate when the pin is itself breaking' {
+            # Same chain, but b is pinned to 2.0.0 -- an incompatible
+            # transition -- so c must inherit the break.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@2.0.0')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].EffectiveTargetVersion | Should -Be '2.0.0'
+            $byFolder['c'].EffectiveChangeType    | Should -Be 'breaking'
+            $byFolder['c'].EffectiveTargetVersion | Should -Be '2.0.0'
+        }
+
+        It 'does not propagate from a compatible release that no pin suppressed' {
+            # Boundary guard for the forced-pin clause: propagation is widened
+            # only by PinHonoredAgainstCascade, not by every entry in the set.
+            # a releases non-breaking, so b's own release stays compatible and
+            # nothing was suppressed -- c must remain at its patch floor.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeFalse
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'patch'
+            $byFolder['c'].EffectiveChangeType      | Should -Be 'patch'
+        }
+
+        It 'does not propagate from a forced pin that suppressed only a non-breaking requirement' {
+            # PinHonoredAgainstCascade is set for ANY suppressed requirement,
+            # not only a breaking one. Here b's own self-check requires
+            # non-breaking (1.1.0) and the user pins 1.0.1 with -Force, so the
+            # flag is set while the suppressed requirement was merely additive.
+            # An additive API change breaks no consumer, so c must stay at its
+            # patch floor rather than being dragged to a major release.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0')
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') `
+                    -AllowedExternalTypes @('a::*'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @('b::*'))
+            )
+            $classifier = { param($folder) if ($folder -eq 'b') { 'non-breaking' } else { 'patch' } }
+            $parsed = Parse-ReleaseTokens -Tokens @('b@1.0.1')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType $classifier -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeTrue
+            $byFolder['b'].EffectiveChangeType      | Should -Be 'non-breaking'
+            $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.0.1'
+
+            $byFolder['c'].EffectiveChangeType      | Should -Not -Be 'breaking'
         }
 
         It '-Force emits a warning naming the package, the pin, the required minimum, and the sources' {
@@ -659,7 +927,8 @@ Describe 'Resolve-ReleaseSet' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') `
+                    -AllowedExternalTypes @())
             )
             $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('b@patch', 'a@breaking')
@@ -683,5 +952,297 @@ Describe 'Resolve-ReleaseSet' {
             $cReasonForA = @($byFolder['c'].CascadeReasons | Where-Object { $_.Target -eq 'a' })
             $cReasonForA.Count   | Should -Be 1
         }
+    }
+}
+
+Describe 'Resolve-ReleaseSet exposure cascade over re-exported types' {
+    # cargo-check-external-types attributes a re-exported type to its DEFINING
+    # crate. A crate that reaches `defining::T` through an intermediate
+    # therefore allowlists `defining` while depending only on the intermediate.
+    # fetch_azure documents exactly this in its own manifest:
+    #
+    #   # azure_core re-exports its HttpClient trait from this crate;
+    #   # cargo-check-external-types reports re-exports by their defining crate.
+    #   "typespec_client_core::*",
+    #
+    # Requiring a direct dependency edge missed every such crate, which is a
+    # fail-open: a breaking bump of the defining crate shipped as compatible.
+
+    It 'raises an indirect dependent whose allowlist names the defining crate' {
+        # relay is raised directly because it exposes defining. facade requires
+        # the indirect defining-crate path: it depends on relay, but its
+        # allowlist names defining rather than its declared dependency.
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                -AllowedExternalTypes @('defining::Handle')
+            New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                -AllowedExternalTypes @('defining::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+        $facade = $resolved | Where-Object { $_.Folder -eq 'facade' }
+
+        $facade.EffectiveChangeType    | Should -Be 'breaking'
+        $facade.EffectiveTargetVersion | Should -Be '2.0.0'
+    }
+
+    It 'records the defining crate as the cascade reason, not the intermediate' {
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                -AllowedExternalTypes @('unrelated::Thing')
+            New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                -AllowedExternalTypes @('defining::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+        $facade = $resolved | Where-Object { $_.Folder -eq 'facade' }
+
+        $facade.EffectiveChangeType | Should -Be 'breaking'
+        @($facade.CascadeReasons | Where-Object { $_.Target -eq 'defining' }).Count |
+            Should -Be 1 -Because 'the break originates at the crate the type is defined in'
+    }
+
+    It 'raises an indirect dependent even when the intermediate stays compatible' {
+        # relay explicitly claims to expose nothing, so it correctly stays at
+        # its patch floor while facade above it must still break. This is the
+        # unmasked case: with a direct-edge-only scan nothing reaches facade.
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                -AllowedExternalTypes @('defining::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+
+        ($resolved | Where-Object { $_.Folder -eq 'relay' }).EffectiveChangeType  | Should -Be 'patch'
+        ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'breaking'
+    }
+
+    It "matches an indirect allowlist entry rooted at the target's [lib] name" {
+        # facade names def_v1::Handle because that is what rustdoc calls the
+        # type: the crate root follows defining's [lib] name, not its package
+        # name. facade cannot learn this from a rename alias -- it has no edge
+        # to defining to rename -- so the root has to come from the target.
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                -AllowedExternalTypes @('def_v1::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+
+        ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'breaking'
+    }
+
+    Context 'a crate holding both a direct and an indirect path' {
+        # The two exposure predicates accept different allowlist roots, so a
+        # crate that reaches the target both ways has to be judged on both.
+        # Testing only the direct edge loses the roots the indirect path earns.
+
+        It 'raises a dependent whose renamed direct edge cannot supply the root its indirect path does' {
+            # facade imports defining directly, but under `package = "..."`, so
+            # on that edge the crate is nameable only as aliased_dep and the
+            # direct predicate rightly refuses def_v1. facade also reaches
+            # defining through relay, which re-exports its types -- and that
+            # path attributes them to defining's own crate root, def_v1. The
+            # allowlist entry is therefore legitimate, and facade's public API
+            # really is defining's types.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('def_v1') } `
+                    -AllowedExternalTypes @('def_v1::*')
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('defining', 'relay') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @('def_v1::Handle')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType |
+                Should -Be 'breaking' -Because 'the indirect path earns the root the renamed direct edge cannot'
+        }
+
+        It 'does not raise a dependent whose only path to the target is the renamed direct edge' {
+            # Identical to the case above except that nothing re-exports
+            # defining, so lonely has no second path. Its allowlist entry
+            # cannot have been earned: importing the crate as aliased_dep makes
+            # def_v1::Handle unwritable, so the entry names some unrelated
+            # crate that merely collides with defining's root.
+            #
+            # This is why the indirect test keys off a path that exists
+            # independently of the direct edge rather than plain reachability:
+            # reachability counts the direct edge itself and would readmit the
+            # root the direct predicate just rejected.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'lonely' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @('def_v1::Handle')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'lonely' }).EffectiveChangeType |
+                Should -Not -Be 'breaking' -Because 'a renamed edge makes that root unwritable, so the entry is a collision'
+        }
+
+        It 'still requires positive evidence on the indirect path' {
+            # facade holds both paths but claims to name nothing foreign, so
+            # neither predicate has anything to match. Evaluating both edges
+            # must not degrade into "any crate that reaches the target".
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('def_v1') } `
+                    -AllowedExternalTypes @('def_v1::*')
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('defining', 'relay') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @()
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType |
+                Should -Not -Be 'breaking'
+        }
+    }
+
+    Context 'the indirect edge demands positive evidence' {
+        # The direct edge fails closed on "no evidence" because an unknown must
+        # not ship a break as compatible. Carrying that rule to indirect edges
+        # would force every transitive dependent that lacks metadata to
+        # breaking, which is a large and wrong over-cascade. These pin the
+        # narrower rule.
+
+        It 'does not raise an indirect dependent that declares no allowlist' {
+            # relay's empty allowlist is a positive claim that it exposes
+            # nothing, so no type of defining's can reach facade through it.
+            # facade's absent metadata is not evidence to the contrary.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                    -AllowedExternalTypes $null
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+            $facade = $resolved | Where-Object { $_.Folder -eq 'facade' }
+
+            $facade.EffectiveChangeType    | Should -Be 'patch'
+            $facade.EffectiveTargetVersion | Should -Be '1.0.1'
+        }
+
+        It 'still fails closed for a DIRECT dependent that declares no allowlist' {
+            # Same absent metadata, direct edge: must fail closed.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -AllowedExternalTypes $null
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'relay' }).EffectiveChangeType | Should -Be 'breaking'
+        }
+
+        It 'does not raise an indirect dependent whose allowlist names only the intermediate' {
+            # facade names relay, not defining. relay itself does not expose
+            # defining, so facade cannot be holding one of defining's types.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('relay') `
+                    -AllowedExternalTypes @('relay::Adapter')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'patch'
+        }
+
+        It 'does not raise a crate that names the target but cannot reach it' {
+            # No dependency path at all: an allowlist entry naming a same-named
+            # crate from elsewhere must not manufacture a cascade edge.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'stranger' -Version '1.0.0' `
+                    -AllowedExternalTypes @('defining::Handle')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            @($resolved | Where-Object { $_.Folder -eq 'stranger' }).Count |
+                Should -Be 0 -Because 'stranger is not a dependent of defining at all'
+        }
+    }
+
+    It 'reaches an indirect dependent through an unpublished conduit' {
+        # Unpublished crates are not released themselves but still carry types
+        # between published ones, so they must not break the reachability walk.
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'internal' -Version '1.0.0' -Deps @('defining') `
+                -Published $false -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('internal') `
+                -AllowedExternalTypes @('defining::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+
+        ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'breaking'
+    }
+
+    It 'excludes a proc-macro-only crate from the indirect edge' {
+        $baseline = @(
+            New-BaselinePackage -Folder 'defining' -Version '1.0.0' -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                -AllowedExternalTypes @()
+            New-BaselinePackage -Folder 'macros' -Version '1.0.0' -Deps @('relay') `
+                -IsProcMacroOnly $true -AllowedExternalTypes @('defining::Handle')
+        )
+        $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+        $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+            -GetRequiredChangeType (New-StubClassifier)
+        $macros = $resolved | Where-Object { $_.Folder -eq 'macros' }
+
+        $macros.EffectiveChangeType | Should -Be 'patch' -Because 'a proc-macro crate has no rustdoc API to expose types through'
     }
 }

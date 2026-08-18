@@ -4,7 +4,7 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.4.0"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]
@@ -31,6 +31,8 @@ all-features = true
 
 [features]
 default = []
+# Allows clocks to use lower-overhead, lower-precision instants on Linux and Windows
+fast-instant = ["dep:libc", "dep:windows-sys"]
 # Enables additional test-specific APIs
 test-util = []
 # Serialization support for serde
@@ -51,7 +53,14 @@ serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true, features = ["Win32_System_SystemInformation"] }
+
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 ohno = { path = "../ohno", features = ["app-err"] }
 
 #external
@@ -64,10 +73,16 @@ jiff = { workspace = true, default-features = true }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }
 
 [[example]]
 name = "tick_basic"
@@ -100,6 +115,11 @@ required-features = ["test-util"]
 [[bench]]
 name = "clock_bench"
 harness = false
+
+[[bench]]
+name = "tick_instant"
+harness = false
+required-features = ["fast-instant"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

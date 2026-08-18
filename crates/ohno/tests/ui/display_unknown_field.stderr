@@ -1,0 +1,11 @@
+error: unknown field `pth` in `#[display(...)]`, available fields: `path`, `code`
+  --> tests/ui/display_unknown_field.rs:15:11
+   |
+15 | #[display("bad path: {pth}")]
+   |           ^^^^^^^^^^^^^^^^^
+
+error: unknown field `pth` in `#[display(...)]`, available fields: `path`, `code`
+  --> tests/ui/display_unknown_field.rs:22:27
+   |
+22 | #[display("bad path: {}", pth.display())]
+   |                           ^^^
