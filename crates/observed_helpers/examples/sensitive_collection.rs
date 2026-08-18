@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates using `SensitiveCollection` inside an emit `Event`, processed
+//! Demonstrates using `SensitiveSlice` inside an emit `Event`, processed
 //! by a custom `EventProcessor` that captures fields. Shows both redacted and
 //! passthrough output.
 

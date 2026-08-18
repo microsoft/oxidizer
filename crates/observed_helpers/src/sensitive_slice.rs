@@ -1,6 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! A bounded, type-erased view over a collection of classified items.
+//!
+//! [`SensitiveSlice`] borrows at most `N` items from any iterator of
+//! [`RedactedDisplay`] references and stores them inline, so a struct field can
+//! hold a redactable collection without naming the iterator's type and without
+//! allocating. Formatting goes through the caller's [`Redactor`], so the items
+//! themselves are never rendered in the clear by this module.
+
 use std::fmt;
 
 use arrayvec::ArrayVec;
@@ -79,19 +87,19 @@ impl<'a, const N: usize, const D: char> SensitiveSlice<'a, N, D> {
 
         let mut items = ArrayVec::new();
         let mut overflowed = false;
-        let mut iter = iter.into_iter();
 
-        for item in iter.by_ref() {
+        // `is_full` is checked BEFORE the push, so once `N` items are stored the
+        // next one is still pulled from the iterator - and then deliberately
+        // dropped. Pulling it is what makes `overflowed` accurate: the flag
+        // means "the source had more than `N` items", not "the source had at
+        // least `N`". A source of exactly `N` items ends the loop through
+        // `None` and leaves the flag false.
+        for item in iter {
             if items.is_full() {
                 overflowed = true;
                 break;
             }
             items.push(item as &(dyn RedactedDisplay + Sync));
-        }
-
-        // If we haven't detected overflow yet, check if the iterator has more.
-        if !overflowed {
-            overflowed = iter.next().is_some();
         }
 
         Self { items, overflowed }

@@ -9,7 +9,11 @@ use opentelemetry::logs::AnyValue;
 /// Converts a [`Text`] into an `OTel` [`StringValue`](opentelemetry::StringValue),
 /// preserving the borrowed-versus-shared distinction so neither representation
 /// copies.
-// Excluded from the coverage gate for the reason given above `any_value_of`.
+// Excluded from the coverage gate for the same reason as `any_value_of` below:
+// the trailing arm guards the `#[non_exhaustive]` `Text` and cannot be reached.
+// Unlike `any_value_of` this function delegates nothing - both real conversions
+// are inline and therefore excluded too. They are pinned by the `Text::Static`
+// and `Text::Shared` tests and by mutation testing, but not by the gate.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn string_value_of(text: Text) -> opentelemetry::StringValue {
     match text {
@@ -49,10 +53,13 @@ fn unsigned_otel_value(value: u64) -> opentelemetry::Value {
 /// attributes and bodies.
 // The last arm guards the `#[non_exhaustive]` `Value`, so no variant that exists
 // today can reach it, and coverage instrumentation counts an arm that is never
-// taken as an uncovered line. The dispatch is therefore excluded from the
-// coverage gate instead of the guard being deleted: without the guard, a variant
-// added upstream would either fail to compile here or silently lose data. The
-// conversions it delegates to stay measured, and mutation testing still applies.
+// taken as an uncovered line. The match is therefore excluded from the coverage
+// gate instead of the guard being deleted: without the guard, a variant added
+// upstream would either fail to compile here or silently lose data.
+//
+// The exclusion covers the inline arms as well, not only the guard. What stays
+// measured is the work these arms delegate: `unsigned_any_value`, `list_of` and
+// the element closures. Mutation testing still applies to everything here.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
 pub fn any_value_of(value: Value) -> AnyValue {

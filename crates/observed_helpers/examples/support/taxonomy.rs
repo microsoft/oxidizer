@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A small stand-in data taxonomy shared by the `observed` crate's examples.
+//! A small stand-in data taxonomy for this crate's examples.
 //!
 //! This taxonomy exists purely to exercise the [`data_privacy`] classification
 //! and redaction machinery in examples. It defines a handful of representative
@@ -9,8 +9,9 @@
 //! policy.
 //!
 //! It is included by individual examples via `#[path = "support/taxonomy.rs"]`
-//! so the examples stay self-contained and do not depend on the internal
-//! `observed_testing` test harness.
+//! so the examples stay self-contained and need no test-harness dependency.
+//! The `observed` crate carries its own copy for the same reason: an example
+//! cannot include a file outside its own package directory.
 
 use data_privacy::taxonomy;
 

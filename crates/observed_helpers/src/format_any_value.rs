@@ -1,6 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Human-readable rendering of an `OpenTelemetry` [`AnyValue`].
+//!
+//! `AnyValue` only derives `Debug`, so printing one produces wrapper noise such
+//! as `String(Owned("hello"))`. [`format_any_value`] returns a [`fmt::Display`]
+//! adapter that renders the value itself, recursing through lists and maps.
+//! Rendering allocates nothing beyond what the formatter itself needs and has
+//! no side effects.
+
 use std::fmt;
 
 use opentelemetry::logs::AnyValue;
@@ -45,10 +53,17 @@ struct DisplayAnyValue<'a>(&'a AnyValue);
 impl DisplayAnyValue<'_> {
     // The last arm guards the `#[non_exhaustive]` `AnyValue`, so it cannot be
     // reached by any variant that exists today, and coverage instrumentation
-    // counts an arm that is never taken as an uncovered line. The dispatch is
-    // therefore excluded from the coverage gate instead of the guard being
-    // deleted; the rendering it delegates to stays measured, and mutation
-    // testing still applies here.
+    // counts an arm that is never taken as an uncovered line. The whole match
+    // is therefore excluded from the coverage gate rather than the guard being
+    // deleted: without it, a variant added upstream would either fail to
+    // compile here or silently lose data.
+    //
+    // The exclusion covers the scalar and `Bytes` arms too, since they render
+    // inline: those are pinned by `format_int` / `format_bool` / `format_string`
+    // / `format_bytes` and by mutation testing, which still applies here, but
+    // not by the coverage gate. Only the list and map rendering, in
+    // `write_list` / `write_map` below, stays measured - and each nested element
+    // re-enters this excluded dispatch.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn fmt_value(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
