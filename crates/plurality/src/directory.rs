@@ -14,7 +14,7 @@
 
 #![expect(
     clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+    reason = "each block reads or moves through one `UnsafeCell` several times under a single caller-guaranteed precondition that no other borrow is live; one block per operation would repeat that precondition per statement, and the buffer swap has no intermediate state a separate block could describe"
 )]
 
 use alloc::vec::Vec;

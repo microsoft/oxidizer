@@ -4,6 +4,7 @@
 use allocator_api2::alloc::{Allocator, Global};
 
 use crate::multi_pool::{ChunkSizing, MultiPool};
+use crate::slot::MAX_CHUNK_SIZE_SLOTS;
 
 /// Default per-chunk byte target.
 ///
@@ -115,9 +116,28 @@ impl<A: Allocator + Clone> MultiPoolBuilder<A> {
     }
 
     /// Builds the pool.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the requested `chunk_bytes` or `chunk_size` is `0`, or if
+    /// `chunk_size` is greater than `2^31` (the largest `u32` whose next power
+    /// of two is representable).
     #[must_use]
     #[cold]
     pub fn build(self) -> MultiPool<A> {
+        // The caller-supplied request is validated here; the per-layout
+        // reduction each layout pool then applies is a property of the layout,
+        // not of the request. Ref: docs/design/multi-pool.md, "Bounding growth".
+        match self.sizing {
+            ChunkSizing::Bytes(bytes) => assert!(bytes >= 1, "chunk_bytes must be >= 1"),
+            ChunkSizing::Slots(slots) => {
+                assert!(slots >= 1, "chunk_size must be >= 1");
+                assert!(
+                    slots <= MAX_CHUNK_SIZE_SLOTS,
+                    "chunk_size exceeds the largest slot count with a representable next power of two"
+                );
+            }
+        }
         MultiPool::from_parts(self.sizing, self.max_chunks, self.max_layouts, self.allocator)
     }
 }

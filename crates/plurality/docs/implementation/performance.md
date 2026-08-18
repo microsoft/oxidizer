@@ -30,8 +30,10 @@ suites under `benches/` produce the numbers cited here.
 Parameterising the pool body over geometry must leave the typed pool's emitted
 code identical to what a body written against the element type produces.
 `TypedGeometry<T>` is zero-sized and its accessors are constant-evaluable, so
-every geometry expression on that path folds to a constant. The gate is
-instruction counts: the typed rows of the Callgrind suite must hold.
+every geometry expression on that path folds to a constant. The check is the
+typed rows of the Callgrind suite, read against the counts recorded below.
+Nothing enforces it automatically: no baseline is committed, and the suite is
+not a CI gate. Ref: docs/callgrind-benchmarks.md.
 
 The one genuinely new cost on the runtime path is that slot addressing
 multiplies by a loaded stride from the pool body, where a typed pool's constant
@@ -45,8 +47,9 @@ typed path keeps its constant.
 
 Multi-pool coverage follows the workspace conventions: identical operation
 bodies in the wall-clock and instruction-count harnesses, single-threaded,
-measuring elementary operations against a pre-warmed pool with growth and
-first-use effects outside the measured region. [`PERF.md`](../PERF.md)
+measuring elementary operations against a pre-warmed pool, with growth and
+first-use effects outside the measured region except in the first-touch row,
+which exists to measure them. [`PERF.md`](../PERF.md)
 publishes a curated wall-clock subset; the instruction-count suites stay in the
 repository for optimization work.
 
@@ -111,7 +114,8 @@ it; the scan and the pool it selects are the rest, and the free-list pop and
 the value write cost the same on both paths.
 
 The per-entry slope is what the linear scan actually stakes its case on, and it
-is the part that scales. The intercept is a fixed toll on the routed path only.
+is the part that scales. Across the two rows it comes out at 6 instructions per
+directory entry. The intercept is a fixed toll on the routed path only.
 
 Instructions are not time, and for the scan the gap is wide. Sixteen layouts
 run roughly twice the instructions of one, yet the wall-clock rows for the two
@@ -130,12 +134,33 @@ row, so it cancels in the differences. That also gives the design's claim that
 reclamation costs what it costs in a typed pool a way to fail — a divergence
 would show up as a delta larger than the modeled addition explains.
 
+### First touch of a layout
+
+Routing branches on whether the directory already holds the key, and both ends
+of that branch are measured. The miss row allocates a layout the pool has never
+seen from a directory one entry long, so it reads directly against the
+one-layout hit row, which scans the same distance and finds its pool. What the
+row prices is the whole first touch — the scan that fails, the cloned allocator
+and layout-pool metadata, the directory push, and the first chunk the growth
+path then allocates — because that is what presenting a new layout costs a
+caller. It is not a measurement of the scan alone, and the row cannot separate
+the two contributions.
+
+The chunk dominates the result, which places the row orders of magnitude above
+the hit row and ties it to the configured chunk size rather than to anything
+the router does. It is therefore read as a first-touch figure in its own right,
+not against the steady-state rows. Its wall-clock counterpart builds a fresh
+pool for every measured iteration, so it reports one allocation per iteration
+where the steady-state rows report a block of them.
+
 ### Scenarios
 
 - **Allocate and free, one layout present** — the low case for routing cost and
   the direct comparison against the typed pool's corresponding row.
 - **Allocate and free, sixteen layouts present** — the high case, isolating how
   lookup scales with directory size.
+- **Allocate a layout the pool has never seen** — the miss end of the routing
+  branch, covering installation of a layout pool and its first chunk.
 - **Allocate, coerce to a trait object, dispatch, and free** — the row that
   lines up with the owning fat-pointer comparison, where the reference
   implementation's multi pools already appear. This is where the architectural

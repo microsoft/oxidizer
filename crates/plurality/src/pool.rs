@@ -1266,7 +1266,10 @@ pub(crate) unsafe fn teardown<A: Allocator, G: SlotGeometry>(pool: NonNull<PoolI
         let _ = inner.chunks_allocated.load(Acquire);
         // Re-borrowed per chunk so that no directory borrow is live across the
         // `deallocate` call below, keeping the crate's rule that control never
-        // leaves the pool while a directory is borrowed.
+        // leaves the pool while a directory is borrowed. The length is sampled
+        // once rather than re-read per iteration, as `grow` does: teardown runs
+        // at refcount zero, so no handle survives through which an allocator
+        // could re-enter and publish a chunk.
         // Ref: docs/implementation/reentrancy.md.
         let chunks = (&*inner.directory.get()).len();
         for i in 0..chunks {

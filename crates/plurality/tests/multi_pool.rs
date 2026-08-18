@@ -896,7 +896,7 @@ enum DenyMode {
     Matching { layout: Layout, phase: AllocationPhase },
 }
 
-/// Identifies the allocation site a failure-injection rule is meant to reach.
+/// Identifies the allocation site a global-allocator rule is meant to reach.
 #[cfg(not(miri))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AllocationPhase {
@@ -1005,12 +1005,111 @@ unsafe impl GlobalAlloc for DenyableGlobal {
 #[cfg(not(miri))]
 type ReentryValue = [u64; 4];
 
+/// Selects the global-allocation request a reentry hook interrupts.
+#[cfg(not(miri))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReentryMode {
+    Disabled,
+    Matching { layout: Layout, phase: AllocationPhase },
+}
+
+/// Records what a reentry hook interrupted during one arming window.
+#[cfg(not(miri))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Reentry {
+    layout: Layout,
+    phase: AllocationPhase,
+    preceding_requests: usize,
+    fires: usize,
+}
+
+/// Arming state of one reentry hook, and what that hook interrupted.
+///
+/// The shapes a pool reserves are ordinary — a handful of pointers or layout
+/// keys — so a layout on its own does not identify the site a test means to
+/// interrupt: an incidental request of the same shape matches it just as well.
+/// A window therefore pairs the layout with the phase it targets and records
+/// what it caught, the way `DenyMode` and `DeniedAllocation` do for failure
+/// injection, so that a test asserts on the interruption rather than on the
+/// pool's end state alone.
+#[cfg(not(miri))]
+struct ReentryHook {
+    mode: Cell<ReentryMode>,
+    requests: Cell<usize>,
+    reentry: Cell<Option<Reentry>>,
+}
+
+#[cfg(not(miri))]
+impl ReentryHook {
+    const fn disarmed() -> Self {
+        Self {
+            mode: Cell::new(ReentryMode::Disabled),
+            requests: Cell::new(0),
+            reentry: Cell::new(None),
+        }
+    }
+
+    /// Watches for the first request with `layout`, which the caller declares
+    /// to be the allocation `phase` makes.
+    fn arm(&self, layout: Layout, phase: AllocationPhase) {
+        self.reentry.set(None);
+        self.requests.set(0);
+        self.mode.set(ReentryMode::Matching { layout, phase });
+    }
+
+    fn disarm(&self) {
+        self.mode.set(ReentryMode::Disabled);
+    }
+
+    /// `true` if this request is the one the armed window watches.
+    ///
+    /// Counts every other request the window sees, so that the record can show
+    /// the hook waited for the phase it targets instead of firing on the first
+    /// allocation to reach it.
+    fn claim(&self, layout: Layout) -> bool {
+        match self.mode.get() {
+            ReentryMode::Disabled => false,
+            ReentryMode::Matching { layout: target, phase } if layout == target => {
+                self.record(layout, phase);
+                true
+            }
+            ReentryMode::Matching { .. } => {
+                self.requests.set(self.requests.get() + 1);
+                false
+            }
+        }
+    }
+
+    /// Keeps the first interruption's detail, since a later one is a different
+    /// allocation than the window was armed for, and counts them all.
+    fn record(&self, layout: Layout, phase: AllocationPhase) {
+        let reentry = match self.reentry.get() {
+            Some(seen) => Reentry {
+                fires: seen.fires + 1,
+                ..seen
+            },
+            None => Reentry {
+                layout,
+                phase,
+                preceding_requests: self.requests.get(),
+                fires: 1,
+            },
+        };
+        self.reentry.set(Some(reentry));
+    }
+
+    /// Survives the window it describes, so a test reads it after the guard.
+    fn reentry(&self) -> Option<Reentry> {
+        self.reentry.get()
+    }
+}
+
 // The reentry hook lets a test drive an allocation that arrives while a pool is
 // reserving directory capacity, which is the one path no pool-level allocator
 // can reach: directory buffers come from the global allocator.
 #[cfg(not(miri))]
 thread_local! {
-    static REENTRY_LAYOUT: Cell<Option<Layout>> = const { Cell::new(None) };
+    static REENTRY: ReentryHook = const { ReentryHook::disarmed() };
     static REENTRY_POOL: RefCell<Option<StdRc<Pool<ReentryValue>>>> = const { RefCell::new(None) };
     static REENTRY_ACTIVE: Cell<bool> = const { Cell::new(false) };
     static REENTRY_VALUES: RefCell<Vec<PoolBox<ReentryValue>>> = const { RefCell::new(Vec::new()) };
@@ -1019,15 +1118,21 @@ thread_local! {
 /// Allocates from the registered pool if this request is the one being watched.
 #[cfg(not(miri))]
 fn maybe_reenter(layout: Layout) {
-    if REENTRY_LAYOUT.get() != Some(layout) || REENTRY_ACTIVE.replace(true) {
+    // The allocations made below reach this hook again, and one of them
+    // requests the very layout the window watches. Claiming outside that nested
+    // span keeps the window's record a count of interrupted reservations rather
+    // than of the reentrant traffic each interruption produces.
+    if REENTRY_ACTIVE.replace(true) {
         return;
     }
-    let target = REENTRY_POOL.with_borrow(Option::clone);
-    if let Some(pool) = target {
-        // Four values fill the buffer the interrupted reservation prepared,
-        // which is what forces it to start over with a larger one.
-        for i in 0..4_u64 {
-            REENTRY_VALUES.with_borrow_mut(|values| values.push(pool.alloc_box([i; 4])));
+    if REENTRY.with(|hook| hook.claim(layout)) {
+        let target = REENTRY_POOL.with_borrow(Option::clone);
+        if let Some(pool) = target {
+            // Four values fill the buffer the interrupted reservation prepared,
+            // which is what forces it to start over with a larger one.
+            for i in 0..4_u64 {
+                REENTRY_VALUES.with_borrow_mut(|values| values.push(pool.alloc_box([i; 4])));
+            }
         }
     }
     REENTRY_ACTIVE.set(false);
@@ -1038,9 +1143,8 @@ fn maybe_reenter(layout: Layout) {
 // in which reserved room can be taken away from the reservation's owner.
 #[cfg(not(miri))]
 thread_local! {
-    static INSTALL_REENTRY_LAYOUT: Cell<Option<Layout>> = const { Cell::new(None) };
+    static INSTALL_REENTRY: ReentryHook = const { ReentryHook::disarmed() };
     static INSTALL_REENTRY_POOL: RefCell<Option<StdRc<MultiPool>>> = const { RefCell::new(None) };
-    static INSTALL_REENTRY_FIRED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Installs unseen layouts in the registered multi pool if this request is the
@@ -1048,11 +1152,13 @@ thread_local! {
 /// undisturbed.
 #[cfg(not(miri))]
 fn maybe_install_reentrantly(layout: Layout) {
-    if INSTALL_REENTRY_LAYOUT.get() != Some(layout) {
+    if !INSTALL_REENTRY.with(|hook| hook.claim(layout)) {
         return;
     }
-    INSTALL_REENTRY_LAYOUT.set(None);
-    INSTALL_REENTRY_FIRED.set(true);
+    // The installs below grow the same directories, and their own reservations
+    // request the watched layout in turn, so the window closes here rather than
+    // recursing.
+    INSTALL_REENTRY.with(ReentryHook::disarm);
 
     if let Some(pool) = INSTALL_REENTRY_POOL.take() {
         // One install per slot of room the interrupted reservation had already
@@ -1072,23 +1178,56 @@ struct ReenterGlobal;
 
 #[cfg(not(miri))]
 impl ReenterGlobal {
-    fn on(layout: Layout, pool: &StdRc<Pool<ReentryValue>>) -> Self {
+    /// Reenters through `pool` on the first request with `layout`, which the
+    /// caller declares to be the allocation `phase` makes.
+    fn matching(layout: Layout, phase: AllocationPhase, pool: &StdRc<Pool<ReentryValue>>) -> Self {
         REENTRY_VALUES.with_borrow_mut(Vec::clear);
         REENTRY_POOL.replace(Some(StdRc::clone(pool)));
-        REENTRY_LAYOUT.set(Some(layout));
+        REENTRY.with(|hook| hook.arm(layout, phase));
         Self
     }
 
     fn values() -> Vec<PoolBox<ReentryValue>> {
         REENTRY_VALUES.with_borrow_mut(core::mem::take)
     }
+
+    fn reentry() -> Option<Reentry> {
+        REENTRY.with(ReentryHook::reentry)
+    }
 }
 
 #[cfg(not(miri))]
 impl Drop for ReenterGlobal {
     fn drop(&mut self) {
-        REENTRY_LAYOUT.set(None);
+        REENTRY.with(ReentryHook::disarm);
         REENTRY_POOL.replace(None);
+    }
+}
+
+/// Arms the install-reentry hook for the lifetime of the guard.
+#[cfg(not(miri))]
+struct InstallReentrantly;
+
+#[cfg(not(miri))]
+impl InstallReentrantly {
+    /// Installs into `pool` on the first request with `layout`, which the
+    /// caller declares to be the allocation `phase` makes.
+    fn matching(layout: Layout, phase: AllocationPhase, pool: &StdRc<MultiPool>) -> Self {
+        INSTALL_REENTRY_POOL.replace(Some(StdRc::clone(pool)));
+        INSTALL_REENTRY.with(|hook| hook.arm(layout, phase));
+        Self
+    }
+
+    fn reentry() -> Option<Reentry> {
+        INSTALL_REENTRY.with(ReentryHook::reentry)
+    }
+}
+
+#[cfg(not(miri))]
+impl Drop for InstallReentrantly {
+    fn drop(&mut self) {
+        INSTALL_REENTRY.with(ReentryHook::disarm);
+        INSTALL_REENTRY_POOL.replace(None);
     }
 }
 
@@ -1272,12 +1411,21 @@ fn a_reentrant_allocation_that_fills_a_reservation_makes_it_start_over() {
     // chunks as the prepared buffer holds, so the reservation cannot use it and
     // must prepare a larger one.
     // Ref: docs/implementation/reentrancy.md, "Reserving without a live borrow".
+    let reentry_layout = first_vec_reservation_layout::<*const ()>();
     let outer = {
-        let _reenter = ReenterGlobal::on(first_vec_reservation_layout::<*const ()>(), &pool);
+        let _reenter = ReenterGlobal::matching(reentry_layout, AllocationPhase::DirectoryChunksReservation, &pool);
         pool.alloc_box([u64::MAX; 4])
     };
     let nested = ReenterGlobal::values();
 
+    let reentry = ReenterGlobal::reentry().unwrap();
+    assert_eq!(reentry.phase, AllocationPhase::DirectoryChunksReservation);
+    assert_eq!(reentry.layout, reentry_layout);
+    assert_eq!(reentry.fires, 1, "one reservation was outstanding, so one was interrupted");
+    assert!(
+        reentry.preceding_requests > 0,
+        "the interrupted request must follow the chunk allocation the reservation publishes"
+    );
     assert_eq!(nested.len(), 4, "the hook must have allocated during the reservation");
     assert_eq!(pool.chunks_allocated(), 5, "one chunk per allocation, none shared");
     assert_eq!(*outer, [u64::MAX; 4], "the outer allocation kept its own slot");
@@ -1311,11 +1459,20 @@ fn reentrant_installs_that_consume_reserved_room_make_the_reservation_start_over
     // reentrant installs then take every slot that first reservation secured,
     // which the outer install must notice before it pushes.
     // Ref: docs/implementation/reentrancy.md, "Reserving two vectors at once".
-    INSTALL_REENTRY_POOL.replace(Some(StdRc::clone(&pool)));
-    INSTALL_REENTRY_LAYOUT.set(Some(grown_directory_layouts_reservation_layout()));
-    let outer = pool.alloc_box([7_u8; 64]);
+    let reentry_layout = grown_directory_layouts_reservation_layout();
+    let outer = {
+        let _install = InstallReentrantly::matching(reentry_layout, AllocationPhase::DirectoryLayoutsReservation, &pool);
+        pool.alloc_box([7_u8; 64])
+    };
 
-    assert!(INSTALL_REENTRY_FIRED.get(), "the hook must have fired during the reservation");
+    let reentry = InstallReentrantly::reentry().unwrap();
+    assert_eq!(reentry.phase, AllocationPhase::DirectoryLayoutsReservation);
+    assert_eq!(reentry.layout, reentry_layout);
+    assert_eq!(reentry.fires, 1, "the window closes on the reservation it interrupts");
+    assert!(
+        reentry.preceding_requests > 0,
+        "the interrupted request must follow layout-pool construction and the pool-directory reservation"
+    );
     assert_eq!(pool.layouts(), 9, "four prepared layouts, four reentrant ones and the outer one");
     assert_eq!(*outer, [7; 64]);
 

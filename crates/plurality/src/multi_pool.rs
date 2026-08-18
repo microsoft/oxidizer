@@ -11,7 +11,7 @@
 
 #![expect(
     clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+    reason = "the routing and installation paths take several borrows of the two parallel vectors under one precondition, that the caller holds the single-threaded allocation path, and rely on the push order keeping the vectors index-aligned; one block per borrow would repeat both at every site"
 )]
 
 use alloc::vec::Vec;
@@ -393,9 +393,14 @@ impl<A: Allocator + Clone> MultiPool<A> {
         let installed = unsafe { (*self.pools.get()).len() };
         let mut total = 0;
         for index in 0..installed {
-            // SAFETY: as for `lookup`; `index` is below the length read above,
-            // and the vector only ever grows because layout pools are never
-            // retired. The view outlives the borrow it was copied out of.
+            // SAFETY: as for `lookup`; `index` stays below the length read
+            // above because none of the functions passed as `f` reach the pool:
+            // each reads a counter out of the layout pool view it is handed,
+            // and `f` being a plain `fn` closes that set to what this module
+            // passes. That matters because a reservation leaves the vector
+            // momentarily empty while it moves the elements into a larger
+            // buffer. Ref: docs/implementation/reentrancy.md.
+            // The view outlives the borrow it was copied out of.
             let view = unsafe { (&*self.pools.get())[index].as_ref() };
             total += f(view);
         }

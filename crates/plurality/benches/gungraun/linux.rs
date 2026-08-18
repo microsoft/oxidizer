@@ -76,6 +76,7 @@ macro_rules! multi_alloc_bench {
 
 multi_alloc_bench!(multi_box_val, setup_multi_pool);
 multi_alloc_bench!(multi_box_val_spread, setup_multi_pool_spread);
+multi_alloc_bench!(multi_box_val_miss, setup_multi_pool_miss);
 
 #[library_benchmark]
 #[bench::op(args = (ops::CAP,), setup = ops::setup_arc)]
@@ -157,7 +158,8 @@ library_benchmark_group!(
         rc_with,
         rc_uninit,
         multi_box_val,
-        multi_box_val_spread
+        multi_box_val_spread,
+        multi_box_val_miss
     ]
 );
 

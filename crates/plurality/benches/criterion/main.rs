@@ -19,11 +19,13 @@
 )]
 
 //! Criterion allocation and fat-pointer benchmarks. Reported iterations contain
-//! `N` operations; `perf_report.rs` converts them to per-operation times.
+//! `N` operations; `perf_report.rs` converts them to per-operation times. A row
+//! whose measurement requires a first-touch state runs one operation per
+//! iteration and says so at its definition.
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 
 // The shared module is compiled into each bench target, matching the multitude
 // benchmark pattern while keeping the optimizer's same-crate view of the hot
@@ -71,6 +73,28 @@ fn alloc_benches(c: &mut Criterion) {
     bench!(rc_uninit);
     bench!(multi_box_val, &multi);
     bench!(multi_box_val_spread, &multi_spread);
+
+    // A miss is available only on a pool that has not yet seen the layout, so
+    // every measured iteration takes its own pool. `iter_batched` builds the
+    // batch before the timed region and drops the returned pools after it, so
+    // neither construction nor teardown is measured, and this row therefore
+    // reports one operation per iteration rather than `N`. The batch holds one
+    // pool per iteration, each carrying the chunk its miss installed, so it is
+    // sized for large inputs to bound the memory a batch occupies.
+    //
+    // The row prices the whole miss — the failed scan, the layout pool, and its
+    // first chunk — since that is what a first touch costs; it does not isolate
+    // the scan.
+    g.bench_function("multi_box_val_miss", |b| {
+        b.iter_batched(
+            || ops::setup_multi_pool_miss(ops::CAP),
+            |pool| {
+                ops::multi_box_val_miss(black_box(&pool), 0);
+                pool
+            },
+            BatchSize::LargeInput,
+        );
+    });
     g.finish();
 
     let mut g = c.benchmark_group("clone");
