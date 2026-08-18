@@ -10,6 +10,7 @@
 //! - [`ThreadAware`] notifies a value that it has moved to a different affinity.
 //! - [`Affinity`] identifies the processor and memory region associated with an
 //!   execution context.
+//! - [`pinned_affinities`] creates affinity identifiers for a known topology.
 //!
 //! Relocation is a cooperative performance optimization rather than a correctness
 //! boundary. Implementations must remain correct if a relocation notification is
@@ -95,6 +96,36 @@ impl Affinity {
     }
 }
 
+/// Creates affinities manually when not using a thread registry.
+///
+/// `counts` contains the number of processors in each memory region.
+///
+/// # Panics
+///
+/// Panics if there are more than `u16::MAX` processors or memory regions.
+#[must_use]
+#[expect(clippy::needless_range_loop, reason = "clearer in this case")]
+pub fn pinned_affinities(counts: &[usize]) -> alloc::vec::Vec<Affinity> {
+    let memory_region_count = counts.len();
+    let processor_count = counts.iter().sum();
+    let mut affinities = alloc::vec::Vec::with_capacity(processor_count);
+    let mut processor_index = 0;
+
+    for memory_region_index in 0..memory_region_count {
+        for _ in 0..counts[memory_region_index] {
+            affinities.push(Affinity::new(
+                processor_index.try_into().expect("too many processors"),
+                memory_region_index.try_into().expect("too many memory regions"),
+                processor_count.try_into().expect("too many processors"),
+                memory_region_count.try_into().expect("too many memory regions"),
+            ));
+            processor_index += 1;
+        }
+    }
+
+    affinities
+}
+
 /// Marks state that can adapt after being transferred between affinities.
 ///
 /// Implementations commonly recreate affinity-local resources, select a
@@ -131,7 +162,7 @@ pub trait ThreadAware: Send {
 
 #[cfg(test)]
 mod tests {
-    use super::Affinity;
+    use super::{Affinity, pinned_affinities};
 
     #[test]
     fn affinity_exposes_topology() {
@@ -149,5 +180,15 @@ mod tests {
     #[should_panic(expected = "processor index must be less than processor count")]
     fn affinity_rejects_out_of_range_processor() {
         let _ = Affinity::new(4, 0, 4, 1);
+    }
+
+    #[test]
+    fn pinned_affinities_describe_topology() {
+        let affinities = pinned_affinities(&[2, 1]);
+
+        assert_eq!(affinities.len(), 3);
+        assert_eq!(affinities[0], Affinity::new(0, 0, 3, 2));
+        assert_eq!(affinities[1], Affinity::new(1, 0, 3, 2));
+        assert_eq!(affinities[2], Affinity::new(2, 1, 3, 2));
     }
 }

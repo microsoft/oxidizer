@@ -183,8 +183,6 @@ pub mod closure;
 #[cfg(feature = "threads")]
 pub mod registry;
 
-#[doc(hidden)]
-pub mod __private;
 pub mod affinity;
 
 // Re-export the derive macro (behind the `derive` feature) so users can

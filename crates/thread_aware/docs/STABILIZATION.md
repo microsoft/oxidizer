@@ -9,11 +9,12 @@ expose:
 
 - `ThreadAware`
 - `Affinity`
+- `pinned_affinities`
 
-The `thread_aware` crate re-exports both types so existing imports continue to
-work. In particular, `thread_aware::ThreadAware` and
-`thread_aware::affinity::Affinity` remain the preferred paths for users of the
-full library.
+The `thread_aware` crate re-exports these items so existing imports continue
+to work. In particular, `thread_aware::ThreadAware` and
+`thread_aware::affinity::{Affinity, pinned_affinities}` remain the preferred
+paths for users of the full library.
 
 The core crate has no dependencies. Its opt-in `std` feature adds implementations
 for standard-library types such as `HashMap`, `Path`, and `PathBuf`; otherwise it
