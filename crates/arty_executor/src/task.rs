@@ -140,14 +140,17 @@ where
 
         match poll_result {
             task::Poll::Ready(result) => {
-                // We need to send the result through the result transmitter. This also drops
-                // any state still held by the state machine, as it cannot be polled any more.
-                let tx = maybe_payload
-                    .take()
-                    .expect("we already validated above that there is a payload")
-                    .result_tx;
+                let payload = maybe_payload.take().expect("we already validated above that there is a payload");
 
-                tx.send(result);
+                // Dropping the completed future executes user code and therefore needs the same
+                // panic containment as polling it.
+                if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
+                    let Payload { future, result_tx } = payload;
+                    drop(future);
+                    result_tx.send(result);
+                })) {
+                    on_unhandled_task_panic(panic);
+                }
 
                 task::Poll::Ready(())
             }
@@ -188,7 +191,10 @@ where
         // reference to this field.
         let payload = unsafe { self.payload.get().as_mut() }.expect("UnsafeCell pointer cannot be null");
 
-        *payload = None;
+        let payload = payload.take();
+        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+            on_unhandled_task_panic(panic);
+        }
     }
 
     unsafe fn initialize(self: Pin<&Self>, wake_signal: WakeSignal) {

@@ -15,9 +15,9 @@ use events_once::RawLocalPooledReceiver;
 /// # Resource management
 ///
 /// Join handles must be dropped before the executor they came from shuts down or the executor
-/// shutdown will result in a timeout and panic. You can think of it as there existing an imaginary
-/// `&Executor` shared reference held by the join handle, which must be dropped before the
-/// executor itself.
+/// shutdown will time out and terminate the process. You can think of it as there existing an
+/// imaginary `&Executor` shared reference held by the join handle, which must be dropped before
+/// the executor itself.
 #[derive(Debug)]
 pub struct JoinHandle<R: 'static> {
     /// The storage is managed by the executor, which will not shut down until all join handles

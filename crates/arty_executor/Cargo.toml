@@ -25,12 +25,12 @@ test-util = ["dep:scopeguard"]
 
 [dependencies]
 events_once = { workspace = true }
-fast_time = { workspace = true }
 foldhash = { workspace = true }
 infinity_pool = { workspace = true }
 nm = { workspace = true }
 pin-project = { workspace = true }
 scopeguard = { workspace = true, optional = true }
+tick = { workspace = true, features = ["fast-instant"] }
 
 [dev-dependencies]
 all_the_time = { workspace = true }

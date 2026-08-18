@@ -472,6 +472,15 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "shutdown timeout must be representable")]
+    fn unrepresentable_shutdown_timeout_panics_when_shutdown_begins() {
+        // SAFETY: The configured timeout intentionally prevents shutdown from beginning.
+        let executor = unsafe { Executor::builder().shutdown_timeout(Duration::MAX).build() };
+
+        executor.begin_shutdown();
+    }
+
+    #[test]
     fn shutdown_with_unreferenced_tasks_is_immediate() {
         // SAFETY: We promise to not drop this until we get a CycleOutcome of "Shutdown",
         // as required by the Executor.
@@ -500,7 +509,7 @@ mod tests {
 
         executor.begin_shutdown();
 
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
 
         drop(join_handle);
 

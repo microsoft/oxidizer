@@ -46,6 +46,11 @@ impl ExecutorBuilder {
     /// [`begin_shutdown()`][Executor::begin_shutdown].
     ///
     /// The default value is unspecified and may change in future versions.
+    ///
+    /// # Panics
+    ///
+    /// Shutdown will panic when it begins if the timeout cannot be represented as a future
+    /// [`Instant`][std::time::Instant].
     pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.shutdown_timeout = timeout;
         self

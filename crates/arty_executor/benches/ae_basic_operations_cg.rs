@@ -36,7 +36,7 @@ fn main() {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::hint::black_box;
-    use std::pin::Pin;
+    use std::pin::{Pin, pin};
     use std::task::{Context, Waker};
 
     use arty_executor::testing::new_guarded_executor;
@@ -169,22 +169,19 @@ mod linux {
 
     #[library_benchmark]
     #[bench::async_round_trip(setup = make_executor_only)]
-    fn spawn_and_complete(mut state: State) -> State {
-        let mut join_handle = Box::pin(state.tasks.add(async move {}));
+    fn spawn_and_complete(state: State) -> State {
+        let mut join_handle = pin!(state.tasks.add(async move {}));
         assert_ne!(state.executor.execute_cycle(), CycleOutcome::Shutdown);
         let mut cx = Context::from_waker(Waker::noop());
         let result = black_box(join_handle.as_mut().poll(&mut cx));
         assert!(result.is_ready());
-        // Park the handle in state so its drop happens after the measurement window closes,
-        // matching the drop-order semantics of the wall-clock bench.
-        state.join_handle = Some(join_handle);
         state
     }
 
     #[library_benchmark]
     #[bench::yield_round_trip(setup = make_executor_only)]
-    fn yield_round_trip(mut state: State) -> State {
-        let mut join_handle = Box::pin(state.tasks.add(YieldFuture::default()));
+    fn yield_round_trip(state: State) -> State {
+        let mut join_handle = pin!(state.tasks.add(YieldFuture::default()));
         // First cycle: YieldFuture self-wakes; cycle reports Continue.
         assert_eq!(state.executor.execute_cycle(), CycleOutcome::Continue);
         // Second cycle: YieldFuture returns Ready; cycle reports Suspend.
@@ -192,7 +189,6 @@ mod linux {
         let mut cx = Context::from_waker(Waker::noop());
         let result = black_box(join_handle.as_mut().poll(&mut cx));
         assert!(result.is_ready());
-        state.join_handle = Some(join_handle);
         state
     }
 

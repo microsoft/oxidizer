@@ -8,13 +8,13 @@ use std::collections::{HashSet, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{task, thread};
 
 use events_once::RawLocalEventLake;
-use fast_time::{Clock, Instant};
 use infinity_pool::{DropPolicy, RawBlindPool};
 use nm::{Event, Magnitude, MetricsPusher, Push};
+use tick::SimpleClock;
 
 use crate::{
     BuildPointerHasher, CycleOutcome, ERR_POISONED_LOCK, JoinHandle, RawPooledCastTypeErasedTask, ShutdownTimeoutBehavior, Task, TaskRef,
@@ -106,7 +106,7 @@ struct ExclusiveState {
     /// Used to measure the time spent during/between executor cycle processing and during shutdown.
     /// This is a very fast clock designed to be cheap to poll many times each millisecond (if we
     /// need to).
-    clock: Clock,
+    clock: SimpleClock,
 
     // Used to report interval between cycles.
     last_cycle_ended: Option<Instant>,
@@ -186,7 +186,7 @@ impl ExecutorCore {
                 active: VecDeque::new(),
                 inactive: HashSet::with_hasher(BuildPointerHasher::default()),
                 completed: VecDeque::new(),
-                clock: Clock::new(),
+                clock: SimpleClock::new_system().with_fast_instant(true),
                 last_cycle_ended: None,
             }),
             shared: SharedState {
@@ -258,7 +258,7 @@ impl ExecutorCore {
     pub(crate) fn execute_cycle(&self) -> CycleOutcome {
         let mut state_exclusive = self.exclusive.borrow_mut();
 
-        let cycle_start_timestamp = state_exclusive.clock.now();
+        let cycle_start_timestamp = state_exclusive.clock.instant();
 
         if let Some(last_cycle_ended) = state_exclusive.last_cycle_ended {
             let cycle_gap = cycle_start_timestamp.saturating_duration_since(last_cycle_ended);
@@ -279,9 +279,9 @@ impl ExecutorCore {
 
             self.drop_inert_tasks(&mut state_exclusive, &mut state_reentrant);
 
-            let outcome = if self.evaluate_shutdown_completion(&mut state_exclusive, &state_reentrant) {
+            let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
-            } else if self.has_work_to_do(&state_exclusive, &state_reentrant) {
+            } else if state_reentrant.shutdown_deadline.is_some() || self.has_work_to_do(&state_exclusive, &state_reentrant) {
                 // We want to be immediately called again because we may have more work to do.
                 CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
                 CycleOutcome::Continue
@@ -293,7 +293,7 @@ impl ExecutorCore {
                 CycleOutcome::Suspend
             };
 
-            let cycle_end_timestamp = state_exclusive.clock.now();
+            let cycle_end_timestamp = state_exclusive.clock.instant();
 
             let cycle_duration = cycle_end_timestamp.saturating_duration_since(cycle_start_timestamp);
             state_exclusive.last_cycle_ended = Some(cycle_end_timestamp);
@@ -511,11 +511,11 @@ impl ExecutorCore {
             "Cannot start shutdown process when it has already been started"
         );
 
-        let shutdown_start_time = state_exclusive.clock.now();
+        let shutdown_start_time = state_exclusive.clock.instant();
         state_reentrant.shutdown_deadline = Some(
             shutdown_start_time
                 .checked_add(self.shared.shutdown_timeout)
-                .expect("impossible for shutdown timeout to be so high we cross the end of the universe"),
+                .expect("shutdown timeout must be representable as an Instant after shutdown starts"),
         );
 
         // We call `abort()` on all tasks that we are canceling. This will drop the maximum amount
@@ -556,7 +556,7 @@ impl ExecutorCore {
     /// Returns whether we are at the end of a successful shutdown process.
     #[cfg_attr(test, mutants::skip)] // Mutation can lead to deadlocked executor as it never shuts down.
     #[must_use]
-    fn evaluate_shutdown_completion(&self, state_exclusive: &mut ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
+    fn evaluate_shutdown_completion(&self, state_exclusive: &ExclusiveState, state_reentrant: &ReentrancySafeState) -> bool {
         let Some(shutdown_deadline) = state_reentrant.shutdown_deadline else {
             // We are not in a shutdown process.
             return false;
@@ -576,7 +576,7 @@ impl ExecutorCore {
             return true;
         }
 
-        if state_exclusive.clock.now() >= shutdown_deadline {
+        if state_exclusive.clock.instant() >= shutdown_deadline {
             self.shutdown_failed(state_exclusive, state_reentrant);
         }
 
@@ -676,6 +676,13 @@ impl Drop for ExecutorCore {
         assert!(
             self.reentrancy_safe.borrow().shutdown_deadline.is_some(),
             "Executor is being dropped without a shutdown process having been started. This is a programming error."
+        );
+
+        let state_exclusive = self.exclusive.get_mut();
+        let state_reentrant = self.reentrancy_safe.get_mut();
+        assert!(
+            state_exclusive.completed.is_empty() && state_reentrant.result_events.is_empty(),
+            "Executor is being dropped before execute_cycle() returned CycleOutcome::Shutdown. This violates ExecutorBuilder::build() safety requirements."
         );
     }
 }

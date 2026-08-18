@@ -173,6 +173,7 @@ impl WakeSignal {
                 // times. That is fine - it is up to the receiver of the notifications to deal
                 // with spurious notifications (which may arrive anyway through other means).
                 awakened_set.push_back(self.task_ref);
+                drop(awakened_set);
                 self.parent_waker.wake_by_ref();
                 return;
             }
