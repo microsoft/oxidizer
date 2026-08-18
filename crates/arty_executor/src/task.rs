@@ -214,10 +214,17 @@ where
     }
 }
 
-#[expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")]
+#[cfg_attr(
+    not(test),
+    expect(clippy::needless_pass_by_value, reason = "semantically correct to consume the panic")
+)]
 #[cfg_attr(test, mutants::skip)] // Impractical to unit test process termination.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
+    #[cfg(test)]
+    std::panic::resume_unwind(panic);
+
+    #[cfg(not(test))]
     if let Some(s) = panic.downcast_ref::<&str>() {
         eprintln!("unhandled panic in async task - terminating process: {s}");
     } else {
@@ -226,6 +233,7 @@ fn on_unhandled_task_panic(panic: Box<dyn Any + Send + 'static>) -> ! {
 
     // This should never be reached if the higher layers of Arty runtime correctly wrap
     // every task in a panic-handler designed to forward the panic to the awaiter.
+    #[cfg(not(test))]
     std::process::abort();
 }
 
@@ -304,6 +312,7 @@ pub(crate) trait TypeErasedTask {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Ready;
     use std::pin::pin;
     use std::rc::Rc;
     use std::task::Waker;
@@ -314,6 +323,22 @@ mod tests {
 
     use super::*;
     use crate::testing::TestSubjectFuture;
+
+    struct PanicOnDropFuture(Ready<u64>);
+
+    impl Future for PanicOnDropFuture {
+        type Output = u64;
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
+            Pin::new(&mut self.0).poll(cx)
+        }
+    }
+
+    impl Drop for PanicOnDropFuture {
+        fn drop(&mut self) {
+            panic!("panic from future destructor");
+        }
+    }
 
     #[test]
     fn smoke_test() {
@@ -477,6 +502,50 @@ mod tests {
 
         // The state held by the task must have been dropped.
         assert!(shared_state_weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn panic_while_dropping_completed_future_is_contained() {
+        let event_pool = pin!(RawLocalEventPool::<u64>::new());
+
+        // SAFETY: We are required to drop this before the pool - we do.
+        let (tx, mut rx) = unsafe { event_pool.as_ref().rent() };
+
+        let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
+        let task = task.as_ref();
+
+        // SAFETY: We organize the test so the task is inert and safe to drop by end of test.
+        unsafe {
+            task.initialize(WakeSignal::fake());
+        }
+
+        assert_panic!(task.poll());
+
+        let mut cx = task::Context::from_waker(Waker::noop());
+        let event_result = Pin::new(&mut rx).poll(&mut cx);
+        assert!(matches!(event_result, task::Poll::Ready(Err(Disconnected))));
+    }
+
+    #[test]
+    fn panic_while_dropping_aborted_future_is_contained() {
+        let event_pool = pin!(RawLocalEventPool::<u64>::new());
+
+        // SAFETY: We are required to drop this before the pool - we do.
+        let (tx, mut rx) = unsafe { event_pool.as_ref().rent() };
+
+        let task = pin!(Task::new(PanicOnDropFuture(std::future::ready(42)), tx));
+        let task = task.as_ref();
+
+        // SAFETY: We organize the test so the task is inert and safe to drop by end of test.
+        unsafe {
+            task.initialize(WakeSignal::fake());
+        }
+
+        assert_panic!(task.abort());
+
+        let mut cx = task::Context::from_waker(Waker::noop());
+        let event_result = Pin::new(&mut rx).poll(&mut cx);
+        assert!(matches!(event_result, task::Poll::Ready(Err(Disconnected))));
     }
 
     #[test]
