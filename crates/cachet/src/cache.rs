@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, SizeError};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, InsertOutcome, SizeError};
 use tick::Clock;
 use uniflight::Merger;
 
@@ -257,7 +257,19 @@ where
     /// Inserts a value into the cache.
     ///
     /// The entry's timestamp will be set to the current time according
-    /// to the cache's clock.
+    /// to the cache's clock if the configured insertion policy accepts it.
+    /// The returned outcome distinguishes policy rejection from successful
+    /// insertion.
+    ///
+    /// An accepted entry may still be evicted immediately by the underlying cache.
+    /// In a multi-tier cache, acceptance means at least one tier accepted the
+    /// write; a higher-priority tier may still contain an older value.
+    ///
+    /// Multi-tier insertion is not atomic. If one tier accepts the write and
+    /// another returns an error, this method returns the error even though the
+    /// entry may remain stored in the successful tier.
+    /// Use a [`CacheEventHandler`](crate::CacheEventHandler) when per-tier
+    /// acceptance details are needed.
     ///
     /// # Errors
     ///
@@ -279,7 +291,7 @@ where
     /// # Ok::<(), cachet::Error>(())
     /// # };
     /// ```
-    pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<(), Error> {
+    pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<InsertOutcome, Error> {
         let request_id = next_request_id();
         let watch = self.clock.stopwatch();
         async {
@@ -290,6 +302,21 @@ where
         }
         .with_request_id(request_id)
         .await
+    }
+
+    async fn insert_computed_entry(&self, key: &K, entry: CacheEntry<V>) -> Result<CacheEntry<V>, Error> {
+        let mut original = entry;
+        let mut candidate = original.clone();
+        let cached_at = self.clock.system_time();
+        candidate.ensure_cached_at(cached_at);
+
+        match self.storage.insert(key.clone(), candidate).await? {
+            InsertOutcome::Accepted => {
+                original.ensure_cached_at(cached_at);
+                Ok(original)
+            }
+            InsertOutcome::Rejected => Ok(original),
+        }
     }
 
     /// Invalidates (removes) a value from the cache.
@@ -490,10 +517,7 @@ where
             return Ok(entry);
         }
         let value = f().await;
-        let mut entry = CacheEntry::new(value);
-        entry.ensure_cached_at(self.clock.system_time());
-        self.storage.insert(key.clone(), entry.clone()).await?;
-        Ok(entry)
+        self.insert_computed_entry(key, CacheEntry::new(value)).await
     }
 
     /// Retrieves a value from cache, or computes and caches a [`CacheEntry`] if missing.
@@ -573,10 +597,7 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
-        let mut entry = f().await;
-        entry.ensure_cached_at(self.clock.system_time());
-        self.storage.insert(key.clone(), entry.clone()).await?;
-        Ok(entry)
+        self.insert_computed_entry(key, f().await).await
     }
 
     /// Retrieves a value from cache, or computes and caches a [`CacheEntry`] if missing.
@@ -654,10 +675,8 @@ where
         if let Some(entry) = self.storage.get(key).await? {
             return Ok(entry);
         }
-        let mut entry = f().await.map_err(Error::from_source)?;
-        entry.ensure_cached_at(self.clock.system_time());
-        self.storage.insert(key.clone(), entry.clone()).await?;
-        Ok(entry)
+        let entry = f().await.map_err(Error::from_source)?;
+        self.insert_computed_entry(key, entry).await
     }
 
     /// Retrieves a value from cache, or computes and caches it if missing.
@@ -739,10 +758,7 @@ where
             return Ok(entry);
         }
         let value = f().await.map_err(Error::from_source)?;
-        let mut entry = CacheEntry::new(value);
-        entry.ensure_cached_at(self.clock.system_time());
-        self.storage.insert(key.clone(), entry.clone()).await?;
-        Ok(entry)
+        self.insert_computed_entry(key, CacheEntry::new(value)).await
     }
 
     /// Retrieves a value from cache, or conditionally computes and caches it.
@@ -826,12 +842,7 @@ where
             return Ok(Some(entry));
         }
         match f().await {
-            Some(value) => {
-                let mut entry = CacheEntry::new(value);
-                entry.ensure_cached_at(self.clock.system_time());
-                self.storage.insert(key.clone(), entry.clone()).await?;
-                Ok(Some(entry))
-            }
+            Some(value) => self.insert_computed_entry(key, CacheEntry::new(value)).await.map(Some),
             None => Ok(None),
         }
     }
@@ -852,8 +863,8 @@ where
                 Ok(cachet_service::CacheResponse::Get(entry))
             }
             cachet_service::CacheOperation::Insert(req) => {
-                self.insert(req.key, req.entry).await?;
-                Ok(cachet_service::CacheResponse::Insert)
+                let outcome = self.insert(req.key, req.entry).await?;
+                Ok(cachet_service::CacheResponse::Insert(outcome))
             }
             cachet_service::CacheOperation::Invalidate(req) => {
                 self.invalidate(&req.key).await?;

@@ -9,7 +9,7 @@
 // tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
 testing_aids::init_tracing!();
 
-use cachet::{Cache, CacheEntry, Error};
+use cachet::{Cache, CacheEntry, Error, InsertOutcome, InsertPolicy};
 use cachet_tier::MockCache;
 use tick::Clock;
 
@@ -422,6 +422,73 @@ async fn or_insert_family_populates_cached_at_on_miss() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
+async fn or_insert_family_does_not_stamp_when_policy_rejects() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .insert_policy(InsertPolicy::never())
+        .build();
+
+    let entry = cache.get_or_insert("a", || async { 1 }).await.unwrap();
+    assert_eq!(entry.cached_at(), None);
+
+    let entry = cache.get_or_insert_with("b", || async { CacheEntry::new(2) }).await.unwrap();
+    assert_eq!(entry.cached_at(), None);
+
+    let entry = cache.try_get_or_insert("c", || async { Ok::<_, Error>(3) }).await.unwrap();
+    assert_eq!(entry.cached_at(), None);
+
+    let entry = cache
+        .try_get_or_insert_with("d", || async { Ok::<_, Error>(CacheEntry::new(4)) })
+        .await
+        .unwrap();
+    assert_eq!(entry.cached_at(), None);
+
+    let entry = cache.optionally_get_or_insert("e", || async { Some(5) }).await.unwrap().unwrap();
+    assert_eq!(entry.cached_at(), None);
+
+    for key in ["a", "b", "c", "d", "e"] {
+        assert!(cache.get(key).await.unwrap().is_none());
+    }
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn rejected_insert_preserves_caller_cached_at() {
+    let clock = Clock::new_frozen();
+    let cached_at = clock.system_time() - std::time::Duration::from_secs(30);
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .insert_policy(InsertPolicy::never())
+        .build();
+
+    let entry = cache
+        .get_or_insert_with("key", || async {
+            let mut entry = CacheEntry::new(42);
+            entry.ensure_cached_at(cached_at);
+            entry
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(entry.cached_at(), Some(cached_at));
+    assert!(cache.get("key").await.unwrap().is_none());
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn accepted_insert_returns_stored_timestamp() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let returned = cache.get_or_insert_with("key", || async { CacheEntry::new(42) }).await.unwrap();
+    let stored = cache.get("key").await.unwrap().unwrap();
+
+    assert_eq!(returned.cached_at(), stored.cached_at());
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 async fn stampede_protection_get_or_insert_with() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
@@ -594,8 +661,8 @@ async fn stampede_protection_converts_panic_to_error() {
             Ok(None)
         }
 
-        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
-            Ok(())
+        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+            Ok(InsertOutcome::Accepted)
         }
 
         async fn invalidate(&self, _key: &String) -> Result<(), Error> {
@@ -809,7 +876,7 @@ mod service_tests {
                 CacheOperation::Get(req) => Ok(CacheResponse::Get(self.data.lock().get(&req.key).cloned())),
                 CacheOperation::Insert(req) => {
                     self.data.lock().insert(req.key, req.entry);
-                    Ok(CacheResponse::Insert)
+                    Ok(CacheResponse::Insert(InsertOutcome::Accepted))
                 }
                 CacheOperation::Invalidate(req) => {
                     self.data.lock().remove(&req.key);
@@ -879,11 +946,29 @@ mod service_tests {
             .execute(CacheOperation::Insert(InsertRequest::new("key".to_string(), CacheEntry::new(42))))
             .await
             .unwrap();
-        assert!(matches!(response, CacheResponse::Insert));
+        assert!(matches!(response, CacheResponse::Insert(InsertOutcome::Accepted)));
 
         // Verify the value was inserted
         let entry = cache.get(&"key".to_string()).await.unwrap().unwrap();
         assert_eq!(*entry.value(), 42);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn cache_service_insert_preserves_rejection() {
+        let clock = Clock::new_frozen();
+        let cache = Cache::builder::<String, i32>(clock)
+            .memory()
+            .insert_policy(InsertPolicy::never())
+            .build();
+
+        let response = cache
+            .execute(CacheOperation::Insert(InsertRequest::new("key".to_string(), CacheEntry::new(42))))
+            .await
+            .unwrap();
+
+        assert!(matches!(response, CacheResponse::Insert(InsertOutcome::Rejected)));
+        assert!(cache.get("key").await.unwrap().is_none());
     }
 
     #[cfg_attr(miri, ignore)]
