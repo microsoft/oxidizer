@@ -264,6 +264,29 @@ mod tests {
         assert_eq!(storage.get_clone(affinity), Some("Hello".to_string()));
     }
 
+    /// A `Strategy` that hands out an index outside the slot count it reports, violating the
+    /// consistency contract. Exists only to drive the debug guard in `SlotTable::slot`.
+    struct InconsistentStrategy;
+
+    impl Strategy for InconsistentStrategy {
+        fn index(_affinity: crate::affinity::Affinity) -> usize {
+            1
+        }
+
+        fn count(_affinity: crate::affinity::Affinity) -> usize {
+            1
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "Strategy::count must be consistent across affinities")]
+    fn inconsistent_strategy_index_is_caught_in_debug() {
+        let affinity = pinned_affinities(&[1])[0];
+        let table = SlotTable::<i32, InconsistentStrategy>::new();
+        _ = table.replace(affinity, 0);
+    }
+
     #[test]
     fn per_app() {
         let affinities = pinned_affinities(&[1, 1]);

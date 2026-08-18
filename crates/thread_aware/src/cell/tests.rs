@@ -262,6 +262,18 @@ fn test_from_storage() {
 }
 
 #[test]
+fn storage_default_is_empty_then_fillable() {
+    let affinity = pinned_affinities(&[2])[0];
+
+    let storage = super::storage::Storage::<i32, crate::PerCore>::default();
+    assert!(storage.get(affinity).is_none());
+
+    let value = sync::Arc::new(7);
+    assert!(storage.insert(affinity, sync::Arc::clone(&value)).is_none());
+    assert!(sync::Arc::ptr_eq(&storage.get(affinity).unwrap(), &value));
+}
+
+#[test]
 fn test_factory_clone_with_data() {
     // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
     // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
