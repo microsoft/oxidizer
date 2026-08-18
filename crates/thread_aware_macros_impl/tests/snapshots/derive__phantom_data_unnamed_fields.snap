@@ -2,7 +2,7 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for TupleWithPhantom<T> {
+impl<T: ::core::marker::Send> ::thread_aware::ThreadAware for TupleWithPhantom<T> {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,

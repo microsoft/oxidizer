@@ -81,23 +81,25 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
-    let used_generic_idents = match &input.data {
+    let usage = match &input.data {
         Data::Struct(s) => collect_generics_in_fields(&s.fields, &generics)?,
         Data::Enum(e) => {
-            let mut set = HashSet::new();
+            let mut usage = GenericUsage::default();
             for v in &e.variants {
                 let local = collect_generics_in_fields(&v.fields, &generics)?;
-                set.extend(local);
+                usage.merge(local);
             }
-            set
+            usage
         }
-        Data::Union(_) => HashSet::default(),
+        Data::Union(_) => GenericUsage::default(),
     };
 
     for param in &mut generics.params {
-        if let GenericParam::Type(ty_param) = param
-            && used_generic_idents.contains(&ty_param.ident)
-        {
+        let GenericParam::Type(ty_param) = param else {
+            continue;
+        };
+
+        if usage.relocated.contains(&ty_param.ident) {
             let already = ty_param.bounds.iter().any(|b| {
                 matches!(
                     b,
@@ -110,14 +112,52 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
                 ta_path.segments.push(parse_quote!(ThreadAware));
                 ty_param.bounds.push(parse_quote!(#ta_path));
             }
+        } else if usage.phantom.contains(&ty_param.ident) {
+            // The parameter is only ever named inside `PhantomData`, so it is never
+            // relocated and must not be forced to implement `ThreadAware`. It still
+            // has to be `Send`, because `PhantomData<T>` is `Send` only when `T` is
+            // and the generated impl must satisfy the `ThreadAware: Send` supertrait.
+            let already = ty_param.bounds.iter().any(|b| {
+                matches!(
+                    b,
+                    syn::TypeParamBound::Trait(trait_bound)
+                        if trait_bound.path.segments.last().is_some_and(|seg| {
+                            seg.ident == "Send" || seg.ident == "ThreadAware"
+                        })
+                )
+            });
+            if !already {
+                ty_param.bounds.push(parse_quote!(::core::marker::Send));
+            }
         }
     }
     Ok(generics)
 }
 
+/// How each generic parameter is reached from the type's fields.
+///
+/// The two categories carry different obligations: a parameter reachable through a
+/// relocated field must implement `ThreadAware`, while one named only inside
+/// `PhantomData` merely has to be `Send`.
+#[derive(Default)]
+struct GenericUsage {
+    /// Parameters reachable through a field that is actually relocated.
+    relocated: HashSet<syn::Ident>,
+
+    /// Parameters that appear only inside a `PhantomData` field.
+    phantom: HashSet<syn::Ident>,
+}
+
+impl GenericUsage {
+    fn merge(&mut self, other: Self) {
+        self.relocated.extend(other.relocated);
+        self.phantom.extend(other.phantom);
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<HashSet<syn::Ident>> {
-    let mut set = HashSet::new();
+fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<GenericUsage> {
+    let mut usage = GenericUsage::default();
     let generic_idents: HashSet<_> = generics
         .params
         .iter()
@@ -127,21 +167,24 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
         })
         .collect();
     for ty in fields.iter().map(|f| &f.ty) {
-        collect_generics_in_type(ty, &generic_idents, &mut set)?;
+        collect_generics_in_type(ty, &generic_idents, &mut usage)?;
     }
-    Ok(set)
+    Ok(usage)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut HashSet<syn::Ident>) -> syn::Result<()> {
+fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut GenericUsage) -> syn::Result<()> {
     match ty {
         Type::Path(TypePath { path, .. }) => {
             if is_phantom_data(ty) {
+                // The field is not relocated, but its parameters still constrain the
+                // type's `Send`-ness, so record them separately instead of dropping them.
+                collect_phantom_generics(ty, generic_idents, &mut acc.phantom);
                 return Ok(());
             }
             for segment in &path.segments {
                 if generic_idents.contains(&segment.ident) {
-                    acc.insert(segment.ident.clone());
+                    acc.relocated.insert(segment.ident.clone());
                 }
                 if let PathArguments::AngleBracketed(ab) = &segment.arguments {
                     for arg in &ab.args {
@@ -164,6 +207,40 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
         _ => {}
     }
     Ok(())
+}
+
+/// Records every generic parameter named anywhere inside a `PhantomData` type argument.
+///
+/// Unlike [`collect_generics_in_type`] this makes no relocated/phantom distinction:
+/// everything reachable from here is phantom by construction.
+#[cfg_attr(coverage_nightly, coverage(off))] // mirrors collect_generics_in_type's coverage exemption
+fn collect_phantom_generics(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut HashSet<syn::Ident>) {
+    match ty {
+        Type::Path(TypePath { path, .. }) => {
+            for segment in &path.segments {
+                if generic_idents.contains(&segment.ident) {
+                    acc.insert(segment.ident.clone());
+                }
+                if let PathArguments::AngleBracketed(ab) = &segment.arguments {
+                    for arg in &ab.args {
+                        if let syn::GenericArgument::Type(t) = arg {
+                            collect_phantom_generics(t, generic_idents, acc);
+                        }
+                    }
+                }
+            }
+        }
+        Type::Reference(r) => collect_phantom_generics(&r.elem, generic_idents, acc),
+        Type::Tuple(t) => {
+            for elem in &t.elems {
+                collect_phantom_generics(elem, generic_idents, acc);
+            }
+        }
+        Type::Array(a) => collect_phantom_generics(&a.elem, generic_idents, acc),
+        Type::Group(g) => collect_phantom_generics(&g.elem, generic_idents, acc),
+        Type::Paren(p) => collect_phantom_generics(&p.elem, generic_idents, acc),
+        _ => {}
+    }
 }
 
 // We intentionally do not re-export FieldAttrCfg (wrapper crates access it via the module path).
