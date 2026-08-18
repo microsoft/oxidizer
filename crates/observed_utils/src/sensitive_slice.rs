@@ -41,7 +41,7 @@ use data_privacy::{RedactedDisplay, Redactor};
 ///
 /// ```
 /// use data_privacy::{DataClass, Sensitive};
-/// use observed_helpers::SensitiveSlice;
+/// use observed_utils::SensitiveSlice;
 ///
 /// let emails = vec![
 ///     Sensitive::new("alice@example.com", DataClass::new("pii", "email")),
@@ -56,7 +56,7 @@ use data_privacy::{RedactedDisplay, Redactor};
 ///
 /// ```
 /// use data_privacy::{DataClass, Sensitive};
-/// use observed_helpers::SensitiveSlice;
+/// use observed_utils::SensitiveSlice;
 ///
 /// let items = vec![
 ///     Sensitive::new("a", DataClass::new("t", "v")),

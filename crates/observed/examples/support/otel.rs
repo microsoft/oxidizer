@@ -37,10 +37,10 @@ const CODE_NAMESPACE: &str = "code.namespace";
 /// Converts a [`Text`] into an `OTel` string, preserving the borrowed-versus-
 /// shared distinction so neither representation copies.
 ///
-/// `observed_helpers` offers this conversion (and the two below) ready-made, but
+/// `observed_utils` offers this conversion (and the two below) ready-made, but
 /// it depends on `observed`, so using it here would make `observed`'s dependency
 /// graph cyclic. A consumer outside this crate should call
-/// `observed_helpers::any_value_of` rather than copy this.
+/// `observed_utils::any_value_of` rather than copy this.
 fn string_value_of(text: Text) -> opentelemetry::StringValue {
     match text {
         Text::Static(s) => s.into(),

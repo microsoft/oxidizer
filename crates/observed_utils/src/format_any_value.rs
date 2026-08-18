@@ -31,7 +31,7 @@ use opentelemetry::logs::AnyValue;
 /// # Examples
 ///
 /// ```
-/// use observed_helpers::format_any_value;
+/// use observed_utils::format_any_value;
 /// use opentelemetry::logs::AnyValue;
 ///
 /// let v = AnyValue::String("hello world".into());

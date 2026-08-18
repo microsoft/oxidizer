@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial release of `observed_helpers`, the optional companion to `observed`
+- Initial release of `observed_utils`, the optional companion to `observed`
   for consumers that export to OpenTelemetry.
 - `any_value_of`, `otel_value_of` and `otel_severity_of` convert an `observed`
   `Value` or `Severity` into its OpenTelemetry counterpart. `observed` itself no

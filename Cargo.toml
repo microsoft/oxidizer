@@ -154,7 +154,7 @@ new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.24.0" }
-observed_helpers = { path = "crates/observed_helpers", default-features = false, version = "0.24.0" }
+observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.1.0" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "0.24.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
 ohno = { path = "crates/ohno", default-features = false, version = "0.4.0" }

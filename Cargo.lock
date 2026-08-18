@@ -3151,18 +3151,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "observed_helpers"
-version = "0.24.0"
-dependencies = [
- "arrayvec",
- "const-hex",
- "data_privacy",
- "observed",
- "opentelemetry",
- "tick",
-]
-
-[[package]]
 name = "observed_macros"
 version = "0.24.0"
 dependencies = [
@@ -3180,10 +3168,22 @@ version = "0.0.0"
 dependencies = [
  "data_privacy",
  "observed",
- "observed_helpers",
+ "observed_utils",
  "testing_aids",
  "tick",
  "tokio",
+]
+
+[[package]]
+name = "observed_utils"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "const-hex",
+ "data_privacy",
+ "observed",
+ "opentelemetry",
+ "tick",
 ]
 
 [[package]]
