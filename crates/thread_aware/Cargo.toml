@@ -132,12 +132,23 @@ required-features = ["bytes", "http", "jiff02", "uuid"]
 [[bench]]
 name = "thread_aware_relocate"
 harness = false
-required-features = ["std"]
+required-features = ["std", "derive"]
 
 [[bench]]
 name = "thread_aware_relocate_cg"
 harness = false
-required-features = ["std"]
+required-features = ["std", "derive"]
+
+# These integration tests exercise `#[derive(ThreadAware)]`, so they compile only
+# when the `derive` feature is enabled. Gating them keeps every additive feature
+# combination (for example `--no-default-features --features std`) buildable.
+[[test]]
+name = "derive_compiles"
+required-features = ["derive"]
+
+[[test]]
+name = "transfer_pass"
+required-features = ["derive"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
