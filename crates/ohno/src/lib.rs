@@ -143,16 +143,22 @@
 //! `caused by:` line — while [`source()`](std::error::Error::source) still returns the concrete
 //! error. This is the direct equivalent of `thiserror`'s `#[error(transparent)]`, and it is what
 //! makes the abstract-wrapper shape described in
-//! [Modelling Multiple Failure Conditions](#modelling-multiple-failure-conditions) viable.
+//! [Modeling Multiple Failure Conditions](#modeling-multiple-failure-conditions) viable.
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! use ohno::assert_error_message;
+//!
 //! #[ohno::error]
 //! pub struct StorageError;
 //!
 //! let error = StorageError::caused_by("disk is full");
 //!
 //! // The wrapper contributes no text of its own.
-//! assert_eq!(error.to_string(), "disk is full");
+//! assert_error_message!(error, "disk is full");
+//! # }
+//! # }
 //! ```
 //!
 //! **Without a source, the bare type name is printed.** The two cases are one `#[from]` apart, so
@@ -160,23 +166,29 @@
 //! rather than a message:
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! use ohno::assert_error_message;
+//!
 //! #[ohno::error]
 //! pub struct StorageError;
 //!
 //! let error = StorageError::new();
 //!
-//! assert_eq!(error.to_string(), "StorageError");
+//! assert_error_message!(error, "StorageError");
+//! # }
+//! # }
 //! ```
 //!
-//! Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper to make
-//! sourceless construction unrepresentable, rather than relying on review to catch it.
+//! Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper so that a
+//! wrapper with no source cannot be built at all, rather than relying on review to catch it.
 //!
 //! One further caveat: because each ohno error carries its own [`OhnoCore`], a chain of
 //! transparent wrappers emits one backtrace block per level when backtrace capture is enabled.
 //! A two-level wrapper prints two blocks under `RUST_BACKTRACE=1`. This is inherent to
 //! per-type cores rather than a property of the transparent shape itself.
 //!
-//! # Modelling Multiple Failure Conditions
+//! # Modeling Multiple Failure Conditions
 //!
 //! `#[derive(Error)]` rejects enums, because [`OhnoCore`] has to live somewhere and a per-variant
 //! core would be meaningless. This is the first question most people arriving from `thiserror`
@@ -192,7 +204,9 @@
 //! [above](#without-display) so the wrapper adds no text of its own:
 //!
 //! ```rust
-//! use ohno::ErrorExt as _;
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! use ohno::{ErrorExt as _, assert_error_message};
 //!
 //! #[ohno::error]
 //! pub struct ParseError;
@@ -208,11 +222,13 @@
 //! let error: RequestError = ParseError::caused_by("unexpected token").into();
 //!
 //! // The wrapper is transparent: the leaf's message is what users see.
-//! assert_eq!(error.to_string(), "unexpected token");
+//! assert_error_message!(error, "unexpected token");
 //!
 //! // A caller that does need to discriminate can still recover the concrete type.
 //! assert!(error.find_source::<ParseError>().is_some());
 //! assert!(error.find_source::<TimeoutError>().is_none());
+//! # }
+//! # }
 //! ```
 //!
 //! ## Kind field — production code branches on the category
@@ -221,7 +237,11 @@
 //! accessor:
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
 //! use std::fmt;
+//!
+//! use ohno::assert_error_message;
 //!
 //! #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 //! pub enum RequestErrorKind {
@@ -254,7 +274,9 @@
 //! let error = RequestError::new(RequestErrorKind::Timeout);
 //!
 //! assert_eq!(error.kind(), RequestErrorKind::Timeout);
-//! assert_eq!(error.to_string(), "request timed out");
+//! assert_error_message!(error, "request timed out");
+//! # }
+//! # }
 //! ```
 //!
 //! Adopting ohno across nine crates, the abstract wrapper was the right shape almost everywhere,

@@ -148,16 +148,18 @@ has a source.
 `caused by:` line — while [`source()`][__link11] still returns the concrete
 error. This is the direct equivalent of `thiserror`’s `#[error(transparent)]`, and it is what
 makes the abstract-wrapper shape described in
-[Modelling Multiple Failure Conditions](#modelling-multiple-failure-conditions) viable.
+[Modeling Multiple Failure Conditions](#modeling-multiple-failure-conditions) viable.
 
 ```rust
+use ohno::assert_error_message;
+
 #[ohno::error]
 pub struct StorageError;
 
 let error = StorageError::caused_by("disk is full");
 
 // The wrapper contributes no text of its own.
-assert_eq!(error.to_string(), "disk is full");
+assert_error_message!(error, "disk is full");
 ```
 
 **Without a source, the bare type name is printed.** The two cases are one `#[from]` apart, so
@@ -165,23 +167,25 @@ a wrapper that is accidentally constructed without a source renders as `Error: S
 rather than a message:
 
 ```rust
+use ohno::assert_error_message;
+
 #[ohno::error]
 pub struct StorageError;
 
 let error = StorageError::new();
 
-assert_eq!(error.to_string(), "StorageError");
+assert_error_message!(error, "StorageError");
 ```
 
-Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper to make
-sourceless construction unrepresentable, rather than relying on review to catch it.
+Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper so that a
+wrapper with no source cannot be built at all, rather than relying on review to catch it.
 
 One further caveat: because each ohno error carries its own [`OhnoCore`][__link12], a chain of
 transparent wrappers emits one backtrace block per level when backtrace capture is enabled.
 A two-level wrapper prints two blocks under `RUST_BACKTRACE=1`. This is inherent to
 per-type cores rather than a property of the transparent shape itself.
 
-## Modelling Multiple Failure Conditions
+## Modeling Multiple Failure Conditions
 
 `#[derive(Error)]` rejects enums, because [`OhnoCore`][__link13] has to live somewhere and a per-variant
 core would be meaningless. This is the first question most people arriving from `thiserror`
@@ -197,7 +201,7 @@ types, relying on the transparent passthrough described
 [above](#without-display) so the wrapper adds no text of its own:
 
 ```rust
-use ohno::ErrorExt as _;
+use ohno::{ErrorExt as _, assert_error_message};
 
 #[ohno::error]
 pub struct ParseError;
@@ -213,7 +217,7 @@ pub struct RequestError;
 let error: RequestError = ParseError::caused_by("unexpected token").into();
 
 // The wrapper is transparent: the leaf's message is what users see.
-assert_eq!(error.to_string(), "unexpected token");
+assert_error_message!(error, "unexpected token");
 
 // A caller that does need to discriminate can still recover the concrete type.
 assert!(error.find_source::<ParseError>().is_some());
@@ -227,6 +231,8 @@ accessor:
 
 ```rust
 use std::fmt;
+
+use ohno::assert_error_message;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestErrorKind {
@@ -259,7 +265,7 @@ impl RequestError {
 let error = RequestError::new(RequestErrorKind::Timeout);
 
 assert_eq!(error.kind(), RequestErrorKind::Timeout);
-assert_eq!(error.to_string(), "request timed out");
+assert_error_message!(error, "request timed out");
 ```
 
 Adopting ohno across nine crates, the abstract wrapper was the right shape almost everywhere,
@@ -468,7 +474,7 @@ uniformly via [`Labeled::label`][__link24].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxrtgMzSQtLobG_YdBTen9vQbiTdbxoFbwvsb-UfheR5PhZFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb6AB-xE0kPw0bH5ofcQampBgbM4OxvEk7l6UbbJqe5GnscZxhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
