@@ -19,7 +19,6 @@
 //! on a Linux host with Valgrind installed.
 
 #![allow(missing_docs, reason = "benchmark code")]
-#![allow(unused_results, reason = "black_box of bench input is intentional")]
 #![allow(
     clippy::needless_pass_by_value,
     reason = "gungraun bench inputs are passed by value by the framework"
