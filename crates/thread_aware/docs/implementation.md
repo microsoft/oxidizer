@@ -21,6 +21,12 @@ core's cache, generating no coherence traffic. Slots are filled lazily: a slot
 is populated the first time a clone is relocated into the affinity that owns it,
 and stays populated for the lifetime of the shared table.
 
+A slot stores an `Arc<T>` rather than a `T`. An `Arc<T>` is a sized value even
+when `T` is not, which is what lets `Arc<T, S>` keep `T: ?Sized` (so `Arc<dyn
+Trait, S>` works). The public handle is `storage::Storage`; the raw table behind
+it is `SlotTable`, kept separate so it can be unit-tested with a plain value type
+while the handle pins the stored type to `Arc<T>`.
+
 ## Relocation locking
 
 `ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
@@ -73,6 +79,17 @@ nothing had recorded yet. This write happens after the destination lock is
 released, never with both locks held: two threads relocating in opposite
 directions (`X → Y` and `Y → X`) would otherwise deadlock, each waiting for the
 lock the other holds.
+
+A slot lock is never left poisoned, so acquiring one never has to handle a poison
+error. Poisoning would require a panic while the lock is held, and the crate
+never panics there. The operations run under a slot lock — cloning, storing and
+comparing the reference-counted handle it holds — cannot unwind. The one
+exception is materializing a value on the miss path, which runs the caller's
+factory; `relocate` runs that under `catch_unwind`, and on a panic it drops the
+destination guard before resuming the unwind, so the lock is released cleanly
+rather than poisoned. `strong_count` likewise clones each handle out from under
+its lock and applies its predicate afterwards, so no caller code runs while a
+lock is held.
 
 ## Benchmarks
 

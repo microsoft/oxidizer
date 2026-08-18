@@ -15,10 +15,11 @@ use alloc::boxed::Box;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{self};
 
 pub use builtin::{PerCore, PerNuma, PerProcess};
-pub(crate) use storage::{SharedStorage, Strategy};
+pub(crate) use storage::{Storage, Strategy};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
@@ -108,7 +109,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// ```
 #[derive(Debug)]
 pub struct Arc<T: ?Sized, S: Strategy> {
-    storage: sync::Arc<SharedStorage<T, S>>,
+    storage: sync::Arc<Storage<T, S>>,
     value: sync::Arc<T>,
     factory: Factory<T>,
 }
@@ -395,7 +396,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::SharedStorage::new()),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
@@ -457,7 +458,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::SharedStorage::new()),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
@@ -495,7 +496,7 @@ where
         let value = sync::Arc::clone(erased.arc());
 
         Self {
-            storage: sync::Arc::new(storage::SharedStorage::new()),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::ErasedCloneFn(erased),
         }
@@ -518,7 +519,7 @@ where
         let value = sync::Arc::from(closure.clone().call_once());
 
         Self {
-            storage: sync::Arc::new(storage::SharedStorage::new()),
+            storage: sync::Arc::new(storage::Storage::new()),
             value,
             factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
@@ -531,7 +532,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: sync::Arc<SharedStorage<T, S>>, current_affinity: Affinity) -> Self {
+    pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_affinity: Affinity) -> Self {
         let value = storage.get_clone(current_affinity).expect("No data found for the current affinity");
 
         Self {
@@ -576,6 +577,49 @@ impl<T, S: Strategy> Arc<T, S> {
     }
 }
 
+impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
+    /// Produces the value for `destination` and the factory to carry forward.
+    ///
+    /// This runs the configured factory, which is caller-supplied code. It is the
+    /// only such code `relocate` runs while holding a slot lock, so `relocate`
+    /// wraps this call in `catch_unwind` to keep a panicking factory from
+    /// poisoning the destination slot lock.
+    fn materialize(&self, source: Option<Affinity>, destination: Affinity) -> (sync::Arc<T>, Factory<T>) {
+        match &self.factory {
+            // We can use the closure to create new data
+            Factory::Closure(factory, factory_source_affinity) => {
+                let mut factory_clone = (**factory).clone();
+
+                // In case factory source is stored in factory, use that - it means we already transferred the factory
+                // once, so we know the original source affinity. Otherwise, use source as that means this is the first
+                // time we're transferring the Arc, so source is the source affinity of the factory as well.
+                let factory_source = factory_source_affinity.or(source);
+
+                factory_clone.relocate(factory_source, destination);
+                (
+                    sync::Arc::from(factory_clone.call_once()),
+                    Factory::Closure(sync::Arc::clone(factory), factory_source),
+                )
+            }
+
+            // We can clone and transfer the data
+            Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+
+            // We can clone the data and closure it
+            Factory::ErasedCloneFn(erased) => {
+                let cloned = erased.clone_and_relocate(source, destination);
+                (cloned, self.factory.clone())
+            }
+
+            Factory::Manual => {
+                // If we are in manual mode, we just clone the data
+                // This effectively makes it behave like `sync::Arc<T>`
+                (sync::Arc::clone(&self.value), self.factory.clone())
+            }
+        }
+    }
+}
+
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         // Relocation is a two-stage locking operation, scoped to a single affinity's slot: a
@@ -606,37 +650,15 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 return;
             }
 
-            // We need to transfer or recreate the data
-            let (data, new_factory) = match &self.factory {
-                // We can use the closure to create new data
-                Factory::Closure(factory, factory_source_affinity) => {
-                    let mut factory_clone = (**factory).clone();
-
-                    // In case factory source is stored in factory, use that - it means we already transferred the factory
-                    // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                    // time we're transferring the Arc, so source is the source affinity of the factory as well.
-                    let factory_source = factory_source_affinity.or(source);
-
-                    factory_clone.relocate(factory_source, destination);
-                    (
-                        sync::Arc::from(factory_clone.call_once()),
-                        Factory::Closure(sync::Arc::clone(factory), factory_source),
-                    )
-                }
-
-                // We can clone and transfer the data
-                Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
-
-                // We can clone the data and closure it
-                Factory::ErasedCloneFn(erased) => {
-                    let cloned = erased.clone_and_relocate(source, destination);
-                    (cloned, self.factory.clone())
-                }
-
-                Factory::Manual => {
-                    // If we are in manual mode, we just clone the data
-                    // This effectively makes it behave like `sync::Arc<T>`
-                    (sync::Arc::clone(&self.value), self.factory.clone())
+            // Materializing runs the caller's factory — the only caller code executed while a slot
+            // lock is held. Run it under `catch_unwind` so that a panic unwinds only after the guard
+            // is dropped, leaving the slot lock unpoisoned.
+            // Ref: docs/implementation.md, "Relocation locking".
+            let (data, new_factory) = match panic::catch_unwind(AssertUnwindSafe(|| self.materialize(source, destination))) {
+                Ok(materialized) => materialized,
+                Err(payload) => {
+                    drop(destination_slot);
+                    panic::resume_unwind(payload);
                 }
             };
 

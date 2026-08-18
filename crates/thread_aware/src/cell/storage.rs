@@ -25,15 +25,22 @@ pub trait Strategy {
     fn count(affinity: Affinity) -> usize;
 }
 
-/// Message used when a slot lock is found poisoned by a panic in another thread.
-const POISONED: &str = "storage slot lock poisoned by a panic in another thread";
+/// A slot lock is never left poisoned, so acquiring it never fails.
+///
+/// Poisoning requires a panic while the lock is held, and no panicking code runs
+/// there: the stored values are reference-counted handles whose clone cannot
+/// unwind, and the one operation that runs caller code under the lock —
+/// materializing a value on relocation's miss path — catches the unwind and
+/// releases the lock before it resumes.
+/// Ref: docs/implementation.md, "Relocation locking".
+const NEVER_POISONED: &str = "a slot lock is never poisoned; the crate never panics while one is held";
 
 /// One affinity's independently-locked, cache-line-isolated storage slot.
 type Slot<T> = CachePadded<RwLock<Option<T>>>;
 
 /// Affinity-partitioned storage: one independently-locked slot per affinity.
 ///
-/// This is the raw slot table. [`SharedStorage`] wraps it as the handle an
+/// This is the raw slot table. [`Storage`] wraps it as the handle an
 /// `Arc` actually holds; the two are separate so this can be unit-tested with a
 /// plain value type while the wrapper pins the stored type to `Arc<T>`.
 ///
@@ -47,13 +54,13 @@ type Slot<T> = CachePadded<RwLock<Option<T>>>;
 /// atomic load of the `OnceLock` pointer, which stays resident and shared in
 /// every core's cache and generates no coherence traffic.
 #[derive(Debug)]
-pub(crate) struct Storage<T, S: Strategy> {
+pub(crate) struct SlotTable<T, S: Strategy> {
     slots: OnceLock<Box<[Slot<T>]>>,
     _marker: PhantomData<S>,
 }
 
-impl<T, S: Strategy> Storage<T, S> {
-    /// Creates a new empty `Storage` instance.
+impl<T, S: Strategy> SlotTable<T, S> {
+    /// Creates a new empty `SlotTable` instance.
     #[must_use]
     pub(crate) const fn new() -> Self {
         Self {
@@ -82,7 +89,7 @@ impl<T, S: Strategy> Storage<T, S> {
     /// Returns the previous value if it existed, otherwise returns `None`.
     #[cfg(test)]
     pub(crate) fn replace(&self, affinity: Affinity, value: T) -> Option<T> {
-        self.slot(affinity).write().expect(POISONED).replace(value)
+        self.slot(affinity).write().expect(NEVER_POISONED).replace(value)
     }
 
     /// Acquires the exclusive lock on the slot for `affinity`.
@@ -92,7 +99,7 @@ impl<T, S: Strategy> Storage<T, S> {
     /// this affinity is affected and no other thread can materialize it in the
     /// meantime.
     pub(crate) fn write(&self, affinity: Affinity) -> RwLockWriteGuard<'_, Option<T>> {
-        self.slot(affinity).write().expect(POISONED)
+        self.slot(affinity).write().expect(NEVER_POISONED)
     }
 
     /// Acquires the shared lock on the slot for `affinity`.
@@ -101,17 +108,17 @@ impl<T, S: Strategy> Storage<T, S> {
     /// lock; production relocation reads through [`get_clone`](Self::get_clone).
     #[cfg(test)]
     pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<T>> {
-        self.slot(affinity).read().expect(POISONED)
+        self.slot(affinity).read().expect(NEVER_POISONED)
     }
 }
 
-impl<T, S: Strategy> Default for Storage<T, S> {
+impl<T, S: Strategy> Default for SlotTable<T, S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, S: Strategy> Storage<T, S>
+impl<T, S: Strategy> SlotTable<T, S>
 where
     T: Clone,
 {
@@ -119,41 +126,43 @@ where
     /// Returns `None` if the data does not exist for that affinity.
     #[must_use]
     pub(crate) fn get_clone(&self, affinity: Affinity) -> Option<T> {
-        self.slot(affinity).read().expect(POISONED).clone()
+        self.slot(affinity).read().expect(NEVER_POISONED).clone()
     }
-}
 
-impl<T, S: Strategy> Storage<T, S> {
     /// Counts how many stored entries satisfy the given predicate.
     ///
-    /// The slots are read one at a time rather than under a single consistent
-    /// snapshot, so the count is an estimate under concurrent relocation — which
-    /// matches the inherently racy nature of a strong-count query.
+    /// Each value is cloned out from under its slot lock and the predicate runs
+    /// afterwards, so no caller code executes while a lock is held. The slots are
+    /// visited one at a time rather than under a single consistent snapshot, so
+    /// the count is an estimate under concurrent relocation — which matches the
+    /// inherently racy nature of a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&T) -> bool) -> usize {
-        match self.slots.get() {
-            None => 0,
-            Some(slots) => slots
-                .iter()
-                .filter(|slot| slot.read().expect(POISONED).as_ref().is_some_and(&predicate))
-                .count(),
-        }
+        let Some(slots) = self.slots.get() else {
+            return 0;
+        };
+
+        slots
+            .iter()
+            .filter_map(|slot| slot.read().expect(NEVER_POISONED).clone())
+            .filter(|value| predicate(value))
+            .count()
     }
 }
 
-/// Opaque handle to an `Arc`'s per-affinity storage, shared by its clones.
+/// Per-affinity storage shared by every clone of an `Arc`.
 ///
-/// Hides the per-slot locking so the representation can change without breaking
-/// callers. `T` is `?Sized` because a slot stores an `Arc<T>`, which is a sized
-/// value even when `T` is not.
+/// A relocation into an affinity publishes the value here; later relocations into
+/// the same affinity read it back. Handing this to `Arc::from_storage` rebuilds
+/// an `Arc` that shares it.
 #[derive(Debug)]
-pub struct SharedStorage<T: ?Sized, S: Strategy> {
-    inner: Storage<sync::Arc<T>, S>,
+pub struct Storage<T: ?Sized, S: Strategy> {
+    inner: SlotTable<sync::Arc<T>, S>,
 }
 
-impl<T: ?Sized, S: Strategy> SharedStorage<T, S> {
-    /// Creates an empty handle, with no affinity populated.
+impl<T: ?Sized, S: Strategy> Storage<T, S> {
+    /// Creates an empty storage, with no affinity populated.
     pub(crate) const fn new() -> Self {
-        Self { inner: Storage::new() }
+        Self { inner: SlotTable::new() }
     }
 
     /// Clones out the value published for `affinity`, if any.
@@ -187,13 +196,13 @@ impl<T: ?Sized, S: Strategy> SharedStorage<T, S> {
 #[cfg(test)]
 mod tests {
     use crate::affinity::pinned_affinities;
-    use crate::storage::{Storage, Strategy};
+    use crate::storage::{SlotTable, Strategy};
     use crate::{PerCore, PerNuma, PerProcess};
 
     #[test]
     fn replace_returns_previous_value() {
         let affinities = pinned_affinities(&[1]);
-        let storage = Storage::<String, PerCore>::default();
+        let storage = SlotTable::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // First replace should return None (no previous value)
@@ -213,7 +222,7 @@ mod tests {
     fn get_clone() {
         let affinities = pinned_affinities(&[1]);
 
-        let storage = Storage::<String, PerCore>::default();
+        let storage = SlotTable::<String, PerCore>::default();
         let affinity = affinities[0];
 
         assert!(storage.get_clone(affinity).is_none());
@@ -262,13 +271,13 @@ mod tests {
         let affinities = pinned_affinities(&[1]);
 
         // Create storage using Default trait - this exercises line 101
-        let storage = Storage::<String, PerCore>::default();
+        let storage = SlotTable::<String, PerCore>::default();
         let affinity = affinities[0];
 
         // Verify the default storage is empty (no data for any affinity)
         assert!(storage.get_clone(affinity).is_none());
 
-        // Verify it works the same as Storage::new()
+        // Verify it works the same as SlotTable::new()
         storage.replace(affinity, "test".to_string());
         assert_eq!(storage.get_clone(affinity), Some("test".to_string()));
     }

@@ -244,7 +244,7 @@ fn test_from_storage() {
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let storage = super::storage::SharedStorage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -330,7 +330,7 @@ fn test_factory_clone_with_manual() {
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let storage = super::storage::SharedStorage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(200);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -362,7 +362,7 @@ fn test_factory_manual_relocated() {
     let affinity2 = affinities[1];
 
     // Create a storage with a value at affinity1
-    let storage = super::storage::SharedStorage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
     storage.replace(affinity1, Arc::clone(&value));
 
@@ -473,7 +473,7 @@ fn test_strong_count_with_deduplication() {
     // The strong count includes:
     // - arc1_relocated (1)
     // - arc2_relocated (1)
-    // Storage reference at affinity2 is excluded by strong_count
+    // SlotTable reference at affinity2 is excluded by strong_count
     assert_eq!(PerCore::strong_count(&arc1_relocated), 2);
     assert_eq!(PerCore::strong_count(&arc2_relocated), 2);
 }
@@ -498,7 +498,7 @@ fn test_strong_count_independent_across_affinities() {
     // arc_a is now referenced by:
     // - arc_a itself
     // - arc_a2
-    // Storage at affinity1 also holds a reference, but strong_count excludes internal refs
+    // SlotTable at affinity1 also holds a reference, but strong_count excludes internal refs
     assert_eq!(PerCore::strong_count(&arc_a), 2);
     assert_eq!(PerCore::strong_count(&arc_a2), 2);
     // arc_b on affinity2 is unaffected by the clone on affinity1
@@ -691,7 +691,7 @@ fn factory_manual_debug() {
     use std::sync::{self};
 
     let affinities = pinned_affinities(&[1]);
-    let storage = sync::Arc::new(super::storage::SharedStorage::new());
+    let storage = sync::Arc::new(super::storage::Storage::new());
     storage.replace(affinities[0], sync::Arc::new(42));
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");
@@ -781,4 +781,40 @@ fn new_boxed_relocate() {
     let mut arc = super::Arc::<Counter, crate::PerCore>::new_boxed(|| Box::new(Counter::new()));
     arc.relocate(Some(affinities[0]), affinities[1]);
     assert_eq!(arc.value(), 0, "new_boxed relocate should create a fresh counter");
+}
+
+#[test]
+fn factory_panic_does_not_poison_slot_lock() {
+    // A relocation that misses runs the factory while holding the destination slot lock. The
+    // factory is caller code and may panic; relocation must catch that panic and release the lock
+    // before resuming the unwind, so the lock is never left poisoned.
+
+    // A value whose clone panics. `with_value` clones it only when materializing a new affinity,
+    // so construction succeeds and the first relocation into an empty affinity panics.
+    struct Bomb;
+
+    impl Clone for Bomb {
+        fn clone(&self) -> Self {
+            panic!("materialization bomb");
+        }
+    }
+
+    impl ThreadAware for Bomb {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let arc = super::Arc::<Bomb, crate::PerCore>::with_value(Bomb);
+    let mut relocated = arc.clone();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(source), destination)));
+    assert!(result.is_err(), "the factory panic must propagate to the caller");
+
+    // If the panic had poisoned the slot lock, this acquisition would itself panic. It does not:
+    // the lock was released before the unwind resumed, and the slot is empty because
+    // materialization panicked before publishing anything.
+    assert!(arc.storage.get_clone(destination).is_none(), "the slot lock must not be poisoned");
 }
