@@ -29,6 +29,7 @@ pub fn metric_number_of(value: &Value) -> Option<f64> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,6 +37,7 @@ mod tests {
     #[test]
     fn numeric_values_convert() {
         assert_eq!(metric_number_of(&Value::from(42_i64)), Some(42.0));
+        assert_eq!(metric_number_of(&Value::from(7_u64)), Some(7.0));
         assert_eq!(metric_number_of(&Value::from(2.72_f64)), Some(2.72));
     }
 

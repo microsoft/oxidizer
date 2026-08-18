@@ -66,10 +66,10 @@ pub struct SensitiveSlice<'a, const N: usize = 5, const D: char = ','> {
 
 impl<'a, const N: usize, const D: char> SensitiveSlice<'a, N, D> {
     /// Collects items from any iterator of references to [`RedactedDisplay`]
-    /// implementors.
+    /// implementers.
     ///
     /// At most `N` items are stored inline. Whether there were additional
-    /// items is recorded so overflow can be signalled during formatting.
+    /// items is recorded so overflow can be signaled during formatting.
     pub fn new<I, T>(iter: I) -> Self
     where
         I: IntoIterator<Item = &'a T>,
@@ -139,6 +139,7 @@ impl<const N: usize, const D: char> Clone for SensitiveSlice<'_, N, D> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, VecDeque};
@@ -236,5 +237,31 @@ mod tests {
         let sc = SensitiveSlice::<5>::new(arr.iter());
         let result = sc.to_redacted_string(&passthrough_engine());
         assert_eq!(result, "one, two, three");
+    }
+
+    #[test]
+    fn debug_reports_stored_count_and_overflow_without_leaking_items() {
+        let v = [s("a"), s("b"), s("c")];
+
+        let sc = SensitiveSlice::<5>::new(v.iter());
+        let rendered = format!("{sc:?}");
+        assert_eq!(rendered, "SensitiveSlice { stored: 3, overflowed: false }");
+
+        let truncated = SensitiveSlice::<2>::new(v.iter());
+        let rendered = format!("{truncated:?}");
+        assert_eq!(rendered, "SensitiveSlice { stored: 2, overflowed: true }");
+    }
+
+    #[test]
+    fn clone_preserves_items_and_overflow() {
+        let v = [s("a"), s("b"), s("c")];
+        let sc = SensitiveSlice::<2>::new(v.iter());
+        let cloned = sc.clone();
+
+        assert_eq!(
+            cloned.to_redacted_string(&passthrough_engine()),
+            sc.to_redacted_string(&passthrough_engine())
+        );
+        assert_eq!(cloned.to_redacted_string(&passthrough_engine()), "a, b, ...");
     }
 }
