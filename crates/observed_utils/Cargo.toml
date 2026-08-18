@@ -2,9 +2,9 @@
 # Licensed under the MIT License.
 
 [package]
-name = "observed_helpers"
+name = "observed_utils"
 description = "Helper types and utilities shared by observed telemetry framework crates."
-version = "0.24.0"
+version = "0.1.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "helpers", "logging"]
 categories = ["development-tools::debugging"]
@@ -15,7 +15,7 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 include.workspace = true
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_helpers"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_utils"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [

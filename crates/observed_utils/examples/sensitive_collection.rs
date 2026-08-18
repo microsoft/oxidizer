@@ -15,7 +15,7 @@ use microsoft_enterprise_data_taxonomy::MicrosoftEnterpriseDataTaxonomy;
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed::{Sink, emit, event};
-use observed_helpers::SensitiveSlice;
+use observed_utils::SensitiveSlice;
 
 #[path = "support/taxonomy.rs"]
 mod microsoft_enterprise_data_taxonomy;

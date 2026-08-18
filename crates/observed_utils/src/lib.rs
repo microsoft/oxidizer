@@ -2,10 +2,8 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_helpers/logo.png")]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_helpers/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_utils/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_utils/favicon.ico")]
 // TODO(doc-coverage): remove once `missing_docs` is promoted to [workspace.lints.rust].
 #![deny(missing_docs)]
 
