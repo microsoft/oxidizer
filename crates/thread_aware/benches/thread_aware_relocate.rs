@@ -31,10 +31,7 @@
 //!
 //! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate`
 
-#![allow(missing_docs, reason = "benchmark code")]
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
-#![allow(clippy::missing_panics_doc, reason = "benchmark code")]
-#![allow(clippy::std_instead_of_core, reason = "benchmark code")]
 
 use std::hint::black_box;
 use std::sync::Barrier;

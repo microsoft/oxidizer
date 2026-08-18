@@ -19,10 +19,6 @@
 //! on a Linux host with Valgrind installed.
 
 #![allow(missing_docs, reason = "benchmark code")]
-#![allow(
-    clippy::needless_pass_by_value,
-    reason = "gungraun bench inputs are passed by value by the framework"
-)]
 #![cfg_attr(
     target_os = "linux",
     expect(
