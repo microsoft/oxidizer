@@ -78,7 +78,7 @@ impl Delay {
     }
 
     fn register_timer(&mut self, waker: &Waker) -> Poll<()> {
-        let when = self.clock.instant().checked_add(self.duration);
+        let when = self.clock.timer_instant().checked_add(self.duration);
 
         if let Some(when) = when {
             self.current_timer = Some(self.clock.register_timer(when, waker.clone()));
@@ -103,7 +103,7 @@ impl Future for Delay {
             None if this.duration == Duration::MAX => Poll::Pending,
             None if this.duration == Duration::ZERO => Poll::Ready(()),
             None => this.register_timer(cx.waker()),
-            Some(key) if key.tick() <= this.clock.instant() => {
+            Some(key) if key.tick() <= this.clock.timer_instant() => {
                 this.current_timer = None;
 
                 // Unregister the timer, just in case this call was explicit
@@ -145,6 +145,16 @@ mod tests {
         let now = std::time::Instant::now();
         Delay::new(&clock, Duration::from_millis(5)).await;
         assert!(now.elapsed() >= Duration::from_millis(5));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn delay_with_fast_instant_completes() {
+        let clock = Clock::new_tokio().with_fast_instant(true);
+
+        tokio::time::timeout(Duration::from_secs(1), Delay::new(&clock, Duration::from_millis(5)))
+            .await
+            .expect("timer scheduling uses the driver's precise time source");
     }
 
     #[test]

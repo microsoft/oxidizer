@@ -12,8 +12,8 @@ use rustc_hash::FxBuildHasher;
 
 use crate::reader::Reader;
 use crate::shard::{Shard, ShardReadGuard};
-use crate::sharded_reader::ShardedReader;
 use crate::sym::{NUM_SHARDS, SHARD_BITS, Sym};
+use crate::threaded_reader::ThreadedReader;
 
 /// Mixing constant (golden-ratio) used to decorrelate the shard selector from the
 /// bits `hashbrown` consumes for its control byte and bucket index.
@@ -36,17 +36,34 @@ const MIN_PREALLOCATED_STRINGS_PER_SHARD: usize = 8;
 /// wrapping it in an `Arc` yourself.
 ///
 /// It is **fill-then-freeze**: intern from as many threads as you like, then call
-/// [`freeze`](Self::freeze) to get a `Send + Sync` [`Reader`] for the read phase,
-/// whose lookups are lock-free. Handles stay valid across the freeze.
+/// [`freeze`](Self::freeze) to get a `Send + Sync` [`ThreadedReader`] for the read
+/// phase, whose lookups are lock-free. Handles stay valid across the freeze.
 ///
 /// Interning is optimized for concurrent fill. Deduplication hits in different
 /// shards proceed independently, but hits in the same shard serialize on its
 /// single upgradable-read slot. Freeze before a read-heavy phase rather than
 /// using repeated `intern` calls as lookups.
 ///
-/// By default, [`ThreadedLexicon`] uses a fast, non-cryptographic hasher; supply your own with
-/// [`with_hasher`](ThreadedLexicon::with_hasher) (for example a DoS-resistant one
-/// when interning untrusted input).
+/// Handles encode a shard index alongside a per-shard position, so unlike
+/// [`LocalLexicon`](crate::LocalLexicon) they are **not** numbered consecutively.
+/// Do not use their numeric value as an index into a side table.
+///
+/// # Choosing a hasher
+///
+/// <div class="warning">
+///
+/// The default hasher is fast but **not collision-attack resistant**. Interning
+/// attacker-controlled strings — names off the wire in an XML, JSON, or other
+/// protocol parser — with the default hasher invites hash-collision denial of
+/// service. Supply a defensive hasher with
+/// [`with_hasher`](ThreadedLexicon::with_hasher) whenever an attacker can choose
+/// the strings.
+///
+/// This differs from `lasso`, which defaults to a collision-resistant hasher. A
+/// type-for-type migration therefore needs a deliberate hasher choice, or it
+/// silently loses that protection.
+///
+/// </div>
 ///
 /// # Examples
 ///
@@ -215,11 +232,11 @@ impl<S: BuildHasher> ThreadedLexicon<S> {
     /// commit afterwards are not. `freeze` leaves the interner usable, so other
     /// clones keep interning and may themselves freeze independently.
     #[must_use]
-    pub fn freeze(self) -> impl Reader {
+    pub fn freeze(self) -> ThreadedReader {
         self.into_reader()
     }
 
-    fn into_reader(self) -> ShardedReader {
+    fn into_reader(self) -> ThreadedReader {
         match Arc::try_unwrap(self.0) {
             Ok(inner) => inner.into_reader(),
             Err(arc) => arc.build_reader(),
@@ -346,11 +363,11 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
 
     /// Consumes the inner state, moving each shard's `(offsets, bytes)` blob into a
     /// [`ShardReader`] with no copy or re-walk.
-    fn into_reader(self) -> ShardedReader {
-        ShardedReader::new(Box::new(self.shards.map(Shard::freeze)))
+    fn into_reader(self) -> ThreadedReader {
+        ThreadedReader::new(Box::new(self.shards.map(Shard::freeze)))
     }
 
-    /// Builds a [`ShardedReader`] without consuming, copying each shard's
+    /// Builds a [`ThreadedReader`] without consuming, copying each shard's
     /// `(offsets, bytes)` blob. Used when the interner is still shared (outstanding
     /// `Arc` clones).
     ///
@@ -361,10 +378,10 @@ impl<S: BuildHasher> ThreadedLexiconInner<S> {
     /// Guards are taken in index order and `intern` only ever locks one shard, so
     /// this cannot deadlock. Concurrent lookups keep running; only in-flight
     /// insertions briefly stall for the copy.
-    fn build_reader(&self) -> ShardedReader {
+    fn build_reader(&self) -> ThreadedReader {
         let guards: [ShardReadGuard<'_>; NUM_SHARDS] = core::array::from_fn(|i| self.shards[i].read_guard());
         let readers = core::array::from_fn(|i| Shard::snapshot_locked(&guards[i]));
-        ShardedReader::new(Box::new(readers))
+        ThreadedReader::new(Box::new(readers))
     }
 }
 

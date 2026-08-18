@@ -145,6 +145,7 @@ argh = { workspace = true }
 criterion = { workspace = true }
 ctor = { workspace = true }
 fastrand.workspace = true
+futures = { workspace = true, features = ["executor", "std"] }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 mutants = { workspace = true }
@@ -163,7 +164,7 @@ rustls = { workspace = true, features = [
 ], default-features = false }
 rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
@@ -171,6 +172,7 @@ tokio = { workspace = true, features = [
     "rt",
     "net",
 ] }
+tracing = { workspace = true, features = ["std"] }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }

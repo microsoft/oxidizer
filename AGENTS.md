@@ -53,11 +53,34 @@ Pull request titles must follow [Conventional Commits](https://www.conventionalc
 
 Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [docs/feature-gated-doctests.md](docs/feature-gated-doctests.md).
 
+## Optional Dependencies in Test Builds
+
+Feature-dependent code is gated behind `cfg(any(test, feature = "foo"))` so that a crate's test build compiles it without enumerating features. Features must therefore be additive. Because `cfg(test)` does not activate Cargo features, every optional dependency must also be declared as a non-optional dev-dependency, carrying whatever dependency features the feature activates. See [docs/optional-deps-in-test-builds.md](docs/optional-deps-in-test-builds.md).
+
 ## `no_std` Support
 
 `no_std` support is optional when deciding whether to adopt or expand it. Support for constrained targets must not justify disproportionate implementation complexity, such as extensive `cfg` branching or specialized fallbacks for platforms without pointer-width atomics.
 
 Once a crate documents a `no_std` configuration as supported, that configuration is a real compatibility promise, not best-effort support. It must work correctly, be tested in CI, and be documented with its actual prerequisites and support boundary, including requirements such as `alloc`, pointer-width atomics, or specific target capabilities.
+
+### `no_std`-only code is exempt from coverage and mutation testing
+
+Code selected by the *absence* of `std` — `#[cfg(not(feature = "std"))]` and equivalents — is excluded from the coverage gate and from mutation testing. Neither harness is guaranteed to build a `no_std` configuration: mutation testing runs with default features, and in the coverage run's `--no-default-features` leg Cargo feature unification across the selected dependency graph can re-enable `std` anyway. Such code is therefore often absent from the measured build entirely, and holding it to a coverage or mutation obligation measures the harness rather than the code.
+
+Mark it with both exclusions:
+
+```rust
+#[cfg(not(feature = "std"))]
+#[cfg_attr(coverage_nightly, coverage(off))] // no_std-only path (AGENTS.md, "no_std Support").
+#[cfg_attr(test, mutants::skip)] // no_std-only path (AGENTS.md, "no_std Support").
+fn capture() -> Self {
+    Self::Disabled
+}
+```
+
+`coverage(off)` needs `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` in the crate root.
+
+Attach the exclusions to the `no_std` arm alone, splitting the item into per-configuration definitions where the two arms share one function. The `std` arm keeps its full coverage and mutation obligations. The exemption covers only code that a `no_std` build selects *instead of* a `std` build; ungated code that merely also compiles under `no_std` is tested normally.
 
 ## Required CI Checks
 

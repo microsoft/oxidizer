@@ -25,7 +25,9 @@ pub(crate) use sealed::Sealed;
 /// [`LocalLexicon`](crate::LocalLexicon) implements this trait directly. Calling
 /// [`LocalLexicon::freeze`](crate::LocalLexicon::freeze) or
 /// [`ThreadedLexicon::freeze`](crate::ThreadedLexicon::freeze) returns an
-/// immutable `impl Reader`. Bring this trait into scope to call its methods
+/// immutable [`LocalReader`](crate::LocalReader) or
+/// [`ThreadedReader`](crate::ThreadedReader) — concrete types, so a frozen table
+/// can be stored by value. Bring this trait into scope to call its methods
 /// (`use internity::Reader`), and use `impl Reader` / `Box<dyn Reader>` when you
 /// need to abstract over reader implementations.
 ///

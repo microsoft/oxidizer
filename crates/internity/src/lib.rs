@@ -21,6 +21,14 @@
 //! gets added only once to the data store, and you get back the same handle. Later, you can
 //! use the handle to retrieve the actual string.
 //!
+//! # Performance
+//!
+//! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/PERF.md)
+//! for wall-clock timings and memory footprint measured head-to-head against the
+//! other main Rust interners, and
+//! [`COMPARISON.md`](https://github.com/microsoft/oxidizer/blob/main/crates/internity/docs/COMPARISON.md)
+//! for a design-level comparison of the Rust string-interning ecosystem.
+//!
 //! # Handles
 //!
 //! Interning yields a [`Sym`] — a 4-byte, `Copy` handle. It's cheap to store and
@@ -49,6 +57,10 @@
 //! [`Reader`] for the read phase. A `Reader` is immutable, `Send + Sync`, and its
 //! lookups are lock-free — ideal for sharing across threads.
 //!
+//! Freezing returns a concrete, nameable type — [`LocalReader`] or
+//! [`ThreadedReader`] — so a frozen table can be stored in a struct by value,
+//! without boxing or virtual dispatch.
+//!
 //! ```
 //! use internity::{LocalLexicon, Reader};
 //!
@@ -72,6 +84,25 @@
 //! `HashMap`. Use `with_hasher` to supply your own — for
 //! example a DoS-resistant hasher when interning untrusted input.
 //!
+//! The default is **not** collision-attack resistant, and this differs from
+//! `lasso`, which defaults to a collision-resistant hasher. Migrating by swapping
+//! the type therefore needs a deliberate hasher choice, or it silently loses that
+//! protection. See [`LocalLexicon`] for the full warning.
+//!
+//! # Dense handles
+//!
+//! [`LocalLexicon`] assigns its handles consecutively in insertion order, and
+//! [`freeze`](LocalLexicon::freeze) preserves that numbering, so every live string
+//! has a distinct position in `0..len`. Use
+//! [`index_of`](LocalLexicon::index_of) and [`sym_at`](LocalLexicon::sym_at) to
+//! move between a handle and its position, which makes a `Vec<T>` side table
+//! indexed by symbol possible — cheaper than a hash map keyed by the handle.
+//! The raw [`Sym::as_u32`] value is 1-based and must not be used as an index
+//! directly.
+//!
+//! [`ThreadedLexicon`] handles pack a shard index into their high bits and are
+//! **not** consecutive, so it offers no such conversion.
+//!
 //! # Production guidance
 //!
 //! * A [`Sym`] is local to the interner that created it. A foreign handle is
@@ -81,6 +112,10 @@
 //!   defensive `BuildHasher` when strings can be selected by an attacker.
 //! * Interners do not remove individual strings. Memory grows during the fill
 //!   phase until the interner is dropped or frozen.
+//! * Freezing drops the dedup hash map, which is where its memory saving comes
+//!   from — so a frozen reader resolves handles but cannot look strings up by
+//!   value. Keep the lexicon live if you need that, or rebuild a smaller index;
+//!   see [`freeze`](LocalLexicon::freeze) for a worked example.
 //! * A [`Sym`] does not implement [`serde::Serialize`]/`Deserialize` on its own:
 //!   a bare handle is a meaningless integer without its interner. Serialize
 //!   handles with the reader-aware [`se::SerializeIn`] derive (which resolves
@@ -101,8 +136,9 @@
 //!
 //! # Cargo features
 //!
-//! * `std` *(default)* — enables the concurrent [`ThreadedLexicon`]. Without it the
-//!   crate is `no_std` + `alloc`: [`LocalLexicon`], [`Lexicon`], [`Sym`], and
+//! * `std` *(default)* — enables the concurrent [`ThreadedLexicon`] and its frozen
+//!   [`ThreadedReader`]. Without it the crate is `no_std` + `alloc`:
+//!   [`LocalLexicon`], its frozen [`LocalReader`], [`Lexicon`], [`Sym`], and
 //!   [`Reader`] still work.
 //! * `serde` — reader-aware serialization: the [`se::SerializeIn`] /
 //!   [`de::DeserializeIn`] derives, [`se::SerializeReader`] for a whole corpus,
@@ -145,15 +181,15 @@ mod shard;
 mod shard_write;
 #[cfg(feature = "std")]
 #[forbid(unsafe_code)]
-mod sharded_reader;
+mod threaded_lexicon;
 #[cfg(feature = "std")]
 #[forbid(unsafe_code)]
-mod threaded_lexicon;
+mod threaded_reader;
 
 // Unchecked UTF-8 reconstruction is isolated in `storage`; reader modules forbid
 // unsafe code.
 #[forbid(unsafe_code)]
-mod flat_reader;
+mod local_reader;
 #[cfg(feature = "std")]
 #[forbid(unsafe_code)]
 mod shard_reader;
@@ -174,6 +210,7 @@ pub mod se;
 
 pub use lexicon::Lexicon;
 pub use local_lexicon::LocalLexicon;
+pub use local_reader::LocalReader;
 pub use reader::Reader;
 pub use sym::Sym;
 pub use symbol_map::{SymBuildHasher, SymHasher};
@@ -181,3 +218,5 @@ pub use symbol_map::{SymBuildHasher, SymHasher};
 pub use symbol_map::{SymMap, SymSet};
 #[cfg(feature = "std")]
 pub use threaded_lexicon::ThreadedLexicon;
+#[cfg(feature = "std")]
+pub use threaded_reader::ThreadedReader;

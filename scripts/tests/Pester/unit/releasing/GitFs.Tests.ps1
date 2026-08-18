@@ -373,6 +373,82 @@ Describe 'Get-WorkspacePackages: publish-syntax variants via cargo metadata' {
     }
 }
 
+Describe 'Get-WorkspacePackages: allowed_external_types container shapes' {
+
+    # `allowed_external_types` must be an array. `[package.metadata]` is
+    # arbitrary TOML that cargo passes through unvalidated, so a malformed
+    # shape reaches the planner intact and has to be rejected here.
+    #
+    # The rejection must produce $null, not an empty array: downstream,
+    # Test-PackageExposesTarget reads $null as "no policy declared" and fails
+    # closed, while @() is a positive claim of no foreign types and fails open.
+
+    It 'reads a well-formed array allowlist' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; AllowedExternalTypes = @('std::io::Error') }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-array')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        @($pkg.AllowedExternalTypes) | Should -Be @('std::io::Error')
+    }
+
+    It 'rejects a scalar allowlist rather than wrapping it into a valid-looking one' {
+        # Wrapping would turn the malformed `allowed_external_types = "std::*"`
+        # into a well-formed single-entry allowlist that matches no target, so
+        # the crate would read as provably not exposing anything -- a fail-open
+        # that ships a breaking dependency inside a compatible version.
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '"std::*"' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-scalar')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        $pkg.AllowedExternalTypes | Should -BeNullOrEmpty -Because 'a scalar is not a declared policy'
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' |
+            Should -BeTrue -Because 'malformed metadata must fail closed'
+    }
+
+    It 'rejects a table allowlist' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '{ std = "*" }' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-table')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        $pkg.AllowedExternalTypes | Should -BeNullOrEmpty
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'preserves an empty array as the positive claim it is' {
+        # `[]` is the one shape that legitimately means "my public API names
+        # nothing foreign", so it must survive as an empty allowlist rather
+        # than collapsing to $null and being read as absent metadata.
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; RawAllowedExternalTypes = '[]' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'aet-empty')
+
+        $pkg = Get-WorkspacePackages -repoRoot $ws.Path | Where-Object { $_.Name -eq 'pkg' }
+        ($null -ne $pkg.AllowedExternalTypes) | Should -BeTrue -Because 'an empty array is a declared policy, not absent metadata'
+        @($pkg.AllowedExternalTypes).Count | Should -Be 0
+        Test-PackageExposesTarget -Dependent $pkg -TargetPackageName 'bytesbuf' |
+            Should -BeFalse -Because 'an empty allowlist claims no foreign types'
+    }
+}
+
 Describe 'Get-WorkspacePackages' {
     BeforeAll {
         Reset-ReleaseScriptCaches
@@ -398,6 +474,56 @@ Describe 'Get-WorkspacePackages' {
         # Get-WorkspacePackages flattens to normal/build only.
         $target.Deps | Should -Contain 'dependency_b'
         $target.Deps | Should -Not -Contain 'dependency_a'
+    }
+}
+
+Describe 'Get-WorkspacePackages: dependency identity vs dependency name' {
+    BeforeAll {
+        Reset-ReleaseScriptCaches
+        # `relay` exists twice: as a workspace member that depends on `target`,
+        # and as an unrelated non-member under external/. `borrower` depends on
+        # the non-member one, `member_user` on the member one. The two are
+        # indistinguishable by package name and differ only by resolved path.
+        $spec = @{
+            Packages = @(
+                @{ Name = 'target'; Version = '1.0.0' }
+                @{ Name = 'relay';  Version = '1.0.0'; Deps = @(@{ Name = 'target' }) }
+                @{ Name = 'member_user'; Version = '1.0.0'; Deps = @(@{ Name = 'relay' }) }
+                @{ Name = 'borrower'; Version = '1.0.0'; Deps = @(@{ Name = 'relay'; External = $true }) }
+            )
+            ExternalPackages = @(
+                @{ Name = 'relay'; Version = '9.9.9' }
+            )
+        }
+        $script:IdentityWs = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'dep-identity')
+        $script:IdentityPackages = Get-WorkspacePackages -repoRoot $script:IdentityWs.Path
+    }
+
+    It 'returns only the workspace members, not the non-member of the same name' {
+        @($script:IdentityPackages | Where-Object { $_.Name -eq 'relay' }).Count | Should -Be 1
+        $script:IdentityPackages.Count | Should -Be 4
+    }
+
+    It 'does not record a non-member path dependency as a workspace edge' {
+        $borrower = $script:IdentityPackages | Where-Object { $_.Name -eq 'borrower' }
+        # Text-name matching would put 'relay' here and fabricate a path from
+        # borrower to target through a package borrower never depends on.
+        $borrower.Deps | Should -Not -Contain 'relay'
+        @($borrower.Deps).Count | Should -Be 0
+    }
+
+    It 'still records the edge when the dependency really is the workspace member' {
+        $memberUser = $script:IdentityPackages | Where-Object { $_.Name -eq 'member_user' }
+        $memberUser.Deps | Should -Contain 'relay'
+    }
+
+    It 'does not place the non-member dependent in the target''s dependent closure' {
+        $dependents = Get-AllTransitiveDependents -packageName 'target' -repoRoot $script:IdentityWs.Path
+        # relay genuinely depends on target; member_user reaches it through relay.
+        $dependents | Should -Contain 'relay'
+        $dependents | Should -Contain 'member_user'
+        # borrower does not, and must not be dragged into a release for it.
+        $dependents | Should -Not -Contain 'borrower'
     }
 }
 

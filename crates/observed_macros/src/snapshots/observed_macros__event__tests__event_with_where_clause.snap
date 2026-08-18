@@ -1,0 +1,44 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl<T: 'static> ::observed::Event for BoundedEvent<T>
+    where
+        T: Clone,
+        T: ::core::clone::Clone,
+        ::observed::Value: ::core::convert::From<T>,
+        T: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "bounded.event",
+            ::core::option::Option::Some(::core::any::TypeId::of::<BoundedEvent<T>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "bounded.event",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "value",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("value"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.value.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

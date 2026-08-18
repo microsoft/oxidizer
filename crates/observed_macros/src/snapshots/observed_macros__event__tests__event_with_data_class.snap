@@ -1,0 +1,57 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for UserLogin {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "user.login",
+            ::core::option::Option::Some(::core::any::TypeId::of::<UserLogin>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "user.login",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "username",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("username"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            &self.username,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

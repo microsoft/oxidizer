@@ -595,6 +595,14 @@ fn freeze_races_writer_and_stays_prefix_consistent() {
     use std::collections::BTreeSet;
     use std::sync::mpsc;
 
+    // The properties under test are structural -- a freeze snapshot must be a
+    // prefix, never a cross-shard tear -- so they hold at any size, provided the
+    // count still spans several shards. The polling loop below re-freezes and
+    // walks the whole lexicon on every iteration, so the cost grows faster than
+    // linearly under Miri; 256 keeps multi-shard coverage at a fraction of it.
+    #[cfg(miri)]
+    const COUNT: usize = 256;
+    #[cfg(not(miri))]
     const COUNT: usize = 4096;
     const MID: usize = COUNT / 2;
 
@@ -840,4 +848,167 @@ fn threaded_intern_bytes_walks_collision_chain_by_byte_comparison() {
     assert_eq!(reader.resolve(beta), "beta");
     assert_eq!(reader.resolve(gamma), "gamma");
     assert_eq!(reader.resolve(delta), "δ");
+}
+
+#[test]
+fn dense_index_round_trips_through_lexicon_and_reader() {
+    let mut lexicon = LocalLexicon::new();
+    let syms: Vec<Sym> = (0..64).map(|i| lexicon.intern(format!("name{i}"))).collect();
+
+    for (expected, &sym) in syms.iter().enumerate() {
+        assert_eq!(lexicon.index_of(sym), Some(expected));
+        assert_eq!(lexicon.sym_at(expected), Some(sym));
+    }
+
+    // Freezing preserves the numbering.
+    let reader = lexicon.freeze();
+    for (expected, &sym) in syms.iter().enumerate() {
+        assert_eq!(reader.index_of(sym), Some(expected));
+        assert_eq!(reader.sym_at(expected), Some(sym));
+        assert_eq!(reader.resolve(sym), format!("name{expected}"));
+    }
+}
+
+#[test]
+fn dense_index_is_zero_based_while_raw_handle_is_one_based() {
+    // The raw handle is deliberately non-zero, so it is offset by one from the
+    // position. Callers must use `index_of`, never `as_u32`, to index a side
+    // table; this pins the distinction the docs promise.
+    let mut lexicon = LocalLexicon::new();
+    let a = lexicon.intern("a");
+    let b = lexicon.intern("b");
+
+    assert_eq!(lexicon.index_of(a), Some(0));
+    assert_eq!(lexicon.index_of(b), Some(1));
+    assert_eq!(a.as_u32(), 1);
+    assert_eq!(b.as_u32(), 2);
+
+    // The last handle's raw value is out of bounds for a `len`-sized side table.
+    assert_eq!(usize::try_from(b.as_u32()).unwrap(), lexicon.len());
+}
+
+#[test]
+fn dense_index_is_none_out_of_range() {
+    let mut lexicon = LocalLexicon::new();
+    let only = lexicon.intern("only");
+
+    assert_eq!(lexicon.index_of(only), Some(0));
+    assert_eq!(lexicon.sym_at(1), None);
+    assert_eq!(lexicon.sym_at(usize::MAX), None);
+
+    // The first handle past the end: its dense position is exactly `len`, the
+    // boundary where an off-by-one would hand back a bogus in-range index.
+    let first_past_end = Sym::from_u32(2).unwrap();
+    assert_eq!(lexicon.index_of(first_past_end), None);
+
+    // A handle past the end is rejected rather than yielding a bogus index.
+    let past_end = Sym::from_u32(u32::MAX).unwrap();
+    assert_eq!(lexicon.index_of(past_end), None);
+
+    let reader = lexicon.freeze();
+    assert_eq!(reader.index_of(first_past_end), None);
+    assert_eq!(reader.index_of(past_end), None);
+    assert_eq!(reader.sym_at(1), None);
+    assert_eq!(reader.sym_at(usize::MAX), None);
+}
+
+#[test]
+fn dense_index_supports_a_side_table() {
+    let mut lexicon = LocalLexicon::new();
+    for name in ["alpha", "beta", "gamma"] {
+        let _ = lexicon.intern(name);
+    }
+
+    // One slot per symbol, indexed directly — no hashing.
+    let mut lengths = vec![0usize; lexicon.len()];
+    for (sym, s) in lexicon.iter() {
+        let i = lexicon.index_of(sym).unwrap();
+        lengths[i] = s.len();
+    }
+    assert_eq!(lengths, vec![5, 4, 5]);
+}
+
+#[test]
+fn frozen_readers_can_be_stored_by_value() {
+    // The point of exporting the concrete types: a struct can name the field.
+    struct LocalStore {
+        names: internity::LocalReader,
+    }
+    struct ThreadedStore {
+        names: internity::ThreadedReader,
+    }
+
+    let mut lexicon = LocalLexicon::new();
+    let a = lexicon.intern("a");
+    let local = LocalStore { names: lexicon.freeze() };
+    assert_eq!(local.names.resolve(a), "a");
+
+    let lexicon = ThreadedLexicon::new();
+    let b = lexicon.intern("b");
+    let threaded = ThreadedStore { names: lexicon.freeze() };
+    assert_eq!(threaded.names.resolve(b), "b");
+}
+
+#[test]
+fn frozen_readers_are_cloneable() {
+    // Readers are immutable, so a clone is an independent owner of the same
+    // corpus. Handles stay valid against either copy.
+    let mut lexicon = LocalLexicon::new();
+    let a = lexicon.intern("a");
+    let b = lexicon.intern("b");
+    let local = lexicon.freeze();
+    let local_clone = local.clone();
+
+    drop(local);
+    assert_eq!(local_clone.resolve(a), "a");
+    assert_eq!(local_clone.index_of(b), Some(1));
+    assert_eq!(local_clone.len(), 2);
+
+    let lexicon = ThreadedLexicon::new();
+    let c = lexicon.intern("c");
+    let threaded = lexicon.freeze();
+    let threaded_clone = threaded.clone();
+
+    drop(threaded);
+    assert_eq!(threaded_clone.resolve(c), "c");
+    assert_eq!(threaded_clone.len(), 1);
+}
+
+#[test]
+fn frozen_reader_supports_an_external_string_lookup() {
+    // The pattern documented on `LocalLexicon::freeze`, exercised end to end.
+    let mut lexicon = LocalLexicon::new();
+    let names: Vec<String> = (0..256).map(|i| format!("name{i}")).collect();
+    let syms: Vec<Sym> = names.iter().map(|n| lexicon.intern(n)).collect();
+
+    let reader = lexicon.freeze();
+    let mut by_string: Vec<Sym> = reader.iter().map(|(sym, _)| sym).collect();
+    by_string.sort_unstable_by(|&a, &b| reader.resolve(a).cmp(reader.resolve(b)));
+
+    let get = |needle: &str| {
+        by_string
+            .binary_search_by(|&sym| reader.resolve(sym).cmp(needle))
+            .ok()
+            .map(|i| by_string[i])
+    };
+
+    for (name, &want) in names.iter().zip(&syms) {
+        assert_eq!(get(name), Some(want));
+    }
+    assert_eq!(get("absent"), None);
+}
+
+#[test]
+fn reader_debug_reports_length() {
+    let mut lexicon = LocalLexicon::new();
+    let _ = lexicon.intern("a");
+    let reader = lexicon.freeze();
+    let text = format!("{reader:?}");
+    assert!(text.contains("LocalReader"), "{text}");
+    assert!(text.contains("len"), "{text}");
+
+    let lexicon = ThreadedLexicon::new();
+    let _ = lexicon.intern("a");
+    let text = format!("{:?}", lexicon.freeze());
+    assert!(text.contains("ThreadedReader"), "{text}");
 }

@@ -125,7 +125,11 @@ jobs:
         run: cargo hack build --each-feature --workspace ${{ needs.delta.outputs.exclude_not_affected }} --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
+        # --no-tests=pass: the crate selection here is narrowed by `delta` to the
+        # affected crates, so a PR that only touches crates without test targets
+        # (docs, examples) legitimately selects zero tests. Without this, nextest
+        # treats that as an error and exits 4.
+        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features --no-tests=pass
       - name: Docs
         if: success() || failure()
         env:
@@ -171,8 +175,17 @@ jobs:
         if: success() || failure()
         run: rustup toolchain install ${{ env.RUST_NIGHTLY }} --profile minimal --component rustfmt
       - name: Source Format (nightly)
-        if: success() || failure()
+        if: (success() || failure()) && runner.os != 'Windows'
         run: cargo +${{ env.RUST_NIGHTLY }} fmt --all -- --config-path ./unstable-rustfmt.toml --check
+      - name: Source Format (nightly, Windows)
+        if: (success() || failure()) && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packages = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages.name
+          foreach ($package in $packages) {
+            cargo "+${{ env.RUST_NIGHTLY }}" fmt --package $package -- --config-path ./unstable-rustfmt.toml --check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
@@ -345,10 +358,32 @@ jobs:
           cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
+        # --no-tests=pass: see the `testing` job's Tests step.
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }} --no-tests=pass
       - name: Miri (stacked borrows)
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
+        # Excluded crates generate code rather than run it, so Miri has no
+        # aliasing or provenance violations to find in them:
+        #
+        #   * the `*_macros_impl` crates are proc-macro implementations whose
+        #     tests are snapshot comparisons of generated token streams;
+        #   * `routerama_build` is a build-time generator. Its only runtime
+        #     component, the `trie` module, is used by `routerama` (which depends
+        #     on it with `default-features = false`) and is therefore still
+        #     interpreted by Miri through `routerama`'s own tests.
+        #
+        # Any `unsafe` these crates *emit* -- for example `data_privacy_macros_impl`
+        # emitting `str::from_utf8_unchecked` -- is executed, and so checked, in
+        # the consuming crate's tests, which remain in this run.
+        #
+        # Interpreting them anyway cost ~75 min of the ~3h16m step
+        # (`multitude_macros_impl` alone ran 30 tests in 45 min).
+        #
+        # Note `rest_over_grpc` is deliberately NOT excluded: its build half is
+        # already `#[cfg_attr(miri, ignore)]`, and the tests that do run cover the
+        # runtime transcoding path over `bytes`/`hyper`, which is exactly the kind
+        # of buffer handling Miri needs to check.
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --exclude data_privacy_macros_impl --exclude fundle_macros_impl --exclude internity_macros_impl --exclude multitude_macros_impl --exclude routerama_build --exclude templated_uri_macros_impl --exclude thread_aware_macros_impl --lib --tests
 
   model-checking:
     if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
@@ -391,7 +426,10 @@ jobs:
         run: just bolero 60s
 
   mutation-testing:
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    # Pull requests are covered by the diff-scoped, cross-platform anvil-pr
+    # mutation matrix. Keep this legacy job for merge-group validation without
+    # duplicating hours of mutation work on unusually large pull requests.
+    if: github.event_name == 'merge_group'
     needs: [testing]
     runs-on: ubuntu-latest
     steps:

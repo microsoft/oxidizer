@@ -1,46 +1,36 @@
 # TODO
 
-## General
+The forward-looking backlog of open work for the `multitude` crate. It records
+only what is still worth doing: completed items are deleted rather than marked
+done, so the length of this file is a real measure of outstanding work. The
+shipped architecture is documented in [`DESIGN.md`](./DESIGN.md).
 
-- No owning IntoIterator for Box<[T]> (std has it). Minor, but an easy ergonomic win.
+## Contents
 
-- Consider storing the length of arrays in the chunk using a variable integer encoding instead
-  of always storing a usize. This would save RAM and CPU cache space, at the cost of a bit of computation
-  whenever getting the length.
+### Features
+- [F1](#f1) — Provide an owning `IntoIterator` for `Box<[T]>`
+- [F2](#f2) — Add guaranteed in-place initialization (`alloc_*_emplace`)
+- [F3](#f3) — Add `ArenaSnapshot<T>` for single-owner immutable graphs
 
-## Optional freeze-prefix reservation for `Vec`/`String`/`Utf16String`
+## Features
 
-Every growable buffer currently reserves the `Arc<[T]>` freeze prefix
-(`[strong][len]`) unconditionally, so `into_arc` / `into_boxed_slice` are
-zero-copy (see `vec/freeze.rs`, `internal::constants::buffer_freezable`,
-`ArenaBuf::freeze_prefix`). That costs a few prefix bytes (and the
-`arc_block_align` rounding) on every buffer — even ones that are never
-frozen.
+<a id="f1"></a>
+### F1 — Provide an owning `IntoIterator` for `Box<[T]>`
 
-Let the caller choose, at construction time, whether to reserve the prefix,
-based on how they intend to use the collection: buffers that won't be frozen
-skip the prefix and pack tighter, while freeze-bound buffers keep O(1)
-`into_arc` / `into_boxed_slice`.
+**Area:** `boxed` · **Priority:** Low · **Effort:** Small
 
-Two shapes (same underlying "buffer may or may not carry the prefix" work,
-which already exists via the `freeze_prefix` flag and the const
-`buffer_freezable` gate):
+No owning IntoIterator for Box<[T]> (std has it). Minor, but an easy ergonomic win.
 
-- **Runtime flag on the builders** (`alloc_vec*` / `alloc_string*` /
-  `alloc_utf16_string*`): record the choice in `ArenaBuf` next to the
-  existing `freeze_prefix` flag and branch in `Vec::try_grow_to`. Smallest
-  API; one branch in the cold growth path; freeze falls back to the O(n)
-  copy when the prefix is absent (the `can_freeze_in_place` check already
-  handles this).
-- **Zero-cost marker type parameter on `Vec`**: a sealed marker selecting
-  prefix-vs-no-prefix, with `into_arc` / `into_boxed_slice` O(1) only on the
-  freeze-ready variant. No runtime branch and a compile-time freeze
-  guarantee; cost is generic noise in signatures, mitigated by defaulting to
-  today's behavior plus type aliases.
+**Done when:** `multitude::Box<[T], A>` implements `IntoIterator` with an
+owning iterator that yields `T` by value, runs the destructor of any element
+not consumed, and releases the chunk reference when the iterator drops.
 
-`String` / `Utf16String` wrap `Vec`, so the choice propagates for free.
+---
 
-## Guaranteed in-place initialization
+<a id="f2"></a>
+### F2 — Add guaranteed in-place initialization (`alloc_*_emplace`)
+
+**Area:** `arena` · **Priority:** Medium · **Effort:** Large
 
 `alloc(value)` and the `alloc_*_with(|| value)` family produce a `T` by value
 and then write it into the reserved arena slot. LLVM commonly elides the
@@ -80,7 +70,18 @@ large aggregates, pinned/self-referential values, and code that requires a
 language-level no-move guarantee. Benchmark those cases, including peak stack
 usage, before choosing the final API.
 
-## `ArenaSnapshot<T>`
+**Done when:** the emplace family exists for all four ownership flavors with a
+signature that cannot fabricate an uninitialized `T` from safe code, each of
+the listed open behaviors is documented, an unwinding initializer leaks no
+chunk reference, and a benchmark shows the reduced peak stack usage for a
+large aggregate.
+
+---
+
+<a id="f3"></a>
+### F3 — Add `ArenaSnapshot<T>` for single-owner immutable graphs
+
+**Area:** `arena` · **Priority:** Low · **Effort:** Large
 
 Today, a graph that must outlive its source `Arena` generally uses
 escape-capable owners throughout the graph:
@@ -176,3 +177,11 @@ data after freezing. Because this design establishes a new unsafe ownership
 abstraction, proceed only if benchmarks show meaningful savings over the
 existing graph of escape-capable smart pointers, and require a dedicated
 soundness review before implementation.
+
+**Done when:** a benchmark first establishes the saving over an equivalent
+graph of escape-capable smart pointers; then, if pursued, one implementation
+shape ships with every listed design question answered in the rustdoc, a root
+reference that cannot escape its snapshot, correct teardown on both successful
+and failed construction, and a recorded soundness review.
+
+**See also:** F2 (in-place initialization of graph nodes during construction)

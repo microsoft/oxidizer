@@ -263,6 +263,13 @@ impl<In, Out> HedgingShared<In, Out> {
         }
     }
 
+    #[cfg_attr(
+        not(any(feature = "metrics", feature = "logs", test)),
+        expect(
+            clippy::unused_self,
+            reason = "the guard only carries telemetry state, which compiles away when neither `metrics` nor `logs` is enabled"
+        )
+    )]
     fn create_guard(&self, attempt: Attempt, hedging_delay: Duration) -> TelemetryGuard {
         TelemetryGuard::new(
             attempt,

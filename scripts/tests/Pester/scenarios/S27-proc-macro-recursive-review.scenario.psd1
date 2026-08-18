@@ -8,7 +8,12 @@
     Workspace = @{
         Spec = @{
             Packages = @(
-                @{ Name = 'app'; Version = '1.0.0'; Deps = @(@{ Name = 'facade' }) }
+                @{
+                    Name = 'app'
+                    Version = '1.0.0'
+                    Deps = @(@{ Name = 'facade' })
+                    AllowedExternalTypes = @()
+                }
                 @{ Name = 'facade'; Version = '1.0.0'; Deps = @(@{ Name = 'macros' }) }
                 @{ Name = 'macros'; Version = '1.0.0'; ProcMacro = $true }
             )

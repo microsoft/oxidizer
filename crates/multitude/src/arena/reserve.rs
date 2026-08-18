@@ -23,8 +23,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin (OOM)
     pub(in crate::arena) fn try_reserve_local<T>(&self) -> Option<Uninit<'_, T>> {
-        let ticket = self.current().try_alloc_uninit::<T>()?;
-        self.mark_reference_handout();
+        let ticket = self.current().try_alloc_uninit_local::<T>(&self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk until an exclusive arena
         // operation, which cannot overlap this borrow.
         Some(unsafe { ticket.rebind() })
@@ -35,8 +34,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_local_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
-        let ticket = self.current().try_alloc_uninit_slice::<T>(len)?;
-        self.mark_reference_handout();
+        let ticket = self.current().try_alloc_uninit_slice_local::<T>(len, &self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
@@ -54,8 +52,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_slice_with_size<T>(&self, len: usize, size: usize) -> Option<Uninit<'_, [T]>> {
         // SAFETY: required by this function's contract.
-        let ticket = unsafe { self.current().try_alloc_uninit_slice_with_size::<T>(len, size) }?;
-        self.mark_reference_handout();
+        let ticket = unsafe {
+            self.current()
+                .try_alloc_uninit_slice_with_size_local::<T>(len, size, &self.current_has_reference)
+        }?;
         // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
@@ -67,13 +67,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// paths).
     ///
     /// As with the other reference reservations no chunk refcount is taken
-    /// here: the chunk is pinned via `mark_reference_handout` and the
+    /// here: the chunk is pinned via the local-reference marker and the
     /// refcount is acquired only at freeze time.
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
-        let ticket = self.current().try_alloc_freezable_slice::<T>(len)?;
-        self.mark_reference_handout();
+        let ticket = self
+            .current()
+            .try_alloc_freezable_slice_local::<T>(len, &self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
@@ -83,8 +84,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_bytes(&self, len: usize) -> Option<Uninit<'_, [u8]>> {
-        let ticket = self.current().try_alloc_bytes(len)?;
-        self.mark_reference_handout();
+        let ticket = self.current().try_alloc_bytes_local(len, &self.current_has_reference)?;
         // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
