@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dynosaur",
  "ohno 0.4.0",
