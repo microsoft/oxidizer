@@ -592,7 +592,11 @@ impl<T, S: Strategy> Arc<T, S> {
     pub fn strong_count(this: &Self) -> usize {
         let raw = sync::Arc::strong_count(&this.value);
         let internal = this.storage.count_where(|stored| sync::Arc::ptr_eq(stored, &this.value));
-        raw - internal
+
+        // `raw` and `internal` are sampled separately rather than from one consistent snapshot: a
+        // concurrent relocation can publish this value into another slot between the two reads, so
+        // `internal` may briefly exceed the now-stale `raw`. Saturate instead of underflowing.
+        raw.saturating_sub(internal)
     }
 
     /// Converts the `Arc<T, S>` into an `sync::Arc<T>`.
