@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(
             processor.events(),
             [
-                ExpectedEvent::new("fetch.winhttp.request", Severity::Info).metric(),
+                ExpectedEvent::without_severity("fetch.winhttp.request").metric(),
                 ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
                     .body("WinHTTP transport request failed")
                     .dimension("winhttp.connect.duration", 0.25_f64)

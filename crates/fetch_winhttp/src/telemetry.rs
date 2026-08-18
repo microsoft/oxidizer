@@ -142,6 +142,8 @@ mod tests {
         );
         assert_eq!(
             RequestAttempt::DESCRIPTION,
+            // The severity argument is inert for a metric-only event: without `.log()` the
+            // comparison asserts only that the description carries no log signal.
             ExpectedEventDescription::new("fetch.winhttp.request", Severity::Info)
                 .event_metric("fetch.winhttp.request.count", InstrumentKind::Counter),
         );
@@ -185,7 +187,7 @@ mod tests {
                 .dimension("winhttp.operation", "assured_non_blocking_callbacks")
                 .log(),
         );
-        assert_eq!(events[1], ExpectedEvent::new("fetch.winhttp.request", Severity::Info).metric(),);
+        assert_eq!(events[1], ExpectedEvent::without_severity("fetch.winhttp.request").metric());
         assert_eq!(
             events[2],
             ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
