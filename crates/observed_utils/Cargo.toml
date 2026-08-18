@@ -38,7 +38,7 @@ observed = { workspace = true }
 
 # 3rd-party
 arrayvec = { workspace = true }
-const-hex = { workspace = true, features = ["alloc"] }
+const-hex = { workspace = true }
 opentelemetry = { workspace = true, features = ["logs"] }
 
 [dev-dependencies]
