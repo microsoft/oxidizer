@@ -33,7 +33,6 @@
 
 #![expect(clippy::missing_panics_doc, reason = "Test code doesn't need exhaustive panic docs")]
 
-mod metric_number;
 mod mock_processor;
 
 pub mod events;
@@ -42,7 +41,6 @@ pub mod types;
 
 use std::sync::Arc;
 
-pub use metric_number::metric_number_of;
 pub use mock_processor::{
     CapturedEvent, CapturedFieldMetric, ExpectedEnrichmentEntry, ExpectedEvent, ExpectedEventDescription, MockProcessor,
 };
