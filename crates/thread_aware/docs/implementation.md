@@ -13,19 +13,28 @@ affinities therefore touch different locks on different lines and never contend;
 a relocation only ever synchronizes with other relocations into the *same*
 affinity.
 
-The table is sized once, on first use, to the slot count the strategy reports —
-a value fixed for the process lifetime — so there is no growth path and no
-table-wide lock guarding the array. After that first initialization, reaching a
-slot is a plain atomic load of a pointer that stays resident and shared in every
-core's cache, generating no coherence traffic. Slots are filled lazily: a slot
-is populated the first time a clone is relocated into the affinity that owns it,
-and stays populated for the lifetime of the shared table.
+The table is sized once, on first use, to the slot count the strategy reports.
+Because the whole table is fixed from then on, the strategy must report the same
+count for every affinity that shares it — the built-in strategies do, since the
+processor and memory-region counts are properties of the machine. There is no
+growth path and no table-wide lock guarding the array. After that first
+initialization, reaching a slot is a plain atomic load of a pointer that stays
+resident and shared in every core's cache, generating no coherence traffic. Slots
+are filled lazily: a slot is populated the first time a clone is relocated into
+the affinity that owns it, and stays populated for the lifetime of the shared
+table.
 
 A slot stores an `Arc<T>` rather than a `T`. An `Arc<T>` is a sized value even
 when `T` is not, which is what lets `Arc<T, S>` keep `T: ?Sized` (so `Arc<dyn
 Trait, S>` works). The public handle is `storage::Storage`; the raw table behind
 it is `SlotTable`, kept separate so it can be unit-tested with a plain value type
 while the handle pins the stored type to `Arc<T>`.
+
+`Storage` is constructible and populatable from outside the crate: a caller can
+build one with `Storage::new`, seed affinities with `Storage::insert`, and then
+pass it to `Arc::from_storage` to obtain an `Arc` backed by those prepared
+values. The internal slot layout stays hidden — only the affinity-keyed
+insert/get surface is exposed.
 
 ## Relocation locking
 

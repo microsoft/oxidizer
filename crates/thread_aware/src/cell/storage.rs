@@ -19,9 +19,17 @@ use crate::affinity::Affinity;
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
+    ///
+    /// The index must be less than [`count`](Self::count) for every affinity that
+    /// shares a storage.
     fn index(affinity: Affinity) -> usize;
 
-    /// Returns the total number of slots for the given affinity.
+    /// Returns the number of slots the storage holds.
+    ///
+    /// This must be the same for every affinity that shares a storage: it sizes a
+    /// single shared table, not a per-affinity allocation. The built-in strategies
+    /// satisfy this because the processor and memory-region counts are properties
+    /// of the machine, identical across the affinities of one registry.
     fn count(affinity: Affinity) -> usize;
 }
 
@@ -83,13 +91,25 @@ impl<T, S: Strategy> SlotTable<T, S> {
 
     /// Returns the lock guarding the slot for `affinity`.
     fn slot(&self, affinity: Affinity) -> &RwLock<Option<T>> {
-        &self.slots(affinity)[S::index(affinity)]
+        let slots = self.slots(affinity);
+        let index = S::index(affinity);
+
+        // The table is sized once, to the slot count reported by whichever affinity first touches
+        // it. A `Strategy` whose `count` is consistent across affinities (the documented contract,
+        // upheld by every built-in) keeps every index in range; this catches a custom strategy that
+        // violates it before it can index out of bounds in release.
+        debug_assert!(
+            index < slots.len(),
+            "Strategy::index returned {index} for a table of {} slots; Strategy::count must be consistent across affinities",
+            slots.len()
+        );
+
+        &slots[index]
     }
 
     /// Replaces the data for the given affinity with the provided value.
     ///
     /// Returns the previous value if it existed, otherwise returns `None`.
-    #[cfg(test)]
     pub(crate) fn replace(&self, affinity: Affinity, value: T) -> Option<T> {
         self.slot(affinity).write().expect(NEVER_POISONED).replace(value)
     }
@@ -154,8 +174,12 @@ where
 /// Per-affinity storage shared by every clone of an `Arc`.
 ///
 /// A relocation into an affinity publishes the value here; later relocations into
-/// the same affinity read it back. Handing this to `Arc::from_storage` rebuilds
-/// an `Arc` that shares it.
+/// the same affinity read it back. This can also be built directly and populated
+/// with [`insert`](Self::insert), then handed to [`Arc::from_storage`] to produce
+/// an `Arc` backed by it — the way to hand an `Arc` a set of per-affinity values
+/// prepared in advance.
+///
+/// [`Arc::from_storage`]: crate::Arc::from_storage
 #[derive(Debug)]
 pub struct Storage<T: ?Sized, S: Strategy> {
     inner: SlotTable<sync::Arc<T>, S>,
@@ -163,12 +187,19 @@ pub struct Storage<T: ?Sized, S: Strategy> {
 
 impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// Creates an empty storage, with no affinity populated.
-    pub(crate) const fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { inner: SlotTable::new() }
     }
 
-    /// Clones out the value published for `affinity`, if any.
-    pub(crate) fn get_clone(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
+    /// Sets the value for `affinity`, returning the previous one if there was one.
+    pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
+        self.inner.replace(affinity, value)
+    }
+
+    /// Returns a clone of the value published for `affinity`, if any.
+    #[must_use]
+    pub fn get(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
         self.inner.get_clone(affinity)
     }
 
@@ -187,11 +218,11 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
         self.inner.read(affinity)
     }
+}
 
-    /// Publishes `value` for `affinity`, returning any previous value.
-    #[cfg(test)]
-    pub(crate) fn replace(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
-        self.inner.replace(affinity, value)
+impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

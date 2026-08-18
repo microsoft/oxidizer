@@ -527,13 +527,38 @@ where
 
     /// Creates a new `Arc` from the given storage and the current affinity.
     ///
+    /// This is the counterpart to building a [`Storage`] directly: populate it with
+    /// [`Storage::insert`] for the affinities that should carry a value, then hand it here to
+    /// obtain an `Arc` backed by those values.
+    ///
     /// If the resulting `Arc` is transferred to an affinity which does not have data in the storage,
     /// it will behave like a [`sync::Arc`].
     ///
     /// # Panics
     /// Panics if the storage does not contain data for the current affinity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc as StdArc;
+    ///
+    /// use thread_aware::affinity::pinned_affinities;
+    /// use thread_aware::storage::Storage;
+    /// use thread_aware::{Arc, PerCore};
+    ///
+    /// let affinity = pinned_affinities(&[2])[0];
+    ///
+    /// let storage = Storage::new();
+    /// storage.insert(affinity, StdArc::new(42));
+    ///
+    /// let arc = Arc::<_, PerCore>::from_storage(StdArc::new(storage), affinity);
+    /// assert_eq!(*arc, 42);
+    /// ```
+    ///
+    /// [`Storage`]: crate::storage::Storage
+    /// [`Storage::insert`]: crate::storage::Storage::insert
     pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_affinity: Affinity) -> Self {
-        let value = storage.get_clone(current_affinity).expect("No data found for the current affinity");
+        let value = storage.get(current_affinity).expect("No data found for the current affinity");
 
         Self {
             storage,
@@ -635,7 +660,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // affinity owns its own lock, relocations targeting different affinities never contend, and
         // even a miss blocks only the affinity it materializes.
         // Ref: docs/implementation.md, "Relocation locking".
-        if let Some(value) = self.storage.get_clone(destination) {
+        if let Some(value) = self.storage.get(destination) {
             self.value = value;
             return;
         }

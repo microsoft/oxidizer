@@ -246,7 +246,7 @@ fn test_from_storage() {
     // Create a storage and populate it with a value for affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value));
 
     let storage_arc = Arc::new(storage);
 
@@ -332,7 +332,7 @@ fn test_factory_clone_with_manual() {
     // Create a storage and populate it with a value for affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(200);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value));
 
     let storage_arc = Arc::new(storage);
 
@@ -364,7 +364,7 @@ fn test_factory_manual_relocated() {
     // Create a storage with a value at affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value));
 
     let storage_arc = Arc::new(storage);
 
@@ -692,7 +692,7 @@ fn factory_manual_debug() {
 
     let affinities = pinned_affinities(&[1]);
     let storage = sync::Arc::new(super::storage::Storage::new());
-    storage.replace(affinities[0], sync::Arc::new(42));
+    storage.insert(affinities[0], sync::Arc::new(42));
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");
     assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
@@ -816,7 +816,7 @@ fn factory_panic_does_not_poison_slot_lock() {
     // If the panic had poisoned the slot lock, this acquisition would itself panic. It does not:
     // the lock was released before the unwind resumed, and the slot is empty because
     // materialization panicked before publishing anything.
-    assert!(arc.storage.get_clone(destination).is_none(), "the slot lock must not be poisoned");
+    assert!(arc.storage.get(destination).is_none(), "the slot lock must not be poisoned");
 }
 
 #[test]
