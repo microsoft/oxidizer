@@ -818,3 +818,35 @@ fn factory_panic_does_not_poison_slot_lock() {
     // materialization panicked before publishing anything.
     assert!(arc.storage.get_clone(destination).is_none(), "the slot lock must not be poisoned");
 }
+
+#[test]
+fn relocation_preserves_the_source_affinity_value() {
+    // A miss records the value the Arc moved away from into the source affinity's slot, so a later
+    // relocation back into that affinity finds the original value instead of re-materializing a
+    // fresh one. This guards the `source != destination` branch that performs that write.
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let mut arc = PerCore::new(Counter::new);
+
+    // The value the Arc currently holds belongs to the source affinity.
+    let source_value = sync::Arc::clone(&arc.value);
+
+    // Relocate away from the source affinity: this materializes the destination and must record
+    // `source_value` in the source slot.
+    arc.relocate(Some(source), destination);
+    assert!(
+        !sync::Arc::ptr_eq(&arc.value, &source_value),
+        "relocating away must adopt the destination value"
+    );
+
+    // Relocate a clone back into the source affinity. It must find the recorded original value, not
+    // a freshly materialized one.
+    let mut back = arc.clone();
+    back.relocate(Some(destination), source);
+    assert!(
+        sync::Arc::ptr_eq(&back.value, &source_value),
+        "relocating back into the source affinity must find the preserved original value"
+    );
+}
