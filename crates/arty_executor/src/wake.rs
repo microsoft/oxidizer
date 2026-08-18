@@ -119,9 +119,10 @@ impl WakeSignal {
         // Most of the time, the flag will be false so we at first probe it with Relaxed ordering.
         // If it is false, we can return early. If it is true, we need to ensure that we see all
         // memory operations that happened before the flag was set (i.e. the state changes that
-        // led to the task being awakened), so we add an Acquire fence.
+        // led to the task being awakened). An Acquire fence sequenced after the relaxed RMW that
+        // observes the Release store establishes the required synchronization.
         if self.awakened.swap(false, atomic::Ordering::Relaxed) {
-            // This does nothing on x84 but on weaker memory models, the visibility of
+            // This does nothing on x86 but on weaker memory models, the visibility of
             // writes to arbitrary locations may be delayed without this fence.
             atomic::fence(atomic::Ordering::Acquire);
             true
