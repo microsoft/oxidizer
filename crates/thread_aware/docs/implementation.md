@@ -49,38 +49,30 @@ locks only the destination affinity's slot, and acquires it in two stages.
       [ release slot[destination] ]
              |
       [ exclusive lock: slot[source] ]
-       restore old value if slot[source] is empty
+       record source value in slot[source] if empty
 ```
 
-The first stage is the one that matters for throughput. Slots are populated
-lazily but never emptied, so once a process has warmed up, essentially every
-relocation into a given affinity finds the slot already populated and does
-nothing but clone a reference out of it. Because each affinity owns its own lock,
-these hot-path reads scale with the number of affinities instead of funnelling
-through one lock: a fanout that hands work to every core relocates into a
-different slot per core and the cores do not contend.
+The first stage carries the throughput. A slot is never emptied once populated,
+so a relocation into an already-populated affinity only clones a reference out of
+its slot. Because each affinity owns its own lock, these reads scale with the
+number of affinities: a fanout that hands work to every core relocates into a
+different slot per core, and the cores do not contend.
 
-The second stage exists for the cold case, where the destination slot has to be
-materialized. Materialization runs the value's factory and publishes the result,
-which requires exclusive access to that slot — and only that slot, so a cold miss
-on one affinity does not block hits on any other.
+The second stage handles a miss: the destination slot is empty, so its value is
+materialized by running the factory and published under the exclusive lock — on
+that slot only, so a miss on one affinity never blocks hits on another. The
+re-probe before materializing is required for correctness, not an optimization:
+the lock is dropped between the stages, so another thread may have populated the
+slot in between, and without re-checking the two would materialize competing
+values for the same affinity.
 
-The re-probe at the start of the second stage is load-bearing rather than an
-optimization. The lock is released between the stages, so several threads can
-observe the same empty slot and queue up on the exclusive lock together. Only
-the first of them may materialize; the rest must observe the published value and
-adopt it, otherwise they would each materialize a competing value and overwrite
-the one already published, handing different threads different values for the
-same affinity.
-
-The source slot is restored in a separate step, under its own lock, only after
-the destination lock has been released. Holding both a destination and a source
-lock at once would let two threads relocating in opposite directions —
-`X → Y` and `Y → X` — deadlock, each holding the lock the other needs. Restoring
-the source afterwards, and only when its slot is still empty, avoids that: no two
-slot locks are ever held simultaneously, and a source affinity that another
-thread has already materialized keeps its value rather than being overwritten
-with an equivalent one.
+A relocation also preserves the value it moves away from. The `Arc` is carrying
+the source affinity's value, so on a miss that value is written into the source
+slot when the slot is still empty — the case of an `Arc` leaving an affinity that
+nothing had recorded yet. This write happens after the destination lock is
+released, never with both locks held: two threads relocating in opposite
+directions (`X → Y` and `Y → X`) would otherwise deadlock, each waiting for the
+lock the other holds.
 
 ## Benchmarks
 
@@ -96,9 +88,10 @@ is on the hot path.
 | `concurrent` | Cost of one relocation while every core relocates at once.           |
 
 The suite measures two subjects: a bare `Arc<Payload, PerCore>`, which isolates
-one relocation, and a five-layer object tree, which is what actually crosses
-affinities in a consumer. Relocation is a graph walk, so a caller pays for every
-thread-aware node reachable from the message rather than for a single call.
+one relocation, and a five-layer object tree, a larger object graph. Relocation
+is a graph walk, so a caller pays for every thread-aware node reachable from the
+message, not just for a single call; the two subjects cover both ends of that
+range.
 
 The two subjects exercise the locking policy at very different rates. Each
 thread-aware node owns a separate slot table with its own lock, and the derived
