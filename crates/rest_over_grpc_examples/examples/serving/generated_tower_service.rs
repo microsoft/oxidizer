@@ -13,7 +13,7 @@
 //! Run with:
 //!
 //! ```text
-//! cargo run -p rest_over_grpc_examples --example tower_service
+//! cargo run -p rest_over_grpc_examples --example generated_tower_service
 //! ```
 
 use bytes::Bytes;
