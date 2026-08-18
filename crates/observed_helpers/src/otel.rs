@@ -88,6 +88,7 @@ pub fn otel_severity_of(severity: Severity) -> opentelemetry::logs::Severity {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,15 +123,34 @@ mod tests {
 
     #[test]
     fn scalars_convert_to_otel_value() {
+        assert_eq!(otel_value_of(Value::from(true)), opentelemetry::Value::Bool(true));
         assert_eq!(otel_value_of(Value::from(7_i64)), opentelemetry::Value::I64(7));
+        assert_eq!(otel_value_of(Value::from(1.5_f64)), opentelemetry::Value::F64(1.5));
         assert_eq!(otel_value_of(Value::from("hi")), opentelemetry::Value::String("hi".into()));
+    }
+
+    #[test]
+    fn shared_text_converts_without_copying_representation() {
+        assert_eq!(any_value_of(Value::from(String::from("owned"))), AnyValue::String("owned".into()));
+        assert_eq!(
+            otel_value_of(Value::from(String::from("owned"))),
+            opentelemetry::Value::String("owned".into())
+        );
     }
 
     #[test]
     fn arrays_convert_to_otel_arrays() {
         assert_eq!(
+            otel_value_of(Value::from(vec![true, false])),
+            opentelemetry::Value::Array(opentelemetry::Array::Bool(vec![true, false]))
+        );
+        assert_eq!(
             otel_value_of(Value::from(vec![1_i64, 2])),
             opentelemetry::Value::Array(opentelemetry::Array::I64(vec![1, 2]))
+        );
+        assert_eq!(
+            otel_value_of(Value::from(vec![1.0_f64, 2.0])),
+            opentelemetry::Value::Array(opentelemetry::Array::F64(vec![1.0, 2.0]))
         );
         assert_eq!(
             otel_value_of(Value::from(vec![String::from("a")])),

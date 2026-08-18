@@ -76,8 +76,13 @@ impl fmt::Display for DisplayAnyValue<'_> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use opentelemetry::Key;
+
     use super::*;
 
     #[test]
@@ -124,5 +129,38 @@ mod tests {
     fn format_empty_list() {
         let v = AnyValue::ListAny(Box::default());
         assert_eq!(format_any_value(&v).to_string(), "[]");
+    }
+
+    #[test]
+    fn format_map() {
+        let mut map = HashMap::new();
+        map.insert(Key::from("a"), AnyValue::Int(1));
+        map.insert(Key::from("b"), AnyValue::String("two".into()));
+        let v = AnyValue::Map(Box::new(map));
+
+        // `HashMap` iteration order is unspecified, so compare the rendered
+        // entries as a set while still asserting on the delimiter shape.
+        let rendered = format_any_value(&v).to_string();
+        let inner = rendered
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .expect("map renders inside braces");
+        let mut entries: Vec<&str> = inner.split(", ").collect();
+        entries.sort_unstable();
+        assert_eq!(entries, ["a: 1", "b: two"]);
+    }
+
+    #[test]
+    fn format_empty_map() {
+        let v = AnyValue::Map(Box::default());
+        assert_eq!(format_any_value(&v).to_string(), "{}");
+    }
+
+    #[test]
+    fn format_nested_map_in_list() {
+        let mut map = HashMap::new();
+        map.insert(Key::from("k"), AnyValue::Boolean(true));
+        let v = AnyValue::ListAny(Box::new(vec![AnyValue::Map(Box::new(map))]));
+        assert_eq!(format_any_value(&v).to_string(), "[{k: true}]");
     }
 }
