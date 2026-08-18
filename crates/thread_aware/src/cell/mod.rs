@@ -675,7 +675,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // populates that affinity. The source slot is written afterwards, under its own lock and
         // never while the destination lock is held, so two threads relocating in opposite directions
         // cannot each end up waiting for the lock the other holds.
-        let old_value = {
+        let (old_value, replaced_empty_slot) = {
             let mut destination_slot = self.storage.write(destination);
 
             // The slot is re-probed because the lock was released between the two stages, during
@@ -700,10 +700,6 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             let old_value = std::mem::replace(&mut self.value, data);
 
             let old_data = destination_slot.replace(sync::Arc::<T>::clone(&self.value));
-            assert!(
-                old_data.is_none(),
-                "Data already exists for the destination affinity. This should be unreachable because the slot was re-probed while holding the write lock."
-            );
 
             // Record the factory only when materialization actually changed it (the closure factory,
             // on the first relocation). The stateless kinds return `None` and are left untouched.
@@ -711,8 +707,14 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 self.factory = factory;
             }
 
-            old_value
+            (old_value, old_data.is_none())
         };
+
+        // The re-probe under the write lock proved the slot empty, so the publish above must have
+        // filled an empty slot. Check this only after releasing the lock: an assertion firing while
+        // the lock was held would poison it and break the never-poison guarantee.
+        // Ref: docs/implementation.md, "Relocation locking".
+        debug_assert!(replaced_empty_slot, "slot was occupied after a re-probe under its own write lock");
 
         if let Some(source) = source {
             // Record the value the `Arc` moved away from into the source affinity's slot, unless
