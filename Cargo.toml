@@ -200,8 +200,8 @@ rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
-scopeguard = { version = "1.2.0", default-features = false }
 same-file = { version = "1.0.6", default-features = false }
+scopeguard = { version = "1.2.0", default-features = false }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.7.0" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.7.0" }
 serde = { version = "1.0.228", default-features = false }
