@@ -396,7 +396,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(Storage::new()),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
@@ -458,7 +458,7 @@ where
         let value = sync::Arc::new(value);
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(Storage::new()),
             value,
             factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
@@ -496,7 +496,7 @@ where
         let value = sync::Arc::clone(erased.arc());
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(Storage::new()),
             value,
             factory: Factory::ErasedCloneFn(erased),
         }
@@ -519,7 +519,7 @@ where
         let value = sync::Arc::from(closure.clone().call_once());
 
         Self {
-            storage: sync::Arc::new(storage::Storage::new()),
+            storage: sync::Arc::new(Storage::new()),
             value,
             factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
@@ -531,7 +531,7 @@ where
     /// it will behave like a [`sync::Arc`].
     ///
     /// # Panics
-    /// This may panic if the storage does not contain data for the current affinity.
+    /// Panics if the storage does not contain data for the current affinity.
     pub fn from_storage(storage: sync::Arc<Storage<T, S>>, current_affinity: Affinity) -> Self {
         let value = storage.get_clone(current_affinity).expect("No data found for the current affinity");
 
@@ -578,44 +578,48 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
-    /// Produces the value for `destination` and the factory to carry forward.
+    /// Produces the value for `destination`, and any change the factory needs.
     ///
-    /// This runs the configured factory, which is caller-supplied code. It is the
-    /// only such code `relocate` runs while holding a slot lock, so `relocate`
-    /// wraps this call in `catch_unwind` to keep a panicking factory from
-    /// poisoning the destination slot lock.
-    fn materialize(&self, source: Option<Affinity>, destination: Affinity) -> (sync::Arc<T>, Factory<T>) {
+    /// The first element is the value `destination` will hold. The second is a
+    /// replacement for [`self.factory`](Self), or `None` when the factory is
+    /// unchanged. Only the closure factory ever changes, and only on an `Arc`'s
+    /// first relocation: it records the source affinity it started from so later
+    /// relocations reproduce the original transfer. The other factory kinds are
+    /// stateless and never need replacing.
+    ///
+    /// This runs the configured factory, which is caller-supplied code and the
+    /// only such code `relocate` runs while holding a slot lock. `relocate` wraps
+    /// this call in `catch_unwind`; if the factory panics, the destination slot is
+    /// left empty and the next relocation into that affinity re-materializes.
+    fn materialize(&self, source: Option<Affinity>, destination: Affinity) -> (sync::Arc<T>, Option<Factory<T>>) {
         match &self.factory {
-            // We can use the closure to create new data
             Factory::Closure(factory, factory_source_affinity) => {
                 let mut factory_clone = (**factory).clone();
 
-                // In case factory source is stored in factory, use that - it means we already transferred the factory
-                // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                // time we're transferring the Arc, so source is the source affinity of the factory as well.
+                // Prefer the source affinity already recorded in the factory: it is set on the first
+                // relocation and is the affinity the factory was originally built for. Fall back to
+                // `source` on that first relocation, when nothing has been recorded yet.
                 let factory_source = factory_source_affinity.or(source);
 
                 factory_clone.relocate(factory_source, destination);
-                (
-                    sync::Arc::from(factory_clone.call_once()),
-                    Factory::Closure(sync::Arc::clone(factory), factory_source),
-                )
+                let data = sync::Arc::from(factory_clone.call_once());
+
+                // Record the source affinity the first time we learn it; afterwards the factory is
+                // identical and does not need replacing.
+                let updated = factory_source_affinity
+                    .is_none()
+                    .then(|| Factory::Closure(sync::Arc::clone(factory), factory_source));
+
+                (data, updated)
             }
 
-            // We can clone and transfer the data
-            Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+            // The remaining kinds are stateless: they produce the value and keep themselves.
+            Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), None),
 
-            // We can clone the data and closure it
-            Factory::ErasedCloneFn(erased) => {
-                let cloned = erased.clone_and_relocate(source, destination);
-                (cloned, self.factory.clone())
-            }
+            Factory::ErasedCloneFn(erased) => (erased.clone_and_relocate(source, destination), None),
 
-            Factory::Manual => {
-                // If we are in manual mode, we just clone the data
-                // This effectively makes it behave like `sync::Arc<T>`
-                (sync::Arc::clone(&self.value), self.factory.clone())
-            }
+            // Manual mode behaves like a plain `sync::Arc<T>`: clone the current value.
+            Factory::Manual => (sync::Arc::clone(&self.value), None),
         }
     }
 }
@@ -636,10 +640,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             return;
         }
 
-        // The destination slot's exclusive lock is held across the whole materialization so that
-        // exactly one thread populates this affinity. The source slot is deliberately not locked
-        // here: it is restored afterwards, under its own lock, so that no two slot locks are ever
-        // held at once and a pair of threads relocating in opposite directions cannot deadlock.
+        // A miss records two affinities. The destination affinity gets the freshly materialized
+        // value. The source affinity gets the value the `Arc` is carrying: that value belongs to
+        // the source affinity, and on a first relocation it has never been written to the table, so
+        // recording it lets a later relocation back into the source affinity find it instead of
+        // materializing a fresh one.
+        //
+        // The destination slot's exclusive lock is held across materialization so exactly one thread
+        // populates that affinity. The source slot is written afterwards, under its own lock and
+        // never while the destination lock is held, so two threads relocating in opposite directions
+        // cannot each end up waiting for the lock the other holds.
         let old_value = {
             let mut destination_slot = self.storage.write(destination);
 
@@ -670,19 +680,24 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 "Data already exists for the destination affinity. This should be unreachable because the slot was re-probed while holding the write lock."
             );
 
-            self.factory = new_factory;
+            // Record the factory only when materialization actually changed it (the closure factory,
+            // on the first relocation). The stateless kinds return `None` and are left untouched.
+            if let Some(factory) = new_factory {
+                self.factory = factory;
+            }
 
             old_value
         };
 
         if let Some(source) = source {
-            // Only restore the value to the source slot when source and destination differ. If they
-            // are the same slot, the replacement above already stored the new value there.
+            // Record the value the `Arc` moved away from into the source affinity's slot, unless
+            // source and destination are the same slot (the destination write above already stored
+            // the current value there).
             if source != destination {
                 let mut source_slot = self.storage.write(source);
 
-                // Store only if the source affinity is not already materialized. Another thread may
-                // have populated it while this one held the destination lock; its value is the same
+                // Store only if the source affinity has no value yet. Another thread may have
+                // recorded it while this one held the destination lock; that is the same
                 // per-affinity value this would store, so leaving it in place is correct.
                 if source_slot.is_none() {
                     *source_slot = Some(old_value);

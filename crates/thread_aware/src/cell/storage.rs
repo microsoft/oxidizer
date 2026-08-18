@@ -27,13 +27,15 @@ pub trait Strategy {
 
 /// A slot lock is never left poisoned, so acquiring it never fails.
 ///
-/// Poisoning requires a panic while the lock is held, and no panicking code runs
-/// there: the stored values are reference-counted handles whose clone cannot
-/// unwind, and the one operation that runs caller code under the lock —
-/// materializing a value on relocation's miss path — catches the unwind and
-/// releases the lock before it resumes.
+/// Poisoning happens when a thread panics while holding the lock and the guard is
+/// dropped during unwinding. The operations run under a slot lock — cloning,
+/// storing and comparing the reference-counted handle it holds — cannot unwind,
+/// so the only code that can panic there is the caller's factory on relocation's
+/// miss path. `relocate` runs that under `catch_unwind` and drops the guard before
+/// resuming the unwind, so the lock is released normally rather than poisoned.
 /// Ref: docs/implementation.md, "Relocation locking".
-const NEVER_POISONED: &str = "a slot lock is never poisoned; the crate never panics while one is held";
+const NEVER_POISONED: &str =
+    "a slot lock is never left poisoned; a panic while one is held is caught and the lock released before the unwind resumes";
 
 /// One affinity's independently-locked, cache-line-isolated storage slot.
 type Slot<T> = CachePadded<RwLock<Option<T>>>;
