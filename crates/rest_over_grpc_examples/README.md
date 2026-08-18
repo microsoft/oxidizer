@@ -22,7 +22,7 @@ See [`build.rs`](build.rs) for generation and
 |---|---|
 | Call a generated transcoder directly | [`basic_transcode`](examples/transcoding/basic_transcode.rs) |
 | Add custom routes and fallback behavior | [`custom_fallback`](examples/transcoding/custom_fallback.rs) |
-| Mount a generated service in Tower | [`tower_service`](examples/serving/tower_service.rs) |
+| Mount a generated service in Tower | [`generated_tower_service`](examples/serving/generated_tower_service.rs) |
 | Mount it in Axum and return neutral responses from handlers | [`axum_app`](examples/serving/axum_app.rs) |
 | Observe server-streamed response frames | [`streaming_response`](examples/serving/streaming_response.rs) |
 | Enforce custom content-type and body-size policy | [`custom_body_handling`](examples/serving/custom_body_handling.rs) |
