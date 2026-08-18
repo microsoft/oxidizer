@@ -1,0 +1,11 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: rendered
+---
+impl<T: ::core::marker::Send> ::thread_aware::ThreadAware for PhantomGroup<T> {
+    fn relocate(
+        &mut self,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
+    ) {}
+}

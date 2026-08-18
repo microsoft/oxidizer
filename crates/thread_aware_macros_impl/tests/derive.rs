@@ -256,3 +256,142 @@ fn generics_paren_adds_bound() {
     };
     assert_snapshot!(expand(input));
 }
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_prebound_send_no_dup() {
+    // A phantom-only generic that already carries `Send` must not gain a second one.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomPreBound<T: Send>(core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_prebound_thread_aware_no_send() {
+    // `ThreadAware` already implies `Send`, so a phantom-only generic bound by it
+    // must not gain a redundant `Send`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomPreBoundTa<T: ThreadAware>(core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn generics_lifetime_and_const_params_untouched() {
+    // Only type parameters can carry bounds; lifetimes and const generics are skipped.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct Mixed<'a, const N: usize, T>(&'a T, [u8; N], core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+#[test]
+#[cfg_attr(miri, ignore)]
+fn generics_unused_param_gets_no_bound() {
+    // A type parameter that no field mentions is neither relocated nor phantom,
+    // so it must be left completely unbound.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct UnusedParam<T, U>(T);
+    };
+    assert_snapshot!(expand(input));
+}
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_ref_generic_gets_send_bound() {
+    // A generic reachable only through a reference inside `PhantomData`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomRef<T>(core::marker::PhantomData<&'static T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_tuple_generic_gets_send_bound() {
+    // A generic reachable only through a tuple inside `PhantomData`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomTuple<T>(core::marker::PhantomData<(T,)>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_array_generic_gets_send_bound() {
+    // A generic reachable only through an array inside `PhantomData`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomArray<T>(core::marker::PhantomData<[T; 2]>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_paren_generic_gets_send_bound() {
+    // A generic reachable only through a parenthesized type inside `PhantomData`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomParen<T> {
+            marker: core::marker::PhantomData<(T)>,
+        }
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_group_generic_gets_send_bound() {
+    // Covers the Type::Group arm inside `PhantomData`, synthesizing the group node
+    // that normally appears only after macro expansion (Delimiter::None).
+    use syn::{TypeGroup, parse_quote, token};
+
+    let mut input: syn::DeriveInput = parse_quote! {
+        #[derive(ThreadAware)]
+        pub struct PhantomGroup<T>(core::marker::PhantomData<T>);
+    };
+
+    // Wrap the `T` argument of `PhantomData<T>` in a synthetic group.
+    if let syn::Data::Struct(ref mut ds) = input.data
+        && let syn::Fields::Unnamed(ref mut fs) = ds.fields
+    {
+        let field = fs.unnamed.first_mut().expect("expected one field");
+        if let syn::Type::Path(ref mut tp) = field.ty {
+            let segment = tp.path.segments.last_mut().expect("expected a path segment");
+            if let syn::PathArguments::AngleBracketed(ref mut ab) = segment.arguments {
+                let arg = ab.args.first_mut().expect("expected one type argument");
+                if let syn::GenericArgument::Type(ty) = arg {
+                    let original = ty.clone();
+                    *ty = syn::Type::Group(TypeGroup {
+                        attrs: vec![],
+                        group_token: token::Group {
+                            span: proc_macro2::Span::call_site(),
+                        },
+                        elem: Box::new(original),
+                    });
+                } else {
+                    panic!("unexpected generic argument shape")
+                }
+            } else {
+                panic!("unexpected path arguments shape")
+            }
+        } else {
+            panic!("unexpected field type shape")
+        }
+    } else {
+        panic!("unexpected data shape")
+    }
+
+    let root: syn::Path = syn::parse_quote!(::thread_aware);
+    let ts = derive_thread_aware(quote! {#input}, &root);
+    let rendered = syn::parse_file(&ts.to_string()).map_or_else(|_| ts.to_string(), |f| prettyplease::unparse(&f));
+    assert_snapshot!(rendered);
+}

@@ -1,0 +1,11 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl<T: Send> ::thread_aware::ThreadAware for PhantomPreBound<T> {
+    fn relocate(
+        &mut self,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
+    ) {}
+}

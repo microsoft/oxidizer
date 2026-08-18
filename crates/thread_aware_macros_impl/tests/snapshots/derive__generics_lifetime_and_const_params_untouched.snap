@@ -1,0 +1,15 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl<'a, const N: usize, T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
+for Mixed<'a, N, T> {
+    fn relocate(
+        &mut self,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
+    ) {
+        ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
+    }
+}
