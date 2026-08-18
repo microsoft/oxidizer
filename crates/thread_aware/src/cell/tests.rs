@@ -760,7 +760,7 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
         drop(shared_guard);
 
         let values = racers.into_iter().map(|racer| racer.join().unwrap()).collect::<Vec<_>>();
-        let (first, rest) = values.split_first().expect("RACERS is nonzero");
+        let (first, rest) = values.split_first().unwrap();
 
         for other in rest {
             assert!(
