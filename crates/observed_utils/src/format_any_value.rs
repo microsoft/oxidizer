@@ -6,8 +6,9 @@
 //! `AnyValue` only derives `Debug`, so printing one produces wrapper noise such
 //! as `String(Owned("hello"))`. [`format_any_value`] returns a [`fmt::Display`]
 //! adapter that renders the value itself, recursing through lists and maps.
-//! Rendering allocates nothing beyond what the formatter itself needs and has
-//! no side effects.
+//! Rendering has no side effects, and every arm writes straight to the
+//! formatter except `Bytes`, which builds one temporary hex `String` per byte
+//! string.
 
 use std::fmt;
 
