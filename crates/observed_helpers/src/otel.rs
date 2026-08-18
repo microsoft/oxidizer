@@ -9,6 +9,8 @@ use opentelemetry::logs::AnyValue;
 /// Converts a [`Text`] into an `OTel` [`StringValue`](opentelemetry::StringValue),
 /// preserving the borrowed-versus-shared distinction so neither representation
 /// copies.
+// Excluded from the coverage gate for the reason given above `any_value_of`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn string_value_of(text: Text) -> opentelemetry::StringValue {
     match text {
         Text::Static(s) => s.into(),
@@ -19,20 +21,45 @@ fn string_value_of(text: Text) -> opentelemetry::StringValue {
     }
 }
 
+/// Converts every element of `values` into an `OTel` list.
+fn list_of<T>(values: Vec<T>, mut f: impl FnMut(T) -> AnyValue) -> AnyValue {
+    AnyValue::ListAny(Box::new(values.into_iter().map(&mut f).collect()))
+}
+
+/// Converts a `u64` into an `OTel` [`AnyValue`].
+///
+/// `AnyValue` has no unsigned variant, so a value past `i64::MAX` is exported as
+/// its decimal string rather than wrapping into a negative number.
+fn unsigned_any_value(value: u64) -> AnyValue {
+    i64::try_from(value).map_or_else(|_| AnyValue::String(value.to_string().into()), AnyValue::Int)
+}
+
+/// Converts a `u64` into an `OTel` [`opentelemetry::Value`].
+///
+/// See [`unsigned_any_value`]: `opentelemetry::Value` has no unsigned variant
+/// either.
+fn unsigned_otel_value(value: u64) -> opentelemetry::Value {
+    i64::try_from(value).map_or_else(
+        |_| opentelemetry::Value::String(value.to_string().into()),
+        opentelemetry::Value::I64,
+    )
+}
+
 /// Converts a [`Value`] into an `OTel` [`AnyValue`], as used for log record
 /// attributes and bodies.
+// The last arm guards the `#[non_exhaustive]` `Value`, so no variant that exists
+// today can reach it, and coverage instrumentation counts an arm that is never
+// taken as an uncovered line. The dispatch is therefore excluded from the
+// coverage gate instead of the guard being deleted: without the guard, a variant
+// added upstream would either fail to compile here or silently lose data. The
+// conversions it delegates to stay measured, and mutation testing still applies.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
 pub fn any_value_of(value: Value) -> AnyValue {
-    fn list_of<T>(values: Vec<T>, mut f: impl FnMut(T) -> AnyValue) -> AnyValue {
-        AnyValue::ListAny(Box::new(values.into_iter().map(&mut f).collect()))
-    }
-
     match value {
         Value::Bool(v) => AnyValue::Boolean(v),
         Value::I64(v) => AnyValue::Int(v),
-        // `AnyValue` has no unsigned variant, so a `u64` past `i64::MAX` is
-        // exported as its decimal string rather than wrapping into a negative.
-        Value::U64(v) => i64::try_from(v).map_or_else(|_| AnyValue::String(v.to_string().into()), AnyValue::Int),
+        Value::U64(v) => unsigned_any_value(v),
         Value::F64(v) => AnyValue::Double(v),
         Value::String(v) => AnyValue::String(string_value_of(v)),
         Value::BoolArray(v) => list_of(v, AnyValue::Boolean),
@@ -48,6 +75,8 @@ pub fn any_value_of(value: Value) -> AnyValue {
 
 /// Converts a [`Value`] into an `OTel` [`opentelemetry::Value`], as used for
 /// metric dimensions.
+// Excluded from the coverage gate for the reason given above `any_value_of`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
 pub fn otel_value_of(value: Value) -> opentelemetry::Value {
     use opentelemetry::Array;
@@ -55,9 +84,7 @@ pub fn otel_value_of(value: Value) -> opentelemetry::Value {
     match value {
         Value::Bool(v) => opentelemetry::Value::Bool(v),
         Value::I64(v) => opentelemetry::Value::I64(v),
-        // See `any_value_of`: `opentelemetry::Value` has no unsigned variant
-        // either.
-        Value::U64(v) => i64::try_from(v).map_or_else(|_| opentelemetry::Value::String(v.to_string().into()), opentelemetry::Value::I64),
+        Value::U64(v) => unsigned_otel_value(v),
         Value::F64(v) => opentelemetry::Value::F64(v),
         Value::String(v) => opentelemetry::Value::String(string_value_of(v)),
         Value::BoolArray(v) => opentelemetry::Value::Array(Array::Bool(v)),
