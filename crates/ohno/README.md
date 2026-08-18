@@ -139,6 +139,134 @@ name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is
 |`self.path.display()`|no, the `self.` prefix is implicit|
 |`.path.display()`|no, not a valid expression|
 
+### Without `#[display]`
+
+When no `#[display]` override is given, the rendered message depends on whether the error
+has a source.
+
+**With a source, the source’s message is printed verbatim** — no type name, and no
+`caused by:` line — while [`source()`][__link11] still returns the concrete
+error. This is the direct equivalent of `thiserror`’s `#[error(transparent)]`, and it is what
+makes the abstract-wrapper shape described in
+[Modelling Multiple Failure Conditions](#modelling-multiple-failure-conditions) viable.
+
+```rust
+#[ohno::error]
+pub struct StorageError;
+
+let error = StorageError::caused_by("disk is full");
+
+// The wrapper contributes no text of its own.
+assert_eq!(error.to_string(), "disk is full");
+```
+
+**Without a source, the bare type name is printed.** The two cases are one `#[from]` apart, so
+a wrapper that is accidentally constructed without a source renders as `Error: StorageError`
+rather than a message:
+
+```rust
+#[ohno::error]
+pub struct StorageError;
+
+let error = StorageError::new();
+
+assert_eq!(error.to_string(), "StorageError");
+```
+
+Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper to make
+sourceless construction unrepresentable, rather than relying on review to catch it.
+
+One further caveat: because each ohno error carries its own [`OhnoCore`][__link12], a chain of
+transparent wrappers emits one backtrace block per level when backtrace capture is enabled.
+A two-level wrapper prints two blocks under `RUST_BACKTRACE=1`. This is inherent to
+per-type cores rather than a property of the transparent shape itself.
+
+## Modelling Multiple Failure Conditions
+
+`#[derive(Error)]` rejects enums, because [`OhnoCore`][__link13] has to live somewhere and a per-variant
+core would be meaningless. This is the first question most people arriving from `thiserror`
+have, since its headline pattern is an enum with one variant per failure condition.
+
+There are two workable shapes. The deciding question is: **does anything actually branch on
+the category?**
+
+### Abstract wrapper — nothing branches on the category
+
+Prefer this shape. A fieldless error type with `#[from(..)]` over concrete per-condition error
+types, relying on the transparent passthrough described
+[above](#without-display) so the wrapper adds no text of its own:
+
+```rust
+use ohno::ErrorExt as _;
+
+#[ohno::error]
+pub struct ParseError;
+
+#[ohno::error]
+pub struct TimeoutError;
+
+#[ohno::error]
+#[derive(Default)]
+#[from(ParseError, TimeoutError)]
+pub struct RequestError;
+
+let error: RequestError = ParseError::caused_by("unexpected token").into();
+
+// The wrapper is transparent: the leaf's message is what users see.
+assert_eq!(error.to_string(), "unexpected token");
+
+// A caller that does need to discriminate can still recover the concrete type.
+assert!(error.find_source::<ParseError>().is_some());
+assert!(error.find_source::<TimeoutError>().is_none());
+```
+
+### Kind field — production code branches on the category
+
+One struct carrying a plain kind enum, a `#[display("{kind}")]` override, and a `kind()`
+accessor:
+
+```rust
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestErrorKind {
+    Parse,
+    Timeout,
+}
+
+impl fmt::Display for RequestErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse => f.write_str("request could not be parsed"),
+            Self::Timeout => f.write_str("request timed out"),
+        }
+    }
+}
+
+#[ohno::error]
+#[display("{kind}")]
+pub struct RequestError {
+    kind: RequestErrorKind,
+}
+
+impl RequestError {
+    #[must_use]
+    pub fn kind(&self) -> RequestErrorKind {
+        self.kind
+    }
+}
+
+let error = RequestError::new(RequestErrorKind::Timeout);
+
+assert_eq!(error.kind(), RequestErrorKind::Timeout);
+assert_eq!(error.to_string(), "request timed out");
+```
+
+Adopting ohno across nine crates, the abstract wrapper was the right shape almost everywhere,
+and the kind field was used exactly once — in the single case where production code actually
+branched on the category. Reach for the kind field only when that is true; matching on a
+category nothing consumes just adds a public enum to maintain.
+
 ## Automatic Constructors
 
 By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:
@@ -220,15 +348,15 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The [`#[enrich_err("message")]`][__link11] attribute macro adds error enrichment with file and line info to function errors.
+The [`#[enrich_err("message")]`][__link14] attribute macro adds error enrichment with file and line info to function errors.
 
-Functions annotated with [`#[enrich_err("message")]`][__link12] automatically wrap any returned `Result`. If
+Functions annotated with [`#[enrich_err("message")]`][__link15] automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a message, including file and line information, into the error chain.
 
 **Requirements:**
 
 * The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-* The error type must implement the [`Enrichable`][__link13] trait (automatically implemented for all ohno error types)
+* The error type must implement the [`Enrichable`][__link16] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 
@@ -284,10 +412,10 @@ fn open_file(path: &str) -> Result<String, MyError> {
 
 ## AppError
 
-For applications that need a simple, catch-all error type, use [`AppError`][__link14]. It
+For applications that need a simple, catch-all error type, use [`AppError`][__link17]. It
 automatically captures backtraces and can wrap any error type.
 
-To avoid accidental usage in libraries, [`AppError`][__link15] is only available when the `app-err`
+To avoid accidental usage in libraries, [`AppError`][__link18] is only available when the `app-err`
 feature is enabled.
 
 Example usage:
@@ -303,7 +431,7 @@ fn process() -> Result<(), AppError> {
 
 ## Error Labeling
 
-[`ErrorLabel`][__link16] is a low-cardinality string label for errors, intended for use as a metric
+[`ErrorLabel`][__link19] is a low-cardinality string label for errors, intended for use as a metric
 tag or structured log field. Labels must be chosen from a small, bounded set known at
 development time to avoid high-cardinality metric series.
 
@@ -317,7 +445,7 @@ let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
 assert_eq!(label, "http.client.timeout");
 ```
 
-Use [`ErrorLabel::from_error_chain`][__link17] to walk an error’s [`source`][__link18]
+Use [`ErrorLabel::from_error_chain`][__link20] to walk an error’s [`source`][__link21]
 chain and build a dotted label from recognized errors:
 
 ```rust
@@ -331,8 +459,8 @@ let label = ErrorLabel::from_error_chain(&io_err, |e| {
 assert_eq!(label, "connection_refused");
 ```
 
-Types that carry an [`ErrorLabel`][__link19] can implement the [`Labeled`][__link20] trait to expose it
-uniformly via [`Labeled::label`][__link21].
+Types that carry an [`ErrorLabel`][__link22] can implement the [`Labeled`][__link23] trait to expose it
+uniformly via [`Labeled::label`][__link24].
 
 
 <hr/>
@@ -340,22 +468,25 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv-Hzd015wccb3QHVUUNfzdYbgkSSUDnsKTUbn3uKf5ryHu1hZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbxrtgMzSQtLobG_YdBTen9vQbiTdbxoFbwvsb-UfheR5PhZFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
- [__link11]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
- [__link12]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
- [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
- [__link15]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
- [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
- [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
- [__link18]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link11]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link12]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
+ [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
+ [__link14]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link15]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
+ [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link18]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
  [__link2]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
- [__link21]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
+ [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
+ [__link21]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link22]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link23]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
+ [__link24]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
  [__link3]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
  [__link4]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link5]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore

@@ -134,6 +134,134 @@
 //! | `self.path.display()` | no, the `self.` prefix is implicit |
 //! | `.path.display()` | no, not a valid expression |
 //!
+//! ## Without `#[display]`
+//!
+//! When no `#[display]` override is given, the rendered message depends on whether the error
+//! has a source.
+//!
+//! **With a source, the source's message is printed verbatim** — no type name, and no
+//! `caused by:` line — while [`source()`](std::error::Error::source) still returns the concrete
+//! error. This is the direct equivalent of `thiserror`'s `#[error(transparent)]`, and it is what
+//! makes the abstract-wrapper shape described in
+//! [Modelling Multiple Failure Conditions](#modelling-multiple-failure-conditions) viable.
+//!
+//! ```rust
+//! #[ohno::error]
+//! pub struct StorageError;
+//!
+//! let error = StorageError::caused_by("disk is full");
+//!
+//! // The wrapper contributes no text of its own.
+//! assert_eq!(error.to_string(), "disk is full");
+//! ```
+//!
+//! **Without a source, the bare type name is printed.** The two cases are one `#[from]` apart, so
+//! a wrapper that is accidentally constructed without a source renders as `Error: StorageError`
+//! rather than a message:
+//!
+//! ```rust
+//! #[ohno::error]
+//! pub struct StorageError;
+//!
+//! let error = StorageError::new();
+//!
+//! assert_eq!(error.to_string(), "StorageError");
+//! ```
+//!
+//! Apply [`#[no_constructors]`](#automatic-constructors) to every transparent wrapper to make
+//! sourceless construction unrepresentable, rather than relying on review to catch it.
+//!
+//! One further caveat: because each ohno error carries its own [`OhnoCore`], a chain of
+//! transparent wrappers emits one backtrace block per level when backtrace capture is enabled.
+//! A two-level wrapper prints two blocks under `RUST_BACKTRACE=1`. This is inherent to
+//! per-type cores rather than a property of the transparent shape itself.
+//!
+//! # Modelling Multiple Failure Conditions
+//!
+//! `#[derive(Error)]` rejects enums, because [`OhnoCore`] has to live somewhere and a per-variant
+//! core would be meaningless. This is the first question most people arriving from `thiserror`
+//! have, since its headline pattern is an enum with one variant per failure condition.
+//!
+//! There are two workable shapes. The deciding question is: **does anything actually branch on
+//! the category?**
+//!
+//! ## Abstract wrapper — nothing branches on the category
+//!
+//! Prefer this shape. A fieldless error type with `#[from(..)]` over concrete per-condition error
+//! types, relying on the transparent passthrough described
+//! [above](#without-display) so the wrapper adds no text of its own:
+//!
+//! ```rust
+//! use ohno::ErrorExt as _;
+//!
+//! #[ohno::error]
+//! pub struct ParseError;
+//!
+//! #[ohno::error]
+//! pub struct TimeoutError;
+//!
+//! #[ohno::error]
+//! #[derive(Default)]
+//! #[from(ParseError, TimeoutError)]
+//! pub struct RequestError;
+//!
+//! let error: RequestError = ParseError::caused_by("unexpected token").into();
+//!
+//! // The wrapper is transparent: the leaf's message is what users see.
+//! assert_eq!(error.to_string(), "unexpected token");
+//!
+//! // A caller that does need to discriminate can still recover the concrete type.
+//! assert!(error.find_source::<ParseError>().is_some());
+//! assert!(error.find_source::<TimeoutError>().is_none());
+//! ```
+//!
+//! ## Kind field — production code branches on the category
+//!
+//! One struct carrying a plain kind enum, a `#[display("{kind}")]` override, and a `kind()`
+//! accessor:
+//!
+//! ```rust
+//! use std::fmt;
+//!
+//! #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+//! pub enum RequestErrorKind {
+//!     Parse,
+//!     Timeout,
+//! }
+//!
+//! impl fmt::Display for RequestErrorKind {
+//!     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//!         match self {
+//!             Self::Parse => f.write_str("request could not be parsed"),
+//!             Self::Timeout => f.write_str("request timed out"),
+//!         }
+//!     }
+//! }
+//!
+//! #[ohno::error]
+//! #[display("{kind}")]
+//! pub struct RequestError {
+//!     kind: RequestErrorKind,
+//! }
+//!
+//! impl RequestError {
+//!     #[must_use]
+//!     pub fn kind(&self) -> RequestErrorKind {
+//!         self.kind
+//!     }
+//! }
+//!
+//! let error = RequestError::new(RequestErrorKind::Timeout);
+//!
+//! assert_eq!(error.kind(), RequestErrorKind::Timeout);
+//! assert_eq!(error.to_string(), "request timed out");
+//! ```
+//!
+//! Adopting ohno across nine crates, the abstract wrapper was the right shape almost everywhere,
+//! and the kind field was used exactly once — in the single case where production code actually
+//! branched on the category. Reach for the kind field only when that is true; matching on a
+//! category nothing consumes just adds a public enum to maintain.
+//!
 //! # Automatic Constructors
 //!
 //! By default, `#[derive(Error)]` automatically generates `new()` and `caused_by()` constructor methods:
