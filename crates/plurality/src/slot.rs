@@ -25,6 +25,12 @@ pub(crate) const MAX_POOL_SLOTS: u64 = FREE_END as u64;
 #[cfg(not(target_pointer_width = "64"))]
 pub(crate) const MAX_POOL_SLOTS: u64 = (usize::MAX as u64).saturating_sub(1);
 
+/// Largest chunk size a caller may request.
+///
+/// Chunk sizes are rounded up to a power of two, and this is the greatest
+/// `u32` whose next power of two is still representable in `u32`.
+pub(crate) const MAX_CHUNK_SIZE_SLOTS: u32 = 1 << 31;
+
 /// Refcount overflow guard, mirroring `alloc::sync::Arc`.
 const MAX_REFCOUNT: u32 = i32::MAX as u32;
 
@@ -123,6 +129,8 @@ impl<T> SlotCell<T> {
     #[inline]
     pub(crate) unsafe fn drop_value(slot: NonNull<Self>) {
         // SAFETY: caller guarantees an occupied, initialized slot dropped once.
-        unsafe { drop_in_place((*(*slot.as_ptr()).value.get()).as_mut_ptr()) };
+        unsafe {
+            drop_in_place((*(*slot.as_ptr()).value.get()).as_mut_ptr());
+        };
     }
 }

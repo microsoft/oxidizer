@@ -15,13 +15,17 @@
     reason = "test and benchmark code"
 )]
 
-//! Single-operation bodies for Callgrind allocation and fat-pointer benchmarks.
+//! Shared setup and operation bodies for allocation and fat-pointer benchmarks.
 
 use std::boxed::Box as StdBox;
 use std::hint::black_box;
 
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-use plurality::{Arc, Box as PoolBox, Pool, Rc, coerce};
+use plurality::{Arc, Box as PoolBox, MultiPool, Pool, Rc, coerce};
+
+mod metadata;
+
+pub(crate) use metadata::SPREAD_LAYOUTS;
 
 /// A small (~32-byte), `Drop`-free payload, so the benchmarks measure the
 /// pool's own allocate/free cost rather than user destructors.
@@ -88,6 +92,59 @@ pub(crate) fn setup_rc(n: usize) -> (Pool<Obj>, Rc<Obj>) {
     let pool = setup_pool(n);
     let base = pool.alloc_rc(Obj::new(0));
     (pool, base)
+}
+
+/// A multi pool serving a single layout, pre-warmed exactly as [`setup_pool`]
+/// warms the typed pool.
+pub(crate) fn setup_multi_pool(n: usize) -> MultiPool {
+    let pool = MultiPool::builder().chunk_size(CAP as u32).build();
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    pool
+}
+
+/// A multi pool serving [`SPREAD_LAYOUTS`] layouts, with `Obj` registered last.
+///
+/// Directory entries are held in first-seen order, so registering `Obj` after
+/// the fillers makes the measured allocation traverse the whole key vector.
+/// Ref: docs/implementation/multi-pool.md, "Lookup".
+pub(crate) fn setup_multi_pool_spread(n: usize) -> MultiPool {
+    let pool = MultiPool::builder().chunk_size(CAP as u32).build();
+
+    /// Registers one filler layout per byte length. Each length routes to a
+    /// pool of its own, and none of them collides with `Obj`, whose size is
+    /// larger than any of them.
+    macro_rules! fillers {
+        ($($len:literal),*) => {
+            $( drop(pool.alloc_box([0_u8; $len])); )*
+        };
+    }
+    fillers!(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    assert_eq!(pool.layouts(), SPREAD_LAYOUTS - 1);
+
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    assert_eq!(pool.layouts(), SPREAD_LAYOUTS);
+    pool
+}
+
+/// A multi pool holding one layout that `Obj` does not route to, so allocating
+/// an `Obj` misses the directory and installs a layout pool.
+///
+/// The directory is one entry long, as in [`setup_multi_pool`], so the scan the
+/// measured allocation runs is the same length in both and the rows differ only
+/// in whether it finds its layout. `n` sets the chunk size, because the chunk
+/// the install grows is part of what a miss allocates.
+pub(crate) fn setup_multi_pool_miss(n: usize) -> MultiPool {
+    let pool = MultiPool::builder().chunk_size(n as u32).build();
+
+    // A routing key pairs size with widened alignment, so a one-byte filler
+    // cannot collide with the larger `Obj`.
+    // Ref: docs/implementation/multi-pool.md, "Lookup".
+    drop(pool.alloc_box(0_u8));
+    assert_eq!(pool.layouts(), 1);
+
+    pool
 }
 
 // ── Box ──────────────────────────────────────────────────────────────────
@@ -184,6 +241,41 @@ pub(crate) fn rc_uninit(p: &Pool<Obj>, i: u64) {
     drop(black_box(unsafe { u.assume_init() }));
 }
 
+// ── MultiPool (routed allocation) ────────────────────────────────────────
+//
+// The first two bodies below turn the typed `box_val` row into a three-rung
+// ladder: typed, routed with one layout, routed with a full directory. The
+// first step isolates the runtime slot stride plus a one-entry scan, the second
+// gives the per-entry scan slope, which a single routed row would report as one
+// summed number. The third takes the other endpoint of the routing branch, so
+// the miss is covered as well as the hit.
+// Ref: docs/implementation/multi-pool.md, "Lookup";
+// docs/callgrind-benchmarks.md, "Scenario selection".
+
+#[inline]
+pub(crate) fn multi_box_val(p: &MultiPool, i: u64) {
+    drop(black_box(p.alloc_box(black_box(Obj::new(i)))));
+}
+
+/// The body of [`multi_box_val`], measured against a pool whose directory holds
+/// [`SPREAD_LAYOUTS`] layouts, so the two rows differ only in scan length.
+#[inline]
+pub(crate) fn multi_box_val_spread(p: &MultiPool, i: u64) {
+    multi_box_val(p, i);
+}
+
+/// The body of [`multi_box_val`], measured against a pool that has never seen
+/// `Obj`, so the scan misses and the layout pool is installed.
+///
+/// The row prices the whole first touch: the failed scan, the layout pool the
+/// miss builds and installs, and the first chunk the growth path then
+/// allocates. That is what presenting a new layout costs a caller, and the row
+/// is not a measurement of the scan alone.
+#[inline]
+pub(crate) fn multi_box_val_miss(p: &MultiPool, i: u64) {
+    multi_box_val(p, i);
+}
+
 // ── clone + drop (shared handles) ────────────────────────────────────────
 
 #[inline]
@@ -203,6 +295,19 @@ pub(crate) fn setup_plurality(n: usize) -> Pool<Obj> {
     let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
     drop(warm);
     assert!(pool.capacity() >= n as u64);
+    assert!(pool.is_empty());
+    let handle = pool.alloc_box(Obj::new(n as u64));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+    assert_eq!(handle.tag(), 0xFF);
+    drop(handle);
+    pool
+}
+
+pub(crate) fn setup_plurality_multi(n: usize) -> MultiPool {
+    let pool = MultiPool::new();
+    let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+    drop(warm);
+    assert!(pool.capacity_of::<Obj>() >= n as u64);
     assert!(pool.is_empty());
     let handle = pool.alloc_box(Obj::new(n as u64));
     let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
@@ -276,6 +381,14 @@ pub(crate) fn setup_std_box(n: usize) {
 
 #[inline]
 pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
+    let handle = pool.alloc_box(black_box(Obj::new(i)));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+    invoke_dyn(&*handle);
+    drop(black_box(handle));
+}
+
+#[inline]
+pub(crate) fn plurality_multi_box(pool: &MultiPool, i: u64) {
     let handle = pool.alloc_box(black_box(Obj::new(i)));
     let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
     invoke_dyn(&*handle);
