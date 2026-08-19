@@ -17,12 +17,14 @@
 //!
 //! - [`any_value_of`], [`otel_value_of`] and [`otel_severity_of`] convert an
 //!   [`observed::Value`] or [`observed::Severity`] into its OpenTelemetry
-//!   counterpart.
+//!   counterpart. OpenTelemetry has no unsigned value, so a `u64` past
+//!   `i64::MAX` converts to its decimal string rather than wrapping.
 //! - [`metric_number_of`] extracts the number a metric instrument records.
 //! - [`format_any_value`] renders an [`AnyValue`](opentelemetry::logs::AnyValue)
 //!   in human-readable form instead of its `Debug` shape.
-//! - [`SensitiveSlice`] renders a bounded, type-erased collection of classified
-//!   items without allocating.
+//! - [`SensitiveSlice`] holds a bounded, type-erased collection of classified
+//!   items inline, without allocating for the collection, and renders them
+//!   through the caller's redactor.
 //!
 //! This crate is less stable than `observed` itself and may have breaking changes.
 
