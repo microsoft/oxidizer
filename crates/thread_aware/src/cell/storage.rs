@@ -19,17 +19,9 @@ use crate::affinity::Affinity;
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
-    ///
-    /// The index must be less than [`count`](Self::count) for every affinity that
-    /// shares a storage.
     fn index(affinity: Affinity) -> usize;
 
     /// Returns the number of slots the storage holds.
-    ///
-    /// This must be the same for every affinity that shares a storage: it sizes a
-    /// single shared table, not a per-affinity allocation. The built-in strategies
-    /// satisfy this because the processor and memory-region counts are properties
-    /// of the machine, identical across the affinities of one registry.
     fn count(affinity: Affinity) -> usize;
 }
 
@@ -95,20 +87,22 @@ impl<T, S: Strategy> SlotTable<T, S> {
     /// Returns the lock guarding the slot for `affinity`.
     fn slot(&self, affinity: Affinity) -> &RwLock<Option<T>> {
         let slots = self.slots(affinity);
-        let index = S::index(affinity);
+        let requested = S::index(affinity);
 
-        // The table is sized once, to the slot count reported by whichever affinity first touches
-        // it. A `Strategy` whose `count` is consistent across affinities (the documented contract,
-        // upheld by every built-in) keeps every index in range; this catches a custom strategy that
-        // violates it before it can index out of bounds in release.
+        // Trap the anomaly in debug builds so a misbehaving strategy surfaces during development;
+        // release builds take the fallback below instead.
         debug_assert!(
-            index < slots.len(),
-            "Strategy::index returned {index} for a table of {} slots in {}; Strategy::count must be consistent across affinities",
-            slots.len(),
-            core::any::type_name::<S>()
+            requested < slots.len(),
+            "Strategy::index returned {requested} for {}, which exceeds the {} slots the table was sized to",
+            core::any::type_name::<S>(),
+            slots.len()
         );
 
-        &slots[index]
+        // The table is sized once, on first use, to the slot count the first affinity reported, so
+        // an index past its end means this affinity's index and the sized count do not line up.
+        // Fall back to the first slot rather than indexing out of bounds — better than nothing when
+        // there is no correct slot to reach. Debug builds have already trapped this above.
+        slots.get(requested).unwrap_or(&slots[0])
     }
 
     /// Replaces the data for the given affinity with the provided value.
@@ -268,8 +262,8 @@ mod tests {
         assert_eq!(storage.get_clone(affinity), Some("Hello".to_string()));
     }
 
-    /// A `Strategy` that hands out an index outside the slot count it reports, violating the
-    /// consistency contract. Exists only to drive the debug guard in `SlotTable::slot`.
+    /// A `Strategy` that hands out an index outside the slot count it reports. Exists only to drive
+    /// the debug guard in `SlotTable::slot`.
     struct InconsistentStrategy;
 
     impl Strategy for InconsistentStrategy {
@@ -284,7 +278,7 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "Strategy::count must be consistent across affinities")]
+    #[should_panic(expected = "Strategy::index returned")]
     fn inconsistent_strategy_index_is_caught_in_debug() {
         let affinity = pinned_affinities(&[1])[0];
         let table = SlotTable::<i32, InconsistentStrategy>::new();

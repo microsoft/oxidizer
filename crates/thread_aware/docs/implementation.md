@@ -23,10 +23,13 @@ two locks share a line on the architectures the crate targets, rather than
 guaranteeing physical isolation on every machine.
 
 The table is sized once, on first use, to the slot count the strategy reports.
-Because the whole table is fixed from then on, the strategy must report the same
-count for every affinity that shares it — the built-in strategies do, since the
-processor and memory-region counts are properties of the machine. There is no
-growth path and no table-wide lock guarding the array. After that first
+Because the whole table is fixed from then on, the design assumes the strategy
+reports the same count for every affinity that shares it — the built-in strategies
+do, since the processor and memory-region counts are properties of the machine. A
+strategy that breaks that assumption can produce an index past the table's end; the
+lookup then falls back to the first slot rather than reaching out of bounds, and
+debug builds trap the anomaly. There is no growth path and no table-wide lock
+guarding the array. After that first
 initialization the array and the pointer to it are immutable, so reaching a slot
 is a plain atomic load that carries no further synchronization; how well it stays
 in cache is left to the hardware. Slots are filled lazily: a slot is populated the
