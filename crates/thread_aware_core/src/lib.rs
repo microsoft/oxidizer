@@ -24,6 +24,7 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub mod affinity2;
 mod impls;
 
 /// Identifies a processor and memory region in an application's affinity topology.
