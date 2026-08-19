@@ -7,7 +7,9 @@ use ohno_macros_impl::enrich_err::*;
 use proc_macro2::TokenStream;
 use syn::Item;
 
-#[cfg(test)]
+// miri fails to use insta snapshots: `insta::_macro_support::get_cargo_workspace` leads to
+// `unsupported operation: `open` not available when isolation is enabled`
+#[cfg(all(test, not(miri)))]
 mod tests {
     use quote::quote;
     use syn::parse_quote;

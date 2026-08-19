@@ -7,7 +7,9 @@ use ohno_macros_impl::derive_error::display::*;
 use ohno_macros_impl::diagnostics::Errors;
 use quote::quote;
 
-#[cfg(test)]
+// miri fails to use insta snapshots: `insta::_macro_support::get_cargo_workspace` leads to
+// `unsupported operation: `open` not available when isolation is enabled`
+#[cfg(all(test, not(miri)))]
 mod tests {
     use ohno_macros_impl::derive_error::ast::Ast;
     use ohno_macros_impl::derive_error::parse;
