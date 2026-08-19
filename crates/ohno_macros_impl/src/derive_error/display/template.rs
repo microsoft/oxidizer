@@ -30,6 +30,7 @@ impl Placeholder<'_> {
     /// The spec is carried through as written and never inspected, so one that refers to another
     /// argument is reported by `rustc` against the derive rather than by the macro against the
     /// template. See the limits section of `docs/design.md`.
+    #[must_use]
     pub fn lowered(&self) -> String {
         self.spec.map_or_else(|| "{}".to_owned(), |spec| format!("{{:{spec}}}"))
     }
@@ -46,6 +47,7 @@ pub enum Fault {
 
 impl Fault {
     /// The diagnostic this fault renders as.
+    #[must_use]
     pub fn message(&self) -> &'static str {
         match self {
             Self::UnclosedPlaceholder => {

@@ -240,6 +240,7 @@ fn check_bare_marker(attr: &Attribute, name: &str, errors: &mut Errors) {
 }
 
 /// Renders a member the way a diagnostic spells it: `path`, or `0`.
+#[must_use]
 pub fn member_name(member: &Member) -> String {
     match member {
         Member::Named(ident) => ident.to_string(),
@@ -251,6 +252,7 @@ pub fn member_name(member: &Member) -> String {
 ///
 /// Nothing is resolved, so a core reached through a type alias or a renamed import is invisible
 /// here and has to be marked.
+#[must_use]
 pub fn is_ohno_core(ty: &Type) -> bool {
     let Type::Path(path) = ty else {
         return false;

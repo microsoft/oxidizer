@@ -16,11 +16,6 @@
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros_impl/favicon.ico"
 )]
-#![expect(
-    clippy::must_use_candidate,
-    missing_debug_implementations,
-    reason = "Internal parse/model items, public only so this crate's integration tests can reach them"
-)]
 
 // The modules below are public only so this crate's own integration tests can reach them.
 // They are not a supported API surface: depend on `ohno` instead.
@@ -43,6 +38,7 @@ use proc_macro2::TokenStream;
 use quote::ToTokens;
 
 /// Expands the `#[derive(Error)]` derive macro.
+#[must_use]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     match syn::parse2::<syn::DeriveInput>(input) {
         Ok(input) => derive_error::expand(input),
@@ -51,6 +47,7 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 }
 
 /// Expands the `#[enrich_err(...)]` attribute macro.
+#[must_use]
 pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     match syn::parse2::<syn::Item>(input) {
         Ok(item) => enrich_err::expand(args, item),
@@ -59,6 +56,7 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 /// Expands the `#[ohno::error]` attribute macro.
+#[must_use]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
     if !args.is_empty() {
         return syn::Error::new_spanned(args, "`#[ohno::error]` takes no arguments")

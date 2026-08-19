@@ -17,7 +17,7 @@ use quote::ToTokens;
 /// [`syn::Error::new_spanned`]. A span taken from a node covers the whole node only where
 /// `Span::join` is available and shrinks to the first token elsewhere, which would make the same
 /// diagnostic underline different amounts of code on different toolchains.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Errors(Option<syn::Error>);
 
 impl Errors {
@@ -35,6 +35,7 @@ impl Errors {
     }
 
     /// Returns `true` when nothing has been recorded.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
@@ -42,6 +43,7 @@ impl Errors {
     /// Renders everything recorded as `compile_error!` invocations.
     ///
     /// Returns an empty stream when nothing was recorded.
+    #[must_use]
     pub fn into_compile_error(self) -> TokenStream {
         self.0.map(|error| error.to_compile_error()).unwrap_or_default()
     }

@@ -35,6 +35,7 @@ const NO_CONSTRUCTORS: &str = "`#[no_constructors]` is not supported under `#[oh
 const CORE_FIELD_NAME: &str = "ohno_core";
 
 /// Expands the attribute, or renders everything that stopped it.
+#[must_use]
 pub fn expand(item: Item) -> TokenStream {
     let mut errors = Errors::default();
 

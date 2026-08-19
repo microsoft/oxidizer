@@ -20,6 +20,7 @@ pub enum Style {
 }
 
 /// What the struct says.
+#[derive(Debug)]
 pub struct Ast {
     /// The type's name.
     pub ident: Ident,
@@ -40,6 +41,7 @@ pub struct Ast {
 }
 
 /// One field, with the markers that may designate it as the error field.
+#[derive(Debug)]
 pub struct AstField {
     /// How the field is written in an expression: `path`, or `0`.
     pub member: Member,
@@ -60,12 +62,14 @@ impl AstField {
     /// Every field the user wrote is referenceable. The core added by `#[ohno::error]` is not:
     /// printing it would print the error's own chain, and naming it would point at a field that is
     /// not in the user's code.
+    #[must_use]
     pub fn is_referenceable(&self) -> bool {
         !self.generated
     }
 }
 
 /// A decoded `#[display(...)]`.
+#[derive(Debug)]
 pub struct DisplayAttr {
     /// The template literal, kept whole so a template fault can point at it.
     pub template: LitStr,
@@ -74,6 +78,7 @@ pub struct DisplayAttr {
 }
 
 /// One type listed in a `#[from(...)]`, with the field expressions written for it.
+#[derive(Debug)]
 pub struct FromAttr {
     /// The type the generated `From` converts from.
     pub source: Type,
@@ -82,6 +87,7 @@ pub struct FromAttr {
 }
 
 /// One `key: expression` pair inside a `#[from(...)]` entry.
+#[derive(Debug)]
 pub struct FromOverride {
     /// The field the expression initializes, as the user keyed it.
     pub key: Member,

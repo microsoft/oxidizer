@@ -11,6 +11,7 @@
 use syn::{Expr, Lit};
 
 /// What an argument is rooted in.
+#[derive(Debug)]
 pub enum Root<'a> {
     /// `self`, written explicitly. Reported separately, because it would expand to `self.self`.
     SelfKeyword(&'a Expr),
@@ -29,6 +30,7 @@ pub enum Root<'a> {
 
 impl Root<'_> {
     /// The name the root is looked up by, if it names a field at all.
+    #[must_use]
     pub fn field_name(&self) -> Option<&str> {
         match self {
             Self::Name(name, _) | Self::Index(name, _) => Some(name),

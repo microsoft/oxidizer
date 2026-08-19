@@ -20,6 +20,7 @@ use super::ast::Style;
 use super::model::{Model, Shape};
 
 /// Generates every item the derive owes for `model`.
+#[must_use]
 pub fn generate(model: &Model) -> TokenStream {
     let display = traits::display(model);
     let error = traits::error(model);
@@ -43,6 +44,7 @@ pub fn generate(model: &Model) -> TokenStream {
 /// Builds a `Self { .. }` or `Self(..)` literal from one initializer per field.
 ///
 /// The initializers arrive in declaration order, so they line up with [`Shape::all`].
+#[must_use]
 pub fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
     match shape.style {
         Style::Named => {
@@ -57,6 +59,7 @@ pub fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
 }
 
 /// The member of the field holding the core, ready to quote as `self.#member`.
+#[must_use]
 pub fn core_member(model: &Model) -> &Member {
     &model.shape.core().member
 }

@@ -36,6 +36,7 @@ fn override_message(model: &Model) -> TokenStream {
 }
 
 /// `impl Display`, which renders the message and lets the core append the rest.
+#[must_use]
 pub fn display(model: &Model) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
@@ -54,6 +55,7 @@ pub fn display(model: &Model) -> TokenStream {
 }
 
 /// `impl std::error::Error`, whose `source` is the core's.
+#[must_use]
 pub fn error(model: &Model) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
@@ -70,6 +72,7 @@ pub fn error(model: &Model) -> TokenStream {
 }
 
 /// `impl ohno::Enrichable`, which appends an entry to the core.
+#[must_use]
 pub fn enrichable(model: &Model) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
@@ -91,6 +94,7 @@ pub fn enrichable(model: &Model) -> TokenStream {
 ///
 /// Both read the same `override_message`, so the two agree by construction rather than by being
 /// written twice.
+#[must_use]
 pub fn error_ext(model: &Model) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
     let ident = &model.ident;
@@ -116,6 +120,7 @@ pub fn error_ext(model: &Model) -> TokenStream {
 /// `impl Debug`, unless `#[no_debug]` was written.
 ///
 /// Prints every field, the core included, in the shape `#[derive(Debug)]` would.
+#[must_use]
 pub fn debug(model: &Model) -> TokenStream {
     if !model.debug {
         return TokenStream::new();

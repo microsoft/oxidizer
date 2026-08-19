@@ -1332,9 +1332,7 @@ mod coverage_tests {
 
     #[test]
     fn event_args_requires_a_string_name() {
-        let err = syn::parse_str::<EventArgs>("123")
-            .err()
-            .expect("a non-string event name must be rejected");
+        let err = syn::parse_str::<EventArgs>("123").expect_err("a non-string event name must be rejected");
         assert!(err.to_string().contains("requires a string event name"), "unexpected error: {err}");
     }
 
@@ -1347,9 +1345,7 @@ mod coverage_tests {
 
     #[test]
     fn event_args_rejects_unknown_flag() {
-        let err = syn::parse_str::<EventArgs>(r#""e", bogus"#)
-            .err()
-            .expect("an unknown flag must be rejected");
+        let err = syn::parse_str::<EventArgs>(r#""e", bogus"#).expect_err("an unknown flag must be rejected");
         assert!(
             err.to_string().contains("unknown `#[event(...)]` flag `bogus`"),
             "unexpected error: {err}"

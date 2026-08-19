@@ -61,6 +61,6 @@ mod tests {
     #[test]
     fn format_args_reject_a_leading_expression() {
         let parsed = syn::parse2::<FormatArgs>(quote!(not_a_literal));
-        assert!(parsed.is_err());
+        let _ = parsed.expect_err("a leading expression must be rejected");
     }
 }

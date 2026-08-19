@@ -22,6 +22,7 @@ pub const GENERATED_ERROR_FIELD_MARKER: &str = "ohno::generated-core@7f3d9c2a";
 ///
 /// Written in the shape a `///` comment produces, so a hand-written copy and a generated one are
 /// the same tokens.
+#[must_use]
 pub fn generated_marker() -> TokenStream {
     let text = format!(" {GENERATED_ERROR_FIELD_MARKER}");
     quote!(#[doc = #text])
@@ -31,6 +32,7 @@ pub fn generated_marker() -> TokenStream {
 ///
 /// The comparison is trimmed, so it recognizes the marker whether it was written as a `///`
 /// comment (which carries a leading space) or as a bare `#[doc = "..."]`.
+#[must_use]
 pub fn is_generated_marker(attr: &Attribute) -> bool {
     let Meta::NameValue(name_value) = &attr.meta else {
         return false;

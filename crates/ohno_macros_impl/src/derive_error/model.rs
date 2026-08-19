@@ -17,6 +17,7 @@ use crate::diagnostics::Errors;
 use crate::message::Message;
 
 /// A validated error type.
+#[derive(Debug)]
 pub struct Model {
     /// The type's name.
     pub ident: Ident,
@@ -40,6 +41,7 @@ pub struct Model {
 /// unrepresentable: an index can dangle, so every generator using it would need a branch for a core
 /// that is not there. Declaration order is still recoverable, and `Style` and the members are read
 /// from the same value, so they cannot disagree.
+#[derive(Debug)]
 pub struct Shape {
     /// Whether the fields are named or positional.
     pub style: Style,
@@ -56,6 +58,7 @@ impl Shape {
     ///
     /// Returns `None` when `core` is out of range, which is the last point at which that is
     /// representable.
+    #[must_use]
     pub fn new(mut fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self> {
         if core >= fields.len() {
             return None;
@@ -73,6 +76,7 @@ impl Shape {
     }
 
     /// The field holding the core.
+    #[must_use]
     pub fn core(&self) -> &ModelField {
         &self.core
     }
@@ -90,6 +94,7 @@ impl Shape {
     }
 }
 /// One field of a validated error type.
+#[derive(Debug)]
 pub struct ModelField {
     /// How the field is written in an expression: `path`, or `0`.
     pub member: Member,
@@ -104,6 +109,7 @@ pub struct ModelField {
 
 impl ModelField {
     /// Builds a field, deriving its constructor binding from its member.
+    #[must_use]
     pub fn new(member: Member, ty: Type) -> Self {
         let binding = match &member {
             Member::Named(ident) => ident.clone(),
@@ -115,6 +121,7 @@ impl ModelField {
 }
 
 /// One generated `From<T>`.
+#[derive(Debug)]
 pub struct Conversion {
     /// The type the conversion converts from.
     pub source: Type,
@@ -154,6 +161,7 @@ impl Conversion {
     }
 
     /// The initializers, in the order [`Shape::data`] yields its fields.
+    #[must_use]
     pub fn initializers(&self) -> &[Expr] {
         &self.initializers
     }

@@ -16,11 +16,6 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/observed_macros_impl/favicon.ico"
 )]
 #![expect(clippy::missing_errors_doc, reason = "This is a macro")]
-#![expect(
-    clippy::must_use_candidate,
-    clippy::too_long_first_doc_paragraph,
-    reason = "Internal items, public only so this crate's integration tests can reach them"
-)]
 
 mod enrichment;
 mod event;

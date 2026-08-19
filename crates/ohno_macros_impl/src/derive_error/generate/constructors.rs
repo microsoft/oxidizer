@@ -16,6 +16,7 @@ use crate::derive_error::model::Model;
 use crate::paths;
 
 /// The constructors, unless `#[no_constructors]` was written.
+#[must_use]
 pub fn generate(model: &Model) -> TokenStream {
     if !model.constructors {
         return TokenStream::new();

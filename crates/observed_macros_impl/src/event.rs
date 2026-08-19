@@ -43,11 +43,8 @@ struct EventDef {
 }
 
 /// Arguments to the `#[event("name" [, disabled])]` attribute macro.
+#[derive(Debug)]
 #[doc(hidden)]
-#[expect(
-    missing_debug_implementations,
-    reason = "Internal item, public only for this crate's integration tests"
-)]
 pub struct EventArgs {
     pub name: String,
     pub disabled: bool,
@@ -272,12 +269,8 @@ enum InstrumentKindValue {
     Histogram,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
-#[expect(
-    missing_debug_implementations,
-    reason = "Internal item, public only for this crate's integration tests"
-)]
 pub enum SeverityKind {
     Trace,
     Debug,
@@ -293,6 +286,7 @@ impl SeverityKind {
     ///
     /// The `Warn` severity is spelled `warning` (not `warn`) because `warn` is a
     /// built-in lint attribute that cannot be used as a custom attribute.
+    #[must_use]
     pub fn from_ident(ident: &Ident) -> Option<Self> {
         Some(match ident.to_string().as_str() {
             "trace" => Self::Trace,
@@ -370,12 +364,8 @@ impl InstrumentKindValue {
 /// deliberately absent: no telemetry backend represents them, so `Value` offers
 /// no conversion and the macro rejects them with a dedicated diagnostic rather
 /// than truncating.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[doc(hidden)]
-#[expect(
-    missing_debug_implementations,
-    reason = "Internal item, public only for this crate's integration tests"
-)]
 pub enum NumericKind {
     /// A signed integer: `i8`, `i16`, `i32`, `i64`, `isize`.
     SignedInt,
@@ -387,10 +377,13 @@ pub enum NumericKind {
 
 /// Classifies a primitive numeric type, matched syntactically on the last path
 /// segment (so `u64` and `std::primitive::u64` are recognized, but a type
-/// aliased to an integer is not). Returns `None` for non-numeric types,
+/// aliased to an integer is not).
+///
+/// Returns `None` for non-numeric types,
 /// unrecognized paths, and the unsupported 128-bit widths. Group and
 /// parenthesis wrappers are transparent; `Option<T>` deliberately is **not**, so
 /// an optional field can never satisfy an instrument's value-type requirement.
+#[must_use]
 pub fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
@@ -407,6 +400,7 @@ pub fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
 /// Returns true for the 128-bit integer widths, which are recognized only so
 /// they can be rejected with a specific diagnostic instead of the generic
 /// "not a supported numeric type" one.
+#[must_use]
 pub fn is_128_bit_int(ty: &syn::Type) -> bool {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return false;
@@ -419,6 +413,7 @@ pub fn is_128_bit_int(ty: &syn::Type) -> bool {
 }
 
 /// Strips transparent `Paren`/`Group` wrappers from a type.
+#[must_use]
 pub fn strip_type_wrappers(ty: &syn::Type) -> &syn::Type {
     match ty {
         syn::Type::Paren(inner) => strip_type_wrappers(&inner.elem),
@@ -797,6 +792,7 @@ fn is_field_helper_attr(attr: &Attribute) -> bool {
 
 /// Removes the `observed` helper attributes from the struct and its fields so the
 /// re-emitted definition compiles without the (now consumed) attributes.
+#[must_use]
 pub fn strip_helper_attrs(mut item: ItemStruct) -> ItemStruct {
     item.attrs.retain(|attr| !is_event_helper_attr(attr));
     let field_attrs = match &mut item.fields {

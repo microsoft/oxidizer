@@ -324,6 +324,7 @@ pub(crate) fn is_reference_type(ty: &syn::Type) -> bool {
 /// generic type argument, so `Option<T>`, `std::option::Option<T>`, and
 /// `core::option::Option<T>` are all recognized. A type aliased to `Option`
 /// will not be detected.
+#[must_use]
 pub fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
     let syn::Type::Path(type_path) = unwrap_groups(ty) else {
         return None;
@@ -348,6 +349,7 @@ pub fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
 }
 
 /// Returns the pointee `T` if `ty` is a reference `&T` / `&mut T`, else `ty`.
+#[must_use]
 pub fn strip_reference(ty: &syn::Type) -> &syn::Type {
     match unwrap_groups(ty) {
         syn::Type::Reference(reference) => strip_reference(&reference.elem),
@@ -386,6 +388,7 @@ pub(crate) fn is_borrowed_str(ty: &syn::Type) -> bool {
 /// harmless because the generated body needs them anyway. Concrete field types
 /// are left alone so the expansion does not carry noise such as
 /// `where String: Clone`, which the compiler resolves on its own.
+#[must_use]
 pub fn mentions_any_type_param(ty: &syn::Type, params: &[Ident]) -> bool {
     if params.is_empty() {
         return false;

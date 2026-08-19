@@ -19,6 +19,7 @@ use crate::message::{FormatArgs, Message};
 use crate::paths;
 
 /// Expands the attribute, or renders everything that stopped it.
+#[must_use]
 pub fn expand(args: TokenStream, item: Item) -> TokenStream {
     let mut errors = Errors::default();
 

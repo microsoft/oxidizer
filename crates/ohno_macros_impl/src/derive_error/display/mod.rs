@@ -20,10 +20,12 @@ use crate::diagnostics::Errors;
 use crate::message::Message;
 
 /// The fields a template and its arguments may name.
+#[derive(Debug)]
 pub struct Referenceable<'a>(Vec<&'a Member>);
 
 impl<'a> Referenceable<'a> {
     /// Collects the fields the user wrote, in declaration order.
+    #[must_use]
     pub fn new(fields: &'a [AstField]) -> Self {
         Self(
             fields

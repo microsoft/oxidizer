@@ -23,6 +23,7 @@ use syn::DeriveInput;
 use crate::diagnostics::Errors;
 
 /// Expands the derive, or renders everything that stopped it.
+#[must_use]
 pub fn expand(input: DeriveInput) -> TokenStream {
     let mut errors = Errors::default();
 
