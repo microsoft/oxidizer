@@ -430,6 +430,7 @@ monomorphizes
 monotonicity
 msrc
 msvc
+multi
 multitude
 mutator
 mutator's
@@ -482,6 +483,7 @@ reallocations
 recency
 reclaimer
 reclaimers
+recurses
 recoverability
 recoverable
 reentrancy
@@ -826,3 +828,12 @@ stackable
 triages
 UCUM
 untargeted
+backticked
+derive's
+initializers
+lexes
+referenceable
+reportable
+substrings
+unrepresentable
+unterminated

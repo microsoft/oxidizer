@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dynosaur",
  "ohno 0.4.0",
@@ -3486,7 +3486,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plurality"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",

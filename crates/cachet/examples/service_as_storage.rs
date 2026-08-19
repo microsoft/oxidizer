@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use cachet::{Cache, CacheEntry, CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest};
+use cachet::{Cache, CacheEntry, CacheOperation, CacheResponse, GetRequest, InsertOutcome, InsertRequest, InvalidateRequest};
 use layered::Service;
 use tick::Clock;
 
@@ -27,7 +27,7 @@ impl Service<CacheOperation<String, String>> for RemoteCache {
             CacheOperation::Insert(InsertRequest { key, entry }) => {
                 // Note: simplified - real impl would mutate
                 let _ = (key, entry);
-                Ok(CacheResponse::Insert)
+                Ok(CacheResponse::Insert(InsertOutcome::Accepted))
             }
             CacheOperation::Invalidate(InvalidateRequest { key }) => {
                 let _ = key;

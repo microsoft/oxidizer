@@ -22,6 +22,10 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
+// The shared module is compiled into each bench target, matching the multitude
+// benchmark pattern while keeping the optimizer's same-crate view of the hot
+// path. Ref: docs/callgrind-benchmarks.md, "Pairing with Criterion".
+#[path = "../plurality_ops_common/mod.rs"]
 mod ops;
 
 #[cfg(target_os = "linux")]

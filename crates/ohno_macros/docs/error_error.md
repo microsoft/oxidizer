@@ -140,10 +140,10 @@ field lookup takes the first marked field it sees.
 
 ## Implementation notes
 
-**The struct is parsed, validated and selected from in one call.** Selection
-takes the first picked field, which is only unambiguous once validation has
-ruled out the ways it can. Keeping them one operation makes that order
-structural rather than a rule the caller has to remember.
+**The struct is parsed, then validated, then selected from.** Selection takes
+the first marked field, which is only unambiguous once validation has ruled out
+the ways it can be ambiguous, so the phases run in that order. `design.md` sets
+out why they are separate.
 
 **Rejection happens where the input is still the user's.** `#[ohno::error]` runs
 before it adds anything, so it can say a marker was hand-written. The derive

@@ -28,7 +28,8 @@
 //! layer they exercise:
 //!
 //! - `examples/serving/` — getting requests on and off the network
-//!   (`tower_service`, `axum_app`, `streaming_response`, `custom_body_handling`).
+//!   (`generated_tower_service`, `axum_app`, `streaming_response`,
+//!   `custom_body_handling`).
 //! - `examples/transcoding/` — calling the transcoder (`basic_transcode`,
 //!   `custom_fallback`).
 //! - `examples/handling/` — supplying the service logic (`direct_service`,
