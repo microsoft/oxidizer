@@ -621,6 +621,8 @@ versioning
 vtable
 w.r.t.
 waker
+waker's
+wakers
 wildcard
 wildcards
 winsock
@@ -807,6 +809,11 @@ snapshotted
 Sharding
 parallelizes
 prefetches
+dereferencing
+enqueue
+enqueued
+multithreaded
+waker
 enrichments
 fieldless
 idents
