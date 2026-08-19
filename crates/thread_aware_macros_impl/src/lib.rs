@@ -161,16 +161,21 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 
 /// Reports whether `candidate` names the same trait the derive would emit.
 ///
-/// Compares the segment idents, so the fully qualified form the derive emits matches the
-/// shorter form a user typically writes, and a bare single-segment `ThreadAware` from a
-/// `use` matches too. Matching only the final segment - as this once did - treats an
-/// unrelated `some_crate::ThreadAware` as the real trait and suppresses the bound the
-/// generated body needs.
+/// Compares every segment ident, so a user-written bound naming the same path suppresses the
+/// generated duplicate. Matching only the final segment - as this once did - treats an
+/// unrelated `some_crate::ThreadAware` as the real trait and drops the bound the generated
+/// body needs.
+///
+/// A bare single-segment `ThreadAware` deliberately does not match. It is ambiguous: it may be
+/// the real trait imported under its short name, or a trait of the user's own that shares the
+/// name, and a macro cannot tell them apart. Emitting the bound regardless costs a redundant
+/// but legal bound in the first case, which writing the qualified path avoids; suppressing it
+/// leaves the second case unable to compile at all.
 fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
     let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
     let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();
 
-    candidate_idents == emitted_idents || candidate_idents == ["ThreadAware"]
+    candidate_idents == emitted_idents
 }
 
 /// How the fields of a type contribute to the bounds of the generated impl.
