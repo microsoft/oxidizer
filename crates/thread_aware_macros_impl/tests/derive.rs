@@ -476,11 +476,11 @@ fn phantom_group_generic_gets_send_bound() {
     if let syn::Data::Struct(ref mut ds) = input.data
         && let syn::Fields::Unnamed(ref mut fs) = ds.fields
     {
-        let field = fs.unnamed.first_mut().expect("expected one field");
+        let field = fs.unnamed.first_mut().unwrap();
         if let syn::Type::Path(ref mut tp) = field.ty {
-            let segment = tp.path.segments.last_mut().expect("expected a path segment");
+            let segment = tp.path.segments.last_mut().unwrap();
             if let syn::PathArguments::AngleBracketed(ref mut ab) = segment.arguments {
-                let arg = ab.args.first_mut().expect("expected one type argument");
+                let arg = ab.args.first_mut().unwrap();
                 if let syn::GenericArgument::Type(ty) = arg {
                     let original = ty.clone();
                     *ty = syn::Type::Group(TypeGroup {
