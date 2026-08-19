@@ -19,9 +19,12 @@ use data_privacy::{RedactedDisplay, Redactor};
 /// A type-erased collection of references to [`RedactedDisplay`] items.
 ///
 /// This type does **not** require specifying the iterator type — it stores up
-/// to `N` `&dyn RedactedDisplay` fat pointers in an inline array. This makes
-/// struct definitions much cleaner when the exact iterator type is an
-/// implementation detail.
+/// to `N` `&(dyn RedactedDisplay + Sync)` fat pointers in an inline array. This
+/// makes struct definitions much cleaner when the exact iterator type is an
+/// implementation detail. The [`Sync`] bound is part of the contract rather
+/// than an implementation detail: `&(dyn Trait + Sync)` is itself [`Send`] and
+/// [`Sync`], while a bare `&dyn Trait` is neither, so the bound is what lets an
+/// event struct holding one cross threads.
 ///
 /// When formatted via `RedactedDisplay`, it renders at most `N` items separated
 /// by the delimiter `D`, appending `...` if there are more items.
@@ -79,7 +82,8 @@ pub struct SensitiveSlice<'a, const N: usize = 5, const D: char = ','> {
 
 impl<'a, const N: usize, const D: char> SensitiveSlice<'a, N, D> {
     /// Collects items from any iterator of references to [`RedactedDisplay`]
-    /// implementers.
+    /// implementers. The item type must also be [`Sync`], matching the
+    /// `&(dyn RedactedDisplay + Sync)` references this type stores.
     ///
     /// At most `N` items are stored inline. Whether there were additional
     /// items is recorded so overflow can be signaled during formatting.
