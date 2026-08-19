@@ -124,6 +124,11 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// refcount, so a chunk that served any of them must be pinned on
     /// `retired_local` when rotated out (it cannot reclaim until reset). Reset
     /// to `false` whenever a fresh chunk is installed.
+    ///
+    /// Because the flag is cleared on reset as well as on refill, it doubles as
+    /// a "the current chunk has served a local allocation in this generation"
+    /// signal, which [`Arena::stats`] uses (together with `local_shared_count`)
+    /// to tell a freshly rewound chunk from one with live slack.
     current_has_reference: Cell<bool>,
 
     /// Geometric-growth chunk-class hint for the next refill: each successful
@@ -365,6 +370,10 @@ impl<A: Allocator + Clone> Arena<A> {
         // outstanding handles). Fold in the currently-active chunk's free
         // tail so the reported value also reflects the slack that would
         // become wasted if the next alloc forced a refill right now.
+        //
+        // A retained-but-rewound chunk has no live slack yet: `reset` leaves
+        // the chunk installed, so gate on generation activity to keep the
+        // gauge at zero across a reset.
         let current_is_active = self.current_has_reference.get() || self.local_shared_count.get() != 0;
         let current_free = if current_is_active {
             u64::from(self.current.borrow().wasted_tail_for_stats())

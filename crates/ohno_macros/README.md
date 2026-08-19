@@ -19,6 +19,7 @@ Macros for the [`ohno`][__link0] crate.
 
 * `#[derive(Error)]` - Automatically implement error traits
 * `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
+* `#[ohno::error]` - Turn a plain struct into an error type
 
 
 <hr/>

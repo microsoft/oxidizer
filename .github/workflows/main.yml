@@ -125,7 +125,11 @@ jobs:
         run: cargo hack build --each-feature --workspace ${{ needs.delta.outputs.exclude_not_affected }} --verbose --locked --color always
       - name: Tests
         if: success() || failure()
-        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
+        # --no-tests=pass: the crate selection here is narrowed by `delta` to the
+        # affected crates, so a PR that only touches crates without test targets
+        # (docs, examples) legitimately selects zero tests. Without this, nextest
+        # treats that as an error and exits 4.
+        run: cargo nextest run --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features --no-tests=pass
       - name: Docs
         if: success() || failure()
         env:
@@ -354,7 +358,8 @@ jobs:
           cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
       - name: Careful
         if: success() || failure()
-        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
+        # --no-tests=pass: see the `testing` job's Tests step.
+        run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }} --no-tests=pass
       - name: Miri (stacked borrows)
         if: success() || failure()
         # Excluded crates generate code rather than run it, so Miri has no

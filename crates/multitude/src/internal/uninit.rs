@@ -15,6 +15,22 @@ use super::in_chunk::InChunk;
 
 const FIXED_COPY_BYTES: usize = 64;
 
+/// Unroll factor for the element-wise clone loop in
+/// [`Uninit::init_clone_from_slice`].
+///
+/// Eight matches [`FIXED_COPY_BYTES`] for pointer-sized elements — one cache
+/// line per unrolled step — which is wide enough for LLVM to emit inline
+/// vector copies for trivially-cloneable `T` while keeping the scalar
+/// remainder loop short.
+const CLONE_UNROLL: usize = 8;
+
+// The clone loop body writes out one clone site per unrolled step by hand, so
+// the two must be changed together.
+const _: () = assert!(
+    CLONE_UNROLL == 8,
+    "init_clone_from_slice spells out exactly CLONE_UNROLL clone sites"
+);
+
 /// Copies one cache-line-sized region without a dynamic `memcpy` dispatch.
 ///
 /// # Safety
@@ -22,9 +38,10 @@ const FIXED_COPY_BYTES: usize = 64;
 /// `dst` and `src` must be valid for [`FIXED_COPY_BYTES`] non-overlapping
 /// bytes.
 //
-// Keeping this out of line is deliberate: when LLVM inlined the fixed copy
-// beside the dynamic fallback, it merged both paths back into libc `memcpy`.
-// The isolated fixed-size body compiles to inline vector moves.
+// `#[inline(never)]` is load-bearing: an isolated fixed-size body compiles to
+// inline vector moves, whereas merging it with the dynamic fallback lets LLVM
+// fold both into a libc `memcpy` call. Do not inline this or fuse it with the
+// dynamic path without re-checking the generated code.
 #[inline(never)]
 unsafe fn copy_fixed_bytes_nonoverlapping(src: *const u8, dst: *mut u8) {
     // SAFETY: the caller guarantees both regions cover `FIXED_COPY_BYTES`.
@@ -202,16 +219,18 @@ impl<'a, T> Uninit<'a, [T]> {
         let slice_ptr = self.ptr.as_non_null();
         let len = slice_ptr.len();
         debug_assert_eq!(src.len(), len, "init_clone_from_slice: source length must match reservation");
-        // Keep fixed clone sites visible to LLVM. A conventional iterator
-        // loop made it coalesce each short trivial slice into an out-of-line
-        // `memcpy`; this shape instead produced inline vector copies in
-        // disassembly while the guard preserves panic cleanup.
+        // The `CLONE_UNROLL` clone sites are written out individually so LLVM
+        // keeps them visible and emits inline vector copies for short
+        // trivially-cloneable slices. Both a plain iterator loop and a
+        // constant-trip-count inner loop over `CLONE_UNROLL` coalesce the
+        // copies into out-of-line `memcpy` calls instead, so neither
+        // simplification is safe to apply without re-checking the disassembly.
         // SAFETY: `dst` has `len` uninitialized `T` slots, `src` has the same
         // length, and the guard drops exactly the initialized prefix on panic.
         unsafe {
             let dst = slice_ptr.as_ptr().cast::<T>();
             let mut guard = InitGuard { dst, initialized: 0 };
-            while len - guard.initialized >= 8 {
+            while len - guard.initialized >= CLONE_UNROLL {
                 let index = guard.initialized;
                 dst.add(index).write((*src.as_ptr().add(index)).clone());
                 guard.initialized += 1;

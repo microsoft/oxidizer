@@ -342,6 +342,12 @@ fn assert_send_sync<T: Send + Sync>() {}
 static_assertions::assert_not_impl_any!(Rc<u32>: Send, Sync);
 static_assertions::assert_not_impl_any!(Alloc<'static, u32>: Send, Sync);
 
+// `!Sync` is the sole barrier keeping allocation on one thread at a time, which
+// is what licenses the non-atomic chunk directory and the unchecked slot
+// indexing that reads it. `Pool<T, A>` is `Send` without `T: Send`, so no bound
+// on the element type stands behind this one.
+static_assertions::assert_not_impl_any!(Pool<u32>: Sync);
+
 #[test]
 fn auto_trait_bounds() {
     assert_send::<Pool<u32>>();

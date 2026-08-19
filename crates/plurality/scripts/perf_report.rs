@@ -46,6 +46,15 @@ const CLONE_OPS: &[(&str, &str)] = &[
     ("clone/arc_clone", "`Arc<T>` clone + drop"),
 ];
 
+/// The cost of serving many types from one pool, against the typed pool doing
+/// the same work. The first entry is the baseline every other row is compared
+/// against.
+const TYPE_ERASURE_OPS: &[(&str, &str)] = &[
+    ("alloc/box_val", "`Pool<T>` — one type"),
+    ("alloc/multi_box_val", "`MultiPool` — one layout"),
+    ("alloc/multi_box_val_spread", "`MultiPool` — sixteen layouts"),
+];
+
 /// The cross-crate allocate+free comparison. The first entry is the baseline
 /// every other row is compared against.
 const COMPARISON_OPS: &[(&str, &str)] = &[
@@ -65,6 +74,10 @@ const COMPARISON_OPS: &[(&str, &str)] = &[
 /// The first entry is the baseline every other row is compared against.
 const DYN_BOX_OPS: &[(&str, &str)] = &[
     ("dyn_box/plurality_box", "plurality — `Box<dyn Trait>`"),
+    (
+        "dyn_box/plurality_multi_box",
+        "plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous)",
+    ),
     (
         "dyn_box/infinity_pinned",
         "infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>`",
@@ -128,6 +141,7 @@ fn run(fast: bool) -> Result<(), String> {
     let expected = HANDLE_OPS
         .iter()
         .chain(CLONE_OPS)
+        .chain(TYPE_ERASURE_OPS)
         .chain(COMPARISON_OPS)
         .chain(DYN_BOX_OPS)
         .map(|(key, _)| *key);
@@ -346,6 +360,7 @@ fn build_report(crit: &[(String, f64)], graph: &Graph) -> String {
     );
 
     emit_handle_costs(&mut out, crit);
+    emit_type_erasure(&mut out, crit);
     emit_comparison(&mut out, crit);
     emit_graph_churn(&mut out, graph);
     emit_dyn_box(&mut out, crit);
@@ -379,6 +394,35 @@ fn emit_handle_costs(out: &mut String, crit: &[(String, f64)]) {
     out.push('\n');
     out.push_str("[`Alloc`]: https://docs.rs/plurality/latest/plurality/struct.Alloc.html\n");
     out.push_str("[`Box`]: https://docs.rs/plurality/latest/plurality/struct.Box.html\n\n");
+}
+
+fn emit_type_erasure(out: &mut String, crit: &[(String, f64)]) {
+    let baseline = crit_per_op(crit, TYPE_ERASURE_OPS[0].0);
+
+    out.push_str("## Cost of serving many types from one pool\n\n");
+    out.push_str(
+        "What dropping the element type costs. [`MultiPool`] accepts values of \
+         any type, and finds the right slot size by looking the value's layout \
+         up in a directory of the layouts it has seen; a `Pool<T>` knows its \
+         slot size at compile time and looks nothing up. The lookup is a linear \
+         scan, so the rows below hold the number of distinct layouts at one and \
+         at sixteen, the latter with the measured layout registered last so the \
+         scan runs its full length. Price type erasure at the step from the \
+         first row to either of the others, not at the difference between them: \
+         the longer scan executes materially more instructions, but the \
+         processor overlaps it with the pool's own pointer chasing, and what \
+         remains is smaller than the effect of heap and code placement, which \
+         this benchmark does not control. `cargo bench --bench criterion`.\n\n",
+    );
+    out.push_str("| Pool | Allocate + free | Δ vs `Pool<T>` |\n|---|---:|---:|\n");
+    for (key, label) in TYPE_ERASURE_OPS {
+        let time = crit_per_op(crit, key);
+        let _ = writeln!(out, "| {} | {} | {} |", label, fmt_ns(time), fmt_ratio(time, baseline));
+    }
+    out.push('\n');
+    out.push_str(
+        "[`MultiPool`]: https://docs.rs/plurality/latest/plurality/struct.MultiPool.html\n\n",
+    );
 }
 
 fn emit_comparison(out: &mut String, crit: &[(String, f64)]) {
@@ -454,8 +498,11 @@ fn emit_dyn_box(out: &mut String, crit: &[(String, f64)]) {
          single-threaded, lock-free allocation; infinity-pool's `PinnedPool` \
          variants support concurrent, lock-based allocation with `Send` \
          handles, while their faster `Local` variants make both pool and \
-         handles single-threaded. The `BlindPool` rows additionally support \
-         heterogeneous layouts and therefore pay for more capability. Other \
+         handles single-threaded. The rows marked heterogeneous accept values \
+         of any type in one pool and therefore pay for more capability; each \
+         row here also unsizes a handle and makes a virtual call, so the cost \
+         of type erasure alone is the one measured above rather than the \
+         difference between these rows. Other \
          surveyed pool crates return keys or pool-borrowing guards rather than \
          owning fat-pointer handles. `cargo bench --bench criterion`.\n\n",
     );

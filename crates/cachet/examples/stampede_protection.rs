@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use cachet::{Cache, CacheEntry, CacheTier, Error};
+use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};
 use tick::Clock;
 
 #[derive(Debug, Clone)]
@@ -23,8 +23,8 @@ impl CacheTier<String, String> for SlowBackend {
         Ok(Some(CacheEntry::new(format!("value_for_{key}"))))
     }
 
-    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<(), Error> {
-        Ok(())
+    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, _: &String) -> Result<(), Error> {
