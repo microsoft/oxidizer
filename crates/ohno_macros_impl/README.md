@@ -13,9 +13,9 @@
 
 </div>
 
-Implementation of the macros for the [`ohno`][__link0] crate.
+Implementation of the procedural macros for the [`ohno`][__link0] crate.
 
-## Macros
+This crate holds the logic behind:
 
 * `#[derive(Error)]` - Automatically implement error traits
 * `#[enrich_err("message")]` - Add error enrichment with file/line information to function errors
