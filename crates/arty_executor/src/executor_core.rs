@@ -70,7 +70,7 @@ struct ReentrancySafeState {
     /// In shutdown mode (`Some`), all tasks are considered completed and the only thing we do is
     /// wait for them to become inert (which may be driven by uncontrollable actions of foreign
     /// threads). New tasks can no longer be scheduled in this mode (a panic will occur). If the
-    /// deadline is reached without a successful shutdown, we terminate the process and try report
+    /// deadline is reached without a successful shutdown, we terminate the process and try to report
     /// the underlying reasons.
     shutdown_deadline: Option<Instant>,
 }
@@ -236,7 +236,7 @@ impl ExecutorCore {
             task_ref,
         );
 
-        // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+        // SAFETY: The task is alive (we own it and just created it) and we are on the thread
         // where it was created (because we just created it). The executor is the only thing that
         // creates references to the tasks and it only ever creates temporary non-overlapping
         // references narrowly bounded to individual code blocks, ensuring that aliasing rules
@@ -366,7 +366,7 @@ impl ExecutorCore {
         // been awakened. This scales very poorly with large (1000+) task sets, which
         // is why we avoid it if at all possible.
         state_exclusive.inactive.retain(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
             // references narrowly bounded to individual code blocks, ensuring that aliasing rules
@@ -389,7 +389,7 @@ impl ExecutorCore {
         let inactive_before = state_exclusive.inactive.len();
 
         while let Some(task_ref) = state_exclusive.active.pop_front() {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
             // references narrowly bounded to individual code blocks, ensuring that aliasing rules
@@ -400,7 +400,7 @@ impl ExecutorCore {
             match task.poll() {
                 task::Poll::Ready(()) => {
                     // The task has completed, so we can move it to the completed list.
-                    // It will sit there until it signals `is_inert()` at which point is is dropped.
+                    // It will sit there until it signals `is_inert()` at which point it is dropped.
                     // It may sit in the `completed` list essentially forever, for example if
                     // something is still holding its waker. We generally hope this is not the
                     // case, though, since that would be wasteful, but we allow it technically.
@@ -446,7 +446,7 @@ impl ExecutorCore {
         // We drop all completed tasks that are inert, which means they have
         // 1) been polled to completion (or aborted); 2) no remaining demands on their resources.
         state_exclusive.completed.retain(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
             // references narrowly bounded to individual code blocks, ensuring that aliasing rules
@@ -539,7 +539,7 @@ impl ExecutorCore {
         });
 
         for task_ref in active.drain(..).chain(inactive.drain()).chain(new.drain(..)) {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
             // references narrowly bounded to individual code blocks, ensuring that aliasing rules
@@ -648,7 +648,7 @@ impl ExecutorCore {
         // wrap the true waker in a diagnostic waker, remembering the backtrace identifying where
         // it was created. These are what we log here - where was every (remaining) waker cloned.
         state_exclusive.completed.iter().for_each(|task_ref| {
-            // SAFETY: The task is alive (we own it and just created it) and we are on the the thread
+            // SAFETY: The task is alive (we own it and just created it) and we are on the thread
             // where it was created (because we just created it). The executor is the only thing that
             // creates references to the tasks and it only ever creates temporary non-overlapping
             // references narrowly bounded to individual code blocks, ensuring that aliasing rules

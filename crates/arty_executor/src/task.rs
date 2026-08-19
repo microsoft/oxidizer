@@ -294,7 +294,7 @@ pub(crate) trait TypeErasedTask {
     /// regard to what `is_inert()` is expected to return.
     fn abort(self: Pin<&Self>);
 
-    /// Initializes the the task, providing it the wake signal that it needs to enable polling
+    /// Initializes the task, providing it the wake signal that it needs to enable polling
     ///
     /// # Safety
     ///

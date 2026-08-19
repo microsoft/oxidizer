@@ -31,6 +31,7 @@ pub enum CycleOutcome {
 
     /// The executor has completed shutdown and is ready to be dropped.
     ///
-    /// Attempting additional executor processing cycles in this state will panic.
+    /// Additional processing cycles are unnecessary but harmless and continue returning
+    /// `Shutdown`.
     Shutdown,
 }

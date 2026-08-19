@@ -63,7 +63,7 @@ use crate::{CycleOutcome, ExecutorBuilder, ExecutorCore, TaskSet};
 /// * Some future awaited by a task failed to cancel an ongoing `await` operation when the future
 ///   was dropped. This suggests a resource management defect in the future.
 /// * A [`JoinHandle`][1] remains alive somewhere with an independent lifetime (e.g. in
-///   a `thread_static!` variable). This suggests a resource management defect in whatever logic
+///   a `thread_local!` variable). This suggests a resource management defect in whatever logic
 ///   placed the [`JoinHandle`][1] there.
 ///
 /// If the app is a debug build (`debug_assertions` is set) and `RUST_BACKTRACE=1` is defined,
@@ -88,7 +88,7 @@ impl Executor {
         Self { core: Rc::new(core) }
     }
 
-    /// Creates a new handle to the set of tasks registered with with the executor. You can use
+    /// Creates a new handle to the set of tasks registered with the executor. You can use
     /// this to register additional tasks.
     #[must_use]
     pub fn tasks(&self) -> TaskSet {
