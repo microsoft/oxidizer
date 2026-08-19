@@ -26,6 +26,22 @@ fn set_reference_marker(marker: &Cell<bool>) {
     marker.set(true);
 }
 
+/// Records that the current chunk has served a local reference — an
+/// arena-lifetime handout that carries no refcount of its own — so the arena
+/// pins the chunk on `retired_local` when it rotates out instead of reclaiming
+/// it early.
+///
+/// Callers must run this *before* the bump cursor is committed, so a chunk can
+/// never hold committed local storage while still looking reclaimable. The load
+/// guard keeps the steady state store-free; only the false-to-true transition
+/// writes, and that transition is cold.
+#[inline]
+fn mark_local_reference(marker: &Cell<bool>) {
+    if !marker.get() {
+        set_reference_marker(marker);
+    }
+}
+
 /// Branch-layout hint for the uncommon chunk-exhaustion path. The workspace
 /// Rust 1.93 MSRV predates `core::hint::cold_path`.
 #[cold]
@@ -178,15 +194,12 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         self.try_alloc_before_commit(size, align, || {})
     }
 
-    /// Local-reference form of [`Self::try_alloc`].
+    /// [`Self::try_alloc`] that also records the reservation in `marker`.
+    /// See [`mark_local_reference`] for what the marker guarantees.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     fn try_alloc_local(&self, size: usize, align: usize, marker: &Cell<bool>) -> Option<InChunk<u8>> {
-        self.try_alloc_before_commit(size, align, || {
-            if !marker.get() {
-                set_reference_marker(marker);
-            }
-        })
+        self.try_alloc_before_commit(size, align, || mark_local_reference(marker))
     }
 
     /// Shared allocation core with a success-only action immediately before the
@@ -239,7 +252,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         Some(Uninit::new(bytes.cast::<T>()))
     }
 
-    /// Local-reference form of [`Self::try_alloc_uninit`].
+    /// [`Self::try_alloc_uninit`] that also records the reservation in
+    /// `marker`. See [`mark_local_reference`].
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_local<T>(&self, marker: &Cell<bool>) -> Option<Uninit<'_, T>> {
@@ -268,15 +282,12 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         self.try_alloc_bytes_before_commit(len, || {})
     }
 
-    /// Local-reference form of [`Self::try_alloc_bytes`].
+    /// [`Self::try_alloc_bytes`] that also records the reservation in
+    /// `marker`. See [`mark_local_reference`].
     #[inline]
     #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin
     pub(crate) fn try_alloc_bytes_local(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [u8]>> {
-        self.try_alloc_bytes_before_commit(len, || {
-            if !marker.get() {
-                set_reference_marker(marker);
-            }
-        })
+        self.try_alloc_bytes_before_commit(len, || mark_local_reference(marker))
     }
 
     #[inline]
@@ -317,7 +328,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         Some(Uninit::new(bytes.into_slice::<T>(len)))
     }
 
-    /// Local-reference form of [`Self::try_alloc_uninit_slice`].
+    /// [`Self::try_alloc_uninit_slice`] that also records the reservation in
+    /// `marker`. See [`mark_local_reference`].
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_uninit_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {
         let size = mem::size_of::<T>().checked_mul(len)?;
@@ -402,11 +414,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         meta_bytes: usize,
         marker: &Cell<bool>,
     ) -> Option<NonNull<u8>> {
-        self.try_alloc_smart_prefixed_before_commit::<S>(payload_bytes, value_align, meta_bytes, || {
-            if !marker.get() {
-                set_reference_marker(marker);
-            }
-        })
+        self.try_alloc_smart_prefixed_before_commit::<S>(payload_bytes, value_align, meta_bytes, || mark_local_reference(marker))
     }
 
     #[inline]
@@ -518,7 +526,8 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         unsafe { self.try_alloc_freezable_slice_with_size::<T>(len, payload_bytes) }
     }
 
-    /// Local-reference form of [`Self::try_alloc_freezable_slice`].
+    /// [`Self::try_alloc_freezable_slice`] that also records the reservation
+    /// in `marker`. See [`mark_local_reference`].
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
     pub(crate) fn try_alloc_freezable_slice_local<T>(&self, len: usize, marker: &Cell<bool>) -> Option<Uninit<'_, [T]>> {

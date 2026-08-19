@@ -487,7 +487,7 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_fill_iter<T, I: ExactSizeIterator<Item = T>>(&self, iter: I) -> Result<Alloc<'_, [T]>, AllocError> {
         reject_over_aligned::<T>()?;
         let len = iter.len();
-        let slot = self.alloc_slice_fill_iter_raw::<T, I>(iter, len)?;
+        let slot = self.alloc_slice_fill_iter_raw::<T, I>(len, iter)?;
         // SAFETY: `alloc_slice_fill_iter_raw` initialized exactly `len`
         // elements in the unique arena slot returned.
         Ok(unsafe { adopt_slice_with_len(slot, len) })
@@ -499,7 +499,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// continuation out of line avoids materializing iterator state on the
     /// common path. The iterator is consumed only on success arms that return.
     #[inline(always)]
-    fn alloc_slice_fill_iter_raw<T, I: Iterator<Item = T>>(&self, iter: I, len: usize) -> Result<&mut [T], AllocError> {
+    fn alloc_slice_fill_iter_raw<T, I: Iterator<Item = T>>(&self, len: usize, iter: I) -> Result<&mut [T], AllocError> {
         if len == 0 {
             // Drop the iterator without consuming it: the contract is
             // "fill `len` slots from the iterator", so a zero-length
@@ -560,7 +560,7 @@ mod tests {
         let arena = Arena::new();
         let _prime = arena.alloc(0_u8);
 
-        let slice = arena.alloc_slice_fill_iter_raw([1_u8, 2, 3].into_iter(), 3).unwrap();
+        let slice = arena.alloc_slice_fill_iter_raw(3, [1_u8, 2, 3].into_iter()).unwrap();
 
         assert_eq!(slice, [1, 2, 3]);
     }
