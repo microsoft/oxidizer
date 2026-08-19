@@ -343,3 +343,62 @@ fn skipped_non_send_field_with_manual_send_is_usable() {
     assert_eq!(value.tracked.relocations, 1);
     assert_eq!(*value.cache, 7, "the skipped field is left untouched");
 }
+
+// The three cases below pin why the `Self: Send` obligation must be emitted unconditionally
+// rather than gated on the field type syntactically naming a generic parameter. Each one has
+// a `Send`-ness that such a scan cannot see.
+
+/// A marker-only type whose argument is not `Send`, made `Send` by hand.
+#[derive(ThreadAware)]
+struct ManualSendMarker(PhantomData<Rc<()>>);
+
+// SAFETY: test-only. The marker holds no value.
+unsafe impl Send for ManualSendMarker {}
+
+struct MaybeSend<const N: usize>(*const ());
+
+// SAFETY: test-only. Only this one const value is declared thread-safe.
+unsafe impl Send for MaybeSend<0> {}
+
+/// `Send`-ness depending on a const parameter, which a type-parameter scan never sees.
+#[derive(ThreadAware)]
+struct ConstDependent<const N: usize> {
+    tracked: Tracker,
+    marker: PhantomData<MaybeSend<N>>,
+}
+
+macro_rules! hidden_generic {
+    () => {
+        T
+    };
+}
+
+/// A generic hidden behind a type macro, so no `T` token is visible before expansion.
+#[derive(ThreadAware)]
+struct MacroHidden<T> {
+    tracked: Tracker,
+    marker: PhantomData<hidden_generic!()>,
+}
+
+#[test]
+fn send_ness_invisible_to_a_syntactic_scan_still_compiles() {
+    let (source, destination) = affinity_pair();
+
+    assert_thread_aware::<ManualSendMarker>();
+    assert_thread_aware::<ConstDependent<0>>();
+    assert_thread_aware::<MacroHidden<i32>>();
+
+    let mut value = ConstDependent::<0> {
+        tracked: Tracker::default(),
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+    assert_eq!(value.tracked.relocations, 1);
+
+    let mut hidden = MacroHidden::<i32> {
+        tracked: Tracker::default(),
+        marker: PhantomData,
+    };
+    hidden.relocate(source, destination);
+    assert_eq!(hidden.tracked.relocations, 1);
+}
