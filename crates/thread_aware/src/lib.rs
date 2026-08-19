@@ -239,14 +239,21 @@ pub use core::ThreadAware;
 /// Bounds follow from whether a field is relocated:
 /// * A generic type parameter reachable through a relocated field receives a
 ///   `::thread_aware::ThreadAware` bound.
-/// * A field that is never relocated - a `PhantomData<..>` marker, or one annotated with
-///   `#[thread_aware(skip)]` - instead produces a `where` predicate requiring that field's
-///   type to be [`Send`], which the `ThreadAware: Send` supertrait demands.
+/// * If any field is never relocated - a `PhantomData<..>` marker, or one annotated with
+///   `#[thread_aware(skip)]` - a single `where Self: Send` predicate is added, since the
+///   `ThreadAware: Send` supertrait still has to hold.
+/// * A `PhantomData<..>` nested inside a relocated field instead gets a
+///   `where PhantomData<..>: ThreadAware` predicate, which the compiler reduces through that
+///   marker's own no-op impl.
 ///
-/// The `Send` obligation is placed on the field type itself rather than on the type
-/// parameters named inside it, so shapes such as `PhantomData<&'a T>` (`Send` only when
-/// `T: Sync`) and `PhantomData<Arc<T>>` (`Send` only when `T: Send + Sync`) are bound
-/// correctly.
+/// The `Send` obligation is deliberately stated on `Self` rather than per field. Binding the
+/// parameters named inside a marker would be unsound - `PhantomData<&'a T>` is `Send` only
+/// when `T: Sync` - and binding each field type would be too strong, rejecting types made
+/// `Send` by a manual `unsafe impl`, which is the usual idiom for raw-pointer markers and the
+/// main reason `#[thread_aware(skip)]` exists.
+///
+/// Note that `PhantomData` is recognised syntactically, so a distinct type whose name happens
+/// to end in `PhantomData` is also treated as a marker and left out of the generated body.
 ///
 /// # Example
 /// ```rust

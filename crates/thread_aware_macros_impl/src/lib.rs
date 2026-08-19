@@ -94,107 +94,112 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
         Data::Union(_) => GenericUsage::default(),
     };
 
+    let mut thread_aware_path = root_path.clone();
+    thread_aware_path.segments.push(parse_quote!(ThreadAware));
+
     for param in &mut generics.params {
         let GenericParam::Type(ty_param) = param else {
             continue;
         };
 
         if usage.relocated.contains(&ty_param.ident) {
-            let already = ty_param.bounds.iter().any(|b| {
-                matches!(
-                    b,
-                    syn::TypeParamBound::Trait(trait_bound)
-                        if trait_bound.path.segments.last().is_some_and(|seg| seg.ident == "ThreadAware")
-                )
-            });
+            let already = ty_param
+                .bounds
+                .iter()
+                .any(|b| matches!(b, syn::TypeParamBound::Trait(t) if is_same_trait(&t.path, &thread_aware_path)));
             if !already {
-                let mut ta_path = root_path.clone();
-                ta_path.segments.push(parse_quote!(ThreadAware));
-                ty_param.bounds.push(parse_quote!(#ta_path));
+                ty_param.bounds.push(parse_quote!(#thread_aware_path));
             }
         }
     }
 
-    // Types that are present but never relocated still have to be `Send`, because the
-    // generated impl must satisfy the `ThreadAware: Send` supertrait.
+    // Fields that are never relocated - `PhantomData` markers and `#[thread_aware(skip)]`
+    // fields - still have to satisfy the `ThreadAware: Send` supertrait.
     //
-    // The obligation is placed on the type itself rather than on its type parameters.
-    // Reducing `PhantomData<X>` to the parameters named inside `X` and binding each by
-    // `Send` is not sound: `&'a T` is `Send` only when `T: Sync`, `Arc<T>` only when
-    // `T: Send + Sync`, and `<T as Tr>::Assoc` says nothing about `T` at all. Deferring
-    // to the compiler gets every shape right and needs no per-shape reasoning.
-    if !usage.send_required.is_empty() {
+    // The obligation is stated once, on `Self`, rather than per field. Two earlier attempts
+    // were unsound. Binding the type parameters named inside `PhantomData<X>` by `Send` is
+    // wrong because `&'a T` is `Send` only when `T: Sync` and `Arc<T>` only when
+    // `T: Send + Sync`. Binding the field type itself is wrong because it is strictly
+    // stronger than what is required: a type made `Send` by a manual `unsafe impl` - the
+    // standard idiom for raw-pointer and variance markers, and the reason
+    // `#[thread_aware(skip)]` exists - would carry a predicate such as
+    // `where *const T: Send` that no instantiation can ever prove.
+    //
+    // `Self: Send` is exactly the obligation, and it is discharged either structurally or
+    // by that manual `unsafe impl`.
+    if usage.has_unrelocated_field {
+        let name = &input.ident;
+        let (_, ty_generics, _) = input.generics.split_for_impl();
+        let self_ty: Type = parse_quote!(#name #ty_generics);
+        generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote!(#self_ty: ::core::marker::Send));
+    }
+
+    // A marker nested inside a relocated field is a different case: the enclosing field is
+    // relocated, so it must implement `ThreadAware`, which for a tuple or array means every
+    // element must too. `Self: Send` cannot discharge that, because a `Send` bound on the
+    // whole type does not decompose backwards into a bound on one nested marker.
+    //
+    // Stating `PhantomData<X>: ThreadAware` lets the compiler reduce it through the marker's
+    // own impl to `X: ?Sized + Send`, which is correct for every shape of `X`.
+    if !usage.thread_aware_required.is_empty() {
         let where_clause = generics.make_where_clause();
-        for ty in &usage.send_required {
-            where_clause.predicates.push(parse_quote!(#ty: ::core::marker::Send));
+        for ty in &usage.thread_aware_required {
+            where_clause.predicates.push(parse_quote!(#ty: #thread_aware_path));
         }
     }
 
     Ok(generics)
 }
 
-/// How each field contributes to the bounds of the generated impl.
+/// Reports whether `candidate` names the same trait the derive would emit.
 ///
-/// The two categories carry different obligations: a type parameter reachable through a
-/// relocated field must implement `ThreadAware`, while a field that is never relocated
-/// only has to be `Send`.
+/// Compares the segment idents, so the fully qualified form the derive emits matches the
+/// unprefixed form a user typically writes, and a bare single-segment `ThreadAware` from a
+/// `use` matches too. Matching only the final segment - as this once did - treats an
+/// unrelated `some_crate::ThreadAware` as the real trait and suppresses the bound the
+/// generated body needs.
+fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
+    let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
+    let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();
+
+    candidate_idents == emitted_idents || candidate_idents == ["ThreadAware"]
+}
+
+/// How the fields of a type contribute to the bounds of the generated impl.
 #[derive(Default)]
 struct GenericUsage {
-    /// Type parameters reachable through a field that is actually relocated.
+    /// Type parameters reachable through a relocated field; each is bound by `ThreadAware`.
     relocated: HashSet<syn::Ident>,
 
-    /// Types that are never relocated and so only need a `Send` bound, in the order
-    /// they were found.
-    send_required: Vec<Type>,
+    /// `PhantomData` markers nested inside a relocated field, which the enclosing field's
+    /// own `ThreadAware` obligation reaches, in discovery order.
+    thread_aware_required: Vec<Type>,
 
-    /// Rendered form of everything in `send_required`, used to suppress duplicates.
-    seen_send: HashSet<String>,
+    /// Rendered form of `thread_aware_required`, used to suppress duplicates.
+    seen: HashSet<String>,
+
+    /// Whether any field is present but never relocated, which is what makes the `Self: Send`
+    /// predicate necessary.
+    has_unrelocated_field: bool,
 }
 
 impl GenericUsage {
-    fn require_send(&mut self, ty: &Type) {
-        if self.seen_send.insert(ty.to_token_stream().to_string()) {
-            self.send_required.push(ty.clone());
+    fn require_thread_aware(&mut self, ty: &Type) {
+        if self.seen.insert(ty.to_token_stream().to_string()) {
+            self.thread_aware_required.push(ty.clone());
         }
     }
 
     fn merge(&mut self, other: Self) {
         self.relocated.extend(other.relocated);
-        for ty in &other.send_required {
-            self.require_send(ty);
+        self.has_unrelocated_field |= other.has_unrelocated_field;
+        for ty in &other.thread_aware_required {
+            self.require_thread_aware(ty);
         }
     }
-}
-
-/// Reports whether `ty` names any of the type's own generic parameters.
-///
-/// Scans tokens rather than matching on [`Type`] variants so that every shape is covered,
-/// including qualified paths, bare functions and const-generic expressions. Over-reporting
-/// is harmless: it only ever adds a `Send` predicate that is already satisfied.
-fn mentions_generic(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
-    fn scan(tokens: TokenStream2, generic_idents: &HashSet<syn::Ident>) -> bool {
-        tokens.into_iter().any(|tree| match tree {
-            proc_macro2::TokenTree::Ident(ident) => generic_idents.contains(&ident),
-            proc_macro2::TokenTree::Group(group) => scan(group.stream(), generic_idents),
-            _ => false,
-        })
-    }
-
-    scan(ty.to_token_stream(), generic_idents)
-}
-
-/// Returns the type argument of a `PhantomData<..>` path, or `None` if it has none.
-///
-/// Takes the path rather than the [`Type`] because the only caller has already matched
-/// [`Type::Path`]; accepting a `Type` would add a branch that can never be reached.
-fn phantom_data_argument(path: &syn::Path) -> Option<&Type> {
-    let PathArguments::AngleBracketed(ab) = &path.segments.last()?.arguments else {
-        return None;
-    };
-    ab.args.iter().find_map(|arg| match arg {
-        syn::GenericArgument::Type(t) => Some(t),
-        _ => None,
-    })
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
@@ -209,12 +214,13 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
         })
         .collect();
     for field in fields {
-        // A skipped field is never relocated, so it needs no `ThreadAware` bound - but it
-        // is still part of the type, so it must be `Send` like any other unrelocated field.
-        if parse_field_attrs(&field.attrs)?.skip {
-            if mentions_generic(&field.ty, &generic_idents) {
-                usage.require_send(&field.ty);
-            }
+        // Mirror exactly what the body generators skip. A skipped field and a top-level
+        // marker are both absent from the generated body, so neither needs a `ThreadAware`
+        // bound; both are covered by the `Self: Send` predicate. Keeping this test identical
+        // to the one in `struct_gen`/`enum_gen` is what stops the header and the body
+        // disagreeing about which fields are relocated.
+        if parse_field_attrs(&field.attrs)?.skip || is_phantom_data(&field.ty) {
+            usage.has_unrelocated_field = true;
             continue;
         }
         collect_generics_in_type(&field.ty, &generic_idents, &mut usage)?;
@@ -227,19 +233,10 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
     match ty {
         Type::Path(TypePath { path, .. }) => {
             if is_phantom_data(ty) {
-                // Not relocated, so nothing here needs `ThreadAware`. Bind the marker's
-                // argument instead of dropping it, which is what left phantom-only
-                // parameters unbound.
-                //
-                // The predicate goes on the argument `X` rather than on `PhantomData<X>`:
-                // `X: Send` yields both `PhantomData<X>: Send` (for the supertrait) and
-                // `PhantomData<X>: ThreadAware` (when the marker is nested inside a
-                // relocated field), whereas `PhantomData<X>: Send` yields neither.
-                if let Some(argument) = phantom_data_argument(path)
-                    && mentions_generic(argument, generic_idents)
-                {
-                    acc.require_send(argument);
-                }
+                // Only reachable for a marker nested inside a relocated field: top-level
+                // markers are filtered out by the caller. The enclosing field's `ThreadAware`
+                // obligation reaches this marker, so state it and let the compiler reduce it.
+                acc.require_thread_aware(ty);
                 return Ok(());
             }
             for segment in &path.segments {

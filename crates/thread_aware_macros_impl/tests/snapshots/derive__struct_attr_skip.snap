@@ -2,7 +2,10 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl ::thread_aware::ThreadAware for Foo {
+impl ::thread_aware::ThreadAware for Foo
+where
+    Foo: ::core::marker::Send,
+{
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,

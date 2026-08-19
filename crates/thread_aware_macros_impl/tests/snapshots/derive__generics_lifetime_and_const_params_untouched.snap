@@ -5,7 +5,7 @@ expression: expand(input)
 impl<'a, const N: usize, T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
 for Mixed<'a, N, T>
 where
-    T: ::core::marker::Send,
+    Mixed<'a, N, T>: ::core::marker::Send,
 {
     fn relocate(
         &mut self,
@@ -14,6 +14,5 @@ where
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
         ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
-        ::thread_aware::ThreadAware::relocate(&mut self.2, source, destination);
     }
 }

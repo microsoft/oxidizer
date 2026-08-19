@@ -2,15 +2,16 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T: local::Send> ::thread_aware::ThreadAware for CustomSend<T>
-where
-    T: ::core::marker::Send,
-{
+impl<
+    T: ::thread_aware::ThreadAware,
+    U: ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for AllRelocated<T, U> {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
     }
 }

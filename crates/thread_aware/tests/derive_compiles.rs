@@ -5,6 +5,7 @@
 #![allow(dead_code, reason = "This is a test module")]
 
 use core::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use thread_aware::ThreadAware as _;
@@ -248,6 +249,12 @@ fn skipped_generic_field_needs_only_send() {
 }
 
 /// A real, data-carrying type that merely happens to be named `PhantomData`.
+///
+/// Documented limitation: the derive matches `PhantomData` syntactically, because a macro
+/// cannot resolve a path to the type it names. A look-alike is therefore treated as a marker
+/// and left out of the generated body. Relocating it unconditionally instead was tried and
+/// reverted - it made the body demand `ThreadAware` for a field the bound inference still
+/// treated as a marker, so the two halves disagreed.
 mod lookalike {
     use thread_aware::affinity::Affinity;
 
@@ -262,18 +269,77 @@ mod lookalike {
     }
 }
 
-/// The body generator no longer decides what to relocate by matching the type's name, so a
-/// look-alike carrying real data is relocated like any other field instead of being
-/// silently dropped from the generated body.
 #[derive(ThreadAware)]
-struct HoldsLookalike<T: thread_aware::ThreadAware>(lookalike::PhantomData<T>);
+struct HoldsLookalike<T>(lookalike::PhantomData<T>);
 
 #[test]
-fn type_named_phantom_data_is_relocated_not_skipped() {
+fn type_named_phantom_data_is_treated_as_a_marker() {
     let (source, destination) = affinity_pair();
 
     let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
     value.relocate(source, destination);
 
-    assert_eq!(value.0.value.relocations, 1, "a look-alike must be relocated, not skipped by name");
+    assert_eq!(
+        value.0.value.relocations, 0,
+        "known limitation: a syntactic PhantomData match cannot see through the name"
+    );
+}
+
+// The two cases below pin the `Send` obligation for types made `Send` by a manual
+// `unsafe impl` rather than structurally. Stating that obligation per field - as
+// `where *const T: Send` or `where Rc<T>: Send` - yields a predicate no instantiation can
+// ever prove, so the impl compiles but nothing can use it. Only `Self: Send` is discharged
+// by the manual impl.
+
+fn assert_thread_aware<X: thread_aware::ThreadAware>() {}
+
+/// The standard raw-pointer variance marker.
+#[derive(ThreadAware)]
+struct RawMarker<T> {
+    len: usize,
+    marker: PhantomData<*const T>,
+}
+
+// SAFETY: test-only. The marker carries no value and `RawMarker` owns nothing but a `usize`.
+unsafe impl<T> Send for RawMarker<T> {}
+
+#[test]
+fn phantom_raw_pointer_with_manual_send_is_usable() {
+    assert_thread_aware::<RawMarker<i32>>();
+
+    let (source, destination) = affinity_pair();
+    let mut value = RawMarker::<i32> {
+        len: 3,
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.len, 3);
+}
+
+/// Exactly what `#[thread_aware(skip)]` exists for: a field that is not itself thread-safe.
+#[derive(ThreadAware)]
+struct SkippedNotSend<T> {
+    tracked: Tracker,
+    #[thread_aware(skip)]
+    cache: Rc<T>,
+}
+
+// SAFETY: test-only. The `Rc` is never handed to another thread.
+#[expect(clippy::non_send_fields_in_send_ty, reason = "deliberate: this is the shape `skip` exists for")]
+unsafe impl<T> Send for SkippedNotSend<T> {}
+
+#[test]
+fn skipped_non_send_field_with_manual_send_is_usable() {
+    assert_thread_aware::<SkippedNotSend<i32>>();
+
+    let (source, destination) = affinity_pair();
+    let mut value = SkippedNotSend {
+        tracked: Tracker::default(),
+        cache: Rc::new(7_i32),
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1);
+    assert_eq!(*value.cache, 7, "the skipped field is left untouched");
 }

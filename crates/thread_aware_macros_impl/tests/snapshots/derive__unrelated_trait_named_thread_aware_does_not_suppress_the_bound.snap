@@ -2,10 +2,8 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for PhantomTuple<T>
-where
-    (T,): ::core::marker::Send,
-{
+impl<T: local::ThreadAware + ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
+for CustomTa<T> {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,

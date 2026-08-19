@@ -1,10 +1,10 @@
 ---
 source: crates/thread_aware_macros_impl/tests/derive.rs
-expression: rendered
+expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for PhantomGroup<T>
+impl<T> ::thread_aware::ThreadAware for NestedPhantom<T>
 where
-    T: ::core::marker::Send,
+    core::marker::PhantomData<T>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,

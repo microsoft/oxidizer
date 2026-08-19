@@ -2,10 +2,7 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T: Iterator> ::thread_aware::ThreadAware for PhantomProjection<T>
-where
-    T::Item: ::core::marker::Send,
-{
+impl<T: ThreadAware> ::thread_aware::ThreadAware for PreBoundTa<T> {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,

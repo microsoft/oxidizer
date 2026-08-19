@@ -128,7 +128,7 @@ fn error_unknown_attr() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
-    // PhantomData in named fields relocates via its own no-op impl; the bound is on the argument.
+    // PhantomData in named fields is left out of the generated body; the bound lands on Self.
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithPhantom<T> {
@@ -142,7 +142,7 @@ fn phantom_data_named_fields() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
-    // PhantomData in tuple fields relocates via its own no-op impl; the bound is on the argument.
+    // PhantomData in tuple fields is left out of the generated body; the bound lands on Self.
     let input = quote! {
         #[derive(ThreadAware)]
         struct TupleWithPhantom<T>(Vec<u8>, core::marker::PhantomData<T>);
@@ -202,7 +202,7 @@ fn generics_group_usage_adds_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_unnamed_phantom_data() {
-    // PhantomData in enum unnamed fields relocates via its own no-op impl; the bound is on the argument.
+    // PhantomData in enum unnamed fields is left out of the generated body; the bound lands on Self.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumUnnamedPhantom<T, U> {
@@ -216,7 +216,7 @@ fn enum_unnamed_phantom_data() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_named_phantom_data() {
-    // PhantomData in enum named fields relocates via its own no-op impl; the bound is on the argument.
+    // PhantomData in enum named fields is left out of the generated body; the bound lands on Self.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumNamedPhantom<T, U> {
@@ -259,77 +259,117 @@ fn generics_paren_adds_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_prebound_send_emits_redundant_predicate() {
-    // The `Send` obligation is a where-predicate on the phantom argument, so a parameter
-    // that already carries `Send` inline picks up a redundant but legal duplicate. That is
-    // deliberate: suppressing it required matching the bound by name, which silently
-    // dropped the real bound for any unrelated trait also called `Send`.
+fn phantom_only_generic_gets_self_send_predicate() {
+    // The original defect: a parameter named only inside `PhantomData` used to gain no bound
+    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct PhantomPreBound<T: Send>(core::marker::PhantomData<T>);
+        struct DirectPhantom<T, U>(T, core::marker::PhantomData<U>);
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_prebound_thread_aware_emits_redundant_predicate() {
-    // Likewise for a parameter already bound by `ThreadAware`, which implies `Send`.
+fn phantom_reference_is_not_reduced_to_its_parameter() {
+    // `&'a T` is `Send` only when `T: Sync`. Bounding `T: Send` here produced an impl that
+    // did not compile; the obligation belongs on `Self`, where the compiler reduces it.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct PhantomPreBoundTa<T: ThreadAware>(core::marker::PhantomData<T>);
+        struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_unrelated_trait_named_send_still_gets_predicate() {
-    // A user trait whose last path segment is `Send` must not be mistaken for
-    // `core::marker::Send` and suppress the real obligation.
+fn phantom_raw_pointer_gets_no_unprovable_predicate() {
+    // A structural predicate here would be `where *const T: Send`, which no instantiation can
+    // prove. `Self: Send` is satisfied by the manual `unsafe impl Send` such types carry.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct CustomSend<T: local::Send>(core::marker::PhantomData<T>);
+        struct RawMarker<T>(usize, core::marker::PhantomData<*const T>);
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_concrete_argument_gets_no_predicate() {
-    // The argument names no generic parameter, so there is nothing to constrain.
+fn nested_phantom_gets_thread_aware_predicate() {
+    // The marker sits inside a relocated field, so the enclosing field's own `ThreadAware`
+    // obligation reaches it. `Self: Send` cannot discharge that, as a `Send` bound on the
+    // whole type does not decompose backwards into one on a nested marker.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct ConcretePhantom<T>(T, core::marker::PhantomData<u32>);
+        struct NestedPhantom<T>((core::marker::PhantomData<T>,));
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_without_argument_gets_no_predicate() {
-    // A `PhantomData` written with no type argument has nothing to bind.
+fn skipped_generic_field_gets_self_send_predicate() {
+    // A skipped field is never relocated, so it needs no `ThreadAware` bound.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct BarePhantom<T>(T, core::marker::PhantomData);
+        struct SkippedGeneric<T> {
+            #[thread_aware(skip)]
+            skipped: T,
+        }
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn repeated_phantom_argument_yields_one_predicate() {
-    // The same obligation reached twice must not be emitted twice.
+fn relocated_and_phantom_param_gets_both_obligations() {
+    // A parameter used directly and inside `PhantomData` carries both; treating the two as
+    // mutually exclusive dropped the phantom one.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct DupPhantom<T>(core::marker::PhantomData<T>, core::marker::PhantomData<T>);
+        struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<&'a T>);
     };
     assert_snapshot!(expand(input));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_predicate_appends_to_existing_where_clause() {
+fn unrelated_trait_named_thread_aware_does_not_suppress_the_bound() {
+    // Matching only the final path segment treated `local::ThreadAware` as the real trait and
+    // dropped the bound the generated body needs.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct CustomTa<T: local::ThreadAware>(T);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn prebound_thread_aware_is_not_duplicated() {
+    // The real trait, written by the user, must still suppress the generated duplicate -
+    // otherwise clippy reports the redundancy against the user's own source line.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PreBoundTa<T: ThreadAware>(T);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn no_unrelocated_field_means_no_self_send_predicate() {
+    // Every field is relocated, so `Self: Send` follows from the per-parameter bounds.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct AllRelocated<T, U>(T, U);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn self_send_predicate_appends_to_existing_where_clause() {
     // The generated predicate must extend the user's `where` clause, not replace it.
     let input = quote! {
         #[derive(ThreadAware)]
@@ -354,157 +394,29 @@ fn generics_lifetime_and_const_params_untouched() {
     };
     assert_snapshot!(expand(input));
 }
+
 #[test]
 #[cfg_attr(miri, ignore)]
 fn generics_unused_param_gets_no_bound() {
-    // A type parameter that no field mentions is neither relocated nor phantom,
-    // so it must be left completely unbound.
+    // A type parameter no field mentions must be left completely unbound.
     let input = quote! {
         #[derive(ThreadAware)]
         struct UnusedParam<T, U>(T);
     };
     assert_snapshot!(expand(input));
 }
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_ref_bounds_the_reference_not_the_parameter() {
-    // `&'a T` is `Send` only when `T: Sync`, so the predicate must name the reference
-    // itself. Binding `T: Send` here produced an impl that did not compile.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
-    };
-    assert_snapshot!(expand(input));
-}
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_slice_gets_send_bound() {
-    // An unsized slice payload: `[T]: Send` holds exactly when `T: Send`.
+fn enum_variant_nested_phantom_gets_thread_aware_predicate() {
+    // Exercises merging a nested-marker obligation across enum variants.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct PhantomSlice<T>(core::marker::PhantomData<[T]>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_projection_gets_send_bound() {
-    // `T: Send` says nothing about `T::Item`, so the projection carries the obligation.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomProjection<T: Iterator>(core::marker::PhantomData<T::Item>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn relocated_and_phantom_param_gets_both_obligations() {
-    // A parameter used directly and inside `PhantomData` carries both bounds; treating
-    // the two as mutually exclusive dropped the phantom one.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<&'a T>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn skipped_generic_field_gets_send_bound() {
-    // A skipped field is never relocated, so it needs `Send` rather than `ThreadAware`.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct SkippedGeneric<T> {
-            #[thread_aware(skip)]
-            skipped: T,
+        enum NestedPhantomEnum<T, U> {
+            Wrapped((core::marker::PhantomData<T>,)),
+            Also((core::marker::PhantomData<U>,)),
+            Plain(U),
         }
     };
     assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_tuple_generic_gets_send_bound() {
-    // A generic reachable only through a tuple inside `PhantomData`.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomTuple<T>(core::marker::PhantomData<(T,)>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_array_generic_gets_send_bound() {
-    // A generic reachable only through an array inside `PhantomData`.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomArray<T>(core::marker::PhantomData<[T; 2]>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_paren_generic_gets_send_bound() {
-    // A generic reachable only through a parenthesized type inside `PhantomData`.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomParen<T> {
-            marker: core::marker::PhantomData<(T)>,
-        }
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn phantom_group_generic_gets_send_bound() {
-    // Covers the Type::Group arm inside `PhantomData`, synthesizing the group node
-    // that normally appears only after macro expansion (Delimiter::None).
-    use syn::{TypeGroup, parse_quote, token};
-
-    let mut input: syn::DeriveInput = parse_quote! {
-        #[derive(ThreadAware)]
-        pub struct PhantomGroup<T>(core::marker::PhantomData<T>);
-    };
-
-    // Wrap the `T` argument of `PhantomData<T>` in a synthetic group.
-    if let syn::Data::Struct(ref mut ds) = input.data
-        && let syn::Fields::Unnamed(ref mut fs) = ds.fields
-    {
-        let field = fs.unnamed.first_mut().unwrap();
-        if let syn::Type::Path(ref mut tp) = field.ty {
-            let segment = tp.path.segments.last_mut().unwrap();
-            if let syn::PathArguments::AngleBracketed(ref mut ab) = segment.arguments {
-                let arg = ab.args.first_mut().unwrap();
-                if let syn::GenericArgument::Type(ty) = arg {
-                    let original = ty.clone();
-                    *ty = syn::Type::Group(TypeGroup {
-                        attrs: vec![],
-                        group_token: token::Group {
-                            span: proc_macro2::Span::call_site(),
-                        },
-                        elem: Box::new(original),
-                    });
-                } else {
-                    panic!("unexpected generic argument shape")
-                }
-            } else {
-                panic!("unexpected path arguments shape")
-            }
-        } else {
-            panic!("unexpected field type shape")
-        }
-    } else {
-        panic!("unexpected data shape")
-    }
-
-    let root: syn::Path = syn::parse_quote!(::thread_aware);
-    let ts = derive_thread_aware(quote! {#input}, &root);
-    let rendered = syn::parse_file(&ts.to_string()).map_or_else(|_| ts.to_string(), |f| prettyplease::unparse(&f));
-    assert_snapshot!(rendered);
 }
