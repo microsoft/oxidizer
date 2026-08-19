@@ -30,7 +30,6 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 
 [dev-dependencies]
 insta = { workspace = true }
-mutants = { workspace = true }
 prettyplease = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
