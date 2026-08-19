@@ -7,16 +7,17 @@ use core::fmt;
 /// Why a [`Pool`](crate::Pool) allocation failed.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum ErrorKind {
-    /// Every slot is occupied and the pool cannot grow: it hit the configured
-    /// `max_chunks` cap, or, for an unbounded pool, the addressable
-    /// slot-index ceiling.
+    /// A configured capacity limit was reached: a pool's chunk-growth limit
+    /// (the `max_chunks` cap, or, for an unbounded pool, the addressable
+    /// slot-index ceiling), or a multi pool's `max_layouts` limit on the number
+    /// of internal layout pools.
     CapacityExhausted,
-    /// The backing allocator failed to provide memory for a new chunk.
+    /// The pool could not obtain memory needed for its own use.
     AllocatorFailed,
 }
 
 /// The error returned by the fallible `try_alloc_*` methods of
-/// [`Pool`](crate::Pool).
+/// [`Pool`](crate::Pool) and [`MultiPool`](crate::MultiPool).
 ///
 /// Distinguish the two causes with
 /// [`is_capacity_exhausted`](Self::is_capacity_exhausted) and
@@ -39,21 +40,25 @@ impl AllocError {
         kind: ErrorKind::CapacityExhausted,
     };
 
-    /// The backing allocator failed (see [`is_allocator_failure`]).
+    /// The pool could not obtain required memory (see
+    /// [`is_allocator_failure`]).
     ///
     /// [`is_allocator_failure`]: Self::is_allocator_failure
     pub(crate) const ALLOCATOR_FAILED: Self = Self {
         kind: ErrorKind::AllocatorFailed,
     };
 
-    /// Returns `true` if every slot was occupied and the pool could not grow.
+    /// Returns `true` if a configured capacity limit was reached: either the
+    /// pool may grow no further, or a [`MultiPool`](crate::MultiPool) reached
+    /// its limit on the number of internal layout pools and the request needed
+    /// a new one.
     #[must_use]
     pub fn is_capacity_exhausted(self) -> bool {
         matches!(self.kind, ErrorKind::CapacityExhausted)
     }
 
-    /// Returns `true` if allocation failed because the backing allocator could
-    /// not provide memory for a new chunk.
+    /// Returns `true` if the pool could not obtain memory needed for its own
+    /// use.
     #[must_use]
     pub fn is_allocator_failure(self) -> bool {
         matches!(self.kind, ErrorKind::AllocatorFailed)
@@ -64,7 +69,7 @@ impl fmt::Display for AllocError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.kind {
             ErrorKind::CapacityExhausted => "the pool reached its maximum capacity",
-            ErrorKind::AllocatorFailed => "the backing allocator failed to allocate a new chunk",
+            ErrorKind::AllocatorFailed => "the pool could not obtain required memory",
         })
     }
 }
