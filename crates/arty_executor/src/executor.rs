@@ -509,7 +509,7 @@ mod tests {
 
         executor.begin_shutdown();
 
-        assert_eq!(executor.execute_cycle(), CycleOutcome::Continue);
+        assert_eq!(executor.execute_cycle(), CycleOutcome::Suspend);
 
         drop(join_handle);
 

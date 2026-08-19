@@ -281,7 +281,7 @@ impl ExecutorCore {
 
             let outcome = if self.evaluate_shutdown_completion(&state_exclusive, &state_reentrant) {
                 CycleOutcome::Shutdown
-            } else if state_reentrant.shutdown_deadline.is_some() || self.has_work_to_do(&state_exclusive, &state_reentrant) {
+            } else if self.has_work_to_do(&state_exclusive, &state_reentrant) {
                 // We want to be immediately called again because we may have more work to do.
                 CYCLE_OUTCOME_CONTINUE.with(Event::observe_once);
                 CycleOutcome::Continue
