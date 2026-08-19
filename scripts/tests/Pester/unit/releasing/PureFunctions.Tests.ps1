@@ -310,6 +310,12 @@ Describe 'ConvertFrom-SemverChecksOutput' {
         { ConvertFrom-SemverChecksOutput -Output 'some unexpected tooling error' -PackageName 'foo' } |
             Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
     }
+
+    It 'includes the Windows path-length hint on build failures' -Skip:(-not $IsWindows) {
+        { ConvertFrom-SemverChecksOutput -Output 'LINK : fatal error LNK1104' -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage '*shorten the repository path*'
+    }
+
 }
 
 Describe 'Get-StrongerChangeType' {

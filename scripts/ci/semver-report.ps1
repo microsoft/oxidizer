@@ -214,14 +214,14 @@ try {
         $releaseIsBreaking = Test-IsBreakingChange -oldVersion $baselineVersion -ChangeType $releaseChangeType
 
         Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs v$baselineVersion @ $shortSha..."
-        $PSNativeCommandUseErrorActionPreference = $false
-        $out = & cargo semver-checks --package $cargoName --baseline-rev $baselineSha --all-features --color never 2>&1 | Out-String
+        $semverRun = Invoke-SemverChecksCli -PackageName $cargoName -BaselineSha $baselineSha -RepoRoot $RepoRoot
+        $out = $semverRun.Output
 
         # A build/tool failure makes ConvertFrom-SemverChecksOutput throw (no
         # silent fallback); surface that as a ⚠️ unknown row rather than failing
         # the whole report or misreporting the crate as sufficient.
         try {
-            $changeType = ConvertFrom-SemverChecksOutput -Output $out -ExitCode $LASTEXITCODE -PackageName $cargoName
+            $changeType = ConvertFrom-SemverChecksOutput -Output $out -ExitCode $semverRun.ExitCode -PackageName $cargoName
         } catch {
             Write-Host "cargo semver-checks: $cargoName — analysis FAILED: $($_.Exception.Message)"
             $rows.Add([pscustomobject]@{
