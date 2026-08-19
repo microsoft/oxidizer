@@ -5,7 +5,7 @@
 
 use std::fmt::{self, Debug};
 
-use thread_aware_core::ThreadAware;
+use thread_aware::ThreadAware;
 
 use crate::custom::{CustomSpawner, SpawnCustom};
 use crate::handle::{JoinHandle, JoinHandleInner};
@@ -94,11 +94,11 @@ use crate::handle::{JoinHandle, JoinHandleInner};
 /// contention-free, NUMA-friendly task dispatch. The Tokio variants do not
 /// create per-core state: they ignore relocation and behave identically
 /// regardless of which core they run on.
-#[derive(Clone, thread_aware::ThreadAware)]
+#[derive(Clone, ThreadAware)]
 #[must_use]
 pub struct Spawner(SpawnerKind);
 
-#[derive(Clone, thread_aware::ThreadAware)]
+#[derive(Clone, ThreadAware)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),

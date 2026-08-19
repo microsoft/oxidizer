@@ -3,7 +3,8 @@
 
 use std::borrow::Cow;
 
-use thread_aware_core::{Affinity, ThreadAware};
+use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
 use tick::Clock;
 
 use crate::TelemetryString;

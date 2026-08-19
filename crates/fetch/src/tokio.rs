@@ -15,6 +15,7 @@ use fetch_tls::{TlsBackend, TlsBackendBuilder};
 use http_extensions::Result;
 use hyper_util::rt::TokioIo;
 use templated_uri::BaseUri;
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use crate::custom::{CustomContext, CustomDeps, Isolation};
@@ -26,7 +27,7 @@ use crate::{HttpClient, HttpClientBuilder};
 ///
 /// Contains the necessary dependencies for HTTP client operations in a Tokio
 /// environment, including clock access and memory management.
-#[derive(Debug, Clone, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, ThreadAware)]
 #[fundle::deps]
 pub struct TokioDeps {
     /// Clock for timing operations and timeouts.

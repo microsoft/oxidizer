@@ -49,7 +49,6 @@ jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
-thread_aware_core = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

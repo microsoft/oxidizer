@@ -30,7 +30,6 @@ async-once-cell = { workspace = true }
 dashmap = { workspace = true }
 futures-util = { workspace = true, default-features = false, features = ["std", "alloc"] }
 thread_aware = { workspace = true, default-features = false, features = ["std"] }
-thread_aware_core = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }

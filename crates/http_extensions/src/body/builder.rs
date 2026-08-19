@@ -6,6 +6,7 @@ use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use super::HttpBody;
@@ -41,7 +42,7 @@ use crate::{HttpError, Result};
 /// # Testing
 ///
 /// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
-#[derive(Debug, Clone, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
     memory: MemoryWrapper,
     clock: Clock,
@@ -356,7 +357,7 @@ impl HasMemory for HttpBodyBuilder {
     }
 }
 
-#[derive(Debug, Clone, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, ThreadAware)]
 enum MemoryWrapper {
     Global(GlobalPool),
     Opaque(OpaqueMemory),

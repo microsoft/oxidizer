@@ -4,7 +4,8 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware_core::{Affinity, ThreadAware};
+use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
 
 use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;

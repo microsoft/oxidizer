@@ -34,7 +34,6 @@ tokio = ["dep:tokio"]
 [dependencies]
 futures-channel = { workspace = true, features = ["alloc"] }
 thread_aware = { workspace = true, features = ["derive", "std"] }
-thread_aware_core = { workspace = true }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use nm::{Event, Magnitude};
 use plurality::Pool;
+use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
@@ -35,7 +36,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
-#[derive(Clone, Debug, thread_aware::ThreadAware)]
+#[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
 }
@@ -493,13 +494,12 @@ mod tests {
 
     use static_assertions::assert_impl_all;
     use thread_aware::affinity::pinned_affinities;
-    use thread_aware_core::ThreadAware;
 
     use super::*;
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
-    assert_impl_all!(GlobalPool: thread_aware_core::ThreadAware);
+    assert_impl_all!(GlobalPool: ThreadAware);
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {

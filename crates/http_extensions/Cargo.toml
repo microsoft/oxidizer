@@ -75,7 +75,6 @@ serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 templated_uri = { workspace = true }
 thread_aware = { workspace = true, features = ["derive", "std"] }
-thread_aware_core = { workspace = true }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]

@@ -10,6 +10,7 @@ use http_extensions::HttpResponse;
 use http_extensions::routing::Router;
 use layered::{Intercept, InterceptLayer};
 use opentelemetry::metrics::Meter;
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use crate::handlers::{Logging, LoggingLayer, Metrics, MetricsLayer};
@@ -256,7 +257,7 @@ impl StandardRequestPipeline {
     }
 }
 
-#[derive(Clone, thread_aware::ThreadAware)]
+#[derive(Clone, ThreadAware)]
 pub(crate) struct ConfigureStandardPipeline(
     #[thread_aware(skip)] Arc<dyn Fn(StandardRequestPipeline, PipelineContext) -> StandardRequestPipeline + Send + Sync>,
 );

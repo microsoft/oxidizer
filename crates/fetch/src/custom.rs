@@ -20,8 +20,7 @@ use std::sync::Arc;
 use bytesbuf::mem::GlobalPool;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
-use thread_aware::{PerCore, unaware};
-use thread_aware_core::ThreadAware;
+use thread_aware::{PerCore, ThreadAware, unaware};
 use tick::Clock;
 
 use crate::handlers::TransportHandler;
@@ -30,7 +29,7 @@ use crate::tls::TlsOptions;
 use crate::{HttpClient, HttpClientBuilder};
 
 /// Threading model required by a custom transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ThreadAware)]
 pub enum Isolation {
     /// Each core owns its own pipeline; the factory is invoked once per core.
     Isolated,
@@ -46,7 +45,7 @@ pub enum Isolation {
 /// The `Extras` type parameter (defaulting to `()`) lets the caller thread additional
 /// thread-aware dependencies through to [`CustomContext::extras`] — for example a
 /// connection pool, credential provider, or runtime handle.
-#[derive(Debug, Clone, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, ThreadAware)]
 pub struct CustomDeps<Extras = ()>
 where
     Extras: ThreadAware + Send + Sync + Clone + 'static,
@@ -235,7 +234,7 @@ impl HttpClient {
 
 type TransportFn = Arc<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandler + Send + Sync>;
 
-#[derive(Clone, thread_aware::ThreadAware)]
+#[derive(Clone, ThreadAware)]
 pub(crate) struct Transport {
     #[thread_aware(skip)]
     runtime_name: Cow<'static, str>,

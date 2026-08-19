@@ -44,7 +44,6 @@ nm = { workspace = true, optional = true }
 plurality = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, default-features = false, features = ["derive"] }
-thread_aware_core = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }

@@ -5,6 +5,8 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
+use thread_aware::ThreadAware;
+
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
 use crate::mem::{BlockSize, Memory};
@@ -53,7 +55,7 @@ use crate::mem::{BlockSize, Memory};
 /// data.advance(16);
 /// assert_eq!(data.first_slice().len(), 13); // Remaining 13 bytes in second block.
 /// ```
-#[derive(Clone, Debug, thread_aware::ThreadAware)]
+#[derive(Clone, Debug, ThreadAware)]
 pub struct FixedBlockMemory {
     // Immutable, read-only configuration shared without contention, so there is nothing to relocate.
     #[thread_aware(skip)]
@@ -131,7 +133,6 @@ mod tests {
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
     use thread_aware::affinity::pinned_affinities;
-    use thread_aware_core::ThreadAware;
 
     use super::*;
     use crate::BytesView;

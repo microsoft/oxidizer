@@ -15,7 +15,7 @@ use http_extensions::timeout::ResponseTimeout;
 use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
 use layered::Service;
 use templated_uri::{BaseUri, Uri};
-use thread_aware::PerCore;
+use thread_aware::{PerCore, ThreadAware};
 use tick::{Clock, FutureExt as TimeoutExt};
 
 use crate::pipeline::Pipeline;
@@ -50,7 +50,7 @@ use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 ///
 /// See [crate-level][`crate`] documentation for more details on available configuration options
 /// and advanced usage scenarios.
-#[derive(Debug, Clone, thread_aware::ThreadAware)]
+#[derive(Debug, Clone, ThreadAware)]
 pub struct HttpClient {
     pipeline: HttpClientPipeline,
     body_builder: HttpBodyBuilder,
@@ -370,7 +370,7 @@ impl Service<HttpRequest> for HttpClient {
     }
 }
 
-#[derive(thread_aware::ThreadAware, Clone, Debug)]
+#[derive(ThreadAware, Clone, Debug)]
 pub(super) enum HttpClientPipeline {
     Shared(#[thread_aware(skip)] Arc<Pipeline>),
     Isolated(thread_aware::Arc<Pipeline, PerCore>),
@@ -393,7 +393,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_send() {
-        assert_impl_all!(HttpClient: Send, Sync, Clone, thread_aware_core::ThreadAware);
+        assert_impl_all!(HttpClient: Send, Sync, Clone, ThreadAware);
     }
 
     #[cfg_attr(miri, ignore)]

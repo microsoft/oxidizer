@@ -4,7 +4,7 @@
 #[cfg(not(test))]
 use alloc::boxed::Box;
 
-use thread_aware_core::ThreadAware;
+use thread_aware::ThreadAware;
 
 use crate::mem::Memory;
 

@@ -4,6 +4,8 @@
 #[cfg(not(test))]
 use alloc::boxed::Box;
 
+use thread_aware::ThreadAware;
+
 use crate::mem::{Memory, MemoryShared};
 
 /// Adapter to erase the type of a [`MemoryShared`] implementation.
@@ -11,12 +13,11 @@ use crate::mem::{Memory, MemoryShared};
 /// This adapter adds some inefficiency due to additional indirection overhead for
 /// every memory reservation, so avoid this adapter if you can tolerate alternatives (generics).
 ///
-/// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards
-/// [`ThreadAware`](thread_aware_core::ThreadAware)
+/// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards [`ThreadAware`]
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
-#[derive(Debug, thread_aware::ThreadAware)]
+#[derive(Debug, ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,
 }
@@ -75,7 +76,6 @@ mod tests {
 
     use static_assertions::assert_impl_all;
     use thread_aware::affinity::{Affinity, pinned_affinities};
-    use thread_aware_core::ThreadAware;
 
     use super::*;
     use crate::mem::GlobalPool;
@@ -128,7 +128,7 @@ mod tests {
             }
         }
 
-        impl thread_aware_core::ThreadAware for TrackingMemory {
+        impl ThreadAware for TrackingMemory {
             fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
                 self.relocated.fetch_add(1, atomic::Ordering::SeqCst);
                 self.inner.relocate(source, destination);
