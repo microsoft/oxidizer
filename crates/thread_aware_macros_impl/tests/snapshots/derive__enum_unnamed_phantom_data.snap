@@ -15,9 +15,11 @@ where
         match self {
             Self::Variant(_v0, _v1) => {
                 ::thread_aware::ThreadAware::relocate(_v0, source, destination);
+                ::thread_aware::ThreadAware::relocate(_v1, source, destination);
             }
             Self::Other(_v0, _v1) => {
                 ::thread_aware::ThreadAware::relocate(_v0, source, destination);
+                ::thread_aware::ThreadAware::relocate(_v1, source, destination);
             }
         }
     }

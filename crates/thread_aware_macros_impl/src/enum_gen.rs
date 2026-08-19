@@ -4,7 +4,7 @@
 use quote::quote;
 use syn::{DataEnum, Fields};
 
-use crate::field_attrs::{FieldAttrCfg, is_phantom_data, parse_field_attrs};
+use crate::field_attrs::{FieldAttrCfg, parse_field_attrs};
 
 pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
     let mut arms = Vec::new();
@@ -21,7 +21,7 @@ pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &s
                     let ident = syn::Ident::new(&format!("_v{i}"), proc_macro2::Span::call_site());
                     let cfg: FieldAttrCfg = parse_field_attrs(&f.attrs)?;
                     bindings.push(quote! { #ident });
-                    if !is_phantom_data(&f.ty) && !cfg.skip {
+                    if !cfg.skip {
                         let mut path = root_path.clone();
                         path.segments.push(syn::parse_quote!(ThreadAware));
                         stmts.push(quote! { #path::relocate(#ident, source, destination); });
@@ -36,7 +36,7 @@ pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &s
                     let ident = f.ident.as_ref().expect("Field identifier is missing");
                     let cfg: FieldAttrCfg = parse_field_attrs(&f.attrs)?;
                     bindings.push(quote! { #ident });
-                    if !is_phantom_data(&f.ty) && !cfg.skip {
+                    if !cfg.skip {
                         let mut path = root_path.clone();
                         path.segments.push(syn::parse_quote!(ThreadAware));
                         stmts.push(quote! { #path::relocate(#ident, source, destination); });

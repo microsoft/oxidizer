@@ -128,7 +128,7 @@ fn error_unknown_attr() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
-    // PhantomData in named fields should be passed through without transformation.
+    // PhantomData in named fields relocates via its own no-op impl; the bound is on the argument.
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithPhantom<T> {
@@ -142,7 +142,7 @@ fn phantom_data_named_fields() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
-    // PhantomData in tuple fields should be passed through without transformation.
+    // PhantomData in tuple fields relocates via its own no-op impl; the bound is on the argument.
     let input = quote! {
         #[derive(ThreadAware)]
         struct TupleWithPhantom<T>(Vec<u8>, core::marker::PhantomData<T>);
@@ -202,7 +202,7 @@ fn generics_group_usage_adds_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_unnamed_phantom_data() {
-    // PhantomData in enum unnamed fields should be passed through without transformation.
+    // PhantomData in enum unnamed fields relocates via its own no-op impl; the bound is on the argument.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumUnnamedPhantom<T, U> {
@@ -216,7 +216,7 @@ fn enum_unnamed_phantom_data() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_named_phantom_data() {
-    // PhantomData in enum named fields should be passed through without transformation.
+    // PhantomData in enum named fields relocates via its own no-op impl; the bound is on the argument.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumNamedPhantom<T, U> {

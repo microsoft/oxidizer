@@ -14,5 +14,6 @@ where
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
         ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.2, source, destination);
     }
 }

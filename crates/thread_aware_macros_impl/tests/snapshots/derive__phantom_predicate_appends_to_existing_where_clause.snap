@@ -13,5 +13,6 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.value, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.marker, source, destination);
     }
 }

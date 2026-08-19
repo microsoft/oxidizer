@@ -10,5 +10,7 @@ where
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
-    ) {}
+    ) {
+        ::thread_aware::ThreadAware::relocate(&mut self.marker, source, destination);
+    }
 }

@@ -9,5 +9,6 @@ impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for BarePhantom
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
     }
 }

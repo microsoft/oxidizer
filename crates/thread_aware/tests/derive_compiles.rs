@@ -246,3 +246,34 @@ fn skipped_generic_field_needs_only_send() {
     assert_eq!(value.tracked.relocations, 1);
     assert_eq!(*value.skipped, 1, "the skipped field is left untouched");
 }
+
+/// A real, data-carrying type that merely happens to be named `PhantomData`.
+mod lookalike {
+    use thread_aware::affinity::Affinity;
+
+    pub(crate) struct PhantomData<T> {
+        pub(crate) value: T,
+    }
+
+    impl<T: thread_aware::ThreadAware> thread_aware::ThreadAware for PhantomData<T> {
+        fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+            self.value.relocate(source, destination);
+        }
+    }
+}
+
+/// The body generator no longer decides what to relocate by matching the type's name, so a
+/// look-alike carrying real data is relocated like any other field instead of being
+/// silently dropped from the generated body.
+#[derive(ThreadAware)]
+struct HoldsLookalike<T: thread_aware::ThreadAware>(lookalike::PhantomData<T>);
+
+#[test]
+fn type_named_phantom_data_is_relocated_not_skipped() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.value.relocations, 1, "a look-alike must be relocated, not skipped by name");
+}
