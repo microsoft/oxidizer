@@ -14,20 +14,32 @@ What one allocate-then-free costs through each of the four handle types, so you 
 
 | Handle | Allocate + free |
 |---|---:|
-| `Alloc<'pool, T>` — borrowed, unique owner | 12.92 ns |
-| `Box<T>` — `'static`, unique owner, `Send` | 14.41 ns |
-| `Rc<T>` — shared, non-atomic refcount | 14.92 ns |
-| `Arc<T>` — shared, atomic refcount, `Send + Sync` | 15.11 ns |
+| `Alloc<'pool, T>` — borrowed, unique owner | 12.46 ns |
+| `Box<T>` — `'static`, unique owner, `Send` | 12.90 ns |
+| `Rc<T>` — shared, non-atomic refcount | 12.96 ns |
+| `Arc<T>` — shared, atomic refcount, `Send + Sync` | 13.69 ns |
 
 Sharing an existing value is cheaper still, since no slot changes hands:
 
 | Operation | Time |
 |---|---:|
-| `Rc<T>` clone + drop | 1.31 ns |
-| `Arc<T>` clone + drop | 4.92 ns |
+| `Rc<T>` clone + drop | 1.27 ns |
+| `Arc<T>` clone + drop | 4.79 ns |
 
 [`Alloc`]: https://docs.rs/plurality/latest/plurality/struct.Alloc.html
 [`Box`]: https://docs.rs/plurality/latest/plurality/struct.Box.html
+
+## Cost of serving many types from one pool
+
+What dropping the element type costs. [`MultiPool`] accepts values of any type, and finds the right slot size by looking the value's layout up in a directory of the layouts it has seen; a `Pool<T>` knows its slot size at compile time and looks nothing up. The lookup is a linear scan, so the rows below hold the number of distinct layouts at one and at sixteen, the latter with the measured layout registered last so the scan runs its full length. Price type erasure at the step from the first row to either of the others, not at the difference between them: the longer scan executes materially more instructions, but the processor overlaps it with the pool's own pointer chasing, and what remains is smaller than the effect of heap and code placement, which this benchmark does not control. `cargo bench --bench criterion`.
+
+| Pool | Allocate + free | Δ vs `Pool<T>` |
+|---|---:|---:|
+| `Pool<T>` — one type | 12.90 ns | 1.00× |
+| `MultiPool` — one layout | 15.15 ns | 1.17× |
+| `MultiPool` — sixteen layouts | 14.95 ns | 1.16× |
+
+[`MultiPool`]: https://docs.rs/plurality/latest/plurality/struct.MultiPool.html
 
 ## Against other pooling crates
 
@@ -35,16 +47,16 @@ The same allocate-and-free workload run against every pooling crate we found wit
 
 | Pool | Allocate + free | Δ vs plurality `Box` |
 |---|---:|---:|
-| plurality — `Box` | 14.41 ns | 1.00× |
-| plurality — `Alloc` | 12.93 ns | 0.90× |
-| slab | 14.17 ns | 0.98× |
-| slotmap | 14.04 ns | 0.97× |
-| sharded-slab | 21.93 ns | 1.52× |
-| object-pool | 16.42 ns | 1.14× |
-| opool | 17.59 ns | 1.22× |
-| deadpool | 50.31 ns | 3.49× |
-| infinity-pool — `PinnedPool` | 19.53 ns | 1.36× |
-| infinity-pool — `RawPinnedPool` | 11.03 ns | 0.77× |
+| plurality — `Box` | 13.87 ns | 1.00× |
+| plurality — `Alloc` | 12.75 ns | 0.92× |
+| slab | 13.77 ns | 0.99× |
+| slotmap | 14.12 ns | 1.02× |
+| sharded-slab | 21.51 ns | 1.55× |
+| object-pool | 16.57 ns | 1.19× |
+| opool | 17.43 ns | 1.26× |
+| deadpool | 49.32 ns | 3.56× |
+| infinity-pool — `PinnedPool` | 19.44 ns | 1.40× |
+| infinity-pool — `RawPinnedPool` | 10.36 ns | 0.75× |
 
 ## Against the system allocator, under churn
 
@@ -52,24 +64,25 @@ The scenario a pool actually exists for: 1,000,000 node allocations with a reali
 
 | Backend | Total | ns / alloc | Mallocs/s (millions) |
 |---|---:|---:|---:|
-| std::Box + mimalloc | 0.1993 s | 199.28 | 5.02 |
-| plurality::Pool | 0.0707 s | 70.67 | 14.15 |
+| std::Box + mimalloc | 0.1585 s | 158.48 | 6.31 |
+| plurality::Pool | 0.0679 s | 67.91 | 14.72 |
 
-**plurality::Pool is 2.82x faster than std::Box + mimalloc.**
+**plurality::Pool is 2.33x faster than std::Box + mimalloc.**
 
 ## Owning `dyn Trait` handles
 
 Each row allocates the same concrete 32-byte value, converts its owning handle to `dyn Trait`, performs one virtual call, and drops the handle — the shape you get when a pool backs a heterogeneous collection of trait objects. Before measurement every pool materializes a 1,024-object working set using its default layout policy, drops every object, and executes the exact operation once, so growth, layout-map creation, and first-use effects stay outside the timed region; an allocation-tracking test confirms 1,024 consecutive executions of every pooled measured body perform zero system allocations. The standard-library setup is warmed the same way, but its measured body necessarily performs one heap allocation through the process's default system allocator.
 
-infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The `BlindPool` rows additionally support heterogeneous layouts and therefore pay for more capability. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench criterion`.
+infinity-pool is the only other crate found with reusable owning `?Sized` handles, but no one variant matches plurality on both axes: plurality combines `Send` handles and cross-thread drops with single-threaded, lock-free allocation; infinity-pool's `PinnedPool` variants support concurrent, lock-based allocation with `Send` handles, while their faster `Local` variants make both pool and handles single-threaded. The rows marked heterogeneous accept values of any type in one pool and therefore pay for more capability; each row here also unsizes a handle and makes a virtual call, so the cost of type erasure alone is the one measured above rather than the difference between these rows. Other surveyed pool crates return keys or pool-borrowing guards rather than owning fat-pointer handles. `cargo bench --bench criterion`.
 
 | Handle | Allocate, call, free | Δ vs plurality |
 |---|---:|---:|
-| plurality — `Box<dyn Trait>` | 15.87 ns | 1.00× |
-| infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 33.62 ns | 2.12× |
-| infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 27.45 ns | 1.73× |
-| infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous) | 39.58 ns | 2.49× |
-| infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous) | 31.34 ns | 1.97× |
-| standard library — `Box<dyn Trait>` | 14.04 ns | 0.89× |
+| plurality — `Box<dyn Trait>` | 15.80 ns | 1.00× |
+| plurality — `MultiPool` / `Box<dyn Trait>` (heterogeneous) | 15.49 ns | 0.98× |
+| infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>` | 32.88 ns | 2.08× |
+| infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>` | 27.07 ns | 1.71× |
+| infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous) | 40.22 ns | 2.55× |
+| infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous) | 31.18 ns | 1.97× |
+| standard library — `Box<dyn Trait>` | 16.26 ns | 1.03× |
 
 The standard-library row is an allocator best case: every allocation is the same size and is immediately freed, so allocator thread caches are maximally effective. The churn benchmark above measures a broader live set and locality effects.

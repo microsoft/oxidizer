@@ -294,3 +294,28 @@ fn test_cast_argument_applies_to_the_field_value() {
     let error = TestError::new(7_u32);
     assert_error_message!(error, "7");
 }
+
+/// A positional argument may call a method of `self`, which is what the diagnostic for an
+/// unsupported root promises.
+#[derive(Error)]
+#[display("{}", describe())]
+struct MethodArgumentError {
+    code: u32,
+    inner: OhnoCore,
+}
+
+impl MethodArgumentError {
+    fn describe(&self) -> String {
+        format!("code {}", self.code)
+    }
+}
+
+#[test]
+fn test_display_argument_calls_a_method_of_self() {
+    let error = MethodArgumentError {
+        code: 7,
+        inner: OhnoCore::default(),
+    };
+
+    assert_error_message!(error, "code 7");
+}

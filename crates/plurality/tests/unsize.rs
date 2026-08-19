@@ -242,7 +242,12 @@ fn erased_debug_forwards_to_value() {
 
 #[test]
 fn coercion_debug_is_non_exhaustive() {
-    assert_eq!(format!("{:?}", Coercion::<[u8; 1], [u8]>::to_slice()), "Coercion { .. }");
+    // The name is the fully qualified type, so it survives renames and states
+    // which coercion this is.
+    assert_eq!(
+        format!("{:?}", Coercion::<[u8; 1], [u8]>::to_slice()),
+        "plurality::coerce::Coercion<[u8; 1], [u8]> { .. }"
+    );
 }
 
 struct ImmediateReady(u32);

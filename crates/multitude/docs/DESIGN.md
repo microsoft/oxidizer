@@ -188,12 +188,19 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
         acquire (fresh or from cache)
                   │
                   ▼
-            ┌───────────┐   fills up / reset
-            │  CURRENT  │──────────────┐
-            │ (mutating)│              │
-            └───────────┘              ▼
-                              reconcile surplus, then:
-                    ┌───────────────────┴───────────────────┐
+            ┌───────────┐
+            │  CURRENT  │
+            │ (mutating)│
+            └───────────┘
+```
+
+**Refill** (the chunk fills up) always rotates the chunk out of `CURRENT`:
+
+```text
+            ┌───────────┐  fills up
+            │  CURRENT  │────────────► reconcile surplus, then:
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
         handed out an Alloc?                         smart-pointer-only?
                     │ yes                                    │ no
                     ▼                                        ▼
@@ -206,6 +213,28 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
                     │ reset / arena drop        drops
                     ▼                             │
               → cache or free  ◄──────────────────┘
+```
+
+**Reset** releases every older retired chunk, then keeps or detaches the
+current one depending on whether a smart owner escaped from it:
+
+```text
+            ┌───────────┐  reset
+            │  CURRENT  │────────────► no smart owner escaped?
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
+                    │ yes                                   │ no
+                    ▼                                       ▼
+            ┌────────────────────┐          reconcile surplus and detach;
+            │  RETAINED          │          the chunk lives on until the
+            │ (stays CURRENT,    │          last escaped handle drops
+            │  cursor rewound,   │                      │
+            │  marker cleared)   │                      ▼
+            └─────────┬──────────┘                → cache or free
+                      │                                 │
+                      ▼                                 ▼
+        serves the next generation           next alloc acquires a
+                                             fresh CURRENT chunk
 ```
 
 **Pinned chunks.** If a chunk handed out any `Alloc` handle (including the
