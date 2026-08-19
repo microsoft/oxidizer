@@ -25,8 +25,13 @@ use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, Ty
 
 mod enum_gen;
 
-/// Public so the wrapper proc-macro crate can access `is_phantom_data`
-pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldAttrCfg
+/// Field attribute parsing, plus the syntactic `PhantomData` test the derive uses to decide
+/// which fields are relocated.
+///
+/// Public because this is a shared implementation crate consumed by wrapper proc-macro
+/// crates; the module is part of its published surface even though nothing in this
+/// workspace reaches for it today.
+pub mod field_attrs;
 
 mod struct_gen;
 
@@ -266,4 +271,5 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
     Ok(())
 }
 
-// We intentionally do not re-export FieldAttrCfg (wrapper crates access it via the module path).
+// `FieldAttrCfg` is intentionally not re-exported at the crate root; consumers reach it
+// through the `field_attrs` module path.
