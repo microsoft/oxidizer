@@ -145,3 +145,104 @@ fn enum_with_phantom_only_generic_compiles_and_relocates() {
     let mut marked = PhantomEnum::<Tracker, Arc<i32>>::Marked(PhantomData);
     marked.relocate(source, destination);
 }
+
+// The cases below pin the `Send` obligation for phantom payloads whose `Send`-ness does
+// not follow from `T: Send`. Bounding the type parameters instead of the field type made
+// each of these fail to compile, and the snapshot tests could not catch it because they
+// never build the expansion.
+
+/// `&'a T` is `Send` only when `T: Sync`, so a per-parameter `T: Send` bound is wrong here.
+#[derive(ThreadAware)]
+struct PhantomRef<'a, T: 'a>(Tracker, PhantomData<&'a T>);
+
+#[test]
+fn phantom_shared_reference_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    // `i32` is `Sync`, which is what `&'a i32: Send` actually requires.
+    let mut value = PhantomRef::<'_, i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// `Arc<T>` is `Send` only when `T: Send + Sync`.
+#[derive(ThreadAware)]
+struct PhantomArc<T>(Tracker, PhantomData<Arc<T>>);
+
+#[test]
+fn phantom_arc_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomArc::<i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// An unsized slice payload: reached through no `Type::Slice` arm, so it used to get no bound.
+#[derive(ThreadAware)]
+struct PhantomSlice<T>(Tracker, PhantomData<[T]>);
+
+#[test]
+fn phantom_slice_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomSlice::<i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// An associated-type projection: `T: Send` says nothing about `T::Item`.
+#[derive(ThreadAware)]
+struct PhantomProjection<T: Iterator>(Tracker, PhantomData<T::Item>);
+
+#[test]
+fn phantom_projection_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomProjection::<std::vec::IntoIter<i32>>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// A parameter that is both relocated and named inside `PhantomData` carries both
+/// obligations; classifying it as one or the other drops the second.
+#[derive(ThreadAware)]
+struct RelocatedAndPhantom<'a, T: 'a>(T, PhantomData<&'a T>);
+
+#[test]
+fn parameter_that_is_both_relocated_and_phantom_compiles() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = RelocatedAndPhantom::<'_, Tracker>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// A skipped field is never relocated, so it needs `Send` rather than `ThreadAware`.
+#[derive(ThreadAware)]
+struct SkippedGeneric<T> {
+    tracked: Tracker,
+    #[thread_aware(skip)]
+    skipped: T,
+}
+
+#[test]
+fn skipped_generic_field_needs_only_send() {
+    let (source, destination) = affinity_pair();
+
+    // `Arc<i32>` is `Send` but deliberately not `ThreadAware`; a skipped field must not
+    // force the stronger bound.
+    let mut value = SkippedGeneric {
+        tracked: Tracker::default(),
+        skipped: Arc::new(1_i32),
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1);
+    assert_eq!(*value.skipped, 1, "the skipped field is left untouched");
+}

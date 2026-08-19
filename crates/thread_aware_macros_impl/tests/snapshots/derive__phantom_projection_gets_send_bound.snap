@@ -2,9 +2,9 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for PhantomTuple<T>
+impl<T: Iterator> ::thread_aware::ThreadAware for PhantomProjection<T>
 where
-    (T,): ::core::marker::Send,
+    T::Item: ::core::marker::Send,
 {
     fn relocate(
         &mut self,

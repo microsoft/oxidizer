@@ -236,8 +236,17 @@ pub use core::ThreadAware;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Generic type parameters appearing in non-skipped fields automatically receive a
-/// `::thread_aware::ThreadAware` bound (occurrences only inside `PhantomData<..>` are ignored).
+/// Bounds follow from whether a field is relocated:
+/// * A generic type parameter reachable through a relocated field receives a
+///   `::thread_aware::ThreadAware` bound.
+/// * A field that is never relocated - a `PhantomData<..>` marker, or one annotated with
+///   `#[thread_aware(skip)]` - instead produces a `where` predicate requiring that field's
+///   type to be [`Send`], which the `ThreadAware: Send` supertrait demands.
+///
+/// The `Send` obligation is placed on the field type itself rather than on the type
+/// parameters named inside it, so shapes such as `PhantomData<&'a T>` (`Send` only when
+/// `T: Sync`) and `PhantomData<Arc<T>>` (`Send` only when `T: Send + Sync`) are bound
+/// correctly.
 ///
 /// # Example
 /// ```rust

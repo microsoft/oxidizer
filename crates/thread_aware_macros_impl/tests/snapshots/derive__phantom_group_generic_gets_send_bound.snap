@@ -2,7 +2,10 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: rendered
 ---
-impl<T: ::core::marker::Send> ::thread_aware::ThreadAware for PhantomGroup<T> {
+impl<T> ::thread_aware::ThreadAware for PhantomGroup<T>
+where
+    T: ::core::marker::Send,
+{
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,

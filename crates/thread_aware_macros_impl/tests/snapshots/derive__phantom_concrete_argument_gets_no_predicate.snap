@@ -2,13 +2,12 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for PhantomTuple<T>
-where
-    (T,): ::core::marker::Send,
-{
+impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for ConcretePhantom<T> {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
-    ) {}
+    ) {
+        ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+    }
 }

@@ -259,8 +259,11 @@ fn generics_paren_adds_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_prebound_send_no_dup() {
-    // A phantom-only generic that already carries `Send` must not gain a second one.
+fn phantom_prebound_send_emits_redundant_predicate() {
+    // The `Send` obligation is a where-predicate on the phantom argument, so a parameter
+    // that already carries `Send` inline picks up a redundant but legal duplicate. That is
+    // deliberate: suppressing it required matching the bound by name, which silently
+    // dropped the real bound for any unrelated trait also called `Send`.
     let input = quote! {
         #[derive(ThreadAware)]
         struct PhantomPreBound<T: Send>(core::marker::PhantomData<T>);
@@ -270,12 +273,34 @@ fn phantom_prebound_send_no_dup() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_prebound_thread_aware_no_send() {
-    // `ThreadAware` already implies `Send`, so a phantom-only generic bound by it
-    // must not gain a redundant `Send`.
+fn phantom_prebound_thread_aware_emits_redundant_predicate() {
+    // Likewise for a parameter already bound by `ThreadAware`, which implies `Send`.
     let input = quote! {
         #[derive(ThreadAware)]
         struct PhantomPreBoundTa<T: ThreadAware>(core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_unrelated_trait_named_send_still_gets_predicate() {
+    // A user trait whose last path segment is `Send` must not be mistaken for
+    // `core::marker::Send` and suppress the real obligation.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct CustomSend<T: local::Send>(core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_concrete_argument_gets_no_predicate() {
+    // The argument names no generic parameter, so there is nothing to constrain.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct ConcretePhantom<T>(T, core::marker::PhantomData<u32>);
     };
     assert_snapshot!(expand(input));
 }
@@ -303,11 +328,60 @@ fn generics_unused_param_gets_no_bound() {
 }
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_ref_generic_gets_send_bound() {
-    // A generic reachable only through a reference inside `PhantomData`.
+fn phantom_ref_bounds_the_reference_not_the_parameter() {
+    // `&'a T` is `Send` only when `T: Sync`, so the predicate must name the reference
+    // itself. Binding `T: Send` here produced an impl that did not compile.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct PhantomRef<T>(core::marker::PhantomData<&'static T>);
+        struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_slice_gets_send_bound() {
+    // An unsized slice payload: `[T]: Send` holds exactly when `T: Send`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomSlice<T>(core::marker::PhantomData<[T]>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_projection_gets_send_bound() {
+    // `T: Send` says nothing about `T::Item`, so the projection carries the obligation.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct PhantomProjection<T: Iterator>(core::marker::PhantomData<T::Item>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn relocated_and_phantom_param_gets_both_obligations() {
+    // A parameter used directly and inside `PhantomData` carries both bounds; treating
+    // the two as mutually exclusive dropped the phantom one.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<&'a T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn skipped_generic_field_gets_send_bound() {
+    // A skipped field is never relocated, so it needs `Send` rather than `ThreadAware`.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct SkippedGeneric<T> {
+            #[thread_aware(skip)]
+            skipped: T,
+        }
     };
     assert_snapshot!(expand(input));
 }
