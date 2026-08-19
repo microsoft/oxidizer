@@ -183,11 +183,11 @@ fn mentions_generic(ty: &Type, generic_idents: &HashSet<syn::Ident>) -> bool {
     scan(ty.to_token_stream(), generic_idents)
 }
 
-/// Returns the type argument of a `PhantomData<..>`, or `None` if it has none.
-fn phantom_data_argument(ty: &Type) -> Option<&Type> {
-    let Type::Path(TypePath { path, .. }) = ty else {
-        return None;
-    };
+/// Returns the type argument of a `PhantomData<..>` path, or `None` if it has none.
+///
+/// Takes the path rather than the [`Type`] because the only caller has already matched
+/// [`Type::Path`]; accepting a `Type` would add a branch that can never be reached.
+fn phantom_data_argument(path: &syn::Path) -> Option<&Type> {
     let PathArguments::AngleBracketed(ab) = &path.segments.last()?.arguments else {
         return None;
     };
@@ -235,7 +235,7 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
                 // `X: Send` yields both `PhantomData<X>: Send` (for the supertrait) and
                 // `PhantomData<X>: ThreadAware` (when the marker is nested inside a
                 // relocated field), whereas `PhantomData<X>: Send` yields neither.
-                if let Some(argument) = phantom_data_argument(ty)
+                if let Some(argument) = phantom_data_argument(path)
                     && mentions_generic(argument, generic_idents)
                 {
                     acc.require_send(argument);

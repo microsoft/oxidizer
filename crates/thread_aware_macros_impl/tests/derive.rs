@@ -307,6 +307,45 @@ fn phantom_concrete_argument_gets_no_predicate() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn phantom_without_argument_gets_no_predicate() {
+    // A `PhantomData` written with no type argument has nothing to bind.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct BarePhantom<T>(T, core::marker::PhantomData);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn repeated_phantom_argument_yields_one_predicate() {
+    // The same obligation reached twice must not be emitted twice.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct DupPhantom<T>(core::marker::PhantomData<T>, core::marker::PhantomData<T>);
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn phantom_predicate_appends_to_existing_where_clause() {
+    // The generated predicate must extend the user's `where` clause, not replace it.
+    let input = quote! {
+        #[derive(ThreadAware)]
+        struct WithWhere<T, U>
+        where
+            T: Clone,
+        {
+            value: T,
+            marker: core::marker::PhantomData<U>,
+        }
+    };
+    assert_snapshot!(expand(input));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn generics_lifetime_and_const_params_untouched() {
     // Only type parameters can carry bounds; lifetimes and const generics are skipped.
     let input = quote! {
