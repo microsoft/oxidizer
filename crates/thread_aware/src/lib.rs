@@ -252,7 +252,10 @@ pub use core::ThreadAware;
 /// `Send` by a manual `unsafe impl`, which is the usual idiom for raw-pointer markers and the
 /// main reason `#[thread_aware(skip)]` exists.
 ///
-/// Note that `PhantomData` is recognized syntactically, so a distinct type whose name happens
+/// Two names are matched syntactically, because a macro cannot resolve a path to the item it
+/// refers to. A distinct trait named `ThreadAware`, referred to by that bare name, is assumed
+/// to be this crate's trait and suppresses the generated bound; qualify either trait to
+/// disambiguate. Likewise `PhantomData` is recognized syntactically, so a distinct type whose name happens
 /// to end in `PhantomData` is also treated as a marker and left out of the generated body.
 ///
 /// # Example

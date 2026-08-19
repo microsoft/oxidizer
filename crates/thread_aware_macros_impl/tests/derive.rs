@@ -65,7 +65,7 @@ fn generics_add_bounds() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn generics_prebound_bare_is_still_bound() {
+fn generics_prebound_bare_no_dup() {
     // Ensures no duplicate ThreadAware bound when already present.
     let input = quote! {
         #[derive(ThreadAware)]
@@ -346,7 +346,7 @@ fn unrelated_trait_named_thread_aware_does_not_suppress_the_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn prebound_bare_thread_aware_is_still_bound() {
+fn prebound_bare_thread_aware_assumed_real() {
     // The real trait, written by the user, must still suppress the generated duplicate -
     // otherwise clippy reports the redundancy against the user's own source line.
     let input = quote! {

@@ -403,26 +403,30 @@ fn send_ness_invisible_to_a_syntactic_scan_still_compiles() {
     assert_eq!(hidden.tracked.relocations, 1);
 }
 
-/// A trait of the user's own that happens to be called `ThreadAware`.
+/// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
+/// path.
 ///
-/// The derive must not mistake it for the real one and skip the bound the generated body
-/// needs. Treating a bare name as the real trait made this shape fail to compile outright.
+/// Matching only the final path segment treated this as the real trait and dropped the bound
+/// the generated body needs, so the impl could not compile. A bare `ThreadAware` stays
+/// ambiguous and is still assumed to be the real trait - see `is_same_trait`.
 mod own_thread_aware {
     use thread_aware::affinity::Affinity;
     use thread_aware_macros::ThreadAware as DeriveThreadAware;
 
-    pub(crate) trait ThreadAware {}
+    pub(crate) mod inner {
+        pub(crate) trait ThreadAware {}
+    }
 
     pub(crate) struct Inner;
 
-    impl ThreadAware for Inner {}
+    impl inner::ThreadAware for Inner {}
 
     impl thread_aware::ThreadAware for Inner {
         fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
     }
 
     #[derive(DeriveThreadAware)]
-    pub(crate) struct Holder<T: ThreadAware>(pub(crate) T);
+    pub(crate) struct Holder<T: inner::ThreadAware>(pub(crate) T);
 }
 
 #[test]
