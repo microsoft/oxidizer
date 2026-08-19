@@ -96,7 +96,7 @@ impl Affinity {
     }
 }
 
-/// Creates affinities manually when not using a thread registry.
+/// Creates affinities for a topology described by per-memory-region processor counts.
 ///
 /// `counts` contains the number of processors in each memory region.
 ///
