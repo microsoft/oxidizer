@@ -162,7 +162,7 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 /// Reports whether `candidate` names the same trait the derive would emit.
 ///
 /// Compares the segment idents, so the fully qualified form the derive emits matches the
-/// unprefixed form a user typically writes, and a bare single-segment `ThreadAware` from a
+/// shorter form a user typically writes, and a bare single-segment `ThreadAware` from a
 /// `use` matches too. Matching only the final segment - as this once did - treats an
 /// unrelated `some_crate::ThreadAware` as the real trait and suppresses the bound the
 /// generated body needs.
