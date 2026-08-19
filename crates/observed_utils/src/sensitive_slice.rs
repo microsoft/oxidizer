@@ -6,8 +6,10 @@
 //! [`SensitiveSlice`] borrows at most `N` items from any iterator of
 //! [`RedactedDisplay`] references and stores them inline, so a struct field can
 //! hold a redactable collection without naming the iterator's type and without
-//! allocating. Formatting goes through the caller's [`Redactor`], so the items
-//! themselves are never rendered in the clear by this module.
+//! allocating for the collection itself. Rendering delegates to each item's own
+//! [`RedactedDisplay`] implementation, driven by the caller's [`Redactor`]: what
+//! reaches the output - redacted, suppressed, or in the clear - is decided by
+//! that redactor and those items, not by this module.
 
 use std::fmt;
 
@@ -26,7 +28,9 @@ use data_privacy::{RedactedDisplay, Redactor};
 ///
 /// # Performance
 ///
-/// - **Zero heap allocations** — items are stored inline in a fixed-size array.
+/// - **No heap allocation for the collection** — the item references are stored
+///   inline in a fixed-size array. Rendering an individual item is that item's
+///   own implementation and may allocate.
 /// - Only the first `N` items are stored; whether the source had more items
 ///   is tracked to detect overflow.
 /// - Virtual dispatch (`dyn RedactedDisplay`) per item during formatting,
@@ -34,7 +38,8 @@ use data_privacy::{RedactedDisplay, Redactor};
 ///
 /// # Type parameters
 ///
-/// - `N` — maximum number of items to render (default: `5`).
+/// - `N` — maximum number of items to render (default: `5`). Must be greater
+///   than zero: `SensitiveSlice::<0>` is rejected at compile time.
 /// - `D` — single-character delimiter between items (default: `','`).
 ///
 /// # Examples
@@ -78,6 +83,10 @@ impl<'a, const N: usize, const D: char> SensitiveSlice<'a, N, D> {
     ///
     /// At most `N` items are stored inline. Whether there were additional
     /// items is recorded so overflow can be signaled during formatting.
+    ///
+    /// `N` must be greater than zero: a zero-capacity instantiation fails the
+    /// compile-time assertion below rather than producing an always-empty
+    /// collection.
     pub fn new<I, T>(iter: I) -> Self
     where
         I: IntoIterator<Item = &'a T>,

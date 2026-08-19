@@ -51,6 +51,11 @@ fn unsigned_otel_value(value: u64) -> opentelemetry::Value {
 
 /// Converts a [`Value`] into an `OTel` [`AnyValue`], as used for log record
 /// attributes and bodies.
+///
+/// One conversion is not variant-for-variant: a [`Value::U64`] up to `i64::MAX`
+/// becomes [`AnyValue::Int`], while a larger one becomes an [`AnyValue::String`]
+/// holding the decimal digits. `AnyValue` has no unsigned variant, so the
+/// alternatives would be wrapping into a negative number or dropping the value.
 // The last arm guards the `#[non_exhaustive]` `Value`, so no variant that exists
 // today can reach it, and coverage instrumentation counts an arm that is never
 // taken as an uncovered line. The match is therefore excluded from the coverage
@@ -82,6 +87,9 @@ pub fn any_value_of(value: Value) -> AnyValue {
 
 /// Converts a [`Value`] into an `OTel` [`opentelemetry::Value`], as used for
 /// metric dimensions.
+///
+/// As in [`any_value_of`], a [`Value::U64`] past `i64::MAX` is exported as its
+/// decimal string: `opentelemetry::Value` has no unsigned variant either.
 // Excluded from the coverage gate for the reason given above `any_value_of`.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
