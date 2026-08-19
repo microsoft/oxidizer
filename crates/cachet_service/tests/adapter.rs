@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cachet_service::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome};
 use layered::Service;
 
 /// A simple in-memory cache service for testing.
@@ -40,7 +40,7 @@ where
             CacheOperation::Insert(req) => {
                 let mut data = self.data.lock().expect("lock poisoned");
                 data.insert(req.key, req.entry);
-                Ok(CacheResponse::Insert)
+                Ok(CacheResponse::Insert(InsertOutcome::Accepted))
             }
             CacheOperation::Invalidate(req) => {
                 let mut data = self.data.lock().expect("lock poisoned");
@@ -173,7 +173,7 @@ fn cache_response_into_entry_extracts_value() {
 
 #[test]
 fn cache_response_into_entry_returns_none_for_non_get() {
-    let response: CacheResponse<i32> = CacheResponse::Insert;
+    let response: CacheResponse<i32> = CacheResponse::Insert(InsertOutcome::Accepted);
     assert!(response.into_entry().is_none());
 
     let response: CacheResponse<i32> = CacheResponse::Invalidate;

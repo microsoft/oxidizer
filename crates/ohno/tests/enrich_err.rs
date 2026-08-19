@@ -115,6 +115,27 @@ fn mixed_inline_and_positional_arguments() {
 }
 
 #[test]
+fn an_opaque_ok_type_is_supported() {
+    // The wrapper never names the return type, so `impl Trait` stays in the one position it is
+    // allowed in: the function's own signature.
+    #[enrich_err("listing")]
+    fn list(fail: bool) -> Result<impl Iterator<Item = u8>, BasicTestError> {
+        if fail {
+            return Err(BasicTestError::caused_by("no list"));
+        }
+        Ok([1u8, 2].into_iter())
+    }
+
+    assert_eq!(list(false).unwrap().collect::<Vec<_>>(), vec![1, 2]);
+
+    let Err(error) = list(true) else {
+        panic!("an error");
+    };
+    assert_eq!(error.message(), "no list");
+    assert_enrichment!(error, "listing");
+}
+
+#[test]
 fn generic_function_with_where() {
     #[enrich_err("where t: {t}")]
     fn where_test<T>(t: T) -> Result<(), BasicTestError>

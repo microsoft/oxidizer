@@ -35,13 +35,15 @@ crate differs from `thiserror`.
 | `.path.display()` | no, not valid Rust |
 
 An argument is scoped by its leftmost term, so that term is the one that has to
-name a field: `count * 2` is rooted at `count`, and `t.0.message()` at `t`. An
-argument rooted anywhere else — a constant, an associated function, a string
-literal — names no field of `self` and is rejected.
+name a field, or call a method of `self`: `count * 2` is rooted at `count`,
+`t.0.message()` at `t`, and `describe()` calls a method. An argument rooted
+anywhere else — a constant, an associated function, a string literal — reaches
+nothing on `self` and is rejected.
 
-A numeric literal is the exception, because that is how a tuple field is named.
-`0` is a field root, so `{0}` and `0.abs()` are both rooted at field `0`, and a
-float root is read as nested tuple access (see below).
+An unsuffixed numeric literal is the exception, because that is how a tuple field
+is named. `0` is a field root, so `{0}` and `0.abs()` are both rooted at field
+`0`, and a float root is read as nested tuple access (see below). A suffix is not
+part of a tuple index, so `0u8` is rooted nowhere and is rejected.
 
 The operator applies to the field's value, not to a reference to it, so
 `count as u64` casts the field and `count * 2` uses the value's `Mul`.
@@ -97,10 +99,9 @@ the mirror-image reason: it would otherwise be copied into the generated
 `format!` string, where `rustc` reports it against code the user cannot see. Both
 are spanned at the template, which is the only thing the user wrote.
 
-**The scoping prefix is applied by parsing, not by enumeration.** Whether an
-argument can carry `self.` at all is answered by building the unprefixed
-`self.<argument>` and asking `syn` to parse it. Enumerating the expression forms
-that may legally follow a dot would be a second copy of the grammar.
+**The scoping prefix is applied to the argument's leftmost term.** Which
+expression forms may legally follow a dot is answered by enumerating them, and
+anything else is reported rather than prefixed.
 
 **The result is then wrapped as `&(...)`.** The parentheses are load-bearing: a
 bare `&self.<argument>` binds the reference to the leftmost term alone, so
@@ -109,13 +110,13 @@ would multiply it.
 
 **Roots are found by walking left.** Field access, method calls, indexing,
 binary operators, casts, `await`, `?` and ranges all keep a term in leftmost
-position, which is where the prefix lands. A `self` root is reported separately,
-because it would otherwise expand to `self.self`.
+position, which is where the prefix lands. A call in that position is a method
+of `self`, so it is prefixed without being looked up as a field. A `self` root
+is reported separately, because it would otherwise expand to `self.self`.
 
 **A nested tuple index arrives as a float.** `0.1` lexes as one literal, and only
 its leading component names a field of `self`; the rest reaches into that
 field's own type and is left to `rustc`.
 
-**Raw identifiers keep their `r#`.** Field names reach the macro as text, and
-`Ident::new` panics on that spelling, which would turn a user's typo into a
-macro crash rather than a diagnostic.
+**Raw identifiers keep their `r#`.** Field names are compared as text, so a name
+spelled `r#type` in the template has to match the field spelled the same way.

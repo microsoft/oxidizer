@@ -13,6 +13,10 @@ shipped architecture is documented in [`DESIGN.md`](./DESIGN.md).
 ### Features
 - [F1](#f1) — Add batch allocation (`alloc_*_many` / `alloc_*_with_many`)
 - [F2](#f2) — Add guaranteed in-place construction (`alloc_*_emplace`)
+- [F3](#f3) — Add an aggregate byte budget for `MultiPool`
+
+### Performance
+- [P1](#p1) — Pack the `MultiPool` directory routing key
 
 ## Competitive feature gaps
 
@@ -431,3 +435,64 @@ benchmark shows the reduced peak stack usage for a large aggregate.
 
 **See also:** CFG1 (`insert_with` covers the self-referential case for keys),
 F1 (segment-claim reservation reused by a batched emplace tier)
+
+---
+
+<a id="f3"></a>
+### F3 — Add an aggregate byte budget for `MultiPool`
+
+**Area:** `multi_pool` · **Priority:** Low · **Effort:** Medium
+
+`MultiPool` bounds growth with a per-geometry chunk cap and a cap on the number
+of layout pools. Total memory is therefore bounded in *chunks*, by the product
+of the two caps. Converting that to bytes also requires knowing the largest
+layout the program will present, because the chunk byte target is a target
+rather than a ceiling: a value too large to fit it still gets a chunk, and a
+caller who fixes the slot count instead sizes chunks by stride. The bound is
+also coarse, since every layout pool is charged its full allowance whether or
+not it uses it.
+
+A tighter alternative is an aggregate byte budget shared by every layout pool
+under one `MultiPool`, consulted when a layout pool acquires a chunk and
+released when it deallocates one. The check itself is free — chunk acquisition
+is already a cold path — but the budget is cross-pool mutable state with an
+awkward lifetime: it must outlive every layout pool, and layout pools outlive
+the `MultiPool` whenever handles do. That implies a third reference count
+(multi-pool core, alongside the existing per-slot and pool-level counts) and a
+release step in layout-pool teardown.
+
+The two caps are the right default either way, because they are the bounds that
+map onto the existing per-pool machinery with no shared state at all.
+
+**Done when:** a bounded-memory deployment asks for a byte ceiling, the budget
+ships with the third reference count it implies, and a test drives a pool to the
+ceiling across several geometries.
+
+## Performance
+
+<a id="p1"></a>
+### P1 — Pack the `MultiPool` directory routing key
+
+**Area:** `multi_pool` · **Priority:** Low · **Effort:** Small
+
+The router scans a `Vec<Layout>` of routing keys, comparing 16 bytes per entry
+on a 64-bit target even though a key only carries a size and one of a handful of
+alignments. Packing each key into a `u64` — size in the low bits, the base-two
+logarithm of the cell alignment in the high bits — halves the bytes the scan
+touches, so a directory of sixteen entries spans two cache lines instead of
+four. The keys are produced by `geometry::routing_key`, which already normalizes
+alignment, so the packing has one producer.
+
+The measured cost of the scan is a few instructions per entry examined, and the
+entries a program presents are few, so this trades readability for a win that
+only appears at directory sizes the design does not expect. Wall clock is
+weaker still: at sixteen entries the longer scan does not separate from the
+one-entry case, because the processor overlaps a predictable walk over a
+contiguous vector with the pool's own pointer chasing. Nothing reads a
+stored key back as a `Layout` today — the vector is only pushed to, compared
+against and counted — so the change is confined to the key type and its one
+producer, with `install` taking the unpacked layout it already receives.
+
+**Done when:** a profile of a wide directory asks for it and the
+`multi_box_val_spread` row confirms a shorter scan, rather than the change being
+justified by reasoning about cache lines.
