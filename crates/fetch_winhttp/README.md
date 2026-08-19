@@ -23,47 +23,43 @@ WinHTTP-specific TLS and timeout configuration is available through
 [`WinHttpTlsConfig`][__link3] and [`WinHttpOptions`][__link4]. Independently built clients do
 not share connections.
 
-### Platform and transport behavior
+### Platform requirements
 
-* Windows 11 build 22000 or later is required.
+Windows 11 (build 22000) or later, or Windows Server 2025 (build 26100) or
+later. Windows Server 2022 and earlier are not supported.
+
+### Behavior and limitations
+
+WinHTTP owns connection management and much of the HTTP protocol, so some
+generic `fetch` configuration cannot be represented and some behavior is
+fixed by the operating system.
+
+* Generic TLS configuration, finite connection limits, and bounded
+  connection lifetimes are accepted and ignored rather than rejected, so a
+  client that sets them still builds.
 * Proxy selection follows automatic Windows proxy policy, including
-  automatic discovery and proxy auto-configuration scripts; no proxy
-  override or direct-connection fallback is exposed.
-* The connection idle timeout is honored, raised to a platform minimum when
-  the caller asks for a shorter window. An unlimited idle timeout is
-  approximated by the longest window the platform can express, which exceeds
-  forty-nine days.
-* Generic TLS configuration and the generic transport options WinHTTP
-  cannot represent, including finite connection limits and bounded
-  connection lifetimes, are accepted but ignored.
-* The request body is fully sent before response reception begins.
-* A request carrying a `Transfer-Encoding` header is rejected before
-  anything is sent, because this transport performs request framing itself
-  and cannot honor a caller-supplied transfer coding. Removing the header
-  does not change how the body is framed on the wire.
-* A `Content-Length` header must be a single well-formed value, and
-  repeated values must agree with each other. When the request body reports
-  its own length, the header must equal it, and a disagreement fails the
-  request before anything is sent. When the body cannot report a length, the
-  header declares it and is taken on trust. A header that survives is sent
-  in normalized decimal form.
+  automatic discovery and proxy auto-configuration scripts. There is no
+  proxy override and no direct-connection fallback.
 * Redirects are not followed, no cookie store is kept, and authentication
-  challenges are not answered automatically. A redirect response is
-  returned to the caller as an ordinary response, and `Set-Cookie`,
-  `Cookie`, and challenge headers pass through as plain data for the caller
-  to act on. None of these can be re-enabled.
-* Gzip and deflate response bodies are decoded transparently, and the
-  `Content-Encoding` and `Content-Length` headers describing the encoded
-  form are removed. There is no opt-out. Brotli and zstd responses are
-  delivered still encoded, with their headers intact.
-* Response trailers exposed by WinHTTP are preserved for HTTP/2 and HTTP/3.
-  HTTP/1.1 permits trailer fields, but WinHTTP does not expose them.
-  Request trailers are rejected, and because a trailer frame is reached only
-  once the body yields it, that rejection arrives after the headers and any
-  preceding body data have been sent.
+  challenges are not answered. Those responses are returned to the caller to
+  act on, and none of this can be re-enabled.
+* Request framing is derived from the body, so a caller-supplied
+  `Transfer-Encoding` is rejected before anything is sent. Code that
+  forwards an inbound request’s headers verbatim is the common case that
+  trips on this.
+* Gzip and deflate responses are decoded transparently, with the headers
+  describing the encoded form removed and no opt-out. Brotli and zstd are
+  not decoded and arrive still encoded.
+* A request body that yields trailers fails the request, and does so after
+  the headers and preceding body data have already been sent. The request
+  body is sent in full before response reception begins.
+
+The full contract - error classification, timeout semantics, and the
+fidelity of every generic option - is documented in
+[`docs/design.md`][__link5].
 
 Requests are serviced through the operating system’s
-[WinHTTP][__link5]
+[WinHTTP][__link6]
 API.
 
 
@@ -72,10 +68,11 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb05Y4yz2EhSUb_WUj-fedRzMbJzzLIW6JSRUbChzaHWEeGElhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfkRGO84lKi4bECGPhBOTXqAbhtwWCr_OBp4brCj0OGQxd1JhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps
  [__link3]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpTlsConfig
  [__link4]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpOptions
- [__link5]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
+ [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
+ [__link6]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp

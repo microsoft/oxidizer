@@ -964,7 +964,7 @@ same field parser without a status line. Names must be ASCII, optional whitespac
 trimmed, opaque `obs-text` value bytes are preserved, and repeated fields are appended
 to the `http::HeaderMap` rather than overwritten. Invalid header names and values are
 rejected. `WINHTTP_QUERY_FLAG_WIRE_ENCODING` and the trailer query flag establish the
-Windows 11 version 21H2 minimum documented in design.md; no runtime compatibility path
+platform minimum documented in design.md section 1.3; no runtime compatibility path
 is attempted. Only the raw header and trailer blocks are queried as wire-encoded bytes:
 the numeric status query uses a `DWORD` buffer and the legacy `WINHTTP_QUERY_VERSION`
 string query a UTF-16 buffer.

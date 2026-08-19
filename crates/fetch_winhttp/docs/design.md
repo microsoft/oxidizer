@@ -100,8 +100,11 @@ feedback (../../fetch/docs/stabilization.md).
 
 ### 1.3 Platform support
 
-The transport requires Windows 11 version 21H2 (build 22000) or later. Earlier
-Windows releases are not supported.
+The transport requires Windows 11 version 21H2 (build 22000) or later, or
+Windows Server 2025 (build 26100) or later. Windows Server 2022 (build 20348)
+is not supported: the WinHTTP response-header query capabilities the transport
+relies on are documented as introduced in build 22000, which Windows Server 2022
+predates.
 
 ## 2. Connection management
 
@@ -128,7 +131,7 @@ approximate, and some ignored:
 | `multiple_pools` | Accepted; its behavior remains defined by the generic `fetch` client contract. |
 | `max_connections = usize::MAX` (default) | Honored as no caller-imposed limit. |
 | finite `max_connections` | Ignored. |
-| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. `Unlimited` requests the longest window the platform can express rather than an unbounded one. |
+| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. `Unlimited` requests the longest window the platform can express - over 49 days - rather than an unbounded one. |
 | `connection_lifetime = Unlimited` (default) | Honored. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
@@ -160,11 +163,9 @@ to bound how long any single TCP/TLS connection stays in service so long-lived
 clients periodically re-establish connections (load-balancer rebalancing, cert
 rotation, routing changes).
 
-Honoring it requires the transport to track individual connections and retire
-them on a schedule, and to stagger that schedule so that a set of connections
-established together does not expire together - the synchronized reconnect
-`PerConnection` exists to prevent. **v1 therefore ignores `connection_lifetime`
-for `Fixed` and `PerConnection`.**
+**v1 ignores `connection_lifetime` for `Fixed` and `PerConnection`.** The transport
+does not track the identity or age of individual connections (§2.1), so a bounded
+connection age is not part of its contract.
 
 `connection_idle_timeout` is honored and bounds how long an unused connection stays
 eligible for reuse. It does not bound the age of a continuously busy connection,
@@ -270,26 +271,16 @@ behaves consistently with the rest of `fetch`:
   than being silently dropped. A trailer frame is reached only once the body yields it,
   so that failure arrives after the headers and every preceding data frame have been
   sent (§7).
-- **Caller-supplied request framing headers.** A `Content-Length` supplied by the caller
-  must be a single well-formed value, and repeated fields must agree with each other. A
-  body that reports its own length is authoritative: the header must equal that length,
-  and a disagreement fails the request locally, before anything is sent. A body that
-  cannot report a length - a stream of unknown size - takes its declared length from the
-  header instead, which the transport frames against on the caller's word and does not
-  check against the bytes the body goes on to produce. A `Content-Length` that survives is
-  transmitted in normalized decimal form. A `Transfer-Encoding` supplied by the caller is
-  rejected, because the transport performs request framing itself.
-- **Divergence from `fetch_hyper`: a caller-supplied `Transfer-Encoding` is rejected
-  rather than honored.** `fetch_hyper` honors `Transfer-Encoding: chunked` on a body of
-  unknown length and sends the request; this transport fails such a request instead,
-  whatever the length of the body, before anything reaches the network, with an
-  `invalid_request` error (§7). The callers this affects are the ones that forward an
-  inbound request's headers verbatim - proxy and gateway style code - because a
-  forwarded request commonly carries `Transfer-Encoding: chunked` together with a body
-  of unknown length, so identical caller code succeeds on `fetch_hyper` and fails here.
-  Removing the header from the forwarded set makes the request acceptable and does not
-  change how the body is framed on the wire, since the transport derives the framing from
-  the body itself.
+- **`Transfer-Encoding` is rejected.** The transport derives request framing from the
+  body itself, so a caller-supplied transfer coding fails the request with
+  `invalid_request` (§7) before anything is sent. Removing the header does not change how
+  the body is framed on the wire. Code that forwards an inbound request's headers verbatim
+  is the common case that trips on this.
+- **`Content-Length` must be a single well-formed value**, with repeated fields in
+  agreement. A body that reports its own length is authoritative: the header must equal
+  it, and a disagreement fails the request before anything is sent. A body that cannot
+  report one is framed against the header on trust. A surviving header is sent in
+  normalized decimal form.
 - **Redirects are not followed.** Like `fetch_hyper` (and unlike WinHTTP's own default),
   3xx responses are surfaced to the caller unchanged rather than followed, with no knob
   to re-enable automatic redirects.
