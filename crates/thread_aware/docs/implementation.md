@@ -1,5 +1,8 @@
 # Thread-aware implementation
 
+The user-visible behavior and design tenets of `Arc` and `Storage` are described
+in [design.md](design.md); this document covers how that behavior is implemented.
+
 ## Storage
 
 An `Arc<T, S>` owns a handle to a slot table shared by every clone of that
@@ -7,34 +10,79 @@ value. The `Strategy` type parameter maps an `Affinity` to a slot index and to
 the number of slots the table needs, so `PerCore`, `PerNuma` and `PerProcess`
 differ only in that mapping.
 
-Each slot holds the value materialized for one affinity and is guarded by its
-own reader-writer lock, on its own cache line. Relocations targeting different
-affinities therefore touch different locks on different lines and never contend;
-a relocation only ever synchronizes with other relocations into the *same*
-affinity.
+Each slot holds the value materialized for it and is guarded by its own
+reader-writer lock. The strategy maps affinities to slots: `PerCore` gives each
+processor its own slot, while `PerNuma` and `PerProcess` fold several affinities
+onto one shared slot. Relocations into different slots touch different locks and
+never contend, so under `PerCore` a fanout across cores spreads across slots; a
+relocation only ever synchronizes with other relocations into the *same* slot.
+
+Slots are cache-line padded to curb false sharing between neighboring locks. The
+padding follows a target-specific alignment estimate; it reduces the chance that
+two locks share a line on the architectures the crate targets, rather than
+guaranteeing physical isolation on every machine.
 
 The table is sized once, on first use, to the slot count the strategy reports.
 Because the whole table is fixed from then on, the strategy must report the same
 count for every affinity that shares it — the built-in strategies do, since the
 processor and memory-region counts are properties of the machine. There is no
 growth path and no table-wide lock guarding the array. After that first
-initialization, reaching a slot is a plain atomic load of a pointer that stays
-resident and shared in every core's cache, generating no coherence traffic. Slots
-are filled lazily: a slot is populated the first time a clone is relocated into
-the affinity that owns it, and stays populated for the lifetime of the shared
-table.
+initialization the array and the pointer to it are immutable, so reaching a slot
+is a plain atomic load that carries no further synchronization; how well it stays
+in cache is left to the hardware. Slots are filled lazily: a slot is populated the
+first time a clone is relocated into it, and stays populated for the lifetime of
+the shared table.
 
-A slot stores an `Arc<T>` rather than a `T`. An `Arc<T>` is a sized value even
-when `T` is not, which is what lets `Arc<T, S>` keep `T: ?Sized` (so `Arc<dyn
-Trait, S>` works). The public handle is `storage::Storage`; the raw table behind
-it is `SlotTable`, kept separate so it can be unit-tested with a plain value type
-while the handle pins the stored type to `Arc<T>`.
+A slot stores a `sync::Arc<T>` — the same shared handle the `Arc<T, S>` derefs
+through — not a bare `T`. The `Arc` is the crate's primary abstraction: an
+`Arc<T, S>` keeps its current-affinity value in a `value: sync::Arc<T>` field and
+derefs through it with no locking, while the slot table is a secondary,
+lazily-filled cache recording which `sync::Arc<T>` was materialized for each
+affinity, so a later relocation can restore the same shared handle. The choice to
+store an `Arc` is therefore made at the `Storage` layer, not baked into
+`SlotTable`: `SlotTable` is a generic, value-agnostic partitioned table
+(unit-tested with a plain value type), and `Storage` is the adapter that fixes its
+element type to `sync::Arc<T>`. The public boundary makes the same split visible —
+`Storage::insert`, `Storage::get` and `Arc::from_storage` all traffic in
+`sync::Arc<T>`, because an unsized `T` cannot be passed or stored by value and
+must already sit behind a shared pointer.
+
+Storing `sync::Arc<T>` is also what preserves `T: ?Sized` (so `Arc<dyn Trait, S>`
+works). A `sync::Arc<T>` is a sized value for any `T` — thin when `T` is sized, a
+fat pointer when it is not — and the slot's `RwLock` holds it as an opaque value
+without inspecting its shape.
 
 `Storage` is constructible and populatable from outside the crate: a caller can
 build one with `Storage::new`, seed affinities with `Storage::insert`, and then
 pass it to `Arc::from_storage` to obtain an `Arc` backed by those prepared
 values. The internal slot layout stays hidden — only the affinity-keyed
 insert/get surface is exposed.
+
+### Why a reader-writer lock and not an atomic swap
+
+An earlier design considered replacing each slot's `RwLock<Option<Arc<T>>>` with
+an atomic pointer swap (an `arc_swap`-style cell), which would turn a slot read
+into a lock-free load. It is not adopted, for two reasons.
+
+A cell like that stores the live handle as a single machine-word pointer it loads
+and stores atomically. That works directly only when `T` is sized, where `Arc<T>`
+is a thin pointer; for an unsized `T` — `dyn Trait`, `[u8]` — `Arc<T>` is a fat
+pointer that does not fit one atomic word, so a direct swap would force
+`T: Sized`. The reader-writer lock keeps `?Sized` for free, because it guards the
+`Arc<T>` as an opaque value and never decomposes it into a pointer. `?Sized` could
+still be kept under a swap by adding a thin indirection — swapping an `Arc<Arc<T>>`
+or `Arc<Box<T>>`, whose outer handle is thin whatever `T` is — but that adds an
+allocation and an extra indirection to every stored value.
+
+The decisive reason is that the swap would buy almost nothing here.
+Dereferencing an `Arc<T, S>` — the steady state — never touches a slot: the holder
+carries its current value in its own `value` field and derefs through that with no
+synchronization. A slot lock is taken on relocation (and by the storage
+accessors), and on relocation's common hit path only its shared side. Because each
+slot has its own lock and the workloads that matter relocate into distinct slots,
+that acquisition is essentially uncontended, so replacing it with a lock-free load
+would shave a few instructions off a path that is not the hot one while adding
+indirection to every stored value. Keeping the lock is the better trade.
 
 ## Relocation locking
 
@@ -69,8 +117,8 @@ locks only the destination affinity's slot, and acquires it in two stages.
 
 The first stage carries the throughput. A slot is never emptied once populated,
 so a relocation into an already-populated affinity only clones a reference out of
-its slot. Because each affinity owns its own lock, these reads scale with the
-number of affinities: a fanout that hands work to every core relocates into a
+its slot. Because each slot owns its own lock, these reads scale with the number
+of slots: under `PerCore` a fanout that hands work to every core relocates into a
 different slot per core, and the cores do not contend.
 
 The second stage handles a miss: the destination slot is empty, so its value is
@@ -111,7 +159,7 @@ is on the hot path.
 | ------------ | ------------------------------------------------------------------- |
 | `hit_path`   | Relocation into an already-populated slot, single-threaded.          |
 | `miss_path`  | Relocation that has to materialize a slot, single-threaded.          |
-| `concurrent` | Cost of one relocation while every core relocates at once.           |
+| `concurrent` | Hit-path relocation throughput with many workers relocating at once. |
 
 The suite measures two subjects: a bare `Arc<Payload, PerCore>`, which isolates
 one relocation, and a five-layer object tree, a larger object graph. Relocation
@@ -119,53 +167,63 @@ is a graph walk, so a caller pays for every thread-aware node reachable from the
 message, not just for a single call; the two subjects cover both ends of that
 range.
 
-The two subjects exercise the locking policy at very different rates. Each
+The two subjects do very different amounts of lock work per message. Each
 thread-aware node owns a separate slot table with its own lock, and the derived
-walk visits fields in sequence rather than nested, so the tree does not hold any
-one lock for longer — it takes roughly one acquisition per layer instead of one
-in total. That multiplies how often a message collides with another thread.
+walk visits fields in sequence, so relocating the tree takes roughly one slot
+acquisition per layer instead of one in total. Each message therefore pays the
+per-slot cost several times over, which makes that cost easier to resolve.
 
 `hit_path` and `miss_path` measure both subjects, the bare one being a meaningful
 isolation of a single relocation. `concurrent` measures only the tree: at one
-acquisition per message the bare subject collides too rarely to resolve any
-difference between locking policies.
+acquisition per message the bare subject does too little lock work to resolve the
+effect it is looking for.
 
 ### The concurrent benchmark
 
-`concurrent` answers a single question: what does one relocation cost while every
-core is relocating at once? A pool of workers is created once and reused. Each
-round hands every worker a batch of relocations, releases them together, and
-measures the wall-clock time until the last worker finishes.
+`concurrent` measures one thing: the per-relocation cost of the hit path while
+many workers relocate at once. A pool of workers is created once and reused; each
+worker owns a distinct destination slot that is materialized before timing, and
+relocates its own clone of the subject into that slot. Every measured relocation
+is therefore a hit, and because the destinations are distinct no two workers ever
+touch the same slot lock. What the benchmark isolates is that hit path with no
+shared lock to serialize on: adding workers introduces no lock hand-off between
+them, so the per-relocation cost does not degrade the way it did when a single
+lock guarded the whole table. The before/after comparison against that former
+design is reported in the pull request, not established by this run alone.
 
-The batch is the crux. A relocation is a handful of nanoseconds, while releasing
-the workers and waking them onto their cores is tens of microseconds; a
-per-operation timing at that ratio measures the scheduler, not the lock. Batching
-many relocations behind one release amortizes the fixed cost to nothing. Criterion
-drives the batch size up until a sample fills its target time and fits round
-duration against batch size, so the fixed release cost falls into the regression
-intercept and the reported per-iteration time is the slope — the cost of one
-relocation under contention. Throughput is reported per worker, so the group also
-prints aggregate relocations per second.
+Each round hands every worker a batch of relocations, releases them together, and
+measures the wall-clock time until the last worker finishes. The batch is what
+makes the measurement possible: a relocation is a handful of nanoseconds while
+releasing the workers and waking them onto their cores is tens of microseconds, so
+a per-round timing at that ratio would measure the scheduler, not the work.
+Criterion drives the batch size up until a sample fills its target time and fits
+round duration against batch size, so the fixed release cost lands in the
+regression intercept. The reported per-iteration time is then the batch makespan
+divided by the batch size — the amortized cost of one relocation on the worker
+that finishes last. Workers are synchronized once per batch, not per relocation.
+Throughput is counted per worker, so the group also prints aggregate relocations
+per second.
 
 Readiness is proven before the clock starts: every worker parks on a barrier, the
 controller waits there too, and only once all have arrived does it start timing
 and release them. Timing therefore excludes barrier arrival skew, and there is no
 per-operation synchronization inside the batch to distort the measurement.
 
-The group sweeps contention with one worker per processor and
-`CONCURRENT_OVERSUBSCRIPTION` workers per processor. The oversubscribed shape is
-the one that exposes a worker preempted while holding an exclusive lock, since
-only then are there runnable workers queued behind it. The uncontended cost is
-`hit_path`'s job and is deliberately absent here, where a single worker would
-measure no contention and only add the pool's thread-handoff overhead.
+The group sweeps one worker per processor and `CONCURRENT_OVERSUBSCRIPTION`
+workers per processor. Because the measured relocations are all hits into distinct
+slots, the oversubscribed shape does not add lock contention; it adds scheduler
+pressure, exposing how the hit path behaves when more workers than processors are
+runnable. The uncontended single-worker cost is `hit_path`'s job and is
+deliberately absent here, where one worker would only add the pool's
+thread-handoff overhead to the same number.
 
 Processor count means logical processors, so on a machine with simultaneous
 multithreading the saturated shape runs two workers per physical core. The
 affinities the workers relocate between are fabricated values used to select
 slots; no thread is pinned.
 
-`concurrent` is Criterion-only. Callgrind counts instructions on a serialized
-execution, so it cannot observe lock contention at all. It also cannot show the
-benefit of the shared-lock probe, because an uncontended shared acquisition costs
-about as many instructions as an uncontended exclusive one; its role is to catch
-regressions in either branch.
+By construction `concurrent` does not measure the miss path, first-use table
+initialization, the source-slot write that follows a miss, or contention on a
+shared destination; those paths are either single-threaded (`miss_path`) or out of
+scope. It is Criterion-only: Callgrind counts instructions on a serialized
+execution and cannot observe scaling across threads at all.

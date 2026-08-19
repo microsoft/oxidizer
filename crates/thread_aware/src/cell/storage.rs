@@ -45,7 +45,7 @@ pub trait Strategy {
 const NEVER_POISONED: &str =
     "a slot lock is never left poisoned; a panic while one is held is caught and the lock released before the unwind resumes";
 
-/// One affinity's independently-locked, cache-line-isolated storage slot.
+/// One slot: an independently-locked value cell, cache-line padded to curb false sharing.
 type Slot<T> = CachePadded<RwLock<Option<T>>>;
 
 /// Affinity-partitioned storage: one independently-locked slot per affinity.
@@ -54,15 +54,18 @@ type Slot<T> = CachePadded<RwLock<Option<T>>>;
 /// `Arc` actually holds; the two are separate so this can be unit-tested with a
 /// plain value type while the wrapper pins the stored type to `Arc<T>`.
 ///
-/// Each affinity owns its own `RwLock`, so relocations targeting different
-/// affinities never touch the same lock or the same cache line. The slots are
-/// cache-line padded so that neighboring affinities do not share a line.
+/// Each slot owns its own `RwLock`, so relocations into different slots never
+/// touch the same lock. The strategy decides how affinities map to slots:
+/// `PerCore` gives each processor its own slot, while `PerNuma` and `PerProcess`
+/// map several affinities onto one shared slot. The slots are cache-line padded,
+/// using `CachePadded`'s target-specific alignment estimate, to curb false sharing
+/// between neighboring locks rather than to guarantee physical isolation.
 ///
 /// The slot array is sized once, on first use, to `S::count(affinity)` — a value
 /// fixed for the process lifetime — so there is no growth path and therefore no
-/// table-wide lock guarding it. After initialization, reaching a slot is a plain
-/// atomic load of the `OnceLock` pointer, which stays resident and shared in
-/// every core's cache and generates no coherence traffic.
+/// table-wide lock guarding it. After initialization the array and the pointer to
+/// it are immutable, so reaching a slot is a plain atomic load that carries no
+/// further synchronization; its cache behavior is left to the hardware.
 #[derive(Debug)]
 pub(crate) struct SlotTable<T, S: Strategy> {
     slots: OnceLock<Box<[Slot<T>]>>,

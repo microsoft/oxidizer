@@ -5,8 +5,8 @@
 //!
 //! Paired with `thread_aware_relocate.rs`, which covers the same operations
 //! under wall-clock measurement. Only the uncontended `hit_path` and `miss_path`
-//! subgroups appear here: the `concurrent` subgroup measures lock contention
-//! across threads, which the single-threaded Callgrind simulator cannot model.
+//! subgroups appear here: the `concurrent` subgroup measures scaling across
+//! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
 //! the shared-lock probe. An uncontended shared acquisition and an uncontended

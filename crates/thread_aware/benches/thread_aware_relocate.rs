@@ -21,13 +21,14 @@
 //! The suite covers these shapes:
 //!
 //! * `hit_path` / `miss_path` — uncontended cost of the two branches.
-//! * `concurrent` — the cost of one relocation while every core relocates at
-//!   once, which is what a fanout across all cores looks like.
+//! * `concurrent` — the hit-path cost with as many concurrent workers as
+//!   processors, and beyond, each relocating into its own slot, so there is no
+//!   shared lock to serialize on.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
 //! `miss_path` under instruction-count measurement. The `concurrent` subgroup has
-//! no Callgrind counterpart because it measures lock contention across threads,
-//! which the single-threaded simulator cannot model.
+//! no Callgrind counterpart because it measures scaling across threads, which the
+//! single-threaded simulator cannot model.
 //!
 //! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate`
 
@@ -289,11 +290,12 @@ fn bench_miss_path(c: &mut Criterion) {
 }
 
 // =========================================================================
-// concurrent — the cost of one relocation while every core relocates at once.
+// concurrent — the hit-path cost while many workers relocate into their own
+//              slots at once, with no shared lock to serialize on.
 // =========================================================================
 
 /// Persistent worker pool that measures a relocation performed concurrently from
-/// every worker.
+/// every worker, each into its own already-materialized destination slot.
 ///
 /// The workers are created once and reused for every Criterion sample; spawning
 /// them per sample would cost orders of magnitude more than the work measured.
@@ -306,7 +308,10 @@ fn bench_miss_path(c: &mut Criterion) {
 /// fixed cost. Criterion drives the batch size up until a sample fills its target
 /// time and fits round duration against batch size, so the fixed release cost
 /// lands in the regression intercept and the reported per-iteration time is the
-/// slope: the cost of one relocation under full contention.
+/// batch makespan divided by the batch size: the amortized cost of one relocation
+/// on the worker that finishes last. Because the destinations are distinct and
+/// already populated, no two workers share a slot lock, so that figure reflects
+/// the hit path while every worker is busy.
 ///
 /// Readiness is proven before the clock starts. Every worker parks on `ready`,
 /// the controller waits there too, and only once all of them have arrived does it
@@ -389,8 +394,9 @@ impl ConcurrentRelocation {
     /// Runs one round of `batch` relocations per worker and returns the wall-clock
     /// time until the last worker finished.
     ///
-    /// Dividing by `batch` gives the cost of one relocation under contention from
-    /// every worker. Criterion does that division, and its regression discards the
+    /// Dividing by `batch` gives the amortized cost of one relocation on the
+    /// worker that finishes last; workers are synchronized once per batch, not per
+    /// relocation. Criterion does that division, and its regression discards the
     /// fixed per-round release cost as the intercept.
     fn run(&self, batch: u64) -> Duration {
         self.batch.store(batch, Ordering::Release);
@@ -427,16 +433,19 @@ fn bench_concurrent(c: &mut Criterion) {
 
     let saturated = SystemHardware::current().processors().len();
 
-    // A sweep over contention: one worker per processor, then more workers than
-    // processors. The reported per-relocation time shows how the lock policy holds
-    // up as contention rises. The uncontended cost is `hit_path`'s job, so it is
-    // deliberately absent here: a single worker measures no contention and only
-    // adds this harness's thread-handoff overhead to the same number.
+    // A sweep over worker count: one worker per processor, then more workers than
+    // processors. Every worker relocates into its own distinct, already-populated
+    // slot, so the measured relocations are all hits and no two workers share a
+    // lock; the reported per-relocation time therefore shows the hit path scaling
+    // as the machine fills rather than lock contention. The oversubscribed shape
+    // adds scheduler pressure, not lock contention. The uncontended single-worker
+    // cost is `hit_path`'s job, so it is deliberately absent here: one worker would
+    // only add this harness's thread-handoff overhead to the same number.
     //
     // The subject is the object tree, which is what actually crosses affinities in
-    // a consumer. It locks one slot table per layer, so a message collides with
-    // other workers several times over, which is what makes the lock policy
-    // visible; a bare `Arc` collides once and shows nothing.
+    // a consumer. It locks one slot table per layer, so each message does several
+    // slot acquisitions and the per-message lock cost is large enough to resolve; a
+    // bare `Arc` does one acquisition and shows nothing.
     let shapes = [
         ("threads_saturated", saturated),
         ("threads_oversubscribed", saturated * CONCURRENT_OVERSUBSCRIPTION),

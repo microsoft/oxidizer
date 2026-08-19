@@ -720,17 +720,22 @@ fn factory_closure_debug() {
 
 #[test]
 fn concurrent_relocation_to_same_affinity_materializes_once() {
-    // Races many threads into the same empty destination slot to exercise both hit branches of
-    // the two-stage relocation lock: the shared-lock probe and the re-probe that follows the
-    // escalation to the exclusive lock.
+    // Races many threads into the same empty destination slot and asserts they all end up with
+    // the one value materialized for it: whichever racer wins publishes, and every other racer
+    // adopts that same `sync::Arc`, whether it sees the value in its initial shared probe or in
+    // the re-probe after escalating to the exclusive lock.
+    //
+    // What this proves deterministically is single materialization. It cannot, from thread
+    // scheduling alone, guarantee that any particular racer takes the exclusive-lock re-probe
+    // branch; the shared guard and the spin below make that likely, not certain.
     // Ref: docs/implementation.md, "Relocation locking".
 
-    // Enough racers that the exclusive-lock queue is populated on any machine that can run more
-    // than a couple of threads, while staying cheap enough for a unit test.
+    // Enough racers to make it likely that some land on the exclusive-lock re-probe branch on a
+    // machine that can run several threads, while staying cheap enough for a unit test.
     const RACERS: usize = 8;
 
     // Repeated because which stage a racer lands in is decided by the operating system
-    // scheduler; repetition makes it near-certain that both branches are taken across the run.
+    // scheduler; repetition raises the chance that the re-probe branch is taken across the run.
     const ROUNDS: usize = 32;
 
     let affinities = pinned_affinities(&[2]);
@@ -744,8 +749,8 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
         let storage = sync::Arc::clone(&origin.storage);
         let barrier = sync::Arc::new(sync::Barrier::new(RACERS.saturating_add(1)));
 
-        // Holding a shared guard lets every racer complete its probe and queue up on the
-        // exclusive lock before any of them can materialize the destination slot.
+        // Holding a shared guard blocks the escalation to the exclusive lock, so a racer that
+        // reaches that stage must wait; it does not by itself schedule the racer threads.
         let shared_guard = storage.read(destination);
 
         let mut racers = Vec::with_capacity(RACERS);
