@@ -22,19 +22,22 @@ padding follows a target-specific alignment estimate; it reduces the chance that
 two locks share a line on the architectures the crate targets, rather than
 guaranteeing physical isolation on every machine.
 
-The table is sized once, on first use, to the slot count the strategy reports.
-Because the whole table is fixed from then on, the design assumes the strategy
-reports the same count for every affinity that shares it — the built-in strategies
-do, since the processor and memory-region counts are properties of the machine. A
-strategy that breaks that assumption can produce an index past the table's end; the
-lookup then falls back to the first slot rather than reaching out of bounds, and
-debug builds trap the anomaly. There is no growth path and no table-wide lock
-guarding the array. After that first
-initialization the array and the pointer to it are immutable, so reaching a slot
-is a plain atomic load that carries no further synchronization; how well it stays
-in cache is left to the hardware. Slots are filled lazily: a slot is populated the
-first time a clone is relocated into it, and stays populated for the lifetime of
-the shared table.
+The slot table is a concurrent append-only vector (a `boxcar::Vec`), so it grows on
+demand while a lookup stays lock-free. A lookup indexes the vector with a single
+lock-free read — the steady-state hit — that scales across cores rather than
+serializing on a shared table lock. When the index is past the vector's end, the
+lookup appends empty slots until it is covered, sizing toward the strategy's reported
+count when that is larger so a well-behaved strategy fills its slots on the first
+access. The reported count is only a sizing hint: a strategy whose index runs past
+it — including a custom strategy that reports an inconsistent count across the
+affinities that share one `Arc` — is served by growing the table rather than being
+rejected.
+
+The table only ever appends and never moves or removes a slot, so each slot keeps a
+stable address for the life of the table. A lookup hands back a reference to a slot
+that stays valid even as later growth extends the table; its holder then locks the
+slot itself. Slots are filled lazily: a slot is populated the first time a clone is
+relocated into it, and stays populated for the lifetime of the shared table.
 
 A slot stores a `sync::Arc<T>` — the same shared handle the `Arc<T, S>` derefs
 through — not a bare `T`. The `Arc` is the crate's primary abstraction: an
@@ -81,11 +84,14 @@ The decisive reason is that the swap would buy almost nothing here.
 Dereferencing an `Arc<T, S>` — the steady state — never touches a slot: the holder
 carries its current value in its own `value` field and derefs through that with no
 synchronization. A slot lock is taken on relocation (and by the storage
-accessors), and on relocation's common hit path only its shared side. Because each
-slot has its own lock and the workloads that matter relocate into distinct slots,
-that acquisition is essentially uncontended, so replacing it with a lock-free load
-would shave a few instructions off a path that is not the hot one while adding
-indirection to every stored value. Keeping the lock is the better trade.
+accessors), and on relocation's common hit path only its shared side. Reaching a
+slot is already lock-free — the append-only table indexes to the slot with an atomic
+load and no table lock — so the only lock left on the hit path is the slot's own
+shared side. Because each slot owns its own lock and the workloads that matter
+relocate into distinct slots, these acquisitions are essentially uncontended, so
+replacing the slot lock with a lock-free load would shave a few instructions off a
+path that is not the hot one while adding indirection to every stored value. Keeping
+the lock is the better trade.
 
 ## Relocation locking
 

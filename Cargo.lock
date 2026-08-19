@@ -700,6 +700,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4667,6 +4673,7 @@ dependencies = [
 name = "thread_aware"
 version = "0.10.0"
 dependencies = [
+ "boxcar",
  "bytes",
  "criterion",
  "crossbeam-utils",
