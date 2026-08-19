@@ -143,12 +143,16 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     }
 
     // A marker nested inside a relocated field is a different case: the enclosing field is
-    // relocated, so it must implement `ThreadAware`, which for a tuple or array means every
-    // element must too. `Self: Send` cannot discharge that, because a `Send` bound on the
-    // whole type does not decompose backwards into a bound on one nested marker.
+    // relocated, so it must implement `ThreadAware`, which for a tuple means every element
+    // must too. `Self: Send` cannot discharge that, because a `Send` bound on the whole type
+    // does not decompose backwards into a bound on one nested marker.
     //
     // Stating `PhantomData<X>: ThreadAware` lets the compiler reduce it through the marker's
-    // own impl to `X: ?Sized + Send`, which is correct for every shape of `X`.
+    // own impl to `X: ?Sized + Send`. That reduction is always correct, but unlike the
+    // top-level `Self: Send` case it is not always satisfiable: for `X = *const T` it becomes
+    // `*const T: Send`, which no instantiation can prove, and a manual `unsafe impl Send for
+    // Self` cannot discharge it because the predicate sits on the marker rather than on
+    // `Self`. Such a field needs `#[thread_aware(skip)]` on the enclosing field.
     if !usage.thread_aware_required.is_empty() {
         let where_clause = generics.make_where_clause();
         for ty in &usage.thread_aware_required {

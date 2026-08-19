@@ -432,3 +432,59 @@ fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
     let mut value = own_thread_aware::Holder(own_thread_aware::Inner);
     value.relocate(source, destination);
 }
+
+/// A named enum variant carrying non-relocated fields.
+///
+/// The generated match arm emits no statement for a marker or a skipped field, so binding it
+/// by name left an unused variable. `deny(warnings)` is deliberate: it is what a downstream
+/// crate would hit, and it is what this shape used to fail.
+mod enum_named_bindings {
+    #![deny(warnings)]
+
+    use core::marker::PhantomData;
+
+    use thread_aware_macros::ThreadAware;
+
+    #[derive(ThreadAware)]
+    pub(crate) enum NamedVariants<T, U> {
+        Marked {
+            value: super::Tracker,
+            marker: PhantomData<T>,
+        },
+        Skipped {
+            value: super::Tracker,
+            #[thread_aware(skip)]
+            ignored: U,
+        },
+    }
+}
+
+#[test]
+fn enum_named_variant_bindings_do_not_warn() {
+    use enum_named_bindings::NamedVariants;
+
+    let (source, destination) = affinity_pair();
+
+    let mut marked = NamedVariants::<i32, u8>::Marked {
+        value: Tracker::default(),
+        marker: PhantomData,
+    };
+    marked.relocate(source, destination);
+    match &marked {
+        NamedVariants::Marked { value, .. } => assert_eq!(value.relocations, 1),
+        NamedVariants::Skipped { .. } => unreachable!("constructed as Marked"),
+    }
+
+    let mut skipped = NamedVariants::<i32, u8>::Skipped {
+        value: Tracker::default(),
+        ignored: 7,
+    };
+    skipped.relocate(source, destination);
+    match &skipped {
+        NamedVariants::Skipped { value, ignored } => {
+            assert_eq!(value.relocations, 1);
+            assert_eq!(*ignored, 7, "the skipped field is left untouched");
+        }
+        NamedVariants::Marked { .. } => unreachable!("constructed as Skipped"),
+    }
+}

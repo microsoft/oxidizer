@@ -283,8 +283,8 @@ fn phantom_reference_is_not_reduced_to_its_parameter() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_raw_pointer_gets_no_unprovable_predicate() {
-    // A structural predicate here would be `where *const T: Send`, which no instantiation can
+fn top_level_phantom_raw_pointer_gets_no_unprovable_predicate() {
+    // A TOP-LEVEL raw-pointer marker. A structural predicate would be `where *const T: Send`, which no instantiation can
     // prove. `Self: Send` is satisfied by the manual `unsafe impl Send` such types carry.
     let input = quote! {
         #[derive(ThreadAware)]
@@ -388,20 +388,11 @@ fn self_send_predicate_appends_to_existing_where_clause() {
 #[cfg_attr(miri, ignore)]
 fn generics_lifetime_and_const_params_untouched() {
     // Only type parameters can carry bounds; lifetimes and const generics are skipped.
+    // The field shape must be one the crate can actually relocate; pinning an expansion
+    // that cannot compile is the blind spot this PR exists to close.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct Mixed<'a, const N: usize, T>(&'a T, [u8; N], core::marker::PhantomData<T>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn generics_unused_param_gets_no_bound() {
-    // A type parameter no field mentions must be left completely unbound.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct UnusedParam<T, U>(T);
+        struct Mixed<'a, const N: usize, T>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);
     };
     assert_snapshot!(expand(input));
 }

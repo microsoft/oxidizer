@@ -12,10 +12,10 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         match self {
-            Self::Variant { data, marker } => {
+            Self::Variant { data, marker: _ } => {
                 ::thread_aware::ThreadAware::relocate(data, source, destination);
             }
-            Self::Other { value, phantom } => {
+            Self::Other { value, phantom: _ } => {
                 ::thread_aware::ThreadAware::relocate(value, source, destination);
             }
         }
