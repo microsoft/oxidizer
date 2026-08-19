@@ -51,7 +51,7 @@ impl Affinity {
     /// Panics if either count is zero or an index is outside its corresponding
     /// count.
     #[must_use]
-    pub const fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
+    const fn new(processor_index: u16, memory_region_index: u16, processor_count: u16, memory_region_count: u16) -> Self {
         assert!(processor_count > 0, "processor count must be nonzero");
         assert!(memory_region_count > 0, "memory region count must be nonzero");
         assert!(
