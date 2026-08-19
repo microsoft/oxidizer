@@ -165,7 +165,7 @@ is on the hot path.
 | Group        | What it measures                                                    |
 | ------------ | ------------------------------------------------------------------- |
 | `hit_path`   | Relocation into an already-populated slot, single-threaded.          |
-| `miss_path`  | Relocation that has to materialize a slot, single-threaded.          |
+| `miss_path`  | Cross-slot miss into an already-sized table, single-threaded.        |
 | `concurrent` | Hit-path relocation throughput with many workers relocating at once. |
 
 The suite measures two subjects: a bare `Arc<Payload, PerCore>`, which isolates
@@ -184,6 +184,17 @@ per-slot cost several times over, which makes that cost easier to resolve.
 isolation of a single relocation. `concurrent` measures only the tree: at one
 acquisition per message the bare subject does too little lock work to resolve the
 effect it is looking for.
+
+### The miss benchmark
+
+`miss_path` measures a cross-slot miss: the destination slot is empty, so
+relocation escalates to that slot's exclusive lock, runs the factory to
+materialize the value, publishes it, and records the value the `Arc` carried in
+the still-empty source slot. A primer affinity relocates a throwaway clone before
+timing, so the shared slot table is already allocated and both the source and
+destination slots it later uses stay empty. That keeps the one-time table
+allocation — an O(slot-count) cost paid once per `Arc` lineage, not once per
+miss — out of the measurement.
 
 ### The concurrent benchmark
 
@@ -229,8 +240,9 @@ multithreading the saturated shape runs two workers per physical core. The
 affinities the workers relocate between are fabricated values used to select
 slots; no thread is pinned.
 
-By construction `concurrent` does not measure the miss path, first-use table
-initialization, the source-slot write that follows a miss, or contention on a
-shared destination; those paths are either single-threaded (`miss_path`) or out of
-scope. It is Criterion-only: Callgrind counts instructions on a serialized
-execution and cannot observe scaling across threads at all.
+By construction `concurrent` does not measure the miss path or contention on a
+shared destination; the miss path — including the source-slot write that follows
+it — is `miss_path`'s single-threaded job, and shared-destination contention is
+out of scope for the whole suite. It is Criterion-only: Callgrind counts
+instructions on a serialized execution and cannot observe scaling across threads
+at all.

@@ -49,14 +49,15 @@ use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
 /// How far the oversubscribed case of the `concurrent` group exceeds the
 /// processor count.
 ///
-/// Oversubscription is the point of that shape: it puts runnable workers in the
-/// scheduler queue behind the ones holding a processor, which is the regime a
-/// thread-per-core runtime reaches whenever it has more runnable work than cores,
-/// and the regime in which a worker preempted while holding an exclusive lock
-/// stalls everyone behind it.
+/// Oversubscription is the point of that shape: it puts more runnable workers in
+/// the scheduler queue than there are processors to run them, the regime a
+/// thread-per-core runtime reaches whenever it has more runnable work than cores.
+/// Every worker still relocates into its own already-filled slot, so no two
+/// workers ever share a lock; the shape exposes how the uncontended hit path
+/// behaves under scheduler pressure, not lock contention.
 ///
-/// Two is enough to reach that regime. Higher factors pile on scheduler queueing
-/// without changing the contention the lock itself sees.
+/// Two is enough to reach that regime. Higher factors only pile on more scheduler
+/// queueing.
 const CONCURRENT_OVERSUBSCRIPTION: usize = 2;
 
 /// Source of distinct per-affinity identities.
@@ -103,6 +104,18 @@ fn materialized(affinities: &[Affinity]) -> Arc<Payload, PerCore> {
     assert_eq!(ids.len(), distinct, "every affinity must hold its own value");
 
     arc
+}
+
+/// Sizes the shared slot table(s) of `subject` and fills only `primer`'s slot.
+///
+/// Relocating a throwaway clone into a primer affinity allocates every slot table
+/// the subject reaches and materializes the primer slot, while leaving every other
+/// slot empty. Timing a relocation between two affinities distinct from `primer`
+/// therefore measures a genuine cross-slot miss with the table already allocated,
+/// keeping the one-time table allocation out of the measurement.
+fn seed_slot_table<T: ThreadAware + Clone>(subject: &T, primer: Affinity) {
+    let mut seed = subject.clone();
+    seed.relocate(None, primer);
 }
 
 // =========================================================================
@@ -256,19 +269,27 @@ fn bench_hit_path(c: &mut Criterion) {
 
 // =========================================================================
 // miss_path — destination affinity is empty, so the value is materialized.
+//             A primer affinity sizes the shared slot table before timing, so
+//             the measurement is the cross-slot miss itself — the exclusive
+//             re-probe, the factory call, and the two slot writes — rather than
+//             the one-time table allocation.
 // =========================================================================
 
 fn bench_miss_path(c: &mut Criterion) {
-    let affinities = pinned_affinities(&[2]);
-    let destination = affinities[1];
+    let affinities = pinned_affinities(&[3]);
+    let (primer, source, destination) = (affinities[0], affinities[1], affinities[2]);
 
     let mut group = c.benchmark_group("thread_aware_relocate/miss_path");
 
     group.bench_function("new_affinity", |b| {
         b.iter_batched(
-            || Arc::<Payload, PerCore>::new(Payload::new),
+            || {
+                let arc = Arc::<Payload, PerCore>::new(Payload::new);
+                seed_slot_table(&arc, primer);
+                arc
+            },
             |mut arc| {
-                arc.relocate(black_box(None), black_box(destination));
+                arc.relocate(black_box(Some(source)), black_box(destination));
                 arc
             },
             BatchSize::SmallInput,
@@ -277,9 +298,13 @@ fn bench_miss_path(c: &mut Criterion) {
 
     group.bench_function("tree", |b| {
         b.iter_batched(
-            Tree::new,
+            || {
+                let tree = Tree::new();
+                seed_slot_table(&tree, primer);
+                tree
+            },
             |mut tree| {
-                tree.relocate(black_box(None), black_box(destination));
+                tree.relocate(black_box(Some(source)), black_box(destination));
                 tree
             },
             BatchSize::SmallInput,

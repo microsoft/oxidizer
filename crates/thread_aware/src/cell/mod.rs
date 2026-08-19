@@ -593,9 +593,11 @@ impl<T, S: Strategy> Arc<T, S> {
         let raw = sync::Arc::strong_count(&this.value);
         let internal = this.storage.count_where(|stored| sync::Arc::ptr_eq(stored, &this.value));
 
-        // `raw` and `internal` are sampled separately rather than from one consistent snapshot: a
-        // concurrent relocation can publish this value into another slot between the two reads, so
-        // `internal` may briefly exceed the now-stale `raw`. Saturate instead of underflowing.
+        // `sync::Arc::strong_count` is an unsynchronized snapshot, stale the instant it is read, so
+        // `raw` and `internal` can never be reconciled into one consistent view regardless of how
+        // they are sampled: a concurrent relocation can publish this value into another slot,
+        // leaving `internal` momentarily larger than the now-stale `raw`. Saturate rather than
+        // underflow.
         raw.saturating_sub(internal)
     }
 
@@ -607,7 +609,7 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
-    /// Produces the value for `destination`, and any change the factory needs.
+    /// Produces the value for `destination` and a replacement factory.
     ///
     /// The first element is the value `destination` will hold. The second is a
     /// replacement for [`self.factory`](Self), or `None` when the factory is

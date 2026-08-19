@@ -103,8 +103,9 @@ impl<T, S: Strategy> SlotTable<T, S> {
         // violates it before it can index out of bounds in release.
         debug_assert!(
             index < slots.len(),
-            "Strategy::index returned {index} for a table of {} slots; Strategy::count must be consistent across affinities",
-            slots.len()
+            "Strategy::index returned {index} for a table of {} slots in {}; Strategy::count must be consistent across affinities",
+            slots.len(),
+            core::any::type_name::<S>()
         );
 
         &slots[index]
@@ -156,16 +157,16 @@ where
 
     /// Counts how many stored entries satisfy the given predicate.
     ///
-    /// Each value is cloned out from under its slot lock and the predicate runs
-    /// afterwards, so no caller code executes while a lock is held. The slots are
-    /// visited one at a time rather than under a single consistent snapshot, so
-    /// the count is an estimate under concurrent relocation — which matches the
+    /// The count is an estimate under concurrent relocation, matching the
     /// inherently racy nature of a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&T) -> bool) -> usize {
         let Some(slots) = self.slots.get() else {
             return 0;
         };
 
+        // Clone each value out from under its slot lock and apply the predicate afterwards, so no
+        // caller code runs while a lock is held. Slots are visited one at a time rather than under
+        // a single consistent snapshot, which is what leaves the count an estimate.
         slots
             .iter()
             .filter_map(|slot| slot.read().expect(NEVER_POISONED).clone())
