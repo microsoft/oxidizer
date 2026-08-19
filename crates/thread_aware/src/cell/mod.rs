@@ -669,23 +669,38 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             return;
         }
 
-        // A miss records two affinities. The destination affinity gets the freshly materialized
-        // value. The source affinity gets the value the `Arc` is carrying: that value belongs to
-        // the source affinity, and on a first relocation it has never been written to the table, so
-        // recording it lets a later relocation back into the source affinity find it instead of
-        // materializing a fresh one.
+        // A miss into a slot different from the source records two slots. The destination slot gets
+        // the freshly materialized value. The source slot gets the value the `Arc` is carrying: that
+        // value belongs to the source slot, and on a first relocation it has never been written to
+        // the table, so recording it lets a later relocation back into the source slot find it
+        // instead of materializing a fresh one.
         //
         // The destination slot's exclusive lock is held across materialization so exactly one thread
-        // populates that affinity. The source slot is written afterwards, under its own lock and
-        // never while the destination lock is held, so two threads relocating in opposite directions
+        // populates that slot. The source slot is written afterwards, under its own lock and never
+        // while the destination lock is held, so two threads relocating in opposite directions
         // cannot each end up waiting for the lock the other holds.
+        //
+        // When the source resolves to the destination's own slot there is no cross-slot move: the
+        // carried value already belongs to that slot, so a miss seeds the slot with it and keeps it
+        // rather than materializing a fresh value that would diverge from the shared one. This is
+        // the whole of relocation under `PerProcess`, where every affinity shares one slot.
+        // Ref: docs/implementation.md, "Relocation locking".
+        let same_slot = source.is_some_and(|source| S::index(source) == S::index(destination));
+
         let (old_value, replaced_empty_slot) = {
             let mut destination_slot = self.storage.write(destination);
 
             // The slot is re-probed because the lock was released between the two stages, during
-            // which another thread may have materialized this same destination affinity.
+            // which another thread may have materialized this same destination slot.
             if let Some(value) = destination_slot.clone() {
                 self.value = value;
+                return;
+            }
+
+            // Same slot as the source: the carried value already belongs here, so seed the empty
+            // slot with it and keep it, without materializing a fresh value.
+            if same_slot {
+                *destination_slot = Some(sync::Arc::<T>::clone(&self.value));
                 return;
             }
 
@@ -720,19 +735,17 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // Ref: docs/implementation.md, "Relocation locking".
         debug_assert!(replaced_empty_slot, "slot was occupied after a re-probe under its own write lock");
 
+        // Record the value the `Arc` moved away from into the source slot. This is reached only on a
+        // cross-slot miss — the same-slot case returned above — so the source slot is always
+        // distinct from the destination slot just written.
         if let Some(source) = source {
-            // Record the value the `Arc` moved away from into the source affinity's slot, unless
-            // source and destination are the same slot (the destination write above already stored
-            // the current value there).
-            if source != destination {
-                let mut source_slot = self.storage.write(source);
+            let mut source_slot = self.storage.write(source);
 
-                // Store only if the source affinity has no value yet. Another thread may have
-                // recorded it while this one held the destination lock; that is the same
-                // per-affinity value this would store, so leaving it in place is correct.
-                if source_slot.is_none() {
-                    *source_slot = Some(old_value);
-                }
+            // Store only if the source slot has no value yet. Another thread may have recorded it
+            // while this one held the destination lock; that is the same value this would store, so
+            // leaving it in place is correct.
+            if source_slot.is_none() {
+                *source_slot = Some(old_value);
             }
         }
     }

@@ -106,6 +106,10 @@ locks only the destination affinity's slot, and acquires it in two stages.
              |
              no
              |
+      same slot as source? --- yes ---> keep carried value,
+             |                            seed slot[destination], done
+             no
+             |
        materialize value
        publish to slot[destination]
              |
@@ -121,21 +125,24 @@ its slot. Because each slot owns its own lock, these reads scale with the number
 of slots: under `PerCore` a fanout that hands work to every core relocates into a
 different slot per core, and the cores do not contend.
 
-The second stage handles a miss: the destination slot is empty, so its value is
-materialized by running the factory and published under the exclusive lock — on
-that slot only, so a miss on one affinity never blocks hits on another. The
-re-probe before materializing is required for correctness, not an optimization:
-the lock is dropped between the stages, so another thread may have populated the
-slot in between, and without re-checking the two would materialize competing
-values for the same affinity.
+The second stage handles a miss: the destination slot is empty. If the source
+resolves to that same slot, the value the `Arc` carries already belongs there, so
+it is kept and the slot is seeded with it — this is every relocation under
+`PerProcess`, and any relocation whose source and destination share a slot.
+Otherwise the value is materialized by running the factory and published under the
+exclusive lock, on that slot only, so a miss on one slot never blocks hits on
+another. The re-probe before either is required for correctness, not an
+optimization: the lock is dropped between the stages, so another thread may have
+populated the slot in between, and without re-checking, two threads would
+materialize competing values for the same slot.
 
-A relocation also preserves the value it moves away from. The `Arc` is carrying
-the source affinity's value, so on a miss that value is written into the source
-slot when the slot is still empty — the case of an `Arc` leaving an affinity that
-nothing had recorded yet. This write happens after the destination lock is
-released, never with both locks held: two threads relocating in opposite
-directions (`X → Y` and `Y → X`) would otherwise deadlock, each waiting for the
-lock the other holds.
+A cross-slot miss also preserves the value it moves away from. The `Arc` is
+carrying the source slot's value, so that value is written into the source slot
+when it is still empty — the case of an `Arc` leaving a slot that nothing had
+recorded yet. This write happens after the destination lock is released, never
+with both locks held: two threads relocating in opposite directions (`X → Y` and
+`Y → X`) would otherwise deadlock, each waiting for the lock the other holds. The
+same-slot case needs none of this, having already seeded the one slot involved.
 
 A slot lock is never left poisoned, so acquiring one never has to handle a poison
 error. Poisoning would require a panic while the lock is held, and the crate

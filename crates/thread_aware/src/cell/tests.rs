@@ -518,33 +518,27 @@ fn test_strong_count_independent_across_affinities() {
 }
 
 #[test]
-fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
-    // Regression test: when source == destination, Arc::relocated() must NOT overwrite the
-    // newly-created value in storage with the stale pre-relocation value.
+fn self_relocation_keeps_the_value_and_storage_consistent() {
+    // Source and destination in the same slot (here the same affinity) are not a cross-slot move,
+    // so relocation keeps the carried value and seeds the slot with it. The Arc and its slot then
+    // agree, and a later relocation finds that same value on the shared-probe fast path rather than
+    // a stale or freshly materialized one.
     let affinities = pinned_affinities(&[2]);
     let affinity = affinities[0];
 
-    // Create an Arc whose Counter starts at zero, then advance it.
     let arc = PerCore::new(Counter::new);
     arc.increment_by(42);
     assert_eq!(arc.value(), 42);
 
-    // Relocate with source == destination.  The ThreadAware impl always creates a *new*
-    // Counter (value resets to 0), so `relocate` must result in 0 and must also leave
-    // storage holding 0 (not the stale 42).
     let mut arc = arc;
     arc.relocate(Some(affinity), affinity);
-    assert_eq!(arc.value(), 0, "relocated value should come from factory");
+    assert_eq!(arc.value(), 42, "a same-slot relocation keeps the carried value");
 
-    // A second relocation from the same slot must find the factory-created value (0) in
-    // storage, not the stale pre-relocation value (42).  Before the bug fix, the first
-    // relocated() call wrote the stale Arc<Counter(42)> back into the storage slot,
-    // so the second call's `get_clone` fast-path would return 42 instead of 0.
     arc.relocate(Some(affinity), affinity);
     assert_eq!(
         arc.value(),
-        0,
-        "subsequent relocation must not see stale pre-relocation value from storage"
+        42,
+        "the slot holds the carried value, so a later relocation finds it unchanged"
     );
 }
 
@@ -866,4 +860,44 @@ fn relocation_preserves_the_source_affinity_value() {
         sync::Arc::ptr_eq(&back.value, &source_value),
         "relocating back into the source affinity must find the preserved original value"
     );
+}
+
+#[test]
+fn same_slot_relocation_keeps_the_carried_value() {
+    // Source and destination that resolve to the same slot are not a cross-slot move: the carried
+    // value already belongs to that slot, so relocation must keep it rather than materialize a
+    // fresh one. `PerProcess` maps every affinity to slot 0, so any relocation exercises this.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = crate::Arc::<Counter, crate::PerProcess>::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(Some(affinities[0]), affinities[1]);
+
+    assert!(
+        sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a same-slot relocation must keep the carried value, not materialize a fresh one"
+    );
+    assert_eq!(moved.value(), 5, "the shared value must be preserved across a same-slot relocation");
+}
+
+#[test]
+fn cross_slot_relocation_materializes_a_fresh_value() {
+    // The counterpart to the same-slot cases: a relocation between distinct slots must still
+    // materialize an independent value for the destination. This guards against the same-slot
+    // short-circuit widening to cover genuine cross-slot moves.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = PerCore::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(Some(affinities[0]), affinities[1]);
+
+    assert!(
+        !sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a cross-slot relocation must materialize a fresh value, not keep the carried one"
+    );
+    assert_eq!(moved.value(), 0, "a fresh PerCore value starts independent of the source");
 }

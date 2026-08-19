@@ -26,11 +26,9 @@ parameter `S` decides what "affinity" means.
 An affinity identifies the placement of the code that holds the `Arc`. The
 strategy maps that affinity to the value the holder sees:
 
-- `PerProcess` maps every affinity to one slot, so a clone family shares a single
-  materialized value process-wide. For values whose clones share their state this
-  approximates a plain `sync::Arc<T>`, but it is not identical: the first
-  relocation still materializes the shared value (see §3), so a holder that never
-  relocates keeps the value it was created with.
+- `PerProcess` maps every affinity to one slot, so all clones share a single value
+  process-wide and relocation keeps that shared value: an `Arc<T, PerProcess>`
+  behaves like a plain `sync::Arc<T>`.
 - `PerCore` keeps a value per processor. A holder that relocates to another
   processor observes that processor's own value.
 - `PerNuma` keeps a value per memory region, so holders on cores of the same NUMA
@@ -48,8 +46,8 @@ clones that have adopted the same slot share one underlying `sync::Arc<T>`.
 
 Constructors create the initial carried value eagerly. The per-slot values are
 then produced lazily — a slot is materialized the first time a holder relocates
-into it while it is still empty — and how a value is produced depends on the
-constructor used:
+into it across a slot boundary while it is still empty — and how a value is
+produced depends on the constructor used:
 
 - `new` / `new_boxed` run a constructor function once per slot, giving each slot a
   freshly built, independent value. Neither requires `T: Clone` or
@@ -59,6 +57,11 @@ constructor used:
 - `from_unaware` takes one value and clones it for each slot.
 - `with_clone_fn` takes a concrete value plus a clone function, so trait-object
   values can be reproduced per slot without an object-safe `Clone`.
+
+A relocation whose source and destination resolve to the same slot is not a
+cross-slot move: the holder keeps the value it is already carrying rather than
+producing a new one. This is why every relocation under `PerProcess` — where all
+affinities share one slot — preserves the shared value.
 
 Relocation is a cooperative performance optimization, not a guarantee: consistent
 with the crate-wide contract for `ThreadAware`, a holder that reaches a new
