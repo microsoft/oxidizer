@@ -19,9 +19,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "thread_aware_core::Affinity",
+    "thread_aware_core::affinity::Affinity",
     "thread_aware_core::ThreadAware",
-    "thread_aware_core::pinned_affinities",
+    "thread_aware_core::affinity::pinned_affinities",
     "thread_aware_macros::ThreadAware",
 ]
 
