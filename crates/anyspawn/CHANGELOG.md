@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - Now requires `0.10.0` of `thread_aware`
+
 ## [0.7.0] - 2026-08-09
 
 - 🔧 Maintenance

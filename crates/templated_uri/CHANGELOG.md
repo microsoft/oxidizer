@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - Now requires `0.13.0` of `data_privacy`
+  - Now requires `0.5.0` of `ohno`
+  - Now requires `0.5.0` of `templated_uri_macros`
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance

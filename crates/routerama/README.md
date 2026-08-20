@@ -177,10 +177,10 @@ requires `std`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbr5-IsDAswPcbjrjUKkRECAkbANwTnhwOkuUbLetNhGHuvgVhZIGCaXJvdXRlcmFtYWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbr5-IsDAswPcbjrjUKkRECAkbANwTnhwOkuUbLetNhGHuvgVhZIGCaXJvdXRlcmFtYWUwLjEuMQ
  [__link0]: macro@resolver
- [__link1]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver
- [__link2]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver::resolve
+ [__link1]: https://docs.rs/routerama/0.1.1/routerama/?search=Resolver
+ [__link2]: https://docs.rs/routerama/0.1.1/routerama/?search=Resolver::resolve
  [__link3]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
  [__link4]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
  [__link5]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html

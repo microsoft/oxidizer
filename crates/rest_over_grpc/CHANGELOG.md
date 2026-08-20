@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] - 2026-08-13
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.1` of `http_path_template`
+  - Now requires `0.1.1` of `routerama`
+  - Now requires `0.1.1` of `routerama_build`
+
+- ✔️ Tasks
+
+  - release bytesbuf v0.7.0 and 23 additional packages ([#599](https://github.com/microsoft/oxidizer/599))
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

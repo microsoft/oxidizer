@@ -1,10 +1,6 @@
 # Changelog
 
-All notable changes to this crate are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
-to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.1.1] - 2026-08-13
 
 ### Added
 
@@ -19,6 +15,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strings from the byte buffer without the UTF-8 char-boundary checks that slicing a
   `&str` incurs. All unchecked-UTF-8 conversion now lives in one `storage` module —
   every other module, including the frozen readers, is `#![forbid(unsafe_code)]`.
+
+- ✨ Features
+
+  - export frozen readers and guarantee dense handles ([#657](https://github.com/microsoft/oxidizer/657))
+
+All notable changes to this crate are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
+to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0]
 

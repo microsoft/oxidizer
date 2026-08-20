@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] - 2026-08-13
+
+- ⚠️ Breaking
+
+  - document pub(crate) constructors, reject #[no_constructors] under #[ohno::error] ([#653](https://github.com/microsoft/oxidizer/653))
+  - Now requires `0.5.0` of `ohno`
+
 ## [0.3.0] - 2026-08-09
 
 - 🔧 Maintenance
