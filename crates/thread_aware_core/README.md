@@ -38,5 +38,5 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 
  [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbmGboBPVPu90b3Wgg_7oIUr8bjuE3eObj9rAbn8voVsAhhq1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTEuMC4w
  [__link0]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/trait.ThreadAware.html
- [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/struct.Affinity.html
- [__link2]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/fn.pinned_affinities.html
+ [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=Affinity
+ [__link2]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=pinned_affinities
