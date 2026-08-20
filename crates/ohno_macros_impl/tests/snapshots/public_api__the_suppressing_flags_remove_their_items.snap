@@ -2,7 +2,15 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === no_debug drops the Debug impl ===
+// ======== no_debug drops the Debug impl ========
+
+#[derive(Error)]
+#[no_debug]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -66,7 +74,15 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === no_constructors drops new and caused_by ===
+// ======== no_constructors drops new and caused_by ========
+
+#[derive(Error)]
+#[no_constructors]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -106,7 +122,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === both together ===
+// ======== both together ========
+
+#[derive(Error)]
+#[no_debug]
+#[no_constructors]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

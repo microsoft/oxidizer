@@ -2,7 +2,16 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === one source type ===
+// ======== one source type ========
+
+#[derive(Error)]
+#[from(std::io::Error)]
+struct T {
+    source: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -87,7 +96,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === several source types ===
+// ======== several source types ========
+
+#[derive(Error)]
+#[from(std::io::Error, std::fmt::Error)]
+struct T {
+    source: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -182,7 +200,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a generic source keeps its arguments ===
+// ======== a generic source keeps its arguments ========
+
+#[derive(Error)]
+#[from(Wrapper<u8, u16>)]
+struct T {
+    source: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -267,7 +294,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a named field override ===
+// ======== a named field override ========
+
+#[derive(Error)]
+#[from(std::io::Error(path:"unknown".to_owned()))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -352,7 +388,13 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a tuple index override ===
+// ======== a tuple index override ========
+
+#[derive(Error)]
+#[from(std::io::Error(0:"unknown".to_owned()))]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -425,7 +467,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === fields with no override default ===
+// ======== fields with no override default ========
+
+#[derive(Error)]
+#[from(std::io::Error)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

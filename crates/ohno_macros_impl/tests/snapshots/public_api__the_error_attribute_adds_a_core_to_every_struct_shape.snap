@@ -2,7 +2,14 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === named struct ===
+// ======== named struct ========
+
+#[ohno::error]
+struct T {
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     path: String,
@@ -10,7 +17,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === a colliding core name is numbered ===
+// ======== a colliding core name is numbered ========
+
+#[ohno::error]
+struct T {
+    ohno_core: u32,
+    ohno_core_1: u32,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     ohno_core: u32,
@@ -19,7 +34,12 @@ struct T {
     ohno_core_2: ::ohno::OhnoCore,
 }
 
-// === tuple struct gains a trailing core ===
+// ======== tuple struct gains a trailing core ========
+
+#[ohno::error]
+struct T(String);
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T(
     String,
@@ -27,7 +47,12 @@ struct T(
     ::ohno::OhnoCore,
 );
 
-// === unit struct becomes a tuple struct ===
+// ======== unit struct becomes a tuple struct ========
+
+#[ohno::error]
+struct T;
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T(
     /// ohno::generated-core@7f3d9c2a

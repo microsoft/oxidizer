@@ -2,7 +2,17 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === bare name ===
+// ======== bare name ========
+
+#[derive(Error)]
+#[display("value {}", path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -97,7 +107,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === field access ===
+// ======== field access ========
+
+#[derive(Error)]
+#[display("value {}", path.inner)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -196,7 +216,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === method call ===
+// ======== method call ========
+
+#[derive(Error)]
+#[display("value {}", path.len())]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -295,7 +325,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === index ===
+// ======== index ========
+
+#[derive(Error)]
+#[display("value {}", path[0])]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -394,7 +434,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === cast ===
+// ======== cast ========
+
+#[derive(Error)]
+#[display("value {}", path as u64)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -493,7 +543,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === binary operator ===
+// ======== binary operator ========
+
+#[derive(Error)]
+#[display("value {}", path*2)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -592,7 +652,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === try ===
+// ======== try ========
+
+#[derive(Error)]
+#[display("value {}", path?)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -687,7 +757,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === range ===
+// ======== range ========
+
+#[derive(Error)]
+#[display("value {}", path..10)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

@@ -23,28 +23,61 @@ use ohno_macros_impl::{derive_error, enrich_err, error};
 use proc_macro2::TokenStream;
 use quote::quote;
 
-/// Pretty-prints an expansion, so a snapshot shows Rust rather than a token soup.
-fn pretty(expanded: &TokenStream) -> String {
-    let file = syn::parse_file(&expanded.to_string()).expect("the expansion parses as a file");
-    prettyplease::unparse(&file)
+/// Pretty-prints Rust source, falling back to the bare tokens when they do not parse as a file.
+///
+/// Several cases deliberately feed a macro something that is not an item at all. Their input is
+/// still worth showing, so it is printed as written rather than dropped.
+fn pretty(tokens: &TokenStream) -> String {
+    syn::parse_file(&tokens.to_string()).map_or_else(|_| tokens.to_string(), |file| prettyplease::unparse(&file))
 }
 
-/// The `#[derive(Error)]` expansion.
+/// One case body: the source a user would write, then what the macro turns it into.
+///
+/// The input is recorded beside the expansion so a snapshot reads on its own. Reviewing a change
+/// otherwise means holding the test file open next to the snapshot to learn what produced it.
+fn case(source: &TokenStream, expanded: &TokenStream) -> String {
+    format!(
+        "{}\n// ---- expands to ----\n\n{}",
+        pretty(source).trim_end(),
+        pretty(expanded).trim_end()
+    )
+}
+
+/// A `#[derive(Error)]` case.
 fn derived(input: TokenStream) -> String {
-    pretty(&derive_error(input))
+    // `quote!` interpolates through a borrow, so the source view is built first and the input is
+    // then handed to the macro by value. That keeps the helper free of clones.
+    let source = quote!(#[derive(Error)] #input);
+    let expanded = derive_error(input);
+    case(&source, &expanded)
 }
 
-/// The `#[ohno::error]` expansion.
+/// An `#[ohno::error]` case.
 fn attributed(item: TokenStream) -> String {
-    pretty(&error(TokenStream::new(), item))
+    let source = quote!(#[ohno::error] #item);
+    let expanded = error(TokenStream::new(), item);
+    case(&source, &expanded)
 }
 
-/// The `#[enrich_err(...)]` expansion.
+/// An `#[ohno::error(...)]` case, for the arguments the attribute does not accept.
+fn attributed_with(args: TokenStream, item: TokenStream) -> String {
+    let source = quote!(#[ohno::error(#args)] #item);
+    let expanded = error(args, item);
+    case(&source, &expanded)
+}
+
+/// An `#[enrich_err(...)]` case.
 fn enriched(args: TokenStream, item: TokenStream) -> String {
-    pretty(&enrich_err(args, item))
+    let source = if args.is_empty() {
+        quote!(#[enrich_err] #item)
+    } else {
+        quote!(#[enrich_err(#args)] #item)
+    };
+    let expanded = enrich_err(args, item);
+    case(&source, &expanded)
 }
 
-/// The derive's expansion for a `#[display(...)]` attribute over a fixed struct.
+/// A `#[display(...)]` case over a fixed struct.
 fn displayed(attribute: &TokenStream) -> String {
     derived(quote! {
         #attribute
@@ -52,7 +85,7 @@ fn displayed(attribute: &TokenStream) -> String {
     })
 }
 
-/// Joins labelled expansions into one snapshot body.
+/// Joins labelled cases into one snapshot body.
 ///
 /// Callers bind the result to a local named `output` and pass that to `assert_snapshot!`. The
 /// macro has to sit in the test function itself — insta names a snapshot after the function that
@@ -62,9 +95,9 @@ fn displayed(attribute: &TokenStream) -> String {
 fn cases<I: IntoIterator<Item = (&'static str, String)>>(rendered: I) -> String {
     let mut output = String::new();
     for (label, body) in rendered {
-        output.push_str("// === ");
+        output.push_str("// ======== ");
         output.push_str(label);
-        output.push_str(" ===\n");
+        output.push_str(" ========\n\n");
         output.push_str(body.trim_end());
         output.push_str("\n\n");
     }
@@ -647,14 +680,14 @@ fn the_error_attribute_reports_what_it_cannot_rewrite() {
         ),
         (
             "an argument, which the attribute does not take",
-            pretty(&error(
+            attributed_with(
                 quote!(anything),
                 quote! {
                     struct T { path: String }
                 },
-            )),
+            ),
         ),
-        ("an unparsable item", pretty(&error(TokenStream::new(), quote!(1 + 1)))),
+        ("an unparsable item", attributed(quote!(1 + 1))),
     ]);
     insta::assert_snapshot!(output);
 }

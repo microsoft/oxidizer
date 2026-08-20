@@ -2,7 +2,15 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === named struct ===
+// ======== named struct ========
+
+#[derive(Error)]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -77,7 +85,12 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === tuple struct ===
+// ======== tuple struct ========
+
+#[derive(Error)]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -143,7 +156,14 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a lone core takes no constructor parameters ===
+// ======== a lone core takes no constructor parameters ========
+
+#[derive(Error)]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -212,7 +232,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a core in the middle keeps declaration order ===
+// ======== a core in the middle keeps declaration order ========
+
+#[derive(Error)]
+struct T {
+    first: String,
+    inner: ohno::OhnoCore,
+    last: u32,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -294,7 +323,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a marked core need not be named OhnoCore ===
+// ======== a marked core need not be named OhnoCore ========
+
+#[derive(Error)]
+struct T {
+    path: String,
+    #[error]
+    mine: Renamed,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

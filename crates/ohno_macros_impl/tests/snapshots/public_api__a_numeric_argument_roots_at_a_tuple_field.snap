@@ -2,7 +2,13 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === integer literal ===
+// ======== integer literal ========
+
+#[derive(Error)]
+#[display("value {}", 0)]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -81,7 +87,13 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === float literal is a nested tuple access ===
+// ======== float literal is a nested tuple access ========
+
+#[derive(Error)]
+#[display("value {}", 0.1)]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -160,7 +172,13 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === method on an integer literal ===
+// ======== method on an integer literal ========
+
+#[derive(Error)]
+#[display("value {}", 0.abs())]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

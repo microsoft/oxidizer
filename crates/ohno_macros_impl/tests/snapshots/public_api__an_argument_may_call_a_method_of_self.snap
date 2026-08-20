@@ -2,7 +2,17 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === bare call ===
+// ======== bare call ========
+
+#[derive(Error)]
+#[display("value {}", describe())]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -101,7 +111,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === await ===
+// ======== await ========
+
+#[derive(Error)]
+#[display("value {}", path.await)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -200,7 +220,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === trailing comma after the arguments ===
+// ======== trailing comma after the arguments ========
+
+#[derive(Error)]
+#[display("value {}", path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

@@ -2,7 +2,17 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === no placeholders lowers to a literal ===
+// ======== no placeholders lowers to a literal ========
+
+#[derive(Error)]
+#[display("nothing interpolated")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -97,7 +107,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === escapes are resolved for a literal ===
+// ======== escapes are resolved for a literal ========
+
+#[derive(Error)]
+#[display("braces {{ and }}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -188,7 +208,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a named placeholder becomes a field access ===
+// ======== a named placeholder becomes a field access ========
+
+#[derive(Error)]
+#[display("failed for {path}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -287,7 +317,17 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a format spec survives ===
+// ======== a format spec survives ========
+
+#[derive(Error)]
+#[display("padded {path:>8}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -382,7 +422,13 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a tuple field is named by index ===
+// ======== a tuple field is named by index ========
+
+#[derive(Error)]
+#[display("failed for {0}")]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -461,7 +507,16 @@ impl ::core::convert::From<::core::convert::Infallible> for T {
     }
 }
 
-// === a raw identifier keeps its prefix ===
+// ======== a raw identifier keeps its prefix ========
+
+#[derive(Error)]
+#[display("failed for {r#type}")]
+struct T {
+    r#type: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl ::core::fmt::Display for T {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {

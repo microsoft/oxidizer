@@ -2,7 +2,17 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === docs and derives on the struct survive ===
+// ======== docs and derives on the struct survive ========
+
+#[ohno::error]
+/// Documentation for T.
+#[derive(Clone)]
+#[display("failed for {path}")]
+struct T {
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 /// Documentation for T.
 #[derive(Clone)]
@@ -13,7 +23,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === an ordinary doc comment on a field survives ===
+// ======== an ordinary doc comment on a field survives ========
+
+#[ohno::error]
+struct T {
+    /// Where the failure happened.
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     /// Where the failure happened.
@@ -22,7 +40,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === a doc comment that merely mentions the marker is not the marker ===
+// ======== a doc comment that merely mentions the marker is not the marker ========
+
+#[ohno::error]
+struct T {
+    /// The ohno generated core field is not this one.
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     /// The ohno generated core field is not this one.
@@ -31,7 +57,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === a non-doc attribute carrying the marker text is not the marker ===
+// ======== a non-doc attribute carrying the marker text is not the marker ========
+
+#[ohno::error]
+struct T {
+    #[other = " ohno::generated-core@7f3d9c2a"]
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     #[other = " ohno::generated-core@7f3d9c2a"]
@@ -40,7 +74,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === a doc attribute with a non-string value is not the marker ===
+// ======== a doc attribute with a non-string value is not the marker ========
+
+#[ohno::error]
+struct T {
+    #[doc = 1]
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     #[doc = 1]
@@ -49,7 +91,15 @@ struct T {
     ohno_core: ::ohno::OhnoCore,
 }
 
-// === a doc attribute built by a macro is not the marker ===
+// ======== a doc attribute built by a macro is not the marker ========
+
+#[ohno::error]
+struct T {
+    #[doc = concat!(" ohno::generated-core@7f3d9c2a")]
+    path: String,
+}
+// ---- expands to ----
+
 #[derive(::ohno::Error)]
 struct T {
     #[doc = concat!(" ohno::generated-core@7f3d9c2a")]

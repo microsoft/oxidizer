@@ -2,7 +2,16 @@
 source: crates/ohno_macros_impl/tests/public_api.rs
 expression: output
 ---
-// === type parameters ===
+// ======== type parameters ========
+
+#[derive(Error)]
+struct T<A, B> {
+    a: A,
+    b: B,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl<A, B> ::core::fmt::Display for T<A, B> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -84,7 +93,15 @@ impl<A, B> ::core::convert::From<::core::convert::Infallible> for T<A, B> {
     }
 }
 
-// === lifetime ===
+// ======== lifetime ========
+
+#[derive(Error)]
+struct T<'a> {
+    path: &'a str,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl<'a> ::core::fmt::Display for T<'a> {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -159,7 +176,18 @@ impl<'a> ::core::convert::From<::core::convert::Infallible> for T<'a> {
     }
 }
 
-// === where clause ===
+// ======== where clause ========
+
+#[derive(Error)]
+struct T<A>
+where
+    A: Clone,
+{
+    a: A,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
 #[automatically_derived]
 impl<A> ::core::fmt::Display for T<A>
 where
