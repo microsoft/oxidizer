@@ -1,0 +1,38 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === not a parenthesized list ===
+::core::compile_error! {
+    "`#[from(...)]` takes a parenthesized list of types, such as `#[from(std::io::Error)]`"
+}
+
+// === an empty list ===
+::core::compile_error! {
+    "`#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]`"
+}
+
+// === an entry that opens with a named override list ===
+::core::compile_error! {
+    "expected a type"
+}
+
+// === an entry that opens with an indexed override list ===
+::core::compile_error! {
+    "expected a type"
+}
+
+// === an override naming an unknown field ===
+::core::compile_error! {
+    "unknown field `missing` in `#[from(...)]`, available fields: `path`"
+}
+
+// === a named key on a tuple struct ===
+::core::compile_error! {
+    "`#[from(...)]` field keys for a tuple struct are field indexes, not names, so `path:` names no field"
+}
+
+// === a key naming the core ===
+::core::compile_error! {
+    "`#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error"
+}

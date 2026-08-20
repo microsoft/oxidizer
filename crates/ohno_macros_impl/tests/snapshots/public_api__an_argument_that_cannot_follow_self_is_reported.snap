@@ -1,0 +1,68 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === associated constant ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === string literal receiver ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === fully qualified call ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === qualified path ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === qualified path with a trait ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === parenthesized ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === unary operator ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === range with no start ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === char literal ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === suffixed integer ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === method on a suffixed integer ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === suffixed float ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}
+
+// === suffixed float with a trailing zero ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`"
+}

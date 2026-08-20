@@ -1,0 +1,34 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === a self. prefix ===
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix"
+}
+
+// === an unknown root ===
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+
+// === an argument with no placeholder ===
+::core::compile_error! {
+    "`#[display(...)]` argument is not consumed by any `{}` placeholder"
+}
+
+// === more placeholders than arguments ===
+::core::compile_error! {
+    "`#[display(...)]` template has more `{}` placeholders than arguments"
+}
+
+// === every fault in one template together ===
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix"
+}
+::core::compile_error! {
+    "`#[display(...)]` template has more `{}` placeholders than arguments"
+}

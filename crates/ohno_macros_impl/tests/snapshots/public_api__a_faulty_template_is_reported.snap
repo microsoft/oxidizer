@@ -1,0 +1,33 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === unknown placeholder lists the available fields ===
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+
+// === nothing is referenceable when every field is generated ===
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, the error type has no fields that can be referenced"
+}
+
+// === stray closing brace ===
+::core::compile_error! {
+    "`#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace"
+}
+
+// === unbalanced opening brace ===
+::core::compile_error! {
+    "`#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace"
+}
+
+// === two display attributes ===
+::core::compile_error! {
+    "only one `#[display(...)]` may be given, and this is the second"
+}
+
+// === a non-literal template ===
+::core::compile_error! {
+    "expected string literal"
+}

@@ -1,0 +1,29 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === a non-function ===
+::core::compile_error! {
+    "`#[enrich_err(...)]` applies to functions only"
+}
+
+// === a function with no return type ===
+::core::compile_error! {
+    "`#[enrich_err(...)]` needs a return type to enrich. A function returning `()` has no error to carry the message"
+}
+fn load() {
+    inner();
+}
+
+// === a non-literal first argument ===
+::core::compile_error! {
+    "expected string literal"
+}
+fn load() -> Result<(), MyError> {
+    inner()
+}
+
+// === an unparsable item ===
+::core::compile_error! {
+    "expected one of: `fn`, `extern`, `use`, `static`, `const`, `unsafe`, `mod`, `type`, `struct`, `enum`, `union`, `impl`, `trait`, `auto`, `default`, `macro`, identifier, `self`, `super`, `crate`, `::`"
+}

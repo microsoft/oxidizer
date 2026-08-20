@@ -1,0 +1,142 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === a bare attribute names the function ===
+fn load() -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    "error in function load",
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === a literal message renders without format ===
+fn load() -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    "could not load",
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === an inline capture goes through format ===
+fn load(path: &str) -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    ::std::format!("could not load {path}"),
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === arguments are passed through unchanged ===
+fn load(path: &str) -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    ::std::format!("could not load {}", path),
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === arguments force a format call even with no placeholder ===
+fn load(path: &str) -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    ::std::format!("plain message", path),
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === a self-prefixed argument is left alone ===
+fn load(&self) -> Result<(), MyError> {
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    ::std::format!("could not load {}", self.path),
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === the signature survives untouched ===
+pub(crate) fn load<A: Clone>(path: &str, count: usize) -> Result<A, MyError>
+where
+    A: Send,
+{
+    let __ohno_result = (|| { inner() })();
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    "error in function load",
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}
+
+// === an async function awaits an async block ===
+async fn load() -> Result<(), MyError> {
+    let __ohno_result = async { inner().await }.await;
+    __ohno_result
+        .map_err(|mut __ohno_error| {
+            ::ohno::Enrichable::add_enrichment(
+                &mut __ohno_error,
+                ::ohno::EnrichmentEntry::new(
+                    "error in function load",
+                    ::core::file!(),
+                    ::core::line!(),
+                ),
+            );
+            __ohno_error
+        })
+}

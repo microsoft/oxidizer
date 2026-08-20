@@ -1,0 +1,13 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// === no_debug with a list ===
+::core::compile_error! {
+    "`#[no_debug]` takes no arguments"
+}
+
+// === no_constructors with a value ===
+::core::compile_error! {
+    "`#[no_constructors]` takes no arguments"
+}

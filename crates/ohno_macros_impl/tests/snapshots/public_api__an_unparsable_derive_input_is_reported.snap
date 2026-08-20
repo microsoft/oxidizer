@@ -1,0 +1,7 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+::core::compile_error! {
+    "expected one of: `struct`, `enum`, `union`"
+}
