@@ -1,12 +1,15 @@
 ---
-source: crates/observed_macros_impl/src/event/tests.rs
-expression: output
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"silent\"\"#,\nr\"\n            struct Silent {\n                tenant: ClassifiedString,\n            }\n            \",)"
 ---
+struct Silent {
+    tenant: ClassifiedString,
+}
 const _: () = {
-    impl ::observed::Event for NoSignal {
+    impl ::observed::Event for Silent {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "no.signal",
-            ::core::option::Option::Some(::core::any::TypeId::of::<NoSignal>()),
+            "silent",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Silent>()),
             ::core::option::Option::None,
             ::core::option::Option::None,
             false,

@@ -1,19 +1,22 @@
 ---
-source: crates/observed_macros_impl/src/event/tests.rs
-expression: output
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"heartbeat\"\"#,\nr#\"\n            #[counter(name = \"heartbeat.total\", desc = \"heartbeats\", unit = \"1\")]\n            struct Heartbeat {\n                #[unredacted]\n                shard: i64,\n            }\n            \"#,)"
 ---
+struct Heartbeat {
+    shard: i64,
+}
 const _: () = {
-    impl ::observed::Event for CountEvent {
+    impl ::observed::Event for Heartbeat {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "http.request.count",
-            ::core::option::Option::Some(::core::any::TypeId::of::<CountEvent>()),
+            "heartbeat",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
             ::core::option::Option::None,
             ::core::option::Option::Some(
                 ::observed::metadata::MetricDescription::new(
-                    "http.request.count",
+                    "heartbeat.total",
                     ::observed::metadata::InstrumentKind::Counter,
-                    "",
-                    "",
+                    "heartbeats",
+                    "1",
                 ),
             ),
             false,

@@ -1,0 +1,85 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_enrichment(r\"\n            struct GenericCtx<'a, T> {\n                #[unredacted]\n                unredacted_value: T,\n                #[data_class(DataTaxonomy::Euii)]\n                classified: T,\n                defaulted: T,\n                optional: Option<T>,\n                #[unredacted]\n                label: &'a str,\n                #[unredacted]\n                concrete: i64,\n            }\n            \",)"
+---
+const _: () = {
+    impl<'a, T> ::observed::enrichment::Enrichment for GenericCtx<'a, T>
+    where
+        T: ::core::convert::Into<::observed::Value>,
+        ::observed::__private::Sensitive<
+            T,
+        >: ::observed::__private::RedactedDisplay + ::core::marker::Send
+            + ::core::marker::Sync + 'static,
+        T: ::observed::__private::RedactedDisplay + ::core::marker::Send
+            + ::core::marker::Sync + 'static,
+        T: ::observed::__private::RedactedDisplay + ::core::marker::Send
+            + ::core::marker::Sync + 'static,
+    {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(6usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "unredacted_value",
+                        self.unredacted_value,
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new(
+                        "classified",
+                        ::observed::__private::Sensitive::new(
+                            self.classified,
+                            DataTaxonomy::Euii,
+                        ),
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new(
+                        "defaulted",
+                        self.defaulted,
+                    ),
+                );
+            match self.optional {
+                ::core::option::Option::Some(__val) => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::new(
+                                "optional",
+                                __val,
+                            ),
+                        )
+                }
+                ::core::option::Option::None => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::unclassified(
+                                "optional",
+                                "n/a",
+                            ),
+                        )
+                }
+            }
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "label",
+                        ::observed::Value::from(
+                            ::std::sync::Arc::<str>::from(self.label),
+                        ),
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "concrete",
+                        self.concrete,
+                    ),
+                );
+            entries
+        }
+    }
+};

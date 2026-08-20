@@ -276,7 +276,3 @@ fn entry_ctor(
     let metric_chain = metric_key.map(|mk| quote! { .with_metric_dimension(#mk) });
     quote! { #constructor #exclude_chain #metric_chain }
 }
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(test, not(miri)))]
-mod tests;

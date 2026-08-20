@@ -1,0 +1,168 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"generic\"\"#,\nr\"\n            #[info]\n            struct Generic<'a, T, const N: usize>\n            where\n                T: Clone,\n            {\n                #[unredacted]\n                unredacted_value: T,\n                #[data_class(DataTaxonomy::Euii)]\n                classified: T,\n                #[data_class(DataTaxonomy::Euii)]\n                classified_ref: &'a T,\n                defaulted: T,\n                optional: Option<T>,\n                matrix: [T; N],\n                #[unredacted]\n                concrete: i64,\n            }\n            \",)"
+---
+struct Generic<'a, T, const N: usize>
+where
+    T: Clone,
+{
+    unredacted_value: T,
+    classified: T,
+    classified_ref: &'a T,
+    defaulted: T,
+    optional: Option<T>,
+    matrix: [T; N],
+    concrete: i64,
+}
+const _: () = {
+    impl<'a, T: 'static, const N: usize> ::observed::Event for Generic<'a, T, N>
+    where
+        T: Clone,
+        T: ::core::clone::Clone,
+        ::observed::Value: ::core::convert::From<T>,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::core::fmt::Display,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::core::fmt::Display,
+        &'a T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::observed::__private::RedactedDisplay,
+        T: ::core::marker::Send + ::core::marker::Sync,
+        T: ::observed::__private::RedactedDisplay,
+        Option<T>: ::core::marker::Send + ::core::marker::Sync,
+        [T; N]: ::observed::__private::RedactedDisplay,
+        [T; N]: ::core::marker::Send + ::core::marker::Sync,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "generic",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<Generic<'static, T, N>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "generic",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "unredacted_value",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("unredacted_value"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.unredacted_value.clone()),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "classified",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("classified"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            &self.classified,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "classified_ref",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("classified_ref"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            self.classified_ref,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "defaulted",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("defaulted"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.defaulted, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "optional",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("optional"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                match self.optional.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                    }
+                }
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "matrix",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("matrix"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.matrix, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "concrete",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("concrete"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.concrete.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

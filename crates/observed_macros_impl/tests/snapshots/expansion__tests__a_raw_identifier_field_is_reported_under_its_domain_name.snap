@@ -1,15 +1,19 @@
 ---
-source: crates/observed_macros_impl/src/event/tests.rs
-expression: output
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"raw\"\"#,\nr\"\n            #[info]\n            struct Raw {\n                r#type: ClassifiedString,\n                #[dimension(metric)]\n                #[unredacted]\n                r#match: i64,\n            }\n            \",)"
 ---
+struct Raw {
+    r#type: ClassifiedString,
+    r#match: i64,
+}
 const _: () = {
-    impl ::observed::Event for HttpRequest {
+    impl ::observed::Event for Raw {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "http.request",
-            ::core::option::Option::Some(::core::any::TypeId::of::<HttpRequest>()),
+            "raw",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Raw>()),
             ::core::option::Option::Some(
                 ::observed::metadata::LogDescription::new(
-                    "http.request",
+                    "raw",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
                 ),
@@ -24,36 +28,31 @@ const _: () = {
         ) -> ::core::ops::ControlFlow<()> {
             {
                 const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "method",
+                    "type",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("method"),
+                        ::observed::metadata::LogFieldEntry::new("type"),
                     ),
                     ::core::option::Option::None,
                 );
                 visitor(
                     &FIELD_DESC,
-                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
+                    &|engine| ::observed::Value::from_redacted(&self.r#type, engine),
                 )?;
             }
             {
                 const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
-                    "user_agent",
+                    "match",
                     ::core::option::Option::Some(
-                        ::observed::metadata::LogFieldEntry::new("user_agent"),
+                        ::observed::metadata::LogFieldEntry::new("match"),
                     ),
-                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::dimension("match"),
+                    ),
                 );
-                match self.user_agent.as_ref() {
-                    ::core::option::Option::Some(__val) => {
-                        visitor(
-                            &FIELD_DESC,
-                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
-                        )?;
-                    }
-                    ::core::option::Option::None => {
-                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("unknown"))?;
-                    }
-                }
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.r#match.clone()),
+                )?;
             }
             ::core::ops::ControlFlow::Continue(())
         }

@@ -1,0 +1,56 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_enrichment(r#\"\n            struct RequestContext<'a> {\n                #[dimension(metric)]\n                #[unredacted]\n                shard: i64,\n                #[dimension(metric = \"region.key\")]\n                #[unredacted]\n                region: i64,\n                #[dimension(log = \"http.status\", metric = \"status\")]\n                #[unredacted]\n                status: i64,\n                #[dimension(log = exclude, metric)]\n                #[unredacted]\n                internal: i64,\n                #[unredacted]\n                borrowed: &'a str,\n            }\n            \"#,)"
+---
+const _: () = {
+    impl<'a> ::observed::enrichment::Enrichment for RequestContext<'a> {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(5usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                            "shard",
+                            self.shard,
+                        )
+                        .with_metric_dimension("shard"),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                            "region",
+                            self.region,
+                        )
+                        .with_metric_dimension("region.key"),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                            "http.status",
+                            self.status,
+                        )
+                        .with_metric_dimension("status"),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                            "internal",
+                            self.internal,
+                        )
+                        .exclude_from_logs()
+                        .with_metric_dimension("internal"),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "borrowed",
+                        ::observed::Value::from(
+                            ::std::sync::Arc::<str>::from(self.borrowed),
+                        ),
+                    ),
+                );
+            entries
+        }
+    }
+};

@@ -763,7 +763,6 @@ pub(crate) fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenSt
 }
 
 /// Generates just the `Event` trait impl (without re-emitting the struct).
-/// Shared by the [`event_attr`] entry point and the unit tests.
 pub(crate) fn generate_event(
     ident: &Ident,
     generics: &Generics,
@@ -1194,7 +1193,3 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
         },
     }
 }
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(all(test, not(miri)))]
-mod tests;

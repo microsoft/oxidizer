@@ -1,15 +1,16 @@
 ---
-source: crates/observed_macros_impl/src/event/tests.rs
-expression: output
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"no.fields\"\"#, \"#[info] struct NoFields;\")"
 ---
+struct NoFields;
 const _: () = {
-    impl ::observed::Event for NoV2Workloads {
+    impl ::observed::Event for NoFields {
         const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
-            "workload.disabled",
-            ::core::option::Option::Some(::core::any::TypeId::of::<NoV2Workloads>()),
+            "no.fields",
+            ::core::option::Option::Some(::core::any::TypeId::of::<NoFields>()),
             ::core::option::Option::Some(
                 ::observed::metadata::LogDescription::new(
-                    "workload.disabled",
+                    "no.fields",
                     ::observed::Severity::Info,
                     ::core::option::Option::None,
                 ),
