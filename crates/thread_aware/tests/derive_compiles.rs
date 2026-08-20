@@ -248,13 +248,12 @@ fn skipped_generic_field_needs_only_send() {
     assert_eq!(*value.skipped, 1, "the skipped field is left untouched");
 }
 
-/// A real, data-carrying type that merely happens to be named `PhantomData`.
+/// A real, data-carrying type that merely happens to be named `PhantomData`, named by a
+/// qualified path.
 ///
-/// Documented limitation: the derive matches `PhantomData` syntactically, because a macro
-/// cannot resolve a path to the type it names. A look-alike is therefore treated as a marker
-/// and left out of the generated body. Relocating it unconditionally instead was tried and
-/// reverted - it made the body demand `ThreadAware` for a field the bound inference still
-/// treated as a marker, so the two halves disagreed.
+/// The marker test accepts only the canonical spellings, so this is treated as an ordinary
+/// field: relocated like any other, and bound like any other. Matching on the final path
+/// segment alone let the derive compile while silently never relocating the data.
 mod lookalike {
     use thread_aware::affinity::Affinity;
 
@@ -273,15 +272,15 @@ mod lookalike {
 struct HoldsLookalike<T>(lookalike::PhantomData<T>);
 
 #[test]
-fn type_named_phantom_data_is_treated_as_a_marker() {
+fn qualified_type_named_phantom_data_is_relocated() {
     let (source, destination) = affinity_pair();
 
     let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
     value.relocate(source, destination);
 
     assert_eq!(
-        value.0.value.relocations, 0,
-        "known limitation: a syntactic PhantomData match cannot see through the name"
+        value.0.value.relocations, 1,
+        "a qualified look-alike is a normal field and must be relocated"
     );
 }
 

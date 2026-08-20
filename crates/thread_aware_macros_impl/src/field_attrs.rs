@@ -42,15 +42,29 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     Ok(cfg)
 }
 
-/// Checks if the given type is `PhantomData`.
+/// Checks whether the given type is the standard library's `PhantomData` marker.
+///
+/// Only the canonical spellings are accepted: a bare `PhantomData` from a `use`, or a path
+/// ending in `marker::PhantomData` rooted at `core`, `std` or nothing. A qualified path such
+/// as `my_crate::PhantomData` is a distinct type that merely shares the final segment, and is
+/// treated as an ordinary field so that it is relocated and bound like any other.
+///
+/// A bare `PhantomData` remains ambiguous - a macro cannot resolve a name to the item it
+/// refers to - but it is by far the most common spelling of the real marker, so it is
+/// accepted. Qualifying a look-alike disambiguates it.
 #[must_use]
 pub fn is_phantom_data(ty: &Type) -> bool {
-    if let Type::Path(tp) = ty
-        && let Some(seg) = tp.path.segments.last()
-    {
-        return seg.ident == "PhantomData";
-    }
-    false
+    let Type::Path(tp) = ty else {
+        return false;
+    };
+
+    let idents: Vec<_> = tp.path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let segments: Vec<&str> = idents.iter().map(String::as_str).collect();
+
+    matches!(
+        segments.as_slice(),
+        ["PhantomData"] | ["marker", "PhantomData"] | ["core" | "std", "marker", "PhantomData"]
+    )
 }
 
 #[cfg(test)]
@@ -163,6 +177,28 @@ mod tests {
         // Test with multiple generic parameters
         let ty: Type = parse_quote! { PhantomData<(T, U, V)> };
         assert!(is_phantom_data(&ty));
+    }
+
+    #[test]
+    fn test_is_phantom_data_marker_module_only() {
+        // `marker::PhantomData` after `use core::marker;`.
+        let ty: Type = parse_quote! { marker::PhantomData<T> };
+        assert!(is_phantom_data(&ty));
+    }
+
+    #[test]
+    fn test_is_phantom_data_rejects_lookalike_paths() {
+        // A distinct type that merely shares the final segment must not be taken for the
+        // marker: treating it as one leaves its data silently un-relocated.
+        let cases: Vec<Type> = vec![
+            parse_quote! { my_crate::PhantomData<T> },
+            parse_quote! { lookalike::inner::PhantomData<T> },
+            parse_quote! { core::other::PhantomData<T> },
+            parse_quote! { alloc::marker::PhantomData<T> },
+        ];
+        for ty in &cases {
+            assert!(!is_phantom_data(ty), "a qualified look-alike must not be treated as the marker");
+        }
     }
 
     #[test]

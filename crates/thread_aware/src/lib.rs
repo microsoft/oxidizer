@@ -253,10 +253,12 @@ pub use core::ThreadAware;
 /// main reason `#[thread_aware(skip)]` exists.
 ///
 /// Two names are matched syntactically, because a macro cannot resolve a path to the item it
-/// refers to. A distinct trait named `ThreadAware`, referred to by that bare name, is assumed
-/// to be this crate's trait and suppresses the generated bound; qualify either trait to
-/// disambiguate. Likewise `PhantomData` is recognized syntactically, so a distinct type whose name happens
-/// to end in `PhantomData` is also treated as a marker and left out of the generated body.
+/// refers to, so both fall back to the bare name being the standard one. `PhantomData` is
+/// treated as the marker only when spelled canonically - bare, or `core`/`std`
+/// `::marker::PhantomData` - so a qualified look-alike such as `my_crate::PhantomData` is
+/// relocated like any other field. A trait named `ThreadAware` and referred to by that bare
+/// name is assumed to be this crate's and suppresses the generated bound. In both cases,
+/// qualifying the path disambiguates.
 ///
 /// # Example
 /// ```rust
