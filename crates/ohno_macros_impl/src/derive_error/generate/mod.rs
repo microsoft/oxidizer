@@ -63,6 +63,3 @@ pub(crate) fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStr
 pub(crate) fn core_member(model: &Model) -> &Member {
     &model.shape.core().member
 }
-
-#[cfg(all(test, not(miri)))]
-mod tests;

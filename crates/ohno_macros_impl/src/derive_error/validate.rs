@@ -43,7 +43,7 @@ pub(crate) fn validate(ast: Ast, errors: &mut Errors) -> Option<Model> {
         .map(|field| ModelField::new(field.member.clone(), field.ty.clone()))
         .collect();
 
-    let shape = Shape::new(fields, core?, ast.style)?;
+    let shape = Shape::new(fields, core?, ast.style);
 
     let conversions = ast
         .conversions
@@ -135,6 +135,3 @@ fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

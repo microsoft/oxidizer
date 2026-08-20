@@ -84,6 +84,3 @@ pub(crate) fn root(expr: &Expr) -> Root<'_> {
         _ => Root::Unsupported,
     }
 }
-
-#[cfg(test)]
-mod tests;

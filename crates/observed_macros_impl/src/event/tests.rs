@@ -1438,18 +1438,6 @@ mod coverage_tests {
     }
 
     #[test]
-    fn strip_helper_attrs_clears_tuple_struct_field_attributes() {
-        // Tuple structs are rejected by codegen, but the re-emit helper stays
-        // total over `Fields` so it never silently leaves helpers behind.
-        let item: ItemStruct = syn::parse_str(r"#[info] struct E(#[unredacted] i64);").expect("failed to parse tuple struct");
-
-        let stripped = strip_helper_attrs(item);
-
-        assert!(stripped.attrs.is_empty());
-        assert!(stripped.fields.iter().all(|field| field.attrs.is_empty()));
-    }
-
-    #[test]
     fn every_severity_attribute_maps_to_its_own_variant() {
         // A dropped arm would leave the attribute unrecognized, silently
         // demoting the event to "no log signal" instead of failing to build.

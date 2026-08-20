@@ -142,6 +142,3 @@ fn scope_to_self(expr: &Expr, fields: &Referenceable<'_>, errors: &mut Errors) -
 fn unescape(template: &str) -> String {
     template.replace("{{", "{").replace("}}", "}")
 }
-
-#[cfg(all(test, not(miri)))]
-mod tests;

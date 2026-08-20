@@ -60,4 +60,53 @@ mod tests {
     fn derive_enrichment_reports_an_unparsable_input() {
         _ = derive_enrichment(quote!(1 + 1)).expect_err("a non-derive-input is rejected");
     }
+
+    // These cover `strip_helper_attrs`, which only `event_attr` calls. The per-module tests reach
+    // `generate_event` instead, which runs before it, so nothing below the entry point can see it.
+    #[test]
+    fn event_strips_the_helper_attributes_it_consumed() {
+        let expanded = event(
+            quote!("http.request"),
+            quote! {
+                #[info]
+                struct HttpRequest {
+                    #[unredacted]
+                    status: i64,
+                }
+            },
+        )
+        .expect("the event attribute expands")
+        .to_string();
+
+        assert!(!expanded.contains("# [info]"), "{expanded}");
+        assert!(!expanded.contains("# [unredacted]"), "{expanded}");
+    }
+
+    #[test]
+    fn event_accepts_a_unit_struct() {
+        let expanded = event(
+            quote!("no.signal"),
+            quote! {
+                struct NoSignal;
+            },
+        )
+        .expect("a unit struct expands")
+        .to_string();
+
+        assert!(expanded.contains("NoSignal"), "{expanded}");
+    }
+
+    #[test]
+    fn event_rejects_a_tuple_struct() {
+        let error = event(
+            quote!("tuple.event"),
+            quote! {
+                #[info]
+                struct Tuple(#[unredacted] i64);
+            },
+        )
+        .expect_err("a tuple struct is rejected");
+
+        assert!(error.to_string().contains("named fields"), "{error}");
+    }
 }

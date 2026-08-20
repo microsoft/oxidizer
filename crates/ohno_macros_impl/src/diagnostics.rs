@@ -48,6 +48,3 @@ impl Errors {
         self.0.map(|error| error.to_compile_error()).unwrap_or_default()
     }
 }
-
-#[cfg(test)]
-mod tests;

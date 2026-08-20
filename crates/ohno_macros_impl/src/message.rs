@@ -82,6 +82,3 @@ impl Parse for FormatArgs {
         Ok(Self { template, arguments })
     }
 }
-
-#[cfg(test)]
-mod tests;

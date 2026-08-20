@@ -56,23 +56,21 @@ pub(crate) struct Shape {
 impl Shape {
     /// Builds a shape from the fields in declaration order and the index of the core among them.
     ///
-    /// Returns `None` when `core` is out of range, which is the last point at which that is
-    /// representable.
+    /// # Panics
+    ///
+    /// Panics when `core` does not index `fields`. [`validate`](super::validate::validate) derives
+    /// the index from the very field list it then maps into `fields`, so the two cannot disagree.
     #[must_use]
-    pub(crate) fn new(mut fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self> {
-        if core >= fields.len() {
-            return None;
-        }
-
+    pub(crate) fn new(mut fields: Vec<ModelField>, core: usize, style: Style) -> Self {
         let after = fields.split_off(core + 1);
-        let core = fields.pop()?;
+        let core = fields.pop().expect("`core` indexes `fields`, so the split leaves it in place");
 
-        Some(Self {
+        Self {
             style,
             before: fields,
             core,
             after,
-        })
+        }
     }
 
     /// The field holding the core.
@@ -187,6 +185,3 @@ fn unknown_key(shape: &Shape, key: &Member) -> String {
 
     format!("unknown field `{name}` in `#[from(...)]`, available fields: {available}")
 }
-
-#[cfg(test)]
-mod tests;

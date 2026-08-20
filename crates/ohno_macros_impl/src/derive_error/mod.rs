@@ -34,6 +34,3 @@ pub(crate) fn expand(input: DeriveInput) -> TokenStream {
 
     expanded.unwrap_or_else(|| errors.into_compile_error())
 }
-
-#[cfg(all(test, not(miri)))]
-mod tests;

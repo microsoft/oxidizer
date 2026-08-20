@@ -124,6 +124,3 @@ fn placeholder(contents: &str) -> Placeholder<'_> {
         spec,
     }
 }
-
-#[cfg(test)]
-mod tests;

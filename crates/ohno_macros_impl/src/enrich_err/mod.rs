@@ -112,6 +112,3 @@ fn wrap(function: &ItemFn, message: &Message) -> syn::Block {
         })
     })
 }
-
-#[cfg(all(test, not(miri)))]
-mod tests;

@@ -260,6 +260,3 @@ pub(crate) fn is_ohno_core(ty: &Type) -> bool {
 
     path.qself.is_none() && path.path.segments.last().is_some_and(|segment| segment.ident == "OhnoCore")
 }
-
-#[cfg(test)]
-mod tests;

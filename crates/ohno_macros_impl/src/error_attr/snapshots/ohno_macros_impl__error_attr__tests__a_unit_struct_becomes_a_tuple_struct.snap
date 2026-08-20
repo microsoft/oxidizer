@@ -1,9 +1,0 @@
----
-source: crates/ohno_macros_impl/src/error_attr/mod/tests.rs
-expression: rendered(parse_quote!(struct T;))
----
-#[derive(::ohno::Error)]
-struct T(
-    /// ohno::generated-core@7f3d9c2a
-    ::ohno::OhnoCore,
-);

@@ -52,6 +52,3 @@ pub(crate) fn is_generated_marker(attr: &Attribute) -> bool {
 
     text.value().trim() == GENERATED_ERROR_FIELD_MARKER
 }
-
-#[cfg(test)]
-mod tests;

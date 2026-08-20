@@ -798,13 +798,10 @@ fn is_field_helper_attr(attr: &Attribute) -> bool {
 #[must_use]
 pub(crate) fn strip_helper_attrs(mut item: ItemStruct) -> ItemStruct {
     item.attrs.retain(|attr| !is_event_helper_attr(attr));
-    let field_attrs = match &mut item.fields {
-        Fields::Named(fields) => Some(fields.named.iter_mut()),
-        Fields::Unnamed(fields) => Some(fields.unnamed.iter_mut()),
-        Fields::Unit => None,
-    };
-    if let Some(fields) = field_attrs {
-        for field in fields {
+    // `parse_event_def` rejects a tuple struct, and `event_attr` propagates that before reaching
+    // here, so named fields (or none at all) are the only shapes that arrive.
+    if let Fields::Named(fields) = &mut item.fields {
+        for field in &mut fields.named {
             field.attrs.retain(|attr| !is_field_helper_attr(attr));
         }
     }
