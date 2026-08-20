@@ -7,8 +7,8 @@
 //! fail. Otherwise a bad argument reaches `rustc` as a field access in code the user cannot see,
 //! and the field added by `#[ohno::error]` appears in `rustc`'s own list of available fields.
 
-pub mod argument;
-pub mod template;
+pub(crate) mod argument;
+pub(crate) mod template;
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -21,12 +21,12 @@ use crate::message::Message;
 
 /// The fields a template and its arguments may name.
 #[derive(Debug)]
-pub struct Referenceable<'a>(Vec<&'a Member>);
+pub(crate) struct Referenceable<'a>(Vec<&'a Member>);
 
 impl<'a> Referenceable<'a> {
     /// Collects the fields the user wrote, in declaration order.
     #[must_use]
-    pub fn new(fields: &'a [AstField]) -> Self {
+    pub(crate) fn new(fields: &'a [AstField]) -> Self {
         Self(
             fields
                 .iter()
@@ -63,7 +63,7 @@ impl<'a> Referenceable<'a> {
 /// Returns `None` when the template could not be split, in which case its placeholders and the
 /// argument count say nothing and are not checked: a repaired template would only produce faults
 /// invented by the repair.
-pub fn lower(display: &DisplayAttr, fields: &Referenceable<'_>, errors: &mut Errors) -> Option<Message> {
+pub(crate) fn lower(display: &DisplayAttr, fields: &Referenceable<'_>, errors: &mut Errors) -> Option<Message> {
     let raw = display.template.value();
 
     let segments = match template::split(&raw) {
@@ -142,3 +142,6 @@ fn scope_to_self(expr: &Expr, fields: &Referenceable<'_>, errors: &mut Errors) -
 fn unescape(template: &str) -> String {
     template.replace("{{", "{").replace("}}", "}")
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests;

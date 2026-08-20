@@ -12,7 +12,7 @@ use syn::{Expr, Lit};
 
 /// What an argument is rooted in.
 #[derive(Debug)]
-pub enum Root<'a> {
+pub(crate) enum Root<'a> {
     /// `self`, written explicitly. Reported separately, because it would expand to `self.self`.
     SelfKeyword(&'a Expr),
     /// A single-segment path, such as `count` or `r#type`.
@@ -28,23 +28,12 @@ pub enum Root<'a> {
     Unsupported,
 }
 
-impl Root<'_> {
-    /// The name the root is looked up by, if it names a field at all.
-    #[must_use]
-    pub fn field_name(&self) -> Option<&str> {
-        match self {
-            Self::Name(name, _) | Self::Index(name, _) => Some(name),
-            Self::SelfKeyword(_) | Self::Method | Self::Unsupported => None,
-        }
-    }
-}
-
 /// The diagnostic for an argument written with a `self.` prefix.
-pub const SELF_PREFIXED: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, \
+pub(crate) const SELF_PREFIXED: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, \
      so a field is referenced by its bare name, without a `self.` prefix";
 
 /// The diagnostic for an argument that cannot follow `self.` at all.
-pub const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, \
+pub(crate) const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are implicitly scoped to `self`, \
      so each argument must be rooted in a field or method of `self`";
 
 /// Finds the leftmost term of `expr`.
@@ -52,7 +41,7 @@ pub const UNSUPPORTED_ROOT: &str = "`#[display(...)]` positional arguments are i
 /// Field access, method calls, indexing, binary operators, casts, `await`, `?` and ranges all keep
 /// a term in leftmost position, which is where the prefix lands. A call in that position is a
 /// method of `self` rather than a field.
-pub fn root(expr: &Expr) -> Root<'_> {
+pub(crate) fn root(expr: &Expr) -> Root<'_> {
     match expr {
         // A qualified path such as `<T>::VALUE` is rejected here too: `Path::get_ident` returns
         // `None` for it, and `self.<T>::VALUE` would not parse anyway.
@@ -95,3 +84,6 @@ pub fn root(expr: &Expr) -> Root<'_> {
         _ => Root::Unsupported,
     }
 }
+
+#[cfg(test)]
+mod tests;

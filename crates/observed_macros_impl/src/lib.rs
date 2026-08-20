@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Implementation of the procedural macros for the `observed` crate.
@@ -33,15 +34,4 @@ pub fn event(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
 pub fn derive_enrichment(input: TokenStream) -> Result<TokenStream> {
     let input: DeriveInput = syn::parse2(input)?;
     enrichment::derive_enrichment(&input)
-}
-
-/// Internal items reached only by this crate's own integration tests. Not a public API.
-#[doc(hidden)]
-pub mod internals {
-    pub use crate::enrichment::derive_enrichment;
-    pub use crate::event::{
-        EventArgs, NumericKind, SeverityKind, event_attr, generate_event, is_128_bit_int, numeric_kind, strip_helper_attrs,
-        strip_type_wrappers,
-    };
-    pub use crate::field_attrs::{mentions_any_type_param, option_inner_type, strip_reference};
 }

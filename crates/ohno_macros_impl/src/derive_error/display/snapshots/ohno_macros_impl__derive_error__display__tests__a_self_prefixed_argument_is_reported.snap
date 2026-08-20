@@ -1,0 +1,10 @@
+---
+source: crates/ohno_macros_impl/src/derive_error/display/mod/tests.rs
+expression: "lowered(parse_quote!\n{\n    #[display(\"bad path: {}\", self.path.display())] struct T\n    { path: String, inner: ohno::OhnoCore }\n})"
+---
+fn message() {
+    let _ = ::std::format!("bad path: {}", & (self.self.path.display()));
+}
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix"
+}

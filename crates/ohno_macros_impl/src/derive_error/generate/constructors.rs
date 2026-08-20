@@ -17,7 +17,7 @@ use crate::paths;
 
 /// The constructors, unless `#[no_constructors]` was written.
 #[must_use]
-pub fn generate(model: &Model) -> TokenStream {
+pub(crate) fn generate(model: &Model) -> TokenStream {
     if !model.constructors {
         return TokenStream::new();
     }

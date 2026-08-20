@@ -8,9 +8,9 @@
 //! that could fail would have to either thread a `Result` up or emit tokens `rustc` rejects at a
 //! span the user never wrote.
 
-pub mod constructors;
-pub mod conversions;
-pub mod traits;
+pub(crate) mod constructors;
+pub(crate) mod conversions;
+pub(crate) mod traits;
 
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -21,7 +21,7 @@ use super::model::{Model, Shape};
 
 /// Generates every item the derive owes for `model`.
 #[must_use]
-pub fn generate(model: &Model) -> TokenStream {
+pub(crate) fn generate(model: &Model) -> TokenStream {
     let display = traits::display(model);
     let error = traits::error(model);
     let enrichable = traits::enrichable(model);
@@ -45,7 +45,7 @@ pub fn generate(model: &Model) -> TokenStream {
 ///
 /// The initializers arrive in declaration order, so they line up with [`Shape::all`].
 #[must_use]
-pub fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
+pub(crate) fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
     match shape.style {
         Style::Named => {
             let assignments = shape.all().zip(initializers).map(|(field, value)| {
@@ -60,6 +60,9 @@ pub fn construct(shape: &Shape, initializers: &[TokenStream]) -> TokenStream {
 
 /// The member of the field holding the core, ready to quote as `self.#member`.
 #[must_use]
-pub fn core_member(model: &Model) -> &Member {
+pub(crate) fn core_member(model: &Model) -> &Member {
     &model.shape.core().member
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests;

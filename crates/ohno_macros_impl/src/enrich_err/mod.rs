@@ -20,7 +20,7 @@ use crate::paths;
 
 /// Expands the attribute, or renders everything that stopped it.
 #[must_use]
-pub fn expand(args: TokenStream, item: Item) -> TokenStream {
+pub(crate) fn expand(args: TokenStream, item: Item) -> TokenStream {
     let mut errors = Errors::default();
 
     let Item::Fn(mut function) = item else {
@@ -112,3 +112,6 @@ fn wrap(function: &ItemFn, message: &Message) -> syn::Block {
         })
     })
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests;

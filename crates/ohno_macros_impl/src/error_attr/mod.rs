@@ -36,7 +36,7 @@ const CORE_FIELD_NAME: &str = "ohno_core";
 
 /// Expands the attribute, or renders everything that stopped it.
 #[must_use]
-pub fn expand(item: Item) -> TokenStream {
+pub(crate) fn expand(item: Item) -> TokenStream {
     let mut errors = Errors::default();
 
     let Item::Struct(mut item) = item else {
@@ -140,3 +140,6 @@ fn unused_name(fields: &FieldsNamed) -> String {
         .find(|candidate| !taken(candidate))
         .expect("more candidates than there are fields, so one of them is always free")
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests;

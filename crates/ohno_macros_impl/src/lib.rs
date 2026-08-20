@@ -17,22 +17,13 @@
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros_impl/favicon.ico"
 )]
 
-// The modules below are public only so this crate's own integration tests can reach them.
-// They are not a supported API surface: depend on `ohno` instead.
-#[doc(hidden)]
-pub mod derive_error;
-#[doc(hidden)]
-pub mod diagnostics;
-#[doc(hidden)]
-pub mod enrich_err;
-#[doc(hidden)]
-pub mod error_attr;
-#[doc(hidden)]
-pub mod marker;
-#[doc(hidden)]
-pub mod message;
-#[doc(hidden)]
-pub mod paths;
+mod derive_error;
+mod diagnostics;
+mod enrich_err;
+mod error_attr;
+mod marker;
+mod message;
+mod paths;
 
 use proc_macro2::TokenStream;
 use quote::ToTokens;

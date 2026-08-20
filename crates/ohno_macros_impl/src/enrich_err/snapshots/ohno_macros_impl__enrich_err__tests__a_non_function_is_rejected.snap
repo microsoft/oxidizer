@@ -1,0 +1,7 @@
+---
+source: crates/ohno_macros_impl/src/enrich_err/mod/tests.rs
+expression: "rendered(quote!(\"failed\"), parse_quote!(struct T;))"
+---
+::core::compile_error! {
+    "`#[enrich_err(...)]` applies to functions only"
+}

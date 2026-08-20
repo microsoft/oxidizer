@@ -12,7 +12,7 @@ use crate::paths;
 
 /// Every conversion the derive owes.
 #[must_use]
-pub fn generate(model: &Model) -> TokenStream {
+pub(crate) fn generate(model: &Model) -> TokenStream {
     let from_types = model.conversions.iter().map(|conversion| from_type(model, conversion));
     let infallible = from_infallible(model);
 

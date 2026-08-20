@@ -44,8 +44,7 @@ struct EventDef {
 
 /// Arguments to the `#[event("name" [, disabled])]` attribute macro.
 #[derive(Debug)]
-#[doc(hidden)]
-pub struct EventArgs {
+pub(crate) struct EventArgs {
     pub name: String,
     pub disabled: bool,
 }
@@ -270,8 +269,7 @@ enum InstrumentKindValue {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[doc(hidden)]
-pub enum SeverityKind {
+pub(crate) enum SeverityKind {
     Trace,
     Debug,
     Info,
@@ -287,7 +285,7 @@ impl SeverityKind {
     /// The `Warn` severity is spelled `warning` (not `warn`) because `warn` is a
     /// built-in lint attribute that cannot be used as a custom attribute.
     #[must_use]
-    pub fn from_ident(ident: &Ident) -> Option<Self> {
+    pub(crate) fn from_ident(ident: &Ident) -> Option<Self> {
         Some(match ident.to_string().as_str() {
             "trace" => Self::Trace,
             "debug" => Self::Debug,
@@ -365,8 +363,7 @@ impl InstrumentKindValue {
 /// no conversion and the macro rejects them with a dedicated diagnostic rather
 /// than truncating.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[doc(hidden)]
-pub enum NumericKind {
+pub(crate) enum NumericKind {
     /// A signed integer: `i8`, `i16`, `i32`, `i64`, `isize`.
     SignedInt,
     /// An unsigned integer: `u8`, `u16`, `u32`, `u64`, `usize`.
@@ -384,7 +381,7 @@ pub enum NumericKind {
 /// parenthesis wrappers are transparent; `Option<T>` deliberately is **not**, so
 /// an optional field can never satisfy an instrument's value-type requirement.
 #[must_use]
-pub fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
+pub(crate) fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return None;
     };
@@ -401,7 +398,7 @@ pub fn numeric_kind(ty: &syn::Type) -> Option<NumericKind> {
 /// they can be rejected with a specific diagnostic instead of the generic
 /// "not a supported numeric type" one.
 #[must_use]
-pub fn is_128_bit_int(ty: &syn::Type) -> bool {
+pub(crate) fn is_128_bit_int(ty: &syn::Type) -> bool {
     let syn::Type::Path(type_path) = strip_type_wrappers(ty) else {
         return false;
     };
@@ -414,7 +411,7 @@ pub fn is_128_bit_int(ty: &syn::Type) -> bool {
 
 /// Strips transparent `Paren`/`Group` wrappers from a type.
 #[must_use]
-pub fn strip_type_wrappers(ty: &syn::Type) -> &syn::Type {
+pub(crate) fn strip_type_wrappers(ty: &syn::Type) -> &syn::Type {
     match ty {
         syn::Type::Paren(inner) => strip_type_wrappers(&inner.elem),
         syn::Type::Group(inner) => strip_type_wrappers(&inner.elem),
@@ -748,7 +745,7 @@ fn parse_field_def(field: &Field) -> Result<FieldDef> {
 /// helper attributes never need to resolve as real macros. (The `warn` severity
 /// is spelled `#[warning(...)]` to avoid the built-in `warn` lint attribute,
 /// which rustc validates before macro expansion.)
-pub fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
+pub(crate) fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     let args: EventArgs = syn::parse2(attr)?;
     let item_struct: ItemStruct = syn::parse2(item)?;
     let impl_tokens = generate_event(
@@ -767,7 +764,13 @@ pub fn event_attr(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
 
 /// Generates just the `Event` trait impl (without re-emitting the struct).
 /// Shared by the [`event_attr`] entry point and the unit tests.
-pub fn generate_event(ident: &Ident, generics: &Generics, attrs: &[Attribute], fields: &Fields, args: &EventArgs) -> Result<TokenStream> {
+pub(crate) fn generate_event(
+    ident: &Ident,
+    generics: &Generics,
+    attrs: &[Attribute],
+    fields: &Fields,
+    args: &EventArgs,
+) -> Result<TokenStream> {
     let def = parse_event_def(ident, generics, attrs, fields, args)?;
     validate_message_placeholders(&def)?;
     Ok(generate_event_impl(&def))
@@ -793,7 +796,7 @@ fn is_field_helper_attr(attr: &Attribute) -> bool {
 /// Removes the `observed` helper attributes from the struct and its fields so the
 /// re-emitted definition compiles without the (now consumed) attributes.
 #[must_use]
-pub fn strip_helper_attrs(mut item: ItemStruct) -> ItemStruct {
+pub(crate) fn strip_helper_attrs(mut item: ItemStruct) -> ItemStruct {
     item.attrs.retain(|attr| !is_event_helper_attr(attr));
     let field_attrs = match &mut item.fields {
         Fields::Named(fields) => Some(fields.named.iter_mut()),
@@ -1194,3 +1197,7 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
         },
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, not(miri)))]
+mod tests;

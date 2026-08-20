@@ -18,16 +18,16 @@ use quote::ToTokens;
 /// `Span::join` is available and shrinks to the first token elsewhere, which would make the same
 /// diagnostic underline different amounts of code on different toolchains.
 #[derive(Default, Debug)]
-pub struct Errors(Option<syn::Error>);
+pub(crate) struct Errors(Option<syn::Error>);
 
 impl Errors {
     /// Records a fault anchored at `tokens`.
-    pub fn add(&mut self, tokens: impl ToTokens, message: impl Display) {
+    pub(crate) fn add(&mut self, tokens: impl ToTokens, message: impl Display) {
         self.combine(syn::Error::new_spanned(tokens, message));
     }
 
     /// Records an already-built error, such as one returned by a `syn` parser.
-    pub fn combine(&mut self, error: syn::Error) {
+    pub(crate) fn combine(&mut self, error: syn::Error) {
         match &mut self.0 {
             Some(existing) => existing.combine(error),
             None => self.0 = Some(error),
@@ -36,7 +36,7 @@ impl Errors {
 
     /// Returns `true` when nothing has been recorded.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 
@@ -44,7 +44,10 @@ impl Errors {
     ///
     /// Returns an empty stream when nothing was recorded.
     #[must_use]
-    pub fn into_compile_error(self) -> TokenStream {
+    pub(crate) fn into_compile_error(self) -> TokenStream {
         self.0.map(|error| error.to_compile_error()).unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests;

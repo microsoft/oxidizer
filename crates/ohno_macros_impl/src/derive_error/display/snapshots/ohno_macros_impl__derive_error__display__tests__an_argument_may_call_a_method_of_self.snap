@@ -1,0 +1,7 @@
+---
+source: crates/ohno_macros_impl/src/derive_error/display/mod/tests.rs
+expression: "lowered(parse_quote!\n{\n    #[display(\"{}\", describe())] struct T\n    { path: String, inner: ohno::OhnoCore }\n})"
+---
+fn message() {
+    let _ = ::std::format!("{}", & (self.describe()));
+}

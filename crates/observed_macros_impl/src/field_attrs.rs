@@ -325,7 +325,7 @@ pub(crate) fn is_reference_type(ty: &syn::Type) -> bool {
 /// `core::option::Option<T>` are all recognized. A type aliased to `Option`
 /// will not be detected.
 #[must_use]
-pub fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
+pub(crate) fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
     let syn::Type::Path(type_path) = unwrap_groups(ty) else {
         return None;
     };
@@ -350,7 +350,7 @@ pub fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
 
 /// Returns the pointee `T` if `ty` is a reference `&T` / `&mut T`, else `ty`.
 #[must_use]
-pub fn strip_reference(ty: &syn::Type) -> &syn::Type {
+pub(crate) fn strip_reference(ty: &syn::Type) -> &syn::Type {
     match unwrap_groups(ty) {
         syn::Type::Reference(reference) => strip_reference(&reference.elem),
         other => other,
@@ -389,7 +389,7 @@ pub(crate) fn is_borrowed_str(ty: &syn::Type) -> bool {
 /// are left alone so the expansion does not carry noise such as
 /// `where String: Clone`, which the compiler resolves on its own.
 #[must_use]
-pub fn mentions_any_type_param(ty: &syn::Type, params: &[Ident]) -> bool {
+pub(crate) fn mentions_any_type_param(ty: &syn::Type, params: &[Ident]) -> bool {
     if params.is_empty() {
         return false;
     }
@@ -502,4 +502,49 @@ pub(crate) fn extend_where_clause(generics: &mut syn::Generics, predicates: impl
         return;
     }
     generics.make_where_clause().predicates.extend(predicates);
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn ty(s: &str) -> syn::Type {
+        syn::parse_str(s).expect("parse type")
+    }
+
+    #[test]
+    fn option_inner_type_rejects_non_option_shapes() {
+        // qualified self (`<T as Trait>::Assoc`).
+        assert!(option_inner_type(&ty("<i32 as Copy>::Output")).is_none());
+        // `Option` without angle-bracketed arguments.
+        assert!(option_inner_type(&ty("Option")).is_none());
+        // more than one generic argument.
+        assert!(option_inner_type(&ty("Option<u8, u16>")).is_none());
+        // a non-type (lifetime) generic argument.
+        assert!(option_inner_type(&ty("Option<'a>")).is_none());
+    }
+
+    #[test]
+    fn strip_reference_peels_every_reference_layer() {
+        fn rendered(ty: &syn::Type) -> String {
+            quote::ToTokens::to_token_stream(ty).to_string()
+        }
+
+        assert_eq!(rendered(strip_reference(&ty("&T"))), "T");
+        assert_eq!(rendered(strip_reference(&ty("& &mut T"))), "T");
+        // A non-reference type is returned unchanged.
+        assert_eq!(rendered(strip_reference(&ty("Vec<T>"))), rendered(&ty("Vec<T>")));
+    }
+
+    #[test]
+    fn mentions_any_type_param_descends_into_token_groups() {
+        let param: Ident = syn::parse_str("T").expect("parse ident");
+
+        // Array and tuple types nest their contents in a token `Group`, which is
+        // the only way the walker recurses.
+        assert!(mentions_any_type_param(&ty("[T; 4]"), std::slice::from_ref(&param)));
+        assert!(mentions_any_type_param(&ty("(u8, T)"), std::slice::from_ref(&param)));
+        assert!(!mentions_any_type_param(&ty("[u8; 4]"), std::slice::from_ref(&param)));
+    }
 }

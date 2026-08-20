@@ -17,7 +17,7 @@ use syn::{Expr, LitStr, Token};
 
 /// A message, ready to render.
 #[derive(Debug)]
-pub enum Message {
+pub(crate) enum Message {
     /// Rendered as a string literal, with any `{{` and `}}` escapes already resolved.
     Literal(String),
     /// Rendered as `format!(template, arguments...)`.
@@ -35,7 +35,7 @@ impl Message {
     /// The template is rendered as a literal only when it carries no arguments and no braces at
     /// all, because a brace may open a placeholder that `format!` still has to resolve.
     #[must_use]
-    pub fn opaque(template: String, arguments: Vec<TokenStream>) -> Self {
+    pub(crate) fn opaque(template: String, arguments: Vec<TokenStream>) -> Self {
         if arguments.is_empty() && !template.contains(['{', '}']) {
             Self::Literal(template)
         } else {
@@ -48,7 +48,7 @@ impl Message {
     /// Either a `&'static str` or a `String`; both satisfy the `Into<Cow<'static, str>>` and
     /// `Into<Cow<'_, str>>` bounds the runtime asks for.
     #[must_use]
-    pub fn render(&self) -> TokenStream {
+    pub(crate) fn render(&self) -> TokenStream {
         match self {
             Self::Literal(text) => LitStr::new(text, Span::call_site()).into_token_stream(),
             Self::Formatted { template, arguments } => {
@@ -61,7 +61,7 @@ impl Message {
 
 /// The arguments both macros accept: a string literal, then zero or more expressions.
 #[derive(Debug)]
-pub struct FormatArgs {
+pub(crate) struct FormatArgs {
     /// The template, kept whole so a diagnostic can point at it.
     pub template: LitStr,
     /// The positional arguments that follow it.
@@ -82,3 +82,6 @@ impl Parse for FormatArgs {
         Ok(Self { template, arguments })
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/error_attr/mod.rs
-expression: "rendered(parse_quote!\n{\n    struct T\n    {\n        path: String, #[doc = \" ohno::generated-core@7f3d9c2a\"] mine:\n        ohno::OhnoCore,\n    }\n})"
----
-::core::compile_error! {
-    "This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`"
-}

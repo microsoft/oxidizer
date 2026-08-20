@@ -22,7 +22,7 @@ use crate::message::FormatArgs;
 ///
 /// Returns `None` only when the input is not an error type at all, in which case a fault has been
 /// recorded. Faults found while decoding individual attributes are recorded without giving up.
-pub fn parse(input: DeriveInput, errors: &mut Errors) -> Option<Ast> {
+pub(crate) fn parse(input: DeriveInput, errors: &mut Errors) -> Option<Ast> {
     let DeriveInput {
         attrs,
         ident,
@@ -241,7 +241,7 @@ fn check_bare_marker(attr: &Attribute, name: &str, errors: &mut Errors) {
 
 /// Renders a member the way a diagnostic spells it: `path`, or `0`.
 #[must_use]
-pub fn member_name(member: &Member) -> String {
+pub(crate) fn member_name(member: &Member) -> String {
     match member {
         Member::Named(ident) => ident.to_string(),
         Member::Unnamed(index) => index.index.to_string(),
@@ -253,10 +253,13 @@ pub fn member_name(member: &Member) -> String {
 /// Nothing is resolved, so a core reached through a type alias or a renamed import is invisible
 /// here and has to be marked.
 #[must_use]
-pub fn is_ohno_core(ty: &Type) -> bool {
+pub(crate) fn is_ohno_core(ty: &Type) -> bool {
     let Type::Path(path) = ty else {
         return false;
     };
 
     path.qself.is_none() && path.path.segments.last().is_some_and(|segment| segment.ident == "OhnoCore")
 }
+
+#[cfg(test)]
+mod tests;

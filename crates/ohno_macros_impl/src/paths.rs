@@ -11,24 +11,24 @@ use quote::quote;
 
 /// `::ohno::OhnoCore`, the type held by the error field.
 #[must_use]
-pub fn ohno_core() -> TokenStream {
+pub(crate) fn ohno_core() -> TokenStream {
     quote!(::ohno::OhnoCore)
 }
 
 /// `::ohno::Enrichable`, the trait carrying `add_enrichment`.
 #[must_use]
-pub fn enrichable() -> TokenStream {
+pub(crate) fn enrichable() -> TokenStream {
     quote!(::ohno::Enrichable)
 }
 
 /// `::ohno::EnrichmentEntry`, one message with its source location.
 #[must_use]
-pub fn enrichment_entry() -> TokenStream {
+pub(crate) fn enrichment_entry() -> TokenStream {
     quote!(::ohno::EnrichmentEntry)
 }
 
 /// `::ohno::ErrorExt`, the trait carrying `message` and `backtrace`.
 #[must_use]
-pub fn error_ext() -> TokenStream {
+pub(crate) fn error_ext() -> TokenStream {
     quote!(::ohno::ErrorExt)
 }

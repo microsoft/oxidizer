@@ -8,7 +8,7 @@
 
 /// One piece of a template.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Segment<'a> {
+pub(crate) enum Segment<'a> {
     /// Text copied to the output template verbatim, `{{` and `}}` escapes included.
     Literal(&'a str),
     /// A `{...}` placeholder.
@@ -17,7 +17,7 @@ pub enum Segment<'a> {
 
 /// A `{...}` placeholder.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Placeholder<'a> {
+pub(crate) struct Placeholder<'a> {
     /// The field named by the placeholder. `None` for `{}`, which consumes the next argument.
     pub name: Option<&'a str>,
     /// The format spec after the `:`, without the colon.
@@ -31,14 +31,14 @@ impl Placeholder<'_> {
     /// argument is reported by `rustc` against the derive rather than by the macro against the
     /// template. See the limits section of `docs/design.md`.
     #[must_use]
-    pub fn lowered(&self) -> String {
+    pub(crate) fn lowered(&self) -> String {
         self.spec.map_or_else(|| "{}".to_owned(), |spec| format!("{{:{spec}}}"))
     }
 }
 
 /// Why a template could not be split.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Fault {
+pub(crate) enum Fault {
     /// A `{` that no `}` closes.
     UnclosedPlaceholder,
     /// A `}` that no `{` opens.
@@ -48,7 +48,7 @@ pub enum Fault {
 impl Fault {
     /// The diagnostic this fault renders as.
     #[must_use]
-    pub fn message(&self) -> &'static str {
+    pub(crate) fn message(&self) -> &'static str {
         match self {
             Self::UnclosedPlaceholder => {
                 "`#[display(...)]` template has a `{` with no matching `}`. \
@@ -72,7 +72,7 @@ impl Fault {
 /// The scan is driven by an iterator rather than by an index it increments. An index the scan
 /// computes can be wrong, but an iterator always moves forward, so a wrong computation shows up as
 /// a wrong segment a test can assert on rather than as a scan that never ends.
-pub fn split(template: &str) -> Result<Vec<Segment<'_>>, Fault> {
+pub(crate) fn split(template: &str) -> Result<Vec<Segment<'_>>, Fault> {
     let bytes = template.as_bytes();
     let mut segments = Vec::new();
     let mut literal_start = 0;
@@ -124,3 +124,6 @@ fn placeholder(contents: &str) -> Placeholder<'_> {
         spec,
     }
 }
+
+#[cfg(test)]
+mod tests;

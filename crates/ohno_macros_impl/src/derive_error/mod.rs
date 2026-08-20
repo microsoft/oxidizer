@@ -10,12 +10,12 @@
 //!               syntax          rules              rendering
 //! ```
 
-pub mod ast;
-pub mod display;
-pub mod generate;
-pub mod model;
-pub mod parse;
-pub mod validate;
+pub(crate) mod ast;
+pub(crate) mod display;
+pub(crate) mod generate;
+pub(crate) mod model;
+pub(crate) mod parse;
+pub(crate) mod validate;
 
 use proc_macro2::TokenStream;
 use syn::DeriveInput;
@@ -24,7 +24,7 @@ use crate::diagnostics::Errors;
 
 /// Expands the derive, or renders everything that stopped it.
 #[must_use]
-pub fn expand(input: DeriveInput) -> TokenStream {
+pub(crate) fn expand(input: DeriveInput) -> TokenStream {
     let mut errors = Errors::default();
 
     let expanded = parse::parse(input, &mut errors)
@@ -34,3 +34,6 @@ pub fn expand(input: DeriveInput) -> TokenStream {
 
     expanded.unwrap_or_else(|| errors.into_compile_error())
 }
+
+#[cfg(all(test, not(miri)))]
+mod tests;

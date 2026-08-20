@@ -1,0 +1,10 @@
+---
+source: crates/ohno_macros_impl/src/derive_error/display/mod/tests.rs
+expression: "lowered(parse_quote!\n{\n    #[display(\"bad: {typ}\")] struct T\n    {\n        r#type: String, #[doc = \" ohno::generated-core@7f3d9c2a\"] ohno_core:\n        ohno::OhnoCore,\n    }\n})"
+---
+fn message() {
+    let _ = "bad: {}";
+}
+::core::compile_error! {
+    "unknown field `typ` in `#[display(...)]`, available fields: `r#type`"
+}

@@ -124,7 +124,7 @@ fn parse_enrichment_field_def(field: &Field) -> Result<EnrichmentFieldDef> {
 // ================================================================================================
 
 /// Entry point: generates the `Enrichment` trait implementation from `DeriveInput`.
-pub fn derive_enrichment(input: &DeriveInput) -> Result<TokenStream> {
+pub(crate) fn derive_enrichment(input: &DeriveInput) -> Result<TokenStream> {
     let def = parse_enrichment_def(input)?;
     Ok(generate_enrichment_impl(&def))
 }
@@ -276,3 +276,7 @@ fn entry_ctor(
     let metric_chain = metric_key.map(|mk| quote! { .with_metric_dimension(#mk) });
     quote! { #constructor #exclude_chain #metric_chain }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, not(miri)))]
+mod tests;

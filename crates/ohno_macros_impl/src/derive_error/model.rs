@@ -18,7 +18,7 @@ use crate::message::Message;
 
 /// A validated error type.
 #[derive(Debug)]
-pub struct Model {
+pub(crate) struct Model {
     /// The type's name.
     pub ident: Ident,
     /// The type's generics, threaded through every generated item.
@@ -42,7 +42,7 @@ pub struct Model {
 /// that is not there. Declaration order is still recoverable, and `Style` and the members are read
 /// from the same value, so they cannot disagree.
 #[derive(Debug)]
-pub struct Shape {
+pub(crate) struct Shape {
     /// Whether the fields are named or positional.
     pub style: Style,
     /// The fields declared before the core.
@@ -59,7 +59,7 @@ impl Shape {
     /// Returns `None` when `core` is out of range, which is the last point at which that is
     /// representable.
     #[must_use]
-    pub fn new(mut fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self> {
+    pub(crate) fn new(mut fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self> {
         if core >= fields.len() {
             return None;
         }
@@ -77,25 +77,25 @@ impl Shape {
 
     /// The field holding the core.
     #[must_use]
-    pub fn core(&self) -> &ModelField {
+    pub(crate) fn core(&self) -> &ModelField {
         &self.core
     }
 
     /// Every field, in declaration order. What `Debug` prints.
-    pub fn all(&self) -> impl Iterator<Item = &ModelField> {
+    pub(crate) fn all(&self) -> impl Iterator<Item = &ModelField> {
         self.before.iter().chain(std::iter::once(&self.core)).chain(self.after.iter())
     }
 
     /// Every field but the core, in declaration order.
     ///
     /// What the constructors take, and what a conversion initializes.
-    pub fn data(&self) -> impl Iterator<Item = &ModelField> {
+    pub(crate) fn data(&self) -> impl Iterator<Item = &ModelField> {
         self.before.iter().chain(self.after.iter())
     }
 }
 /// One field of a validated error type.
 #[derive(Debug)]
-pub struct ModelField {
+pub(crate) struct ModelField {
     /// How the field is written in an expression: `path`, or `0`.
     pub member: Member,
     /// How the field is bound as a constructor parameter.
@@ -110,7 +110,7 @@ pub struct ModelField {
 impl ModelField {
     /// Builds a field, deriving its constructor binding from its member.
     #[must_use]
-    pub fn new(member: Member, ty: Type) -> Self {
+    pub(crate) fn new(member: Member, ty: Type) -> Self {
         let binding = match &member {
             Member::Named(ident) => ident.clone(),
             Member::Unnamed(index) => format_ident!("param_{}", index.index, span = Span::call_site()),
@@ -122,7 +122,7 @@ impl ModelField {
 
 /// One generated `From<T>`.
 #[derive(Debug)]
-pub struct Conversion {
+pub(crate) struct Conversion {
     /// The type the conversion converts from.
     pub source: Type,
     /// One initializer per non-core field, aligned with [`Shape::data`].
@@ -138,7 +138,7 @@ impl Conversion {
     ///
     /// Returns `None` when an override names no non-core field, in which case a fault has been
     /// recorded.
-    pub fn new(shape: &Shape, source: Type, overrides: &[(Member, Expr)], errors: &mut Errors) -> Option<Self> {
+    pub(crate) fn new(shape: &Shape, source: Type, overrides: &[(Member, Expr)], errors: &mut Errors) -> Option<Self> {
         let mut initializers: Vec<Expr> = Vec::new();
 
         for field in shape.data() {
@@ -162,7 +162,7 @@ impl Conversion {
 
     /// The initializers, in the order [`Shape::data`] yields its fields.
     #[must_use]
-    pub fn initializers(&self) -> &[Expr] {
+    pub(crate) fn initializers(&self) -> &[Expr] {
         &self.initializers
     }
 }
@@ -187,3 +187,6 @@ fn unknown_key(shape: &Shape, key: &Member) -> String {
 
     format!("unknown field `{name}` in `#[from(...)]`, available fields: {available}")
 }
+
+#[cfg(test)]
+mod tests;

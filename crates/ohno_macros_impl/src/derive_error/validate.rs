@@ -28,7 +28,7 @@ const DUPLICATE_MARKER: &str = "Duplicate `#[error]` on the same field. Mark it 
 /// Applies the rules to `ast`.
 ///
 /// Returns `None` when no `Model` can be built, in which case at least one fault has been recorded.
-pub fn validate(ast: Ast, errors: &mut Errors) -> Option<Model> {
+pub(crate) fn validate(ast: Ast, errors: &mut Errors) -> Option<Model> {
     let referenceable = Referenceable::new(&ast.fields);
     let message = ast
         .display
@@ -135,3 +135,6 @@ fn report_duplicate_markers(fields: &[AstField], errors: &mut Errors) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

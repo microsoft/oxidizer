@@ -1,0 +1,13 @@
+---
+source: crates/ohno_macros_impl/src/error_attr/mod/tests.rs
+expression: "rendered(parse_quote!\n{\n    #[doc = r\" Documentation for T.\"] #[derive(Clone)]\n    #[display(\"failed for {path}\")] struct T { path: String }\n})"
+---
+#[derive(::ohno::Error)]
+/// Documentation for T.
+#[derive(Clone)]
+#[display("failed for {path}")]
+struct T {
+    path: String,
+    /// ohno::generated-core@7f3d9c2a
+    ohno_core: ::ohno::OhnoCore,
+}

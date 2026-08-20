@@ -1,0 +1,7 @@
+---
+source: crates/ohno_macros_impl/src/derive_error/display/mod/tests.rs
+expression: "lowered(parse_quote!\n{ #[display(\"Static error message\")] struct T { inner: ohno::OhnoCore } })"
+---
+fn message() {
+    let _ = "Static error message";
+}
