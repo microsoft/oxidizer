@@ -16,8 +16,9 @@
 //!   than dense zero-based ordinals. Because they are identifiers, they are not
 //!   intended to index into a densely sized array.
 //!
-//! The fields keep the base type's `u16`, and the accessors return the same `u16` so
-//! there is no width mismatch between what is stored and what is read.
+//! The fields are `u32` — wider than the base type's `u16` — to comfortably hold real
+//! platform ids, and the accessors return the same `u32` so there is no width mismatch
+//! between what is stored and what is read.
 
 /// Identifies a processor and memory region by their real platform ids.
 ///
@@ -26,8 +27,8 @@
 /// reports and need not be dense or zero-based.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Affinity {
-    processor_id: u16,
-    memory_region_id: u16,
+    processor_id: u32,
+    memory_region_id: u32,
 }
 
 impl Affinity {
@@ -36,7 +37,7 @@ impl Affinity {
     /// The ids are the identifiers reported by the platform; they need not be dense or
     /// zero-based, so no range validation is performed.
     #[must_use]
-    pub const fn new(processor_id: u16, memory_region_id: u16) -> Self {
+    pub const fn new(processor_id: u32, memory_region_id: u32) -> Self {
         Self {
             processor_id,
             memory_region_id,
@@ -45,13 +46,13 @@ impl Affinity {
 
     /// Returns the processor id.
     #[must_use]
-    pub const fn processor_id(self) -> u16 {
+    pub const fn processor_id(self) -> u32 {
         self.processor_id
     }
 
     /// Returns the memory-region id.
     #[must_use]
-    pub const fn memory_region_id(self) -> u16 {
+    pub const fn memory_region_id(self) -> u32 {
         self.memory_region_id
     }
 }
