@@ -25,6 +25,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod affinity2;
+pub mod affinity3;
 mod impls;
 
 /// Identifies a processor and memory region in an application's affinity topology.
