@@ -75,7 +75,7 @@ fn out_of_coordinate_space() -> ! {
 /// prepared in advance.
 ///
 /// This is the caller-facing handle. It fixes the stored type to `sync::Arc<T>` and wraps a private
-/// [`SlotTable`], the value-agnostic partitioned table that does the locking.
+/// `SlotTable`, the value-agnostic partitioned table that does the locking.
 ///
 /// [`Arc::from_storage`]: crate::Arc::from_storage
 #[derive(Debug)]
@@ -429,6 +429,23 @@ mod tests {
         let storage = Storage::<i32, InconsistentStrategy>::new();
 
         let _ = storage.get(affinity);
+    }
+
+    #[test]
+    fn probe_returns_published_value() {
+        let affinity = pinned_affinities(&[1])[0];
+        let storage = Storage::<i32, PerCore>::new();
+
+        // An empty affinity probes as absent; after publishing, the probe returns that value. This
+        // pins the hit-path fast read to its published slot: were `probe` to always report absent,
+        // the relocation hit path would silently fall through to the slower write path and this
+        // assertion would fail.
+        assert!(storage.probe(affinity).is_none());
+
+        let _ = storage.insert(affinity, std::sync::Arc::new(7));
+
+        let probed = storage.probe(affinity).expect("probe returns the value just published");
+        assert_eq!(*probed, 7);
     }
 
     #[test]
