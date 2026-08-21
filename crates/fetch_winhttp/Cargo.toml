@@ -17,13 +17,80 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytesbuf::mem::global::GlobalPool",
+    "fetch::client_builder::HttpClientBuilder",
+    "observed::*",
+    "thread_aware::core::ThreadAware",
+    "tick::clock::Clock",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 default-target = "x86_64-pc-windows-msvc"
 
-[dependencies]
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
 
-[dev-dependencies]
+[target.'cfg(windows)'.dependencies]
+bytesbuf = { workspace = true }
+bytesbuf_io = { workspace = true, features = ["futures-stream"] }
+events_once = { workspace = true }
+fetch = { workspace = true }
+futures-core = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true }
+observed = { workspace = true }
+ohno = { workspace = true }
+plurality = { workspace = true }
+recoverable = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
+widestring = { workspace = true, features = ["alloc"] }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+bytes = { workspace = true }
+ctor = { workspace = true }
+futures = { workspace = true, features = ["executor", "std"] }
+h3 = { workspace = true }
+h3-quinn = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = [
+    "http1",
+    "http2",
+    "server-auto",
+    "tokio",
+] }
+mockall = { workspace = true }
+observed_testing = { path = "../observed_testing" }
+quinn = { workspace = true, features = [
+    "runtime-tokio",
+    "rustls-aws-lc-rs",
+] }
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "std", "tls12"] }
+rustls-pki-types = { workspace = true, features = ["std"] }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
+
+[[test]]
+name = "non_windows"
+path = "tests/non_windows.rs"
 
 [lints]
 workspace = true

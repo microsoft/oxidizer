@@ -99,7 +99,7 @@ deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
-events_once = { version = "0.5.19", default-features = false }
+events_once = { version = "0.5.32", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
 fetch = { path = "crates/fetch", default-features = false, version = "0.15.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.5.0" }
@@ -116,6 +116,8 @@ futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
 gungraun = { version = "0.19.2", default-features = false }
+h3 = { version = "0.0.8", default-features = false }
+h3-quinn = { version = "0.0.10", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
 heck = { version = "0.5.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
@@ -183,12 +185,14 @@ prost-reflect = { version = "0.16.4", default-features = false }
 prost-types = { version = "0.14.4", default-features = false }
 protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
+quinn = { version = "0.11.11", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rallocator = { path = "crates/rallocator", default-features = false, version = "0.1.0" }
 rallocator_cli = { path = "crates/rallocator_cli", default-features = false, version = "0.1.0" }
 rallocator_telemetry = { path = "crates/rallocator_telemetry", default-features = false, version = "0.1.0" }
 rallocator_wire = { path = "crates/rallocator_wire", default-features = false, version = "0.1.0" }
 rapidhash = { version = "4.1.1", default-features = false }
+rcgen = { version = "0.14.5", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.2.0" }
 regex = { version = "1.12.2", default-features = false }
 rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.2.0" }
@@ -234,6 +238,7 @@ tick = { path = "crates/tick", default-features = false, version = "0.5.0" }
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
 tokio-native-tls = { version = "0.3.1", default-features = false }
+tokio-rustls = { version = "0.26.4", default-features = false }
 tonic = { version = "0.14.2", default-features = false }
 tonic-prost = { version = "0.14.2", default-features = false }
 tonic-prost-build = { version = "0.14.2", default-features = false }
@@ -251,6 +256,7 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 ustr = { version = "1.1.0", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
+windows = { version = "0.62.2", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }

@@ -15,20 +15,52 @@
 
 WinHTTP-based HTTP transport for the [`fetch`][__link0] HTTP client.
 
-This crate is a Windows-only custom transport that services `fetch`
-[`HttpClient`][__link1] requests through the operating system’s
-[WinHTTP][__link2]
-API, running in fully asynchronous mode.
+This Windows-only crate adds a WinHTTP transport constructor to
+[`HttpClient`][__link1]. Callers supply the clock, memory pool, and telemetry sink
+required by the transport through [`WinHttpDeps`][__link2].
 
-## Status
+WinHTTP-specific TLS and timeout configuration is available through
+[`WinHttpTlsConfig`][__link3] and [`WinHttpOptions`][__link4]. Independently built clients do
+not share connections.
 
-This crate is a placeholder. Only the design exists so far; there is no
-implementation yet. See
-[`docs/design.md`][__link3]
-for the architecture, behavior, and design tenets, and
-[`docs/implementation.md`][__link4]
-for the implementation strategy (threading, cancellation and FFI ownership,
-pooling, body streaming) and the test plan.
+### Platform requirements
+
+Windows 11 (build 22000) or later, or Windows Server 2025 (build 26100) or
+later. Windows Server 2022 and earlier are not supported.
+
+### Behavior and limitations
+
+WinHTTP owns connection management and much of the HTTP protocol, so some
+generic `fetch` configuration cannot be represented and some behavior is
+fixed by the operating system.
+
+* Generic TLS configuration, finite connection limits, and bounded
+  connection lifetimes are accepted and ignored rather than rejected, so a
+  client that sets them still builds.
+* Proxy selection follows automatic Windows proxy policy, including
+  automatic discovery and proxy auto-configuration scripts. There is no
+  proxy override and no direct-connection fallback.
+* Redirects are not followed, no cookie store is kept, and authentication
+  challenges are not answered. Those responses are returned to the caller to
+  act on, and none of this can be re-enabled.
+* Request framing is derived from the body, so a caller-supplied
+  `Transfer-Encoding` is rejected before anything is sent. Code that
+  forwards an inbound request’s headers verbatim is the common case that
+  trips on this.
+* Gzip and deflate responses are decoded transparently, with the headers
+  describing the encoded form removed and no opt-out. Brotli and zstd are
+  not decoded and arrive still encoded.
+* A request body that yields trailers fails the request, and does so after
+  the headers and preceding body data have already been sent. The request
+  body is sent in full before response reception begins.
+
+The full contract - error classification, timeout semantics, and the
+fidelity of every generic option - is documented in
+[`docs/design.md`][__link5].
+
+Requests are serviced through the operating system’s
+[WinHTTP][__link6]
+API.
 
 
 <hr/>
@@ -36,8 +68,11 @@ pooling, body streaming) and the test plan.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfkRGO84lKi4bECGPhBOTXqAbhtwWCr_OBp4brCj0OGQxd1JhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
- [__link2]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
- [__link3]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
- [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/implementation.md
+ [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps
+ [__link3]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpTlsConfig
+ [__link4]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpOptions
+ [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
+ [__link6]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
