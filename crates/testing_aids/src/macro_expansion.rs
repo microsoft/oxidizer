@@ -21,7 +21,9 @@ use proc_macro2::TokenStream;
 /// Panics if `source` is not valid Rust tokens.
 #[must_use]
 pub fn tokenize(source: &str) -> TokenStream {
-    source.parse().expect("the source tokenizes")
+    source
+        .parse()
+        .unwrap_or_else(|err| panic!("the source tokenizes as Rust: {err}\n--- source ---\n{source}"))
 }
 
 /// Renders a macro expansion as formatted Rust source, ready to snapshot.
@@ -32,8 +34,11 @@ pub fn tokenize(source: &str) -> TokenStream {
 /// broken, so this is deliberately not a recoverable case.
 #[must_use]
 pub fn render_expansion(tokens: TokenStream) -> String {
-    let raw = tokens.to_string();
-    let file = syn::parse2(tokens).unwrap_or_else(|err| panic!("the expansion parses as a Rust file: {err}\n--- tokens ---\n{raw}"));
+    // Cloning a `TokenStream` is cheap, and rendering the tokens only inside the panic arm
+    // keeps the successful path -- the overwhelmingly common one in a snapshot suite -- from
+    // formatting a string nothing reads.
+    let file =
+        syn::parse2(tokens.clone()).unwrap_or_else(|err| panic!("the expansion parses as a Rust file: {err}\n--- tokens ---\n{tokens}"));
     prettyplease::unparse(&file)
 }
 
