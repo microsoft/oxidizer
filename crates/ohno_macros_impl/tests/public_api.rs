@@ -22,24 +22,21 @@
 use ohno_macros_impl::{derive_error, enrich_err, error};
 use proc_macro2::TokenStream;
 use quote::quote;
-
-/// Pretty-prints Rust source, falling back to the bare tokens when they do not parse as a file.
-///
-/// Several cases deliberately feed a macro something that is not an item at all. Their input is
-/// still worth showing, so it is printed as written rather than dropped.
-fn pretty(tokens: &TokenStream) -> String {
-    syn::parse_file(&tokens.to_string()).map_or_else(|_| tokens.to_string(), |file| prettyplease::unparse(&file))
-}
+use testing_aids::{render_expansion, render_tokens_lossy};
 
 /// One case body: the source a user would write, then what the macro turns it into.
 ///
 /// The input is recorded beside the expansion so a snapshot reads on its own. Reviewing a change
 /// otherwise means holding the test file open next to the snapshot to learn what produced it.
+///
+/// The source side is rendered leniently: several cases deliberately feed a macro something that
+/// is not an item at all, and that input is still worth showing. The expansion side is rendered
+/// strictly, because a macro that emits unparsable tokens is broken.
 fn case(source: &TokenStream, expanded: &TokenStream) -> String {
     format!(
         "{}\n// ---- expands to ----\n\n{}",
-        pretty(source).trim_end(),
-        pretty(expanded).trim_end()
+        render_tokens_lossy(source).trim_end(),
+        render_expansion(expanded).trim_end()
     )
 }
 

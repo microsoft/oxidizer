@@ -18,6 +18,7 @@ use std::time::Duration;
 use std::{env, process, thread};
 
 mod io;
+mod macro_expansion;
 mod macros;
 mod metrics;
 mod poll;
@@ -25,6 +26,7 @@ pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;
+pub use macro_expansion::*;
 pub use metrics::*;
 pub use poll::*;
 pub use yielding::*;

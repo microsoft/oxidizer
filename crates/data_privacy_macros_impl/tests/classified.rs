@@ -6,6 +6,7 @@
 use data_privacy_macros_impl::classified::classified;
 use insta::assert_snapshot;
 use quote::quote;
+use testing_aids::render_expansion;
 
 #[test]
 fn test_classified_impl_empty_args() {
@@ -89,8 +90,7 @@ fn test_success() {
     };
 
     let result = classified(attr_args, input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }
@@ -104,8 +104,7 @@ fn test_success_named_field() {
     };
 
     let result = classified(attr_args, input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }

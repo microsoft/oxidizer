@@ -6,12 +6,12 @@
 use data_privacy_macros_impl::derive::{redacted_debug, redacted_display};
 use insta::assert_snapshot;
 use quote::quote;
+use testing_aids::render_expansion;
 
 macro_rules! test_derive {
     ($input:expr, $derive_fn:path) => {{
         let result = $derive_fn($input);
-        let result_file = syn::parse_file(&result.unwrap_or_else(|e| e.to_compile_error()).to_string()).unwrap();
-        let pretty = prettyplease::unparse(&result_file);
+        let pretty = render_expansion(&result.unwrap_or_else(|e| e.to_compile_error()));
         assert_snapshot!(pretty);
     }};
 }

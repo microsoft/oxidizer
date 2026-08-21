@@ -15,10 +15,6 @@
 //!
 //! **Do not depend on this crate directly.** Use the re-exports from `observed` instead.
 
-mod enrichment;
-mod event;
-mod field_attrs;
-
 use proc_macro::TokenStream;
 
 /// Declares a struct as an `observed` event and generates its `Event` trait impl.
@@ -33,10 +29,9 @@ use proc_macro::TokenStream;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)] // a proc-macro entry point cannot be invoked from this crate's own tests
 pub fn event(attr: TokenStream, item: TokenStream) -> TokenStream {
-    match crate::event::event_attr(attr.into(), item.into()) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
-    }
+    observed_macros_impl::event(attr.into(), item.into())
+        .unwrap_or_else(|err| err.to_compile_error())
+        .into()
 }
 
 /// Derives the `Enrichment` trait for a struct. See the re-export in the `observed`
@@ -45,9 +40,7 @@ pub fn event(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)] // a proc-macro entry point cannot be invoked from this crate's own tests
 pub fn derive_enrichment(input: TokenStream) -> TokenStream {
-    let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    match crate::enrichment::derive_enrichment(&input) {
-        Ok(tokens) => tokens.into(),
-        Err(err) => err.to_compile_error().into(),
-    }
+    observed_macros_impl::derive_enrichment(input.into())
+        .unwrap_or_else(|err| err.to_compile_error())
+        .into()
 }

@@ -42,6 +42,7 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
+    &["observed", "observed_macros", "observed_macros_impl"],
     &["ohno", "ohno_macros", "ohno_macros_impl"],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],

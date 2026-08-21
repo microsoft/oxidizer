@@ -1274,10 +1274,10 @@ name = "data_privacy_macros_impl"
 version = "0.10.3"
 dependencies = [
  "insta",
- "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "testing_aids",
 ]
 
 [[package]]
@@ -1766,10 +1766,10 @@ version = "0.3.5"
 dependencies = [
  "insta",
  "mutants",
- "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "testing_aids",
 ]
 
 [[package]]
@@ -3127,12 +3127,19 @@ dependencies = [
 name = "observed_macros"
 version = "0.24.0"
 dependencies = [
- "insta",
  "mutants",
- "prettyplease 0.3.0",
+ "observed_macros_impl",
+]
+
+[[package]]
+name = "observed_macros_impl"
+version = "0.24.0"
+dependencies = [
+ "insta",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "testing_aids",
 ]
 
 [[package]]
@@ -3195,10 +3202,10 @@ name = "ohno_macros_impl"
 version = "0.5.0"
 dependencies = [
  "insta",
- "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "testing_aids",
 ]
 
 [[package]]
@@ -4822,7 +4829,10 @@ dependencies = [
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
+ "prettyplease 0.3.0",
+ "proc-macro2",
  "serial_test",
+ "syn 3.0.3",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4878,10 +4888,10 @@ name = "thread_aware_macros_impl"
 version = "0.7.4"
 dependencies = [
  "insta",
- "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+ "testing_aids",
 ]
 
 [[package]]

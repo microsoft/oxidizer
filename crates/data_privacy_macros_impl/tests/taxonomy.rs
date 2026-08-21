@@ -6,6 +6,7 @@
 use data_privacy_macros_impl::taxonomy::taxonomy;
 use insta::assert_snapshot;
 use quote::quote;
+use testing_aids::render_expansion;
 
 #[test]
 fn test_taxonomy_impl_empty_args() {
@@ -156,8 +157,7 @@ fn test_success() {
     };
 
     let result = taxonomy(args, input);
-    let result_file = syn::parse_file(&result.unwrap().to_string()).unwrap();
-    let pretty = prettyplease::unparse(&result_file);
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }

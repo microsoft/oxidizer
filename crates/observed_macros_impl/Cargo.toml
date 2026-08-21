@@ -2,12 +2,12 @@
 # Licensed under the MIT License.
 
 [package]
-name = "ohno_macros_impl"
-description = "Implementation of the macros for the ohno crate."
-version = "0.5.0"
+name = "observed_macros_impl"
+description = "Implementation of the procedural macros for the observed crate. You should not add this as a direct dependency; use the re-exports from observed."
+version = "0.24.0"
 readme = "README.md"
-keywords = ["oxidizer", "error", "backtrace"]
-categories = ["data-structures"]
+keywords = ["observed", "proc-macro", "macros", "telemetry", "events"]
+categories = ["development-tools::debugging"]
 
 edition = { workspace = true }
 rust-version = { workspace = true }
@@ -15,7 +15,7 @@ authors = { workspace = true }
 license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/ohno_macros_impl"
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_macros_impl"
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["proc_macro2::*", "syn::*"]
@@ -26,13 +26,19 @@ all-features = true
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
-syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+syn = { workspace = true, features = [
+    "full",
+    "parsing",
+    "derive",
+    "extra-traits",
+    "printing",
+    "clone-impls",
+    "proc-macro",
+] }
 
 [dev-dependencies]
 insta = { workspace = true }
 testing_aids = { workspace = true }
 
-# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
-# <<< anvil-managed: anvil-lints

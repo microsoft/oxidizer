@@ -1,0 +1,152 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"optional\"\"#,\nr#\"\n            #[info]\n            struct Optional<'a> {\n                default_placeholder: Option<ClassifiedString>,\n                #[if_none(drop)]\n                dropped: Option<ClassifiedString>,\n                #[if_none(\"missing\")]\n                custom_placeholder: Option<ClassifiedString>,\n                #[dimension(metric = \"opt.shard\")]\n                #[unredacted]\n                dimension: Option<i64>,\n                #[unredacted]\n                borrowed_inner: Option<&'a str>,\n                #[if_none(drop)]\n                #[data_class(DataTaxonomy::Euii)]\n                classified: Option<String>,\n            }\n            \"#,)"
+---
+struct Optional<'a> {
+    default_placeholder: Option<ClassifiedString>,
+    dropped: Option<ClassifiedString>,
+    custom_placeholder: Option<ClassifiedString>,
+    dimension: Option<i64>,
+    borrowed_inner: Option<&'a str>,
+    classified: Option<String>,
+}
+const _: () = {
+    impl<'a> ::observed::Event for Optional<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "optional",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Optional<'static>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "optional",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "default_placeholder",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("default_placeholder"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                match self.default_placeholder.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                    }
+                }
+            }
+            if let ::core::option::Option::Some(__val) = self.dropped.as_ref() {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "dropped",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("dropped"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "custom_placeholder",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("custom_placeholder"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                match self.custom_placeholder.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from_redacted(__val, _engine),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("missing"))?;
+                    }
+                }
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "dimension",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("dimension"),
+                    ),
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::dimension("opt.shard"),
+                    ),
+                );
+                match self.dimension.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from(__val.clone()),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                    }
+                }
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "borrowed_inner",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("borrowed_inner"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                match self.borrowed_inner.as_ref() {
+                    ::core::option::Option::Some(__val) => {
+                        visitor(
+                            &FIELD_DESC,
+                            &|_engine| ::observed::Value::from(
+                                ::std::sync::Arc::<str>::from(*__val),
+                            ),
+                        )?;
+                    }
+                    ::core::option::Option::None => {
+                        visitor(&FIELD_DESC, &|_| ::observed::Value::from("n/a"))?;
+                    }
+                }
+            }
+            if let ::core::option::Option::Some(__val) = self.classified.as_ref() {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "classified",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("classified"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            __val,
+                            DataTaxonomy::Euii,
+                        ),
+                        _engine,
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

@@ -1,0 +1,25 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"silent\"\"#,\nr\"\n            struct Silent {\n                tenant: ClassifiedString,\n            }\n            \",)"
+---
+struct Silent {
+    tenant: ClassifiedString,
+}
+const _: () = {
+    impl ::observed::Event for Silent {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "silent",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Silent>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

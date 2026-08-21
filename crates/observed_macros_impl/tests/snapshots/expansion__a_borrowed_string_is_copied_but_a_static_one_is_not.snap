@@ -1,0 +1,155 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"strings\"\"#,\nr\"\n            #[info]\n            struct Strings<'a> {\n                #[unredacted]\n                borrowed: &'a str,\n                #[unredacted]\n                qualified: &'a std::primitive::str,\n                #[unredacted]\n                immortal: &'static str,\n                #[unredacted]\n                numeric_ref: &'a u64,\n                #[unredacted]\n                owned: String,\n                redactable_ref: &'a Redactable,\n                parenthesized: (&'a Redactable),\n                #[data_class(DataTaxonomy::Euii)]\n                classified_ref: &'a Classified,\n            }\n            \",)"
+---
+struct Strings<'a> {
+    borrowed: &'a str,
+    qualified: &'a std::primitive::str,
+    immortal: &'static str,
+    numeric_ref: &'a u64,
+    owned: String,
+    redactable_ref: &'a Redactable,
+    parenthesized: (&'a Redactable),
+    classified_ref: &'a Classified,
+}
+const _: () = {
+    impl<'a> ::observed::Event for Strings<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "strings",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Strings<'static>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "strings",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "borrowed",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("borrowed"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.borrowed),
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "qualified",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("qualified"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(
+                        ::std::sync::Arc::<str>::from(self.qualified),
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "immortal",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("immortal"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.immortal.clone()),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "numeric_ref",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("numeric_ref"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.numeric_ref.clone()),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "owned",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("owned"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.owned.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "redactable_ref",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("redactable_ref"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        self.redactable_ref,
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "parenthesized",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("parenthesized"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        self.parenthesized,
+                        engine,
+                    ),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "classified_ref",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("classified_ref"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            self.classified_ref,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
