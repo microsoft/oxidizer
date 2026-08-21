@@ -16,7 +16,7 @@ use tick::Clock;
 async fn main() -> Result<(), ohno::AppError> {
     let deps = CustomDeps {
         clock: Clock::new_tokio(),
-        global_pool: OpaqueMemory::new(GlobalPool::new()),
+        memory: OpaqueMemory::new(GlobalPool::new()),
         extras: (),
     };
 

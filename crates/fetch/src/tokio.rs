@@ -64,7 +64,7 @@ impl HttpClient {
     pub fn builder_tokio(deps: impl Into<TokioDeps>) -> HttpClientBuilder {
         let deps = deps.into();
         let clock = deps.clock.clone();
-        let global_pool = deps.global_pool.clone();
+        let memory = deps.global_pool.clone();
 
         // Re-layer on top of the in-crate `builder_custom_internal` path: the
         // full `TokioDeps` rides through `CustomDeps::extras` so that the
@@ -77,7 +77,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock,
-                global_pool,
+                memory,
                 extras: deps,
             },
         )

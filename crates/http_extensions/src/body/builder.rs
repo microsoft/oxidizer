@@ -88,17 +88,6 @@ impl HttpBodyBuilder {
         }
     }
 
-    /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
-    ///
-    /// The provided memory provider is type-erased and used in place of the global per-thread
-    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: when the builder is moved
-    /// between threads via a thread-aware runtime mechanism, the provider's thread-affine state is
-    /// relocated along with it.
-    #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
-        Self::new(OpaqueMemory::new(memory), clock)
-    }
-
     /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
     ///
     /// Per-call options passed to [`body`](Self::body) or [`stream`](Self::stream) are
@@ -406,15 +395,6 @@ mod tests {
     }
 
     #[test]
-    fn with_custom_memory() {
-        let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
-        let body = builder.text("hello");
-        let data = BytesView::try_from(body).unwrap();
-        assert_eq!(data.len(), 5);
-    }
-
-    #[test]
     fn with_options_sets_buffer_limit() {
         let options = HttpBodyOptions::default().buffer_limit(1024);
         let builder = HttpBodyBuilder::new_fake().with_options(options);
@@ -596,7 +576,7 @@ mod tests {
         );
 
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
         let body = builder.json(&payload).unwrap();
         let bytes_view = body.into_bytes_no_buffering().unwrap();
 

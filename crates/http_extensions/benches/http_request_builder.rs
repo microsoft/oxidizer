@@ -11,6 +11,7 @@
 
 use alloc_tracker::{Allocator, Session};
 use benchmarking::time_sample;
+use bytesbuf::mem::OpaqueMemory;
 use bytesbuf::mem::testing::TransparentMemory;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http::header::CONTENT_TYPE;
@@ -153,7 +154,7 @@ fn entry(c: &mut Criterion) {
     // Use TransparentMemory instead of GlobalPool so that every reserve() call from the
     // serde_json writer results in a real heap allocation. This makes alloc_tracker report
     // the true number of memory reservations, which GlobalPool would otherwise absorb.
-    let transparent_body_builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &tick::Clock::new_frozen());
+    let transparent_body_builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &tick::Clock::new_frozen());
     let operation = session.operation("json_body_large_transparent");
     group.bench_function("json_body_large_transparent", |b| {
         b.iter_custom(|iters| {
