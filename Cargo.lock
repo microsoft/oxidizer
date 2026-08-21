@@ -3192,7 +3192,7 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros_impl"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "insta",
  "prettyplease 0.3.0",
