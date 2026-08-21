@@ -37,99 +37,18 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
+#[path = "support/mod.rs"]
+mod support;
+
+#[cfg(target_os = "linux")]
 mod linux {
     use std::hint::black_box;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     use gungraun::{library_benchmark, library_benchmark_group};
     use thread_aware::affinity::{Affinity, pinned_affinities};
-    use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
+    use thread_aware::{Arc, PerCore, ThreadAware};
 
-    static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
-
-    // Mirrors the payload used by the criterion counterpart so the two files
-    // measure the same object.
-    #[derive(Debug)]
-    pub(crate) struct Payload {
-        id: u64,
-    }
-
-    impl Payload {
-        fn new() -> Self {
-            Self {
-                id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
-            }
-        }
-    }
-
-    // Mirrors the object tree used by the criterion counterpart. Every layer owns
-    // a separate slot table, so relocating the tree acquires one lock per layer
-    // and its instruction count scales with the reachable graph rather than with
-    // the cost of a single call.
-    const TREE_DEPTH: usize = 5;
-
-    #[derive(Debug)]
-    pub(crate) struct Leaf {
-        id: u64,
-    }
-
-    impl Leaf {
-        fn new() -> Self {
-            Self {
-                id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, ThreadAware)]
-    pub(crate) struct Layer {
-        id: u64,
-        name: &'static str,
-        flags: Unaware<u32>,
-        shared: Arc<Leaf, PerCore>,
-        child: Option<Box<Self>>,
-    }
-
-    #[derive(Debug, Clone, ThreadAware)]
-    pub(crate) struct Tree {
-        root: Box<Layer>,
-    }
-
-    impl Tree {
-        fn new() -> Self {
-            let mut layer = None;
-
-            for depth in 0..TREE_DEPTH {
-                layer = Some(Box::new(Layer {
-                    id: depth as u64,
-                    name: "layer",
-                    flags: Unaware(0),
-                    shared: Arc::<Leaf, PerCore>::new(Leaf::new),
-                    child: layer,
-                }));
-            }
-
-            Self {
-                root: layer.expect("the loop runs at least once because TREE_DEPTH is nonzero"),
-            }
-        }
-
-        fn leaf_id(&self) -> u64 {
-            self.root.shared.id
-        }
-
-        fn leaf_ids(&self) -> Vec<u64> {
-            let mut ids = Vec::with_capacity(TREE_DEPTH);
-            let mut layer = Some(&self.root);
-
-            while let Some(current) = layer {
-                ids.push(current.shared.id);
-                layer = current.child.as_ref();
-            }
-
-            ids
-        }
-    }
+    use crate::support::{Payload, Tree};
 
     fn affinities() -> Vec<Affinity> {
         pinned_affinities(&[2])

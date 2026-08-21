@@ -9,13 +9,13 @@
 //! already holds its value, so the call reduces to cloning a `sync::Arc` out of
 //! a slot.
 //!
-//! Two subjects are relocated throughout:
+//! The following subjects are relocated throughout:
 //!
 //! * A bare `Arc<Payload, PerCore>`, which isolates the cost of a single
 //!   relocation.
 //! * A five-layer object tree, which is what actually crosses affinities in
 //!   practice. Relocating it walks the whole graph and locks one slot table per
-//!   layer, so it shows what the lock policy costs per message rather than per
+//!   layer, so it reports what the lock policy costs per message rather than per
 //!   call.
 //!
 //! The suite covers these shapes:
@@ -44,7 +44,12 @@ use std::{sync, thread};
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use many_cpus::SystemHardware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
-use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
+use thread_aware::{Arc, PerCore, ThreadAware};
+
+#[path = "support/mod.rs"]
+mod support;
+
+use support::{Payload, TREE_DEPTH, Tree};
 
 /// How far the oversubscribed case of the `concurrent` group exceeds the
 /// processor count.
@@ -56,31 +61,9 @@ use thread_aware::{Arc, PerCore, ThreadAware, Unaware};
 /// workers ever share a lock; the shape exposes how the uncontended hit path
 /// behaves under scheduler pressure, not lock contention.
 ///
-/// Two is enough to reach that regime. Higher factors only pile on more scheduler
-/// queueing.
+/// A small multiple is enough to reach that regime. Higher factors only add more
+/// scheduler queueing without exercising a different code path.
 const CONCURRENT_OVERSUBSCRIPTION: usize = 2;
-
-/// Source of distinct per-affinity identities.
-static NEXT_VALUE_ID: AtomicU64 = AtomicU64::new(0);
-
-/// Stand-in for the per-affinity state a consumer keeps behind an `Arc<T, PerCore>`,
-/// such as a connection pipeline or a cache shard.
-///
-/// Relocation never inspects the payload. The identity exists so the setup can
-/// verify that a relocation really swapped in the destination affinity's value,
-/// and so the measured loop has something observable to consume.
-#[derive(Debug)]
-struct Payload {
-    id: u64,
-}
-
-impl Payload {
-    fn new() -> Self {
-        Self {
-            id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
-        }
-    }
-}
 
 /// Builds an `Arc<Payload, PerCore>` whose slot is already materialized for every
 /// affinity in `affinities`.
@@ -116,97 +99,6 @@ fn materialized(affinities: &[Affinity]) -> Arc<Payload, PerCore> {
 fn seed_slot_table<T: ThreadAware + Clone>(subject: &T, primer: Affinity) {
     let mut seed = subject.clone();
     seed.relocate(None, primer);
-}
-
-// =========================================================================
-// The relocated object tree.
-// =========================================================================
-
-/// Depth of the object tree, and therefore the number of distinct slot tables a
-/// single tree relocation locks.
-///
-/// Relocation is a graph walk, so what a caller pays is set by the number of
-/// thread-aware nodes reachable from the message, not by the cost of one call.
-/// Five layers is a deliberately modest stand-in for a real message: a request
-/// carrying a session, which holds a connection pool, which holds a resolver,
-/// which holds a metrics sink.
-const TREE_DEPTH: usize = 5;
-
-/// Per-affinity state held behind one `Arc<_, PerCore>` node of the tree.
-#[derive(Debug)]
-struct Leaf {
-    id: u64,
-}
-
-impl Leaf {
-    fn new() -> Self {
-        Self {
-            id: NEXT_VALUE_ID.fetch_add(1, Ordering::Relaxed),
-        }
-    }
-}
-
-/// One layer of [`Tree`].
-///
-/// The field mix is the point of the type. `id` and `name` are thread-aware with
-/// a no-op relocation, `flags` opts out entirely, and `shared` is a genuine
-/// per-affinity node whose relocation takes a lock. Every layer owns a separate
-/// slot table, so relocating the tree walks plain data and acquires exactly one
-/// lock per layer, which is how relocation cost actually accrues in a consumer.
-#[derive(Debug, Clone, ThreadAware)]
-struct Layer {
-    id: u64,
-    name: &'static str,
-    flags: Unaware<u32>,
-    shared: Arc<Leaf, PerCore>,
-    child: Option<Box<Self>>,
-}
-
-/// A message-shaped object tree of [`TREE_DEPTH`] layers.
-///
-/// This is the subject the multithreaded groups relocate, because a runtime
-/// relocates whole messages rather than individual values.
-#[derive(Debug, Clone, ThreadAware)]
-struct Tree {
-    root: Box<Layer>,
-}
-
-impl Tree {
-    fn new() -> Self {
-        let mut layer = None;
-
-        for depth in 0..TREE_DEPTH {
-            layer = Some(Box::new(Layer {
-                id: depth as u64,
-                name: "layer",
-                flags: Unaware(0),
-                shared: Arc::<Leaf, PerCore>::new(Leaf::new),
-                child: layer,
-            }));
-        }
-
-        Self {
-            root: layer.expect("the loop runs at least once because TREE_DEPTH is nonzero"),
-        }
-    }
-
-    /// Number of `Arc<_, PerCore>` nodes a relocation of this tree has to visit.
-    fn node_count(&self) -> usize {
-        self.leaf_ids().len()
-    }
-
-    /// Identity of every `Arc<_, PerCore>` node, in layer order.
-    fn leaf_ids(&self) -> Vec<u64> {
-        let mut ids = Vec::with_capacity(TREE_DEPTH);
-        let mut layer = Some(&self.root);
-
-        while let Some(current) = layer {
-            ids.push(current.shared.id);
-            layer = current.child.as_ref();
-        }
-
-        ids
-    }
 }
 
 /// Builds a [`Tree`] whose every layer is already materialized for every affinity
@@ -329,19 +221,19 @@ fn bench_miss_path(c: &mut Criterion) {
 /// measures the wall-clock time until the last one finishes. The batch is what
 /// makes the measurement possible. A single relocation is a handful of
 /// nanoseconds, while releasing the workers and waking them onto their cores is
-/// tens of microseconds, so a round must contain enough relocations to dwarf that
-/// fixed cost. Criterion drives the batch size up until a sample fills its target
-/// time and fits round duration against batch size, so the fixed release cost
-/// lands in the regression intercept and the reported per-iteration time is the
-/// batch makespan divided by the batch size: the amortized cost of one relocation
-/// on the worker that finishes last. Because the destinations are distinct and
-/// already populated, no two workers share a slot lock, so that figure reflects
-/// the hit path while every worker is busy.
+/// tens of microseconds, so a round must contain enough relocations to reduce that
+/// fixed cost to a negligible fraction of the sample. Criterion drives the batch
+/// size up until a sample fills its target time and fits round duration against
+/// batch size, so the fixed release cost lands in the regression intercept and the
+/// reported per-iteration time is the batch makespan divided by the batch size: the
+/// amortized cost of one relocation on the worker that finishes last. Because the
+/// destinations are distinct and already populated, no two workers share a slot
+/// lock, so that figure reflects the hit path while every worker is busy.
 ///
 /// Readiness is proven before the clock starts. Every worker parks on `ready`,
 /// the controller waits there too, and only once all of them have arrived does it
 /// start the clock and release `start`. Timing therefore excludes the time spent
-/// waiting for stragglers to reach the barrier.
+/// waiting for the slowest workers to reach the barrier.
 struct ConcurrentRelocation {
     ready: sync::Arc<Barrier>,
     start: sync::Arc<Barrier>,
@@ -358,7 +250,7 @@ impl ConcurrentRelocation {
     where
         T: ThreadAware + Clone + Send + 'static,
     {
-        // At least two affinities even for the single-worker case, so that every
+        // Force an affinity floor even for the single-worker case, so that every
         // shape performs a cross-affinity relocation. A worker whose source equals
         // its destination would be measuring a different operation.
         let affinity_count = thread_count.max(2);
@@ -461,16 +353,16 @@ fn bench_concurrent(c: &mut Criterion) {
     // A sweep over worker count: one worker per processor, then more workers than
     // processors. Every worker relocates into its own distinct, already-populated
     // slot, so the measured relocations are all hits and no two workers share a
-    // lock; the reported per-relocation time therefore shows the hit path scaling
+    // lock; the reported per-relocation time therefore reflects the hit path scaling
     // as the machine fills rather than lock contention. The oversubscribed shape
     // adds scheduler pressure, not lock contention. The uncontended single-worker
-    // cost is `hit_path`'s job, so it is deliberately absent here: one worker would
+    // cost belongs to `hit_path`, so it is deliberately absent here: one worker would
     // only add this harness's thread-handoff overhead to the same number.
     //
     // The subject is the object tree, which is what actually crosses affinities in
     // a consumer. It locks one slot table per layer, so each message does several
     // slot acquisitions and the per-message lock cost is large enough to resolve; a
-    // bare `Arc` does one acquisition and shows nothing.
+    // bare `Arc` does one acquisition, too little to resolve above the harness noise.
     let shapes = [
         ("threads_saturated", saturated),
         ("threads_oversubscribed", saturated * CONCURRENT_OVERSUBSCRIPTION),
