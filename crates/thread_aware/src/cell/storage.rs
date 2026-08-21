@@ -120,14 +120,16 @@ impl<T, S: Strategy> SlotTable<T, S> {
         Some(slot.write().expect(NEVER_POISONED))
     }
 
-    /// Acquires the shared lock on the slot for `affinity`, or `None` when that affinity's slot is out
-    /// of range.
+    /// Acquires the shared lock on the slot for `affinity`.
     ///
     /// Used by tests to pin a slot so racing relocations pile up on its exclusive
     /// lock; production relocation reads through [`get_clone`](Self::get_clone).
     #[cfg(test)]
-    pub(crate) fn read(&self, affinity: Affinity) -> Option<RwLockReadGuard<'_, Option<T>>> {
-        Some(self.slot(affinity)?.read().expect(NEVER_POISONED))
+    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<T>> {
+        self.slot(affinity)
+            .expect("tests pin only in-range slots")
+            .read()
+            .expect(NEVER_POISONED)
     }
 }
 
@@ -231,10 +233,9 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
         self.inner.count_where(predicate)
     }
 
-    /// Acquires the shared lock on the slot for `affinity`, or `None` when that affinity's slot is out
-    /// of range.
+    /// Acquires the shared lock on the slot for `affinity`.
     #[cfg(test)]
-    pub(crate) fn read(&self, affinity: Affinity) -> Option<RwLockReadGuard<'_, Option<sync::Arc<T>>>> {
+    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
         self.inner.read(affinity)
     }
 }

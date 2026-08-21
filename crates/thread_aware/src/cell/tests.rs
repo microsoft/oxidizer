@@ -132,6 +132,37 @@ fn out_of_range_relocation_is_a_no_op() {
 }
 
 #[test]
+fn out_of_range_source_is_not_recorded() {
+    use crate::storage::Strategy;
+
+    // A single-slot table indexed by processor, so processor 0 is in range while any higher
+    // processor is out of range. This lets a relocation pair an in-range destination with an
+    // out-of-range source.
+    struct FirstProcessorOnly;
+
+    impl Strategy for FirstProcessorOnly {
+        fn index(affinity: Affinity) -> usize {
+            affinity.processor_index()
+        }
+
+        fn count(_affinity: Affinity) -> usize {
+            1
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let in_range = affinities[0];
+    let out_of_range = affinities[1];
+
+    let mut arc = crate::Arc::<i32, FirstProcessorOnly>::from_unaware(42);
+
+    // The destination is in range, so the value materializes there; the source is out of range and
+    // has no slot to record the carried value into, so that recording is skipped without panicking.
+    arc.relocate(Some(out_of_range), in_range);
+    assert_eq!(*arc, 42);
+}
+
+#[test]
 fn test_partialeq() {
     let value1 = PerCore::with_value(42);
     let value2 = PerCore::with_value(42);
@@ -771,7 +802,7 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
 
         // Holding a shared guard blocks the escalation to the exclusive lock, so a racer that
         // reaches that stage must wait; it does not by itself schedule the racer threads.
-        let shared_guard = storage.read(destination).unwrap();
+        let shared_guard = storage.read(destination);
 
         let mut racers = Vec::with_capacity(RACERS);
 
