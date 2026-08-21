@@ -87,13 +87,13 @@
 //! # How error text is rendered
 //!
 //! Without a `#[display("...")]` attribute, the text an error renders depends on whether it has a
-//! source.
+//! cause — an error or a string handed to `caused_by`.
 //!
-//! **With a source**, the source's message is printed as it stands: no type name, and no
+//! **With a cause**, the cause's message is printed as it stands: no type name, and no
 //! `caused by:` line, so the wrapper leaves no trace in the message line. Enrichment and a
 //! backtrace, described below, are still written after it.
-//! [`source()`](std::error::Error::source) still returns the concrete error, so a caller that
-//! walks the chain still finds it.
+//! A cause that is an error also stays in the [`source()`](std::error::Error::source) chain, so a
+//! caller that walks the chain still finds it.
 //!
 //! ```rust
 //! use std::io;
@@ -122,7 +122,7 @@
 //! "failed to load the configuration", say — has to be given a template; see
 //! [Overriding error text](#overriding-error-text).
 //!
-//! **Without a source**, there is no message to pass through, so the type's own name is printed:
+//! **Without a cause**, there is no message to pass through, so the type's own name is printed:
 //!
 //! ```rust
 //! #[ohno::error]
@@ -136,7 +136,7 @@
 //! ```
 //!
 //! That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
-//! that it needs either a source or a template.
+//! that it needs either a cause or a template.
 //!
 //! ## Enrichment and backtraces
 //!
@@ -184,7 +184,8 @@
 //! [`ErrorExt::message()`](ErrorExt::message) to read the message on its own.
 //!
 //! Every error owns its [`OhnoCore`], and every core renders its own backtrace, so a chain of
-//! wrappers prints the message once and one backtrace block per level:
+//! wrappers that all use the default rendering prints the message once and one backtrace block per
+//! level:
 //!
 //! ```text
 //! no such file: /etc/app.toml

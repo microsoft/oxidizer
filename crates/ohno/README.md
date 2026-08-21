@@ -92,13 +92,13 @@ pub struct NetworkError {
 ## How error text is rendered
 
 Without a `#[display("...")]` attribute, the text an error renders depends on whether it has a
-source.
+cause — an error or a string handed to `caused_by`.
 
-**With a source**, the source’s message is printed as it stands: no type name, and no
+**With a cause**, the cause’s message is printed as it stands: no type name, and no
 `caused by:` line, so the wrapper leaves no trace in the message line. Enrichment and a
 backtrace, described below, are still written after it.
-[`source()`][__link11] still returns the concrete error, so a caller that
-walks the chain still finds it.
+A cause that is an error also stays in the [`source()`][__link11] chain, so a
+caller that walks the chain still finds it.
 
 ```rust
 use std::io;
@@ -126,7 +126,7 @@ Wrapping therefore adds nothing to the text. A wrapper that should say what it w
 “failed to load the configuration”, say — has to be given a template; see
 [Overriding error text](#overriding-error-text).
 
-**Without a source**, there is no message to pass through, so the type’s own name is printed:
+**Without a cause**, there is no message to pass through, so the type’s own name is printed:
 
 ```rust
 #[ohno::error]
@@ -139,7 +139,7 @@ println!("{error}");
 ```
 
 That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
-that it needs either a source or a template.
+that it needs either a cause or a template.
 
 ### Enrichment and backtraces
 
@@ -186,7 +186,8 @@ A backtrace is captured only when `RUST_BACKTRACE` asks for one. Use
 [`ErrorExt::message()`][__link12] to read the message on its own.
 
 Every error owns its [`OhnoCore`][__link13], and every core renders its own backtrace, so a chain of
-wrappers prints the message once and one backtrace block per level:
+wrappers that all use the default rendering prints the message once and one backtrace block per
+level:
 
 ```text
 no such file: /etc/app.toml
@@ -456,7 +457,7 @@ uniformly via [`Labeled::label`][__link25].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbF7t022SddTAbMru5KrO1GBsbj6WlvWEqJMgbKR_mg0kL5sxhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbytrpabsE8xobjqG9axpJ2FMbPtKXWLOg3e8bzFvTXkcI6oFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
