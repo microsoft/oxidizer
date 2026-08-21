@@ -1040,6 +1040,52 @@ fn same_slot_relocation_keeps_the_carried_value() {
 }
 
 #[test]
+fn none_source_single_slot_relocation_keeps_the_carried_value() {
+    // A relocation with no source into a single-slot table is still a same-slot case: with one
+    // slot the carried value provably belongs to it, so `PerProcess` must keep it rather than run
+    // the factory. This pins the `None`-source arm of the same-slot test, the whole of relocation
+    // under `PerProcess` for sourceless moves. Ref: docs/design.md, `PerProcess`.
+    let affinities = pinned_affinities(&[1]);
+
+    let arc = crate::Arc::<Counter, crate::PerProcess>::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(None, affinities[0]);
+
+    assert!(
+        sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a sourceless single-slot relocation must keep the carried value, not materialize a fresh one"
+    );
+    assert_eq!(
+        moved.value(),
+        5,
+        "the shared value must be preserved across a sourceless single-slot relocation"
+    );
+}
+
+#[test]
+fn none_source_multi_slot_relocation_materializes_a_fresh_value() {
+    // With more than one slot a sourceless relocation is not provably same-slot: the destination is
+    // a distinct slot, so relocation must materialize a fresh value rather than keep the carried
+    // one. This pins the `count == 1` boundary of the sourceless same-slot arm against widening to
+    // cover multi-slot tables.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = PerCore::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(None, affinities[1]);
+
+    assert!(
+        !sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a sourceless multi-slot relocation must materialize a fresh value, not keep the carried one"
+    );
+    assert_eq!(moved.value(), 0, "a fresh PerCore value starts independent of the source");
+}
+
+#[test]
 fn cross_slot_relocation_materializes_a_fresh_value() {
     // The counterpart to the same-slot cases: a relocation between distinct slots must still
     // materialize an independent value for the destination. This guards against the same-slot
