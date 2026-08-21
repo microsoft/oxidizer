@@ -16,28 +16,19 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use observed_macros_impl::{derive_enrichment, event};
-use proc_macro2::TokenStream;
+use testing_aids::{render_expansion, tokenize};
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn tokenize(source: &str) -> TokenStream {
-        source.parse().expect("the source tokenizes")
-    }
-
-    fn pretty(tokens: TokenStream) -> String {
-        let file = syn::parse2(tokens).expect("the generated code parses");
-        prettyplease::unparse(&file)
-    }
-
     fn expand_event(attr: &str, item: &str) -> String {
-        pretty(event(tokenize(attr), tokenize(item)).expect("the event attribute expands"))
+        render_expansion(event(tokenize(attr), tokenize(item)).expect("the event attribute expands"))
     }
 
     fn expand_enrichment(item: &str) -> String {
-        pretty(derive_enrichment(tokenize(item)).expect("the derive expands"))
+        render_expansion(derive_enrichment(tokenize(item)).expect("the derive expands"))
     }
 
     // ============================================================================================

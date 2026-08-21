@@ -18,13 +18,20 @@ use std::time::Duration;
 use std::{env, process, thread};
 
 mod io;
+#[cfg(feature = "macros")]
+mod macro_expansion;
 mod macros;
+#[cfg(feature = "runtime")]
 mod metrics;
 mod poll;
+#[cfg(feature = "runtime")]
 pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;
+#[cfg(feature = "macros")]
+pub use macro_expansion::*;
+#[cfg(feature = "runtime")]
 pub use metrics::*;
 pub use poll::*;
 pub use yielding::*;
@@ -143,6 +150,7 @@ pub fn repeating_reverse_incrementing_bytes() -> impl Iterator<Item = u8> {
 
 /// Executes an async function on the Miri-compatible `futures` async task runtime,
 /// blocking until it completes and enforcing a test timeout.
+#[cfg(feature = "runtime")]
 pub fn async_test<F, FF>(f: F)
 where
     F: FnOnce() -> FF + 'static,

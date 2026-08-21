@@ -31,7 +31,7 @@ observed = { workspace = true, features = ["test-util"] }
 tick = { workspace = true, features = ["test-util"] }
 
 [dev-dependencies]
-testing_aids = { workspace = true }
+testing_aids = { workspace = true, features = ["runtime"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 [lints]

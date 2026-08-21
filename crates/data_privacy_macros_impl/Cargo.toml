@@ -36,7 +36,7 @@ syn = { workspace = true, features = [
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
-prettyplease = { workspace = true }
+testing_aids = { workspace = true, features = ["macros"] }
 
 # >>> anvil-managed: anvil-lints
 [lints]

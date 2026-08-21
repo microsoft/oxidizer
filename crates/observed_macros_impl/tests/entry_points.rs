@@ -12,15 +12,12 @@
 use observed_macros_impl::{derive_enrichment, event};
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use quote::quote;
+use testing_aids::tokenize;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn tokenize(source: &str) -> TokenStream {
-        source.parse().expect("the source tokenizes")
-    }
 
     fn expand_event(attr: &str, item: &str) -> String {
         event(tokenize(attr), tokenize(item))

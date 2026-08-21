@@ -33,6 +33,7 @@ macro_rules! assert_panic {
 /// #[cfg(test)]
 /// testing_aids::init_tracing!();
 /// ```
+#[cfg(feature = "runtime")]
 #[macro_export]
 macro_rules! init_tracing {
     () => {
