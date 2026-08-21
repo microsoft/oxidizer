@@ -1,0 +1,609 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== no placeholders lowers to a literal ========
+
+#[derive(Error)]
+#[display("nothing interpolated")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.inner
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from("nothing interpolated"),
+                ),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.inner, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.inner
+            .format_message(
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from("nothing interpolated"),
+                ),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("T")
+            .field("path", &self.path)
+            .field("other", &self.other)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::default(),
+        }
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::from(error),
+        }
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
+// ======== escapes are resolved for a literal ========
+
+#[derive(Error)]
+#[display("braces {{ and }}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.inner
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(::std::borrow::Cow::from("braces { and }")),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.inner, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.inner
+            .format_message(
+                "T",
+                ::core::option::Option::Some(::std::borrow::Cow::from("braces { and }")),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("T")
+            .field("path", &self.path)
+            .field("other", &self.other)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::default(),
+        }
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::from(error),
+        }
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
+// ======== a named placeholder becomes a field access ========
+
+#[derive(Error)]
+#[display("failed for {path}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.inner
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(
+                        ::std::format!("failed for {}", & self.path),
+                    ),
+                ),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.inner, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.inner
+            .format_message(
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(
+                        ::std::format!("failed for {}", & self.path),
+                    ),
+                ),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("T")
+            .field("path", &self.path)
+            .field("other", &self.other)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::default(),
+        }
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::from(error),
+        }
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
+// ======== a format spec survives ========
+
+#[derive(Error)]
+#[display("padded {path:>8}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.inner
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(::std::format!("padded {:>8}", & self.path)),
+                ),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.inner, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.inner
+            .format_message(
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(::std::format!("padded {:>8}", & self.path)),
+                ),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("T")
+            .field("path", &self.path)
+            .field("other", &self.other)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::default(),
+        }
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        path: impl ::core::convert::Into<String>,
+        other: impl ::core::convert::Into<u32>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            other: other.into(),
+            inner: ::ohno::OhnoCore::from(error),
+        }
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
+// ======== a tuple field is named by index ========
+
+#[derive(Error)]
+#[display("failed for {0}")]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.1
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(::std::format!("failed for {}", & self.0)),
+                ),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.1.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.1, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.1
+            .format_message(
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(::std::format!("failed for {}", & self.0)),
+                ),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.1.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_tuple("T").field(&self.0).field(&self.1).finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(param_0: impl ::core::convert::Into<String>) -> Self {
+        Self(param_0.into(), ::ohno::OhnoCore::default())
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        param_0: impl ::core::convert::Into<String>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self(param_0.into(), ::ohno::OhnoCore::from(error))
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}
+
+// ======== a raw identifier keeps its prefix ========
+
+#[derive(Error)]
+#[display("failed for {r#type}")]
+struct T {
+    r#type: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+#[automatically_derived]
+impl ::core::fmt::Display for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        self.inner
+            .format_error(
+                f,
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(
+                        ::std::format!("failed for {}", & self.r#type),
+                    ),
+                ),
+            )
+    }
+}
+#[automatically_derived]
+impl ::std::error::Error for T {
+    fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+#[automatically_derived]
+impl ::ohno::Enrichable for T {
+    fn add_enrichment(&mut self, entry: ::ohno::EnrichmentEntry) {
+        ::ohno::Enrichable::add_enrichment(&mut self.inner, entry);
+    }
+}
+#[automatically_derived]
+impl ::ohno::ErrorExt for T {
+    fn message(&self) -> ::std::string::String {
+        self.inner
+            .format_message(
+                "T",
+                ::core::option::Option::Some(
+                    ::std::borrow::Cow::from(
+                        ::std::format!("failed for {}", & self.r#type),
+                    ),
+                ),
+            )
+    }
+    fn backtrace(&self) -> &::std::backtrace::Backtrace {
+        self.inner.backtrace()
+    }
+}
+impl ::core::fmt::Debug for T {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("T")
+            .field("r#type", &self.r#type)
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+#[automatically_derived]
+impl T {
+    /// Creates the error with no source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn new(r#type: impl ::core::convert::Into<String>) -> Self {
+        Self {
+            r#type: r#type.into(),
+            inner: ::ohno::OhnoCore::default(),
+        }
+    }
+    /// Creates the error wrapping `error` as its source.
+    #[allow(
+        dead_code,
+        reason = "generated for every error type, used at the author's discretion"
+    )]
+    pub(crate) fn caused_by(
+        r#type: impl ::core::convert::Into<String>,
+        error: impl ::core::convert::Into<
+            ::std::boxed::Box<
+                dyn ::std::error::Error + ::core::marker::Send + ::core::marker::Sync,
+            >,
+        >,
+    ) -> Self {
+        Self {
+            r#type: r#type.into(),
+            inner: ::ohno::OhnoCore::from(error),
+        }
+    }
+}
+#[automatically_derived]
+impl ::core::convert::From<::core::convert::Infallible> for T {
+    fn from(_value: ::core::convert::Infallible) -> Self {
+        ::core::unreachable!("Infallible cannot be constructed")
+    }
+}

@@ -1,0 +1,93 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== not a parenthesized list ========
+
+#[derive(Error)]
+#[from = 1]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` takes a parenthesized list of types, such as `#[from(std::io::Error)]`"
+}
+
+// ======== an empty list ========
+
+#[derive(Error)]
+#[from()]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]`"
+}
+
+// ======== an entry that opens with a named override list ========
+
+#[derive(Error)]
+#[from((path:1))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "expected a type"
+}
+
+// ======== an entry that opens with an indexed override list ========
+
+#[derive(Error)]
+#[from((0:1))]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
+::core::compile_error! {
+    "expected a type"
+}
+
+// ======== an override naming an unknown field ========
+
+#[derive(Error)]
+#[from(std::io::Error(missing:1))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "unknown field `missing` in `#[from(...)]`, available fields: `path`"
+}
+
+// ======== a named key on a tuple struct ========
+
+#[derive(Error)]
+#[from(std::io::Error(path:1))]
+struct T(String, ohno::OhnoCore);
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` field keys for a tuple struct are field indexes, not names, so `path:` names no field"
+}
+
+// ======== a key naming the core ========
+
+#[derive(Error)]
+#[from(std::io::Error(inner:1))]
+struct T {
+    path: String,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error"
+}
