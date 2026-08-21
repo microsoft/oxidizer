@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaquePool};
+#[cfg(any(feature = "test-util", test))]
+use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaquePool};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
