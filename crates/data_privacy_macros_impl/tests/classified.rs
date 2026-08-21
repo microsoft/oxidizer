@@ -90,7 +90,7 @@ fn test_success() {
     };
 
     let result = classified(attr_args, input);
-    let pretty = render_expansion(result.unwrap());
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }
@@ -104,7 +104,7 @@ fn test_success_named_field() {
     };
 
     let result = classified(attr_args, input);
-    let pretty = render_expansion(result.unwrap());
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }

@@ -32,7 +32,7 @@ use testing_aids::{render_expansion, render_tokens_lossy};
 /// The source side is rendered leniently: several cases deliberately feed a macro something that
 /// is not an item at all, and that input is still worth showing. The expansion side is rendered
 /// strictly, because a macro that emits unparsable tokens is broken.
-fn case(source: &TokenStream, expanded: TokenStream) -> String {
+fn case(source: &TokenStream, expanded: &TokenStream) -> String {
     format!(
         "{}\n// ---- expands to ----\n\n{}",
         render_tokens_lossy(source).trim_end(),
@@ -46,21 +46,21 @@ fn derived(input: TokenStream) -> String {
     // then handed to the macro by value. That keeps the helper free of clones.
     let source = quote!(#[derive(Error)] #input);
     let expanded = derive_error(input);
-    case(&source, expanded)
+    case(&source, &expanded)
 }
 
 /// An `#[ohno::error]` case.
 fn attributed(item: TokenStream) -> String {
     let source = quote!(#[ohno::error] #item);
     let expanded = error(TokenStream::new(), item);
-    case(&source, expanded)
+    case(&source, &expanded)
 }
 
 /// An `#[ohno::error(...)]` case, for the arguments the attribute does not accept.
 fn attributed_with(args: TokenStream, item: TokenStream) -> String {
     let source = quote!(#[ohno::error(#args)] #item);
     let expanded = error(args, item);
-    case(&source, expanded)
+    case(&source, &expanded)
 }
 
 /// An `#[enrich_err(...)]` case.
@@ -71,7 +71,7 @@ fn enriched(args: TokenStream, item: TokenStream) -> String {
         quote!(#[enrich_err(#args)] #item)
     };
     let expanded = enrich_err(args, item);
-    case(&source, expanded)
+    case(&source, &expanded)
 }
 
 /// A `#[display(...)]` case over a fixed struct.

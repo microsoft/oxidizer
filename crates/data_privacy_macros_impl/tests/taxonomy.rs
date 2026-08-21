@@ -157,7 +157,7 @@ fn test_success() {
     };
 
     let result = taxonomy(args, input);
-    let pretty = render_expansion(result.unwrap());
+    let pretty = render_expansion(&result.unwrap());
 
     assert_snapshot!(pretty);
 }

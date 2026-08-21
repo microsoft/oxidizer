@@ -33,10 +33,10 @@ pub fn tokenize(source: &str) -> TokenStream {
 /// Panics if `tokens` do not parse as a Rust file. A macro that emits something else is
 /// broken, so this is deliberately not a recoverable case.
 #[must_use]
-pub fn render_expansion(tokens: TokenStream) -> String {
-    // Cloning a `TokenStream` is cheap, and rendering the tokens only inside the panic arm
-    // keeps the successful path -- the overwhelmingly common one in a snapshot suite -- from
-    // formatting a string nothing reads.
+pub fn render_expansion(tokens: &TokenStream) -> String {
+    // Taken by reference, like `render_tokens_lossy`: `syn::parse2` needs an owned stream, so
+    // the parse clones (which is cheap), and rendering the tokens stays inside the panic arm
+    // rather than running on the successful path that no snapshot suite ever reads.
     let file =
         syn::parse2(tokens.clone()).unwrap_or_else(|err| panic!("the expansion parses as a Rust file: {err}\n--- tokens ---\n{tokens}"));
     prettyplease::unparse(&file)
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn an_expansion_is_rendered_as_formatted_source() {
-        let rendered = render_expansion(tokenize("struct S { a: u8 }"));
+        let rendered = render_expansion(&tokenize("struct S { a: u8 }"));
 
         assert_eq!(rendered, "struct S {\n    a: u8,\n}\n");
     }
@@ -78,12 +78,12 @@ mod tests {
         // The point of the strict helper: a macro that emits unparsable tokens must fail
         // here rather than reach a snapshot as raw token text, where it would look like a
         // formatting change and be refreshed away.
-        _ = render_expansion(not_a_file());
+        _ = render_expansion(&not_a_file());
     }
 
     #[test]
     fn the_panic_message_carries_the_offending_tokens() {
-        let panic = std::panic::catch_unwind(|| render_expansion(not_a_file())).expect_err("rendering a non-file panics");
+        let panic = std::panic::catch_unwind(|| render_expansion(&not_a_file())).expect_err("rendering a non-file panics");
         let message = panic.downcast_ref::<String>().expect("the panic payload is a formatted string");
 
         assert!(message.contains("1 + 1"), "the tokens are reported: {message}");

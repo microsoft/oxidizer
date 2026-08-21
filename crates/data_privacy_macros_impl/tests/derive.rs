@@ -11,7 +11,7 @@ use testing_aids::render_expansion;
 macro_rules! test_derive {
     ($input:expr, $derive_fn:path) => {{
         let result = $derive_fn($input);
-        let pretty = render_expansion(result.unwrap_or_else(|e| e.to_compile_error()));
+        let pretty = render_expansion(&result.unwrap_or_else(|e| e.to_compile_error()));
         assert_snapshot!(pretty);
     }};
 }

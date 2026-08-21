@@ -11,7 +11,7 @@ use thread_aware_macros_impl::derive_thread_aware;
 fn expand(input: proc_macro2::TokenStream) -> String {
     // Use the canonical ::thread_aware root in test snapshots.
     let root: syn::Path = syn::parse_quote!(::thread_aware);
-    render_expansion(derive_thread_aware(input, &root))
+    render_expansion(&derive_thread_aware(input, &root))
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn generics_group_usage_adds_bound() {
     }
 
     let root: syn::Path = syn::parse_quote!(::thread_aware);
-    let rendered = render_expansion(derive_thread_aware(quote! {#input}, &root));
+    let rendered = render_expansion(&derive_thread_aware(quote! {#input}, &root));
     assert_snapshot!(rendered);
 }
 

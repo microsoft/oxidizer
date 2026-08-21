@@ -18,11 +18,11 @@ use observed_macros_impl::{derive_enrichment, event};
 use testing_aids::{render_expansion, tokenize};
 
 fn expand_event(attr: &str, item: &str) -> String {
-    render_expansion(event(tokenize(attr), tokenize(item)).expect("the event attribute expands"))
+    render_expansion(&event(tokenize(attr), tokenize(item)).expect("the event attribute expands"))
 }
 
 fn expand_enrichment(item: &str) -> String {
-    render_expansion(derive_enrichment(tokenize(item)).expect("the derive expands"))
+    render_expansion(&derive_enrichment(tokenize(item)).expect("the derive expands"))
 }
 
 // ============================================================================================
