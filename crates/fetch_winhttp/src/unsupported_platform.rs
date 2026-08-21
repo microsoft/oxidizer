@@ -15,16 +15,14 @@
 /// Only compiled on targets where it does not, so the answer is fixed.
 #[cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "exists so the library carries instrumented code on targets without WinHTTP"
-    )
+    expect(dead_code, reason = "exists so the library carries instrumented code on targets without WinHTTP")
 )]
 pub(crate) const fn is_supported() -> bool {
     false
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::is_supported;
 

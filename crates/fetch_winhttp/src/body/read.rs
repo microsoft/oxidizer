@@ -258,6 +258,7 @@ impl WinHttpResponseBody {
 }
 
 impl fmt::Debug for WinHttpResponseBody {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WinHttpResponseBody")
             .field("stream", &self.stream)
@@ -341,6 +342,7 @@ fn next_read_capacity(tail_len: usize, desired: usize) -> u32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::VecDeque;
     use std::future::poll_fn;
@@ -363,9 +365,11 @@ mod tests {
         ERROR_WINHTTP_HEADER_NOT_FOUND, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
     };
 
-    use super::{PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, next_read_capacity};
+    use super::{
+        PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, data_available_completion, next_read_capacity, read_completion,
+    };
     use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
-    use crate::context::RequestContext;
+    use crate::context::{CompletionResult, RequestContext};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle, SessionHandle};
     use crate::operation::{ContextInstallation, ContextPool};
@@ -503,6 +507,46 @@ mod tests {
 
         drop(body);
         finish_context(context, &record);
+    }
+
+    #[test]
+    fn a_zero_length_read_never_reaches_the_transport() {
+        let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
+        let into = harness.reader.reserve(8);
+
+        let (read, into) = futures::executor::block_on(harness.reader.read_at_most_into(0, into)).unwrap();
+
+        assert_eq!(read, 0);
+        assert!(into.peek().is_empty());
+        assert_eq!(harness.record.query_calls.load(Ordering::SeqCst), 0);
+        harness.finish();
+    }
+
+    #[test]
+    fn an_unbounded_read_appends_to_the_caller_buffer() {
+        let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
+        let mut into = harness.reader.reserve(8);
+        into.put_slice(*b"prefix");
+
+        let (read, mut into) = futures::executor::block_on(harness.reader.read_more_into(into)).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(into.consume_all(), b"prefixabc");
+        harness.finish();
+    }
+
+    #[test]
+    fn a_completion_belonging_to_another_operation_is_rejected() {
+        // Each operation slot accepts only its own completion. A completion for
+        // a different operation means the callback protocol was violated, which
+        // the reader reports instead of interpreting the foreign payload.
+        let available = data_available_completion(CompletionResult::SendRequestComplete).unwrap_err();
+        assert_eq!(available.label(), "request_winhttp");
+        assert!(available.to_string().contains("QueryDataAvailable"), "{available}");
+
+        let read = read_completion(CompletionResult::SendRequestComplete).unwrap_err();
+        assert_eq!(read.label(), "request_winhttp");
+        assert!(read.to_string().contains("ReadData"), "{read}");
     }
 
     #[test]

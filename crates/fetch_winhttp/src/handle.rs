@@ -35,6 +35,7 @@ impl RawHandle {
 }
 
 impl fmt::Debug for RawHandle {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&self.as_ptr(), f)
     }
@@ -164,6 +165,7 @@ impl Drop for RequestHandle {
 impl RefUnwindSafe for RequestHandle {}
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};

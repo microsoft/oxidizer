@@ -597,6 +597,7 @@ struct UserInfoInAuthorityError;
 struct ZeroPortError;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::VecDeque;
     use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -624,14 +625,13 @@ mod tests {
     use tick::{Clock, ClockControl};
     use widestring::U16CString;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-        WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
-        WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
+        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
     use super::{
         RequestDriver, RequestFailure, RequestSettings, RequestTranslationError, TranslatedRequest, UnsendableRequestVersionError,
-        send_request_headers,
+        expect_completion, send_request_headers,
     };
     use crate::WinHttpTlsConfig;
     use crate::bindings::{
@@ -640,7 +640,7 @@ mod tests {
         WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, WINHTTP_OPTION_REDIRECT_POLICY, WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_QUERY_FLAG_WIRE_ENCODING, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_VERSION,
     };
-    use crate::context::ColdConnectState;
+    use crate::context::{ColdConnectState, CompletionResult, OperationBuffer, OperationKind};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
     use crate::operation::{ContextInstallation, ContextPool};
@@ -1061,6 +1061,19 @@ mod tests {
 
     #[test]
     fn malformed_or_unsupported_requests_fail_before_native_io() {
+        let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_frozen());
+        let asterisk_form = http::Request::builder()
+            .method(Method::OPTIONS)
+            .uri(
+                http::Uri::builder()
+                    .scheme("https")
+                    .authority("example.com")
+                    .path_and_query("*")
+                    .build()
+                    .unwrap(),
+            )
+            .body(body_builder.empty())
+            .unwrap();
         let cases = [
             (
                 request(Method::GET, "/relative"),
@@ -1077,6 +1090,7 @@ mod tests {
                 TransportOptions::default(),
                 "plain HTTP requests are disabled",
             ),
+            (asterisk_form, TransportOptions::default(), "path must start with '/'"),
         ];
 
         for (request, options, message) in cases {
@@ -1650,7 +1664,7 @@ mod tests {
         let mut request = request(Method::GET, "https://example.com/");
         let config = LifecycleConfig {
             defer_send_completion: true,
-            cold_connect_state: ColdConnectState::Connecting,
+            notify_connecting: true,
             ..LifecycleConfig::default()
         };
         let record = Arc::new(LifecycleRecord::default());
@@ -1800,10 +1814,7 @@ mod tests {
     fn request_body_timeout_reaches_the_response_body_and_closes_a_pending_read() {
         let mut request = request(Method::GET, "https://example.com/");
         request.extensions_mut().insert(BodyTimeout::new(Duration::from_secs(1)));
-        let config = LifecycleConfig {
-            defer_data_available: true,
-            ..LifecycleConfig::default()
-        };
+        let config = LifecycleConfig::default();
         let record = Arc::new(LifecycleRecord::default());
         let facade = lifecycle_bindings(Arc::new(config), Arc::clone(&record));
         let session = session(facade);
@@ -1912,6 +1923,26 @@ mod tests {
     }
 
     #[test]
+    fn a_completion_that_does_not_answer_the_awaited_stage_is_a_protocol_error() {
+        // Each request stage awaits exactly one completion. Anything else the
+        // callback can deliver - a completion belonging to a different stage, or
+        // one whose status information WinHTTP filled in inconsistently - leaves
+        // the stage without the answer it needs and is reported as a violation
+        // of the callback contract rather than silently accepted.
+        let unexpected = expect_completion(CompletionResult::DataAvailable(4), OperationKind::SendRequest).unwrap_err();
+        assert_eq!(unexpected.label(), "request_winhttp");
+        assert!(unexpected.to_string().contains("unexpected completion for SendRequest"));
+
+        let malformed = expect_completion(
+            CompletionResult::invalid_status_info(0x0002_0000, 3, OperationBuffer::none()),
+            OperationKind::HeadersAvailable,
+        )
+        .unwrap_err();
+        assert_eq!(malformed.label(), "request_winhttp");
+        assert!(malformed.to_string().contains("callback 0x00020000 with 3 bytes"));
+    }
+
+    #[test]
     fn response_header_validation_and_foreign_thread_completion_are_deterministic() {
         let config = LifecycleConfig {
             complete_send_on_foreign_thread: true,
@@ -2010,11 +2041,10 @@ mod tests {
         failure: Option<LifecycleFailure>,
         complete_send_on_foreign_thread: bool,
         defer_send_completion: bool,
-        cold_connect_state: ColdConnectState,
+        notify_connecting: bool,
         completed_writes: Arc<AtomicUsize>,
         defer_write_completion: bool,
         max_write_completion: Option<u32>,
-        defer_data_available: bool,
     }
 
     impl Default for LifecycleConfig {
@@ -2027,11 +2057,10 @@ mod tests {
                 failure: None,
                 complete_send_on_foreign_thread: false,
                 defer_send_completion: false,
-                cold_connect_state: ColdConnectState::Unobserved,
+                notify_connecting: false,
                 completed_writes: Arc::new(AtomicUsize::new(0)),
                 defer_write_completion: false,
                 max_write_completion: None,
-                defer_data_available: false,
             }
         }
     }
@@ -2204,47 +2233,21 @@ mod tests {
                 return Err(WinHttpError::new(12029, WinHttpOperation::SendRequest));
             }
 
-            match send_config.cold_connect_state {
-                ColdConnectState::Unobserved => {}
-                ColdConnectState::Connecting => {
-                    // SAFETY: complete requires an installed, not-yet-reclaimed
-                    // context, a payload matching the notification, no
-                    // overlapping notification, no outstanding exclusive
-                    // borrow, and no use of the context after the reclaiming
-                    // notification. The script (`lifecycle_bindings`)
-                    // establishes all of them; a diagnostic connect status
-                    // carries no payload, which a null pointer of zero length
-                    // states.
-                    unsafe {
-                        complete(
-                            recorded_context(&send_record),
-                            WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                }
-                ColdConnectState::Connected => {
-                    // SAFETY: as for the `Connecting` arm above, which delivers
-                    // the same payload-free diagnostic status to the same
-                    // registered context from this same thread.
-                    unsafe {
-                        complete(
-                            recorded_context(&send_record),
-                            WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                    // SAFETY: as for the notification immediately above.
-                    unsafe {
-                        complete(
-                            recorded_context(&send_record),
-                            WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
+            if send_config.notify_connecting {
+                // SAFETY: complete requires an installed, not-yet-reclaimed
+                // context, a payload matching the notification, no overlapping
+                // notification, no outstanding exclusive borrow, and no use of
+                // the context after the reclaiming notification. The script
+                // (`lifecycle_bindings`) establishes all of them; a diagnostic
+                // connect status carries no payload, which a null pointer of
+                // zero length states.
+                unsafe {
+                    complete(
+                        recorded_context(&send_record),
+                        WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
+                        std::ptr::null_mut(),
+                        0,
+                    );
                 }
             }
 
@@ -2417,50 +2420,13 @@ mod tests {
             Ok(())
         });
 
-        let data_available_config = Arc::clone(&config);
         let data_available_record = Arc::clone(&record);
+        // The lifecycle script drives requests only as far as the response
+        // headers, so it records the availability query the body reader issues
+        // and leaves it outstanding; body reads themselves belong to the
+        // reader's own tests.
         bindings.expect_query_data_available().returning(move |_| {
             data_available_record.data_available_calls.fetch_add(1, Ordering::SeqCst);
-            if data_available_config.defer_data_available {
-                return Ok(());
-            }
-
-            let mut available = 0_u32;
-            // SAFETY: complete requires an installed, not-yet-reclaimed
-            // context, a payload readable and unmodified for the call, no
-            // overlapping notification, no outstanding exclusive borrow, and no
-            // use of the context after the reclaiming notification. The script
-            // (`lifecycle_bindings`) establishes all of them; the payload is
-            // the initialized local `available`, which outlives the call and
-            // nothing else can reach.
-            unsafe {
-                complete(
-                    recorded_context(&data_available_record),
-                    WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
-                    (&raw mut available).cast(),
-                    status_info_len::<u32>(),
-                );
-            }
-            Ok(())
-        });
-
-        let read_record = Arc::clone(&record);
-        bindings.expect_read_data().returning(move |_, _, _| {
-            // SAFETY: complete requires an installed, not-yet-reclaimed
-            // context, a payload matching the notification, no overlapping
-            // notification, no outstanding exclusive borrow, and no use of the
-            // context after the reclaiming notification. The script
-            // (`lifecycle_bindings`) establishes all of them; a read that
-            // returned nothing reports a null address and a zero count, which
-            // `WinHTTP` uses to signal the end of the response body.
-            unsafe {
-                complete(
-                    recorded_context(&read_record),
-                    WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
-                    std::ptr::null_mut(),
-                    0,
-                );
-            }
             Ok(())
         });
 

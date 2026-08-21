@@ -112,6 +112,7 @@ const fn operation_name(operation: SessionInitializationOperation) -> &'static s
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::ops::ControlFlow;
     use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -122,7 +123,7 @@ mod tests {
     use observed_testing::{ExpectedEvent, ExpectedEventDescription, TEST_ID, test_emitter};
     use static_assertions::{assert_impl_all, assert_not_impl_any};
 
-    use super::{InitializationFailure, RequestAttempt, RequestError, Telemetry};
+    use super::{InitializationFailure, RequestAttempt, RequestError, Telemetry, operation_name};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::session::{SessionInitializationFailure, SessionInitializationOperation};
 
@@ -237,5 +238,28 @@ mod tests {
                 ("connect_duration", Some("winhttp.connect.duration"), None),
             ]
         );
+    }
+
+    #[test]
+    fn every_initialization_step_has_a_stable_dimension_name() {
+        // These names are emitted as telemetry dimension values, so downstream
+        // queries depend on them staying exactly as written.
+        let cases = [
+            (SessionInitializationOperation::Open, "open"),
+            (SessionInitializationOperation::SetTimeouts, "set_timeouts"),
+            (SessionInitializationOperation::DisableGlobalPooling, "disable_global_pooling"),
+            (SessionInitializationOperation::ConnectionIdleTimeout, "connection_idle_timeout"),
+            (
+                SessionInitializationOperation::AssuredNonBlockingCallbacks,
+                "assured_non_blocking_callbacks",
+            ),
+            (SessionInitializationOperation::Http2KeepAlive, "http2_keep_alive"),
+            (SessionInitializationOperation::Http3KeepAlive, "http3_keep_alive"),
+            (SessionInitializationOperation::SetStatusCallback, "set_status_callback"),
+        ];
+
+        for (operation, expected) in cases {
+            assert_eq!(operation_name(operation), expected);
+        }
     }
 }

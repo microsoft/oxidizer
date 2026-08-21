@@ -12,7 +12,7 @@ use windows::Win32::Networking::WinHttp::{
     WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
 
-use crate::context::{ActiveOperation, CompletionResult, OperationBuffer, RequestContext};
+use crate::context::{ActiveOperation, CompletionResult, OperationBuffer, OperationKind, RequestContext};
 use crate::error::WinHttpError;
 
 /// Implements the WinHTTP status-callback contract for request handles.
@@ -185,12 +185,7 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
             // demands of its caller verbatim.
             let result = match unsafe { read_status_info::<WINHTTP_ASYNC_RESULT>(status_info, status_info_len) } {
                 Some(async_result) => {
-                    let mut error = WinHttpError::new(async_result.dwError, active.kind.operation());
-                    if let Some(flags) = context_ref.secure_failure_flags() {
-                        error = error.with_secure_failure_flags(flags);
-                    }
-
-                    CompletionResult::error(error, active.buffer)
+                    CompletionResult::error(diagnosed_error(context_ref, async_result.dwError, active.kind), active.buffer)
                 }
                 None => CompletionResult::invalid_status_info(status, status_info_len, active.buffer),
             };
@@ -221,6 +216,22 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
             active.completion.send(result);
         }
         _ => {}
+    }
+}
+
+/// Attributes a `WinHTTP` failure to an operation and its TLS diagnostics.
+///
+/// A secure failure notification carries the reason a TLS handshake was
+/// rejected but does not itself end the request, and `WinHTTP` documents no
+/// order between it and the failure that follows. Recording the flags on the
+/// context and reading them back here attaches them to whichever notification
+/// ends the operation, whether that is a request error or a cancellation.
+fn diagnosed_error(context: &RequestContext, code: u32, kind: OperationKind) -> WinHttpError {
+    let error = WinHttpError::new(code, kind.operation());
+
+    match context.secure_failure_flags() {
+        Some(flags) => error.with_secure_failure_flags(flags),
+        None => error,
     }
 }
 
@@ -358,10 +369,7 @@ unsafe fn close_context(context: NonNull<RequestContext>) {
     let context_ref = unsafe { context.as_ref() };
 
     if let Some(ActiveOperation { kind, completion, buffer }) = context_ref.take_any() {
-        let mut error = WinHttpError::new(ERROR_WINHTTP_OPERATION_CANCELLED, kind.operation());
-        if let Some(flags) = context_ref.secure_failure_flags() {
-            error = error.with_secure_failure_flags(flags);
-        }
+        let error = diagnosed_error(context_ref, ERROR_WINHTTP_OPERATION_CANCELLED, kind);
         completion.send(CompletionResult::error(error, buffer));
     }
 
@@ -377,16 +385,20 @@ unsafe fn close_context(context: NonNull<RequestContext>) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::ffi::c_void;
-    use std::ptr::null_mut;
+    use std::ptr::{NonNull, null_mut};
 
+    use bytesbuf::BytesView;
+    use bytesbuf::mem::GlobalPool;
     use windows::Win32::Networking::WinHttp::{
-        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
-        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
+        WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,
+        WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_RESOLVING_NAME,
+        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
     };
 
-    use super::{dispatch_completion, status_callback};
+    use super::{decode_success, dispatch_completion, status_callback};
     use crate::context::{CompletionResult, OperationBuffer, OperationKind, RequestContext};
     use crate::testing::{complete, finish, installed, status_info_len};
 
@@ -432,6 +444,73 @@ mod tests {
                 WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,
                 null_mut(),
                 0,
+            );
+        }
+    }
+
+    #[test]
+    fn an_unhandled_status_and_an_unarmed_error_leave_the_context_untouched() {
+        let (guard, context, contexts, session, closes) = installed();
+
+        // A status outside the dispatched set reaches the callback whenever
+        // `WinHTTP` widens what a notification flag covers, and must not be
+        // mistaken for a completion. A request error without an armed operation
+        // arrives when the request fails after its operation was already
+        // claimed. Neither may reclaim the context, which `finish` proves.
+        for status in [WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR] {
+            // SAFETY: complete requires an installed, not-yet-reclaimed
+            // context, a payload matching the notification, no overlapping
+            // notification, no outstanding exclusive borrow, and no use of the
+            // context after the reclaiming notification. `installed` returned
+            // the recorded pointer and only `finish` below reclaims it; a null
+            // payload of zero length is readable for every status; this test
+            // delivers each notification from its own thread in turn; and the
+            // guard borrows the context only sharedly.
+            unsafe {
+                complete(context, status, null_mut(), 0);
+            }
+        }
+
+        // SAFETY: finish requires an installed, not-yet-reclaimed context and
+        // no overlapping notification. The deliveries above left the context
+        // installed and all of them have returned; consuming the guard
+        // discharges the obligation forbidding later use of it.
+        unsafe {
+            finish(guard, context, &contexts, session, &closes);
+        }
+    }
+
+    #[test]
+    fn a_completion_whose_payload_contradicts_its_operation_is_rejected() {
+        // The operation slot pairs a notification with the buffer its
+        // submission lent. A completion that does not fit that pairing - a
+        // payload-free status arriving with a buffer, a write reporting more
+        // bytes than were lent, a read naming a buffer no read was submitted
+        // with, or a status this decoder never issues - describes no
+        // transferable result and is reported as a protocol violation.
+        let pool = GlobalPool::new();
+        let write = || OperationBuffer::write(BytesView::copied_from_slice(b"ab", &pool), 2);
+        let read = || OperationBuffer::read(pool.reserve(8), NonNull::<u8>::dangling().as_ptr().addr(), 8);
+        let mut written = 8_u32;
+        let payload = (&raw mut written).cast::<c_void>();
+        let len = status_info_len::<u32>();
+
+        for (status, buffer) in [
+            (WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, write()),
+            (WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, write()),
+            (WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE, write()),
+            (WINHTTP_CALLBACK_STATUS_READ_COMPLETE, write()),
+            (WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, read()),
+        ] {
+            // SAFETY: decode_success requires a null or readable payload that
+            // stays unmodified for the call. The payload is the initialized
+            // local `written`, which outlives every iteration and which nothing
+            // else can reach.
+            let result = unsafe { decode_success(status, payload, len, buffer) };
+
+            assert!(
+                matches!(result, CompletionResult::InvalidStatusInfo { status: reported, .. } if reported == status),
+                "status 0x{status:08x} must be reported as invalid"
             );
         }
     }

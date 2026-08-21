@@ -450,11 +450,13 @@ struct UnsupportedTrailerFrameError;
 struct UnsupportedBodyFrameError;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
+    use std::sync::Arc;
 
     use bytesbuf::BytesView;
-    use bytesbuf::mem::GlobalPool;
+    use bytesbuf::mem::{GlobalPool, HasMemory as _, Memory as _};
     use http::HeaderValue;
     use ohno::Labeled as _;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
@@ -463,8 +465,9 @@ mod tests {
         RequestBodyError, RequestBodyFraming, RequestBodyFramingError, WinHttpBodyWriter, end_chunked_completion, next_write_len,
         write_completion,
     };
-    use crate::bindings::WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH;
-    use crate::context::CompletionResult;
+    use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH};
+    use crate::context::{CompletionResult, OperationBuffer};
+    use crate::testing::{finish, installed};
 
     assert_impl_all!(RequestBodyFraming: UnwindSafe, RefUnwindSafe);
     // Every `ohno` error owns a boxed source without unwind-safety bounds.
@@ -611,7 +614,7 @@ mod tests {
         assert_eq!(framing.total_length(), 10);
         assert!(!framing.automatic_chunking());
 
-        for invalid in ["invalid", "18446744073709551616"] {
+        for invalid in ["", "invalid", "18446744073709551616"] {
             let mut headers = http::HeaderMap::new();
             headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(invalid).unwrap());
             let error = RequestBodyFraming::new(&mut headers, None).unwrap_err();
@@ -668,6 +671,25 @@ mod tests {
     }
 
     #[test]
+    fn the_writer_reserves_from_the_transport_memory_pool() {
+        // `bytesbuf_io::Write` requires both memory traits so a caller can
+        // serialize directly into transport-owned capacity, which must come
+        // from the pool the transport was configured with.
+        let (mut guard, context, contexts, session, closes) = installed();
+        let pool = GlobalPool::new();
+        let writer = WinHttpBodyWriter::new(&mut guard, BindingsFacade::mock(Arc::new(MockBindings::new())), pool);
+
+        assert!(writer.reserve(64).capacity() >= 64);
+        assert!(writer.memory().reserve(64).capacity() >= 64);
+
+        // SAFETY: finish requires an installed context whose reclaiming
+        // notification has not been delivered, no overlapping notification, and
+        // no outstanding exclusive borrow. `installed` establishes all of them
+        // and the writer above submitted no operation.
+        unsafe { finish(guard, context, &contexts, session, &closes) };
+    }
+
+    #[test]
     fn unexpected_write_completions_are_rejected() {
         let error = write_completion(CompletionResult::HeadersAvailable).unwrap_err();
 
@@ -696,5 +718,29 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("reported 1 bytes"));
+    }
+
+    #[test]
+    fn malformed_status_information_is_rejected_for_every_write_stage() {
+        // A completion whose payload does not match its notification tells the
+        // writer nothing about how many bytes reached the wire, so neither
+        // stage may treat it as progress.
+        let error = write_completion(CompletionResult::invalid_status_info(0x0010_0000, 3, OperationBuffer::none())).unwrap_err();
+
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("invalid status information"), "{error}");
+
+        let error = end_chunked_completion(CompletionResult::invalid_status_info(0x0010_0000, 3, OperationBuffer::none())).unwrap_err();
+
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("invalid status information"), "{error}");
+
+        let error = end_chunked_completion(CompletionResult::HeadersAvailable).unwrap_err();
+
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(
+            error.to_string().contains("unexpected completion for the final request write"),
+            "{error}"
+        );
     }
 }

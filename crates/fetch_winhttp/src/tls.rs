@@ -114,6 +114,7 @@ pub(crate) fn security_flags(config: &WinHttpTlsConfig) -> u32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::fmt::Debug;
     use std::panic::{RefUnwindSafe, UnwindSafe};

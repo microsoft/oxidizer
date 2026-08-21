@@ -64,6 +64,7 @@
     doc = "[`WinHttpOptions`]: https://docs.rs/fetch_winhttp"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
@@ -105,6 +106,7 @@ mod session;
 mod telemetry;
 #[cfg(windows)]
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod testing;
 #[cfg(windows)]
 mod tls;

@@ -376,6 +376,7 @@ pub(crate) fn dword_to_usize(value: u32) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::time::Duration;

@@ -204,12 +204,14 @@ unsafe impl Bindings for RealBindings {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::ptr::null_mut;
 
     use static_assertions::assert_impl_all;
+    use windows::Win32::Foundation::{SetLastError, WIN32_ERROR};
 
     use super::RealBindings;
     use crate::bindings::StatusCallback;
@@ -234,6 +236,24 @@ mod tests {
 
         assert_eq!(error.code(), 5678);
         assert_eq!(error.operation(), WinHttpOperation::SetStatusCallback);
+    }
+
+    #[test]
+    fn a_failed_native_call_reports_the_operating_system_failure_code() {
+        // WinHTTP reports failure by returning a null handle and leaving the
+        // reason in the thread's last-error slot, so that slot is the only
+        // input the production path has. `ERROR_WINHTTP_INTERNAL_ERROR` stands
+        // in for any code the operating system might leave there.
+        const ERROR_WINHTTP_INTERNAL_ERROR: u32 = 12004;
+
+        // SAFETY: SetLastError has no preconditions and only writes the calling
+        // thread's own last-error slot, which this thread reads back below.
+        unsafe { SetLastError(WIN32_ERROR(ERROR_WINHTTP_INTERNAL_ERROR)) };
+
+        let error = RealBindings::handle_result(null_mut::<c_void>(), WinHttpOperation::Connect).unwrap_err();
+
+        assert_eq!(error.code(), ERROR_WINHTTP_INTERNAL_ERROR);
+        assert_eq!(error.operation(), WinHttpOperation::Connect);
     }
 
     #[test]

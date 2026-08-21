@@ -164,6 +164,7 @@ fn into_custom_deps(deps: WinHttpDeps) -> CustomDeps<WinHttpDeps> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::ffi::c_void;
     use std::fmt::Debug;

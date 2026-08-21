@@ -403,9 +403,14 @@ impl CallbackOperationSlot {
 
         self.take_kind(kind)
     }
+}
 
-    fn is_idle(&self) -> bool {
-        self.state.load(Ordering::Acquire) == OPERATION_IDLE
+impl fmt::Debug for CallbackOperationSlot {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CallbackOperationSlot")
+            .field("active", &active_kind(self.state.load(Ordering::Acquire)))
+            .finish_non_exhaustive()
     }
 }
 
@@ -574,10 +579,6 @@ impl RequestContext {
         self.operation.take_any()
     }
 
-    pub(crate) fn is_idle(&self) -> bool {
-        self.operation.is_idle()
-    }
-
     pub(crate) fn record_secure_failure(&self, flags: u32) {
         self.secure_failure
             .store(SECURE_FAILURE_PRESENT | u64::from(flags), Ordering::Release);
@@ -611,9 +612,10 @@ impl RequestContext {
 }
 
 impl fmt::Debug for RequestContext {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestContext")
-            .field("operation_idle", &self.is_idle())
+            .field("operation", &self.operation)
             .field("secure_failure_flags", &self.secure_failure_flags())
             .field("cold_connect_state", &self.cold_connect_state())
             .field("connect", &self.connect)
@@ -630,18 +632,22 @@ impl fmt::Debug for RequestContext {
 unsafe impl Sync for RequestContext {}
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{RefUnwindSafe, UnwindSafe};
 
+    use bytesbuf::BytesView;
+    use bytesbuf::mem::GlobalPool;
     use static_assertions::{assert_impl_all, assert_not_impl_any};
     use windows::Win32::Networking::WinHttp::{
         WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER, WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER,
-        WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR, WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
+        WINHTTP_CALLBACK_STATUS_HANDLE_CREATED, WINHTTP_CALLBACK_STATUS_READ_COMPLETE, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+        WINHTTP_CALLBACK_STATUS_SECURE_FAILURE,
     };
 
     use super::{
-        ActiveOperation, CallbackOperationSlot, ColdConnectState, CompletionBuffer, CompletionResult, OperationBuffer, OperationKind,
-        RequestContext,
+        ActiveOperation, CallbackOperationSlot, ColdConnectState, CompletionBuffer, CompletionResult, OPERATION_CLAIMED, OPERATION_IDLE,
+        OperationBuffer, OperationKind, RequestContext, active_kind,
     };
     use crate::testing::{complete, finish, installed, status_info_len};
 
@@ -749,6 +755,48 @@ mod tests {
                 finish(guard, context, &contexts, session, &closes);
             }
         }
+    }
+
+    #[test]
+    fn a_tag_the_arming_path_cannot_write_names_no_operation() {
+        // The tag is the sole authority a callback consults before claiming the
+        // payload, so every value it can hold must resolve unambiguously: the
+        // exact tag an arming wrote names that operation, and the reserved idle
+        // and claimed tags, along with anything no arming could have written,
+        // name none.
+        for kind in OperationKind::ALL {
+            assert_eq!(active_kind(kind as u8), Some(kind));
+        }
+
+        assert_eq!(active_kind(OPERATION_IDLE), None);
+        assert_eq!(active_kind(OPERATION_CLAIMED), None);
+        assert_eq!(active_kind(u8::MAX), None);
+    }
+
+    #[test]
+    fn an_armed_slot_yields_its_payload_only_to_the_matching_status_and_otherwise_to_destruction() {
+        // WinHTTP reports completions for the request handle as a whole, so a
+        // notification that does not name the armed operation must leave the
+        // payload for the one that does. Destruction is the last claimant: a
+        // slot torn down while still armed owns the only completion sender and
+        // the only reference to the buffer lent to WinHTTP, and must release
+        // both exactly once, which Miri verifies.
+        let pool = GlobalPool::new();
+        let slot = Box::pin(CallbackOperationSlot::new());
+        let buffer = OperationBuffer::write(BytesView::copied_from_slice(b"lent", &pool), 4);
+
+        // SAFETY: arm requires an idle slot whose previous event, if any,
+        // reached its terminal state, the exclusive borrow that keeps a second
+        // submission from overwriting live storage, and an address that stays
+        // stable until both endpoints are destroyed. The slot was just created
+        // and is armed once, this test owns it exclusively, and the pinned box
+        // holds it in place until the receiver is destroyed below.
+        let receiver = unsafe { slot.as_ref().arm(OperationKind::Write, buffer) };
+
+        assert!(slot.take_for_status(WINHTTP_CALLBACK_STATUS_READ_COMPLETE).is_none());
+
+        drop(receiver);
+        drop(slot);
     }
 
     #[test]

@@ -122,6 +122,7 @@ impl ContextInstallation {
 }
 
 impl fmt::Debug for ContextInstallation {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ContextInstallation")
             .field("request", &self.request)
@@ -403,6 +404,7 @@ impl Drop for OperationFuture<'_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
     use std::ptr::NonNull;

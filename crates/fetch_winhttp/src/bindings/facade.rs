@@ -51,13 +51,8 @@ impl BindingsFacade {
     }
 }
 
-impl Default for BindingsFacade {
-    fn default() -> Self {
-        Self::real()
-    }
-}
-
 impl fmt::Debug for BindingsFacade {
+    #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Real => f.write_str("BindingsFacade::Real"),

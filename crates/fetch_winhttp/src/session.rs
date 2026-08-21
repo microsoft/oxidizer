@@ -286,7 +286,9 @@ impl Error for SessionInitializationFailure {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::error::Error as _;
     use std::ffi::c_void;
     use std::panic::{RefUnwindSafe, UnwindSafe};
     use std::sync::Arc;
@@ -770,5 +772,48 @@ mod tests {
 
     fn raw_handle() -> RawHandle {
         RawHandle::new(std::ptr::dangling_mut::<c_void>()).unwrap()
+    }
+
+    #[test]
+    fn every_initialization_step_describes_itself_distinctly_in_the_failure_message() {
+        let operations = [
+            SessionInitializationOperation::Open,
+            SessionInitializationOperation::SetTimeouts,
+            SessionInitializationOperation::DisableGlobalPooling,
+            SessionInitializationOperation::ConnectionIdleTimeout,
+            SessionInitializationOperation::AssuredNonBlockingCallbacks,
+            SessionInitializationOperation::Http2KeepAlive,
+            SessionInitializationOperation::Http3KeepAlive,
+            SessionInitializationOperation::SetStatusCallback,
+        ];
+
+        let mut descriptions = Vec::with_capacity(operations.len());
+
+        for operation in operations {
+            let description = operation.to_string();
+
+            assert!(!description.is_empty(), "{operation:?} has no description");
+
+            // The failure surfaces which setup step failed and its Win32 code,
+            // so both must reach the rendered message.
+            let failure = SessionInitializationFailure::new(operation, WinHttpError::new(87, WinHttpOperation::SetOption));
+            assert_eq!(failure.to_string(), format!("{description} failed with Win32 error 87"));
+
+            descriptions.push(description);
+        }
+
+        let mut unique = descriptions.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), descriptions.len(), "step descriptions must be distinct");
+    }
+
+    #[test]
+    fn an_initialization_failure_exposes_the_win_http_error_as_its_source() {
+        let failure = SessionInitializationFailure::new(SessionInitializationOperation::Open, WinHttpError::new(8, WinHttpOperation::Open));
+
+        let source = failure.source().expect("the originating WinHTTP error is the source");
+
+        assert_eq!(source.to_string(), WinHttpError::new(8, WinHttpOperation::Open).to_string());
     }
 }

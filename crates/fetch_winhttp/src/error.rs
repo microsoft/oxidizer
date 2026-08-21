@@ -254,6 +254,9 @@ const ERROR_MAPPINGS: &[ErrorMapping] = &[
     mapping(ERROR_WINHTTP_SECURE_FAILURE_PROXY, ErrorClass::Tls),
 ];
 
+// Only ever evaluated while building ERROR_MAPPINGS, which is a constant, so
+// this never executes at run time and can carry no run-time coverage.
+#[cfg_attr(coverage_nightly, coverage(off))]
 const fn mapping(code: u32, class: ErrorClass) -> ErrorMapping {
     ErrorMapping { code, class }
 }
@@ -321,6 +324,7 @@ pub(crate) fn query_error(error: QueryError) -> HttpError {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::error::Error as _;
     use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -407,5 +411,45 @@ mod tests {
             assert_eq!(error.label(), expected_label, "code {code}");
             assert_eq!(error.recovery(), expected_recovery, "code {code}");
         }
+    }
+
+    #[test]
+    fn every_operation_describes_itself_distinctly_in_the_error_message() {
+        let operations = [
+            WinHttpOperation::CloseHandle,
+            WinHttpOperation::Connect,
+            WinHttpOperation::Open,
+            WinHttpOperation::OpenRequest,
+            WinHttpOperation::QueryDataAvailable,
+            WinHttpOperation::QueryHeaders,
+            WinHttpOperation::QueryOption,
+            WinHttpOperation::ReadData,
+            WinHttpOperation::ReceiveResponse,
+            WinHttpOperation::SendRequest,
+            WinHttpOperation::SetOption,
+            WinHttpOperation::SetStatusCallback,
+            WinHttpOperation::SetTimeouts,
+            WinHttpOperation::WriteData,
+        ];
+
+        let mut descriptions = Vec::with_capacity(operations.len());
+
+        for operation in operations {
+            let description = operation.to_string();
+
+            assert!(!description.is_empty(), "{operation:?} has no description");
+
+            // The description identifies the failing call within the error
+            // message, so it must reach the rendered error verbatim.
+            let message = WinHttpError::new(12002, operation).to_string();
+            assert_eq!(message, format!("{description} failed with Win32 error 12002"));
+
+            descriptions.push(description);
+        }
+
+        let mut unique = descriptions.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), descriptions.len(), "operation descriptions must be distinct");
     }
 }
