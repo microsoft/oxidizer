@@ -288,13 +288,13 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use bytesbuf::BytesBuf;
+    use bytesbuf::mem::{GlobalPool, Memory, OpaquePool};
     use http::StatusCode;
     use http_extensions::FakeHandler;
-    use thread_aware::unaware;
+    use thread_aware::{ThreadAware, unaware};
 
     use super::{CustomContext, CustomDeps, Isolation, create_builder};
-    use bytesbuf::mem::OpaquePool;
-    use bytesbuf::mem::testing::TransparentMemory;
     use crate::HttpResponseBuilder;
     use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
@@ -313,12 +313,23 @@ mod tests {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }
 
+    #[derive(Clone, Debug, ThreadAware)]
+    struct CustomMemory {
+        inner: GlobalPool,
+    }
+
+    impl Memory for CustomMemory {
+        fn reserve(&self, min_bytes: usize) -> BytesBuf {
+            self.inner.reserve(min_bytes)
+        }
+    }
+
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn custom_deps_accept_custom_opaque_pool() {
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            memory_pool: OpaquePool::new(TransparentMemory::new()),
+            memory_pool: OpaquePool::new(CustomMemory { inner: GlobalPool::new() }),
             extras: (),
         };
 
