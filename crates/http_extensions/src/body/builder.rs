@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::any::{Any, TypeId};
+
 #[cfg(any(feature = "test-util", test))]
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
@@ -51,6 +53,17 @@ pub struct HttpBodyBuilder {
     pub(super) options: HttpBodyOptions,
 }
 
+fn into_opaque_memory<M: MemoryShared>(memory: M) -> OpaqueMemory {
+    if TypeId::of::<M>() == TypeId::of::<OpaqueMemory>() {
+        let memory: Box<dyn Any> = Box::new(memory);
+        *memory
+            .downcast::<OpaqueMemory>()
+            .expect("the concrete type was verified as OpaqueMemory above")
+    } else {
+        OpaqueMemory::new(memory)
+    }
+}
+
 impl HttpBodyBuilder {
     /// Creates a test-friendly [`HttpBodyBuilder`] instance.
     ///
@@ -73,16 +86,16 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        Self::new(OpaqueMemory::new(GlobalPool::new()), &Clock::new_frozen())
+        Self::new(GlobalPool::new(), &Clock::new_frozen())
     }
 
     /// Creates a new instance of [`HttpBodyBuilder`].
     ///
-    /// The provided type-erased memory can wrap any [`MemoryShared`] implementation.
+    /// The provided memory is type-erased unless it is already an [`OpaqueMemory`].
     #[must_use]
-    pub fn new(memory: OpaqueMemory, clock: &Clock) -> Self {
+    pub fn new(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
-            memory,
+            memory: into_opaque_memory(memory),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -385,8 +398,7 @@ mod tests {
     #[test]
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
-        let memory = OpaqueMemory::new(GlobalPool::new());
-        let builder = HttpBodyBuilder::new(memory, &clock);
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
 
@@ -517,7 +529,7 @@ mod tests {
     #[test]
     fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock);
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
@@ -576,7 +588,7 @@ mod tests {
         );
 
         let clock = Clock::new_frozen();
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(TransparentMemory::new()), &clock);
+        let builder = HttpBodyBuilder::new(TransparentMemory::new(), &clock);
         let body = builder.json(&payload).unwrap();
         let bytes_view = body.into_bytes_no_buffering().unwrap();
 
@@ -593,7 +605,7 @@ mod tests {
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
         let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let builder = HttpBodyBuilder::new(OpaqueMemory::new(GlobalPool::new()), &clock).with_options(builder_options);
+        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
