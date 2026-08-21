@@ -26,7 +26,7 @@ check-changes:
     just format-check
 
     Write-Host "`n=== Checking Cargo.toml sorting ===" -ForegroundColor Cyan
-    cargo sort --check --grouped --workspace
+    ./scripts/check-cargo-sort.ps1
 
     Write-Host "`n=== Checking READMEs ===" -ForegroundColor Cyan
     just readme-check
@@ -282,4 +282,3 @@ unused-dependencies-check: udeps
     # --with-metadata resolves the dependency graph via `cargo metadata`, which
     # makes machete more accurate (at the cost of a metadata query).
     cargo machete --with-metadata
-
