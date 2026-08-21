@@ -92,7 +92,8 @@ indirection to every stored value. Keeping the lock is the better trade.
 ## Relocation locking
 
 `ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
-locks only the destination affinity's slot, and acquires it in two stages.
+holds one slot lock at a time and never two at once: first the destination slot,
+acquired in two stages, and then — only on a cross-slot miss — the source slot.
 
 ```text
     relocate(source, destination)
