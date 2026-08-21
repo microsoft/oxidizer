@@ -20,18 +20,23 @@
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath, parse_quote};
 
 mod enum_gen;
 
-/// Public so the wrapper proc-macro crate can access `is_phantom_data`
-pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldAttrCfg
+/// Field attribute parsing, plus the syntactic `PhantomData` test the derive uses to decide
+/// which fields are relocated.
+///
+/// Public because this is a shared implementation crate consumed by wrapper proc-macro
+/// crates; the module is part of its published surface even though nothing in this
+/// workspace reaches for it today.
+pub mod field_attrs;
 
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::is_phantom_data;
+use field_attrs::{is_phantom_data, parse_field_attrs};
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -81,43 +86,143 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
-    let used_generic_idents = match &input.data {
+    let usage = match &input.data {
         Data::Struct(s) => collect_generics_in_fields(&s.fields, &generics)?,
         Data::Enum(e) => {
-            let mut set = HashSet::new();
+            let mut usage = GenericUsage::default();
             for v in &e.variants {
                 let local = collect_generics_in_fields(&v.fields, &generics)?;
-                set.extend(local);
+                usage.merge(local);
             }
-            set
+            usage
         }
-        Data::Union(_) => HashSet::default(),
+        Data::Union(_) => GenericUsage::default(),
     };
 
+    let mut thread_aware_path = root_path.clone();
+    thread_aware_path.segments.push(parse_quote!(ThreadAware));
+
     for param in &mut generics.params {
-        if let GenericParam::Type(ty_param) = param
-            && used_generic_idents.contains(&ty_param.ident)
-        {
-            let already = ty_param.bounds.iter().any(|b| {
-                matches!(
-                    b,
-                    syn::TypeParamBound::Trait(trait_bound)
-                        if trait_bound.path.segments.last().is_some_and(|seg| seg.ident == "ThreadAware")
-                )
-            });
+        let GenericParam::Type(ty_param) = param else {
+            continue;
+        };
+
+        if usage.relocated.contains(&ty_param.ident) {
+            let already = ty_param
+                .bounds
+                .iter()
+                .any(|b| matches!(b, syn::TypeParamBound::Trait(t) if is_same_trait(&t.path, &thread_aware_path)));
             if !already {
-                let mut ta_path = root_path.clone();
-                ta_path.segments.push(parse_quote!(ThreadAware));
-                ty_param.bounds.push(parse_quote!(#ta_path));
+                ty_param.bounds.push(parse_quote!(#thread_aware_path));
             }
         }
     }
+
+    // Fields that are never relocated - `PhantomData` markers and `#[thread_aware(skip)]`
+    // fields - still have to satisfy the `ThreadAware: Send` supertrait.
+    //
+    // The obligation is stated once, on `Self`, rather than per field. Two earlier attempts
+    // were unsound. Binding the type parameters named inside `PhantomData<X>` by `Send` is
+    // wrong because `&'a T` is `Send` only when `T: Sync` and `Arc<T>` only when
+    // `T: Send + Sync`. Binding the field type itself is wrong because it is strictly
+    // stronger than what is required: a type made `Send` by a manual `unsafe impl` - the
+    // standard idiom for raw-pointer and variance markers, and the reason
+    // `#[thread_aware(skip)]` exists - would carry a predicate such as
+    // `where *const T: Send` that no instantiation can ever prove.
+    //
+    // `Self: Send` is exactly the obligation, and it is discharged either structurally or
+    // by that manual `unsafe impl`.
+    if usage.has_unrelocated_field {
+        let name = &input.ident;
+        let (_, ty_generics, _) = input.generics.split_for_impl();
+        let self_ty: Type = parse_quote!(#name #ty_generics);
+        generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote!(#self_ty: ::core::marker::Send));
+    }
+
+    // A marker nested inside a relocated field is a different case: the enclosing field is
+    // relocated, so it must implement `ThreadAware`, which for a tuple means every element
+    // must too. `Self: Send` cannot discharge that, because a `Send` bound on the whole type
+    // does not decompose backwards into a bound on one nested marker.
+    //
+    // Stating `PhantomData<X>: ThreadAware` lets the compiler reduce it through the marker's
+    // own impl to `X: ?Sized + Send`. That reduction is always correct, but unlike the
+    // top-level `Self: Send` case it is not always satisfiable: for `X = *const T` it becomes
+    // `*const T: Send`, which no instantiation can prove, and a manual `unsafe impl Send for
+    // Self` cannot discharge it because the predicate sits on the marker rather than on
+    // `Self`. Such a field needs `#[thread_aware(skip)]` on the enclosing field.
+    if !usage.thread_aware_required.is_empty() {
+        let where_clause = generics.make_where_clause();
+        for ty in &usage.thread_aware_required {
+            where_clause.predicates.push(parse_quote!(#ty: #thread_aware_path));
+        }
+    }
+
     Ok(generics)
 }
 
+/// Reports whether `candidate` names the same trait the derive would emit.
+///
+/// Compares every segment ident rather than only the last, so an unrelated
+/// `some_crate::ThreadAware` is no longer mistaken for the real trait - which dropped the
+/// bound the generated body needs and left the impl unable to compile.
+///
+/// A bare single-segment `ThreadAware` is accepted as the real trait. That is a deliberate
+/// compromise, not an oversight: the name alone cannot distinguish the real trait imported by
+/// `use` from one of the user's own, and the two failure modes are not equal. Real code writes
+/// the imported form - `CallbackMemory<D: ThreadAware + Clone>` in `bytesbuf`, for one - and
+/// emitting a second bound there produces a duplicate that `clippy::trait_duplication_in_bounds`
+/// rejects at the user's own declaration. A user-defined trait sharing the name is the rarer
+/// case, and it has a workaround: qualify it, or qualify the real one.
+///
+/// This is the same limitation as the syntactic `PhantomData` test - a macro cannot resolve a
+/// name to the item it refers to - and it is documented on the derive.
+fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
+    let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
+    let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();
+
+    candidate_idents == emitted_idents || candidate_idents == ["ThreadAware"]
+}
+
+/// How the fields of a type contribute to the bounds of the generated impl.
+#[derive(Default)]
+struct GenericUsage {
+    /// Type parameters reachable through a relocated field; each is bound by `ThreadAware`.
+    relocated: HashSet<syn::Ident>,
+
+    /// `PhantomData` markers nested inside a relocated field, which the enclosing field's
+    /// own `ThreadAware` obligation reaches, in discovery order.
+    thread_aware_required: Vec<Type>,
+
+    /// Rendered form of `thread_aware_required`, used to suppress duplicates.
+    seen: HashSet<String>,
+
+    /// Whether any field is present but never relocated, which is what makes the `Self: Send`
+    /// predicate necessary.
+    has_unrelocated_field: bool,
+}
+
+impl GenericUsage {
+    fn require_thread_aware(&mut self, ty: &Type) {
+        if self.seen.insert(ty.to_token_stream().to_string()) {
+            self.thread_aware_required.push(ty.clone());
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.relocated.extend(other.relocated);
+        self.has_unrelocated_field |= other.has_unrelocated_field;
+        for ty in &other.thread_aware_required {
+            self.require_thread_aware(ty);
+        }
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<HashSet<syn::Ident>> {
-    let mut set = HashSet::new();
+fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<GenericUsage> {
+    let mut usage = GenericUsage::default();
     let generic_idents: HashSet<_> = generics
         .params
         .iter()
@@ -126,22 +231,35 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
             _ => None,
         })
         .collect();
-    for ty in fields.iter().map(|f| &f.ty) {
-        collect_generics_in_type(ty, &generic_idents, &mut set)?;
+    for field in fields {
+        // Mirror exactly what the body generators skip. A skipped field and a top-level
+        // marker are both absent from the generated body, so neither needs a `ThreadAware`
+        // bound; both are covered by the `Self: Send` predicate. Keeping this test identical
+        // to the one in `struct_gen`/`enum_gen` is what stops the header and the body
+        // disagreeing about which fields are relocated.
+        if parse_field_attrs(&field.attrs)?.skip || is_phantom_data(&field.ty) {
+            usage.has_unrelocated_field = true;
+            continue;
+        }
+        collect_generics_in_type(&field.ty, &generic_idents, &mut usage)?;
     }
-    Ok(set)
+    Ok(usage)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut HashSet<syn::Ident>) -> syn::Result<()> {
+fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut GenericUsage) -> syn::Result<()> {
     match ty {
         Type::Path(TypePath { path, .. }) => {
             if is_phantom_data(ty) {
+                // Only reachable for a marker nested inside a relocated field: top-level
+                // markers are filtered out by the caller. The enclosing field's `ThreadAware`
+                // obligation reaches this marker, so state it and let the compiler reduce it.
+                acc.require_thread_aware(ty);
                 return Ok(());
             }
             for segment in &path.segments {
                 if generic_idents.contains(&segment.ident) {
-                    acc.insert(segment.ident.clone());
+                    acc.relocated.insert(segment.ident.clone());
                 }
                 if let PathArguments::AngleBracketed(ab) = &segment.arguments {
                     for arg in &ab.args {
@@ -166,4 +284,5 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
     Ok(())
 }
 
-// We intentionally do not re-export FieldAttrCfg (wrapper crates access it via the module path).
+// `FieldAttrCfg` is intentionally not re-exported at the crate root; consumers reach it
+// through the `field_attrs` module path.

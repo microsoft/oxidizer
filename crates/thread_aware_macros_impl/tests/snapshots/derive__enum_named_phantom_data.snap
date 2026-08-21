@@ -2,17 +2,20 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T, U> ::thread_aware::ThreadAware for EnumNamedPhantom<T, U> {
+impl<T, U> ::thread_aware::ThreadAware for EnumNamedPhantom<T, U>
+where
+    EnumNamedPhantom<T, U>: ::core::marker::Send,
+{
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
     ) {
         match self {
-            Self::Variant { data, marker } => {
+            Self::Variant { data, marker: _ } => {
                 ::thread_aware::ThreadAware::relocate(data, source, destination);
             }
-            Self::Other { value, phantom } => {
+            Self::Other { value, phantom: _ } => {
                 ::thread_aware::ThreadAware::relocate(value, source, destination);
             }
         }

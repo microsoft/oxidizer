@@ -2,15 +2,16 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl ::thread_aware::ThreadAware for Foo
+impl<T: ::thread_aware::ThreadAware, U> ::thread_aware::ThreadAware for WithWhere<T, U>
 where
-    Foo: ::core::marker::Send,
+    T: Clone,
+    WithWhere<T, U>: ::core::marker::Send,
 {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
     ) {
-        ::thread_aware::ThreadAware::relocate(&mut self.data, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.value, source, destination);
     }
 }

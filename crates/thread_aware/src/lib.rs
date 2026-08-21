@@ -236,8 +236,29 @@ pub use core::ThreadAware;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Generic type parameters appearing in non-skipped fields automatically receive a
-/// `::thread_aware::ThreadAware` bound (occurrences only inside `PhantomData<..>` are ignored).
+/// Bounds follow from whether a field is relocated:
+/// * A generic type parameter reachable through a relocated field receives a
+///   `::thread_aware::ThreadAware` bound.
+/// * If any field is never relocated - a `PhantomData<..>` marker, or one annotated with
+///   `#[thread_aware(skip)]` - a single `where Self: Send` predicate is added, since the
+///   `ThreadAware: Send` supertrait still has to hold.
+/// * A `PhantomData<..>` nested inside a relocated field instead gets a
+///   `where PhantomData<..>: ThreadAware` predicate, which the compiler reduces through that
+///   marker's own no-op impl.
+///
+/// The `Send` obligation is deliberately stated on `Self` rather than per field. Binding the
+/// parameters named inside a marker would be unsound - `PhantomData<&'a T>` is `Send` only
+/// when `T: Sync` - and binding each field type would be too strong, rejecting types made
+/// `Send` by a manual `unsafe impl`, which is the usual idiom for raw-pointer markers and the
+/// main reason `#[thread_aware(skip)]` exists.
+///
+/// Two names are matched syntactically, because a macro cannot resolve a path to the item it
+/// refers to, so both fall back to the bare name being the standard one. `PhantomData` is
+/// treated as the marker only when spelled canonically - bare, or `core`/`std`
+/// `::marker::PhantomData` - so a qualified look-alike such as `my_crate::PhantomData` is
+/// relocated like any other field. A trait named `ThreadAware` and referred to by that bare
+/// name is assumed to be this crate's and suppresses the generated bound. In both cases,
+/// qualifying the path disambiguates.
 ///
 /// # Example
 /// ```rust

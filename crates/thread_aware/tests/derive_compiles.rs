@@ -4,7 +4,12 @@
 #![expect(missing_docs, reason = "This is a test module")]
 #![allow(dead_code, reason = "This is a test module")]
 
-use thread_aware::affinity::pinned_affinities;
+use core::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use thread_aware::ThreadAware as _;
+use thread_aware::affinity::{Affinity, pinned_affinities};
 use thread_aware_macros::ThreadAware;
 
 #[derive(ThreadAware)]
@@ -24,4 +29,465 @@ fn derive_thread_aware_compiles_and_calls() {
     let b = addrs.remove(0);
     let mut c = Container { val: Inner(5), raw: 10 };
     thread_aware::ThreadAware::relocate(&mut c, a, b);
+}
+
+/// Counts how many times it was relocated, so tests can assert which fields the
+/// generated body actually reaches.
+#[derive(Default)]
+struct Tracker {
+    relocations: usize,
+}
+
+impl thread_aware::ThreadAware for Tracker {
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        self.relocations += 1;
+    }
+}
+
+fn affinity_pair() -> (Option<Affinity>, Affinity) {
+    let affinities = pinned_affinities(&[2]);
+    (Some(affinities[0]), affinities[1])
+}
+
+/// A generic named only inside `PhantomData` must still compile.
+///
+/// Regression test: the derive used to drop the parameter entirely, so the
+/// generated impl could not satisfy the `ThreadAware: Send` supertrait.
+#[derive(ThreadAware)]
+struct DirectPhantom<T, U>(T, PhantomData<U>);
+
+#[test]
+fn phantom_only_generic_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    // `Arc<i32>` is `Send` but deliberately not `ThreadAware`, so this only
+    // compiles if the phantom parameter is bound by `Send` rather than `ThreadAware`.
+    let mut value = DirectPhantom::<Tracker, Arc<i32>>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1, "the non-phantom field must be relocated exactly once");
+}
+
+/// `PhantomData` nested inside another type is relocated like any other field,
+/// which requires a real `ThreadAware` impl for `PhantomData`.
+#[derive(ThreadAware)]
+struct NestedPhantom<T>((PhantomData<T>,));
+
+#[test]
+fn nested_phantom_data_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = NestedPhantom::<Arc<i32>>((PhantomData,));
+    value.relocate(source, destination);
+}
+
+/// A concrete `PhantomData` of a type that is `Send` but not `ThreadAware`.
+#[derive(ThreadAware)]
+struct ConcretePhantom {
+    tracked: Tracker,
+    marker: PhantomData<Arc<i32>>,
+}
+
+#[test]
+fn concrete_phantom_of_non_thread_aware_type_compiles() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = ConcretePhantom {
+        tracked: Tracker::default(),
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1);
+}
+
+/// Mixes a relocated generic, a skipped field and a phantom-only generic.
+#[derive(ThreadAware)]
+struct Mixed<T, U> {
+    tracked: T,
+    #[thread_aware(skip)]
+    skipped: Tracker,
+    marker: PhantomData<U>,
+}
+
+#[test]
+fn relocate_reaches_every_non_skipped_field_and_no_skipped_one() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = Mixed::<Tracker, Arc<i32>> {
+        tracked: Tracker::default(),
+        skipped: Tracker::default(),
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1, "non-skipped fields must be relocated");
+    assert_eq!(value.skipped.relocations, 0, "#[thread_aware(skip)] fields must not be relocated");
+}
+
+/// Enum variants carrying phantom-only generics.
+#[derive(ThreadAware)]
+enum PhantomEnum<T, U> {
+    Tracked(T),
+    Marked(PhantomData<U>),
+}
+
+#[test]
+fn enum_with_phantom_only_generic_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut tracked = PhantomEnum::<Tracker, Arc<i32>>::Tracked(Tracker::default());
+    tracked.relocate(source, destination);
+    match &tracked {
+        PhantomEnum::Tracked(t) => assert_eq!(t.relocations, 1),
+        PhantomEnum::Marked(_) => unreachable!("constructed as Tracked"),
+    }
+
+    let mut marked = PhantomEnum::<Tracker, Arc<i32>>::Marked(PhantomData);
+    marked.relocate(source, destination);
+}
+
+// The cases below pin the `Send` obligation for phantom payloads whose `Send`-ness does
+// not follow from `T: Send`. Bounding the type parameters instead of the field type made
+// each of these fail to compile, and the snapshot tests could not catch it because they
+// never build the expansion.
+
+/// `&'a T` is `Send` only when `T: Sync`, so a per-parameter `T: Send` bound is wrong here.
+#[derive(ThreadAware)]
+struct PhantomRef<'a, T: 'a>(Tracker, PhantomData<&'a T>);
+
+#[test]
+fn phantom_shared_reference_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    // `i32` is `Sync`, which is what `&'a i32: Send` actually requires.
+    let mut value = PhantomRef::<'_, i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// `Arc<T>` is `Send` only when `T: Send + Sync`.
+#[derive(ThreadAware)]
+struct PhantomArc<T>(Tracker, PhantomData<Arc<T>>);
+
+#[test]
+fn phantom_arc_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomArc::<i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// An unsized slice payload: reached through no `Type::Slice` arm, so it used to get no bound.
+#[derive(ThreadAware)]
+struct PhantomSlice<T>(Tracker, PhantomData<[T]>);
+
+#[test]
+fn phantom_slice_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomSlice::<i32>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// An associated-type projection: `T: Send` says nothing about `T::Item`.
+#[derive(ThreadAware)]
+struct PhantomProjection<T: Iterator>(Tracker, PhantomData<T::Item>);
+
+#[test]
+fn phantom_projection_compiles_and_relocates() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = PhantomProjection::<std::vec::IntoIter<i32>>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// A parameter that is both relocated and named inside `PhantomData` carries both
+/// obligations; classifying it as one or the other drops the second.
+#[derive(ThreadAware)]
+struct RelocatedAndPhantom<'a, T: 'a>(T, PhantomData<&'a T>);
+
+#[test]
+fn parameter_that_is_both_relocated_and_phantom_compiles() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = RelocatedAndPhantom::<'_, Tracker>(Tracker::default(), PhantomData);
+    value.relocate(source, destination);
+
+    assert_eq!(value.0.relocations, 1);
+}
+
+/// A skipped field is never relocated, so it needs `Send` rather than `ThreadAware`.
+#[derive(ThreadAware)]
+struct SkippedGeneric<T> {
+    tracked: Tracker,
+    #[thread_aware(skip)]
+    skipped: T,
+}
+
+#[test]
+fn skipped_generic_field_needs_only_send() {
+    let (source, destination) = affinity_pair();
+
+    // `Arc<i32>` is `Send` but deliberately not `ThreadAware`; a skipped field must not
+    // force the stronger bound.
+    let mut value = SkippedGeneric {
+        tracked: Tracker::default(),
+        skipped: Arc::new(1_i32),
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1);
+    assert_eq!(*value.skipped, 1, "the skipped field is left untouched");
+}
+
+/// A real, data-carrying type that merely happens to be named `PhantomData`, named by a
+/// qualified path.
+///
+/// The marker test accepts only the canonical spellings, so this is treated as an ordinary
+/// field: relocated like any other, and bound like any other. Matching on the final path
+/// segment alone let the derive compile while silently never relocating the data.
+mod lookalike {
+    use thread_aware::affinity::Affinity;
+
+    pub(crate) struct PhantomData<T> {
+        pub(crate) value: T,
+    }
+
+    impl<T: thread_aware::ThreadAware> thread_aware::ThreadAware for PhantomData<T> {
+        fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+            self.value.relocate(source, destination);
+        }
+    }
+}
+
+#[derive(ThreadAware)]
+struct HoldsLookalike<T>(lookalike::PhantomData<T>);
+
+#[test]
+fn qualified_type_named_phantom_data_is_relocated() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = HoldsLookalike(lookalike::PhantomData { value: Tracker::default() });
+    value.relocate(source, destination);
+
+    assert_eq!(
+        value.0.value.relocations, 1,
+        "a qualified look-alike is a normal field and must be relocated"
+    );
+}
+
+// The two cases below pin the `Send` obligation for types made `Send` by a manual
+// `unsafe impl` rather than structurally. Stating that obligation per field - as
+// `where *const T: Send` or `where Rc<T>: Send` - yields a predicate no instantiation can
+// ever prove, so the impl compiles but nothing can use it. Only `Self: Send` is discharged
+// by the manual impl.
+
+fn assert_thread_aware<X: thread_aware::ThreadAware>() {}
+
+/// The standard raw-pointer variance marker.
+#[derive(ThreadAware)]
+struct RawMarker<T> {
+    len: usize,
+    marker: PhantomData<*const T>,
+}
+
+// SAFETY: test-only. The marker carries no value and `RawMarker` owns nothing but a `usize`.
+unsafe impl<T> Send for RawMarker<T> {}
+
+#[test]
+fn phantom_raw_pointer_with_manual_send_is_usable() {
+    assert_thread_aware::<RawMarker<i32>>();
+
+    let (source, destination) = affinity_pair();
+    let mut value = RawMarker::<i32> {
+        len: 3,
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.len, 3);
+}
+
+/// Exactly what `#[thread_aware(skip)]` exists for: a field that is not itself thread-safe.
+#[derive(ThreadAware)]
+struct SkippedNotSend<T> {
+    tracked: Tracker,
+    #[thread_aware(skip)]
+    cache: Rc<T>,
+}
+
+// SAFETY: test-only. The `Rc` is never handed to another thread.
+#[expect(clippy::non_send_fields_in_send_ty, reason = "deliberate: this is the shape `skip` exists for")]
+unsafe impl<T> Send for SkippedNotSend<T> {}
+
+#[test]
+fn skipped_non_send_field_with_manual_send_is_usable() {
+    assert_thread_aware::<SkippedNotSend<i32>>();
+
+    let (source, destination) = affinity_pair();
+    let mut value = SkippedNotSend {
+        tracked: Tracker::default(),
+        cache: Rc::new(7_i32),
+    };
+    value.relocate(source, destination);
+
+    assert_eq!(value.tracked.relocations, 1);
+    assert_eq!(*value.cache, 7, "the skipped field is left untouched");
+}
+
+// The three cases below pin why the `Self: Send` obligation must be emitted unconditionally
+// rather than gated on the field type syntactically naming a generic parameter. Each one has
+// a `Send`-ness that such a scan cannot see.
+
+/// A marker-only type whose argument is not `Send`, made `Send` by hand.
+#[derive(ThreadAware)]
+struct ManualSendMarker(PhantomData<Rc<()>>);
+
+// SAFETY: test-only. The marker holds no value.
+unsafe impl Send for ManualSendMarker {}
+
+struct MaybeSend<const N: usize>(*const ());
+
+// SAFETY: test-only. Only this one const value is declared thread-safe.
+unsafe impl Send for MaybeSend<0> {}
+
+/// `Send`-ness depending on a const parameter, which a type-parameter scan never sees.
+#[derive(ThreadAware)]
+struct ConstDependent<const N: usize> {
+    tracked: Tracker,
+    marker: PhantomData<MaybeSend<N>>,
+}
+
+macro_rules! hidden_generic {
+    () => {
+        T
+    };
+}
+
+/// A generic hidden behind a type macro, so no `T` token is visible before expansion.
+#[derive(ThreadAware)]
+struct MacroHidden<T> {
+    tracked: Tracker,
+    marker: PhantomData<hidden_generic!()>,
+}
+
+#[test]
+fn send_ness_invisible_to_a_syntactic_scan_still_compiles() {
+    let (source, destination) = affinity_pair();
+
+    assert_thread_aware::<ManualSendMarker>();
+    assert_thread_aware::<ConstDependent<0>>();
+    assert_thread_aware::<MacroHidden<i32>>();
+
+    let mut value = ConstDependent::<0> {
+        tracked: Tracker::default(),
+        marker: PhantomData,
+    };
+    value.relocate(source, destination);
+    assert_eq!(value.tracked.relocations, 1);
+
+    let mut hidden = MacroHidden::<i32> {
+        tracked: Tracker::default(),
+        marker: PhantomData,
+    };
+    hidden.relocate(source, destination);
+    assert_eq!(hidden.tracked.relocations, 1);
+}
+
+/// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
+/// path.
+///
+/// Matching only the final path segment treated this as the real trait and dropped the bound
+/// the generated body needs, so the impl could not compile. A bare `ThreadAware` stays
+/// ambiguous and is still assumed to be the real trait - see `is_same_trait`.
+mod own_thread_aware {
+    use thread_aware::affinity::Affinity;
+    use thread_aware_macros::ThreadAware as DeriveThreadAware;
+
+    pub(crate) mod inner {
+        pub(crate) trait ThreadAware {}
+    }
+
+    pub(crate) struct Inner;
+
+    impl inner::ThreadAware for Inner {}
+
+    impl thread_aware::ThreadAware for Inner {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+
+    #[derive(DeriveThreadAware)]
+    pub(crate) struct Holder<T: inner::ThreadAware>(pub(crate) T);
+}
+
+#[test]
+fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = own_thread_aware::Holder(own_thread_aware::Inner);
+    value.relocate(source, destination);
+}
+
+/// A named enum variant carrying non-relocated fields.
+///
+/// The generated match arm emits no statement for a marker or a skipped field, so binding it
+/// by name left an unused variable. `deny(warnings)` is deliberate: it is what a downstream
+/// crate would hit, and it is what this shape used to fail.
+mod enum_named_bindings {
+    #![deny(warnings)]
+
+    use core::marker::PhantomData;
+
+    use thread_aware_macros::ThreadAware;
+
+    #[derive(ThreadAware)]
+    pub(crate) enum NamedVariants<T, U> {
+        Marked {
+            value: super::Tracker,
+            marker: PhantomData<T>,
+        },
+        Skipped {
+            value: super::Tracker,
+            #[thread_aware(skip)]
+            ignored: U,
+        },
+    }
+}
+
+#[test]
+fn enum_named_variant_bindings_do_not_warn() {
+    use enum_named_bindings::NamedVariants;
+
+    let (source, destination) = affinity_pair();
+
+    let mut marked = NamedVariants::<i32, u8>::Marked {
+        value: Tracker::default(),
+        marker: PhantomData,
+    };
+    marked.relocate(source, destination);
+    match &marked {
+        NamedVariants::Marked { value, .. } => assert_eq!(value.relocations, 1),
+        NamedVariants::Skipped { .. } => unreachable!("constructed as Marked"),
+    }
+
+    let mut skipped = NamedVariants::<i32, u8>::Skipped {
+        value: Tracker::default(),
+        ignored: 7,
+    };
+    skipped.relocate(source, destination);
+    match &skipped {
+        NamedVariants::Skipped { value, ignored } => {
+            assert_eq!(value.relocations, 1);
+            assert_eq!(*ignored, 7, "the skipped field is left untouched");
+        }
+        NamedVariants::Marked { .. } => unreachable!("constructed as Skipped"),
+    }
 }
