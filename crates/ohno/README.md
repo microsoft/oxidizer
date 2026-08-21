@@ -95,7 +95,8 @@ Without a `#[display("...")]` attribute, the text an error renders depends on wh
 source.
 
 **With a source**, the source’s message is printed as it stands: no type name, and no
-`caused by:` line, so the wrapper leaves no trace in the output.
+`caused by:` line, so the wrapper leaves no trace in the message line. Enrichment and a
+backtrace, described below, are still written after it.
 [`source()`][__link11] still returns the concrete error, so a caller that
 walks the chain still finds it.
 
@@ -217,14 +218,14 @@ pub struct ConfigError {
 // Usage
 let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 
-// Output: "Failed to read config with path: /etc/config.toml\nCaused by:\n\tfile not found"
+// Output: "Failed to read config with path: /etc/config.toml\ncaused by: file not found"
 ```
 
 The template string supports field interpolation using `{field_name}` syntax. Unlike the
 default rendering, the source is never printed on its own: the custom message always leads, and
-the underlying error (if any) follows as “Caused by:” in the error chain. If the error has no
-source, only the custom message is displayed — the type name is never used once a template is
-given.
+the underlying error (if any) follows on the next line, after a `caused by:` label. If the
+error has no source, only the custom message is displayed — the type name is never used once a
+template is given.
 
 Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 
@@ -453,7 +454,7 @@ uniformly via [`Labeled::label`][__link24].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRFaOdtYzD6kbX0jbL0ZTwy4bz8BAwTIXEz0bF5vL5dCQJKFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbWLkNVCrfkmobfrGU4BhKp5kbplL20GaBRk4bv0uMqN1As6phZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
