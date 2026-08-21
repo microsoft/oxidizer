@@ -214,6 +214,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ade012bac4db278517a0132c8c10c6427025868dca16c801087c28d5a411f1"
 
 [[package]]
+name = "arty_executor"
+version = "0.1.0"
+dependencies = [
+ "all_the_time",
+ "alloc_tracker",
+ "criterion",
+ "derive_more",
+ "events_once",
+ "foldhash 0.2.0",
+ "gungraun",
+ "infinity_pool",
+ "mockall",
+ "mutants",
+ "nm",
+ "pin-project",
+ "scopeguard",
+ "static_assertions",
+ "testing_aids",
+ "tick",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "asn1-rs"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -832,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -863,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -877,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -886,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dynosaur",
  "ohno 0.4.0",
@@ -3338,8 +3362,15 @@ dependencies = [
 name = "ohno_macros"
 version = "0.4.0"
 dependencies = [
- "insta",
  "mutants",
+ "ohno_macros_impl",
+]
+
+[[package]]
+name = "ohno_macros_impl"
+version = "0.5.0"
+dependencies = [
+ "insta",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
@@ -3647,7 +3678,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plurality"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",
