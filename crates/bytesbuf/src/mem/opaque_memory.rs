@@ -1,10 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use core::any::{Any, TypeId};
-
 #[cfg(not(test))]
 use alloc::boxed::Box;
+use core::any::{Any, TypeId};
 
 use thread_aware::ThreadAware;
 
