@@ -106,6 +106,32 @@ fn test_from_unaware() {
 }
 
 #[test]
+fn out_of_range_relocation_is_a_no_op() {
+    use crate::storage::Strategy;
+
+    // A strategy whose index always exceeds its slot count, so every affinity is out of range.
+    struct AlwaysOutOfRange;
+
+    impl Strategy for AlwaysOutOfRange {
+        fn index(_affinity: Affinity) -> usize {
+            1
+        }
+
+        fn count(_affinity: Affinity) -> usize {
+            1
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let mut arc = crate::Arc::<i32, AlwaysOutOfRange>::from_unaware(42);
+
+    // The destination affinity's slot index is out of range, so the relocation must leave the `Arc`
+    // on the value it already carries rather than reaching into an unrelated slot.
+    arc.relocate(Some(affinities[0]), affinities[1]);
+    assert_eq!(*arc, 42);
+}
+
+#[test]
 fn test_partialeq() {
     let value1 = PerCore::with_value(42);
     let value2 = PerCore::with_value(42);
@@ -745,7 +771,7 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
 
         // Holding a shared guard blocks the escalation to the exclusive lock, so a racer that
         // reaches that stage must wait; it does not by itself schedule the racer threads.
-        let shared_guard = storage.read(destination);
+        let shared_guard = storage.read(destination).unwrap();
 
         let mut racers = Vec::with_capacity(RACERS);
 

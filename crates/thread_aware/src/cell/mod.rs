@@ -55,10 +55,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 ///
 /// Relocate an `Arc` only among affinities that share one coordinate space — those for which its
 /// [`Strategy`] reports a consistent slot count (see the design guide, "Affinities and strategies").
-/// Storage is sized once to that count. A relocation targeting an affinity outside that space still
-/// returns a usable value, but it is another affinity's value rather than the requested one, so work
-/// done through it may run against state localized elsewhere and lose the locality the type exists to
-/// provide.
+/// Storage is sized once to that count.
 ///
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.
@@ -688,16 +685,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // populates that slot. The source slot is written afterwards, under its own lock and never
         // while the destination lock is held, so two threads relocating in opposite directions
         // cannot each end up waiting for the lock the other holds.
-        //
-        // When the source resolves to the destination's own slot there is no cross-slot move: the
-        // carried value already belongs to that slot, so a miss seeds the slot with it and keeps it
-        // rather than materializing a fresh value that would diverge from the shared one. This is
-        // the whole of relocation under `PerProcess`, where every affinity shares one slot.
         // Ref: docs/implementation.md, "Relocation locking".
-        let same_slot = source.is_some_and(|source| S::index(source) == S::index(destination));
-
         let (old_value, replaced_empty_slot) = {
-            let mut destination_slot = self.storage.write(destination);
+            // Escalate to the destination slot's exclusive lock. No slot means the destination
+            // affinity is out of range — outside the coordinate space this storage was sized for —
+            // so the relocation is a no-op: the `Arc` keeps the value it already carries rather than
+            // reaching into an unrelated slot. `write` records the anomaly via the
+            // `thread_aware_arc_oob` metric. Ref: docs/implementation.md, "Relocation locking".
+            let Some(mut destination_slot) = self.storage.write(destination) else {
+                return;
+            };
 
             // The slot is re-probed because the lock was released between the two stages, during
             // which another thread may have materialized this same destination slot.
@@ -706,8 +703,11 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 return;
             }
 
-            // Same slot as the source: the carried value already belongs here, so seed the empty
-            // slot with it and keep it, without materializing a fresh value.
+            // When the source resolves to the destination's own slot there is no cross-slot move: the
+            // carried value already belongs to that slot, so seed the empty slot with it and keep it
+            // rather than materializing a fresh value that would diverge from the shared one. This is
+            // the whole of relocation under `PerProcess`, where every affinity shares one slot.
+            let same_slot = source.is_some_and(|source| S::index(source) == S::index(destination));
             if same_slot {
                 *destination_slot = Some(sync::Arc::<T>::clone(&self.value));
                 return;
@@ -748,13 +748,15 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
         // cross-slot miss — the same-slot case returned above — so the source slot is always
         // distinct from the destination slot just written.
         if let Some(source) = source {
-            let mut source_slot = self.storage.write(source);
-
-            // Store only if the source slot has no value yet. Another thread may have recorded it
-            // while this one held the destination lock; that is the same value this would store, so
-            // leaving it in place is correct.
-            if source_slot.is_none() {
-                *source_slot = Some(old_value);
+            // An out-of-range source has no slot to record into, so the recording is simply skipped;
+            // `write` accounts for the out-of-range access via the `thread_aware_arc_oob` metric.
+            if let Some(mut source_slot) = self.storage.write(source) {
+                // Store only if the source slot has no value yet. Another thread may have recorded it
+                // while this one held the destination lock; that is the same value this would store,
+                // so leaving it in place is correct.
+                if source_slot.is_none() {
+                    *source_slot = Some(old_value);
+                }
             }
         }
     }

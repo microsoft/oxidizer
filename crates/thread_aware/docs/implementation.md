@@ -26,8 +26,9 @@ The table is sized once, on first use, to the slot count the strategy reports.
 Because the whole table is fixed from then on, the design assumes the strategy
 reports the same count for every affinity that shares it — the built-in strategies
 do, since the processor and memory-region counts are properties of the machine. A
-strategy that breaks that assumption can produce an index past the table's end; the
-lookup then falls back to the first slot rather than reaching out of bounds, and
+strategy that breaks that assumption can produce an index past the table's end; such
+an affinity has no slot of its own, so a relocation into it is a no-op — the `Arc`
+keeps the value it already carries rather than reaching into an unrelated slot — and
 records the `thread_aware_arc_oob` metric so the condition is observable in a running
 process. There is no growth path and no table-wide lock
 guarding the array. After that first
@@ -147,6 +148,12 @@ recorded yet. This write happens after the destination lock is released, never
 with both locks held: two threads relocating in opposite directions (`X → Y` and
 `Y → X`) would otherwise deadlock, each waiting for the lock the other holds. The
 same-slot case needs none of this, having already seeded the one slot involved.
+
+An affinity whose slot index falls outside the sized table has no slot to lock. A
+relocation into such a destination is a no-op — the `Arc` keeps the value it
+already carries — and an out-of-range source is simply not recorded into. Either
+out-of-range access is reported through the `thread_aware_arc_oob` metric. Ref:
+"Storage".
 
 A slot lock is never left poisoned, so acquiring one never has to handle a poison
 error. Poisoning would require a panic while the lock is held, and the crate
