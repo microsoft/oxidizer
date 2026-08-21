@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "thread_aware_core"
+description = "Stable core traits and types for thread-aware state."
+version = "1.0.0"
+readme = "README.md"
+keywords = ["oxidizer", "thread", "aware"]
+categories = ["data-structures", "no-std"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core"
+
+[features]
+std = []
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

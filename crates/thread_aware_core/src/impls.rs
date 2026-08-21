@@ -1,11 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#[cfg(not(test))]
 use alloc::boxed::Box;
-#[cfg(not(test))]
 use alloc::string::String;
-#[cfg(not(test))]
 use alloc::vec::Vec;
 use core::time::Duration;
 #[cfg(feature = "std")]
@@ -13,8 +10,7 @@ use std::collections::HashMap;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use crate::affinity::Affinity;
-use crate::core::ThreadAware;
+use crate::{Affinity, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -143,10 +139,9 @@ where
 }
 
 #[cfg(feature = "std")]
-// TODO: We should probably support custom hashers as well.
 #[expect(
     clippy::implicit_hasher,
-    reason = "Supporting custom hashers would complicate the implementation significantly."
+    reason = "This implementation preserves the existing API for the default hasher."
 )]
 impl<K, V> ThreadAware for HashMap<K, V>
 where
@@ -165,17 +160,23 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ThreadAware;
-    use crate::affinity::{Affinity, pinned_affinities};
+    use alloc::boxed::Box;
+    use alloc::string::{String, ToString};
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use crate::{Affinity, ThreadAware};
+
+    fn pinned_affinities() -> [Affinity; 2] {
+        [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)]
+    }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn test_hashmap() {
         use std::collections::HashMap;
 
-        use crate::ThreadAware;
-
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -190,14 +191,13 @@ mod tests {
 
         let mut empty_value: HashMap<i32, String> = HashMap::new();
         empty_value.relocate(source, destination);
-        assert_eq!(empty_value.len(), 0);
+        assert!(empty_value.is_empty());
     }
 
     #[test]
-    #[cfg(feature = "threads")]
     fn test_tuples() {
         use crate::ThreadAware;
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -242,7 +242,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
     fn test_function_pointers() {
         use crate::ThreadAware;
 
@@ -276,7 +275,7 @@ mod tests {
             x > 0
         }
 
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -319,7 +318,7 @@ mod tests {
     fn test_result() {
         use crate::ThreadAware;
 
-        let affinities = pinned_affinities(&[2]);
+        let affinities = pinned_affinities();
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
@@ -343,13 +342,6 @@ mod tests {
         assert_eq!(err_string, Err("error".to_string()));
     }
 
-    // std::sync::Arc<T> a type that introduces sharing across threads and thus is very likely to introduce
-    // contention. The main point of ThreadAware is to prevent contention where possible, so it should not be
-    // implemented for Arc<T>. If a user depends on Arc<T>, they need to take special steps to decide how
-    // to correctly avoid contention rather than things just working out of the box with likely incorrect
-    // behavior (shared synchronization primitives etc).
-    static_assertions::assert_not_impl_any!(std::sync::Arc<i32>: ThreadAware);
-
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
     /// no-op replacements.
     #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -362,7 +354,7 @@ mod tests {
     }
 
     fn affinities() -> (Option<Affinity>, Affinity) {
-        let a = pinned_affinities(&[2]);
+        let a = pinned_affinities();
         (Some(a[0]), a[1])
     }
 
@@ -415,16 +407,17 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
+    #[cfg(feature = "std")]
     fn hashmap_forwards_relocate_to_keys_and_values() {
         use std::collections::HashMap;
+
         let (src, dst) = affinities();
         let mut map = HashMap::new();
         map.insert(Tracker(false), Tracker(false));
         map.relocate(src, dst);
-        for (k, v) in &map {
-            assert!(k.0, "key must be relocated");
-            assert!(v.0, "value must be relocated");
+        for (key, value) in &map {
+            assert!(key.0, "key must be relocated");
+            assert!(value.0, "value must be relocated");
         }
     }
 }

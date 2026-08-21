@@ -63,6 +63,7 @@ These are the primary crates built out of this repo:
 - [`seatbelt_http`](./crates/seatbelt_http/README.md) - HTTP-specific extensions for the seatbelt crate.
 - [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
+- [`thread_aware_core`](./crates/thread_aware_core/README.md) - Stable core traits and types for thread-aware state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
 - [`uniflight`](./crates/uniflight/README.md) - Coalesces duplicate async tasks into a single execution.
 
