@@ -3,7 +3,7 @@
 
 [package]
 name = "plurality"
-version = "0.2.1"
+version = "0.2.2"
 description = "A highly efficient pooling memory allocator"
 readme = "README.md"
 keywords = ["pool", "memory", "allocator"]
@@ -64,6 +64,18 @@ opool = { workspace = true }
 sharded-slab = { workspace = true }
 slab = { workspace = true, features = ["std"] }
 slotmap = { workspace = true, features = ["std"] }
+
+[[example]]
+name = "pool_basic"
+
+[[example]]
+name = "pool_across_threads"
+
+[[example]]
+name = "multi_pool_basic"
+
+[[example]]
+name = "multi_pool_dyn_dispatch"
 
 [[bench]]
 name = "criterion"

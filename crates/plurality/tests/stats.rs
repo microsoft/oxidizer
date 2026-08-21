@@ -2,11 +2,12 @@
 // Licensed under the MIT License.
 #![allow(clippy::allow_attributes, clippy::unwrap_used, reason = "test code")]
 
-//! Tests for the `stats` feature: `PoolStats` and `Pool::stats`.
+//! Tests for the `stats` feature: `PoolStats`, `Pool::stats` and
+//! `MultiPool::stats`.
 
 #[cfg(feature = "stats")]
 mod stats_tests {
-    use plurality::{Pool, PoolStats};
+    use plurality::{MultiPool, Pool, PoolStats};
 
     /// A brand-new pool has allocated nothing yet.
     #[test]
@@ -81,5 +82,31 @@ mod stats_tests {
         let s2 = s1; // Copy
         assert_eq!(s1, s2);
         assert_eq!(format!("{s1:?}"), format!("{s2:?}"));
+    }
+
+    /// A multi pool reports one set of totals covering every layout it serves.
+    #[test]
+    fn multi_stats_sum_across_layouts() {
+        let pool = MultiPool::builder().chunk_size(2).build();
+        assert_eq!(pool.stats(), PoolStats::default());
+
+        let a = pool.alloc_box(1_u8);
+        let b = pool.alloc_box(2_u64);
+        let two_layouts = pool.stats();
+        assert_eq!(two_layouts.total_chunks_allocated, 2);
+        assert_eq!(two_layouts.total_chunks_allocated, pool.chunks_allocated());
+        assert!(two_layouts.total_bytes_allocated > 0);
+
+        // A third chunk for a layout already in play adds to the same totals.
+        let c = pool.alloc_box(3_u8);
+        let d = pool.alloc_box(4_u8);
+        let grown = pool.stats();
+        assert_eq!(grown.total_chunks_allocated, 3);
+        assert_eq!(grown.total_chunks_allocated, pool.chunks_allocated());
+        assert!(grown.total_bytes_allocated > two_layouts.total_bytes_allocated);
+
+        // Freeing returns slots but not chunks, so the lifetime totals hold.
+        drop((a, b, c, d));
+        assert_eq!(pool.stats(), grown);
     }
 }

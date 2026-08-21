@@ -1,0 +1,92 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== unit struct ========
+
+#[derive(Error)]
+struct T;
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[derive(ohno::Error)]` needs a field to hold the OhnoCore, and a unit struct has none. Declare one, or use `#[ohno::error]`, which adds it"
+}
+
+// ======== enum ========
+
+#[derive(Error)]
+enum T {
+    A,
+    B,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[derive(ohno::Error)]` supports structs only. An enum has no single field to hold the OhnoCore"
+}
+
+// ======== union ========
+
+#[derive(Error)]
+union T {
+    a: u32,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[derive(ohno::Error)]` supports structs only"
+}
+
+// ======== no field holds a core ========
+
+#[derive(Error)]
+struct T {
+    path: String,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "No field holds the OhnoCore. Declare one, mark it with `#[error]` if its type is spelled through an alias, or use `#[ohno::error]`, which adds the field itself"
+}
+
+// ======== two marked cores ========
+
+#[derive(Error)]
+struct T {
+    #[error]
+    a: ohno::OhnoCore,
+    #[error]
+    b: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore"
+}
+
+// ======== two unmarked cores ========
+
+#[derive(Error)]
+struct T {
+    a: ohno::OhnoCore,
+    b: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "Several fields hold an OhnoCore and none is marked. Mark the one holding the error representation with `#[error]`"
+}
+
+// ======== one field marked twice ========
+
+#[derive(Error)]
+struct T {
+    #[error]
+    #[error]
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "Duplicate `#[error]` on the same field. Mark it once"
+}
