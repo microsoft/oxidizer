@@ -60,11 +60,47 @@ variable name, [`resolve::spectre_arch`][__link1] to map a Rust target architect
 to the matching Spectre subdirectory, and [`resolve::spectre_lib_dir`][__link2] to
 build the `lib\spectre\<arch>` path beneath a toolchain root.
 
+## Idempotence
+
+The build script never adds a search path that is already in effect. Before
+emitting anything it checks whether the resolved directory is already
+supplied through `RUSTFLAGS` (as `-L native=<dir>`) or through the `LIB`
+environment variable that `link.exe` reads directly, and stays silent if so.
+Emitting the same directory twice would be harmless to the linker but hides
+a misconfigured build system, so it is reported as a skip instead.
+
+## Required-flag verification
+
+Some hardening flags cannot be delivered by this crate at all: the
+`cargo:rustc-link-arg` directive of a build script applies only to the
+artifacts of the package that emits it and does **not** propagate to
+dependents, unlike the `cargo:rustc-link-search` used above. Those flags
+must therefore come from `.cargo/config.toml` (or `RUSTFLAGS`) instead.
+
+Because a `RUSTFLAGS` environment variable *replaces* rather than merges
+with `target.<triple>.rustflags` from `.cargo/config.toml`, an unrelated
+ambient `RUSTFLAGS` silently drops those flags. To make that failure loud,
+list them in [`flags::REQUIRED_LINK_ARGS_VAR`][__link3] and the build script will
+inspect `CARGO_ENCODED_RUSTFLAGS` and report any that did not reach `rustc`:
+
+```toml
+# .cargo/config.toml
+[env]
+MSVC_SPECTRE_REQUIRED_LINK_ARGS = "/CETCOMPAT"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Clink-arg=/CETCOMPAT"]
+```
+
+The check is off by default: which arguments are required depends on the
+toolchain and on the compliance bar that integrators must meet, so this
+crate imposes no policy of its own.
+
 ## Features
 
-* `error`: turn the libraries-not-found build warning into a hard build
-  error, for builds that must not silently fall back to the unmitigated
-  runtime.
+* `error`: turn build warnings (Spectre libraries not found, or a required
+  hardening flag missing from `rustc`) into hard build errors, for builds
+  that must not silently ship an unmitigated binary.
 
 ## Examples
 
@@ -86,7 +122,8 @@ assert_eq!(spectre_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbuLgccdrXdFYbykbHHBVklGQb-Hk89cPGoI0bTMuRzEe9Xa9hZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbp47aYEZyz1gboSE8o1l280UbNBUfibw9RiUbiuDUw_AzJpphZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
  [__link0]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::override_var_name
  [__link1]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::spectre_arch
  [__link2]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::spectre_lib_dir
+ [__link3]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=flags::REQUIRED_LINK_ARGS_VAR
