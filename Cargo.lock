@@ -4676,6 +4676,7 @@ dependencies = [
  "jiff",
  "many_cpus",
  "mutants",
+ "nm",
  "static_assertions",
  "thread_aware_macros",
  "uuid",

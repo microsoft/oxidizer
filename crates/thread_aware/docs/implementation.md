@@ -28,7 +28,8 @@ reports the same count for every affinity that shares it — the built-in strate
 do, since the processor and memory-region counts are properties of the machine. A
 strategy that breaks that assumption can produce an index past the table's end; the
 lookup then falls back to the first slot rather than reaching out of bounds, and
-debug builds trap the anomaly. There is no growth path and no table-wide lock
+records the `thread_aware_arc_oob` metric so the condition is observable in a running
+process. There is no growth path and no table-wide lock
 guarding the array. After that first
 initialization the array and the pointer to it are immutable, so reaching a slot
 is a plain atomic load that carries no further synchronization; how well it stays

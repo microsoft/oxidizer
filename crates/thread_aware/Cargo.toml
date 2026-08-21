@@ -58,7 +58,7 @@ all-features = true
 default = ["std", "derive"]
 # Enables the per-affinity Arc and hosted-only type impls. Disable for `#![no_std]`
 # environments; the crate then requires only `alloc`.
-std = ["dep:crossbeam-utils"]
+std = ["dep:crossbeam-utils", "dep:nm"]
 derive = ["dep:thread_aware_macros"]
 threads = ["std", "dep:many_cpus"]
 
@@ -89,6 +89,7 @@ uuid = ["dep:uuid"]
 many_cpus = { workspace = true, optional = true }
 
 crossbeam-utils = { workspace = true, optional = true }
+nm = { workspace = true, optional = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 bytes = { version = "1.11.1", default-features = false, optional = true }
@@ -105,6 +106,7 @@ http = { version = "1.4.1", default-features = false, features = ["std"] }
 jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
+nm = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
 uuid = { version = "1.21.0", default-features = false }

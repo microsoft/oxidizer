@@ -53,10 +53,12 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// of the `Arc`, but the [`trait@ThreadAware`] implementation ensures that when moving to another affinity, the resulting
 /// `Arc` will point to the value in the destination affinity. See [`new`](`Arc::new`) for information on constructing instances.
 ///
-/// For best performance, relocate an `Arc` only among affinities that share one coordinate space — affinities for which
-/// its [`Strategy`] reports a consistent slot count (see the design guide, "Affinities and strategies"). Storage is sized
-/// once to that count; relocating to an affinity outside that space still yields a correct value but forfeits the
-/// per-affinity isolation that lets concurrent relocations proceed without contending.
+/// Relocate an `Arc` only among affinities that share one coordinate space — those for which its
+/// [`Strategy`] reports a consistent slot count (see the design guide, "Affinities and strategies").
+/// Storage is sized once to that count. A relocation targeting an affinity outside that space still
+/// returns a usable value, but it is another affinity's value rather than the requested one, so work
+/// done through it may run against state localized elsewhere and lose the locality the type exists to
+/// provide.
 ///
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.

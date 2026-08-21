@@ -13,6 +13,7 @@ use std::sync::RwLockReadGuard;
 use std::sync::{self, OnceLock, RwLock, RwLockWriteGuard};
 
 use crossbeam_utils::CachePadded;
+use nm::Event;
 
 use crate::affinity::Affinity;
 
@@ -89,20 +90,17 @@ impl<T, S: Strategy> SlotTable<T, S> {
         let slots = self.slots(affinity);
         let requested = S::index(affinity);
 
-        // Trap the anomaly in debug builds so a misbehaving strategy surfaces during development;
-        // release builds take the fallback below instead.
-        debug_assert!(
-            requested < slots.len(),
-            "Strategy::index returned {requested} for {}, which exceeds the {} slots the table was sized to",
-            core::any::type_name::<S>(),
-            slots.len()
-        );
-
         // The table is sized once, on first use, to the slot count the first affinity reported, so
-        // an index past its end means this affinity's index and the sized count do not line up.
-        // Fall back to the first slot rather than indexing out of bounds — better than nothing when
-        // there is no correct slot to reach. Debug builds have already trapped this above.
-        slots.get(requested).unwrap_or(&slots[0])
+        // an index past its end means this affinity does not share that coordinate space. The crate
+        // contracts to still return a usable value, so fall back to the first slot rather than
+        // indexing out of bounds. The value then belongs to a different affinity than the one
+        // requested, so record the anomaly for observability rather than trapping the process.
+        if let Some(slot) = slots.get(requested) {
+            slot
+        } else {
+            report_out_of_range_affinity();
+            &slots[0]
+        }
     }
 
     /// Replaces the data for the given affinity with the provided value.
@@ -130,6 +128,25 @@ impl<T, S: Strategy> SlotTable<T, S> {
     pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<T>> {
         self.slot(affinity).read().expect(NEVER_POISONED)
     }
+}
+
+/// Records that a relocation reached an affinity whose slot index falls outside the sized table.
+///
+/// The table is sized once to one affinity's slot count, so an index past its end means the
+/// destination affinity does not share that coordinate space. The lookup still returns a usable
+/// value — the first slot's — but it is another affinity's value, so work done through it can lose
+/// the locality the type exists to provide. This is a supported-but-degraded path, so it is
+/// recorded as an observable metric rather than trapped: a process that suspects it is happening can
+/// inspect the `thread_aware_arc_oob` event. Ref: docs/implementation.md, "Storage".
+///
+/// Marked `#[cold]` and split out of `slot` so the emission machinery is laid out off the hot path.
+#[cold]
+fn report_out_of_range_affinity() {
+    std::thread_local! {
+        static ARC_OOB: Event = Event::builder().name("thread_aware_arc_oob").build();
+    }
+
+    ARC_OOB.with(Event::observe_once);
 }
 
 impl<T, S: Strategy> Default for SlotTable<T, S> {
@@ -263,7 +280,7 @@ mod tests {
     }
 
     /// A `Strategy` that hands out an index outside the slot count it reports. Exists only to drive
-    /// the debug guard in `SlotTable::slot`.
+    /// the out-of-range fallback in `SlotTable::slot`.
     struct InconsistentStrategy;
 
     impl Strategy for InconsistentStrategy {
@@ -276,13 +293,16 @@ mod tests {
         }
     }
 
-    #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "Strategy::index returned")]
-    fn inconsistent_strategy_index_is_caught_in_debug() {
+    fn out_of_range_affinity_falls_back_to_first_slot() {
         let affinity = pinned_affinities(&[1])[0];
         let table = SlotTable::<i32, InconsistentStrategy>::new();
-        _ = table.replace(affinity, 0);
+
+        // `index` reports 1 for a table sized to a single slot, so the requested slot is out of
+        // range. The lookup falls back to the first slot rather than panicking, so a value written
+        // through the anomalous affinity round-trips through that slot.
+        assert!(table.replace(affinity, 42).is_none());
+        assert_eq!(table.get_clone(affinity), Some(42));
     }
 
     #[test]
