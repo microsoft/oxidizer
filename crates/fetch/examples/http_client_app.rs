@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use bytesbuf::mem::GlobalPool;
+use bytesbuf::mem::{GlobalPool, OpaquePool};
 use fetch::HttpClient;
 use fetch::tls::TlsOptions;
 use ohno::ErrorExt;
@@ -18,7 +18,7 @@ use tick::Clock;
 #[fundle::bundle]
 struct App {
     clock: Clock,
-    global_pool: GlobalPool,
+    memory_pool: OpaquePool,
     client: HttpClient,
 }
 
@@ -42,7 +42,7 @@ async fn main() -> Result<(), ohno::AppError> {
     // Initialize and set up the App instance; fundle ensures all fields are properly constructed.
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
-        .global_pool(|_| GlobalPool::new())
+        .memory_pool(|_| OpaquePool::new(GlobalPool::new()))
         .client({
             let meter_provider = meter_provider.clone();
             move |x| {

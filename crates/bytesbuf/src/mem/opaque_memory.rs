@@ -8,7 +8,7 @@ use thread_aware::ThreadAware;
 
 use crate::mem::{Memory, MemoryShared};
 
-/// Adapter to erase the type of a [`MemoryShared`] implementation.
+/// Type-erased memory pool backed by any [`MemoryShared`] implementation.
 ///
 /// This adapter adds some inefficiency due to additional indirection overhead for
 /// every memory reservation, so avoid this adapter if you can tolerate alternatives (generics).
@@ -18,12 +18,12 @@ use crate::mem::{Memory, MemoryShared};
 /// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
 /// state is up to that provider.
 #[derive(Debug, ThreadAware)]
-pub struct OpaqueMemory {
+pub struct OpaquePool {
     inner: Box<dyn MemoryShared>,
 }
 
-impl OpaqueMemory {
-    /// Creates a new instance of the adapter.
+impl OpaquePool {
+    /// Creates a type-erased pool backed by `inner`.
     #[must_use]
     pub fn new(inner: impl MemoryShared) -> Self {
         Self { inner: Box::new(inner) }
@@ -53,7 +53,7 @@ impl OpaqueMemory {
     }
 }
 
-impl Clone for OpaqueMemory {
+impl Clone for OpaquePool {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone_boxed(),
@@ -61,12 +61,15 @@ impl Clone for OpaqueMemory {
     }
 }
 
-impl Memory for OpaqueMemory {
+impl Memory for OpaquePool {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
     }
 }
+
+/// Compatibility alias for the former name of [`OpaquePool`].
+pub type OpaqueMemory = OpaquePool;
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, feature = "std"))]
@@ -80,7 +83,7 @@ mod tests {
     use super::*;
     use crate::mem::GlobalPool;
 
-    assert_impl_all!(OpaqueMemory: MemoryShared);
+    assert_impl_all!(OpaquePool: MemoryShared);
 
     #[test]
     #[ignore = "stub"]
@@ -93,7 +96,7 @@ mod tests {
     #[test]
     fn wraps_inner() {
         let provider = GlobalPool::new();
-        let memory = OpaqueMemory::new(provider);
+        let memory = OpaquePool::new(provider);
 
         let builder = memory.reserve(1024);
         assert!(builder.capacity() >= 1024);
@@ -102,7 +105,7 @@ mod tests {
     #[test]
     fn memory_trait() {
         let provider = GlobalPool::new();
-        let memory = OpaqueMemory::new(provider);
+        let memory = OpaquePool::new(provider);
 
         // Call reserve via the Memory trait to verify the impl block
         let builder = Memory::reserve(&memory, 1024);
@@ -111,7 +114,7 @@ mod tests {
 
     #[test]
     fn relocate_does_not_break_reservation() {
-        let mut memory = OpaqueMemory::new(GlobalPool::new());
+        let mut memory = OpaquePool::new(GlobalPool::new());
 
         let affinities = pinned_affinities(&[2]);
         memory.relocate(Some(affinities[0]), affinities[1]);
@@ -144,7 +147,7 @@ mod tests {
         }
 
         let relocated = Arc::new(AtomicUsize::new(0));
-        let mut memory = OpaqueMemory::new(TrackingMemory {
+        let mut memory = OpaquePool::new(TrackingMemory {
             relocated: Arc::clone(&relocated),
             inner: GlobalPool::new(),
         });
@@ -157,7 +160,7 @@ mod tests {
 
     #[test]
     fn clone_is_usable_independently() {
-        let memory = OpaqueMemory::new(GlobalPool::new());
+        let memory = OpaquePool::new(GlobalPool::new());
         let mut clone = memory.clone();
 
         // Relocating the clone must leave both the clone and the original usable.

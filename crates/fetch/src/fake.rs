@@ -84,7 +84,7 @@ impl HttpClient {
             Isolation::Shared,
             CustomDeps {
                 clock: deps.clock,
-                global_pool: bytesbuf::mem::GlobalPool::new(),
+                memory_pool: bytesbuf::mem::OpaquePool::new(bytesbuf::mem::GlobalPool::new()),
                 extras: handler,
             },
         )

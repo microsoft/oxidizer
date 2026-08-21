@@ -56,7 +56,7 @@ pub use global::GlobalPool;
 pub use has_memory::HasMemory;
 pub use memory::Memory;
 pub use memory_shared::MemoryShared;
-pub use opaque_memory::OpaqueMemory;
+pub use opaque_memory::{OpaqueMemory, OpaquePool};
 
 #[cfg(any(test, feature = "test-util"))]
 pub mod testing;

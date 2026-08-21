@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaqueMemory};
+use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared, OpaquePool};
 use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
@@ -44,7 +44,7 @@ use crate::{HttpError, Result};
 /// With the `test-util` feature enabled, you can create a test instance using `HttpBodyBuilder::new_fake()`.
 #[derive(Debug, Clone, ThreadAware)]
 pub struct HttpBodyBuilder {
-    memory: MemoryWrapper,
+    memory: OpaquePool,
     clock: Clock,
     pub(super) options: HttpBodyOptions,
 }
@@ -71,16 +71,16 @@ impl HttpBodyBuilder {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_fake() -> Self {
-        Self::new(GlobalPool::new(), &Clock::new_frozen())
+        Self::new(OpaquePool::new(GlobalPool::new()), &Clock::new_frozen())
     }
 
     /// Creates a new instance of [`HttpBodyBuilder`].
     ///
-    /// This method uses a per-thread memory pool from [`GlobalPool`].
+    /// The provided pool can wrap any [`MemoryShared`] implementation.
     #[must_use]
-    pub fn new(memory: GlobalPool, clock: &Clock) -> Self {
+    pub fn new(memory: OpaquePool, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Global(memory),
+            memory,
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -94,11 +94,7 @@ impl HttpBodyBuilder {
     /// relocated along with it.
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
-        Self {
-            memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
-            clock: clock.clone(),
-            options: HttpBodyOptions::default(),
-        }
+        Self::new(OpaquePool::new(memory), clock)
     }
 
     /// Sets default [`HttpBodyOptions`] for all bodies created by this builder.
@@ -357,21 +353,6 @@ impl HasMemory for HttpBodyBuilder {
     }
 }
 
-#[derive(Debug, Clone, ThreadAware)]
-enum MemoryWrapper {
-    Global(GlobalPool),
-    Opaque(OpaqueMemory),
-}
-
-impl Memory for MemoryWrapper {
-    fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        match self {
-            Self::Global(pool) => pool.reserve(min_bytes),
-            Self::Opaque(memory) => memory.reserve(min_bytes),
-        }
-    }
-}
-
 impl AsRef<Clock> for HttpBodyBuilder {
     fn as_ref(&self) -> &Clock {
         &self.clock
@@ -410,7 +391,7 @@ mod tests {
     #[test]
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
-        let memory = GlobalPool::new();
+        let memory = OpaquePool::new(GlobalPool::new());
         let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
@@ -551,7 +532,7 @@ mod tests {
     #[test]
     fn stream_with_timeout_returns_data_before_timeout() {
         let clock = ClockControl::new().to_clock();
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
+        let builder = HttpBodyBuilder::new(OpaquePool::new(GlobalPool::new()), &clock);
         let chunks: Vec<Result<BytesView>> = [b"hello " as &[u8], b"world"]
             .iter()
             .map(|c| Ok(BytesView::copied_from_slice(c, &builder)))
@@ -627,7 +608,7 @@ mod tests {
     fn builder_merges_per_call_options_with_defaults() {
         let clock = Clock::new_frozen();
         let builder_options = HttpBodyOptions::default().timeout(Duration::from_secs(30));
-        let builder = HttpBodyBuilder::new(GlobalPool::new(), &clock).with_options(builder_options);
+        let builder = HttpBodyBuilder::new(OpaquePool::new(GlobalPool::new()), &clock).with_options(builder_options);
 
         // Per-call options override the builder-level default.
         let per_call = HttpBodyOptions::default().timeout(Duration::from_secs(5));
