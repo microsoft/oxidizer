@@ -3,7 +3,11 @@
 
 //! [`TlsOptions`] and its type-state builder [`TlsOptionsBuilder`].
 
+use std::sync::Arc;
+
 use http::Version;
+#[cfg(any(feature = "rustls", test))]
+use rustls::client::ResolvesClientCert;
 
 use crate::client_identity::ClientIdentity;
 use crate::{TlsBackend, TlsBackendBuilder};
@@ -103,7 +107,14 @@ pub struct TlsOptions {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SharedOptions {
     pub(crate) supported_http_versions: Option<Vec<Version>>,
-    pub(crate) client_identity: Option<ClientIdentity>,
+    pub(crate) client_auth: Option<ClientAuth>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ClientAuth {
+    Identity(Arc<ClientIdentity>),
+    #[cfg(any(feature = "rustls", test))]
+    Resolver(Arc<dyn ResolvesClientCert>),
 }
 
 impl SharedOptions {
@@ -116,6 +127,15 @@ impl SharedOptions {
         self.supported_http_versions
             .as_deref()
             .unwrap_or(defaults.supported_http_versions.as_slice())
+    }
+
+    #[cfg(any(feature = "native-tls", test))]
+    pub(crate) fn client_identity(&self) -> Option<&ClientIdentity> {
+        match self.client_auth.as_ref()? {
+            ClientAuth::Identity(identity) => Some(identity.as_ref()),
+            #[cfg(any(feature = "rustls", test))]
+            ClientAuth::Resolver(_) => None,
+        }
     }
 }
 
@@ -210,8 +230,10 @@ impl<B> TlsOptionsBuilder<B> {
     /// The same identity works for either backend; backend-specific
     /// conversion happens when the options are materialized into a backend.
     /// The native-tls backend requires the private key to be `PKCS#8`.
+    ///
+    /// Replaces any previously configured client identity resolver.
     pub fn client_identity(mut self, identity: ClientIdentity) -> Self {
-        self.shared.client_identity = Some(identity);
+        self.shared.client_auth = Some(ClientAuth::Identity(Arc::new(identity)));
         self
     }
 }
@@ -249,7 +271,7 @@ mod tests {
         let tls = TlsOptions::builder().build();
         assert!(matches!(tls.inner, TlsOptionsKind::Auto));
         assert!(tls.shared.supported_http_versions.is_none());
-        assert!(tls.shared.client_identity.is_none());
+        assert!(tls.shared.client_auth.is_none());
     }
 
     #[test]

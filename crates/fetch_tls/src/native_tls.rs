@@ -34,7 +34,7 @@ impl NativeTlsOptions {
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
 
-        if let Some(identity) = shared.client_identity.as_ref() {
+        if let Some(identity) = shared.client_identity() {
             identity
                 .build_native_identity()
                 .map(|i| {
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn builder_native_tls_starts_empty() {
         let builder = TlsOptions::builder_native_tls();
-        assert!(builder.shared.client_identity.is_none());
+        assert!(builder.shared.client_auth.is_none());
     }
 
     #[test]
@@ -109,7 +109,7 @@ mod tests {
     fn new_native_tls_produces_native_tls_options() {
         let tls = TlsOptions::new_native_tls();
         assert!(matches!(tls.inner, TlsOptionsKind::NativeTls(_)));
-        assert!(tls.shared.client_identity.is_none());
+        assert!(tls.shared.client_auth.is_none());
     }
 
     #[test]
