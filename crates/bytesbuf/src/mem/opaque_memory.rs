@@ -82,15 +82,17 @@ mod tests {
 
     use super::*;
     use crate::mem::GlobalPool;
+    use crate::mem::testing::TransparentMemory;
 
     assert_impl_all!(OpaquePool: MemoryShared);
 
     #[test]
-    #[ignore = "stub"]
     fn opaque_pool_wraps_custom_provider() {
-        // Arrange a custom MemoryShared provider.
-        // Wrap it in OpaquePool and reserve memory.
-        // Assert the custom provider handled the reservation.
+        let pool = OpaquePool::new(TransparentMemory::new());
+
+        let buffer = pool.reserve(1024);
+
+        assert_eq!(buffer.capacity(), 1024);
     }
 
     #[test]

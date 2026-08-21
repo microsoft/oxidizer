@@ -381,11 +381,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "stub"]
     fn new_accepts_opaque_pool_with_custom_memory() {
-        // Arrange a custom MemoryShared provider wrapped in OpaquePool.
-        // Create an HttpBodyBuilder with HttpBodyBuilder::new.
-        // Assert body creation reserves through the custom provider.
+        let clock = Clock::new_frozen();
+        let pool = OpaquePool::new(TransparentMemory::new());
+
+        let builder = HttpBodyBuilder::new(pool, &clock);
+        let body = builder.text("custom pool");
+
+        assert_eq!(body.content_length(), Some(11));
     }
 
     #[test]

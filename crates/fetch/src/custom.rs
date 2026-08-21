@@ -293,6 +293,8 @@ mod tests {
     use thread_aware::unaware;
 
     use super::{CustomContext, CustomDeps, Isolation, create_builder};
+    use bytesbuf::mem::OpaquePool;
+    use bytesbuf::mem::testing::TransparentMemory;
     use crate::HttpResponseBuilder;
     use crate::fake::FakeDeps;
     use crate::pipeline::Pipeline;
@@ -311,12 +313,23 @@ mod tests {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }
 
-    #[test]
-    #[ignore = "stub"]
-    fn custom_deps_accept_custom_opaque_pool() {
-        // Arrange CustomDeps with a non-GlobalPool provider wrapped in OpaquePool.
-        // Build a custom client and execute a request.
-        // Assert the request succeeds through the custom pipeline.
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn custom_deps_accept_custom_opaque_pool() {
+        let deps = CustomDeps {
+            clock: FakeDeps::default().clock,
+            memory_pool: OpaquePool::new(TransparentMemory::new()),
+            extras: (),
+        };
+
+        let client = create_builder("test-runtime", "test", ok_factory, Isolation::Shared, deps)
+            .insecure_allow_http()
+            .minimal_pipeline()
+            .build();
+
+        let response = client.post("http://example.com").text("custom pool").fetch().await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[cfg_attr(miri, ignore)]
