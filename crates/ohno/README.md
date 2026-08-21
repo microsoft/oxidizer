@@ -204,7 +204,9 @@ several layers deep.
 ## Overriding error text
 
 The `#[display("...")]` attribute replaces the rendered message with a template of its own,
-while preserving the underlying error as a cause in the error chain.
+while still printing the cause after it. A cause that is an error also stays in the
+[`source()`][__link14] chain; a cause given as a string is printed the same way
+but does not join the chain, exactly as under the default rendering.
 
 ```rust
 use std::path::PathBuf;
@@ -222,10 +224,10 @@ let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 ```
 
 The template string supports field interpolation using `{field_name}` syntax. Unlike the
-default rendering, the source is never printed on its own: the custom message always leads, and
-the underlying error (if any) follows on the next line, after a `caused by:` label. If the
-error has no source, only the custom message is displayed — the type name is never used once a
-template is given.
+default rendering, the cause is never printed on its own: the custom message always leads, and
+the cause (if any) follows on the next line, after a `caused by:` label. If the error has no
+cause, only the custom message is displayed — the type name is never used once a template is
+given.
 
 Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 
@@ -334,15 +336,15 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The [`#[enrich_err("message")]`][__link14] attribute macro adds error enrichment with file and line info to function errors.
+The [`#[enrich_err("message")]`][__link15] attribute macro adds error enrichment with file and line info to function errors.
 
-Functions annotated with [`#[enrich_err("message")]`][__link15] automatically wrap any returned `Result`. If
+Functions annotated with [`#[enrich_err("message")]`][__link16] automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a message, including file and line information, into the error chain.
 
 **Requirements:**
 
 * The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-* The error type must implement the [`Enrichable`][__link16] trait (automatically implemented for all ohno error types)
+* The error type must implement the [`Enrichable`][__link17] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 
@@ -398,10 +400,10 @@ fn open_file(path: &str) -> Result<String, MyError> {
 
 ## AppError
 
-For applications that need a simple, catch-all error type, use [`AppError`][__link17]. It
+For applications that need a simple, catch-all error type, use [`AppError`][__link18]. It
 automatically captures backtraces and can wrap any error type.
 
-To avoid accidental usage in libraries, [`AppError`][__link18] is only available when the `app-err`
+To avoid accidental usage in libraries, [`AppError`][__link19] is only available when the `app-err`
 feature is enabled.
 
 Example usage:
@@ -417,7 +419,7 @@ fn process() -> Result<(), AppError> {
 
 ## Error Labeling
 
-[`ErrorLabel`][__link19] is a low-cardinality string label for errors, intended for use as a metric
+[`ErrorLabel`][__link20] is a low-cardinality string label for errors, intended for use as a metric
 tag or structured log field. Labels must be chosen from a small, bounded set known at
 development time to avoid high-cardinality metric series.
 
@@ -431,7 +433,7 @@ let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
 assert_eq!(label, "http.client.timeout");
 ```
 
-Use [`ErrorLabel::from_error_chain`][__link20] to walk an error’s [`source`][__link21]
+Use [`ErrorLabel::from_error_chain`][__link21] to walk an error’s [`source`][__link22]
 chain and build a dotted label from recognized errors:
 
 ```rust
@@ -445,8 +447,8 @@ let label = ErrorLabel::from_error_chain(&io_err, |e| {
 assert_eq!(label, "connection_refused");
 ```
 
-Types that carry an [`ErrorLabel`][__link22] can implement the [`Labeled`][__link23] trait to expose it
-uniformly via [`Labeled::label`][__link24].
+Types that carry an [`ErrorLabel`][__link23] can implement the [`Labeled`][__link24] trait to expose it
+uniformly via [`Labeled::label`][__link25].
 
 
 <hr/>
@@ -454,25 +456,26 @@ uniformly via [`Labeled::label`][__link24].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbWLkNVCrfkmobfrGU4BhKp5kbplL20GaBRk4bv0uMqN1As6phZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbF7t022SddTAbMru5KrO1GBsbj6WlvWEqJMgbKR_mg0kL5sxhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
  [__link11]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
  [__link12]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt::message
  [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
- [__link14]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link14]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
  [__link15]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
- [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
- [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link16]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
  [__link18]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
- [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link2]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
- [__link21]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
- [__link22]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
- [__link23]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
- [__link24]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
+ [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link21]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
+ [__link22]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link23]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link24]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
+ [__link25]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
  [__link3]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
  [__link4]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link5]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
