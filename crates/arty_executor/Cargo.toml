@@ -1,0 +1,70 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "arty_executor"
+description = "Single-threaded async task executor for the Arty runtime."
+version = "0.1.0"
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+readme = "README.md"
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/arty_executor"
+keywords = ["arty", "executor", "async", "runtime"]
+categories = ["asynchronous"]
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["scopeguard::*"]
+
+[features]
+default = []
+test-util = ["dep:scopeguard"]
+
+[dependencies]
+events_once = { workspace = true }
+foldhash = { workspace = true }
+infinity_pool = { workspace = true }
+nm = { workspace = true }
+pin-project = { workspace = true }
+scopeguard = { workspace = true, optional = true }
+tick = { workspace = true, features = ["fast-instant"] }
+
+[dev-dependencies]
+all_the_time = { workspace = true }
+alloc_tracker = { workspace = true }
+criterion = { workspace = true }
+derive_more = { workspace = true, features = ["debug"] }
+mockall = { workspace = true }
+mutants = { workspace = true }
+scopeguard = { workspace = true }
+static_assertions = { workspace = true }
+testing_aids = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
+
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
+
+[[bench]]
+name = "ae_basic_operations"
+harness = false
+required-features = ["test-util"]
+
+# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
+[[bench]]
+name = "ae_basic_operations_cg"
+harness = false
+required-features = ["test-util"]

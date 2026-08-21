@@ -326,6 +326,17 @@ impl CacheTelemetry {
         );
     }
 
+    pub(crate) fn record_insert_rejected_with_duration(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_info_with_duration(tier_name, attributes::EVENT_INSERT_REJECTED, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INSERT_REJECTED,
+            duration,
+            fallback,
+        );
+    }
+
     /// Records that an entry was evicted from the cache due to capacity limits.
     ///
     /// When moka evicts during an `insert()`, the eviction listener runs
@@ -569,6 +580,13 @@ mod tests {
         assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
             futures::executor::block_on(async {
                 async { t.record_insert_rejected("c", false) }.with_request_id(request_id).await;
+            });
+        });
+        assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
+            futures::executor::block_on(async {
+                async { t.record_insert_rejected_with_duration("c", Duration::from_nanos(1), false) }
+                    .with_request_id(request_id)
+                    .await;
             });
         });
         assert_emits(attributes::EVENT_INSERT_ERROR, |t, request_id| {

@@ -10,7 +10,7 @@
 
 use std::io::{self, ErrorKind};
 
-use cachet::{Cache, CacheEntry, CacheTier, Error};
+use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};
 use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
 use tick::Clock;
 
@@ -24,8 +24,8 @@ impl CacheTier<String, i32> for FailingCache {
         Err(Error::from_source(io::Error::new(ErrorKind::TimedOut, "connection timed out")).with_recovery(RecoveryInfo::retry()))
     }
 
-    async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<(), Error> {
-        Ok(())
+    async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, _key: &String) -> Result<(), Error> {

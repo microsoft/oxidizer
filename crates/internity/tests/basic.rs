@@ -595,6 +595,14 @@ fn freeze_races_writer_and_stays_prefix_consistent() {
     use std::collections::BTreeSet;
     use std::sync::mpsc;
 
+    // The properties under test are structural -- a freeze snapshot must be a
+    // prefix, never a cross-shard tear -- so they hold at any size, provided the
+    // count still spans several shards. The polling loop below re-freezes and
+    // walks the whole lexicon on every iteration, so the cost grows faster than
+    // linearly under Miri; 256 keeps multi-shard coverage at a fraction of it.
+    #[cfg(miri)]
+    const COUNT: usize = 256;
+    #[cfg(not(miri))]
     const COUNT: usize = 4096;
     const MID: usize = COUNT / 2;
 

@@ -98,18 +98,47 @@ fn alloc_slice_copy_mutable() {
 #[test]
 fn alloc_slice_clone_works() {
     let arena = Arena::new();
-    let originals = [
-        std::string::String::from("a"),
-        std::string::String::from("b"),
-        std::string::String::from("c"),
-    ];
+    let originals: [std::string::String; 9] = std::array::from_fn(|i| i.to_string());
     let mut s = arena.alloc_slice_clone(&originals);
-    assert_eq!(s.len(), 3);
-    assert_eq!(s[0], "a");
+    assert_eq!(s.len(), 9);
+    assert_eq!(s[0], "0");
+    assert_eq!(s[8], "8");
     s[0].push('!');
-    assert_eq!(s[0], "a!");
+    assert_eq!(s[0], "0!");
     // Originals untouched.
-    assert_eq!(originals[0], "a");
+    assert_eq!(originals[0], "0");
+}
+
+#[test]
+fn alloc_slice_clone_clones_each_unrolled_source_once() {
+    #[derive(Debug)]
+    struct CloneOnce {
+        value: usize,
+        cloned: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl Clone for CloneOnce {
+        fn clone(&self) -> Self {
+            assert!(!self.cloned.replace(true), "source element cloned more than once");
+            Self {
+                value: self.value,
+                cloned: std::rc::Rc::clone(&self.cloned),
+            }
+        }
+    }
+
+    let arena = Arena::new();
+    let originals: [CloneOnce; 9] = std::array::from_fn(|value| CloneOnce {
+        value,
+        cloned: std::rc::Rc::new(std::cell::Cell::new(false)),
+    });
+
+    let cloned = arena.alloc_slice_clone(&originals);
+
+    for (index, value) in cloned.iter().enumerate() {
+        assert_eq!(value.value, index);
+    }
+    assert!(originals.iter().all(|value| value.cloned.get()));
 }
 
 #[test]
@@ -254,9 +283,9 @@ fn alloc_charges_stats() {
 /// across the active `current_*` chunks plus any chunks that have
 /// been retired from a `current_*` slot but not yet cached or
 /// destroyed. It must be zero on a fresh arena (no chunks held at
-/// all), and return to zero after `reset` releases every chunk back
-/// to the cache / underlying allocator (which leaves the arena with
-/// the empty-mutator sentinels, contributing 0 slack each).
+/// all), and return to zero after `reset` clears retired chunks and
+/// marks a retained, rewound current chunk inactive for the new
+/// generation.
 #[cfg(feature = "stats")]
 #[test]
 fn wasted_tail_bytes_is_live_and_returns_to_zero_after_reset() {
@@ -273,14 +302,13 @@ fn wasted_tail_bytes_is_live_and_returns_to_zero_after_reset() {
         "active chunk's free tail must contribute to wasted_tail_bytes",
     );
     arena.reset();
-    // After reset every chunk has been released (either cached or
-    // destroyed). `current_*` are reset to empty-mutator sentinels
-    // which contribute 0 slack.
+    // After reset every retired chunk has been released. The current chunk is
+    // retained and rewound but remains inactive until the next allocation, so
+    // it contributes no live-generation slack.
     assert_eq!(
         arena.stats().wasted_tail_bytes,
         0,
-        "reset returned every chunk and reinstalled the empty sentinel; \
-         wasted-tail must be zero again",
+        "reset must clear prior-generation wasted-tail accounting",
     );
 }
 
@@ -357,8 +385,8 @@ fn wasted_tail_bytes_is_held_by_outstanding_arc() {
 /// current chunk is full, the old mutator is pushed
 /// into `retired_local` (which keeps a `+1` for the duration of the
 /// `&Arena` borrow). The wasted tail of every retired chunk must be
-/// counted; `reset` releases every retired chunk back to the cache
-/// and the counter must return cleanly to zero.
+/// counted; `reset` releases every retired chunk back to the cache,
+/// rewinds the current chunk, and returns the counter cleanly to zero.
 #[cfg(feature = "stats")]
 #[test]
 fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
@@ -410,8 +438,7 @@ fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
     assert_eq!(
         arena.stats().wasted_tail_bytes,
         0,
-        "reset must release every chunk and reinstall the empty sentinels, \
-         taking the gauge back to zero",
+        "reset must release retired chunks and mark the rewound current inactive",
     );
 }
 
@@ -445,28 +472,25 @@ fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
     }
 }
 
-/// Cache-reuse must not leak: a chunk that's cached on reset, then
-/// re-acquired in the next epoch, then re-retired must contribute its
-/// new wasted tail (not the stale stashed value from the previous
-/// epoch, and not double-counted).
+/// Reuse must not leak: retired chunks cached on reset and a retained current
+/// chunk must contribute only their current generation's wasted tail.
 #[cfg(feature = "stats")]
 #[test]
 fn wasted_tail_correct_after_cache_reuse_cycles() {
     let mut arena = Arena::new();
     let mut acquired_chunks_total = 0u64;
     for _ in 0..8 {
-        // Force at least one full chunk's worth of allocs so we cycle
-        // through `current` AND populate the cache on reset.
+        // Force enough allocs to cycle through `current`; reset caches retired
+        // chunks and rewinds the final current chunk.
         for _ in 0..64 {
             let _ = arena.alloc(0);
         }
         let stats = arena.stats();
         acquired_chunks_total = stats.normal_chunks_allocated;
         arena.reset();
-        // After every reset the counter must be 0 — even though the
-        // chunk's `wasted_at_retire` field still holds the previous
-        // value, the subtract at cache-push consumed it exactly once,
-        // and the next epoch's retire will re-set + re-add.
+        // After every reset the counter must be 0. Cache publication consumes
+        // retired waste exactly once and the retained current is inactive
+        // until the next allocation.
         assert_eq!(arena.stats().wasted_tail_bytes, 0, "cache reuse leaked into wasted-tail counter");
     }
     // Sanity: we actually exercised real allocations, not a no-op.

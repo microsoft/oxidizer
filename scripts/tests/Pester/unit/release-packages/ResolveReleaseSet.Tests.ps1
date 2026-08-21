@@ -27,10 +27,10 @@ BeforeAll {
             [bool]     $IsProcMacroOnly = $false,
             [hashtable] $DepAliases = @{},
             # The crate's rustdoc name -- its [lib] name, which defaults to the
-            # normalized package name. Allowlists of INDIRECT dependents are
-            # rooted at this, never at a rename alias: a rename only exists on
-            # an edge the renaming crate declares, and an indirect dependent
-            # declares no such edge.
+            # normalized package name. Allowlist entries earned on an INDIRECT
+            # path are rooted at this, never at a rename alias: a rename exists
+            # only on an edge the renaming crate declares, and an indirect path
+            # crosses no such edge to the target.
             [string]   $CrateRoot = $null,
             [AllowNull()][string[]] $AllowedExternalTypes = @()
         )
@@ -1047,6 +1047,89 @@ Describe 'Resolve-ReleaseSet exposure cascade over re-exported types' {
             -GetRequiredChangeType (New-StubClassifier)
 
         ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType | Should -Be 'breaking'
+    }
+
+    Context 'a crate holding both a direct and an indirect path' {
+        # The two exposure predicates accept different allowlist roots, so a
+        # crate that reaches the target both ways has to be judged on both.
+        # Testing only the direct edge loses the roots the indirect path earns.
+
+        It 'raises a dependent whose renamed direct edge cannot supply the root its indirect path does' {
+            # facade imports defining directly, but under `package = "..."`, so
+            # on that edge the crate is nameable only as aliased_dep and the
+            # direct predicate rightly refuses def_v1. facade also reaches
+            # defining through relay, which re-exports its types -- and that
+            # path attributes them to defining's own crate root, def_v1. The
+            # allowlist entry is therefore legitimate, and facade's public API
+            # really is defining's types.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('def_v1') } `
+                    -AllowedExternalTypes @('def_v1::*')
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('defining', 'relay') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @('def_v1::Handle')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType |
+                Should -Be 'breaking' -Because 'the indirect path earns the root the renamed direct edge cannot'
+        }
+
+        It 'does not raise a dependent whose only path to the target is the renamed direct edge' {
+            # Identical to the case above except that nothing re-exports
+            # defining, so lonely has no second path. Its allowlist entry
+            # cannot have been earned: importing the crate as aliased_dep makes
+            # def_v1::Handle unwritable, so the entry names some unrelated
+            # crate that merely collides with defining's root.
+            #
+            # This is why the indirect test keys off a path that exists
+            # independently of the direct edge rather than plain reachability:
+            # reachability counts the direct edge itself and would readmit the
+            # root the direct predicate just rejected.
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'lonely' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @('def_v1::Handle')
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'lonely' }).EffectiveChangeType |
+                Should -Not -Be 'breaking' -Because 'a renamed edge makes that root unwritable, so the entry is a collision'
+        }
+
+        It 'still requires positive evidence on the indirect path' {
+            # facade holds both paths but claims to name nothing foreign, so
+            # neither predicate has anything to match. Evaluating both edges
+            # must not degrade into "any crate that reaches the target".
+            $baseline = @(
+                New-BaselinePackage -Folder 'defining' -Version '1.0.0' -CrateRoot 'def_v1' `
+                    -AllowedExternalTypes @()
+                New-BaselinePackage -Folder 'relay' -Version '1.0.0' -Deps @('defining') `
+                    -DepAliases @{ 'defining' = @('def_v1') } `
+                    -AllowedExternalTypes @('def_v1::*')
+                New-BaselinePackage -Folder 'facade' -Version '1.0.0' -Deps @('defining', 'relay') `
+                    -DepAliases @{ 'defining' = @('aliased_dep') } `
+                    -AllowedExternalTypes @()
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('defining@breaking')
+
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline `
+                -GetRequiredChangeType (New-StubClassifier)
+
+            ($resolved | Where-Object { $_.Folder -eq 'facade' }).EffectiveChangeType |
+                Should -Not -Be 'breaking'
+        }
     }
 
     Context 'the indirect edge demands positive evidence' {

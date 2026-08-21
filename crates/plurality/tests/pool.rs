@@ -22,10 +22,11 @@
 mod common;
 
 use core::alloc::Layout;
-use core::ptr::NonNull;
-use std::cell::Cell;
+use core::ptr::{NonNull, from_ref};
+use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::rc::{Rc as StdRc, Weak as StdWeak};
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
@@ -376,7 +377,7 @@ fn chunk_size_zero_panics() {
 }
 
 #[test]
-#[should_panic(expected = "chunk_size must be <= 2^31")]
+#[should_panic(expected = "chunk_size exceeds the largest slot count")]
 fn chunk_size_too_large_panics() {
     let _ = Pool::<u32>::builder().chunk_size((1 << 31) + 1).build();
 }
@@ -405,11 +406,11 @@ unsafe impl Allocator for FailingAllocator {
 fn allocator_failure_surfaces_as_allocator_failure() {
     let pool = Pool::<u32>::builder().chunk_size(4).allocator(FailingAllocator).build();
     // The first allocation must grow a chunk; the allocator fails, so the error
-    // identifies the backing allocator as the cause, not a capacity limit.
+    // identifies a failed memory request as the cause, not a capacity limit.
     let err = pool.try_alloc_box(1).unwrap_err();
     assert!(err.is_allocator_failure());
     assert!(!err.is_capacity_exhausted());
-    assert_eq!(format!("{err}"), "the backing allocator failed to allocate a new chunk");
+    assert_eq!(format!("{err}"), "the pool could not obtain required memory");
 }
 
 // An allocator that tracks the number of live bytes, to prove memory is freed.
@@ -562,4 +563,158 @@ fn contended_free_list_exercises_cas_retries() {
     });
 
     assert!(pool.chunks_allocated() >= 1);
+}
+
+// ── allocator reentrancy ─────────────────────────────────────────────────
+
+/// State shared between [`ReentrantAllocator`] and the tests driving it.
+struct ReentryState {
+    /// Weak, because the pool owns the allocator that reaches back to it.
+    pool: RefCell<StdWeak<Pool<u64, ReentrantAllocator>>>,
+    /// Set while a reentrant allocation is in flight. The nested allocation
+    /// allocates again, and unguarded that recurses without end.
+    active: Cell<bool>,
+    /// Counts reentrant allocations, so a test can tell the hook actually ran.
+    reentries: Cell<u32>,
+    /// The value the reentrant allocation obtained. Held here rather than
+    /// leaked so that both slots can be compared while live and then dropped,
+    /// which is what exercises the free-list resolution the colliding chunk
+    /// identities would corrupt.
+    reentrant: RefCell<Option<PoolBox<u64, ReentrantAllocator>>>,
+}
+
+/// An allocator that allocates from the pool it serves, from inside
+/// `allocate`.
+///
+/// This is the one window `Pool` cannot order away by construction: the chunk
+/// count is read after the call precisely so that a nested `grow` publishes
+/// first. Ref: docs/implementation/reentrancy.md.
+struct ReentrantAllocator(StdRc<ReentryState>);
+
+// SAFETY: allocation and deallocation forward unchanged to `Global`; the
+// reentrant call between them only uses the pool's public API.
+unsafe impl Allocator for ReentrantAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, BackingAllocError> {
+        let block = Global.allocate(layout)?;
+        if !self.0.active.replace(true) {
+            self.0.reentries.set(self.0.reentries.get() + 1);
+            let target = self.0.pool.borrow().upgrade();
+            if let Some(pool) = target {
+                *self.0.reentrant.borrow_mut() = Some(pool.alloc_box(u64::MAX));
+            }
+            self.0.active.set(false);
+        }
+        Ok(block)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded under the caller's `Allocator` contract.
+        unsafe { Global.deallocate(ptr, layout) };
+    }
+}
+
+/// Builds a pool with chunk_size slots per chunk whose allocator re-enters it.
+fn reentrant_pool_sized(chunk_size: u32, max_chunks: Option<u32>) -> (StdRc<ReentryState>, StdRc<Pool<u64, ReentrantAllocator>>) {
+    let state = StdRc::new(ReentryState {
+        pool: RefCell::new(StdWeak::new()),
+        active: Cell::new(false),
+        reentries: Cell::new(0),
+        reentrant: RefCell::new(None),
+    });
+    let builder = Pool::<u64>::builder()
+        .chunk_size(chunk_size)
+        .allocator(ReentrantAllocator(StdRc::clone(&state)));
+    let builder = match max_chunks {
+        Some(max) => builder.max_chunks(max),
+        None => builder,
+    };
+    let pool = StdRc::new(builder.build());
+    *state.pool.borrow_mut() = StdRc::downgrade(&pool);
+    (state, pool)
+}
+
+/// Builds a single-slot-per-chunk pool whose allocator re-enters it.
+fn reentrant_pool(max_chunks: Option<u32>) -> (StdRc<ReentryState>, StdRc<Pool<u64, ReentrantAllocator>>) {
+    reentrant_pool_sized(1, max_chunks)
+}
+
+#[test]
+fn allocator_reentry_during_growth_yields_distinct_slots() {
+    let (state, pool) = reentrant_pool(None);
+
+    // Every allocation grows, so the reentrant call runs while the outer `grow`
+    // is between its allocator call and its chunk publication. The outer must
+    // derive its chunk identity from a count that already includes the nested
+    // chunk, or both would claim one range of global slot indices and hand the
+    // same slot to two live handles.
+    // Ref: docs/implementation/reentrancy.md, "Growth".
+    let outer = pool.alloc_box(1);
+    let nested = state.reentrant.borrow_mut().take().unwrap();
+
+    assert_eq!(state.reentries.get(), 1);
+    assert_eq!(pool.chunks_allocated(), 2, "each of the two allocations grew its own chunk");
+    assert_ne!(
+        from_ref::<u64>(&outer),
+        from_ref::<u64>(&nested),
+        "the two chunks handed out one slot twice"
+    );
+    assert_eq!(*outer, 1);
+    assert_eq!(*nested, u64::MAX);
+    assert_eq!(pool.len(), 2);
+
+    // Returning both slots resolves each global index back to the chunk that
+    // owns it. Two chunks that had claimed one index range would send a slot
+    // home to the wrong chunk.
+    drop(outer);
+    drop(nested);
+    assert_eq!(pool.len(), 0);
+    assert_eq!(pool.chunks_allocated(), 2, "returned slots are reused rather than dropped");
+}
+
+#[test]
+fn allocator_reentry_during_growth_does_not_overshoot_the_chunk_cap() {
+    let (state, pool) = reentrant_pool(Some(1));
+
+    // The reentrant allocation consumes the pool's only chunk between the outer
+    // call's two cap checks. Without the re-check the pool would overshoot by
+    // the reentry depth, and an unbounded pool could derive slot indices that
+    // reach the `FREE_END` sentinel.
+    // Ref: docs/implementation/reentrancy.md, "Growth".
+    let err = pool.try_alloc_box(1).unwrap_err();
+    let nested = state.reentrant.borrow_mut().take().unwrap();
+
+    assert!(err.is_capacity_exhausted());
+    assert_eq!(state.reentries.get(), 1);
+    assert_eq!(pool.chunks_allocated(), 1, "the cap bounds growth whatever the reentry depth");
+    assert_eq!(*nested, u64::MAX, "the reentrant allocation consumed the pool's only chunk");
+}
+
+#[test]
+fn a_full_pool_hands_out_a_slot_a_reentrant_allocation_left_free() {
+    let (state, pool) = reentrant_pool_sized(2, Some(1));
+
+    // The reentrant allocation consumes the pool's only chunk, so the outer
+    // call cannot grow. That chunk's second slot is free, and capacity
+    // exhaustion means no slot is available rather than no chunk is.
+    // Ref: docs/implementation/reentrancy.md, "Growth".
+    let outer = pool.alloc_box(1);
+    let nested = state.reentrant.borrow_mut().take().unwrap();
+
+    assert_eq!(state.reentries.get(), 1);
+    assert_eq!(pool.chunks_allocated(), 1, "the cap held");
+    assert_ne!(
+        from_ref::<u64>(&outer),
+        from_ref::<u64>(&nested),
+        "both values occupy the one chunk"
+    );
+    assert_eq!(*outer, 1);
+    assert_eq!(*nested, u64::MAX);
+    assert_eq!(pool.len(), 2);
+
+    // The chunk is genuinely full now, so the next allocation must fail.
+    assert!(pool.try_alloc_box(2).unwrap_err().is_capacity_exhausted());
+
+    drop(outer);
+    drop(nested);
+    assert_eq!(pool.len(), 0);
 }

@@ -62,6 +62,20 @@ fn empty_slice<'a, T>() -> &'a mut [T] {
     unsafe { core::slice::from_raw_parts_mut(NonNull::<T>::dangling().as_ptr(), 0) }
 }
 
+/// Adopts a fully initialized slice while preserving a length already known by
+/// the caller.
+///
+/// # Safety
+///
+/// `slot` must contain exactly `len` initialized elements that the returned
+/// [`Alloc`] may exclusively own.
+unsafe fn adopt_slice_with_len<T>(slot: &mut [T], len: usize) -> Alloc<'_, [T]> {
+    debug_assert_eq!(slot.len(), len);
+    let ptr = slot.as_mut_ptr();
+    // SAFETY: guaranteed by the caller.
+    unsafe { Alloc::from_mut(core::slice::from_raw_parts_mut(ptr, len)) }
+}
+
 /// Records the caller invariant that `len` is non-zero.
 #[inline(always)]
 #[cfg_attr(test, mutants::skip)]
@@ -281,11 +295,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// into a fresh arena slot and takes ownership of it in an [`Alloc`].
     #[inline(always)]
     fn impl_alloc_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Alloc<'_, [T]>, AllocError> {
+        let len = src.len();
         let slot = self.alloc_slice_copy_raw::<T>(src)?;
-        // SAFETY: `alloc_slice_copy_raw` returns the unique `&mut [T]` for a
-        // freshly-written arena slice that the arena hands out exactly once and
-        // never drops itself, so `Alloc` may adopt it and own its destructor.
-        Ok(unsafe { Alloc::from_mut(slot) })
+        // SAFETY: `alloc_slice_copy_raw` initialized exactly `src.len()`
+        // elements in the unique arena slot returned.
+        Ok(unsafe { adopt_slice_with_len(slot, len) })
     }
 
     /// Raw allocation path shared by `alloc_slice_copy` and
@@ -348,11 +362,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// into a fresh arena slot and takes ownership of it in an [`Alloc`].
     #[inline(always)]
     fn impl_alloc_slice_clone<T: Clone>(&self, src: &[T]) -> Result<Alloc<'_, [T]>, AllocError> {
+        let len = src.len();
         let slot = self.alloc_slice_clone_raw::<T>(src)?;
-        // SAFETY: `alloc_slice_clone_raw` returns the unique `&mut [T]` for a
-        // freshly-written arena slice that the arena hands out exactly once and
-        // never drops itself, so `Alloc` may adopt it and own its destructor.
-        Ok(unsafe { Alloc::from_mut(slot) })
+        // SAFETY: `alloc_slice_clone_raw` initialized exactly `src.len()`
+        // elements in the unique arena slot returned.
+        Ok(unsafe { adopt_slice_with_len(slot, len) })
     }
 
     /// Closure-free fast path for `alloc_slice_clone` /
@@ -412,11 +426,9 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     fn impl_alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Alloc<'_, [T]>, AllocError> {
         let slot = self.alloc_slice_fill_with_raw::<T, F>(len, f)?;
-        // SAFETY: `alloc_slice_fill_with_raw` returns the unique `&mut [T]` for
-        // a freshly-written arena slice that the arena hands out exactly once
-        // and never drops itself, so `Alloc` may adopt it and own its
-        // destructor.
-        Ok(unsafe { Alloc::from_mut(slot) })
+        // SAFETY: `alloc_slice_fill_with_raw` initialized exactly `len`
+        // elements in the unique arena slot returned.
+        Ok(unsafe { adopt_slice_with_len(slot, len) })
     }
 
     /// Closure-bearing fast path for `alloc_slice_fill_with` /
@@ -473,23 +485,21 @@ impl<A: Allocator + Clone> Arena<A> {
     /// arena slot from `iter` and takes ownership of it in an [`Alloc`].
     #[inline(always)]
     fn impl_alloc_slice_fill_iter<T, I: ExactSizeIterator<Item = T>>(&self, iter: I) -> Result<Alloc<'_, [T]>, AllocError> {
-        let slot = self.alloc_slice_fill_iter_raw::<T, I>(iter)?;
-        // SAFETY: `alloc_slice_fill_iter_raw` returns the unique `&mut [T]` for
-        // a freshly-written arena slice that the arena hands out exactly once
-        // and never drops itself, so `Alloc` may adopt it and own its
-        // destructor.
-        Ok(unsafe { Alloc::from_mut(slot) })
+        reject_over_aligned::<T>()?;
+        let len = iter.len();
+        let slot = self.alloc_slice_fill_iter_raw::<T, I>(len, iter)?;
+        // SAFETY: `alloc_slice_fill_iter_raw` initialized exactly `len`
+        // elements in the unique arena slot returned.
+        Ok(unsafe { adopt_slice_with_len(slot, len) })
     }
 
     /// Iterator-bearing fast path for `alloc_slice_fill_iter` /
     /// `try_alloc_slice_fill_iter`. The iterator length is sampled once
-    /// via [`ExactSizeIterator::len`] before reservation. Keeping the refill
+    /// via [`ExactSizeIterator::len`] before this helper. Keeping the refill
     /// continuation out of line avoids materializing iterator state on the
     /// common path. The iterator is consumed only on success arms that return.
     #[inline(always)]
-    fn alloc_slice_fill_iter_raw<T, I: ExactSizeIterator<Item = T>>(&self, iter: I) -> Result<&mut [T], AllocError> {
-        reject_over_aligned::<T>()?;
-        let len = iter.len();
+    fn alloc_slice_fill_iter_raw<T, I: Iterator<Item = T>>(&self, len: usize, iter: I) -> Result<&mut [T], AllocError> {
         if len == 0 {
             // Drop the iterator without consuming it: the contract is
             // "fill `len` slots from the iterator", so a zero-length
@@ -550,7 +560,7 @@ mod tests {
         let arena = Arena::new();
         let _prime = arena.alloc(0_u8);
 
-        let slice = arena.alloc_slice_fill_iter_raw([1_u8, 2, 3].into_iter()).unwrap();
+        let slice = arena.alloc_slice_fill_iter_raw(3, [1_u8, 2, 3].into_iter()).unwrap();
 
         assert_eq!(slice, [1, 2, 3]);
     }

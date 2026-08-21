@@ -188,12 +188,19 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
         acquire (fresh or from cache)
                   │
                   ▼
-            ┌───────────┐   fills up / reset
-            │  CURRENT  │──────────────┐
-            │ (mutating)│              │
-            └───────────┘              ▼
-                              reconcile surplus, then:
-                    ┌───────────────────┴───────────────────┐
+            ┌───────────┐
+            │  CURRENT  │
+            │ (mutating)│
+            └───────────┘
+```
+
+**Refill** (the chunk fills up) always rotates the chunk out of `CURRENT`:
+
+```text
+            ┌───────────┐  fills up
+            │  CURRENT  │────────────► reconcile surplus, then:
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
         handed out an Alloc?                         smart-pointer-only?
                     │ yes                                    │ no
                     ▼                                        ▼
@@ -206,6 +213,28 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
                     │ reset / arena drop        drops
                     ▼                             │
               → cache or free  ◄──────────────────┘
+```
+
+**Reset** releases every older retired chunk, then keeps or detaches the
+current one depending on whether a smart owner escaped from it:
+
+```text
+            ┌───────────┐  reset
+            │  CURRENT  │────────────► no smart owner escaped?
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
+                    │ yes                                   │ no
+                    ▼                                       ▼
+            ┌────────────────────┐          reconcile surplus and detach;
+            │  RETAINED          │          the chunk lives on until the
+            │ (stays CURRENT,    │          last escaped handle drops
+            │  cursor rewound,   │                      │
+            │  marker cleared)   │                      ▼
+            └─────────┬──────────┘                → cache or free
+                      │                                 │
+                      ▼                                 ▼
+        serves the next generation           next alloc acquires a
+                                             fresh CURRENT chunk
 ```
 
 **Pinned chunks.** If a chunk handed out any `Alloc` handle (including the
@@ -225,15 +254,32 @@ after the arena is gone.
 smart pointer is pinned until reset even after its `Arc`s drop. This is the
 deliberate, acknowledged cost of letting one current chunk serve both
 styles; the arena tracks a single "did this chunk hand out a reference?"
-flag so that only genuinely mixed chunks pay it.
+flag so that only genuinely mixed chunks pay it. Local reservations sample
+that flag after bounds checks but before committing the bump cursor, and write
+it only for the false-to-true transition. This keeps the steady-state path free
+of repeated marker stores and avoids a marker load after the cursor store.
+The marker transition and chunk-exhaustion edges are laid out as cold blocks,
+leaving the marked, in-capacity path as straight-line fall-through code.
 
 **Reset is a cursor rewind.** `Arena::reset` takes `&mut self`, which
 statically guarantees no `Alloc` (which borrows `&self`) is live. It runs
 **no** destructors — every `Alloc` already ran its own on drop, and
-smart-pointer values remain owned by their still-live handles. It simply
-reconciles the current chunk's refcount surplus (below) and returns chunk
-bytes to the cache (or leaves chunks alive if escaped handles still hold
-them).
+smart-pointer values remain owned by their still-live handles. A current chunk
+that handed out no smart pointer is retained with its pre-credited refcount and
+rewound in place. Otherwise reset reconciles the current chunk's refcount
+surplus (below) and detaches it, returning its bytes to the cache when the last
+escaped handle releases it. Reset similarly releases only the list-owned
+reference to each older retired chunk; an outstanding smart owner keeps that
+chunk alive until the owner releases it.
+
+The marker is cleared even when reset retains the current chunk: the next
+generation may use that chunk exclusively for smart pointers and must still
+qualify for early reclamation. Leaving a stale mark would silently pin it.
+Encoding an additional "rewound but previously local" state would remove a
+small part of the first-allocation boundary, but the measured path already
+executes fewer instructions than Bumpalo and the extra lifecycle state is not
+justified by the remaining wall-clock delta in
+[`PERF.md`](PERF.md#reset-plus-the-next-allocation).
 
 `ArenaStats` keeps its lifetime counters and live gauges across this boundary,
 while its explicitly named `*_since_reset` counters start a new generation

@@ -1,0 +1,38 @@
+---
+source: crates/observed_macros/src/enrichment.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::enrichment::Enrichment for RequestContext {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(2usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new("tenant", self.tenant),
+                );
+            match self.user_agent {
+                ::core::option::Option::Some(__val) => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::new(
+                                "user_agent",
+                                __val,
+                            ),
+                        )
+                }
+                ::core::option::Option::None => {
+                    entries
+                        .push(
+                            ::observed::__private::EnrichmentEntry::unclassified(
+                                "user_agent",
+                                "n/a",
+                            ),
+                        )
+                }
+            }
+            entries
+        }
+    }
+};
