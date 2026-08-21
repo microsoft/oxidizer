@@ -38,7 +38,7 @@ syn = { workspace = true, features = [
 
 [dev-dependencies]
 insta = { workspace = true }
-testing_aids = { workspace = true, features = ["macros"] }
+testing_aids = { workspace = true }
 
 [lints]
 workspace = true

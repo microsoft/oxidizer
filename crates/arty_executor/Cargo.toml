@@ -41,7 +41,7 @@ mockall = { workspace = true }
 mutants = { workspace = true }
 scopeguard = { workspace = true }
 static_assertions = { workspace = true }
-testing_aids = { workspace = true, features = ["runtime"] }
+testing_aids = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 

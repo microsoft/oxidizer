@@ -9,8 +9,6 @@
 //! after a callsite has been reached with no subscriber installed (which would
 //! otherwise poison `tracing-core`'s process-global callsite-interest cache).
 
-#![cfg(feature = "runtime")]
-
 use serial_test::serial;
 use testing_aids::tracing_logs::write_to_stdout_and_buffer;
 
