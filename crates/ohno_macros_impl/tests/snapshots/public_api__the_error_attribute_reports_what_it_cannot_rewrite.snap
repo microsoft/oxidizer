@@ -1,0 +1,77 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== a field already marked with #[error], and nothing is re-emitted ========
+
+#[ohno::error]
+struct T {
+    path: String,
+    #[error]
+    mine: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly"
+}
+
+// ======== a hand-written reserved marker ========
+
+#[ohno::error]
+struct T {
+    path: String,
+    /// ohno::generated-core@7f3d9c2a
+    mine: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]`"
+}
+
+// ======== no_constructors, which would leave the added field uninitialized ========
+
+#[ohno::error]
+#[no_constructors]
+struct T {
+    path: String,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` is an implementation detail with no stable name or position, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly"
+}
+
+// ======== a non-struct ========
+
+#[ohno::error]
+enum T {
+    A,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[ohno::error]` supports structs only. A struct is what can hold the OhnoCore field it adds"
+}
+
+// ======== an argument, which the attribute does not take ========
+
+#[ohno::error(anything)]
+struct T {
+    path: String,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[ohno::error]` takes no arguments"
+}
+
+// ======== an unparsable item ========
+
+# [ohno :: error] 1 + 1
+// ---- expands to ----
+
+::core::compile_error! {
+    "expected one of: `fn`, `extern`, `use`, `static`, `const`, `unsafe`, `mod`, `type`, `struct`, `enum`, `union`, `impl`, `trait`, `auto`, `default`, `macro`, identifier, `self`, `super`, `crate`, `::`"
+}

@@ -1,0 +1,11 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+#[derive(Error)]
+fn not_a_type() {}
+// ---- expands to ----
+
+::core::compile_error! {
+    "expected one of: `struct`, `enum`, `union`"
+}
