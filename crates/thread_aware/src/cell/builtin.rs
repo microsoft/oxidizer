@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::num::NonZero;
+
 use crate::affinity::Affinity;
 use crate::cell::Strategy;
 
@@ -16,8 +18,9 @@ impl Strategy for PerCore {
         affinity.processor_index()
     }
 
-    fn count(affinity: Affinity) -> usize {
-        affinity.processor_count()
+    fn count(affinity: Affinity) -> NonZero<usize> {
+        // A machine always has at least one processor, so the count is never zero.
+        NonZero::new(affinity.processor_count()).expect("a machine always reports at least one processor")
     }
 }
 
@@ -33,8 +36,9 @@ impl Strategy for PerNuma {
         affinity.memory_region_index()
     }
 
-    fn count(affinity: Affinity) -> usize {
-        affinity.memory_region_count()
+    fn count(affinity: Affinity) -> NonZero<usize> {
+        // A machine always has at least one memory region, so the count is never zero.
+        NonZero::new(affinity.memory_region_count()).expect("a machine always reports at least one memory region")
     }
 }
 
@@ -49,7 +53,7 @@ impl Strategy for PerProcess {
         0
     }
 
-    fn count(_affinity: Affinity) -> usize {
-        1
+    fn count(_affinity: Affinity) -> NonZero<usize> {
+        NonZero::<usize>::MIN
     }
 }

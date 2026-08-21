@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 #[cfg(not(test))]
 use alloc::vec::Vec;
 use std::marker::PhantomData;
+use std::num::NonZero;
 #[cfg(test)]
 use std::sync::RwLockReadGuard;
 use std::sync::{self, OnceLock, RwLock, RwLockWriteGuard};
@@ -18,12 +19,21 @@ use nm::Event;
 use crate::affinity::Affinity;
 
 /// A strategy for storing data in a affinity-aware manner.
+///
+/// A strategy assigns each affinity a slot index and reports how many slots the storage holds. The
+/// affinities that share one `Arc` are expected to map into a single fixed coordinate space: every
+/// such affinity reports the same slot count, and its index falls within that count. The built-in
+/// strategies satisfy this because the counts are machine properties — the processor and
+/// memory-region counts — that do not vary across the affinities of one machine.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
     fn index(affinity: Affinity) -> usize;
 
     /// Returns the number of slots the storage holds.
-    fn count(affinity: Affinity) -> usize;
+    ///
+    /// The count is at least one and is expected to be the same for every affinity that shares one
+    /// `Arc`, because the storage is sized to it exactly once.
+    fn count(affinity: Affinity) -> NonZero<usize>;
 }
 
 /// A slot lock is never left poisoned, so acquiring it never fails.
@@ -38,14 +48,119 @@ pub trait Strategy {
 const NEVER_POISONED: &str =
     "a slot lock is never left poisoned; a panic while one is held is caught and the lock released before the unwind resumes";
 
+/// Rejects a direct [`Storage`] access whose affinity falls outside the storage's coordinate space.
+///
+/// [`Storage::insert`] and [`Storage::get`] require an affinity the storage was sized for. An
+/// affinity indexing past the slot count is a caller error — the caller mixed coordinate spaces
+/// rather than relying on the degraded relocation path — so the access panics rather than silently
+/// discarding a value or returning a value from an unrelated slot. Split into its own `#[cold]`
+/// function so the panic machinery stays off the accessor's inlined body.
+#[cold]
+fn out_of_coordinate_space() -> ! {
+    panic!(
+        "Storage accessed with an affinity outside its coordinate space; direct Storage access requires affinities that map into the slot count this storage was sized for"
+    );
+}
+
+/// Per-affinity storage shared by every clone of an `Arc`.
+///
+/// A relocation into an affinity publishes the value here; later relocations into
+/// the same affinity read it back. This can also be built directly and populated
+/// with [`insert`](Self::insert), then handed to [`Arc::from_storage`] to produce
+/// an `Arc` backed by it — the way to hand an `Arc` a set of per-affinity values
+/// prepared in advance.
+///
+/// This is the caller-facing handle. It fixes the stored type to `sync::Arc<T>` and wraps a private
+/// [`SlotTable`], the value-agnostic partitioned table that does the locking.
+///
+/// [`Arc::from_storage`]: crate::Arc::from_storage
+#[derive(Debug)]
+pub struct Storage<T: ?Sized, S: Strategy> {
+    inner: SlotTable<sync::Arc<T>, S>,
+}
+
+impl<T: ?Sized, S: Strategy> Storage<T, S> {
+    /// Creates an empty storage, with no affinity populated.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { inner: SlotTable::new() }
+    }
+
+    /// Sets the value for `affinity`, returning the previous one if there was one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `affinity` falls outside the storage's coordinate space — an index at or beyond the
+    /// slot count the strategy reports. Direct callers are expected to use affinities the storage was
+    /// sized for.
+    #[inline]
+    pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
+        if !self.inner.in_range(affinity) {
+            out_of_coordinate_space();
+        }
+
+        self.inner.replace(affinity, value)
+    }
+
+    /// Returns a clone of the value published for `affinity`, if any.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `affinity` falls outside the storage's coordinate space — an index at or beyond the
+    /// slot count the strategy reports. Direct callers are expected to use affinities the storage was
+    /// sized for.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
+        if !self.inner.in_range(affinity) {
+            out_of_coordinate_space();
+        }
+
+        self.inner.get_clone(affinity)
+    }
+
+    /// Returns a clone of the value published for `affinity`, or `None` when the affinity is out of
+    /// range.
+    ///
+    /// The tolerant read the relocation hit path uses: an out-of-range affinity is a no-op there
+    /// rather than a caller error, so it returns `None` instead of panicking the way the public
+    /// [`get`](Self::get) does.
+    pub(crate) fn probe(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
+        self.inner.get_clone(affinity)
+    }
+
+    /// Acquires the exclusive lock on the slot for `affinity`, or `None` when that affinity's slot is
+    /// out of range.
+    pub(crate) fn write(&self, affinity: Affinity) -> Option<RwLockWriteGuard<'_, Option<sync::Arc<T>>>> {
+        self.inner.write(affinity)
+    }
+
+    /// Counts published values for which `predicate` holds.
+    pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
+        self.inner.count_where(predicate)
+    }
+
+    /// Acquires the shared lock on the slot for `affinity`.
+    #[cfg(test)]
+    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
+        self.inner.read(affinity)
+    }
+}
+
+impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// One slot: an independently-locked value cell, cache-line padded to curb false sharing.
 type Slot<T> = CachePadded<RwLock<Option<T>>>;
 
 /// Affinity-partitioned storage: one independently-locked slot per affinity.
 ///
-/// This is the raw slot table. [`Storage`] wraps it as the handle an
-/// `Arc` actually holds; the two are separate so this can be unit-tested with a
-/// plain value type while the wrapper pins the stored type to `Arc<T>`.
+/// This is the raw slot table behind [`Storage`], which fixes its element type to `Arc<T>`; the two
+/// are separate so this can be unit-tested with a plain value type while the wrapper pins the stored
+/// type.
 ///
 /// Each slot owns its own `RwLock`, so relocations into different slots never
 /// touch the same lock. The strategy decides how affinities map to slots:
@@ -78,7 +193,7 @@ impl<T, S: Strategy> SlotTable<T, S> {
     /// Returns the slot array, sizing it on first use to hold every affinity.
     fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
         self.slots.get_or_init(|| {
-            (0..S::count(affinity))
+            (0..S::count(affinity).get())
                 .map(|_| CachePadded::new(RwLock::new(None)))
                 .collect::<Vec<_>>()
                 .into_boxed_slice()
@@ -94,6 +209,14 @@ impl<T, S: Strategy> SlotTable<T, S> {
     /// to treat the affinity as unreachable.
     fn slot(&self, affinity: Affinity) -> Option<&RwLock<Option<T>>> {
         self.slots(affinity).get(S::index(affinity)).map(|slot| &**slot)
+    }
+
+    /// Reports whether `affinity` maps to a slot inside the sized table.
+    ///
+    /// Sizes the table on first use, like any other access. The public [`Storage`] surface uses this
+    /// to reject an out-of-range affinity before touching a slot.
+    pub(crate) fn in_range(&self, affinity: Affinity) -> bool {
+        self.slot(affinity).is_some()
     }
 
     /// Replaces the data for the given affinity with the provided value.
@@ -140,7 +263,8 @@ impl<T, S: Strategy> SlotTable<T, S> {
 /// affinity as unreachable and leaves the `Arc` on the value it already carries rather than reaching
 /// into an unrelated slot. This is a supported-but-degraded path, so it is recorded as an observable
 /// metric rather than trapped: a process that suspects it is happening can inspect the
-/// `thread_aware_arc_oob` event. Ref: docs/implementation.md, "Storage".
+/// `thread_aware_arc_oob` event. Direct `Storage` access never reaches here — it rejects an
+/// out-of-range affinity by panicking instead. Ref: docs/implementation.md, "Storage".
 ///
 /// Marked `#[cold]` and split into its own function so the emission machinery is laid out off the hot
 /// path.
@@ -190,66 +314,12 @@ where
     }
 }
 
-/// Per-affinity storage shared by every clone of an `Arc`.
-///
-/// A relocation into an affinity publishes the value here; later relocations into
-/// the same affinity read it back. This can also be built directly and populated
-/// with [`insert`](Self::insert), then handed to [`Arc::from_storage`] to produce
-/// an `Arc` backed by it — the way to hand an `Arc` a set of per-affinity values
-/// prepared in advance.
-///
-/// [`Arc::from_storage`]: crate::Arc::from_storage
-#[derive(Debug)]
-pub struct Storage<T: ?Sized, S: Strategy> {
-    inner: SlotTable<sync::Arc<T>, S>,
-}
-
-impl<T: ?Sized, S: Strategy> Storage<T, S> {
-    /// Creates an empty storage, with no affinity populated.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self { inner: SlotTable::new() }
-    }
-
-    /// Sets the value for `affinity`, returning the previous one if there was one.
-    pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
-        self.inner.replace(affinity, value)
-    }
-
-    /// Returns a clone of the value published for `affinity`, if any.
-    #[must_use]
-    pub fn get(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
-        self.inner.get_clone(affinity)
-    }
-
-    /// Acquires the exclusive lock on the slot for `affinity`, or `None` when that affinity's slot is
-    /// out of range.
-    pub(crate) fn write(&self, affinity: Affinity) -> Option<RwLockWriteGuard<'_, Option<sync::Arc<T>>>> {
-        self.inner.write(affinity)
-    }
-
-    /// Counts published values for which `predicate` holds.
-    pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
-        self.inner.count_where(predicate)
-    }
-
-    /// Acquires the shared lock on the slot for `affinity`.
-    #[cfg(test)]
-    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
-        self.inner.read(affinity)
-    }
-}
-
-impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use crate::affinity::pinned_affinities;
-    use crate::storage::{SlotTable, Strategy};
+    use crate::storage::{SlotTable, Storage, Strategy};
     use crate::{PerCore, PerNuma, PerProcess};
 
     #[test]
@@ -285,7 +355,7 @@ mod tests {
     }
 
     /// A `Strategy` that hands out an index outside the slot count it reports. Exists only to drive
-    /// the out-of-range path in `SlotTable`.
+    /// the out-of-range path in `SlotTable` and `Storage`.
     struct InconsistentStrategy;
 
     impl Strategy for InconsistentStrategy {
@@ -293,8 +363,8 @@ mod tests {
             1
         }
 
-        fn count(_affinity: crate::affinity::Affinity) -> usize {
-            1
+        fn count(_affinity: crate::affinity::Affinity) -> NonZero<usize> {
+            NonZero::<usize>::MIN
         }
     }
 
@@ -338,13 +408,33 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "coordinate space")]
+    fn insert_out_of_range_panics() {
+        let affinity = pinned_affinities(&[1])[0];
+        let storage = Storage::<i32, InconsistentStrategy>::new();
+
+        // `InconsistentStrategy` indexes past its single-slot table, so a direct insert crosses the
+        // coordinate space and is a caller error rather than the degraded relocation path.
+        let _ = storage.insert(affinity, std::sync::Arc::new(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "coordinate space")]
+    fn get_out_of_range_panics() {
+        let affinity = pinned_affinities(&[1])[0];
+        let storage = Storage::<i32, InconsistentStrategy>::new();
+
+        let _ = storage.get(affinity);
+    }
+
+    #[test]
     fn per_app() {
         let affinities = pinned_affinities(&[1, 1]);
 
         let index = PerProcess::index(affinities[0]);
         let count = PerProcess::count(affinities[0]);
         assert_eq!(index, 0);
-        assert_eq!(count, 1);
+        assert_eq!(count.get(), 1);
     }
 
     #[test]
@@ -355,7 +445,7 @@ mod tests {
             let index = PerNuma::index(affinity);
             let count = PerNuma::count(affinity);
             assert_eq!(index, affinity.memory_region_index());
-            assert_eq!(count, affinity.memory_region_count());
+            assert_eq!(count.get(), affinity.memory_region_count());
         }
     }
 
@@ -367,7 +457,7 @@ mod tests {
             let index = PerCore::index(affinity);
             let count = PerCore::count(affinity);
             assert_eq!(index, affinity.processor_index());
-            assert_eq!(count, affinity.processor_count());
+            assert_eq!(count.get(), affinity.processor_count());
         }
     }
 

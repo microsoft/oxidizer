@@ -117,8 +117,8 @@ fn out_of_range_relocation_is_a_no_op() {
             1
         }
 
-        fn count(_affinity: Affinity) -> usize {
-            1
+        fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
+            std::num::NonZero::<usize>::MIN
         }
     }
 
@@ -145,8 +145,8 @@ fn out_of_range_source_is_not_recorded() {
             affinity.processor_index()
         }
 
-        fn count(_affinity: Affinity) -> usize {
-            1
+        fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
+            std::num::NonZero::<usize>::MIN
         }
     }
 
