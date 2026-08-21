@@ -50,3 +50,47 @@ pub fn render_expansion(tokens: TokenStream) -> String {
 pub fn render_tokens_lossy(tokens: &TokenStream) -> String {
     syn::parse2(tokens.clone()).map_or_else(|_| tokens.to_string(), |file| prettyplease::unparse(&file))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tokens that are an expression, not an item, so they cannot form a Rust file.
+    fn not_a_file() -> TokenStream {
+        tokenize("1 + 1")
+    }
+
+    #[test]
+    fn an_expansion_is_rendered_as_formatted_source() {
+        let rendered = render_expansion(tokenize("struct S { a: u8 }"));
+
+        assert_eq!(rendered, "struct S {\n    a: u8,\n}\n");
+    }
+
+    #[test]
+    #[should_panic(expected = "the expansion parses as a Rust file")]
+    fn an_expansion_that_is_not_a_file_fails_the_test() {
+        // The point of the strict helper: a macro that emits unparsable tokens must fail
+        // here rather than reach a snapshot as raw token text, where it would look like a
+        // formatting change and be refreshed away.
+        _ = render_expansion(not_a_file());
+    }
+
+    #[test]
+    fn the_panic_message_carries_the_offending_tokens() {
+        let panic = std::panic::catch_unwind(|| render_expansion(not_a_file())).expect_err("rendering a non-file panics");
+        let message = panic.downcast_ref::<String>().expect("the panic payload is a formatted string");
+
+        assert!(message.contains("1 + 1"), "the tokens are reported: {message}");
+    }
+
+    #[test]
+    fn lossy_rendering_falls_back_to_the_raw_tokens() {
+        assert_eq!(render_tokens_lossy(&not_a_file()), "1 + 1");
+    }
+
+    #[test]
+    fn lossy_rendering_still_formats_what_does_parse() {
+        assert_eq!(render_tokens_lossy(&tokenize("struct S { a: u8 }")), "struct S {\n    a: u8,\n}\n");
+    }
+}
