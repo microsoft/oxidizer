@@ -83,6 +83,14 @@ mod tests {
     assert_impl_all!(OpaqueMemory: MemoryShared);
 
     #[test]
+    #[ignore = "stub"]
+    fn opaque_pool_wraps_custom_provider() {
+        // Arrange a custom MemoryShared provider.
+        // Wrap it in OpaquePool and reserve memory.
+        // Assert the custom provider handled the reservation.
+    }
+
+    #[test]
     fn wraps_inner() {
         let provider = GlobalPool::new();
         let memory = OpaqueMemory::new(provider);

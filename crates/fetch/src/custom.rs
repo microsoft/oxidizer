@@ -311,6 +311,14 @@ mod tests {
         FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }
 
+    #[test]
+    #[ignore = "stub"]
+    fn custom_deps_accept_custom_opaque_pool() {
+        // Arrange CustomDeps with a non-GlobalPool provider wrapped in OpaquePool.
+        // Build a custom client and execute a request.
+        // Assert the request succeeds through the custom pipeline.
+    }
+
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn create_builder_serves_requests_through_custom_pipeline() {

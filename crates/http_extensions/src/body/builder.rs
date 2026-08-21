@@ -400,6 +400,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "stub"]
+    fn new_accepts_opaque_pool_with_custom_memory() {
+        // Arrange a custom MemoryShared provider wrapped in OpaquePool.
+        // Create an HttpBodyBuilder with HttpBodyBuilder::new.
+        // Assert body creation reserves through the custom provider.
+    }
+
+    #[test]
     fn new_with_global_memory() {
         let clock = Clock::new_frozen();
         let memory = GlobalPool::new();
