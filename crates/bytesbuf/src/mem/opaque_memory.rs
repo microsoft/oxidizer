@@ -28,8 +28,8 @@ impl OpaqueMemory {
     ///
     /// # Panics
     ///
-    /// Panics only if runtime type identification reports [`OpaqueMemory`] but downcasting the
-    /// same value to [`OpaqueMemory`] fails, which would indicate a standard library defect.
+    /// Panics only if runtime type identification reports [`OpaqueMemory`] but the downcast of
+    /// the same value to [`OpaqueMemory`] fails, which would indicate a standard library defect.
     #[must_use]
     pub fn new<M: MemoryShared>(inner: M) -> Self {
         if TypeId::of::<M>() == TypeId::of::<Self>() {
