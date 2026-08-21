@@ -26,6 +26,11 @@ pub struct OpaqueMemory {
 
 impl OpaqueMemory {
     /// Creates a new instance of the adapter.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if runtime type identification reports [`OpaqueMemory`] but downcasting the
+    /// same value to [`OpaqueMemory`] fails, which would indicate a standard library defect.
     #[must_use]
     pub fn new<M: MemoryShared>(inner: M) -> Self {
         if TypeId::of::<M>() == TypeId::of::<Self>() {
