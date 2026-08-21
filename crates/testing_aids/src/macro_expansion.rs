@@ -18,7 +18,7 @@ use proc_macro2::TokenStream;
 ///
 /// # Panics
 ///
-/// Panics if `source` does not tokenize.
+/// Panics if `source` is not valid Rust tokens.
 #[must_use]
 pub fn tokenize(source: &str) -> TokenStream {
     source.parse().expect("the source tokenizes")
@@ -28,7 +28,7 @@ pub fn tokenize(source: &str) -> TokenStream {
 ///
 /// # Panics
 ///
-/// Panics if `tokens` is not a parsable Rust file. A macro that emits something else is
+/// Panics if `tokens` do not parse as a Rust file. A macro that emits something else is
 /// broken, so this is deliberately not a recoverable case.
 #[must_use]
 pub fn render_expansion(tokens: TokenStream) -> String {

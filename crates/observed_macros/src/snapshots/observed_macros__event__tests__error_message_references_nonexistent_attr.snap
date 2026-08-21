@@ -1,5 +1,0 @@
----
-source: crates/observed_macros/src/event.rs
-expression: err
----
-log message references `{missing}` but no log attribute with that name exists; available attributes: [x]
