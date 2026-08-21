@@ -89,9 +89,120 @@ pub struct NetworkError {
 }
 ```
 
-## Display Error Override
+## How error text is rendered
 
-The `#[display("...")]` attribute customizes the main error message
+Without a `#[display("...")]` attribute, the text an error renders depends on whether it has a
+source.
+
+**With a source**, the source’s message is printed as it stands: no type name, and no
+`caused by:` line, so the wrapper leaves no trace in the output.
+[`source()`][__link11] still returns the concrete error, so a caller that
+walks the chain still finds it.
+
+```rust
+use std::io;
+
+#[ohno::error]
+pub struct ConfigError;
+
+fn read_config() -> Result<String, ConfigError> {
+    Err(ConfigError::caused_by(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no such file: /etc/app.toml",
+    )))
+}
+
+let error = read_config().unwrap_err();
+
+println!("{error}");
+// Output: no such file: /etc/app.toml
+```
+
+A cause given as a string renders the same way, but it does not join the chain: it is a message
+rather than an error, so `source()` returns `None` for it.
+
+Wrapping therefore adds nothing to the text. A wrapper that should say what it was attempting —
+“failed to load the configuration”, say — has to be given a template; see
+[Overriding error text](#overriding-error-text).
+
+**Without a source**, there is no message to pass through, so the type’s own name is printed:
+
+```rust
+#[ohno::error]
+pub struct ConfigError;
+
+let error = ConfigError::new();
+
+println!("{error}");
+// Output: ConfigError
+```
+
+That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
+that it needs either a source or a template.
+
+### Enrichment and backtraces
+
+The message is only the first line of what `Display` writes. Each enrichment entry follows it
+on its own line, marked with `>` and tagged with the place it was added:
+
+```rust
+use std::io;
+
+#[ohno::error]
+pub struct ConfigError;
+
+#[ohno::enrich_err("failed to load the service configuration")]
+fn read_config() -> Result<String, ConfigError> {
+    Err(ConfigError::caused_by(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no such file: /etc/app.toml",
+    )))
+}
+
+let error = read_config().unwrap_err();
+
+println!("{error}");
+// Output: no such file: /etc/app.toml
+//         > failed to load the service configuration (at src/config.rs:6)
+```
+
+A captured backtrace comes last, after any enrichment:
+
+```text
+no such file: /etc/app.toml
+> failed to load the service configuration (at src/config.rs:6)
+
+Backtrace:
+   0: std::backtrace::Backtrace::capture
+   1: ohno::backtrace::Backtrace::capture
+   2: ohno::core::OhnoCore::from_source
+   3: my_app::config::ConfigError::caused_by
+   4: my_app::config::read_config
+   ...
+```
+
+A backtrace is captured only when `RUST_BACKTRACE` asks for one. Use
+[`ErrorExt::message()`][__link12] to read the message on its own.
+
+Every error owns its [`OhnoCore`][__link13], and every core renders its own backtrace, so a chain of
+wrappers prints the message once and one backtrace block per level:
+
+```text
+no such file: /etc/app.toml
+
+Backtrace:
+   ... frames from where ConfigError wrapped the io::Error ...
+
+Backtrace:
+   ... frames from where StartupError wrapped the ConfigError ...
+```
+
+This follows from each type holding its own core, and is worth knowing before a type is wrapped
+several layers deep.
+
+## Overriding error text
+
+The `#[display("...")]` attribute replaces the rendered message with a template of its own,
 while preserving the underlying error as a cause in the error chain.
 
 ```rust
@@ -109,9 +220,11 @@ let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 // Output: "Failed to read config with path: /etc/config.toml\nCaused by:\n\tfile not found"
 ```
 
-The template string supports field interpolation using `{field_name}` syntax. The underlying
-error (if any) is automatically shown as “Caused by:” in the error chain. If the inner error
-has no source, only the custom message is displayed.
+The template string supports field interpolation using `{field_name}` syntax. Unlike the
+default rendering, the source is never printed on its own: the custom message always leads, and
+the underlying error (if any) follows as “Caused by:” in the error chain. If the error has no
+source, only the custom message is displayed — the type name is never used once a template is
+given.
 
 Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 
@@ -131,7 +244,7 @@ pub struct ConfigError {
 ```
 
 Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
-name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+name. Neither the `self.` prefix nor the leading-dot form is accepted:
 
 |Argument|Accepted|
 |--------|--------|
@@ -220,15 +333,15 @@ let my_err: MyError = io_err.into(); // Works automatically
 
 ## Error Enrichment
 
-The [`#[enrich_err("message")]`][__link11] attribute macro adds error enrichment with file and line info to function errors.
+The [`#[enrich_err("message")]`][__link14] attribute macro adds error enrichment with file and line info to function errors.
 
-Functions annotated with [`#[enrich_err("message")]`][__link12] automatically wrap any returned `Result`. If
+Functions annotated with [`#[enrich_err("message")]`][__link15] automatically wrap any returned `Result`. If
 the function returns an error, the macro injects a message, including file and line information, into the error chain.
 
 **Requirements:**
 
 * The function must return a type that implements the `map_err` method (such as `Result` or `Poll`)
-* The error type must implement the [`Enrichable`][__link13] trait (automatically implemented for all ohno error types)
+* The error type must implement the [`Enrichable`][__link16] trait (automatically implemented for all ohno error types)
 
 **Supported syntax patterns:**
 
@@ -284,10 +397,10 @@ fn open_file(path: &str) -> Result<String, MyError> {
 
 ## AppError
 
-For applications that need a simple, catch-all error type, use [`AppError`][__link14]. It
+For applications that need a simple, catch-all error type, use [`AppError`][__link17]. It
 automatically captures backtraces and can wrap any error type.
 
-To avoid accidental usage in libraries, [`AppError`][__link15] is only available when the `app-err`
+To avoid accidental usage in libraries, [`AppError`][__link18] is only available when the `app-err`
 feature is enabled.
 
 Example usage:
@@ -303,7 +416,7 @@ fn process() -> Result<(), AppError> {
 
 ## Error Labeling
 
-[`ErrorLabel`][__link16] is a low-cardinality string label for errors, intended for use as a metric
+[`ErrorLabel`][__link19] is a low-cardinality string label for errors, intended for use as a metric
 tag or structured log field. Labels must be chosen from a small, bounded set known at
 development time to avoid high-cardinality metric series.
 
@@ -317,7 +430,7 @@ let label = ErrorLabel::from_parts(["http", "client", "timeout"]);
 assert_eq!(label, "http.client.timeout");
 ```
 
-Use [`ErrorLabel::from_error_chain`][__link17] to walk an error’s [`source`][__link18]
+Use [`ErrorLabel::from_error_chain`][__link20] to walk an error’s [`source`][__link21]
 chain and build a dotted label from recognized errors:
 
 ```rust
@@ -331,8 +444,8 @@ let label = ErrorLabel::from_error_chain(&io_err, |e| {
 assert_eq!(label, "connection_refused");
 ```
 
-Types that carry an [`ErrorLabel`][__link19] can implement the [`Labeled`][__link20] trait to expose it
-uniformly via [`Labeled::label`][__link21].
+Types that carry an [`ErrorLabel`][__link22] can implement the [`Labeled`][__link23] trait to expose it
+uniformly via [`Labeled::label`][__link24].
 
 
 <hr/>
@@ -340,22 +453,25 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbv-Hzd015wccb3QHVUUNfzdYbgkSSUDnsKTUbn3uKf5ryHu1hZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRFaOdtYzD6kbX0jbL0ZTwy4bz8BAwTIXEz0bF5vL5dCQJKFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
- [__link11]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
- [__link12]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
- [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
- [__link14]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
- [__link15]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
- [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
- [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
- [__link18]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link11]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link12]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt::message
+ [__link13]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
+ [__link14]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link15]: https://docs.rs/ohno_macros/0.4.0/ohno_macros/?search=enrich_err
+ [__link16]: https://docs.rs/ohno/0.4.0/ohno/?search=Enrichable
+ [__link17]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
+ [__link18]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link19]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
  [__link2]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorExt
- [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
- [__link21]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
+ [__link20]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel::from_error_chain
+ [__link21]: https://doc.rust-lang.org/stable/std/?search=error::Error::source
+ [__link22]: https://docs.rs/ohno/0.4.0/ohno/?search=ErrorLabel
+ [__link23]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled
+ [__link24]: https://docs.rs/ohno/0.4.0/ohno/?search=Labeled::label
  [__link3]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore
  [__link4]: https://docs.rs/ohno/0.4.0/ohno/?search=AppError
  [__link5]: https://docs.rs/ohno/0.4.0/ohno/?search=OhnoCore

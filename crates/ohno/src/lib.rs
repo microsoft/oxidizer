@@ -84,9 +84,123 @@
 //! }
 //! ```
 //!
-//! # Display Error Override
+//! # How error text is rendered
 //!
-//! The `#[display("...")]` attribute customizes the main error message
+//! Without a `#[display("...")]` attribute, the text an error renders depends on whether it has a
+//! source.
+//!
+//! **With a source**, the source's message is printed as it stands: no type name, and no
+//! `caused by:` line, so the wrapper leaves no trace in the output.
+//! [`source()`](std::error::Error::source) still returns the concrete error, so a caller that
+//! walks the chain still finds it.
+//!
+//! ```rust
+//! use std::io;
+//!
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! fn read_config() -> Result<String, ConfigError> {
+//!     Err(ConfigError::caused_by(io::Error::new(
+//!         io::ErrorKind::NotFound,
+//!         "no such file: /etc/app.toml",
+//!     )))
+//! }
+//!
+//! let error = read_config().unwrap_err();
+//!
+//! println!("{error}");
+//! // Output: no such file: /etc/app.toml
+//! # assert!(error.to_string().starts_with("no such file: /etc/app.toml"));
+//! ```
+//!
+//! A cause given as a string renders the same way, but it does not join the chain: it is a message
+//! rather than an error, so `source()` returns `None` for it.
+//!
+//! Wrapping therefore adds nothing to the text. A wrapper that should say what it was attempting —
+//! "failed to load the configuration", say — has to be given a template; see
+//! [Overriding error text](#overriding-error-text).
+//!
+//! **Without a source**, there is no message to pass through, so the type's own name is printed:
+//!
+//! ```rust
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! let error = ConfigError::new();
+//!
+//! println!("{error}");
+//! // Output: ConfigError
+//! # assert!(error.to_string().starts_with("ConfigError"));
+//! ```
+//!
+//! That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
+//! that it needs either a source or a template.
+//!
+//! ## Enrichment and backtraces
+//!
+//! The message is only the first line of what `Display` writes. Each enrichment entry follows it
+//! on its own line, marked with `>` and tagged with the place it was added:
+//!
+//! ```rust
+//! use std::io;
+//!
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! #[ohno::enrich_err("failed to load the service configuration")]
+//! fn read_config() -> Result<String, ConfigError> {
+//!     Err(ConfigError::caused_by(io::Error::new(
+//!         io::ErrorKind::NotFound,
+//!         "no such file: /etc/app.toml",
+//!     )))
+//! }
+//!
+//! let error = read_config().unwrap_err();
+//!
+//! println!("{error}");
+//! // Output: no such file: /etc/app.toml
+//! //         > failed to load the service configuration (at src/config.rs:6)
+//! # assert!(error.to_string().contains("> failed to load the service configuration (at "));
+//! ```
+//!
+//! A captured backtrace comes last, after any enrichment:
+//!
+//! ```text
+//! no such file: /etc/app.toml
+//! > failed to load the service configuration (at src/config.rs:6)
+//!
+//! Backtrace:
+//!    0: std::backtrace::Backtrace::capture
+//!    1: ohno::backtrace::Backtrace::capture
+//!    2: ohno::core::OhnoCore::from_source
+//!    3: my_app::config::ConfigError::caused_by
+//!    4: my_app::config::read_config
+//!    ...
+//! ```
+//!
+//! A backtrace is captured only when `RUST_BACKTRACE` asks for one. Use
+//! [`ErrorExt::message()`](ErrorExt::message) to read the message on its own.
+//!
+//! Every error owns its [`OhnoCore`], and every core renders its own backtrace, so a chain of
+//! wrappers prints the message once and one backtrace block per level:
+//!
+//! ```text
+//! no such file: /etc/app.toml
+//!
+//! Backtrace:
+//!    ... frames from where ConfigError wrapped the io::Error ...
+//!
+//! Backtrace:
+//!    ... frames from where StartupError wrapped the ConfigError ...
+//! ```
+//!
+//! This follows from each type holding its own core, and is worth knowing before a type is wrapped
+//! several layers deep.
+//!
+//! # Overriding error text
+//!
+//! The `#[display("...")]` attribute replaces the rendered message with a template of its own,
 //! while preserving the underlying error as a cause in the error chain.
 //!
 //! ```rust
@@ -104,9 +218,11 @@
 //! // Output: "Failed to read config with path: /etc/config.toml\nCaused by:\n\tfile not found"
 //! ```
 //!
-//! The template string supports field interpolation using `{field_name}` syntax. The underlying
-//! error (if any) is automatically shown as "Caused by:" in the error chain. If the inner error
-//! has no source, only the custom message is displayed.
+//! The template string supports field interpolation using `{field_name}` syntax. Unlike the
+//! default rendering, the source is never printed on its own: the custom message always leads, and
+//! the underlying error (if any) follows as "Caused by:" in the error chain. If the error has no
+//! source, only the custom message is displayed — the type name is never used once a template is
+//! given.
 //!
 //! Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 //!
@@ -126,7 +242,7 @@
 //! ```
 //!
 //! Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
-//! name. Unlike `thiserror`, neither the `self.` prefix nor the leading-dot form is accepted:
+//! name. Neither the `self.` prefix nor the leading-dot form is accepted:
 //!
 //! | Argument | Accepted |
 //! | --- | --- |
