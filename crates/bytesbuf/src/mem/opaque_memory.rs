@@ -53,6 +53,13 @@ impl OpaquePool {
     }
 }
 
+#[cfg(feature = "std")]
+impl From<crate::mem::GlobalPool> for OpaquePool {
+    fn from(pool: crate::mem::GlobalPool) -> Self {
+        Self::new(pool)
+    }
+}
+
 impl Clone for OpaquePool {
     fn clone(&self) -> Self {
         Self {

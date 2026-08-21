@@ -8,7 +8,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use anyspawn::Spawner;
-use bytesbuf::mem::{GlobalPool, OpaquePool};
+use bytesbuf::mem::GlobalPool;
 use fetch_options::{ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, TransportOptions};
 use fetch_tls::TlsBackend;
 use http::Version;
@@ -205,7 +205,7 @@ where
         let body_builder = self
             .body_builder
             .clone()
-            .unwrap_or_else(|| HttpBodyBuilder::new(OpaquePool::new(GlobalPool::new()), &self.clock));
+            .unwrap_or_else(|| HttpBodyBuilder::new(GlobalPool::new(), &self.clock));
 
         HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
     }

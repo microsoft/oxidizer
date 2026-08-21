@@ -18,7 +18,7 @@ use tick::Clock;
 #[fundle::bundle]
 struct App {
     clock: Clock,
-    memory_pool: OpaquePool,
+    global_pool: OpaquePool,
     client: HttpClient,
 }
 
@@ -42,7 +42,7 @@ async fn main() -> Result<(), ohno::AppError> {
     // Initialize and set up the App instance; fundle ensures all fields are properly constructed.
     let app = App::builder()
         .clock(|_| Clock::new_tokio())
-        .memory_pool(|_| OpaquePool::new(GlobalPool::new()))
+        .global_pool(|_| OpaquePool::new(GlobalPool::new()))
         .client({
             let meter_provider = meter_provider.clone();
             move |x| {
