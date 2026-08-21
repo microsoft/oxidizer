@@ -22,6 +22,24 @@ const BUILD_TIMEOUT_SEC: u32 = 600;
 const TIMEOUT_SEC: u32 = 300;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 
+// cargo-mutants selects mutants by parsing source text, so it does not honour
+// `cfg` gating: code the compiler strips on the running platform still yields
+// mutants, and every one of them is unbuildable and so reported as missed.
+// The two lists below name the code that must therefore be skipped per
+// platform. Keep them in sync with `justfiles/anvil/checks/mutants-diff.just`,
+// which applies the same policy to the pull request run.
+
+/// Packages whose entire implementation is gated to a single platform.
+///
+/// Mutating them anywhere else produces only unbuildable mutants, so the whole
+/// group is skipped rather than excluded by path.
+const WINDOWS_ONLY_PACKAGES: &[&str] = &["fetch_winhttp"];
+
+/// Source files that individual crates gate to a single platform.
+const WINDOWS_ONLY_SOURCES: &[&str] = &["**/*_windows.rs"];
+const LINUX_ONLY_SOURCES: &[&str] =
+    &["**/*_linux.rs", "crates/fetch_winhttp/src/unsupported_platform.rs"];
+
 /// Run mutation testing on the workspace
 #[derive(FromArgs)]
 struct Args {
@@ -115,6 +133,11 @@ fn main() {
     let mut failed_groups = Vec::new();
 
     for group in &test_groups {
+        if let Some(skipped) = platform_gated_packages(&group[..]) {
+            println!("Skipping [{}]: not built on this platform ({skipped})", group.join(", "));
+            continue;
+        }
+
         if let Err(e) = mutate_group(&group[..], &args) {
             eprintln!("❌ mutation testing failed for [{}]: {}", group.join(" "), e);
             failed_groups.push((group.clone(), e));
@@ -153,6 +176,14 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
         "-vV".into(),
     ];
 
+    // Layered on top of the static `exclude_globs` in `.cargo/mutants.toml`;
+    // cargo-mutants merges the two rather than replacing the config.
+    let excluded_sources = if cfg!(windows) { LINUX_ONLY_SOURCES } else { WINDOWS_ONLY_SOURCES };
+    for glob in excluded_sources {
+        cargo_args.push("--exclude".into());
+        cargo_args.push((*glob).into());
+    }
+
     if args.in_place {
         cargo_args.push("--in-place".into());
     } else {
@@ -169,4 +200,22 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
     cargo_args.extend(package_args);
 
     automation::run_cargo(cargo_args.into_iter())
+}
+
+/// Returns the packages in `group` that this platform does not build, if any.
+///
+/// A group is only skippable as a whole, so this reports `None` unless every
+/// package in it is gated away.
+fn platform_gated_packages(group: &[String]) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+
+    let gated: Vec<_> = group
+        .iter()
+        .filter(|p| WINDOWS_ONLY_PACKAGES.contains(&p.as_str()))
+        .cloned()
+        .collect();
+
+    (gated.len() == group.len()).then(|| gated.join(", "))
 }

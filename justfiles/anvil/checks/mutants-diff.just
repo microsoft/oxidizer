@@ -42,7 +42,31 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
     git diff "$base..HEAD" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    cargo mutants --in-diff $diff_path --no-shuffle --jobs 0
+    # Platform-conditional exclusions, layered on top of the static
+    # `exclude_globs` in `.cargo/mutants.toml` (cargo-mutants merges the two
+    # rather than replacing the config). cargo-mutants selects mutants by
+    # parsing source text, so it does not honour `cfg` gating: code that the
+    # compiler strips on this platform still yields mutants, and every one of
+    # them is unbuildable and therefore reported as missed. Exclude such code
+    # explicitly. Keep this in sync with `scripts/mutants.rs`, which applies the
+    # same policy to the merge-group run.
+    $platform_excludes = @()
+    if ($IsWindows) {
+        $platform_excludes += '**/*_linux.rs'
+        # The non-Windows placeholder inside the otherwise Windows-only crate.
+        $platform_excludes += 'crates/fetch_winhttp/src/unsupported_platform.rs'
+    } else {
+        $platform_excludes += '**/*_windows.rs'
+        # Crates whose entire implementation is gated to Windows.
+        $platform_excludes += 'crates/fetch_winhttp/**'
+    }
+    $exclude_args = @()
+    foreach ($glob in $platform_excludes) {
+        Write-Host "anvil-mutants-diff: excluding '$glob' on this platform"
+        $exclude_args += '--exclude'
+        $exclude_args += $glob
+    }
+    cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 @exclude_args
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---

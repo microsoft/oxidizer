@@ -53,43 +53,70 @@
 //! [`fetch`]: https://docs.rs/fetch
 //! [`HttpClient`]: https://docs.rs/fetch
 
-// The crate is empty on non-Windows targets. The documentation above is
-// deliberately declared before this attribute so that it survives the
-// configuration stripping and the crate stays documented on every platform.
-// The types it links to do not exist there, so the links are redirected to the
-// published documentation, which is built for Windows.
+// The crate exposes no functionality on non-Windows targets. The documentation
+// above is written for the supported platform, so the types it links to are
+// absent elsewhere; redirect those links to the published documentation, which
+// is built for Windows.
 #![cfg_attr(
     not(windows),
     doc = "[`WinHttpDeps`]: https://docs.rs/fetch_winhttp",
     doc = "[`WinHttpTlsConfig`]: https://docs.rs/fetch_winhttp",
     doc = "[`WinHttpOptions`]: https://docs.rs/fetch_winhttp"
 )]
-#![cfg(windows)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 
+// Every module below implements the WinHTTP transport and is therefore
+// configured out on other platforms. The gate is applied per item rather than
+// at the crate root so that the crate still compiles to an instrumented, if
+// empty, library elsewhere; see `unsupported_platform` below.
+#[cfg(windows)]
 mod bindings;
+#[cfg(windows)]
 mod body;
+#[cfg(windows)]
 mod builder;
+#[cfg(windows)]
 mod callback;
+#[cfg(windows)]
 mod context;
+#[cfg(windows)]
 mod convert;
+#[cfg(windows)]
 mod error;
+#[cfg(windows)]
 mod error_labels;
+#[cfg(windows)]
 mod handle;
+#[cfg(windows)]
 mod operation;
+#[cfg(windows)]
 mod options;
+#[cfg(windows)]
 mod query;
+#[cfg(windows)]
 mod request;
+#[cfg(windows)]
 mod response_headers;
+#[cfg(windows)]
 mod session;
+#[cfg(windows)]
 mod telemetry;
+#[cfg(windows)]
 #[cfg(test)]
 mod testing;
+#[cfg(windows)]
 mod tls;
+#[cfg(windows)]
 mod transport;
 
+#[cfg(not(windows))]
+mod unsupported_platform;
+
+#[cfg(windows)]
 pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};
+#[cfg(windows)]
 pub use options::{WinHttpOptions, WinHttpOptionsBuilder};
+#[cfg(windows)]
 pub use tls::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};
