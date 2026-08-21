@@ -28,7 +28,7 @@ allowed_external_types = [
     "bytesbuf::mem::has_memory::HasMemory",
     "bytesbuf::mem::memory::Memory",
     "bytesbuf::mem::memory_shared::MemoryShared",
-    "bytesbuf::mem::opaque_memory::OpaquePool",
+    "bytesbuf::mem::opaque_memory::OpaqueMemory",
     "bytesbuf::view::BytesView",
     "http::*",
     "http_body::Body",

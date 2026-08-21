@@ -33,7 +33,7 @@ pub struct TokioDeps {
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
     /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: bytesbuf::mem::OpaquePool,
+    pub global_pool: bytesbuf::mem::OpaqueMemory,
 }
 
 impl Default for TokioDeps {
@@ -47,7 +47,7 @@ impl TokioDeps {
     #[must_use]
     pub fn with_clock(clock: &Clock) -> Self {
         Self {
-            global_pool: bytesbuf::mem::OpaquePool::new(bytesbuf::mem::GlobalPool::new()),
+            global_pool: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             clock: clock.clone(),
         }
     }

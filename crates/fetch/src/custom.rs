@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use bytesbuf::mem::OpaquePool;
+use bytesbuf::mem::OpaqueMemory;
 use http_extensions::{HttpBodyBuilder, RequestHandler};
 use opentelemetry::metrics::Meter;
 use thread_aware::{PerCore, ThreadAware, unaware};
@@ -53,7 +53,7 @@ where
     /// Clock for timing operations and timeouts.
     pub clock: Clock,
     /// Memory pool for usage-neutral memory allocations.
-    pub global_pool: OpaquePool,
+    pub global_pool: OpaqueMemory,
     /// Extra dependencies forwarded verbatim to [`CustomContext::extras`].
     pub extras: Extras,
 }
@@ -242,7 +242,7 @@ pub(crate) struct Transport {
     name: Cow<'static, str>,
     inner: thread_aware::Arc<TransportFn, PerCore>,
     clock: Clock,
-    global_pool: OpaquePool,
+    global_pool: OpaqueMemory,
     isolation: Isolation,
 }
 
@@ -278,7 +278,7 @@ impl Debug for Transport {
     }
 }
 
-pub(crate) fn create_body_builder(pool: &OpaquePool, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
+pub(crate) fn create_body_builder(pool: &OpaqueMemory, clock: &Clock, options: &ClientOptions) -> HttpBodyBuilder {
     HttpBodyBuilder::new(pool.clone(), clock).with_options(options.response_body_options)
 }
 
@@ -289,7 +289,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::{GlobalPool, Memory, OpaquePool};
+    use bytesbuf::mem::{GlobalPool, Memory, OpaqueMemory};
     use http::StatusCode;
     use http_extensions::FakeHandler;
     use thread_aware::{ThreadAware, unaware};
@@ -303,7 +303,7 @@ mod tests {
     fn custom_deps() -> CustomDeps {
         CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::OpaquePool::new(bytesbuf::mem::GlobalPool::new()),
+            global_pool: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             extras: (),
         }
     }
@@ -326,10 +326,10 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn custom_deps_accept_custom_opaque_pool() {
+    async fn custom_deps_accept_custom_opaque_memory() {
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: OpaquePool::new(CustomMemory { inner: GlobalPool::new() }),
+            global_pool: OpaqueMemory::new(CustomMemory { inner: GlobalPool::new() }),
             extras: (),
         };
 
@@ -380,7 +380,7 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let deps = CustomDeps {
             clock: FakeDeps::default().clock,
-            global_pool: bytesbuf::mem::OpaquePool::new(bytesbuf::mem::GlobalPool::new()),
+            global_pool: bytesbuf::mem::OpaqueMemory::new(bytesbuf::mem::GlobalPool::new()),
             extras: unaware(Arc::clone(&counter)),
         };
 
