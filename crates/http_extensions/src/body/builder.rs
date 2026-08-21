@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::{Any, TypeId};
-
 #[cfg(any(feature = "test-util", test))]
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
@@ -53,17 +51,6 @@ pub struct HttpBodyBuilder {
     pub(super) options: HttpBodyOptions,
 }
 
-fn into_opaque_memory<M: MemoryShared>(memory: M) -> OpaqueMemory {
-    if TypeId::of::<M>() == TypeId::of::<OpaqueMemory>() {
-        let memory: Box<dyn Any> = Box::new(memory);
-        *memory
-            .downcast::<OpaqueMemory>()
-            .expect("the concrete type was verified as OpaqueMemory above")
-    } else {
-        OpaqueMemory::new(memory)
-    }
-}
-
 impl HttpBodyBuilder {
     /// Creates a test-friendly [`HttpBodyBuilder`] instance.
     ///
@@ -95,7 +82,7 @@ impl HttpBodyBuilder {
     #[must_use]
     pub fn new(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
-            memory: into_opaque_memory(memory),
+            memory: OpaqueMemory::new(memory),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }

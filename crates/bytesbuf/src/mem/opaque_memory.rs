@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use core::any::{Any, TypeId};
+
 #[cfg(not(test))]
 use alloc::boxed::Box;
 
@@ -25,8 +27,15 @@ pub struct OpaqueMemory {
 impl OpaqueMemory {
     /// Creates a new instance of the adapter.
     #[must_use]
-    pub fn new(inner: impl MemoryShared) -> Self {
-        Self { inner: Box::new(inner) }
+    pub fn new<M: MemoryShared>(inner: M) -> Self {
+        if TypeId::of::<M>() == TypeId::of::<Self>() {
+            let inner: Box<dyn Any> = Box::new(inner);
+            *inner
+                .downcast::<Self>()
+                .expect("the concrete type was verified as OpaqueMemory above")
+        } else {
+            Self { inner: Box::new(inner) }
+        }
     }
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
@@ -88,6 +97,16 @@ mod tests {
         let memory = OpaqueMemory::new(provider);
 
         let builder = memory.reserve(1024);
+        assert!(builder.capacity() >= 1024);
+    }
+
+    #[test]
+    fn accepts_existing_opaque_memory() {
+        let memory = OpaqueMemory::new(GlobalPool::new());
+        let memory = OpaqueMemory::new(memory);
+
+        let builder = memory.reserve(1024);
+
         assert!(builder.capacity() >= 1024);
     }
 
