@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//! Transport security behaviour over localhost.
+//!
+//! Covers how the configured certificate and hostname validation relaxations reach the live TLS
+//! handshake.
+
 #![cfg(windows)]
 #![expect(
     clippy::unwrap_used,
     reason = "integration tests use unwrap to surface failures through the test harness"
 )]
-
-//! Transport security behaviour over localhost.
-//!
-//! Covers how the configured certificate and hostname validation relaxations reach the live TLS
-//! handshake.
 
 mod common;
 

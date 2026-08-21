@@ -1,18 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
-
 //! Protocol version negotiation and version-specific framing over localhost.
 //!
 //! Covers which protocol the transport ends up speaking, that it reports that protocol back to the
 //! caller, and the framing behaviour that differs between versions - chunked uploads on HTTP/1.1,
 //! stream framing and response trailers on HTTP/2 and HTTP/3, and the absence of fallback when
 //! HTTP/3 is required but QUIC is unreachable.
+
+#![cfg(windows)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration tests use unwrap to surface failures through the test harness"
+)]
 
 mod common;
 

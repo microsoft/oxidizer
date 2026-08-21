@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(windows)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-
 //! WinHTTP-based HTTP transport for the [`fetch`] HTTP client.
 //!
 //! This Windows-only crate adds a WinHTTP transport constructor to
@@ -56,6 +53,19 @@
 //! [`fetch`]: https://docs.rs/fetch
 //! [`HttpClient`]: https://docs.rs/fetch
 
+// The crate is empty on non-Windows targets. The documentation above is
+// deliberately declared before this attribute so that it survives the
+// configuration stripping and the crate stays documented on every platform.
+// The types it links to do not exist there, so the links are redirected to the
+// published documentation, which is built for Windows.
+#![cfg_attr(
+    not(windows),
+    doc = "[`WinHttpDeps`]: https://docs.rs/fetch_winhttp",
+    doc = "[`WinHttpTlsConfig`]: https://docs.rs/fetch_winhttp",
+    doc = "[`WinHttpOptions`]: https://docs.rs/fetch_winhttp"
+)]
+#![cfg(windows)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 

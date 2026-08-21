@@ -1,17 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
-
 //! Client, connection and response-body lifetimes over localhost.
 //!
 //! Covers connection pool ownership and reuse, what happens when a caller abandons an in-flight
 //! download, and that a client assembled through the full `fetch` pipeline dispatches through this
 //! transport.
+
+#![cfg(windows)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration tests use unwrap to surface failures through the test harness"
+)]
 
 // The standard pipeline exercised here emits `tracing` events through `fetch`'s logging
 // handler, and integration binaries link the library with `cfg(test)` false, so no crate-root

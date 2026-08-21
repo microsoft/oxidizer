@@ -1,12 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
-
 //! Transport policy decisions observed on the wire over localhost.
 //!
 //! Covers what the transport is contractually required to put on - or keep off - the wire and to
@@ -14,6 +8,12 @@
 //! trailers, and the deliberate absence of automatic content decoding, redirect following, cookie
 //! handling and authentication retries. These behaviours hold for every protocol version;
 //! plaintext HTTP/1.1 is simply the cheapest fixture to observe them through.
+
+#![cfg(windows)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "integration tests use unwrap to surface failures through the test harness"
+)]
 
 mod common;
 

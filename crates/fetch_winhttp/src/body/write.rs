@@ -638,7 +638,7 @@ mod tests {
             chunks
         }
 
-        assert_eq!(split(0), []);
+        assert_eq!(split(0), Vec::<u32>::new());
         assert_eq!(split(1), [1]);
         assert_eq!(split(u64::from(u32::MAX)), [u32::MAX]);
         assert_eq!(split(u64::from(u32::MAX) + 1), [u32::MAX, 1]);
