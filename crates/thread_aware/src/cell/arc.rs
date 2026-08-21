@@ -6,11 +6,10 @@ use alloc::boxed::Box;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
-use std::panic::{self, AssertUnwindSafe};
 use std::sync::{self};
 
 use super::factory::Factory;
-use super::storage::{Storage, Strategy};
+use super::storage::{Storage, Strategy, report_out_of_range_affinity};
 use crate::ThreadAware;
 use crate::affinity::Affinity;
 use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
@@ -569,6 +568,10 @@ impl<T, S: Strategy> Arc<T, S> {
     /// held by the storage for deduplication purposes. Each affinity maintains its own
     /// separate value with its own reference count.
     ///
+    /// The count is approximate under concurrent relocation: a relocation publishing this value
+    /// into another affinity can skew the sample. It saturates at zero rather than wrapping to a
+    /// large value.
+    ///
     /// # Examples
     ///
     /// ```
@@ -611,10 +614,10 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
     /// relocations reproduce the original transfer. The other factory kinds are
     /// stateless and never need replacing.
     ///
-    /// This runs the configured factory, which is caller-supplied code and the
-    /// only such code `relocate` runs while holding a slot lock. `relocate` wraps
-    /// this call in `catch_unwind`; if the factory panics, the destination slot is
-    /// left empty and the next relocation into that affinity re-materializes.
+    /// This runs the configured factory, which is caller-supplied code. It runs
+    /// with no cell locked, so if the factory panics the panic simply propagates
+    /// and the destination cell is left empty for the next relocation into that
+    /// affinity to re-materialize.
     fn materialize(&self, source: Option<Affinity>, destination: Affinity) -> (sync::Arc<T>, Option<Factory<T>>) {
         match &self.factory {
             Factory::Closure(factory, factory_source_affinity) => {
@@ -650,107 +653,82 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        // Relocation is a two-stage locking operation, scoped to a single affinity's slot: a
-        // shared-lock probe of the destination slot, escalating to that slot's exclusive lock only
-        // when it turns out to be empty.
-        //
-        // The steady state of any affinity is "already materialized", so the probe is the
-        // overwhelmingly common outcome and it only reads an already-published slot. Because each
-        // affinity owns its own lock, relocations targeting different affinities never contend, and
-        // even a miss blocks only the affinity it materializes.
-        // Ref: docs/implementation.md, "Relocation locking".
+        // Relocation reads the destination's write-once cell with a plain acquire load. The steady
+        // state of any affinity is "already materialized", so this hit is the overwhelmingly common
+        // outcome and carries no lock-word contention: concurrent relocations into distinct
+        // affinities never serialize, because a published cell is only ever read.
+        // Ref: docs/implementation.md, "Relocation and publication".
         if let Some(value) = self.storage.probe(destination) {
             self.value = value;
             return;
         }
 
-        // A miss into a slot different from the source records two slots. The destination slot gets
-        // the freshly materialized value. The source slot gets the value the `Arc` is carrying: that
-        // value belongs to the source slot, and on a first relocation it has never been written to
-        // the table, so recording it lets a later relocation back into the source slot find it
-        // instead of materializing a fresh one.
-        //
-        // The destination slot's exclusive lock is held across materialization so exactly one thread
-        // populates that slot. The source slot is written afterwards, under its own lock and never
-        // while the destination lock is held, so two threads relocating in opposite directions
-        // cannot each end up waiting for the lock the other holds.
-        // Ref: docs/implementation.md, "Relocation locking".
-        let (old_value, replaced_empty_slot) = {
-            // Escalate to the destination slot's exclusive lock. No slot means the destination
-            // affinity is out of range — outside the coordinate space this storage was sized for —
-            // so the relocation is a no-op: the `Arc` keeps the value it already carries rather than
-            // reaching into an unrelated slot. `write` records the anomaly via the
-            // `thread_aware_arc_oob` metric. Ref: docs/implementation.md, "Relocation locking".
-            let Some(mut destination_slot) = self.storage.write(destination) else {
-                return;
-            };
+        // Miss: reach the destination cell. No cell means the destination affinity is out of range —
+        // outside the coordinate space this storage was sized for — so the relocation is a no-op: the
+        // `Arc` keeps the value it already carries rather than reaching into an unrelated slot, and
+        // the anomaly is recorded via the `thread_aware_arc_oob` metric.
+        // Ref: docs/implementation.md, "Relocation and publication".
+        let Some(destination_slot) = self.storage.slot(destination) else {
+            report_out_of_range_affinity();
+            return;
+        };
 
-            // The slot is re-probed because the lock was released between the two stages, during
-            // which another thread may have materialized this same destination slot.
-            if let Some(value) = destination_slot.clone() {
-                // Release the destination guard before the value it replaces is dropped. If the
-                // replaced handle owns the final strong reference, a panicking `T::drop` must unwind
-                // with no slot lock held, or it would poison the lock and break the never-poison
-                // guarantee. Ref: docs/implementation.md, "Relocation locking".
-                let replaced = std::mem::replace(&mut self.value, value);
-                drop(destination_slot);
-                drop(replaced);
-                return;
-            }
+        // The cell may have been published between the probe and here; adopt that value.
+        if let Some(value) = destination_slot.get() {
+            self.value = sync::Arc::<T>::clone(value);
+            return;
+        }
 
-            // When the source resolves to the destination's own slot there is no cross-slot move: the
-            // carried value already belongs to that slot, so seed the empty slot with it and keep it
-            // rather than materializing a fresh value that would diverge from the shared one. This is
-            // the whole of relocation under `PerProcess`, where every affinity shares one slot.
-            let same_slot = source.is_some_and(|source| S::index(source) == S::index(destination));
-            if same_slot {
-                *destination_slot = Some(sync::Arc::<T>::clone(&self.value));
-                return;
-            }
+        // When the source resolves to the destination's own slot there is no cross-slot move: the
+        // carried value already belongs to that slot. A single-slot table is the same case even
+        // without a source — the carried value provably belongs to the one slot — which is the whole
+        // of relocation under `PerProcess`. Seed the empty cell with the carried value and keep it,
+        // rather than materializing a fresh value that would diverge from the shared one.
+        let same_slot = match source {
+            Some(source) => S::index(source) == S::index(destination),
+            // Without a source, a single-slot table provably maps the carried value to its one slot.
+            None => S::count(destination).get() == 1,
+        };
+        if same_slot {
+            // If a racer published first, `get_or_init` returns its value; adopt it so every clone
+            // converges on one identity.
+            let published = destination_slot.get_or_init(|| sync::Arc::<T>::clone(&self.value));
+            self.value = sync::Arc::<T>::clone(published);
+            return;
+        }
 
-            // Materializing runs the caller's factory — the only caller code executed while a slot
-            // lock is held. Run it under `catch_unwind` so that a panic unwinds only after the guard
-            // is dropped, leaving the slot lock unpoisoned.
-            // Ref: docs/implementation.md, "Relocation locking".
-            let (data, new_factory) = match panic::catch_unwind(AssertUnwindSafe(|| self.materialize(source, destination))) {
-                Ok(materialized) => materialized,
-                Err(payload) => {
-                    drop(destination_slot);
-                    panic::resume_unwind(payload);
-                }
-            };
+        // Materialize the destination value by running the caller's factory. No cell is locked while
+        // it runs, so a panic simply propagates and leaves the cell empty for the next relocation to
+        // retry — there is no lock to poison and no re-probe to coordinate.
+        // Ref: docs/implementation.md, "Relocation and publication".
+        let (data, new_factory) = self.materialize(source, destination);
 
+        if destination_slot.set(sync::Arc::<T>::clone(&data)).is_err() {
+            // Another thread published this destination cell first. Adopt its value so every
+            // clone converges on one identity; the value this thread materialized is dropped.
+            self.value = sync::Arc::<T>::clone(destination_slot.get().expect("cell is populated after a rejected set"));
+        } else {
             let old_value = std::mem::replace(&mut self.value, data);
 
-            let old_data = destination_slot.replace(sync::Arc::<T>::clone(&self.value));
-
-            // Record the factory only when materialization actually changed it (the closure factory,
-            // on the first relocation). The stateless kinds return `None` and are left untouched.
+            // Record the factory only when materialization actually changed it (the closure
+            // factory, on the first relocation). The stateless kinds return `None` and are left
+            // untouched.
             if let Some(factory) = new_factory {
                 self.factory = factory;
             }
 
-            (old_value, old_data.is_none())
-        };
-
-        // The re-probe under the write lock proved the slot empty, so the publish above must have
-        // filled an empty slot. Check this only after releasing the lock: an assertion firing while
-        // the lock was held would poison it and break the never-poison guarantee.
-        // Ref: docs/implementation.md, "Relocation locking".
-        debug_assert!(replaced_empty_slot, "slot was occupied after a re-probe under its own write lock");
-
-        // Record the value the `Arc` moved away from into the source slot. This is reached only on a
-        // cross-slot miss — the same-slot case returned above — so the source slot is always
-        // distinct from the destination slot just written.
-        if let Some(source) = source {
-            // An out-of-range source has no slot to record into, so the recording is simply skipped;
-            // `write` accounts for the out-of-range access via the `thread_aware_arc_oob` metric.
-            if let Some(mut source_slot) = self.storage.write(source) {
-                // Store only if the source slot has no value yet. Another thread may have recorded it
-                // while this one held the destination lock; that is the same value this would store,
-                // so leaving it in place is correct.
-                if source_slot.is_none() {
-                    *source_slot = Some(old_value);
+            // Record the value the `Arc` moved away from into the source cell, so a later
+            // relocation back into it finds the original instead of materializing a fresh one.
+            // Reached only on a cross-slot miss — the same-slot case returned above — so the
+            // source cell is distinct from the destination just published. An out-of-range
+            // source has no cell to record into, so the recording is skipped and the anomaly
+            // recorded. `set` leaves an already-populated source cell untouched; another thread
+            // may have recorded it with the same value, so leaving it in place is correct.
+            if let Some(source) = source {
+                if let Some(source_slot) = self.storage.slot(source) {
+                    let _ = source_slot.set(old_value);
+                } else {
+                    report_out_of_range_affinity();
                 }
             }
         }

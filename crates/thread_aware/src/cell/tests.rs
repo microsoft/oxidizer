@@ -109,57 +109,91 @@ fn test_from_unaware() {
 fn out_of_range_relocation_is_a_no_op() {
     use crate::storage::Strategy;
 
-    // A strategy whose index always exceeds its slot count, so every affinity is out of range.
-    struct AlwaysOutOfRange;
+    // Two in-range slots so an out-of-range destination coexists with a populated in-range slot
+    // that a stray fallback would disturb.
+    struct TwoSlots;
 
-    impl Strategy for AlwaysOutOfRange {
-        fn index(_affinity: Affinity) -> usize {
-            1
+    impl Strategy for TwoSlots {
+        fn index(affinity: Affinity) -> usize {
+            affinity.processor_index()
         }
 
         fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
-            std::num::NonZero::<usize>::MIN
+            std::num::NonZero::new(2).unwrap()
         }
     }
 
-    let affinities = pinned_affinities(&[2]);
-    let mut arc = crate::Arc::<i32, AlwaysOutOfRange>::from_unaware(42);
+    let affinities = pinned_affinities(&[3]);
+    let in_range = affinities[0]; // slot 0
+    let out_of_range = affinities[2]; // index 2, past the two-slot table
 
-    // The destination affinity's slot index is out of range, so the relocation must leave the `Arc`
-    // on the value it already carries rather than reaching into an unrelated slot.
-    arc.relocate(Some(affinities[0]), affinities[1]);
+    let mut arc = crate::Arc::<i32, TwoSlots>::from_unaware(42);
+    let carried = sync::Arc::clone(&arc.value);
+
+    // Seed an in-range slot with a distinct value, so a stray fallback into it would be observable
+    // as the holder adopting the value or as the seed being overwritten.
+    let seed = sync::Arc::new(99);
+    let _ = arc.storage.insert(in_range, sync::Arc::clone(&seed));
+
+    // The destination affinity's slot index is out of range, so the relocation is a no-op: the `Arc`
+    // keeps the value it already carries rather than reaching into an unrelated slot.
+    arc.relocate(Some(in_range), out_of_range);
+
+    assert!(
+        sync::Arc::ptr_eq(&arc.value, &carried),
+        "an out-of-range destination must keep the carried allocation, not adopt another slot"
+    );
     assert_eq!(*arc, 42);
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(in_range).unwrap(), &seed),
+        "an out-of-range destination must leave in-range slots untouched"
+    );
 }
 
 #[test]
 fn out_of_range_source_is_not_recorded() {
     use crate::storage::Strategy;
 
-    // A single-slot table indexed by processor, so processor 0 is in range while any higher
-    // processor is out of range. This lets a relocation pair an in-range destination with an
-    // out-of-range source.
-    struct FirstProcessorOnly;
+    // Two in-range slots so the destination can be a non-zero slot, leaving slot 0 free to detect a
+    // stray fallback for the out-of-range source.
+    struct TwoSlots;
 
-    impl Strategy for FirstProcessorOnly {
+    impl Strategy for TwoSlots {
         fn index(affinity: Affinity) -> usize {
             affinity.processor_index()
         }
 
         fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
-            std::num::NonZero::<usize>::MIN
+            std::num::NonZero::new(2).unwrap()
         }
     }
 
-    let affinities = pinned_affinities(&[2]);
-    let in_range = affinities[0];
-    let out_of_range = affinities[1];
+    let affinities = pinned_affinities(&[3]);
+    let seeded = affinities[0]; // slot 0, the slot a stray source fallback would target
+    let destination = affinities[1]; // slot 1, distinct in-range destination
+    let out_of_range = affinities[2]; // index 2, past the two-slot table
 
-    let mut arc = crate::Arc::<i32, FirstProcessorOnly>::from_unaware(42);
+    let mut arc = crate::Arc::<i32, TwoSlots>::from_unaware(42);
 
-    // The destination is in range, so the value materializes there; the source is out of range and
-    // has no slot to record the carried value into, so that recording is skipped without panicking.
-    arc.relocate(Some(out_of_range), in_range);
+    // Seed slot 0 with a distinct value. An out-of-range source has no slot; were it to fall back to
+    // slot 0, this seed would be overwritten.
+    let seed = sync::Arc::new(99);
+    let _ = arc.storage.insert(seeded, sync::Arc::clone(&seed));
+
+    // The destination is in range, so the value materializes in slot 1; the source is out of range
+    // and has no slot to record the carried value into, so that recording is skipped without
+    // reaching into slot 0.
+    arc.relocate(Some(out_of_range), destination);
+
     assert_eq!(*arc, 42);
+    assert!(
+        arc.storage.get(destination).is_some(),
+        "the in-range destination must be materialized"
+    );
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(seeded).unwrap(), &seed),
+        "an out-of-range source must record nothing, leaving slot 0 untouched"
+    );
 }
 
 #[test]
@@ -771,22 +805,18 @@ fn factory_closure_debug() {
 
 #[test]
 fn concurrent_relocation_to_same_affinity_materializes_once() {
-    // Races many threads into the same empty destination slot and asserts they all end up with
-    // the one value materialized for it: whichever racer wins publishes, and every other racer
-    // adopts that same `sync::Arc`, whether it sees the value in its initial shared probe or in
-    // the re-probe after escalating to the exclusive lock.
-    //
-    // What this proves deterministically is single materialization. It cannot, from thread
-    // scheduling alone, guarantee that any particular racer takes the exclusive-lock re-probe
-    // branch; the shared guard and the spin below make that likely, not certain.
-    // Ref: docs/implementation.md, "Relocation locking".
+    // Races many threads into the same empty destination cell and asserts they all end up with the
+    // one value materialized for it: whichever racer wins publishes into the write-once cell, and
+    // every other racer adopts that same `sync::Arc`, whether it observes the value in its initial
+    // acquire-load probe or in the rejected `set` after materializing its own candidate.
+    // Ref: docs/implementation.md, "Relocation and publication".
 
-    // Enough racers to make it likely that some land on the exclusive-lock re-probe branch on a
-    // machine that can run several threads, while staying cheap enough for a unit test.
+    // Enough racers to make a publish/adopt race likely on a machine that can run several threads,
+    // while staying cheap enough for a unit test.
     const RACERS: usize = 8;
 
-    // Repeated because which stage a racer lands in is decided by the operating system
-    // scheduler; repetition raises the chance that the re-probe branch is taken across the run.
+    // Repeated because which racer wins the write-once cell is decided by the operating system
+    // scheduler; repetition exercises both the initial-probe and rejected-`set` adopt branches.
     const ROUNDS: usize = 32;
 
     let affinities = pinned_affinities(&[2]);
@@ -797,12 +827,7 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
         let origin = PerCore::new(Counter::new);
         origin.increment_by(7);
 
-        let storage = sync::Arc::clone(&origin.storage);
-        let barrier = sync::Arc::new(sync::Barrier::new(RACERS.saturating_add(1)));
-
-        // Holding a shared guard blocks the escalation to the exclusive lock, so a racer that
-        // reaches that stage must wait; it does not by itself schedule the racer threads.
-        let shared_guard = storage.read(destination);
+        let barrier = sync::Arc::new(sync::Barrier::new(RACERS));
 
         let mut racers = Vec::with_capacity(RACERS);
 
@@ -811,21 +836,12 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
             let barrier = sync::Arc::clone(&barrier);
 
             racers.push(std::thread::spawn(move || {
+                // Release all racers together so they contend for the same empty destination cell.
                 barrier.wait();
                 racer.relocate(Some(source), destination);
                 racer.into_arc()
             }));
         }
-
-        barrier.wait();
-
-        // Bounded busy-work, not a timed wait: it gives the racers released above a chance to
-        // reach the exclusive lock while the shared guard still blocks them.
-        for _ in 0..10_000 {
-            std::hint::spin_loop();
-        }
-
-        drop(shared_guard);
 
         let values = racers.into_iter().map(|racer| racer.join().unwrap()).collect::<Vec<_>>();
         let (first, rest) = values.split_first().unwrap();
@@ -852,10 +868,10 @@ fn new_boxed_relocate() {
 }
 
 #[test]
-fn factory_panic_does_not_poison_slot_lock() {
-    // A relocation that misses runs the factory while holding the destination slot lock. The
-    // factory is caller code and may panic; relocation must catch that panic and release the lock
-    // before resuming the unwind, so the lock is never left poisoned.
+fn factory_panic_leaves_the_cell_empty() {
+    // A relocation that misses runs the factory with no cell locked, then publishes the result into
+    // the write-once destination cell. The factory is caller code and may panic; because nothing is
+    // locked, the panic simply propagates and the cell is left empty for a later relocation to fill.
 
     // A value whose clone panics. `with_value` clones it only when materializing a new affinity,
     // so construction succeeds and the first relocation into an empty affinity panics.
@@ -881,10 +897,12 @@ fn factory_panic_does_not_poison_slot_lock() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(source), destination)));
     assert!(result.is_err(), "the factory panic must propagate to the caller");
 
-    // If the panic had poisoned the slot lock, this acquisition would itself panic. It does not:
-    // the lock was released before the unwind resumed, and the slot is empty because
-    // materialization panicked before publishing anything.
-    assert!(arc.storage.get(destination).is_none(), "the slot lock must not be poisoned");
+    // The factory panicked before it could publish anything, so the write-once cell stays empty and
+    // a later relocation is free to materialize into it.
+    assert!(
+        arc.storage.get(destination).is_none(),
+        "a panicking factory must leave the cell empty"
+    );
 }
 
 #[test]
@@ -917,6 +935,88 @@ fn relocation_preserves_the_source_affinity_value() {
         sync::Arc::ptr_eq(&back.value, &source_value),
         "relocating back into the source affinity must find the preserved original value"
     );
+}
+
+#[test]
+fn relocation_leaves_a_populated_source_slot_untouched() {
+    // Recording the moved-from value into the source slot uses a write-once `set`, so an
+    // already-populated source slot is left as-is. Another thread may have recorded the same slot
+    // first; keeping the existing value is correct and must not overwrite it.
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let mut arc = PerCore::new(Counter::new);
+    arc.increment_by(11);
+
+    // Pre-populate the source slot with a distinct value, standing in for a value another thread
+    // already recorded there.
+    let seeded = sync::Arc::new(Counter::new());
+    seeded.increment_by(555);
+    let _ = arc.storage.insert(source, sync::Arc::clone(&seeded));
+
+    // Relocate away from the source affinity. The miss records the carried value into the source
+    // slot, but the slot is already populated, so the pre-existing value must survive.
+    arc.relocate(Some(source), destination);
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(source).unwrap(), &seeded),
+        "a populated source slot must keep its existing value"
+    );
+
+    // A relocation back into the source affinity must find the pre-existing value, confirming the
+    // carried value never displaced it.
+    let mut back = arc.clone();
+    back.relocate(Some(destination), source);
+    assert_eq!(back.value(), 555, "relocating back must find the pre-existing source value");
+}
+
+#[test]
+fn opposite_direction_relocations_converge_without_deadlock() {
+    // Two threads relocate in opposite directions across the same pair of affinities. Write-once
+    // cells are never held across the materialization, so opposite-direction traffic cannot
+    // deadlock: each thread completes, and each ends on the value published for its own destination.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    // Repeated so both interleavings of the two source-recording writes are exercised across the run.
+    const ROUNDS: usize = 64;
+
+    let affinities = pinned_affinities(&[2]);
+    let x = affinities[0];
+    let y = affinities[1];
+
+    for _ in 0..ROUNDS {
+        let shared = PerCore::new(Counter::new);
+        let mut to_y = shared.clone();
+        let mut to_x = shared.clone();
+
+        let barrier = sync::Arc::new(sync::Barrier::new(2));
+        let barrier_xy = sync::Arc::clone(&barrier);
+        let barrier_yx = sync::Arc::clone(&barrier);
+
+        let xy = std::thread::spawn(move || {
+            barrier_xy.wait();
+            to_y.relocate(Some(x), y);
+            to_y.into_arc()
+        });
+        let yx = std::thread::spawn(move || {
+            barrier_yx.wait();
+            to_x.relocate(Some(y), x);
+            to_x.into_arc()
+        });
+
+        // The joins return only once both threads finish; a deadlock would hang here instead.
+        let landed_on_y = xy.join().unwrap();
+        let landed_on_x = yx.join().unwrap();
+
+        assert!(
+            sync::Arc::ptr_eq(&landed_on_y, &shared.storage.get(y).unwrap()),
+            "the X->Y thread must end on the value published for Y"
+        );
+        assert!(
+            sync::Arc::ptr_eq(&landed_on_x, &shared.storage.get(x).unwrap()),
+            "the Y->X thread must end on the value published for X"
+        );
+    }
 }
 
 #[test]

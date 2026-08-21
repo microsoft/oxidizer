@@ -9,11 +9,8 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use std::marker::PhantomData;
 use std::num::NonZero;
-#[cfg(test)]
-use std::sync::RwLockReadGuard;
-use std::sync::{self, OnceLock, RwLock, RwLockWriteGuard};
+use std::sync::{self, OnceLock};
 
-use crossbeam_utils::CachePadded;
 use nm::Event;
 
 use crate::affinity::Affinity;
@@ -35,18 +32,6 @@ pub trait Strategy {
     /// `Arc`, because the storage is sized to it exactly once.
     fn count(affinity: Affinity) -> NonZero<usize>;
 }
-
-/// A slot lock is never left poisoned, so acquiring it never fails.
-///
-/// Poisoning happens when a thread panics while holding the lock and the guard is
-/// dropped during unwinding. The operations run under a slot lock — cloning,
-/// storing and comparing the reference-counted handle it holds — cannot unwind,
-/// so the only code that can panic there is the caller's factory on relocation's
-/// miss path. `relocate` runs that under `catch_unwind` and drops the guard before
-/// resuming the unwind, so the lock is released normally rather than poisoned.
-/// Ref: docs/implementation.md, "Relocation locking".
-const NEVER_POISONED: &str =
-    "a slot lock is never left poisoned; a panic while one is held is caught and the lock released before the unwind resumes";
 
 /// Rejects a direct [`Storage`] access whose affinity falls outside the storage's coordinate space.
 ///
@@ -90,7 +75,11 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
         Self { inner: SlotTable::new() }
     }
 
-    /// Sets the value for `affinity`, returning the previous one if there was one.
+    /// Publishes the value for `affinity` if its slot is still empty.
+    ///
+    /// Each slot is written at most once, so a value is stored only when the slot was empty:
+    /// `None` is returned in that case. When the slot already holds a value, the affinity keeps it
+    /// and the passed-in `value` is handed back unchanged.
     ///
     /// # Panics
     ///
@@ -103,7 +92,7 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
             out_of_coordinate_space();
         }
 
-        self.inner.replace(affinity, value)
+        self.inner.set_once(affinity, value)
     }
 
     /// Returns a clone of the value published for `affinity`, if any.
@@ -133,21 +122,19 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
         self.inner.get_clone(affinity)
     }
 
-    /// Acquires the exclusive lock on the slot for `affinity`, or `None` when that affinity's slot is
-    /// out of range.
-    pub(crate) fn write(&self, affinity: Affinity) -> Option<RwLockWriteGuard<'_, Option<sync::Arc<T>>>> {
-        self.inner.write(affinity)
+    /// Returns the write-once cell for `affinity`, or `None` when that affinity's slot is out of
+    /// range.
+    ///
+    /// The caller drives the miss path with this: publish the materialized value into the empty
+    /// cell. A cell is written at most once, so no lock is needed and no other thread can overwrite
+    /// what this one publishes.
+    pub(crate) fn slot(&self, affinity: Affinity) -> Option<&OnceLock<sync::Arc<T>>> {
+        self.inner.slot(affinity)
     }
 
     /// Counts published values for which `predicate` holds.
     pub(crate) fn count_where(&self, predicate: impl Fn(&sync::Arc<T>) -> bool) -> usize {
         self.inner.count_where(predicate)
-    }
-
-    /// Acquires the shared lock on the slot for `affinity`.
-    #[cfg(test)]
-    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<sync::Arc<T>>> {
-        self.inner.read(affinity)
     }
 }
 
@@ -157,21 +144,22 @@ impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
     }
 }
 
-/// One slot: an independently-locked value cell, cache-line padded to curb false sharing.
-type Slot<T> = CachePadded<RwLock<Option<T>>>;
+/// One slot: a write-once cell published on first materialization for its affinity.
+type Slot<T> = OnceLock<T>;
 
-/// Affinity-partitioned storage: one independently-locked slot per affinity.
+/// Affinity-partitioned storage: one independently-published slot per affinity.
 ///
 /// This is the raw slot table behind [`Storage`], which fixes its element type to `Arc<T>`; the two
 /// are separate so this can be unit-tested with a plain value type while the wrapper pins the stored
 /// type.
 ///
-/// Each slot owns its own `RwLock`, so relocations into different slots never
-/// touch the same lock. The strategy decides how affinities map to slots:
-/// `PerCore` gives each processor its own slot, while `PerNuma` and `PerProcess`
-/// map several affinities onto one shared slot. The slots are cache-line padded,
-/// using `CachePadded`'s target-specific alignment estimate, to curb false sharing
-/// between neighboring locks rather than to guarantee physical isolation.
+/// Each slot is a [`OnceLock`], written at most once — on the first relocation
+/// that materializes its affinity — and read by every later relocation. The
+/// strategy decides how affinities map to slots: `PerCore` gives each processor
+/// its own slot, while `PerNuma` and `PerProcess` map several affinities onto one
+/// shared slot. A published read is a plain acquire load with no lock word to
+/// contend on, so concurrent readers of distinct slots never serialize and
+/// neighboring slots do not bounce a lock cache line between cores.
 ///
 /// The slot array is sized once, on first use, to `S::count(affinity)` — a value
 /// fixed for the process lifetime — so there is no growth path and therefore no
@@ -198,21 +186,21 @@ impl<T, S: Strategy> SlotTable<T, S> {
     fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
         self.slots.get_or_init(|| {
             (0..S::count(affinity).get())
-                .map(|_| CachePadded::new(RwLock::new(None)))
+                .map(|_| OnceLock::new())
                 .collect::<Vec<_>>()
                 .into_boxed_slice()
         })
     }
 
-    /// Returns the lock guarding the slot for `affinity`, or `None` when that affinity's index falls
+    /// Returns the write-once cell for `affinity`, or `None` when that affinity's index falls
     /// outside the sized table.
     ///
     /// The table is sized once, on first use, to the slot count the first affinity reported, so an
     /// index past its end means this affinity does not share that coordinate space. Rather than
     /// reaching into an unrelated slot, the lookup reports the slot as absent and leaves each caller
     /// to treat the affinity as unreachable.
-    fn slot(&self, affinity: Affinity) -> Option<&RwLock<Option<T>>> {
-        self.slots(affinity).get(S::index(affinity)).map(|slot| &**slot)
+    pub(crate) fn slot(&self, affinity: Affinity) -> Option<&Slot<T>> {
+        self.slots(affinity).get(S::index(affinity))
     }
 
     /// Reports whether `affinity` maps to a slot inside the sized table.
@@ -223,40 +211,16 @@ impl<T, S: Strategy> SlotTable<T, S> {
         self.slot(affinity).is_some()
     }
 
-    /// Replaces the data for the given affinity with the provided value.
+    /// Publishes `value` into the write-once cell for the given affinity if it is still empty.
     ///
-    /// Returns the previous value if it existed, otherwise returns `None`. An affinity whose slot is
-    /// out of range has nowhere to hold the value, so the value is dropped and `None` is returned.
-    pub(crate) fn replace(&self, affinity: Affinity, value: T) -> Option<T> {
-        self.slot(affinity)?.write().expect(NEVER_POISONED).replace(value)
-    }
-
-    /// Acquires the exclusive lock on the slot for `affinity`, or `None` when that affinity's slot is
-    /// out of range.
-    ///
-    /// The caller drives the miss path with this: re-probe the slot, materialize the value, and store
-    /// it, all while holding the returned guard so that only this affinity is affected and no other
-    /// thread can materialize it in the meantime. An out-of-range affinity has no slot to claim, so
-    /// `None` is returned and the anomaly recorded via the `thread_aware_arc_oob` metric.
-    pub(crate) fn write(&self, affinity: Affinity) -> Option<RwLockWriteGuard<'_, Option<T>>> {
+    /// Returns `None` when the cell was empty and now holds `value`. When another publisher already
+    /// filled it, or the affinity is out of range, the value cannot be stored and is handed back.
+    pub(crate) fn set_once(&self, affinity: Affinity, value: T) -> Option<T> {
         let Some(slot) = self.slot(affinity) else {
-            report_out_of_range_affinity();
-            return None;
+            return Some(value);
         };
 
-        Some(slot.write().expect(NEVER_POISONED))
-    }
-
-    /// Acquires the shared lock on the slot for `affinity`.
-    ///
-    /// Used by tests to pin a slot so racing relocations pile up on its exclusive
-    /// lock; production relocation reads through [`get_clone`](Self::get_clone).
-    #[cfg(test)]
-    pub(crate) fn read(&self, affinity: Affinity) -> RwLockReadGuard<'_, Option<T>> {
-        self.slot(affinity)
-            .expect("tests pin only in-range slots")
-            .read()
-            .expect(NEVER_POISONED)
+        slot.set(value).err()
     }
 }
 
@@ -273,7 +237,7 @@ impl<T, S: Strategy> SlotTable<T, S> {
 /// Marked `#[cold]` and split into its own function so the emission machinery is laid out off the hot
 /// path.
 #[cold]
-fn report_out_of_range_affinity() {
+pub(crate) fn report_out_of_range_affinity() {
     std::thread_local! {
         static ARC_OOB: Event = Event::builder().name("thread_aware_arc_oob").build();
     }
@@ -295,7 +259,7 @@ where
     /// Returns `None` if the data does not exist for that affinity.
     #[must_use]
     pub(crate) fn get_clone(&self, affinity: Affinity) -> Option<T> {
-        self.slot(affinity)?.read().expect(NEVER_POISONED).clone()
+        self.slot(affinity)?.get().cloned()
     }
 
     /// Counts how many stored entries satisfy the given predicate.
@@ -307,12 +271,12 @@ where
             return 0;
         };
 
-        // Clone each value out from under its slot lock and apply the predicate afterwards, so no
-        // caller code runs while a lock is held. Slots are visited one at a time rather than under
-        // a single consistent snapshot, which is what leaves the count an estimate.
+        // Read each published value with a plain acquire load and apply the predicate to a clone.
+        // Slots are visited one at a time rather than under a single consistent snapshot, which is
+        // what leaves the count an estimate.
         slots
             .iter()
-            .filter_map(|slot| slot.read().expect(NEVER_POISONED).clone())
+            .filter_map(|slot| slot.get().cloned())
             .filter(|value| predicate(value))
             .count()
     }
@@ -327,22 +291,21 @@ mod tests {
     use crate::{PerCore, PerNuma, PerProcess};
 
     #[test]
-    fn replace_returns_previous_value() {
+    fn set_once_stores_then_rejects() {
         let affinities = pinned_affinities(&[1]);
         let storage = SlotTable::<String, PerCore>::default();
         let affinity = affinities[0];
 
-        // First replace should return None (no previous value)
-        let previous = storage.replace(affinity, "First".to_string());
-        assert_eq!(previous, None);
+        // The first publish into the empty cell succeeds and returns nothing.
+        let rejected = storage.set_once(affinity, "First".to_string());
+        assert_eq!(rejected, None);
 
-        // Second replace should return the previous value
-        let previous = storage.replace(affinity, "Second".to_string());
-        assert_eq!(previous, Some("First".to_string()));
+        // A cell is written at most once, so later publishes are rejected and hand the value back
+        // unchanged; the cell keeps its original contents.
+        let rejected = storage.set_once(affinity, "Second".to_string());
+        assert_eq!(rejected, Some("Second".to_string()));
 
-        // Third replace should return the new previous value
-        let previous = storage.replace(affinity, "Third".to_string());
-        assert_eq!(previous, Some("Second".to_string()));
+        assert_eq!(storage.get_clone(affinity), Some("First".to_string()));
     }
 
     #[test]
@@ -354,7 +317,7 @@ mod tests {
 
         assert!(storage.get_clone(affinity).is_none());
 
-        storage.replace(affinity, "Hello".to_string());
+        storage.set_once(affinity, "Hello".to_string());
         assert_eq!(storage.get_clone(affinity), Some("Hello".to_string()));
     }
 
@@ -378,14 +341,14 @@ mod tests {
         let table = SlotTable::<i32, InconsistentStrategy>::new();
 
         // `index` reports 1 for a table sized to a single slot, so the requested slot is out of
-        // range. The affinity has no slot of its own, so a write through it stores nothing and a read
-        // finds nothing rather than reaching into an unrelated slot.
-        assert!(table.replace(affinity, 42).is_none());
+        // range. The affinity has no cell of its own, so a publish through it stores nothing and
+        // hands the value back, and a read finds nothing rather than reaching into an unrelated slot.
+        assert_eq!(table.set_once(affinity, 42), Some(42));
         assert_eq!(table.get_clone(affinity), None);
     }
 
     #[test]
-    fn out_of_range_affinity_records_oob_metric() {
+    fn out_of_range_report_records_oob_metric() {
         use nm::Report;
 
         fn oob_count() -> u64 {
@@ -395,19 +358,15 @@ mod tests {
                 .map_or(0, nm::EventMetrics::count)
         }
 
-        let affinity = pinned_affinities(&[1])[0];
-        let table = SlotTable::<i32, InconsistentStrategy>::new();
-
-        // The anomalous strategy indexes past the single-slot table, so escalating to the slot's
-        // exclusive lock finds no slot and records the out-of-range metric. The registry is
+        // Relocation records this metric when it reaches an out-of-range affinity. The registry is
         // process-wide, so the count is asserted as a strict increase rather than an absolute value.
         let before = oob_count();
-        assert!(table.write(affinity).is_none());
+        super::report_out_of_range_affinity();
         let after = oob_count();
 
         assert!(
             after > before,
-            "the out-of-range access must record the thread_aware_arc_oob metric (before={before}, after={after})"
+            "the out-of-range report must record the thread_aware_arc_oob metric (before={before}, after={after})"
         );
     }
 
@@ -495,7 +454,7 @@ mod tests {
         assert!(storage.get_clone(affinity).is_none());
 
         // Verify it works the same as SlotTable::new()
-        storage.replace(affinity, "test".to_string());
+        storage.set_once(affinity, "test".to_string());
         assert_eq!(storage.get_clone(affinity), Some("test".to_string()));
     }
 }

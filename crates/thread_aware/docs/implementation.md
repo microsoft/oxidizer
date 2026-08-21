@@ -10,17 +10,14 @@ value. The `Strategy` type parameter maps an `Affinity` to a slot index and to
 the number of slots the table needs, so `PerCore`, `PerNuma` and `PerProcess`
 differ only in that mapping.
 
-Each slot holds the value materialized for it and is guarded by its own
-reader-writer lock. The strategy maps affinities to slots: `PerCore` gives each
-processor its own slot, while `PerNuma` and `PerProcess` fold several affinities
-onto one shared slot. Relocations into different slots touch different locks and
-never contend, so under `PerCore` a fanout across cores spreads across slots; a
-relocation only ever synchronizes with other relocations into the *same* slot.
-
-Slots are cache-line padded to curb false sharing between neighboring locks. The
-padding follows a target-specific alignment estimate; it reduces the chance that
-two locks share a line on the architectures the crate targets, rather than
-guaranteeing physical isolation on every machine.
+Each slot is a write-once cell — a `OnceLock` — published the first time a clone
+is relocated into it and read by every relocation thereafter. The strategy maps
+affinities to slots: `PerCore` gives each processor its own slot, while `PerNuma`
+and `PerProcess` fold several affinities onto one shared slot. A published slot is
+read with a plain acquire load and is never mutated again, so relocations into
+already-populated slots carry no lock-word contention and never serialize — not
+even into the *same* slot. Under `PerCore` a fanout across cores spreads across
+slots that are all read-only in the steady state.
 
 The table is sized once, on first use, to the slot count the strategy reports —
 `Strategy::count` returns a `NonZero<usize>`, so the table always has at least one
@@ -59,7 +56,7 @@ must already sit behind a shared pointer.
 
 Storing `sync::Arc<T>` is also what preserves `T: ?Sized` (so `Arc<dyn Trait, S>`
 works). A `sync::Arc<T>` is a sized value for any `T` — thin when `T` is sized, a
-fat pointer when it is not — and the slot's `RwLock` holds it as an opaque value
+fat pointer when it is not — and the slot's `OnceLock` holds it as an opaque value
 without inspecting its shape.
 
 `Storage` is constructible and populatable from outside the crate: a caller can
@@ -68,110 +65,118 @@ pass it to `Arc::from_storage` to obtain an `Arc` backed by those prepared
 values. The internal slot layout stays hidden — only the affinity-keyed
 insert/get surface is exposed.
 
-### Why a reader-writer lock and not an atomic swap
+### Why a write-once cell and not an atomic swap
 
-An earlier design considered replacing each slot's `RwLock<Option<Arc<T>>>` with
-an atomic pointer swap (an `arc_swap`-style cell), which would turn a slot read
-into a lock-free load. It is not adopted, for two reasons.
+Each slot is published exactly once and then only read, so it is a `OnceLock`
+rather than a mutable cell. A read is a plain acquire load with no lock word to
+contend on — the property an `arc_swap`-style atomic pointer cell would also give —
+but `OnceLock` reaches it without the two costs such a cell carries here.
 
-A cell like that stores the live handle as a single machine-word pointer it loads
-and stores atomically. That works directly only when `T` is sized, where `Arc<T>`
-is a thin pointer; for an unsized `T` — `dyn Trait`, `[u8]` — `Arc<T>` is a fat
-pointer that does not fit one atomic word, so a direct swap would force
-`T: Sized`. The reader-writer lock preserves `?Sized` at no extra cost, because it
-guards the
-`Arc<T>` as an opaque value and never decomposes it into a pointer. `?Sized` could
-still be kept under a swap by adding a thin indirection — swapping an `Arc<Arc<T>>`
-or `Arc<Box<T>>`, whose outer handle is thin whatever `T` is — but that adds an
-allocation and an extra indirection to every stored value.
+An atomic pointer cell stores the live handle as a single machine-word pointer it
+loads and stores atomically. That works directly only when `T` is sized, where
+`Arc<T>` is a thin pointer; for an unsized `T` — `dyn Trait`, `[u8]` — `Arc<T>` is
+a fat pointer that does not fit one atomic word, so a direct swap would force
+`T: Sized`. `?Sized` could be kept by adding a thin indirection — swapping an
+`Arc<Arc<T>>` or `Arc<Box<T>>`, whose outer handle is thin whatever `T` is — but
+that adds an allocation and an extra indirection to every stored value.
+`OnceLock<Arc<T>>` holds the `Arc<T>` as an opaque value and never decomposes it
+into a pointer, so it preserves `?Sized` at no extra cost.
 
-The decisive reason is that the swap would gain almost nothing here.
-Dereferencing an `Arc<T, S>` — the steady state — never touches a slot: the holder
-carries its current value in its own `value` field and derefs through that with no
-synchronization. A slot lock is taken on relocation (and by the storage
-accessors), and on relocation's common hit path only its shared side. Because each
-slot has its own lock and the workloads that matter relocate into distinct slots,
-that acquisition is essentially uncontended, so replacing it with a lock-free load
-would shave a few instructions off a path that is not the hot path while adding
-indirection to every stored value. Keeping the lock is the better trade.
+The swap's remaining capability — replacing an already-published value — is one
+this design never uses. A slot is materialized once and never emptied or
+rewritten, so write-once is exactly the contract the slot needs. `OnceLock` encodes
+that contract directly, turning "already published" into a cheap acquire load and a
+losing relocation into a rejected `set`, without carrying the machinery for stores
+that never happen. Dereferencing an `Arc<T, S>` — the steady state — never touches
+a slot at all: the holder carries its current value in its own `value` field and
+derefs through that with no synchronization, so the only slot reads are on
+relocation, and on the common hit path each is that single acquire load.
 
-## Relocation locking
+## Relocation and publication
 
 `ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
-holds one slot lock at a time and never two at once: first the destination slot,
-acquired in two stages, and then — only on a cross-slot miss — the source slot.
+touches at most two slots — the destination and, only on a cross-slot miss, the
+source — and holds nothing across them: every slot access is a write-once `set` or
+an acquire-load read, so there is no lock to order and opposite-direction traffic
+cannot deadlock.
 
 ```text
     relocate(source, destination)
              |
-      [ shared lock: slot[destination] ]
-       read slot[destination]
+       probe slot[destination]            (acquire load)
              |
       populated? --- yes ---> adopt value, done
              |
              no
              |
-    [ exclusive lock: slot[destination] ]
-       read slot[destination]        (re-probe)
+       reach cell slot[destination]
+             |
+      out of range? --- yes ---> no-op: keep carried value,
+             |                     record thread_aware_arc_oob, done
+             no
+             |
+       re-read slot[destination]          (acquire load)
              |
       populated? --- yes ---> adopt value, done
              |
              no
              |
-      same slot as source? --- yes ---> keep carried value,
-             |                            seed slot[destination], done
+      same slot as source? --- yes ---> get_or_init slot[destination]
+             |                            with carried value, adopt, done
              no
              |
-       materialize value
-       publish to slot[destination]
+       materialize value                  (no slot touched)
              |
-      [ release slot[destination] ]
+       set slot[destination]              (write-once)
              |
-      [ exclusive lock: slot[source] ]
-       record source value in slot[source] if empty
+      rejected? --- yes ---> adopt the published winner, done
+             |
+             no
+             |
+       record carried value in slot[source]   (write-once, if in range)
 ```
 
-The first stage carries the throughput. A slot is never emptied once populated,
-so a relocation into an already-populated affinity only clones a reference out of
-its slot. Because each slot owns its own lock, these reads scale with the number
-of slots: under `PerCore` a fanout that hands work to every core relocates into a
-different slot per core, and the cores do not contend.
+The probe carries the throughput. A slot is never emptied once populated, so a
+relocation into an already-populated affinity is a single acquire load that clones
+a reference out of the cell. Because each slot is an independent cell, these reads
+scale with the number of slots: under `PerCore` a fanout that hands work to every
+core relocates into a different slot per core, and the cores share no lock word to
+contend on.
 
-The second stage handles a miss: the destination slot is empty. If the source
-resolves to that same slot, the value the `Arc` carries already belongs there, so
-it is kept and the slot is seeded with it — this is every relocation under
-`PerProcess`, and any relocation whose source and destination share a slot.
-Otherwise the value is materialized by running the factory and published under the
-exclusive lock, on that slot only, so a miss on one slot never blocks hits on
-another. The re-probe before either is required for correctness, not an
-optimization: the lock is dropped between the stages, so another thread may have
-populated the slot in between, and without re-checking, two threads would
-materialize competing values for the same slot.
+A miss reaches the destination cell to publish into it. If the source resolves to
+that same slot, the value the `Arc` carries already belongs there, so
+`get_or_init` seeds the empty cell with it — or adopts a racer's value if one
+published first. This is every relocation under `PerProcess`, and any relocation
+whose source and destination share a slot. Otherwise the value is materialized by
+running the factory with no slot touched, and published with a write-once `set`.
+The re-read before materializing is an optimization, not a correctness
+requirement: the write-once `set` is the authority. If two threads both miss and
+both materialize, the first `set` wins and the loser's `set` is rejected; the loser
+then adopts the published winner, so every clone converges on one identity and the
+value the loser built is dropped. Materializing runs the caller's factory while
+nothing is published, so a panic there simply propagates and leaves the cell empty
+for the next relocation to retry — there is no lock to poison and no partial state
+to unwind.
 
 A cross-slot miss also preserves the value it moves away from. The `Arc` is
-carrying the source slot's value, so that value is written into the source slot
-when it is still empty — the case of an `Arc` leaving a slot that nothing had
-recorded yet. This write happens after the destination lock is released, never
-with both locks held: two threads relocating in opposite directions (`X → Y` and
-`Y → X`) would otherwise deadlock, each waiting for the lock the other holds. The
-same-slot case needs none of this, having already seeded the one slot involved.
+carrying the source slot's value, so that value is recorded into the source slot
+with a write-once `set`. An already-populated source slot is left untouched:
+another thread may have recorded the same slot with the same value first, and
+keeping the existing value is correct. The same-slot case needs none of this,
+having already seeded the one slot involved.
 
-An affinity whose slot index falls outside the sized table has no slot to lock. A
+An affinity whose slot index falls outside the sized table has no cell to reach. A
 relocation into such a destination is a no-op — the `Arc` keeps the value it
 already carries — and an out-of-range source is simply not recorded into. Either
 out-of-range access is reported through the `thread_aware_arc_oob` metric. Ref:
 "Storage".
 
-A slot lock is never left poisoned, so acquiring one never has to handle a poison
-error. Poisoning would require a panic while the lock is held, and the crate
-never panics there. The operations run under a slot lock — cloning, storing and
-comparing the reference-counted handle it holds — cannot unwind. The one
-exception is materializing a value on the miss path, which runs the caller's
-factory; `relocate` runs that under `catch_unwind`, and on a panic it drops the
-destination guard before resuming the unwind, so the lock is released cleanly
-rather than poisoned. `strong_count` likewise clones each handle out from under
-its lock and applies its predicate afterwards, so no caller code runs while a
-lock is held.
+Because a slot is only ever published or read, never mutated in place, no operation
+on the relocation path can leave shared state poisoned or half-written. The one
+piece of caller code that runs — the factory on the miss path — runs before
+anything is published, so its unwinding cannot corrupt a slot. `strong_count`
+likewise reads each handle out of its cell with an acquire load and applies its
+predicate afterwards, so no caller code observes a slot mid-write.
 
 ## Benchmarks
 
@@ -192,21 +197,21 @@ is a graph walk, so a caller pays for every thread-aware node reachable from the
 message, not just for a single call; the two subjects cover both ends of that
 range.
 
-The two subjects do very different amounts of lock work per message. Each
-thread-aware node owns a separate slot table with its own lock, and the derived
-walk visits fields in sequence, so relocating the tree takes roughly one slot
-acquisition per layer instead of one in total. Each message therefore pays the
-per-slot cost several times over, which makes that cost easier to resolve.
+The two subjects do very different amounts of slot work per message. Each
+thread-aware node owns a separate slot table, and the derived walk visits fields
+in sequence, so relocating the tree touches roughly one cell per layer instead of
+one in total. Each message therefore pays the per-slot cost several times over,
+which makes that cost easier to resolve.
 
 `hit_path` and `miss_path` measure both subjects, the bare one being a meaningful
-isolation of a single relocation. `concurrent` measures only the tree: at one
-acquisition per message the bare subject does too little lock work to resolve the
-effect it is looking for.
+isolation of a single relocation. `concurrent` measures only the tree: at one cell
+read per message the bare subject does too little slot work to resolve the effect
+it is looking for.
 
 ### The miss benchmark
 
 `miss_path` measures a cross-slot miss: the destination slot is empty, so
-relocation escalates to that slot's exclusive lock, runs the factory to
+relocation runs the factory to
 materialize the value, publishes it, and records the value the `Arc` carried in
 the still-empty source slot. A primer affinity relocates a throwaway clone before
 timing, so the shared slot table is already allocated and both the source and
@@ -221,11 +226,12 @@ many workers relocate at once. A pool of workers is created once and reused; eac
 worker owns a distinct destination slot that is materialized before timing, and
 relocates its own clone of the subject into that slot. Every measured relocation
 is therefore a hit, and because the destinations are distinct no two workers ever
-touch the same slot lock. What the benchmark isolates is that hit path with no
-shared lock to serialize on: adding workers introduces no lock hand-off between
-them, so the per-relocation cost does not degrade the way it did when a single
-lock guarded the whole table. The before/after comparison against that former
-design is reported in the pull request, not established by this run alone.
+read the same cell. What the benchmark isolates is that hit path with no shared
+lock word to serialize on: each hit is an acquire load of a distinct write-once
+cell, so adding workers introduces no hand-off between them and the per-relocation
+cost does not degrade the way it did when a single lock guarded the whole table.
+The before/after comparison against that former design is reported in the pull
+request, not established by this run alone.
 
 Each round hands every worker a batch of relocations, releases them together, and
 measures the wall-clock time until the last worker finishes. The batch is what
@@ -247,7 +253,7 @@ per-operation synchronization inside the batch to distort the measurement.
 
 The group sweeps one worker per processor and `CONCURRENT_OVERSUBSCRIPTION`
 workers per processor. Because the measured relocations are all hits into distinct
-slots, the oversubscribed shape does not add lock contention; it adds scheduler
+slots, the oversubscribed shape does not add cell contention; it adds scheduler
 pressure, exposing how the hit path behaves when more workers than processors are
 runnable. The uncontended single-worker cost belongs to `hit_path` and is
 deliberately absent here, where one worker would only add the pool's

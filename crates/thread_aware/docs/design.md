@@ -4,8 +4,8 @@ This document describes the user-visible behavior and design tenets of
 `thread_aware::Arc` and its companion `storage::Storage` handle. The
 `ThreadAware` trait and the relocation model these build on are introduced in
 the crate root documentation; this document focuses on the affinity-partitioned
-`Arc`. The internal mechanism — per-affinity slot locking, the two-stage
-relocation, and its poison-freedom — is documented separately in
+`Arc`. The internal mechanism — the per-affinity write-once slots and the
+relocation protocol built on them — is documented separately in
 [implementation.md](implementation.md).
 
 ## 1. Purpose
