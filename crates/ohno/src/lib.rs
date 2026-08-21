@@ -90,7 +90,8 @@
 //! source.
 //!
 //! **With a source**, the source's message is printed as it stands: no type name, and no
-//! `caused by:` line, so the wrapper leaves no trace in the output.
+//! `caused by:` line, so the wrapper leaves no trace in the message line. Enrichment and a
+//! backtrace, described below, are still written after it.
 //! [`source()`](std::error::Error::source) still returns the concrete error, so a caller that
 //! walks the chain still finds it.
 //!
@@ -215,14 +216,14 @@
 //! // Usage
 //! let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 //!
-//! // Output: "Failed to read config with path: /etc/config.toml\nCaused by:\n\tfile not found"
+//! // Output: "Failed to read config with path: /etc/config.toml\ncaused by: file not found"
 //! ```
 //!
 //! The template string supports field interpolation using `{field_name}` syntax. Unlike the
 //! default rendering, the source is never printed on its own: the custom message always leads, and
-//! the underlying error (if any) follows as "Caused by:" in the error chain. If the error has no
-//! source, only the custom message is displayed — the type name is never used once a template is
-//! given.
+//! the underlying error (if any) follows on the next line, after a `caused by:` label. If the
+//! error has no source, only the custom message is displayed — the type name is never used once a
+//! template is given.
 //!
 //! Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 //!
