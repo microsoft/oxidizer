@@ -202,7 +202,9 @@
 //! # Overriding error text
 //!
 //! The `#[display("...")]` attribute replaces the rendered message with a template of its own,
-//! while preserving the underlying error as a cause in the error chain.
+//! while still printing the cause after it. A cause that is an error also stays in the
+//! [`source()`](std::error::Error::source) chain; a cause given as a string is printed the same way
+//! but does not join the chain, exactly as under the default rendering.
 //!
 //! ```rust
 //! use std::path::PathBuf;
@@ -220,10 +222,10 @@
 //! ```
 //!
 //! The template string supports field interpolation using `{field_name}` syntax. Unlike the
-//! default rendering, the source is never printed on its own: the custom message always leads, and
-//! the underlying error (if any) follows on the next line, after a `caused by:` label. If the
-//! error has no source, only the custom message is displayed — the type name is never used once a
-//! template is given.
+//! default rendering, the cause is never printed on its own: the custom message always leads, and
+//! the cause (if any) follows on the next line, after a `caused by:` label. If the error has no
+//! cause, only the custom message is displayed — the type name is never used once a template is
+//! given.
 //!
 //! Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
 //!
