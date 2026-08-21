@@ -4,10 +4,11 @@
 //! Transport policy decisions observed on the wire over localhost.
 //!
 //! Covers what the transport is contractually required to put on - or keep off - the wire and to
-//! surface unchanged to the caller: request method and body framing, the rejection of request
-//! trailers, and the deliberate absence of automatic content decoding, redirect following, cookie
-//! handling and authentication retries. These behaviours hold for every protocol version;
-//! plaintext HTTP/1.1 is simply the cheapest fixture to observe them through.
+//! surface unchanged to the caller: server addressing, request method and body framing, the
+//! rejection of request trailers, the selective decoding of response content encodings, and the
+//! deliberate absence of redirect following, cookie handling and authentication retries. These
+//! behaviours hold for every protocol version; plaintext HTTP/1.1 is simply the cheapest fixture
+//! to observe them through.
 
 #![cfg(windows)]
 #![expect(
@@ -69,6 +70,18 @@ fn small_and_large_get_and_post_round_trips() {
     assert_eq!(snapshot.requests[2].method, Method::POST);
     assert_eq!(snapshot.requests[3].method, Method::POST);
     assert!(snapshot.requests.iter().all(|request| request.version == Version::HTTP_11));
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn a_bracketed_ipv6_authority_reaches_the_server() {
+    let server = TestServer::http_ipv6([ResponsePlan::ok("ipv6")]);
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+
+    let body = futures::executor::block_on(test_client.client.get(server.url("/ipv6")).fetch_text_body()).unwrap();
+
+    assert_eq!(body, "ipv6");
+    assert_eq!(server.finish().requests.len(), 1);
 }
 
 #[cfg_attr(miri, ignore)]

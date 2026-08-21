@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use std::convert::Infallible;
-use std::net::{Ipv4Addr, SocketAddr, TcpListener as StdTcpListener};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener as StdTcpListener};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -86,7 +86,13 @@ pub(crate) struct TestServer {
 
 impl TestServer {
     pub(crate) fn http(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
-        Self::start(responses, Transport::Http, None)
+        Self::start(responses, Transport::Http, None, IpAddr::V4(Ipv4Addr::LOCALHOST))
+    }
+
+    /// Serves plaintext HTTP over the IPv6 loopback, so a caller reaches it through a bracketed
+    /// authority.
+    pub(crate) fn http_ipv6(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
+        Self::start(responses, Transport::Http, None, IpAddr::V6(Ipv6Addr::LOCALHOST))
     }
 
     pub(crate) fn https(responses: impl IntoIterator<Item = ResponsePlan>, certificate_names: &[&str]) -> Self {
@@ -99,11 +105,21 @@ impl TestServer {
             .unwrap();
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
-        Self::start(responses, Transport::Https, Some(TlsAcceptor::from(Arc::new(config))))
+        Self::start(
+            responses,
+            Transport::Https,
+            Some(TlsAcceptor::from(Arc::new(config))),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        )
     }
 
-    fn start(responses: impl IntoIterator<Item = ResponsePlan>, transport: Transport, tls_acceptor: Option<TlsAcceptor>) -> Self {
-        let listener = StdTcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    fn start(
+        responses: impl IntoIterator<Item = ResponsePlan>,
+        transport: Transport,
+        tls_acceptor: Option<TlsAcceptor>,
+        bind: IpAddr,
+    ) -> Self {
+        let listener = StdTcpListener::bind((bind, 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let state = Arc::new(State {
@@ -137,7 +153,11 @@ impl TestServer {
             Transport::Https => "https",
         };
         let host = match self.transport {
-            Transport::Http => Ipv4Addr::LOCALHOST.to_string(),
+            // An IPv6 literal only forms a valid authority inside brackets.
+            Transport::Http => match self.address.ip() {
+                IpAddr::V4(address) => address.to_string(),
+                IpAddr::V6(address) => format!("[{address}]"),
+            },
             Transport::Https => "localhost".to_owned(),
         };
         format!("{scheme}://{host}:{}{path}", self.address.port())

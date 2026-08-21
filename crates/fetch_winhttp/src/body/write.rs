@@ -480,6 +480,14 @@ mod tests {
         assert_eq!(small.total_length(), 42);
         assert!(!small.automatic_chunking());
 
+        // The largest length `dwTotalLength` can carry is still an exact length:
+        // the unknown-length sentinel is zero, so it cannot collide with one.
+        let exact_max = RequestBodyFraming::new(&mut headers, Some(u64::from(u32::MAX))).unwrap();
+        assert_eq!(exact_max.total_length(), u32::MAX);
+        assert_ne!(exact_max.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
+        assert!(!exact_max.automatic_chunking());
+
+        headers.remove(http::header::CONTENT_LENGTH);
         let large_length = u64::from(u32::MAX) + 1;
         let large = RequestBodyFraming::new(&mut headers, Some(large_length)).unwrap();
         assert_eq!(large.total_length(), WINHTTP_IGNORE_REQUEST_TOTAL_LENGTH);
