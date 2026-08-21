@@ -225,7 +225,7 @@ syn = { version = "3.0.2", default-features = false }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.4.0" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.4.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.4.0" }
-testing_aids = { path = "crates/testing_aids" }
+testing_aids = { path = "crates/testing_aids", default-features = false }
 thiserror = { version = "2.0.17", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.9.0" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.5" }
