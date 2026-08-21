@@ -34,10 +34,8 @@ strategy maps that affinity to the value the holder sees:
 - `PerNuma` keeps a value per memory region, so holders on cores of the same NUMA
   node share a value and holders on different nodes do not.
 
-Custom strategies are possible. The count a strategy reports is only a sizing hint:
-a strategy whose index runs past it, or that reports different counts across the
-affinities that share one `Arc`, still works — the table grows to cover whatever
-index the strategy hands out (see [implementation.md](implementation.md)).
+Custom strategies are possible; they are expected to report a consistent slot
+count across the affinities that share one `Arc` (see [implementation.md](implementation.md)).
 
 ## 3. Per-affinity values
 

@@ -73,7 +73,6 @@ azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
 base64 = { version = "0.23.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
-boxcar = { version = "0.2.14", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }

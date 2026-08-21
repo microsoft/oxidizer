@@ -4,11 +4,13 @@
 //! Primitives for thread-aware data storage.
 
 #[cfg(not(test))]
+use alloc::boxed::Box;
+#[cfg(not(test))]
 use alloc::vec::Vec;
 use std::marker::PhantomData;
 #[cfg(test)]
 use std::sync::RwLockReadGuard;
-use std::sync::{self, RwLock, RwLockWriteGuard};
+use std::sync::{self, OnceLock, RwLock, RwLockWriteGuard};
 
 use crossbeam_utils::CachePadded;
 
@@ -19,10 +21,7 @@ pub trait Strategy {
     /// Returns the slot index for the given affinity.
     fn index(affinity: Affinity) -> usize;
 
-    /// Returns the number of slots the table is expected to hold for this affinity.
-    ///
-    /// The table sizes itself to this on first use as an allocation hint. It is not a hard bound:
-    /// an [`index`](Self::index) beyond it grows the table to fit rather than being rejected.
+    /// Returns the number of slots the storage holds.
     fn count(affinity: Affinity) -> usize;
 }
 
@@ -54,17 +53,14 @@ type Slot<T> = CachePadded<RwLock<Option<T>>>;
 /// using `CachePadded`'s target-specific alignment estimate, to curb false sharing
 /// between neighboring locks rather than to guarantee physical isolation.
 ///
-/// The table grows on demand and is lock-free to read. It is a concurrent append-only
-/// vector: the steady state is a hit, which finds the slot with a single lock-free indexed
-/// read that scales across cores rather than contending on a shared table lock. The first
-/// access for an index the table does not yet cover appends empty slots until it is reached,
-/// sizing toward the strategy's reported count when that is larger so a well-behaved strategy
-/// fills its slots on the first access. The table only ever appends and never moves or removes
-/// a slot, so each slot keeps a stable address and a reference to one stays valid for the life
-/// of the table even as later growth extends it.
+/// The slot array is sized once, on first use, to `S::count(affinity)` — a value
+/// fixed for the process lifetime — so there is no growth path and therefore no
+/// table-wide lock guarding it. After initialization the array and the pointer to
+/// it are immutable, so reaching a slot is a plain atomic load that carries no
+/// further synchronization; its cache behavior is left to the hardware.
 #[derive(Debug)]
 pub(crate) struct SlotTable<T, S: Strategy> {
-    slots: boxcar::Vec<Slot<T>>,
+    slots: OnceLock<Box<[Slot<T>]>>,
     _marker: PhantomData<S>,
 }
 
@@ -73,41 +69,40 @@ impl<T, S: Strategy> SlotTable<T, S> {
     #[must_use]
     pub(crate) const fn new() -> Self {
         Self {
-            slots: boxcar::Vec::new(),
+            slots: OnceLock::new(),
             _marker: PhantomData,
         }
     }
 
-    /// Returns the slot for `affinity`, growing the table to cover it if needed.
-    ///
-    /// The steady state is the fast path: a single lock-free indexed read. Reaching an index the
-    /// table does not yet cover appends empty slots until it is present; the table only ever
-    /// appends, so the returned reference stays valid for the life of the table.
-    fn slot(&self, affinity: Affinity) -> &Slot<T> {
-        let index = S::index(affinity);
+    /// Returns the slot array, sizing it on first use to hold every affinity.
+    fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
+        self.slots.get_or_init(|| {
+            (0..S::count(affinity))
+                .map(|_| CachePadded::new(RwLock::new(None)))
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        })
+    }
 
-        // Fast path: the slot already exists. The read is lock-free, so concurrent relocations
-        // scale across cores instead of contending on a shared table lock.
-        if let Some(slot) = self.slots.get(index) {
-            return slot;
-        }
+    /// Returns the lock guarding the slot for `affinity`.
+    fn slot(&self, affinity: Affinity) -> &RwLock<Option<T>> {
+        let slots = self.slots(affinity);
+        let requested = S::index(affinity);
 
-        // Slow path: the index is past the end, so append empty slots until it is covered. Size
-        // toward the strategy's reported count when it exceeds the index — a hint that lets a
-        // well-behaved strategy fill all its slots on the first access rather than once per
-        // affinity — while always appending at least one slot per iteration so the index is reached
-        // in bounded steps even if the count under-reports it. Racing callers may over-provision
-        // past the index, which is harmless: a surplus slot is an unused empty cell.
-        let target = (index + 1).max(S::count(affinity));
-        loop {
-            self.slots.push(CachePadded::new(RwLock::new(None)));
-            while self.slots.count() < target {
-                self.slots.push(CachePadded::new(RwLock::new(None)));
-            }
-            if let Some(slot) = self.slots.get(index) {
-                return slot;
-            }
-        }
+        // Trap the anomaly in debug builds so a misbehaving strategy surfaces during development;
+        // release builds take the fallback below instead.
+        debug_assert!(
+            requested < slots.len(),
+            "Strategy::index returned {requested} for {}, which exceeds the {} slots the table was sized to",
+            core::any::type_name::<S>(),
+            slots.len()
+        );
+
+        // The table is sized once, on first use, to the slot count the first affinity reported, so
+        // an index past its end means this affinity's index and the sized count do not line up.
+        // Fall back to the first slot rather than indexing out of bounds — better than nothing when
+        // there is no correct slot to reach. Debug builds have already trapped this above.
+        slots.get(requested).unwrap_or(&slots[0])
     }
 
     /// Replaces the data for the given affinity with the provided value.
@@ -159,18 +154,18 @@ where
     /// The count is an estimate under concurrent relocation, matching the
     /// inherently racy nature of a strong-count query.
     pub(crate) fn count_where(&self, predicate: impl Fn(&T) -> bool) -> usize {
-        // Clone every present value out from under its slot lock into a snapshot, then apply the
-        // predicate afterwards, so no caller code runs while any slot lock is held. Iterating the
-        // append-only table is lock-free; slots are still written concurrently during the pass, so
-        // the snapshot is visited one slot at a time rather than as a consistent whole — what leaves
-        // the count an estimate.
-        let snapshot: Vec<T> = self
-            .slots
-            .iter()
-            .filter_map(|(_, slot)| slot.read().expect(NEVER_POISONED).clone())
-            .collect();
+        let Some(slots) = self.slots.get() else {
+            return 0;
+        };
 
-        snapshot.iter().filter(|value| predicate(value)).count()
+        // Clone each value out from under its slot lock and apply the predicate afterwards, so no
+        // caller code runs while a lock is held. Slots are visited one at a time rather than under
+        // a single consistent snapshot, which is what leaves the count an estimate.
+        slots
+            .iter()
+            .filter_map(|slot| slot.read().expect(NEVER_POISONED).clone())
+            .filter(|value| predicate(value))
+            .count()
     }
 }
 
@@ -268,7 +263,7 @@ mod tests {
     }
 
     /// A `Strategy` that hands out an index outside the slot count it reports. Exists only to drive
-    /// the table's grow-to-fit path when an index lands past the reported count.
+    /// the debug guard in `SlotTable::slot`.
     struct InconsistentStrategy;
 
     impl Strategy for InconsistentStrategy {
@@ -281,46 +276,13 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
-    fn strategy_index_beyond_count_grows_table() {
+    #[should_panic(expected = "Strategy::index returned")]
+    fn inconsistent_strategy_index_is_caught_in_debug() {
         let affinity = pinned_affinities(&[1])[0];
         let table = SlotTable::<i32, InconsistentStrategy>::new();
-
-        // Index 1 lands past the reported count of 1, so the table must grow to reach it rather
-        // than reject the access.
-        assert_eq!(table.replace(affinity, 7), None);
-        assert_eq!(table.get_clone(affinity), Some(7));
-    }
-
-    /// A `Strategy` that maps to the processor index while under-reporting its count as one. Exists
-    /// to force the table to reallocate its vector on a later, higher-indexed access.
-    struct ProcessorIndexUnderCounted;
-
-    impl Strategy for ProcessorIndexUnderCounted {
-        fn index(affinity: crate::affinity::Affinity) -> usize {
-            affinity.processor_index()
-        }
-
-        fn count(_affinity: crate::affinity::Affinity) -> usize {
-            1
-        }
-    }
-
-    #[test]
-    fn slot_reference_survives_growth() {
-        // The first access sizes the vector to one slot; a later access to a far higher index grows
-        // and reallocates it. A reference into the first slot, taken before that growth, must stay
-        // valid afterwards — the invariant the boxed slots exist to uphold.
-        let affinities = pinned_affinities(&[8]);
-        let table = SlotTable::<i32, ProcessorIndexUnderCounted>::new();
-
-        assert_eq!(table.replace(affinities[0], 100), None);
-        let low = table.slot(affinities[0]);
-
-        // Access a far higher index, reallocating the vector while `low` is held.
-        assert_eq!(table.replace(affinities[7], 200), None);
-
-        assert_eq!(*low.read().expect("slot lock is never poisoned"), Some(100));
+        _ = table.replace(affinity, 0);
     }
 
     #[test]
