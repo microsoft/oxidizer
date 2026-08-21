@@ -8,9 +8,11 @@
 //! `TokenStream` text is unreadable in a diff, so an expansion is parsed back into a
 //! [`syn::File`] and pretty-printed before it reaches the snapshot.
 //!
-//! Both helpers panic rather than degrade. An expansion that no longer parses is a defect in
-//! the macro, and rendering it as raw tokens instead would hide that defect behind a snapshot
-//! that merely looks reformatted.
+//! [`tokenize`] and [`render_expansion`] panic rather than degrade: an expansion that no longer
+//! parses is a defect in the macro, and rendering it as raw tokens instead would hide that
+//! defect behind a snapshot that merely looks reformatted. [`render_tokens_lossy`] is the one
+//! exception, and it is for macro *input* only -- a test that deliberately feeds a macro
+//! something which is not an item still wants to show what it fed.
 
 use proc_macro2::TokenStream;
 
