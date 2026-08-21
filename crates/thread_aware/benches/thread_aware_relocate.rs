@@ -14,8 +14,8 @@
 //! * A bare `Arc<Payload, PerCore>`, which isolates the cost of a single
 //!   relocation.
 //! * A five-layer object tree, which is what actually crosses affinities in
-//!   practice. Relocating it walks the whole graph and locks one slot table per
-//!   layer, so it reports what the lock policy costs per message rather than per
+//!   practice. Relocating it walks the whole graph and reads one slot table per
+//!   layer, so it reports what storage access costs per message rather than per
 //!   call.
 //!
 //! The suite covers these shapes:
@@ -23,7 +23,7 @@
 //! * `hit_path` / `miss_path` — uncontended cost of the two branches.
 //! * `concurrent` — the hit-path cost with as many concurrent workers as
 //!   processors, and beyond, each relocating into its own slot, so there is no
-//!   shared lock to serialize on.
+//!   shared cell to contend on.
 //!
 //! Paired with `thread_aware_relocate_cg.rs`, which covers `hit_path` and
 //! `miss_path` under instruction-count measurement. The `concurrent` subgroup has
@@ -58,8 +58,8 @@ use support::{Payload, TREE_DEPTH, Tree};
 /// the scheduler queue than there are processors to run them, the regime a
 /// thread-per-core runtime reaches whenever it has more runnable work than cores.
 /// Every worker still relocates into its own already-filled slot, so no two
-/// workers ever share a lock; the shape exposes how the uncontended hit path
-/// behaves under scheduler pressure, not lock contention.
+/// workers ever share a cell; the shape exposes how the uncontended hit path
+/// behaves under scheduler pressure, not cell contention.
 ///
 /// A small multiple is enough to reach that regime. Higher factors only add more
 /// scheduler queueing without exercising a different code path.
@@ -162,8 +162,8 @@ fn bench_hit_path(c: &mut Criterion) {
 // =========================================================================
 // miss_path — destination affinity is empty, so the value is materialized.
 //             A primer affinity sizes the shared slot table before timing, so
-//             the measurement is the cross-slot miss itself — the exclusive
-//             re-probe, the factory call, and the two slot writes — rather than
+//             the measurement is the cross-slot miss itself — the re-probe
+//             load, the factory call, and the two cell writes — rather than
 //             the one-time table allocation.
 // =========================================================================
 
@@ -208,7 +208,7 @@ fn bench_miss_path(c: &mut Criterion) {
 
 // =========================================================================
 // concurrent — the hit-path cost while many workers relocate into their own
-//              slots at once, with no shared lock to serialize on.
+//              slots at once, with no shared cell to contend on.
 // =========================================================================
 
 /// Persistent worker pool that measures a relocation performed concurrently from
@@ -228,7 +228,7 @@ fn bench_miss_path(c: &mut Criterion) {
 /// reported per-iteration time is the batch makespan divided by the batch size: the
 /// amortized cost of one relocation on the worker that finishes last. Because the
 /// destinations are distinct and already populated, no two workers share a slot
-/// lock, so that figure reflects the hit path while every worker is busy.
+/// cell, so that figure reflects the hit path while every worker is busy.
 ///
 /// Readiness is proven before the clock starts. Every worker parks on `ready`,
 /// the controller waits there too, and only once all of them have arrived does it
@@ -353,16 +353,16 @@ fn bench_concurrent(c: &mut Criterion) {
     // A sweep over worker count: one worker per processor, then more workers than
     // processors. Every worker relocates into its own distinct, already-populated
     // slot, so the measured relocations are all hits and no two workers share a
-    // lock; the reported per-relocation time therefore reflects the hit path scaling
-    // as the machine fills rather than lock contention. The oversubscribed shape
-    // adds scheduler pressure, not lock contention. The uncontended single-worker
+    // cell; the reported per-relocation time therefore reflects the hit path scaling
+    // as the machine fills rather than contention. The oversubscribed shape
+    // adds scheduler pressure, not contention. The uncontended single-worker
     // cost belongs to `hit_path`, so it is deliberately absent here: one worker would
     // only add this harness's thread-handoff overhead to the same number.
     //
     // The subject is the object tree, which is what actually crosses affinities in
-    // a consumer. It locks one slot table per layer, so each message does several
-    // slot acquisitions and the per-message lock cost is large enough to resolve; a
-    // bare `Arc` does one acquisition, too little to resolve above the harness noise.
+    // a consumer. It reads one slot table per layer, so each message does several
+    // cell reads and the per-message storage cost is large enough to resolve; a
+    // bare `Arc` does one read, too little to resolve above the harness noise.
     let shapes = [
         ("threads_saturated", saturated),
         ("threads_oversubscribed", saturated * CONCURRENT_OVERSUBSCRIPTION),

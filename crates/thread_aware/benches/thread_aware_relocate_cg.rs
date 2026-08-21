@@ -9,11 +9,12 @@
 //! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
-//! the shared-lock probe. An uncontended shared acquisition and an uncontended
-//! exclusive acquisition cost nearly the same number of instructions, so the
-//! benefit of the probe only appears under contention, which the simulator
+//! the concurrency win. Single-threaded, a hit is an acquire load and a miss
+//! adds a second load, the factory call, and the write-once publish; those cost
+//! nearly the same whether or not other threads are relocating, so the benefit
+//! of the lock-free cells only appears under contention, which the simulator
 //! cannot model. What this file does catch is the extra work a cross-slot miss
-//! pays over a hit — the exclusive re-probe, the factory call, and the two slot
+//! pays over a hit — the re-probe load, the factory call, and the two cell
 //! writes — and any future growth of either branch. The slot table is sized
 //! before timing, so the one-time table allocation stays out of the counts.
 //!

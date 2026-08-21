@@ -42,7 +42,7 @@ impl Payload {
 }
 
 /// Depth of the object tree, and therefore the number of distinct slot tables a
-/// single tree relocation locks.
+/// single tree relocation reads.
 ///
 /// Relocation is a graph walk, so what a caller pays is set by the number of
 /// thread-aware nodes reachable from the message, not by the cost of one call.
@@ -69,9 +69,9 @@ impl Leaf {
 ///
 /// The field mix is the point of the type. `id` and `name` are thread-aware with
 /// a no-op relocation, `flags` opts out entirely, and `shared` is a genuine
-/// per-affinity node whose relocation takes a lock. Every layer owns a separate
-/// slot table, so relocating the tree walks plain data and acquires exactly one
-/// lock per layer, which is how relocation cost actually accrues in a consumer.
+/// per-affinity node whose relocation reads a slot cell. Every layer owns a separate
+/// slot table, so relocating the tree walks plain data and reads exactly one
+/// cell per layer, which is how relocation cost actually accrues in a consumer.
 #[derive(Debug, Clone, thread_aware::ThreadAware)]
 pub(crate) struct Layer {
     id: u64,
