@@ -54,8 +54,12 @@ const NEVER_POISONED: &str =
 /// affinity indexing past the slot count is a caller error — the caller mixed coordinate spaces
 /// rather than relying on the degraded relocation path — so the access panics rather than silently
 /// discarding a value or returning a value from an unrelated slot. Split into its own `#[cold]`
-/// function so the panic machinery stays off the accessor's inlined body.
+/// function so the panic machinery stays off the inlined accessor bodies.
 #[cold]
+#[expect(
+    clippy::panic,
+    reason = "documented panic path: direct Storage access with a mismatched coordinate space is a caller error"
+)]
 fn out_of_coordinate_space() -> ! {
     panic!(
         "Storage accessed with an affinity outside its coordinate space; direct Storage access requires affinities that map into the slot count this storage was sized for"

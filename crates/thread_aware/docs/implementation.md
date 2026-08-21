@@ -22,16 +22,21 @@ padding follows a target-specific alignment estimate; it reduces the chance that
 two locks share a line on the architectures the crate targets, rather than
 guaranteeing physical isolation on every machine.
 
-The table is sized once, on first use, to the slot count the strategy reports.
-Because the whole table is fixed from then on, the design assumes the strategy
+The table is sized once, on first use, to the slot count the strategy reports —
+`Strategy::count` returns a `NonZero<usize>`, so the table always has at least one
+slot. Because the whole table is fixed from then on, the design assumes the strategy
 reports the same count for every affinity that shares it — the built-in strategies
 do, since the processor and memory-region counts are properties of the machine. A
 strategy that breaks that assumption can produce an index past the table's end; such
-an affinity has no slot of its own, so a relocation into it is a no-op — the `Arc`
-keeps the value it already carries rather than reaching into an unrelated slot — and
-records the `thread_aware_arc_oob` metric so the condition is observable in a running
-process. There is no growth path and no table-wide lock
-guarding the array. After that first
+an affinity has no slot of its own. The relocation path treats it as unreachable: a
+relocation into such a destination is a no-op — the `Arc` keeps the value it already
+carries rather than reaching into an unrelated slot — and records the
+`thread_aware_arc_oob` metric so the condition is observable in a running process.
+The direct storage accessors do not degrade this way: `Storage::insert` and
+`Storage::get` panic on an out-of-range affinity, because a caller preparing storage
+by hand controls its own affinities, so mixing coordinate spaces there is a
+programming error rather than the tolerated relocation fallback. There is no growth
+path and no table-wide lock guarding the array. After that first
 initialization the array and the pointer to it are immutable, so reaching a slot
 is a plain atomic load that carries no further synchronization; how well it stays
 in cache is left to the hardware. Slots are filled lazily: a slot is populated the
@@ -48,7 +53,7 @@ store an `Arc` is therefore made at the `Storage` layer, not baked into
 `SlotTable`: `SlotTable` is a generic, value-agnostic partitioned table
 (unit-tested with a plain value type), and `Storage` is the adapter that fixes its
 element type to `sync::Arc<T>`. The public boundary makes the same split visible —
-`Storage::insert`, `Storage::get` and `Arc::from_storage` all traffic in
+`Storage::insert`, `Storage::get` and `Arc::from_storage` all pass and store
 `sync::Arc<T>`, because an unsized `T` cannot be passed or stored by value and
 must already sit behind a shared pointer.
 
@@ -73,20 +78,21 @@ A cell like that stores the live handle as a single machine-word pointer it load
 and stores atomically. That works directly only when `T` is sized, where `Arc<T>`
 is a thin pointer; for an unsized `T` — `dyn Trait`, `[u8]` — `Arc<T>` is a fat
 pointer that does not fit one atomic word, so a direct swap would force
-`T: Sized`. The reader-writer lock keeps `?Sized` for free, because it guards the
+`T: Sized`. The reader-writer lock preserves `?Sized` at no extra cost, because it
+guards the
 `Arc<T>` as an opaque value and never decomposes it into a pointer. `?Sized` could
 still be kept under a swap by adding a thin indirection — swapping an `Arc<Arc<T>>`
 or `Arc<Box<T>>`, whose outer handle is thin whatever `T` is — but that adds an
 allocation and an extra indirection to every stored value.
 
-The decisive reason is that the swap would buy almost nothing here.
+The decisive reason is that the swap would gain almost nothing here.
 Dereferencing an `Arc<T, S>` — the steady state — never touches a slot: the holder
 carries its current value in its own `value` field and derefs through that with no
 synchronization. A slot lock is taken on relocation (and by the storage
 accessors), and on relocation's common hit path only its shared side. Because each
 slot has its own lock and the workloads that matter relocate into distinct slots,
 that acquisition is essentially uncontended, so replacing it with a lock-free load
-would shave a few instructions off a path that is not the hot one while adding
+would shave a few instructions off a path that is not the hot path while adding
 indirection to every stored value. Keeping the lock is the better trade.
 
 ## Relocation locking
@@ -243,7 +249,7 @@ The group sweeps one worker per processor and `CONCURRENT_OVERSUBSCRIPTION`
 workers per processor. Because the measured relocations are all hits into distinct
 slots, the oversubscribed shape does not add lock contention; it adds scheduler
 pressure, exposing how the hit path behaves when more workers than processors are
-runnable. The uncontended single-worker cost is `hit_path`'s job and is
+runnable. The uncontended single-worker cost belongs to `hit_path` and is
 deliberately absent here, where one worker would only add the pool's
 thread-handoff overhead to the same number.
 
@@ -254,7 +260,7 @@ slots; no thread is pinned.
 
 By construction `concurrent` does not measure the miss path or contention on a
 shared destination; the miss path — including the source-slot write that follows
-it — is `miss_path`'s single-threaded job, and shared-destination contention is
-out of scope for the whole suite. It is Criterion-only: Callgrind counts
+it — is measured single-threaded by `miss_path`, and shared-destination contention
+is out of scope for the whole suite. It is Criterion-only: Callgrind counts
 instructions on a serialized execution and cannot observe scaling across threads
 at all.

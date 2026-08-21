@@ -34,8 +34,9 @@ strategy maps that affinity to the value the holder sees:
 - `PerNuma` keeps a value per memory region, so holders on cores of the same NUMA
   node share a value and holders on different nodes do not.
 
-Custom strategies are possible; they are expected to report a consistent slot
-count across the affinities that share one `Arc` (see [implementation.md](implementation.md)).
+Custom strategies are possible; they are expected to report a slot count — always
+at least one — that is consistent across the affinities that share one `Arc` (see
+[implementation.md](implementation.md)).
 
 ## 3. Per-affinity values
 
@@ -102,6 +103,11 @@ affinity. An `Arc` built this way that later relocates into an affinity the tabl
 left empty behaves like a plain `sync::Arc`, keeping the value it carries. The
 handle exposes only the affinity-keyed insert/get surface; the slot layout behind
 it is not part of the contract.
+
+`Storage::insert` and `Storage::get` require an affinity that maps into the table's
+coordinate space — one within the slot count the strategy reports. A caller building
+storage by hand controls its own affinities, so these accessors reject an
+out-of-range affinity rather than tolerate it.
 
 ## 6. Design tenets
 
