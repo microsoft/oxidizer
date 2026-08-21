@@ -3136,7 +3136,6 @@ name = "observed_macros_impl"
 version = "0.24.0"
 dependencies = [
  "insta",
- "mutants",
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
