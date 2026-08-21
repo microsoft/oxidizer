@@ -306,6 +306,33 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_affinity_records_oob_metric() {
+        use nm::Report;
+
+        fn oob_count() -> u64 {
+            Report::collect()
+                .events()
+                .find(|event| event.name().as_ref() == "thread_aware_arc_oob")
+                .map_or(0, nm::EventMetrics::count)
+        }
+
+        let affinity = pinned_affinities(&[1])[0];
+        let table = SlotTable::<i32, InconsistentStrategy>::new();
+
+        // The anomalous strategy indexes past the single-slot table, so the lookup falls back to
+        // the first slot and records the out-of-range metric. The registry is process-wide, so the
+        // count is asserted as a strict increase rather than an absolute value.
+        let before = oob_count();
+        table.replace(affinity, 7);
+        let after = oob_count();
+
+        assert!(
+            after > before,
+            "the out-of-range fallback must record the thread_aware_arc_oob metric (before={before}, after={after})"
+        );
+    }
+
+    #[test]
     fn per_app() {
         let affinities = pinned_affinities(&[1, 1]);
 
