@@ -28,6 +28,7 @@ allowed_external_types = ["*"]
 [dependencies]
 data_privacy = { workspace = true }
 observed = { workspace = true, features = ["test-util"] }
+observed_utils = { workspace = true }
 tick = { workspace = true, features = ["test-util"] }
 
 [dev-dependencies]

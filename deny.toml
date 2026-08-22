@@ -9,16 +9,6 @@ yanked = "deny"
 unmaintained = "all"
 # Adopter-owned: repo-specific advisory ignores.
 ignore = [
-    # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
-    # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
-    # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
-    # this for benchmark-only usage.
-    "RUSTSEC-2025-0141",
-    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
-    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
-    # upstream and no production code path depends on it. Tracked for removal once the
-    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
-    "RUSTSEC-2026-0173",
     # quick-xml 0.39.4 has two DoS advisories fixed only in >=0.41.0, but it is pulled in
     # transitively via the Azure SDK (typespec <- azure_core 1.0.0), which pins 0.39.x, so
     # we cannot bump it until an upstream Azure SDK release moves to quick-xml >=0.41. Both

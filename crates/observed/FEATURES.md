@@ -83,7 +83,7 @@ emit!(sink, MyEvent { a: expensive() })
                    event_view.visit_fields(|desc, getter| {
                      if let Some(metric) = desc.metric() {
                        if metric.instrument_description().is_some() {
-                         // field metric value: record observed_helpers::metric_number_of(&getter(&engine))
+                         // field metric value: record observed_utils::metric_number_of(&getter(&engine))
                        } else {
                          // metric dimension: getter(&engine) -> KeyValue
                        }
