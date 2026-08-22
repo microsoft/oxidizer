@@ -3357,8 +3357,7 @@ dependencies = [
 [[package]]
 name = "parking_lot_core"
 version = "0.9.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+source = "git+https://github.com/Amanieu/parking_lot.git?rev=fbfe854e8b5407f7a898c64fb6d296c5e965c877#fbfe854e8b5407f7a898c64fb6d296c5e965c877"
 dependencies = [
  "cfg-if",
  "libc",

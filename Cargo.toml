@@ -353,6 +353,11 @@ clippy.wildcard_imports = "allow"
 clippy.empty_structs_with_brackets = "warn"
 clippy.panic = "warn"
 
+[patch.crates-io]
+# parking_lot_core 0.9.12 loses pointer provenance in WordLock. Use the
+# upstream AtomicPtr fix until the next crates.io release includes it.
+parking_lot_core = { git = "https://github.com/Amanieu/parking_lot.git", rev = "fbfe854e8b5407f7a898c64fb6d296c5e965c877" }
+
 # A bit of debugging support for release builds.
 [profile.release]
 debug = "line-tables-only"
