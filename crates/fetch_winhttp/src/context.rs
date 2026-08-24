@@ -108,20 +108,33 @@ impl OperationKind {
 // Keeps `OperationKind::ALL` in sync with the enumeration; see its comment for
 // the exact reach and limits of this check. Evaluated eagerly because free
 // const items are always const-evaluated.
+//
+// Stated as flat assertions rather than a loop over the array. A loop here runs
+// during const evaluation, and rewriting its induction step - as mutation
+// testing does - yields a loop that never terminates, which hangs the compiler
+// instead of failing a test. Ref: AGENTS.md, "Code must not hang even under
+// mutation testing". Assertion arguments are macro operands, which mutation
+// testing leaves alone, so spelling every element out keeps the whole check
+// outside that hazard.
 const _: () = {
     let first = OperationKind::SendRequest as u8;
-    let mut index = 0_u8;
-
-    while (index as usize) < OperationKind::ALL.len() {
-        assert!(
-            OperationKind::ALL[index as usize] as u8 == first + index,
-            "OperationKind::ALL must list every variant exactly once, in declaration order"
-        );
-        index += 1;
-    }
 
     assert!(
-        OperationKind::from_discriminant(first + index).is_none(),
+        OperationKind::ALL.len() == 5,
+        "the element assertion below is written out per element and must grow with OperationKind::ALL"
+    );
+
+    assert!(
+        OperationKind::ALL[0] as u8 == first
+            && OperationKind::ALL[1] as u8 == first + 1
+            && OperationKind::ALL[2] as u8 == first + 2
+            && OperationKind::ALL[3] as u8 == first + 3
+            && OperationKind::ALL[4] as u8 == first + 4,
+        "OperationKind::ALL must list every variant exactly once, in declaration order"
+    );
+
+    assert!(
+        OperationKind::from_discriminant(OperationKind::Write as u8 + 1).is_none(),
         "OperationKind::ALL is missing a variant that from_discriminant decodes"
     );
 };
