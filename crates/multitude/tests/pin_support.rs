@@ -68,7 +68,7 @@ fn alloc_arc_pin_with_cross_thread() {
     assert_eq!(addr_before, addr_thread, "Arc-pinned value must keep its address across threads");
 }
 
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 #[test]
 fn try_alloc_uninit_box_pin_rejects_over_alignment() {
     // Avoid constructing the 32 KiB-aligned value on the stack.

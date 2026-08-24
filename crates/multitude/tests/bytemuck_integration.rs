@@ -153,7 +153,7 @@ fn try_alloc_slice_arc_ok() {
 //
 // Windows cannot materialize a 64 KiB-aligned value in its default stack;
 // non-slice variants check the same alignment guard there.
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 #[derive(Clone, Copy)]
 #[repr(C, align(65536))]
 struct OverAligned {
@@ -161,11 +161,11 @@ struct OverAligned {
 }
 
 // SAFETY: all-zeros is a valid OverAligned (it's just a u8 + padding).
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 unsafe impl Zeroable for OverAligned {}
 
 #[test]
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 fn try_alloc_box_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_box::<OverAligned>();
@@ -173,7 +173,7 @@ fn try_alloc_box_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 fn try_alloc_arc_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_arc::<OverAligned>();
@@ -181,7 +181,7 @@ fn try_alloc_arc_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 fn try_alloc_slice_box_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_slice_box::<OverAligned>(4);
@@ -189,7 +189,7 @@ fn try_alloc_slice_box_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 fn try_alloc_slice_arc_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_slice_arc::<OverAligned>(4);
@@ -197,7 +197,7 @@ fn try_alloc_slice_arc_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_box_panics_on_over_aligned() {
     let arena = Arena::new();
@@ -205,7 +205,7 @@ fn alloc_box_panics_on_over_aligned() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_arc_panics_on_over_aligned() {
     let arena = Arena::new();
@@ -213,7 +213,7 @@ fn alloc_arc_panics_on_over_aligned() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_slice_box_panics_on_over_aligned() {
     let arena = Arena::new();
@@ -221,7 +221,7 @@ fn alloc_slice_box_panics_on_over_aligned() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_slice_arc_panics_on_over_aligned() {
     let arena = Arena::new();
@@ -258,7 +258,7 @@ fn try_alloc_ref_scalar_ok() {
 }
 
 #[test]
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 fn try_alloc_ref_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc::<OverAligned>();
@@ -266,7 +266,7 @@ fn try_alloc_ref_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_ref_panics_on_over_aligned() {
     let arena = Arena::new();
@@ -304,7 +304,7 @@ fn try_alloc_slice_ref_ok() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 fn try_alloc_slice_ref_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_slice::<OverAligned>(4);
@@ -312,7 +312,7 @@ fn try_alloc_slice_ref_over_aligned_returns_err() {
 }
 
 #[test]
-#[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+#[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
 #[should_panic = "arena allocation failed"]
 fn alloc_slice_ref_panics_on_over_aligned() {
     let arena = Arena::new();

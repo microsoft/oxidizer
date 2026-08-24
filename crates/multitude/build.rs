@@ -7,7 +7,7 @@
 //! implementation does. Several tests deliberately construct types aligned to
 //! half a chunk to exercise the arena's alignment handling, well above the cap
 //! such a backend imposes, so those tests cannot be compiled there at all. They
-//! are gated on `cfg(utc_backend)`.
+//! are gated on `cfg(align_capped_backend)`.
 //!
 //! There is no built-in cfg identifying the codegen backend
 //! (<https://developercommunity.visualstudio.com/t/Conditional-compilation-lacks-built-in-c/11107823>),
@@ -30,7 +30,7 @@ use std::{env, fs};
 ///
 /// This is the largest alignment any gated test relies on (`HugeAlign` and
 /// `HugeAlignBox` in `tests/arena.rs`). It must stay in sync with the
-/// `#[repr(align(...))]` values guarded by `cfg(utc_backend)`; probing a
+/// `#[repr(align(...))]` values guarded by `cfg(align_capped_backend)`; probing a
 /// smaller value would leave the gate unset on a backend that accepts the
 /// probe but still rejects a larger gated type.
 const PROBE_ALIGN: u32 = 131_072;
@@ -47,7 +47,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=RUSTUP_TOOLCHAIN");
 
     if !supports_probe_alignment() {
-        println!("cargo::rustc-cfg=utc_backend");
+        println!("cargo::rustc-cfg=align_capped_backend");
     }
 }
 
