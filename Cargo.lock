@@ -40,11 +40,14 @@ dependencies = [
 
 [[package]]
 name = "all_the_time"
-version = "0.4.20"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8efe8e1956623a0fb39d4f54bc19710ba54c62203715c2dcec0fc7a39ca7fefc"
+checksum = "3d71938fa056bcdb424accf781da70014ffe8aa6400d2c5be311710bb5c16aae"
 dependencies = [
  "cpu-time",
+ "folo_utils",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

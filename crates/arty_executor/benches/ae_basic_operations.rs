@@ -40,7 +40,6 @@ fn entrypoint(c: &mut Criterion) {
 
     group.finish();
 
-    time.print_to_stdout();
 }
 
 fn bench_spawn_and_complete_one(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {
