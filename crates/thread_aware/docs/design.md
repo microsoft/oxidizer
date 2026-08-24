@@ -59,6 +59,12 @@ produced depends on the constructor used:
 - `with_clone_fn` takes a concrete value plus a clone function, so trait-object
   values can be reproduced per slot without an object-safe `Clone`.
 
+Materialization runs while the destination slot is being initialized. Constructor
+functions, clone functions, and captured `ThreadAware` state must not relocate an
+`Arc` backed by the same storage into that slot or form a cycle among slot
+initializations. Write-once initialization is non-reentrant, so such dependencies
+can deadlock.
+
 A relocation whose source and destination resolve to the same slot is not a
 cross-slot move: the holder keeps the value it is already carrying rather than
 producing a new one. This is why every relocation under `PerProcess` — where all

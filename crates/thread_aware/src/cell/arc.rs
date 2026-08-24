@@ -3,6 +3,8 @@
 
 #[cfg(not(test))]
 use alloc::boxed::Box;
+#[cfg(test)]
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -35,6 +37,29 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static AFTER_FACTORY_UPDATE_HOOK: RefCell<Option<Box<dyn FnOnce()>>> =
+        const { RefCell::new(None) };
+}
+
+/// Registers a one-shot checkpoint after factory state is updated but before publication.
+#[cfg(test)]
+pub(super) fn set_after_factory_update_hook(hook: impl FnOnce() + 'static) {
+    AFTER_FACTORY_UPDATE_HOOK.with(|registered| {
+        let previous = registered.replace(Some(Box::new(hook)));
+        assert!(previous.is_none(), "only one factory-update test hook may be registered per thread");
+    });
+}
+
+#[cfg(test)]
+fn run_after_factory_update_hook() {
+    let hook = AFTER_FACTORY_UPDATE_HOOK.with(|registered| registered.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// Transferable reference counted type.
 ///
 /// This type works like a per-affinity (per-thread) [`sync::Arc`]. Each affinity gets a unique value that is shared by clones
@@ -44,6 +69,14 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// Relocate an `Arc` only among affinities that share one coordinate space — those its [`Strategy`]
 /// maps into one fixed set of slots, reporting a consistent slot count (see the design guide,
 /// "Affinities and strategies").
+///
+/// # Initialization dependencies
+///
+/// Materializing an empty destination slot runs the configured constructor, clone function, and
+/// captured [`ThreadAware`] state while that slot is being initialized. Code invoked during
+/// materialization must not relocate an `Arc` backed by the same storage into that slot or create a
+/// cycle among slot initializations. [`OnceLock`](std::sync::OnceLock) initialization is
+/// non-reentrant, so violating this requirement can deadlock.
 ///
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.
@@ -155,7 +188,7 @@ where
     T: Send + 'static,
     S: Strategy,
 {
-    /// Creates a new `Arc` with the given value and strategy.
+    /// Creates an `Arc` whose constructor materializes each affinity.
     ///
     /// This variant takes a zero-argument constructor function (`fn() -> T`).
     /// The constructor is invoked lazily and independently for each
@@ -172,6 +205,9 @@ where
     ///
     /// When transferring to another affinity which doesn't yet contain a value, the constructor is
     /// called in the destination affinity to create a brand new instance.
+    ///
+    /// The constructor runs while the destination slot is being initialized and must obey the
+    /// initialization dependency requirements documented on [`Arc`].
     ///
     /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
@@ -248,11 +284,14 @@ where
     T: Send + 'static + ?Sized,
     S: Strategy,
 {
-    /// Creates a new `Arc` with a constructor that returns `Box<T>`.
+    /// Creates an `Arc` with a boxed constructor for unsized values.
     ///
     /// This is the `?Sized`-compatible version of [`new`](Self::new). Use this when `T` is a
     /// trait object (e.g., `dyn Trait`) or other unsized type. The constructor produces a
     /// `Box<T>` which is then stored behind a [`sync::Arc`].
+    ///
+    /// The constructor runs while the destination slot is being initialized and must obey the
+    /// initialization dependency requirements documented on [`Arc`].
     ///
     /// ```rust
     /// # use thread_aware::{Arc, ThreadAware, PerCore};
@@ -288,11 +327,15 @@ where
     T: 'static,
     S: Strategy,
 {
-    /// Creates a new `Arc` with a closure that will be called once per-processor to create the inner value.
+    /// Creates an `Arc` with a thread-aware constructor input.
     ///
     /// The closure only gets called once for each processor, and it's called only when a `Arc` is actually transferred
     /// to another processor. The closure behaves like a `ThreadAwareFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
+    ///
+    /// Relocating `data` and invoking `f` happen while the destination slot is being initialized.
+    /// Their implementations must obey the initialization dependency requirements documented on
+    /// [`Arc`].
     ///
     /// This function can be used to create an `Arc` of a type that itself doesn't implement [`trait@ThreadAware`] because
     /// we can ensure that each affinity will get its own, independently-initialized value:
@@ -375,7 +418,7 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: ThreadAware + Clone + 'static + Send,
 {
-    /// Creates a new `Arc` with the given value.
+    /// Creates an `Arc` by cloning the same value for each affinity.
     ///
     /// The value must implement [`trait@ThreadAware`] and [`Clone`]. When transferring to another affinity
     /// which doesn't yet contain a value, a new value is created by cloning the value in current
@@ -411,6 +454,9 @@ where
     ///
     /// This is useful for types that do not implement [`trait@ThreadAware`]. In such cases, the same value
     /// is cloned for each affinity without any relocation logic.
+    ///
+    /// [`Clone::clone`] runs while the destination slot is being initialized and must obey the
+    /// initialization dependency requirements documented on [`Arc`].
     ///
     /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with new:
@@ -461,7 +507,7 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: ThreadAware + 'static + ?Sized,
 {
-    /// Creates a new `Arc` from a value and a clone function, supporting trait objects.
+    /// Creates an `Arc` from a value and a clone function.
     ///
     /// The object passed will be kept, and serves as the template for all subsequent clones
     /// that happen on relocation. A clone is also performed for the initial `Arc`.
@@ -469,6 +515,10 @@ where
     /// The `clone_fn` receives `&V` (the concrete type) and returns `Box<T>`, enabling
     /// use with `dyn Trait` where `Clone` is not object-safe. Each clone is
     /// [`relocate`](ThreadAware::relocate) to its target affinity.
+    ///
+    /// The clone function and the returned value's relocation run while the destination slot is
+    /// being initialized. Their implementations must obey the initialization dependency requirements
+    /// documented on [`Arc`].
     ///
     /// ```rust
     /// # use thread_aware::{Arc, PerCore, ThreadAware};
@@ -499,11 +549,14 @@ impl<T, S: Strategy> Arc<T, S>
 where
     T: 'static + ?Sized,
 {
-    /// Creates a new `Arc` with a closure that produces `Box<T>`, called once per-affinity to create the inner value.
+    /// Creates an `Arc` from a thread-aware boxed closure.
     ///
     /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
     /// to another affinity. The closure is a [`ThreadAwareFnOnce`] to ensure it captures only values that are safe to
     /// transfer themselves.
+    ///
+    /// Relocating and invoking the closure happen while the destination slot is being initialized.
+    /// The closure must not reenter that slot or create cyclic slot-initialization dependencies.
     pub(crate) fn with_closure_boxed<F>(closure: F) -> Self
     where
         F: ThreadAwareFnOnce<Box<T>> + Clone + ThreadAware + 'static + Send + Sync,
@@ -626,12 +679,13 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
     /// Produces the value `destination` will hold by running the configured factory.
     ///
-    /// This runs caller-supplied code with no cell locked. It is invoked through
-    /// [`OnceLock::get_or_init`](std::sync::OnceLock::get_or_init), so across all racing
-    /// relocations into the same empty cell the factory runs at most once and every racer adopts
-    /// the one published value — the closure's documented "once per affinity" contract. If the
-    /// factory panics the panic simply propagates and the destination cell is left empty for the
-    /// next relocation into that affinity to re-materialize.
+    /// This runs caller-supplied code while the destination cell is in
+    /// [`OnceLock::get_or_init`](std::sync::OnceLock::get_or_init)'s initializing state. Across all
+    /// racing relocations into the same empty cell, the factory runs at most once and every racer
+    /// adopts the one published value — the closure's documented "once per affinity" contract. The
+    /// factory must not reenter that cell or create cyclic cell-initialization dependencies. If it
+    /// panics, the panic propagates and the destination cell is left empty for the next relocation
+    /// into that affinity to re-materialize; there is no poisonable lock.
     fn materialize_value(&self, source: Option<Affinity>, destination: Affinity) -> sync::Arc<T> {
         match &self.factory {
             Factory::Closure(factory, factory_source_affinity) => {
@@ -706,14 +760,22 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             self.factory = factory;
         }
 
+        // The test checkpoint pauses an adopting racer only after its per-clone factory state is
+        // current, allowing the publisher to finish before this racer reaches `get_or_init`.
+        // Production builds execute no additional logic here.
+        #[cfg(test)]
+        run_after_factory_update_hook();
+
         // The value this `Arc` carries belongs to `source`; keep a handle to seed the source cell.
         let old_value = sync::Arc::<T>::clone(&self.value);
 
         // Publish the destination value, running the caller's factory at most once across all racers:
         // `get_or_init` serializes materialization on this cell and hands every racer the single
         // published value, so the closure's documented "once per affinity" contract holds even under
-        // a concurrent first relocation. No cell is locked while the factory runs, so a panic simply
-        // propagates and leaves the cell empty for the next relocation to retry.
+        // a concurrent first relocation. The destination cell remains in its initializing state
+        // while the factory runs, so the factory must not reenter it or create a cyclic initialization
+        // dependency. A panic propagates and leaves the cell empty for the next relocation to retry;
+        // there is no poisonable lock.
         // Ref: docs/implementation.md, "Relocation and publication".
         let published = destination_slot.get_or_init(|| self.materialize_value(source, destination));
         self.value = sync::Arc::<T>::clone(published);

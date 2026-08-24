@@ -913,9 +913,8 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
 fn later_relocations_reproduce_the_original_source_affinity() {
     // The closure factory records the affinity it first relocated from, so every later relocation
     // reproduces that original transfer instead of taking the `Arc`'s current affinity as the
-    // source. This is the deterministic factory update the concurrent adopt path relies on: it runs
-    // before publication for every racer, so a racer that adopts another thread's value still
-    // carries the same recorded source and reproduces the transfer identically on its next hop.
+    // source. This pins the sequential propagation of that recorded source; the concurrent adopting
+    // path is covered separately below.
     // Ref: docs/implementation.md, "Relocation and publication".
 
     // Records the `source` of the most recent relocation into a shared cell so the test can read
@@ -952,6 +951,98 @@ fn later_relocations_reproduce_the_original_source_affinity() {
         *recorded.lock().unwrap(),
         Some(a),
         "a later relocation reproduces the original source affinity, not the current one"
+    );
+}
+
+#[test]
+fn adopting_racer_keeps_the_original_factory_source() {
+    // Hold the publishing racer's factory inside destination B. The adopting racer then updates its
+    // own factory state, releases the publisher through a test-only checkpoint, and reaches B only
+    // after publication has finished. Its onward relocation to C must still reproduce the original
+    // source A. Moving the factory update into the publishing closure would leave this adopter stale.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    /// Coordinates the publisher's first materialization and records factory sources.
+    #[derive(Clone)]
+    struct ControlledRecorder {
+        recorded: sync::Arc<sync::Mutex<Option<Affinity>>>,
+        relocations: sync::Arc<AtomicUsize>,
+        publisher_started: sync::Arc<sync::Barrier>,
+        release_publisher: sync::Arc<sync::Barrier>,
+    }
+
+    impl ThreadAware for ControlledRecorder {
+        fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
+            *self.recorded.lock().unwrap() = source;
+
+            let relocation_index = self.relocations.fetch_add(1, Ordering::AcqRel);
+            if relocation_index == 0 {
+                // Only the publisher's first factory relocation is held. The later relocation to C
+                // must run normally so its recorded source can be asserted.
+                self.publisher_started.wait();
+                self.release_publisher.wait();
+            }
+        }
+    }
+
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let relocations = sync::Arc::new(AtomicUsize::new(0));
+    // Each barrier pairs the publisher with the test thread.
+    let publisher_started = sync::Arc::new(sync::Barrier::new(2));
+    let release_publisher = sync::Arc::new(sync::Barrier::new(2));
+    let publisher_done = sync::Arc::new(sync::Barrier::new(2));
+
+    let origin = PerCore::new_with(
+        ControlledRecorder {
+            recorded: sync::Arc::clone(&recorded),
+            relocations,
+            publisher_started: sync::Arc::clone(&publisher_started),
+            release_publisher: sync::Arc::clone(&release_publisher),
+        },
+        |_recorder: ControlledRecorder| 0_i32,
+    );
+
+    let mut publisher = origin.clone();
+    let publisher = std::thread::spawn({
+        let publisher_done = sync::Arc::clone(&publisher_done);
+        move || {
+            publisher.relocate(Some(a), b);
+            publisher_done.wait();
+            publisher.into_arc()
+        }
+    });
+
+    // The publisher is now inside B's factory, so B remains empty while the adopter starts.
+    publisher_started.wait();
+
+    let mut adopter = origin;
+    super::arc::set_after_factory_update_hook({
+        let release_publisher = sync::Arc::clone(&release_publisher);
+        let publisher_done = sync::Arc::clone(&publisher_done);
+        move || {
+            release_publisher.wait();
+            publisher_done.wait();
+        }
+    });
+    adopter.relocate(Some(a), b);
+
+    let publisher_value = publisher.join().unwrap();
+    assert!(
+        sync::Arc::ptr_eq(&adopter.clone().into_arc(), &publisher_value),
+        "the second racer must adopt the value the publisher installed for B"
+    );
+
+    *recorded.lock().unwrap() = None;
+    adopter.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "an adopting racer must carry the original source into its next materialization"
     );
 }
 
@@ -1069,9 +1160,9 @@ fn relocation_leaves_a_populated_source_slot_untouched() {
 
 #[test]
 fn opposite_direction_relocations_converge_without_deadlock() {
-    // Two threads relocate in opposite directions across the same pair of affinities. Write-once
-    // cells are never held across the materialization, so opposite-direction traffic cannot
-    // deadlock: each thread completes, and each ends on the value published for its own destination.
+    // Two threads relocate in opposite directions across the same pair of affinities. These
+    // factories do not reenter another initializing cell, and source recording holds no cell across
+    // another access, so each thread completes and ends on its destination's published value.
     // Ref: docs/implementation.md, "Relocation and publication".
 
     // Repeated so both interleavings of the two source-recording writes are exercised across the run.

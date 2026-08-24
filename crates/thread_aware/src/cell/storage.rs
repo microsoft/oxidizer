@@ -15,7 +15,7 @@ use nm::Event;
 
 use crate::affinity::Affinity;
 
-/// A strategy for storing data in a affinity-aware manner.
+/// A strategy for storing data in an affinity-aware manner.
 ///
 /// A strategy assigns each affinity a slot index and reports how many slots the storage holds. The
 /// affinities that share one `Arc` are expected to map into a single fixed coordinate space: every
@@ -279,14 +279,10 @@ where
             return 0;
         };
 
-        // Read each published value with a plain acquire load and apply the predicate to a clone.
+        // Read each published value with a plain acquire load and apply the predicate by reference.
         // Slots are visited one at a time rather than under a single consistent snapshot, which is
         // what leaves the count an estimate.
-        slots
-            .iter()
-            .filter_map(|slot| slot.get().cloned())
-            .filter(|value| predicate(value))
-            .count()
+        slots.iter().filter_map(|slot| slot.get()).filter(|value| predicate(value)).count()
     }
 }
 

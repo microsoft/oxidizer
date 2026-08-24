@@ -97,9 +97,12 @@ path each is that cheap lock-free read.
 
 `ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
 touches at most two slots — the destination and, only on a cross-slot miss, the
-source — and holds nothing across them: every slot access is a write-once publish or
-an acquire-load read, so there is no lock to order and opposite-direction traffic
-cannot deadlock.
+source. Hit-path reads and source-slot writes do not hold one cell while accessing
+another, so they introduce no lock order. On a destination miss,
+`OnceLock::get_or_init` keeps that cell in its initializing state while the factory
+runs. The factory must not reenter the same cell or form a cycle among cell
+initializations; absent such caller-created dependencies, opposite-direction
+source recording has no lock order that can deadlock.
 
 ```text
     relocate(source, destination)
@@ -122,7 +125,8 @@ cannot deadlock.
              |
        update factory to record source
              |
-       get_or_init slot[destination]      (runs factory at most once,
+       get_or_init slot[destination]      (destination is initializing while
+             |                             factory runs at most once;
              |                             adopt the published value)
              |
        record carried value in slot[source]   (write-once, if in range)
@@ -145,9 +149,12 @@ value and serializes that materialization on the cell: the first racer to arrive
 runs the factory, every other racer blocks and then adopts the one published value.
 The factory therefore runs at most once per affinity, upholding the "once per
 affinity" contract even under a concurrent first relocation, and no racer's work is
-dropped. The factory runs while nothing is published and no slot is held, so a
-panic there simply propagates and leaves the cell empty for the next relocation to
-retry — there is no lock to poison and no partial state to unwind.
+dropped. The destination cell remains in its initializing state while the factory
+runs. Caller code must not reenter that cell — directly or through another `Arc`
+backed by the same storage — or create a cycle among initializing cells, because
+write-once initialization is non-reentrant. A panic simply propagates and leaves
+the cell empty for the next relocation to retry: there is no poisonable lock and
+no partial published state to unwind.
 
 Before publishing, the relocation records the source affinity into its factory.
 That update is deterministic given the source, so every racer — the one that
