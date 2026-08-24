@@ -195,7 +195,7 @@ mod tests {
     use crate::handle::ConnectHandle;
     use crate::operation::ContextPool;
     use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
-    use crate::testing::{closing, complete, complete_request_error, context_pointer, installed_context_value};
+    use crate::testing::{closing, complete, complete_request_error, context_pointer, drive, installed_context_value};
 
     assert_impl_all!(WinHttpTransport: Send, Sync, std::fmt::Debug);
     assert_impl_all!(ReadyTransport: Send, Sync, std::fmt::Debug);
@@ -219,7 +219,7 @@ mod tests {
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
 
         for uri in ["https://first.example/", "https://second.example/"] {
-            let mut error = futures::executor::block_on(transport.execute(request(uri))).unwrap_err();
+            let mut error = drive(transport.execute(request(uri))).unwrap_err();
 
             assert_eq!(error.label(), "winhttp_initialization");
             assert_eq!(error.recovery(), RecoveryInfo::never());
@@ -257,7 +257,7 @@ mod tests {
         input
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("untouched"));
-        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
+        let mut error = drive(transport.execute(input)).unwrap_err();
 
         assert!(error.to_string().contains("plain HTTP requests are disabled"));
         assert_eq!(error.label(), "invalid_request");
@@ -288,7 +288,7 @@ mod tests {
         let bindings = successful_request_bindings(Arc::clone(&context), Arc::clone(&closes));
         let transport = WinHttpTransport::new(inputs(sink), BindingsFacade::mock(Arc::new(bindings)));
 
-        let response = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap();
+        let response = drive(transport.execute(request("https://example.com/"))).unwrap();
 
         assert_eq!(response.status(), 200);
         assert_eq!(response.version(), http::Version::HTTP_2);
@@ -350,7 +350,7 @@ mod tests {
             .headers_mut()
             .insert("x-original", http::HeaderValue::from_static("preserved"));
 
-        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
+        let mut error = drive(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.label(), "unavailable");
         assert_eq!(error.recovery(), RecoveryInfo::unavailable());
@@ -391,7 +391,7 @@ mod tests {
             .insert("x-original", http::HeaderValue::from_static("preserved"));
         input.extensions_mut().insert(42_u32);
 
-        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
+        let mut error = drive(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
         let attached = error.take_request().unwrap();
@@ -403,7 +403,7 @@ mod tests {
             Some(&http::HeaderValue::from_static("preserved"))
         );
         assert_eq!(attached.extensions().get::<u32>(), Some(&42));
-        let text = futures::executor::block_on(attached.into_body().into_text()).unwrap();
+        let text = drive(attached.into_body().into_text()).unwrap();
         assert_eq!(text, "streaming");
         assert_eq!(
             processor
@@ -435,7 +435,7 @@ mod tests {
             .insert("x-original", http::HeaderValue::from_static("preserved"));
         input.extensions_mut().insert(42_u32);
 
-        let mut error = futures::executor::block_on(transport.execute(input)).unwrap_err();
+        let mut error = drive(transport.execute(input)).unwrap_err();
 
         assert_eq!(error.recovery(), RecoveryInfo::retry());
         let attached = error.take_request().unwrap();
@@ -447,7 +447,7 @@ mod tests {
             Some(&http::HeaderValue::from_static("preserved"))
         );
         assert_eq!(attached.extensions().get::<u32>(), Some(&42));
-        let text = futures::executor::block_on(attached.into_body().into_text()).unwrap();
+        let text = drive(attached.into_body().into_text()).unwrap();
         assert_eq!(text, "replayable");
         assert_eq!(
             processor
@@ -472,7 +472,7 @@ mod tests {
             BindingsFacade::mock(Arc::new(bindings)),
         );
 
-        let mut error = futures::executor::block_on(transport.execute(request("https://example.com/"))).unwrap_err();
+        let mut error = drive(transport.execute(request("https://example.com/"))).unwrap_err();
 
         assert_eq!(error.label(), "connect");
         assert!(error.take_request().is_some());

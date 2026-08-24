@@ -645,7 +645,7 @@ mod tests {
     use crate::handle::{ConnectHandle, RequestHandle};
     use crate::operation::{ContextInstallation, ContextPool};
     use crate::testing::{
-        CONNECT, CloseCounts, REQUEST, SESSION, closing, complete, complete_request_error, context_pointer, installed_context,
+        CONNECT, CloseCounts, REQUEST, SESSION, closing, complete, complete_request_error, context_pointer, drive, installed_context,
         installed_context_value, raw_handle, session, status_info_len,
     };
 
@@ -1836,10 +1836,10 @@ mod tests {
         )
         .unwrap();
         let mut body_polled = false;
-        let response = futures::executor::block_on(driver.execute(&mut body_polled)).unwrap();
+        let response = drive(driver.execute(&mut body_polled)).unwrap();
 
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
-        let error = futures::executor::block_on(response.into_body().into_bytes()).unwrap_err();
+        let error = drive(response.into_body().into_bytes()).unwrap_err();
         assert_eq!(error.label(), "body_timeout");
         assert_eq!(record.data_available_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
@@ -2117,7 +2117,7 @@ mod tests {
             &options,
             &tls,
         ) {
-            Ok(driver) => futures::executor::block_on(driver.execute(&mut body_polled)).map_err(RequestFailure::into_error),
+            Ok(driver) => drive(driver.execute(&mut body_polled)).map_err(RequestFailure::into_error),
             Err(error) => Err(error),
         };
         // The response body owns the request guard, so it must be released here

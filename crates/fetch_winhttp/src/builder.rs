@@ -187,6 +187,7 @@ mod tests {
     use crate::bindings::{BindingsFacade, MockBindings};
     use crate::handle::RawHandle;
     use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
+    use crate::testing::drive;
     use crate::{WinHttpOptions, WinHttpTlsConfig};
 
     assert_impl_all!(WinHttpDeps: Send, Sync, Clone, Debug, ThreadAware);
@@ -237,7 +238,7 @@ mod tests {
         drop(clone);
         assert_eq!(closes.load(Ordering::SeqCst), 0);
 
-        let error = futures::executor::block_on(client.get("http://example.com").fetch()).unwrap_err();
+        let error = drive(client.get("http://example.com").fetch()).unwrap_err();
         assert_eq!(error.recovery(), RecoveryInfo::never());
 
         drop(client);
@@ -255,7 +256,7 @@ mod tests {
         let second = builder.build();
 
         for client in [&first, &second] {
-            futures::executor::block_on(client.get("http://example.com").fetch()).unwrap_err();
+            drive(client.get("http://example.com").fetch()).unwrap_err();
         }
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
@@ -294,7 +295,7 @@ mod tests {
         relocated.relocate(None, affinities[1]);
 
         assert_eq!(opens.load(Ordering::SeqCst), 2);
-        futures::executor::block_on(relocated.get("http://example.com").fetch()).unwrap_err();
+        drive(relocated.get("http://example.com").fetch()).unwrap_err();
 
         drop(relocated);
         drop(client);

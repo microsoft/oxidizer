@@ -374,7 +374,9 @@ mod tests {
     use crate::handle::{ConnectHandle, RequestHandle, SessionHandle};
     use crate::operation::{ContextInstallation, ContextPool};
     use crate::session::WinHttpSession;
-    use crate::testing::{closing, complete, complete_request_error, context_pointer, installed_context, raw_handle, status_info_len};
+    use crate::testing::{
+        closing, complete, complete_request_error, context_pointer, drive, installed_context, raw_handle, status_info_len,
+    };
 
     const SESSION: usize = 101;
     const CONNECT: usize = 102;
@@ -487,16 +489,13 @@ mod tests {
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 0);
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 0);
 
-        let frame = futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap();
+        let frame = drive(next_frame(&mut body)).unwrap().unwrap();
         assert_eq!(frame.into_data().unwrap(), b"abc");
         assert_eq!(record.query_calls.load(Ordering::SeqCst), 1);
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
         assert_eq!(*record.requested.lock().unwrap(), [3]);
 
-        assert!(
-            futures::executor::block_on(next_frame(&mut body)).is_none(),
-            "zero READ_COMPLETE establishes EOF"
-        );
+        assert!(drive(next_frame(&mut body)).is_none(), "zero READ_COMPLETE establishes EOF");
         assert_eq!(record.query_calls.load(Ordering::SeqCst), 2);
         assert_eq!(record.read_calls.load(Ordering::SeqCst), 2);
         let requested = record.requested.lock().unwrap();
@@ -514,7 +513,7 @@ mod tests {
         let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
         let into = harness.reader.reserve(8);
 
-        let (read, into) = futures::executor::block_on(harness.reader.read_at_most_into(0, into)).unwrap();
+        let (read, into) = drive(harness.reader.read_at_most_into(0, into)).unwrap();
 
         assert_eq!(read, 0);
         assert!(into.peek().is_empty());
@@ -528,7 +527,7 @@ mod tests {
         let mut into = harness.reader.reserve(8);
         into.put_slice(*b"prefix");
 
-        let (read, mut into) = futures::executor::block_on(harness.reader.read_more_into(into)).unwrap();
+        let (read, mut into) = drive(harness.reader.read_more_into(into)).unwrap();
 
         assert_eq!(read, 3);
         assert_eq!(into.consume_all(), b"prefixabc");
@@ -560,12 +559,12 @@ mod tests {
         into.put_slice(*b"prefix");
         let prefix_address = into.peek().first_slice().as_ptr().addr();
 
-        let (first_read, into) = futures::executor::block_on(harness.reader.read_at_most_into(3, into)).unwrap();
+        let (first_read, into) = drive(harness.reader.read_at_most_into(3, into)).unwrap();
         assert_eq!(first_read, 2);
         assert_eq!(into.peek(), b"prefixxy");
         assert_eq!(into.peek().first_slice().as_ptr().addr(), prefix_address);
 
-        let (second_read, mut into) = futures::executor::block_on(harness.reader.read_at_most_into(5, into)).unwrap();
+        let (second_read, mut into) = drive(harness.reader.read_at_most_into(5, into)).unwrap();
         assert_eq!(second_read, 5);
         assert_eq!(into.consume_all(), b"prefixxy12345");
         assert_eq!(*harness.record.requested.lock().unwrap(), [3, 5]);
@@ -577,7 +576,7 @@ mod tests {
     fn zero_availability_uses_a_positive_bounded_probe() {
         let mut harness = reader([ReadStep::data(0, b"z".to_vec())], TrailerBehavior::None);
 
-        let data = futures::executor::block_on(harness.reader.read_any()).unwrap();
+        let data = drive(harness.reader.read_any()).unwrap();
 
         assert_eq!(data.peek(), b"z");
         // A zero availability result carries no size information, so the
@@ -594,7 +593,7 @@ mod tests {
     fn a_small_availability_rents_a_proportionally_small_block() {
         let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
 
-        let data = futures::executor::block_on(harness.reader.read_any()).unwrap();
+        let data = drive(harness.reader.read_any()).unwrap();
 
         assert_eq!(data.peek(), b"abc");
         assert_eq!(harness.record.requested.lock().unwrap()[0], 3);
@@ -618,7 +617,7 @@ mod tests {
         into.reserve(PREFERRED_READ_SIZE, &memory);
         assert!(into.remaining_capacity() >= PREFERRED_READ_SIZE);
 
-        let (read, mut into) = futures::executor::block_on(harness.reader.read_at_most_into(PREFERRED_READ_SIZE, into)).unwrap();
+        let (read, mut into) = drive(harness.reader.read_at_most_into(PREFERRED_READ_SIZE, into)).unwrap();
 
         assert_eq!(read, 1);
         assert_eq!(into.consume_all(), b"x");
@@ -642,24 +641,16 @@ mod tests {
         .into_body();
         let BodyHarness { mut body, context, record } = harness;
 
-        let data = futures::executor::block_on(next_frame(&mut body))
-            .unwrap()
-            .unwrap()
-            .into_data()
-            .unwrap();
+        let data = drive(next_frame(&mut body)).unwrap().unwrap().into_data().unwrap();
         assert_eq!(data, b"data");
 
-        let trailers = futures::executor::block_on(next_frame(&mut body))
-            .unwrap()
-            .unwrap()
-            .into_trailers()
-            .unwrap();
+        let trailers = drive(next_frame(&mut body)).unwrap().unwrap().into_trailers().unwrap();
         assert_eq!(
             trailers.get_all("x-trailer").iter().map(HeaderValue::as_bytes).collect::<Vec<_>>(),
             [b"first".as_slice(), &[0x80, 0xff]]
         );
-        assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
-        assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
+        assert!(drive(next_frame(&mut body)).is_none());
+        assert!(drive(next_frame(&mut body)).is_none());
         assert_eq!(record.trailer_queries.load(Ordering::SeqCst), 2);
 
         drop(body);
@@ -671,7 +662,7 @@ mod tests {
         let harness = reader([ReadStep::data(0, Vec::new())], TrailerBehavior::None).into_body();
         let BodyHarness { mut body, context, record } = harness;
 
-        assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
+        assert!(drive(next_frame(&mut body)).is_none());
         assert_eq!(record.trailer_queries.load(Ordering::SeqCst), 1);
 
         drop(body);
@@ -684,14 +675,10 @@ mod tests {
         let BodyHarness { mut body, context, record } = harness;
 
         assert!(!body.is_end_stream());
-        let trailers = futures::executor::block_on(next_frame(&mut body))
-            .unwrap()
-            .unwrap()
-            .into_trailers()
-            .unwrap();
+        let trailers = drive(next_frame(&mut body)).unwrap().unwrap().into_trailers().unwrap();
         assert!(trailers.is_empty());
         assert!(body.is_end_stream());
-        assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
+        assert!(drive(next_frame(&mut body)).is_none());
         assert_eq!(record.trailer_queries.load(Ordering::SeqCst), 2);
 
         drop(body);
@@ -704,7 +691,7 @@ mod tests {
             let harness = reader([ReadStep::data(0, Vec::new())], trailers).into_body();
             let BodyHarness { mut body, context, record } = harness;
 
-            let error = futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap_err();
+            let error = drive(next_frame(&mut body)).unwrap().unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
 
@@ -744,7 +731,7 @@ mod tests {
 
         for step in cases {
             let mut harness = reader([step], TrailerBehavior::None);
-            let error = futures::executor::block_on(harness.reader.read_any()).unwrap_err();
+            let error = drive(harness.reader.read_any()).unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
             harness.finish();
@@ -761,7 +748,7 @@ mod tests {
             TrailerBehavior::None,
         );
 
-        let error = futures::executor::block_on(harness.reader.read_any()).unwrap_err();
+        let error = drive(harness.reader.read_any()).unwrap_err();
 
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("invalid status information"), "{error}");
@@ -784,14 +771,10 @@ mod tests {
         .into_body();
         let BodyHarness { mut body, context, record } = harness;
 
-        let data = futures::executor::block_on(next_frame(&mut body))
-            .unwrap()
-            .unwrap()
-            .into_data()
-            .unwrap();
+        let data = drive(next_frame(&mut body)).unwrap().unwrap().into_data().unwrap();
         assert_eq!(data, b"a");
-        futures::executor::block_on(next_frame(&mut body)).unwrap().unwrap_err();
-        assert!(futures::executor::block_on(next_frame(&mut body)).is_none());
+        drive(next_frame(&mut body)).unwrap().unwrap_err();
+        assert!(drive(next_frame(&mut body)).is_none());
         assert_eq!(record.request_closes.load(Ordering::SeqCst), 1);
 
         drop(body);

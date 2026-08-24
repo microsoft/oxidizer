@@ -400,7 +400,7 @@ mod tests {
 
     use super::{decode_success, dispatch_completion, status_callback};
     use crate::context::{CompletionResult, OperationBuffer, OperationKind, RequestContext};
-    use crate::testing::{complete, finish, installed, status_info_len};
+    use crate::testing::{complete, drive, finish, installed, status_info_len};
 
     #[test]
     fn null_context_callbacks_do_nothing() {
@@ -516,6 +516,52 @@ mod tests {
     }
 
     #[test]
+    fn a_read_completion_naming_a_foreign_buffer_is_rejected() {
+        // A read completion is accepted only if it names the buffer the read
+        // lent. The sole exemption is the empty completion reporting end of
+        // stream, which arrives as a null address with a zero length. Neither
+        // half of that exemption stands alone: a zero length against a foreign
+        // address, or a null address against a non-zero length, names no buffer
+        // this read lent and is rejected rather than trusted to describe
+        // initialized bytes.
+        let pool = GlobalPool::new();
+        let address = NonNull::<u8>::dangling().as_ptr().addr();
+        let capacity = 8_u32;
+        let foreign = std::ptr::without_provenance_mut::<c_void>(address.wrapping_add(0x100));
+        let submitted = std::ptr::without_provenance_mut::<c_void>(address);
+
+        for (payload, len, accepted) in [
+            (foreign, 0_u32, false),
+            (null_mut(), 4, false),
+            (foreign, 4, false),
+            (null_mut(), 0, true),
+            (submitted, 4, true),
+        ] {
+            let buffer = OperationBuffer::read(pool.reserve(capacity as usize), address, capacity);
+
+            // SAFETY: decode_success requires a null or readable payload that
+            // stays unmodified for the call. A read completion is exempt from
+            // the readability half of that requirement, because decoding one
+            // only compares the reported address and length and never reads
+            // through the pointer, so the addresses named here are never
+            // dereferenced.
+            let result = unsafe { decode_success(WINHTTP_CALLBACK_STATUS_READ_COMPLETE, payload, len, buffer) };
+
+            if accepted {
+                assert!(
+                    matches!(result, CompletionResult::ReadComplete { len: reported, .. } if reported == len),
+                    "a read completion naming the lent buffer must be accepted"
+                );
+            } else {
+                assert!(
+                    matches!(result, CompletionResult::InvalidStatusInfo { .. }),
+                    "a read completion of length {len} naming a foreign address must be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn duplicate_and_late_completions_cannot_send_twice() {
         let (mut guard, context, contexts, session, closes) = installed();
         let future = guard.submit(OperationKind::SendRequest, OperationBuffer::none(), |_, _| Ok(()));
@@ -535,10 +581,7 @@ mod tests {
         unsafe {
             complete(context, WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, std::ptr::null_mut(), 0);
         }
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
+        assert!(matches!(drive(future).unwrap(), CompletionResult::SendRequestComplete));
         // SAFETY: as for the deliveries above. Awaiting the future consumes the
         // completion but leaves the context installed, so this late
         // notification still meets the contract.
@@ -589,7 +632,7 @@ mod tests {
         }
 
         assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
+            drive(future).unwrap(),
             CompletionResult::InvalidStatusInfo {
                 status: WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
                 ..

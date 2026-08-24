@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use plurality::Pool;
+use testing_aids::FutureTestExt;
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
 };
@@ -49,6 +50,39 @@ use crate::error::{WinHttpError, WinHttpOperation};
 use crate::handle::{ConnectHandle, RawHandle, RequestHandle, SessionHandle};
 use crate::operation::{ContextInstallation, ContextPool, RequestGuard};
 use crate::session::WinHttpSession;
+
+/// Number of polls [`drive`] spends before declaring a future stalled.
+///
+/// Mock-backed completions are delivered inline by the binding that submits the
+/// operation, so an awaited stage is already complete by the time the future
+/// observes it and a whole request lifecycle resolves in a handful of polls.
+/// The budget is far above that, which keeps it clear of any legitimate
+/// multi-stage sequence while still bounding a stall.
+const STALL_POLL_BUDGET: usize = 1024;
+
+/// Drives a mock-backed future to completion without parking the thread.
+///
+/// Every awaited stage of a request resolves against the operation slot, whose
+/// occupant is chosen by the completion-routing tables in
+/// [`OperationKind`](crate::context::OperationKind). A defect in that routing
+/// leaves the awaited stage forever unanswered, so blocking on such a future
+/// would hang the test binary rather than fail it. Polling to a bounded budget
+/// turns that stall into an ordinary test failure, which is also what keeps
+/// mutation testing of the routing tables terminating.
+///
+/// Tests that require a completion delivered by another thread cannot use this
+/// helper, because no amount of polling substitutes for waiting on that thread.
+///
+/// # Panics
+///
+/// Panics if the future is still pending after [`STALL_POLL_BUDGET`] polls.
+#[track_caller]
+pub(crate) fn drive<F: Future>(future: F) -> F::Output {
+    future.unwrap_ready_within(
+        STALL_POLL_BUDGET,
+        "future never completed: a mock-backed completion was never routed to the stage awaiting it",
+    )
+}
 
 /// Address used for the mock session handle.
 ///

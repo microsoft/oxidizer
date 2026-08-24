@@ -407,9 +407,11 @@ impl Drop for OperationFuture<'_> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe, UnwindSafe};
+    use std::pin::pin;
     use std::ptr::NonNull;
-    use std::sync::atomic::Ordering;
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::task::{Context, Poll, Wake, Waker};
     use std::thread;
 
     use bytesbuf::BytesView;
@@ -426,7 +428,7 @@ mod tests {
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::{ConnectHandle, RequestHandle};
     use crate::testing::{
-        CONNECT, REQUEST, bindings, closing, complete, context_pointer, finish, installed, installed_context, raw_handle, session,
+        CONNECT, REQUEST, bindings, closing, complete, context_pointer, drive, finish, installed, installed_context, raw_handle, session,
         status_info_len,
     };
 
@@ -532,10 +534,7 @@ mod tests {
             Ok(())
         });
 
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
+        assert!(matches!(drive(future).unwrap(), CompletionResult::SendRequestComplete));
         // SAFETY: finish requires an installed, not-yet-reclaimed context and
         // no overlapping notification. The inline delivery above left the
         // context installed and the awaited future proves it has returned;
@@ -548,12 +547,27 @@ mod tests {
 
     #[test]
     fn foreign_thread_completion_wakes_send_future() {
+        /// Records whether the awaiting future's waker was invoked.
+        struct RecordingWaker(AtomicBool);
+
+        impl Wake for RecordingWaker {
+            fn wake(self: Arc<Self>) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
         let (mut guard, context, contexts, session, closes) = installed();
         let completer = Arc::new(Mutex::new(None));
         let spawner = Arc::clone(&completer);
+        // Gates the foreign delivery behind the test's first poll. Without the
+        // gate the completion could land before the future is ever polled, so
+        // the first poll would return the result directly and the wake this
+        // test exists to observe would never occur.
+        let (release, released) = mpsc::channel::<()>();
         let future = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), move |_, context_value| {
             *spawner.lock().unwrap() = Some(thread::spawn(move || {
                 let context = context_pointer(context_value);
+                released.recv().unwrap();
                 // SAFETY: complete requires an installed, not-yet-reclaimed
                 // context, a payload matching the notification, no overlapping
                 // notification, no outstanding exclusive borrow, and no use of
@@ -572,21 +586,43 @@ mod tests {
             Ok(())
         });
 
-        assert!(matches!(
-            futures::executor::block_on(future).unwrap(),
-            CompletionResult::HeadersAvailable
-        ));
-        // Waking this future happens partway through the foreign dispatch, so
-        // the thread is joined before teardown delivers HANDLE_CLOSING: that
-        // notification reclaims the context and may not overlap another
-        // notification for the handle.
-        completer
-            .lock()
-            .unwrap()
-            .take()
-            .expect("the submission closure runs before submit returns and always stores its thread")
-            .join()
-            .expect("the dispatching thread asserts nothing and so cannot panic");
+        // The future borrows the guard, so it is confined to a scope that ends
+        // before `finish` consumes the guard.
+        {
+            let mut future = pin!(future);
+            let waker_state = Arc::new(RecordingWaker(AtomicBool::new(false)));
+            let waker = Waker::from(Arc::clone(&waker_state));
+            let mut cx = Context::from_waker(&waker);
+
+            assert!(
+                future.as_mut().poll(&mut cx).is_pending(),
+                "the gated completion cannot have landed before the first poll"
+            );
+
+            release.send(()).unwrap();
+            // Waking this future happens partway through the foreign dispatch,
+            // so the thread is joined before teardown delivers HANDLE_CLOSING:
+            // that notification reclaims the context and may not overlap
+            // another notification for the handle.
+            completer
+                .lock()
+                .unwrap()
+                .take()
+                .expect("the submission closure runs before submit returns and always stores its thread")
+                .join()
+                .expect("the dispatching thread asserts nothing and so cannot panic");
+
+            assert!(
+                waker_state.0.load(Ordering::SeqCst),
+                "a completion delivered from a foreign thread must wake the awaiting future"
+            );
+
+            let Poll::Ready(completion) = future.as_mut().poll(&mut cx) else {
+                panic!("the completion has been delivered, so the future must now be ready")
+            };
+            assert!(matches!(completion.unwrap(), CompletionResult::HeadersAvailable));
+        }
+
         // SAFETY: finish requires an installed, not-yet-reclaimed context and
         // no overlapping notification. Nothing reclaimed the context, and the
         // join above proves the foreign delivery has returned, so this
@@ -604,7 +640,7 @@ mod tests {
             Err(WinHttpError::new(12029, WinHttpOperation::SendRequest))
         });
 
-        let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
+        let CompletionResult::Error { error, _buffer: buffer } = drive(future).unwrap() else {
             panic!("synchronous failure must produce an error completion");
         };
         assert_eq!(error.code(), 12029);
@@ -648,10 +684,7 @@ mod tests {
             }
             Ok(())
         });
-        assert!(matches!(
-            futures::executor::block_on(send).unwrap(),
-            CompletionResult::SendRequestComplete
-        ));
+        assert!(matches!(drive(send).unwrap(), CompletionResult::SendRequestComplete));
 
         let headers = guard.submit(OperationKind::HeadersAvailable, OperationBuffer::none(), |_, _| {
             // SAFETY: as for the send completion above; a headers-available
@@ -661,10 +694,7 @@ mod tests {
             }
             Ok(())
         });
-        assert!(matches!(
-            futures::executor::block_on(headers).unwrap(),
-            CompletionResult::HeadersAvailable
-        ));
+        assert!(matches!(drive(headers).unwrap(), CompletionResult::HeadersAvailable));
 
         let mut available = 17_u32;
         let data = guard.submit(OperationKind::DataAvailable, OperationBuffer::none(), |_, _| {
@@ -682,10 +712,7 @@ mod tests {
             }
             Ok(())
         });
-        assert!(matches!(
-            futures::executor::block_on(data).unwrap(),
-            CompletionResult::DataAvailable(17)
-        ));
+        assert!(matches!(drive(data).unwrap(), CompletionResult::DataAvailable(17)));
 
         let mut read_memory = [0_u8; 8];
         let read_address = read_memory.as_mut_ptr().addr();
@@ -704,10 +731,7 @@ mod tests {
                 Ok(())
             },
         );
-        assert!(matches!(
-            futures::executor::block_on(read).unwrap(),
-            CompletionResult::ReadComplete { len: 5, .. }
-        ));
+        assert!(matches!(drive(read).unwrap(), CompletionResult::ReadComplete { len: 5, .. }));
 
         let mut written = 4_u32;
         let write = guard.submit(
@@ -729,10 +753,7 @@ mod tests {
                 Ok(())
             },
         );
-        assert!(matches!(
-            futures::executor::block_on(write).unwrap(),
-            CompletionResult::WriteComplete { len: 4, .. }
-        ));
+        assert!(matches!(drive(write).unwrap(), CompletionResult::WriteComplete { len: 4, .. }));
         // SAFETY: finish requires an installed, not-yet-reclaimed context and
         // no overlapping notification. None of the deliveries above reclaimed
         // the context, and every one of them ran inline within a submission

@@ -649,7 +649,7 @@ mod tests {
         ActiveOperation, CallbackOperationSlot, ColdConnectState, CompletionBuffer, CompletionResult, OPERATION_CLAIMED, OPERATION_IDLE,
         OperationBuffer, OperationKind, RequestContext, active_kind,
     };
-    use crate::testing::{complete, finish, installed, status_info_len};
+    use crate::testing::{complete, drive, finish, installed, status_info_len};
 
     assert_impl_all!(OperationKind: UnwindSafe, RefUnwindSafe);
     assert_impl_all!(OperationBuffer: UnwindSafe, RefUnwindSafe);
@@ -712,7 +712,7 @@ mod tests {
                 );
             }
 
-            let CompletionResult::Error { error, _buffer: buffer } = futures::executor::block_on(future).unwrap() else {
+            let CompletionResult::Error { error, _buffer: buffer } = drive(future).unwrap() else {
                 panic!("request error must produce an error completion");
             };
             assert_eq!(error.code(), 12175);
