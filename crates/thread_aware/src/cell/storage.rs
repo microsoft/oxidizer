@@ -78,8 +78,15 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// Publishes the value for `affinity` if its slot is still empty.
     ///
     /// Each slot is written at most once, so a value is stored only when the slot was empty:
-    /// `None` is returned in that case. When the slot already holds a value, the affinity keeps it
-    /// and the passed-in `value` is handed back unchanged.
+    /// `Ok(())` is returned in that case. When the slot already holds a value, the affinity keeps it
+    /// and the passed-in `value` is handed back as `Err(value)`. This mirrors
+    /// [`OnceLock::set`](std::sync::OnceLock::set) rather than the previous-value semantics of
+    /// [`HashMap::insert`](std::collections::HashMap::insert).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(value)`, handing the passed-in `value` back unchanged, when the affinity's slot
+    /// already holds a value.
     ///
     /// # Panics
     ///
@@ -87,7 +94,7 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// slot count the strategy reports. Direct callers are expected to use affinities the storage was
     /// sized for.
     #[inline]
-    pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Option<sync::Arc<T>> {
+    pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
         if !self.inner.in_range(affinity) {
             out_of_coordinate_space();
         }
@@ -213,14 +220,15 @@ impl<T, S: Strategy> SlotTable<T, S> {
 
     /// Publishes `value` into the write-once cell for the given affinity if it is still empty.
     ///
-    /// Returns `None` when the cell was empty and now holds `value`. When another publisher already
-    /// filled it, or the affinity is out of range, the value cannot be stored and is handed back.
-    pub(crate) fn set_once(&self, affinity: Affinity, value: T) -> Option<T> {
+    /// Returns `Ok(())` when the cell was empty and now holds `value`. When another publisher already
+    /// filled it, or the affinity is out of range, the value cannot be stored and is handed back as
+    /// `Err(value)`, mirroring [`OnceLock::set`](std::sync::OnceLock::set).
+    pub(crate) fn set_once(&self, affinity: Affinity, value: T) -> Result<(), T> {
         let Some(slot) = self.slot(affinity) else {
-            return Some(value);
+            return Err(value);
         };
 
-        slot.set(value).err()
+        slot.set(value)
     }
 }
 
@@ -296,14 +304,14 @@ mod tests {
         let storage = SlotTable::<String, PerCore>::default();
         let affinity = affinities[0];
 
-        // The first publish into the empty cell succeeds and returns nothing.
-        let rejected = storage.set_once(affinity, "First".to_string());
-        assert_eq!(rejected, None);
+        // The first publish into the empty cell succeeds.
+        let result = storage.set_once(affinity, "First".to_string());
+        assert_eq!(result, Ok(()));
 
         // A cell is written at most once, so later publishes are rejected and hand the value back
         // unchanged; the cell keeps its original contents.
-        let rejected = storage.set_once(affinity, "Second".to_string());
-        assert_eq!(rejected, Some("Second".to_string()));
+        let result = storage.set_once(affinity, "Second".to_string());
+        assert_eq!(result, Err("Second".to_string()));
 
         assert_eq!(storage.get_clone(affinity), Some("First".to_string()));
     }
@@ -317,7 +325,7 @@ mod tests {
 
         assert!(storage.get_clone(affinity).is_none());
 
-        storage.set_once(affinity, "Hello".to_string());
+        storage.set_once(affinity, "Hello".to_string()).unwrap();
         assert_eq!(storage.get_clone(affinity), Some("Hello".to_string()));
     }
 
@@ -343,7 +351,7 @@ mod tests {
         // `index` reports 1 for a table sized to a single slot, so the requested slot is out of
         // range. The affinity has no cell of its own, so a publish through it stores nothing and
         // hands the value back, and a read finds nothing rather than reaching into an unrelated slot.
-        assert_eq!(table.set_once(affinity, 42), Some(42));
+        assert_eq!(table.set_once(affinity, 42), Err(42));
         assert_eq!(table.get_clone(affinity), None);
     }
 
@@ -454,7 +462,7 @@ mod tests {
         assert!(storage.get_clone(affinity).is_none());
 
         // Verify it works the same as SlotTable::new()
-        storage.set_once(affinity, "test".to_string());
+        storage.set_once(affinity, "test".to_string()).unwrap();
         assert_eq!(storage.get_clone(affinity), Some("test".to_string()));
     }
 }

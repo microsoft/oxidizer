@@ -337,7 +337,7 @@ fn test_from_storage() {
     // Create a storage and populate it with a value for affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.insert(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
@@ -360,8 +360,32 @@ fn storage_default_is_empty_then_fillable() {
     assert!(storage.get(affinity).is_none());
 
     let value = sync::Arc::new(7);
-    assert!(storage.insert(affinity, sync::Arc::clone(&value)).is_none());
+    storage.insert(affinity, sync::Arc::clone(&value)).unwrap();
     assert!(sync::Arc::ptr_eq(&storage.get(affinity).unwrap(), &value));
+}
+
+#[test]
+fn storage_insert_is_write_once() {
+    // The public `Storage::insert` is write-once: the first insert into an empty affinity stores the
+    // value and returns `Ok(())`; a second insert leaves the stored value in place and hands the
+    // rejected value back as `Err`, mirroring `OnceLock::set`.
+    let affinity = pinned_affinities(&[2])[0];
+
+    let storage = super::storage::Storage::<i32, crate::PerCore>::default();
+
+    let first = sync::Arc::new(1);
+    assert_eq!(storage.insert(affinity, sync::Arc::clone(&first)), Ok(()));
+
+    let second = sync::Arc::new(2);
+    let rejected = storage.insert(affinity, sync::Arc::clone(&second)).unwrap_err();
+    assert!(
+        sync::Arc::ptr_eq(&rejected, &second),
+        "a rejected insert must hand back the exact value that was passed in"
+    );
+    assert!(
+        sync::Arc::ptr_eq(&storage.get(affinity).unwrap(), &first),
+        "the write-once slot must keep the value from the first insert"
+    );
 }
 
 #[test]
@@ -435,7 +459,7 @@ fn test_factory_clone_with_manual() {
     // Create a storage and populate it with a value for affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(200);
-    storage.insert(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
@@ -467,7 +491,7 @@ fn test_factory_manual_relocated() {
     // Create a storage with a value at affinity1
     let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.insert(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
     let storage_arc = Arc::new(storage);
 
@@ -789,7 +813,7 @@ fn factory_manual_debug() {
 
     let affinities = pinned_affinities(&[1]);
     let storage = sync::Arc::new(super::storage::Storage::new());
-    storage.insert(affinities[0], sync::Arc::new(42));
+    storage.insert(affinities[0], sync::Arc::new(42)).unwrap();
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");
     assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");

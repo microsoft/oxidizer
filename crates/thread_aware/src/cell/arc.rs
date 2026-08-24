@@ -541,7 +541,7 @@ where
     /// let affinity = pinned_affinities(&[2])[0];
     ///
     /// let storage = Storage::new();
-    /// storage.insert(affinity, StdArc::new(42));
+    /// storage.insert(affinity, StdArc::new(42)).unwrap();
     ///
     /// let arc = Arc::<_, PerCore>::from_storage(StdArc::new(storage), affinity);
     /// assert_eq!(*arc, 42);
