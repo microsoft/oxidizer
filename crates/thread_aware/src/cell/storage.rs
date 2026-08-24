@@ -45,9 +45,9 @@ pub trait Strategy {
     clippy::panic,
     reason = "documented panic path: direct Storage access with a mismatched coordinate space is a caller error"
 )]
-fn out_of_coordinate_space() -> ! {
+fn out_of_coordinate_space(index: usize, slot_count: usize) -> ! {
     panic!(
-        "Storage accessed with an affinity outside its coordinate space; direct Storage access requires affinities that map into the slot count this storage was sized for"
+        "Storage affinity index {index} is outside its coordinate space (slot count: {slot_count}); direct Storage access requires affinities that map into the slot count this storage was sized for"
     );
 }
 
@@ -95,11 +95,11 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     /// sized for.
     #[inline]
     pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
-        if !self.inner.in_range(affinity) {
-            out_of_coordinate_space();
-        }
-
-        self.inner.set_once(affinity, value)
+        let slot = self
+            .inner
+            .strict_slot(affinity)
+            .unwrap_or_else(|(index, slot_count)| out_of_coordinate_space(index, slot_count));
+        slot.set(value)
     }
 
     /// Returns a clone of the value published for `affinity`, if any.
@@ -112,11 +112,11 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
     #[inline]
     #[must_use]
     pub fn get(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
-        if !self.inner.in_range(affinity) {
-            out_of_coordinate_space();
-        }
-
-        self.inner.get_clone(affinity)
+        let slot = self
+            .inner
+            .strict_slot(affinity)
+            .unwrap_or_else(|(index, slot_count)| out_of_coordinate_space(index, slot_count));
+        slot.get().cloned()
     }
 
     /// Returns a clone of the value published for `affinity`, or `None` when the affinity is out of
@@ -189,14 +189,15 @@ impl<T, S: Strategy> SlotTable<T, S> {
         }
     }
 
+    /// Returns the slot array, sizing it on first use to the provided count.
+    fn slots_with_count(&self, slot_count: usize) -> &[Slot<T>] {
+        self.slots
+            .get_or_init(|| (0..slot_count).map(|_| OnceLock::new()).collect::<Vec<_>>().into_boxed_slice())
+    }
+
     /// Returns the slot array, sizing it on first use to hold every affinity.
     fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
-        self.slots.get_or_init(|| {
-            (0..S::count(affinity).get())
-                .map(|_| OnceLock::new())
-                .collect::<Vec<_>>()
-                .into_boxed_slice()
-        })
+        self.slots_with_count(S::count(affinity).get())
     }
 
     /// Returns the write-once cell for `affinity`, or `None` when that affinity's index falls
@@ -210,12 +211,26 @@ impl<T, S: Strategy> SlotTable<T, S> {
         self.slots(affinity).get(S::index(affinity))
     }
 
-    /// Reports whether `affinity` maps to a slot inside the sized table.
+    /// Returns the slot for strict caller-facing access.
     ///
-    /// Sizes the table on first use, like any other access. The public [`Storage`] surface uses this
-    /// to reject an out-of-range affinity before touching a slot.
-    pub(crate) fn in_range(&self, affinity: Affinity) -> bool {
-        self.slot(affinity).is_some()
+    /// An affinity that is already out of range for its own reported coordinate space is rejected
+    /// before the table is initialized. A potentially valid affinity initializes the table before
+    /// this returns, then is checked again against the effective slot count in case another
+    /// coordinate space won the initialization race.
+    pub(crate) fn strict_slot(&self, affinity: Affinity) -> Result<&Slot<T>, (usize, usize)> {
+        let index = S::index(affinity);
+
+        if let Some(slots) = self.slots.get() {
+            return slots.get(index).ok_or((index, slots.len()));
+        }
+
+        let slot_count = S::count(affinity).get();
+        if index >= slot_count {
+            return Err((index, slot_count));
+        }
+
+        let slots = self.slots_with_count(slot_count);
+        slots.get(index).ok_or((index, slots.len()))
     }
 
     /// Publishes `value` into the write-once cell for the given affinity if it is still empty.
@@ -223,6 +238,7 @@ impl<T, S: Strategy> SlotTable<T, S> {
     /// Returns `Ok(())` when the cell was empty and now holds `value`. When another publisher already
     /// filled it, or the affinity is out of range, the value cannot be stored and is handed back as
     /// `Err(value)`, mirroring [`OnceLock::set`](std::sync::OnceLock::set).
+    #[cfg(test)]
     pub(crate) fn set_once(&self, affinity: Affinity, value: T) -> Result<(), T> {
         let Some(slot) = self.slot(affinity) else {
             return Err(value);
@@ -286,6 +302,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use std::num::NonZero;
@@ -375,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "coordinate space")]
+    #[should_panic(expected = "index 1 is outside its coordinate space (slot count: 1)")]
     fn insert_out_of_range_panics() {
         let affinity = pinned_affinities(&[1])[0];
         let storage = Storage::<i32, InconsistentStrategy>::new();
@@ -386,12 +403,27 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "coordinate space")]
+    #[should_panic(expected = "index 1 is outside its coordinate space (slot count: 1)")]
     fn get_out_of_range_panics() {
         let affinity = pinned_affinities(&[1])[0];
         let storage = Storage::<i32, InconsistentStrategy>::new();
 
         let _ = storage.get(affinity);
+    }
+
+    #[test]
+    fn out_of_range_storage_access_does_not_initialize_the_table() {
+        let affinity = pinned_affinities(&[1])[0];
+        let storage = Storage::<i32, InconsistentStrategy>::new();
+
+        // The strategy's own count already proves the index invalid, so strict access can reject it
+        // without allocating a table that no successful operation can use.
+        let panic = std::panic::catch_unwind(|| storage.get(affinity));
+        assert!(panic.is_err(), "strict out-of-range access must panic");
+        assert!(
+            storage.inner.slots.get().is_none(),
+            "an immediately invalid access must leave the slot table uninitialized"
+        );
     }
 
     #[test]

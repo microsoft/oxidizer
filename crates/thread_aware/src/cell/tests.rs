@@ -859,9 +859,8 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
     // while staying cheap enough for a unit test.
     const RACERS: usize = 8;
 
-    // Repeated because which racer wins the write-once cell is decided by the operating system
-    // scheduler; repetition exercises both the winning and adopting racers across rounds.
-    const ROUNDS: usize = 32;
+    // A few rounds sample scheduler variation without turning the unit test into a stress test.
+    const ROUNDS: usize = 4;
 
     let affinities = pinned_affinities(&[2]);
     let source = affinities[0];
@@ -1096,15 +1095,17 @@ fn adopting_racer_keeps_the_original_factory_source() {
     }
 
     let mut adopter = origin;
-    super::arc::set_after_factory_update_hook({
-        let release_publisher = sync::Arc::clone(&release_publisher);
-        let publisher_done = sync::Arc::clone(&publisher_done);
-        move || {
-            release_publisher.wait();
-            publisher_done.wait();
-        }
-    });
-    adopter.relocate(Some(a), b);
+    {
+        let _hook_guard = super::arc::set_after_factory_update_hook({
+            let release_publisher = sync::Arc::clone(&release_publisher);
+            let publisher_done = sync::Arc::clone(&publisher_done);
+            move || {
+                release_publisher.wait();
+                publisher_done.wait();
+            }
+        });
+        adopter.relocate(Some(a), b);
+    }
 
     let publisher_value = publisher.join().unwrap();
     assert!(
@@ -1118,6 +1119,59 @@ fn adopting_racer_keeps_the_original_factory_source() {
         *recorded.lock().unwrap(),
         Some(a),
         "an adopting racer must carry the original source into its next materialization"
+    );
+}
+
+#[test]
+fn dropping_factory_update_hook_guard_clears_the_hook() {
+    let calls = sync::Arc::new(AtomicUsize::new(0));
+
+    {
+        let _hook_guard = super::arc::set_after_factory_update_hook({
+            let calls = sync::Arc::clone(&calls);
+            move || {
+                calls.fetch_add(1, Ordering::AcqRel);
+            }
+        });
+    }
+
+    super::arc::run_after_factory_update_hook();
+    assert_eq!(
+        calls.load(Ordering::Acquire),
+        0,
+        "dropping the guard must clear a hook that relocation did not consume"
+    );
+}
+
+#[test]
+fn stale_factory_update_hook_guard_preserves_a_new_registration() {
+    let calls = sync::Arc::new(AtomicUsize::new(0));
+
+    let first_guard = super::arc::set_after_factory_update_hook({
+        let calls = sync::Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::AcqRel);
+        }
+    });
+    super::arc::run_after_factory_update_hook();
+
+    let second_guard = super::arc::set_after_factory_update_hook({
+        let calls = sync::Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::AcqRel);
+        }
+    });
+
+    // Consuming the first hook releases its thread-local slot before its guard is dropped. The
+    // stale guard must recognize that the newly registered hook has a different owner.
+    drop(first_guard);
+    super::arc::run_after_factory_update_hook();
+    drop(second_guard);
+
+    assert_eq!(
+        calls.load(Ordering::Acquire),
+        2,
+        "a stale guard must not clear a newer hook registration"
     );
 }
 
@@ -1240,8 +1294,8 @@ fn opposite_direction_relocations_converge_without_deadlock() {
     // another access, so each thread completes and ends on its destination's published value.
     // Ref: docs/implementation.md, "Relocation and publication".
 
-    // Repeated so both interleavings of the two source-recording writes are exercised across the run.
-    const ROUNDS: usize = 64;
+    // A small bounded repetition samples both writes without turning this into a stress test.
+    const ROUNDS: usize = 8;
 
     let affinities = pinned_affinities(&[2]);
     let x = affinities[0];

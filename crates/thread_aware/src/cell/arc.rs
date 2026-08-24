@@ -3,12 +3,12 @@
 
 #[cfg(not(test))]
 use alloc::boxed::Box;
-#[cfg(test)]
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::{self};
+#[cfg(test)]
+use std::{cell::RefCell, rc::Rc};
 
 use super::factory::Factory;
 use super::storage::{Storage, Strategy, report_out_of_range_affinity};
@@ -37,26 +37,67 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
     }
 }
 
+/// Associates a one-shot test checkpoint with the guard that owns it.
+#[cfg(test)]
+struct RegisteredAfterFactoryUpdateHook {
+    owner: Rc<()>,
+    hook: Box<dyn FnOnce()>,
+}
+
 #[cfg(test)]
 std::thread_local! {
-    static AFTER_FACTORY_UPDATE_HOOK: RefCell<Option<Box<dyn FnOnce()>>> =
+    static AFTER_FACTORY_UPDATE_HOOK: RefCell<Option<RegisteredAfterFactoryUpdateHook>> =
         const { RefCell::new(None) };
+}
+
+/// Clears a test checkpoint if its owning test exits before relocation consumes it.
+#[cfg(test)]
+#[must_use = "keep the guard alive until relocation has consumed the registered hook"]
+pub(super) struct AfterFactoryUpdateHookGuard {
+    // The `Rc` keeps the guard on the thread that owns the thread-local registration.
+    owner: Rc<()>,
+}
+
+#[cfg(test)]
+impl Drop for AfterFactoryUpdateHookGuard {
+    fn drop(&mut self) {
+        AFTER_FACTORY_UPDATE_HOOK.with(|registered| {
+            let mut registered = registered.borrow_mut();
+            if registered
+                .as_ref()
+                .is_some_and(|registered| Rc::ptr_eq(&registered.owner, &self.owner))
+            {
+                registered.take();
+            }
+        });
+    }
 }
 
 /// Registers a one-shot checkpoint after factory state is updated but before publication.
 #[cfg(test)]
-pub(super) fn set_after_factory_update_hook(hook: impl FnOnce() + 'static) {
+pub(super) fn set_after_factory_update_hook(hook: impl FnOnce() + 'static) -> AfterFactoryUpdateHookGuard {
+    let owner = Rc::new(());
+
     AFTER_FACTORY_UPDATE_HOOK.with(|registered| {
-        let previous = registered.replace(Some(Box::new(hook)));
-        assert!(previous.is_none(), "only one factory-update test hook may be registered per thread");
+        let mut registered = registered.borrow_mut();
+        assert!(
+            registered.is_none(),
+            "only one factory-update test hook may be registered per thread"
+        );
+        *registered = Some(RegisteredAfterFactoryUpdateHook {
+            owner: Rc::clone(&owner),
+            hook: Box::new(hook),
+        });
     });
+
+    AfterFactoryUpdateHookGuard { owner }
 }
 
 #[cfg(test)]
-fn run_after_factory_update_hook() {
-    let hook = AFTER_FACTORY_UPDATE_HOOK.with(|registered| registered.borrow_mut().take());
-    if let Some(hook) = hook {
-        hook();
+pub(super) fn run_after_factory_update_hook() {
+    let registered = AFTER_FACTORY_UPDATE_HOOK.with(|registered| registered.borrow_mut().take());
+    if let Some(registered) = registered {
+        (registered.hook)();
     }
 }
 
