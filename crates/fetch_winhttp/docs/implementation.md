@@ -778,6 +778,12 @@ Gated behind `#[cfg(windows)]` and `#[cfg_attr(miri, ignore)]`, against a
 localhost server (a small `std::net`-based server, or `wiremock` as used
 elsewhere in `fetch`). These validate the real OS path end to end:
 
+The [`WINHTTP_OPTION_RESOLUTION_HOSTNAME` feasibility probe](resolution-hostname-experiment.md)
+is an executable precursor to these tests. It verifies that the network destination, TLS server
+name, and HTTP authority can be controlled independently against the real OS API. The authority
+case must remain covered because Microsoft documents replacing a `Host` header but does not
+explicitly guarantee its observed translation to HTTP/2 `:authority`.
+
 - GET/POST with small and large bodies; response body correctness and size.
 - Streaming upload (unknown length -> chunked) and streaming download; assert
   incremental delivery, not just final bytes.
@@ -819,8 +825,16 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   (dev-dependencies) using a self-signed cert and `accept_invalid_certs`. Assert
   the negotiated `Version` is HTTP/3, and separately assert the "h3 required but
   QUIC unreachable" path yields the expected failure (`0x2EFE`/`0x2EFD`).
+- Independent endpoint identity: send a request whose public authority and loopback dial target
+  are `localhost:<port>` while the TLS server name is a distinct DNS name. Assert that SNI and
+  certificate hostname validation use the TLS name, while HTTP/1.1 `Host` and HTTP/2 `:authority`
+  retain `localhost:<port>`. Also retain the hostname-mismatch negative control.
 - Connection reuse: two sequential requests to the same authority reuse the
   connection (observable via server-side connection counting).
+- Small-write latency follows the calibrated
+  [Nagle behavior experiment](nagle-behavior-experiment.md). Retain the raw Nagle-on and
+  `TCP_NODELAY` controls so a Windows or network change cannot produce a false classification.
+  This is regression evidence for the transport invariant, not proof of a WinHTTP socket option.
 - Timeout configuration is validated only structurally (unit, §7.4). Integration
   tests set every timeout large enough that it can never fire during a healthy
   run, so a tripped timeout is always a real failure, never a timing race. No
@@ -1118,6 +1132,19 @@ hung network read is always aborted at the OS level and its socket released,
 regardless of executor liveness. In the normal case the `fetch`-level timeout
 still fires first and reports the canonical error; the native timer only bites
 when the upper layer cannot.
+
+### 10.5 Data-path tuning
+
+The transport applies no socket-buffer or congestion controls. WinHTTP exposes no raw socket and no
+equivalent to `SO_RCVBUF`, `SO_SNDBUF`, or per-socket initial-congestion-window selection. Similarly,
+`WINHTTP_OPTION_HTTP2_RECEIVE_WINDOW` remains unset so WinHTTP owns the complete receive flow-control
+policy rather than combining an application-selected stream window with an unknown OS update
+strategy.
+
+There is no Nagle option to set. Conformance comes from the calibrated small-write integration
+experiment in §7.3, which verifies behavior equivalent to the TCP transports' `TCP_NODELAY`
+invariant. Application read/write buffering remains an internal implementation choice and must not
+be described as a substitute for kernel or HTTP/2 flow control.
 
 ## 11. Handling options the transport cannot honor
 

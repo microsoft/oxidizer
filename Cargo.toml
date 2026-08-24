@@ -175,6 +175,7 @@ protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
+rcgen = { version = "0.14.5", default-features = false }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 regex = { version = "1.12.2", default-features = false }
 rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.2.0" }
@@ -217,6 +218,7 @@ tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
 tokio-native-tls = { version = "0.3.1", default-features = false }
+tokio-rustls = { version = "0.26.4", default-features = false }
 tonic = { version = "0.14.2", default-features = false }
 tonic-prost = { version = "0.14.2", default-features = false }
 tonic-prost-build = { version = "0.14.2", default-features = false }

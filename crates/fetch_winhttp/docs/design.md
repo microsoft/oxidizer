@@ -168,6 +168,25 @@ arrives from the `fetch` layer at all, rather than being configured on the trans
 that owns the connections, is noted as `fetch` API feedback in the fetch API
 stabilization feedback (../../fetch/docs/stabilization.md).
 
+### 2.3 TCP and flow-control policy
+
+WinHTTP owns opaque sockets and exposes no raw socket handle, socket factory, `TCP_NODELAY`,
+`SO_RCVBUF`, `SO_SNDBUF`, or initial-congestion-window option. `WinHttpOptions` does not imitate
+these mechanisms.
+
+`fetch` requires small writes to avoid Nagle/delayed-ACK stalls. A calibrated two-write experiment
+shows the tested WinHTTP HTTP/1.1 upload path matching a raw `TCP_NODELAY` control rather than a
+Nagle-enabled control. The transport therefore meets the behavioral invariant on the tested
+platform even though WinHTTP does not document how it configures its socket. The experiment remains
+regression evidence and is not presented as a Windows compatibility guarantee; the method and
+measurements are recorded in the [Nagle behavior experiment](nagle-behavior-experiment.md).
+
+WinHTTP exposes an HTTP/2 receive-window option, but the transport leaves it unset. Window sizing
+trades path throughput against outstanding data per stream and is only one part of the OS flow-
+control policy. Kernel socket buffers and TCP congestion startup likewise remain at OS defaults.
+Application buffering inside the transport may still reduce callback, copy, and allocation
+overhead; it is independent of these kernel and protocol controls.
+
 ## 3. HTTP protocol negotiation
 
 The transport supports HTTP/1.1, HTTP/2, and HTTP/3, all as first-class modes. Which

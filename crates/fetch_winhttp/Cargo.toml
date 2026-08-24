@@ -25,5 +25,19 @@ default-target = "x86_64-pc-windows-msvc"
 
 [dev-dependencies]
 
+[target.'cfg(windows)'.dev-dependencies]
+anyhow = { workspace = true, features = ["std"] }
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http2", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+rcgen = { workspace = true, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std"] }
+tokio = { workspace = true, features = ["net", "rt"] }
+tokio-rustls = { workspace = true, features = ["ring"] }
+windows-sys = { workspace = true, features = [
+    "Win32_Networking_WinHttp",
+] }
+
 [lints]
 workspace = true
