@@ -90,7 +90,7 @@ struct UserId(String);
 #[event("user.notification_batch")]
 #[info("Sending notifications to users")]
 struct NotificationBatch<'a> {
-    /// Email recipients from a `Vec`.
+    /// Email recipients from an array.
     recipients: SensitiveSlice<'a, 3>,
     /// User IDs from a `HashMap`'s keys, semicolon-delimited.
     #[dimension(log = "lookup_users")]
