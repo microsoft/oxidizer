@@ -15,16 +15,7 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/ohno_macros/favicon.ico")]
 
-mod derive_error;
-mod diagnostics;
-mod enrich_err;
-mod error_attr;
-mod marker;
-mod message;
-mod paths;
-
 use proc_macro::TokenStream;
-use quote::ToTokens;
 
 /// Derive macro for automatically implementing error traits.
 ///
@@ -53,10 +44,7 @@ use quote::ToTokens;
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
 pub fn derive_error(input: TokenStream) -> TokenStream {
-    match syn::parse::<syn::DeriveInput>(input) {
-        Ok(input) => derive_error::expand(input).into(),
-        Err(error) => error.to_compile_error().into(),
-    }
+    ohno_macros_impl::derive_error(input.into()).into()
 }
 
 /// Attribute macro for adding error enrichment with file and line info to function errors.
@@ -66,10 +54,7 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
-    match syn::parse::<syn::Item>(input) {
-        Ok(item) => enrich_err::expand(args.into(), item).into(),
-        Err(error) => error.to_compile_error().into(),
-    }
+    ohno_macros_impl::enrich_err(args.into(), input.into()).into()
 }
 
 /// Attribute macro that adds the `OhnoCore` field to a struct and derives the error traits.
@@ -87,16 +72,5 @@ pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
 #[cfg_attr(test, mutants::skip)]
 #[proc_macro_attribute]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
-    if !args.is_empty() {
-        let args: proc_macro2::TokenStream = args.into();
-        return syn::Error::new_spanned(args, "`#[ohno::error]` takes no arguments")
-            .to_compile_error()
-            .into_token_stream()
-            .into();
-    }
-
-    match syn::parse::<syn::Item>(input) {
-        Ok(item) => error_attr::expand(item).into(),
-        Err(error) => error.to_compile_error().into(),
-    }
+    ohno_macros_impl::error(args.into(), input.into()).into()
 }

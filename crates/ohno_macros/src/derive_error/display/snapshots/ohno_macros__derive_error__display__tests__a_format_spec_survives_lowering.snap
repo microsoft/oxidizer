@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/derive_error/display/mod.rs
-expression: "lowered(parse_quote!\n{\n    #[display(\"rules: {rules:?}\")] struct T\n    { rules: Vec<String>, inner: ohno::OhnoCore }\n})"
----
-fn message() {
-    let _ = ::std::format!("rules: {:?}", & self.rules);
-}
