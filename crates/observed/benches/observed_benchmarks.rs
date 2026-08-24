@@ -221,12 +221,12 @@ impl opentelemetry_sdk::logs::LogExporter for NoOpLogExporter {
 /// No-op log exporter for benchmarks.
 ///
 /// Helper to run a benchmark with `alloc_tracker` and `all_the_time` tracking.
-fn bench_with_tracking<R>(
+fn bench_with_tracking(
     group: &mut BenchmarkGroup<'_, WallTime>,
     allocs: &alloc_tracker::Session,
     time: &all_the_time::Session,
     name: &str,
-    mut body: impl FnMut() -> R,
+    mut body: impl FnMut(),
 ) {
     let allocs_op = allocs.operation(name);
     let time_op = time.operation(name);
@@ -234,17 +234,14 @@ fn bench_with_tracking<R>(
         b.iter_custom(|iters| {
             let _alloc = allocs_op.measure_thread().iterations(iters);
             let _clock = time_op.measure_thread().iterations(iters);
-            let mut results = Vec::with_capacity(usize::try_from(iters).unwrap_or(usize::MAX));
 
             let start = Instant::now();
 
             for _ in 0..iters {
-                results.push(black_box(body()));
+                body();
             }
 
-            let elapsed = start.elapsed();
-            drop(results);
-            elapsed
+            start.elapsed()
         });
     });
 }
