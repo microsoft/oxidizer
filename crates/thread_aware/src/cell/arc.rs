@@ -654,23 +654,14 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
-    /// Computes the factory to carry after a relocation, or `None` when it is unchanged.
+    /// Records the original source affinity in a closure factory once it is known.
     ///
-    /// This is deterministic and runs no caller code: given the current factory and the
-    /// relocation `source`, every racer into the same destination computes the same replacement.
-    /// Only the closure factory ever changes, and only on an `Arc`'s first relocation, when it
-    /// records the source affinity it started from so later relocations reproduce the original
-    /// transfer. The other factory kinds are stateless and never need replacing.
-    fn relocated_factory(&self, source: Option<Affinity>) -> Option<Factory<T>> {
-        match &self.factory {
-            // Record the source affinity the first time we learn it; afterwards the factory is
-            // identical and does not need replacing.
-            Factory::Closure(factory, factory_source_affinity) => factory_source_affinity
-                .is_none()
-                .then(|| Factory::Closure(sync::Arc::clone(factory), source)),
-
-            // The remaining kinds are stateless and keep themselves.
-            Factory::Data(_) | Factory::ErasedCloneFn(_) | Factory::Manual => None,
+    /// This is deterministic and runs no caller code. Only the closure factory carries source
+    /// state; the other factory kinds are stateless. An unknown `source` records nothing, allowing a
+    /// later relocation with a known source to establish the original affinity.
+    fn record_factory_source(&mut self, source: Option<Affinity>) {
+        if let (Factory::Closure(_, recorded @ None), Some(source)) = (&mut self.factory, source) {
+            *recorded = Some(source);
         }
     }
 
@@ -710,6 +701,12 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        // Record the original source before any fast path can return. A clone whose first relocation
+        // hits an existing destination value or stays within one strategy partition still needs that
+        // source when a later relocation materializes a new value.
+        // Ref: docs/implementation.md, "Relocation and publication".
+        self.record_factory_source(source);
+
         // Relocation reads the destination's write-once cell with a plain acquire load. The steady
         // state of any affinity is "already materialized", so this hit is the overwhelmingly common
         // outcome and carries no lock-word contention: concurrent relocations into distinct
@@ -746,15 +743,6 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             let published = destination_slot.get_or_init(|| sync::Arc::<T>::clone(&self.value));
             self.value = sync::Arc::<T>::clone(published);
             return;
-        }
-
-        // Update the factory before publishing. `relocated_factory` is deterministic given `source`,
-        // so every racer — winner or loser of the publish below — records the same replacement.
-        // Deferring it to the publishing thread alone would leave losers with a stale factory that
-        // mis-records its source affinity on the next relocation.
-        // Ref: docs/implementation.md, "Relocation and publication".
-        if let Some(factory) = self.relocated_factory(source) {
-            self.factory = factory;
         }
 
         // The test checkpoint pauses an adopting racer only after its per-clone factory state is

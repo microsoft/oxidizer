@@ -35,6 +35,16 @@ impl ThreadAware for Counter {
     }
 }
 
+/// Records the source affinity used to relocate constructor state.
+#[derive(Clone)]
+struct SourceRecorder(sync::Arc<sync::Mutex<Option<Affinity>>>);
+
+impl ThreadAware for SourceRecorder {
+    fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
+        *self.0.lock().unwrap() = source;
+    }
+}
+
 #[test]
 fn transfer_creates_new_value() {
     let affinities = pinned_affinities(&[2]);
@@ -917,24 +927,13 @@ fn later_relocations_reproduce_the_original_source_affinity() {
     // path is covered separately below.
     // Ref: docs/implementation.md, "Relocation and publication".
 
-    // Records the `source` of the most recent relocation into a shared cell so the test can read
-    // back which source the factory used when it materialized a value.
-    #[derive(Clone)]
-    struct Recorder(sync::Arc<sync::Mutex<Option<Affinity>>>);
-
-    impl ThreadAware for Recorder {
-        fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
-            *self.0.lock().unwrap() = source;
-        }
-    }
-
     let affinities = pinned_affinities(&[3]);
     let a = affinities[0];
     let b = affinities[1];
     let c = affinities[2];
 
     let recorded = sync::Arc::new(sync::Mutex::new(None));
-    let mut arc = PerCore::new_with(Recorder(sync::Arc::clone(&recorded)), |_recorder: Recorder| 0_i32);
+    let mut arc = PerCore::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
 
     // First relocation A -> B: nothing is recorded yet, so the given source A is used and stored.
     arc.relocate(Some(a), b);
@@ -951,6 +950,62 @@ fn later_relocations_reproduce_the_original_source_affinity() {
         *recorded.lock().unwrap(),
         Some(a),
         "a later relocation reproduces the original source affinity, not the current one"
+    );
+}
+
+#[test]
+fn hit_path_records_the_original_source_affinity() {
+    // Pre-materialize B with one clone, then let another clone first relocate A -> B through the hit
+    // path. Its later B -> C miss must still relocate constructor state from the original source A.
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let origin = PerCore::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+
+    let mut publisher = origin.clone();
+    publisher.relocate(Some(a), b);
+
+    *recorded.lock().unwrap() = None;
+    let mut arc = origin;
+    arc.relocate(Some(a), b);
+    assert_eq!(*recorded.lock().unwrap(), None, "a populated destination must not run the factory");
+
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a clone whose first relocation was a hit must retain its original source"
+    );
+}
+
+#[test]
+fn same_partition_path_records_the_original_source_affinity() {
+    // A and B share one NUMA partition, while C belongs to another. The same-partition A -> B fast
+    // path must record A so the later cross-partition B -> C materialization still relocates
+    // constructor state from the original source.
+    let affinities = pinned_affinities(&[2, 1]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let mut arc = crate::Arc::<_, crate::PerNuma>::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+
+    arc.relocate(Some(a), b);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        None,
+        "a same-partition relocation must keep the carried value without running the factory"
+    );
+
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a same-partition first relocation must retain the original source"
     );
 }
 

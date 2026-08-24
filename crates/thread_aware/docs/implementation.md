@@ -107,6 +107,8 @@ source recording has no lock order that can deadlock.
 ```text
     relocate(source, destination)
              |
+       record known original source in factory
+             |
        probe slot[destination]            (acquire load)
              |
       populated? --- yes ---> adopt value, done
@@ -122,8 +124,6 @@ source recording has no lock order that can deadlock.
       same slot as source? --- yes ---> get_or_init slot[destination]
              |                            with carried value, adopt, done
              no
-             |
-       update factory to record source
              |
        get_or_init slot[destination]      (destination is initializing while
              |                             factory runs at most once;
@@ -156,10 +156,12 @@ write-once initialization is non-reentrant. A panic simply propagates and leaves
 the cell empty for the next relocation to retry: there is no poisonable lock and
 no partial published state to unwind.
 
-Before publishing, the relocation records the source affinity into its factory.
-That update is deterministic given the source, so every racer — the one that
-publishes and every one that adopts — applies the same update and reproduces the
-original transfer identically on its next hop.
+At the start of relocation, a closure factory records the source affinity if it
+has not already done so and the source is known. The update is deterministic and
+runs before the hit, out-of-range, and same-slot fast paths, so a clone that first
+takes any of those paths still reproduces the original transfer when a later
+relocation materializes a new value. An unknown source records nothing, allowing a
+later relocation with a known source to establish the original affinity.
 
 A cross-slot miss also preserves the value it moves away from. The `Arc` is
 carrying the source slot's value, so that value is recorded into the source slot
