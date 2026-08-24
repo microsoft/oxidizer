@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{self};
 
 use crate::affinity::{Affinity, pinned_affinities};
@@ -805,18 +805,28 @@ fn factory_closure_debug() {
 
 #[test]
 fn concurrent_relocation_to_same_affinity_materializes_once() {
-    // Races many threads into the same empty destination cell and asserts they all end up with the
-    // one value materialized for it: whichever racer wins publishes into the write-once cell, and
-    // every other racer adopts that same `sync::Arc`, whether it observes the value in its initial
-    // acquire-load probe or in the rejected `set` after materializing its own candidate.
+    // Races many threads into the same empty destination cell and asserts two things: the caller's
+    // factory runs exactly once for that affinity, and every racer ends on the one value published
+    // for it. Publication goes through `OnceLock::get_or_init`, which serializes materialization on
+    // the cell: the winner runs the factory and every other racer blocks, then adopts the winner's
+    // `sync::Arc`. This is the documented "once per affinity" contract holding under contention.
     // Ref: docs/implementation.md, "Relocation and publication".
+
+    // A cloneable factory input that counts how many times the factory runs. Its `relocate` is a
+    // no-op, so relocations do not disturb the count.
+    #[derive(Clone)]
+    struct Materializations(sync::Arc<AtomicUsize>);
+
+    impl ThreadAware for Materializations {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
 
     // Enough racers to make a publish/adopt race likely on a machine that can run several threads,
     // while staying cheap enough for a unit test.
     const RACERS: usize = 8;
 
     // Repeated because which racer wins the write-once cell is decided by the operating system
-    // scheduler; repetition exercises both the initial-probe and rejected-`set` adopt branches.
+    // scheduler; repetition exercises both the winning and adopting racers across rounds.
     const ROUNDS: usize = 32;
 
     let affinities = pinned_affinities(&[2]);
@@ -824,8 +834,20 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
     let destination = affinities[1];
 
     for _ in 0..ROUNDS {
-        let origin = PerCore::new(Counter::new);
+        let materializations = sync::Arc::new(AtomicUsize::new(0));
+
+        let origin = PerCore::new_with(
+            Materializations(sync::Arc::clone(&materializations)),
+            |counter: Materializations| {
+                counter.0.fetch_add(1, Ordering::AcqRel);
+                Counter::new()
+            },
+        );
         origin.increment_by(7);
+
+        // Construction materialized the origin's own value once; only destination materializations
+        // should be counted, so start the race from zero.
+        materializations.store(0, Ordering::Release);
 
         let barrier = sync::Arc::new(sync::Barrier::new(RACERS));
 
@@ -849,13 +871,64 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
         for other in rest {
             assert!(
                 sync::Arc::ptr_eq(first, other),
-                "every racer must adopt the single value materialized for the destination affinity"
+                "every racer must adopt the single value published for the destination affinity"
             );
         }
 
+        assert_eq!(
+            materializations.load(Ordering::Acquire),
+            1,
+            "the factory must run exactly once for the destination affinity, even under a race"
+        );
         assert_eq!(first.value(), 0, "the destination value is freshly relocated, not the source value");
         assert_eq!(origin.value(), 7, "the source value is left intact");
     }
+}
+
+#[test]
+fn later_relocations_reproduce_the_original_source_affinity() {
+    // The closure factory records the affinity it first relocated from, so every later relocation
+    // reproduces that original transfer instead of taking the `Arc`'s current affinity as the
+    // source. This is the deterministic factory update the concurrent adopt path relies on: it runs
+    // before publication for every racer, so a racer that adopts another thread's value still
+    // carries the same recorded source and reproduces the transfer identically on its next hop.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    // Records the `source` of the most recent relocation into a shared cell so the test can read
+    // back which source the factory used when it materialized a value.
+    #[derive(Clone)]
+    struct Recorder(sync::Arc<sync::Mutex<Option<Affinity>>>);
+
+    impl ThreadAware for Recorder {
+        fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
+            *self.0.lock().unwrap() = source;
+        }
+    }
+
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let mut arc = PerCore::new_with(Recorder(sync::Arc::clone(&recorded)), |_recorder: Recorder| 0_i32);
+
+    // First relocation A -> B: nothing is recorded yet, so the given source A is used and stored.
+    arc.relocate(Some(a), b);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "the first relocation materializes with the source it was given"
+    );
+
+    // Relocate onward B -> C. The factory must reproduce the original source A, not the current
+    // affinity B.
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a later relocation reproduces the original source affinity, not the current one"
+    );
 }
 
 #[test]

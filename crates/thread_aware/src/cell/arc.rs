@@ -604,20 +604,35 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
-    /// Produces the value for `destination` and a replacement factory.
+    /// Computes the factory to carry after a relocation, or `None` when it is unchanged.
     ///
-    /// The first element is the value `destination` will hold. The second is a
-    /// replacement for [`self.factory`](Self), or `None` when the factory is
-    /// unchanged. Only the closure factory ever changes, and only on an `Arc`'s
-    /// first relocation: it records the source affinity it started from so later
-    /// relocations reproduce the original transfer. The other factory kinds are
-    /// stateless and never need replacing.
+    /// This is deterministic and runs no caller code: given the current factory and the
+    /// relocation `source`, every racer into the same destination computes the same replacement.
+    /// Only the closure factory ever changes, and only on an `Arc`'s first relocation, when it
+    /// records the source affinity it started from so later relocations reproduce the original
+    /// transfer. The other factory kinds are stateless and never need replacing.
+    fn relocated_factory(&self, source: Option<Affinity>) -> Option<Factory<T>> {
+        match &self.factory {
+            // Record the source affinity the first time we learn it; afterwards the factory is
+            // identical and does not need replacing.
+            Factory::Closure(factory, factory_source_affinity) => factory_source_affinity
+                .is_none()
+                .then(|| Factory::Closure(sync::Arc::clone(factory), source)),
+
+            // The remaining kinds are stateless and keep themselves.
+            Factory::Data(_) | Factory::ErasedCloneFn(_) | Factory::Manual => None,
+        }
+    }
+
+    /// Produces the value `destination` will hold by running the configured factory.
     ///
-    /// This runs the configured factory, which is caller-supplied code. It runs
-    /// with no cell locked, so if the factory panics the panic simply propagates
-    /// and the destination cell is left empty for the next relocation into that
-    /// affinity to re-materialize.
-    fn materialize(&self, source: Option<Affinity>, destination: Affinity) -> (sync::Arc<T>, Option<Factory<T>>) {
+    /// This runs caller-supplied code with no cell locked. It is invoked through
+    /// [`OnceLock::get_or_init`](std::sync::OnceLock::get_or_init), so across all racing
+    /// relocations into the same empty cell the factory runs at most once and every racer adopts
+    /// the one published value — the closure's documented "once per affinity" contract. If the
+    /// factory panics the panic simply propagates and the destination cell is left empty for the
+    /// next relocation into that affinity to re-materialize.
+    fn materialize_value(&self, source: Option<Affinity>, destination: Affinity) -> sync::Arc<T> {
         match &self.factory {
             Factory::Closure(factory, factory_source_affinity) => {
                 let mut factory_clone = (**factory).clone();
@@ -628,24 +643,16 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> Arc<T, S> {
                 let factory_source = factory_source_affinity.or(source);
 
                 factory_clone.relocate(factory_source, destination);
-                let data = sync::Arc::from(factory_clone.call_once());
-
-                // Record the source affinity the first time we learn it; afterwards the factory is
-                // identical and does not need replacing.
-                let updated = factory_source_affinity
-                    .is_none()
-                    .then(|| Factory::Closure(sync::Arc::clone(factory), factory_source));
-
-                (data, updated)
+                sync::Arc::from(factory_clone.call_once())
             }
 
             // The remaining kinds are stateless: they produce the value and keep themselves.
-            Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), None),
+            Factory::Data(factory) => sync::Arc::from(factory(&self.value, source, destination)),
 
-            Factory::ErasedCloneFn(erased) => (erased.clone_and_relocate(source, destination), None),
+            Factory::ErasedCloneFn(erased) => erased.clone_and_relocate(source, destination),
 
             // Manual mode behaves like a plain `sync::Arc<T>`: clone the current value.
-            Factory::Manual => (sync::Arc::clone(&self.value), None),
+            Factory::Manual => sync::Arc::clone(&self.value),
         }
     }
 }
@@ -672,12 +679,6 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             return;
         };
 
-        // The cell may have been published between the probe and here; adopt that value.
-        if let Some(value) = destination_slot.get() {
-            self.value = sync::Arc::<T>::clone(value);
-            return;
-        }
-
         // When the source resolves to the destination's own slot there is no cross-slot move: the
         // carried value already belongs to that slot. A single-slot table is the same case even
         // without a source — the carried value provably belongs to the one slot — which is the whole
@@ -696,39 +697,39 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
             return;
         }
 
-        // Materialize the destination value by running the caller's factory. No cell is locked while
-        // it runs, so a panic simply propagates and leaves the cell empty for the next relocation to
-        // retry — there is no lock to poison and no re-probe to coordinate.
+        // Update the factory before publishing. `relocated_factory` is deterministic given `source`,
+        // so every racer — winner or loser of the publish below — records the same replacement.
+        // Deferring it to the publishing thread alone would leave losers with a stale factory that
+        // mis-records its source affinity on the next relocation.
         // Ref: docs/implementation.md, "Relocation and publication".
-        let (data, new_factory) = self.materialize(source, destination);
+        if let Some(factory) = self.relocated_factory(source) {
+            self.factory = factory;
+        }
 
-        if destination_slot.set(sync::Arc::<T>::clone(&data)).is_err() {
-            // Another thread published this destination cell first. Adopt its value so every
-            // clone converges on one identity; the value this thread materialized is dropped.
-            self.value = sync::Arc::<T>::clone(destination_slot.get().expect("cell is populated after a rejected set"));
-        } else {
-            let old_value = std::mem::replace(&mut self.value, data);
+        // The value this `Arc` carries belongs to `source`; keep a handle to seed the source cell.
+        let old_value = sync::Arc::<T>::clone(&self.value);
 
-            // Record the factory only when materialization actually changed it (the closure
-            // factory, on the first relocation). The stateless kinds return `None` and are left
-            // untouched.
-            if let Some(factory) = new_factory {
-                self.factory = factory;
-            }
+        // Publish the destination value, running the caller's factory at most once across all racers:
+        // `get_or_init` serializes materialization on this cell and hands every racer the single
+        // published value, so the closure's documented "once per affinity" contract holds even under
+        // a concurrent first relocation. No cell is locked while the factory runs, so a panic simply
+        // propagates and leaves the cell empty for the next relocation to retry.
+        // Ref: docs/implementation.md, "Relocation and publication".
+        let published = destination_slot.get_or_init(|| self.materialize_value(source, destination));
+        self.value = sync::Arc::<T>::clone(published);
 
-            // Record the value the `Arc` moved away from into the source cell, so a later
-            // relocation back into it finds the original instead of materializing a fresh one.
-            // Reached only on a cross-slot miss — the same-slot case returned above — so the
-            // source cell is distinct from the destination just published. An out-of-range
-            // source has no cell to record into, so the recording is skipped and the anomaly
-            // recorded. `set` leaves an already-populated source cell untouched; another thread
-            // may have recorded it with the same value, so leaving it in place is correct.
-            if let Some(source) = source {
-                if let Some(source_slot) = self.storage.slot(source) {
-                    let _ = source_slot.set(old_value);
-                } else {
-                    report_out_of_range_affinity();
-                }
+        // Record the value the `Arc` moved away from into the source cell, so a later relocation
+        // back into it finds the original instead of materializing a fresh one. Reached only on a
+        // cross-slot miss — the same-slot case returned above — so the source cell is distinct from
+        // the destination just published. An out-of-range source has no cell to record into, so the
+        // recording is skipped and the anomaly recorded. `set` leaves an already-populated source
+        // cell untouched; another thread may have recorded it with the same value, so leaving it in
+        // place is correct.
+        if let Some(source) = source {
+            if let Some(source_slot) = self.storage.slot(source) {
+                let _ = source_slot.set(old_value);
+            } else {
+                report_out_of_range_affinity();
             }
         }
     }

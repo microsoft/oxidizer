@@ -85,18 +85,19 @@ into a pointer, so it preserves `?Sized` at no extra cost.
 The swap's remaining capability — replacing an already-published value — is one
 this design never uses. A slot is materialized once and never emptied or
 rewritten, so write-once is exactly the contract the slot needs. `OnceLock` encodes
-that contract directly, turning "already published" into a cheap acquire load and a
-losing relocation into a rejected `set`, without carrying the machinery for stores
-that never happen. Dereferencing an `Arc<T, S>` — the steady state — never touches
-a slot at all: the holder carries its current value in its own `value` field and
-derefs through that with no synchronization, so the only slot reads are on
-relocation, and on the common hit path each is that cheap lock-free read.
+that contract directly: `get_or_init` publishes the first materialized value and
+hands every racer that one value, so the factory runs at most once per affinity
+without carrying the machinery for stores that never happen. Dereferencing an
+`Arc<T, S>` — the steady state — never touches a slot at all: the holder carries
+its current value in its own `value` field and derefs through that with no
+synchronization, so the only slot reads are on relocation, and on the common hit
+path each is that cheap lock-free read.
 
 ## Relocation and publication
 
 `ThreadAware::relocate` moves a clone of an `Arc` into a destination affinity. It
 touches at most two slots — the destination and, only on a cross-slot miss, the
-source — and holds nothing across them: every slot access is a write-once `set` or
+source — and holds nothing across them: every slot access is a write-once publish or
 an acquire-load read, so there is no lock to order and opposite-direction traffic
 cannot deadlock.
 
@@ -115,23 +116,14 @@ cannot deadlock.
              |                     record thread_aware_arc_oob, done
              no
              |
-       re-read slot[destination]          (acquire load)
-             |
-      populated? --- yes ---> adopt value, done
-             |
-             no
-             |
       same slot as source? --- yes ---> get_or_init slot[destination]
              |                            with carried value, adopt, done
              no
              |
-       materialize value                  (no slot touched)
+       update factory to record source
              |
-       set slot[destination]              (write-once)
-             |
-      rejected? --- yes ---> adopt the published winner, done
-             |
-             no
+       get_or_init slot[destination]      (runs factory at most once,
+             |                             adopt the published value)
              |
        record carried value in slot[source]   (write-once, if in range)
 ```
@@ -147,16 +139,20 @@ A miss reaches the destination cell to publish into it. If the source resolves t
 that same slot, the value the `Arc` carries already belongs there, so
 `get_or_init` seeds the empty cell with it — or adopts a racer's value if one
 published first. This is every relocation under `PerProcess`, and any relocation
-whose source and destination share a slot. Otherwise the value is materialized by
-running the factory with no slot touched, and published with a write-once `set`.
-The re-read before materializing is an optimization, not a correctness
-requirement: the write-once `set` is the authority. If two threads both miss and
-both materialize, the first `set` wins and the loser's `set` is rejected; the loser
-then adopts the published winner, so every clone converges on one identity and the
-value the loser built is dropped. Materializing runs the caller's factory while
-nothing is published, so a panic there simply propagates and leaves the cell empty
-for the next relocation to retry — there is no lock to poison and no partial state
-to unwind.
+whose source and destination share a slot. Otherwise the destination value is
+published through `get_or_init`, which runs the caller's factory to materialize the
+value and serializes that materialization on the cell: the first racer to arrive
+runs the factory, every other racer blocks and then adopts the one published value.
+The factory therefore runs at most once per affinity, upholding the "once per
+affinity" contract even under a concurrent first relocation, and no racer's work is
+dropped. The factory runs while nothing is published and no slot is held, so a
+panic there simply propagates and leaves the cell empty for the next relocation to
+retry — there is no lock to poison and no partial state to unwind.
+
+Before publishing, the relocation records the source affinity into its factory.
+That update is deterministic given the source, so every racer — the one that
+publishes and every one that adopts — applies the same update and reproduces the
+original transfer identically on its next hop.
 
 A cross-slot miss also preserves the value it moves away from. The `Arc` is
 carrying the source slot's value, so that value is recorded into the source slot
