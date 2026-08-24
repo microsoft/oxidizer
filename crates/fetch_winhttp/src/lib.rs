@@ -64,7 +64,11 @@
     doc = "[`WinHttpOptions`]: https://docs.rs/fetch_winhttp"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+// The attribute this feature enables appears in the WinHTTP modules, which are
+// configured out on other platforms, and in the placeholder module's tests. The
+// feature is therefore declared only where a use of it survives configuration,
+// because an unused feature declaration is itself an error.
+#![cfg_attr(all(coverage_nightly, any(windows, test)), feature(coverage_attribute))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
 

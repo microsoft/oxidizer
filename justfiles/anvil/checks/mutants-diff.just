@@ -50,23 +50,21 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     # them is unbuildable and therefore reported as missed. Exclude such code
     # explicitly. Keep this in sync with `scripts/mutants.rs`, which applies the
     # same policy to the merge-group run.
-    $platform_excludes = @()
+    #
+    # Each glob must be written as a literal, quoted argument of the invocation.
+    # On Unix, PowerShell expands wildcards in native command arguments against
+    # the file system unless the argument is a quoted token, and it does so even
+    # for arguments supplied from a variable or a splatted array -- which would
+    # turn a directory glob into a list of paths cargo-mutants rejects.
     if ($IsWindows) {
-        $platform_excludes += '**/*_linux.rs'
-        # The non-Windows placeholder inside the otherwise Windows-only crate.
-        $platform_excludes += 'crates/fetch_winhttp/src/unsupported_platform.rs'
+        # The second glob is the non-Windows placeholder inside the otherwise
+        # Windows-only `fetch_winhttp` crate.
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*_linux.rs" --exclude "crates/fetch_winhttp/src/unsupported_platform.rs"
     } else {
-        $platform_excludes += '**/*_windows.rs'
-        # Crates whose entire implementation is gated to Windows.
-        $platform_excludes += 'crates/fetch_winhttp/**'
+        # `fetch_winhttp` implements nothing outside Windows, so the whole crate
+        # goes rather than individual files.
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*_windows.rs" --exclude "crates/fetch_winhttp/**"
     }
-    $exclude_args = @()
-    foreach ($glob in $platform_excludes) {
-        Write-Host "anvil-mutants-diff: excluding '$glob' on this platform"
-        $exclude_args += '--exclude'
-        $exclude_args += $glob
-    }
-    cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 @exclude_args
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---
