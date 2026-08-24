@@ -26,8 +26,9 @@
 //!   connection lifetimes are accepted and ignored rather than rejected, so a
 //!   client that sets them still builds.
 //! - Proxy selection follows automatic Windows proxy policy, including
-//!   automatic discovery and proxy auto-configuration scripts. There is no
-//!   proxy override and no direct-connection fallback.
+//!   automatic discovery and proxy auto-configuration scripts. Callers cannot
+//!   override that policy, and it may route a request through a proxy or
+//!   send it directly to the origin.
 //! - Redirects are not followed, no cookie store is kept, and authentication
 //!   challenges are not answered. Those responses are returned to the caller to
 //!   act on, and none of this can be re-enabled.

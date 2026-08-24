@@ -32,9 +32,12 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 ///   Shared borrows may be held across a submission; interior mutability
 ///   carries every state change the callback and the submitter share.
 /// - At most one asynchronous operation is outstanding per request handle.
-/// - Buffers remain retained until the matching completion, request error,
-///   final handle-closing callback, or failing submitting call ends the
-///   operation.
+/// - A lent buffer remains retained until one of the endpoints named by the
+///   submitting method ends the operation: the matching completion notification
+///   (`READ_COMPLETE` or `WRITE_COMPLETE`), `REQUEST_ERROR`, or the request
+///   handle's final `HANDLE_CLOSING` callback. A failing return from the
+///   submitting call is not one of those endpoints: it starts no operation, so
+///   no buffer was ever lent and the caller reclaims it immediately.
 /// - RAII handle owners close each successfully created handle exactly once; the
 ///   final handle-closing callback is the terminal context-ownership event.
 ///

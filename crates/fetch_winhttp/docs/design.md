@@ -362,10 +362,10 @@ transport's; the transport only reports the timeout.
   | the connection could not be established: the name did not resolve, or the peer refused the connection or could not be reached | `connect` |
   | a WinHTTP operation exceeded its own time limit | `timeout` |
   | TLS failed: certificate validation, revocation checking, secure-channel negotiation, or a client identity this transport cannot supply | `tls` |
-  | the operation was cancelled, aborted, or shut down rather than allowed to fail | `abandoned` |
+  | the operation was cancelled or aborted, or WinHTTP shut down, rather than the request being allowed to fail | `abandoned` |
   | a send, receive, or protocol failure; a response exceeding a limit WinHTTP enforces; response metadata the transport cannot use; and any WinHTTP code the transport does not recognize | `request_winhttp` |
   | a request the transport rejects itself: an unusable HTTP version (§3, §3.1), an unusable target, or request body framing the transport cannot honor (§5) | `invalid_request` |
-  | the WinHTTP session could not be opened | `winhttp_initialization` |
+  | the WinHTTP session could not be opened or configured | `winhttp_initialization` |
   | the connect deadline expired (§6.2) | `response_timeout` |
 
   The table states which condition each label covers. The exact set of native codes
@@ -373,16 +373,20 @@ transport's; the transport only reports the timeout.
   `request_winhttp` and carries unknown recovery guidance. A label follows the code
   WinHTTP reports rather than the underlying cause, so where one code spans several
   conditions the label reflects the code: a TLS incompatibility reported as a generic
-  connection failure is labeled `request_winhttp`, not `tls`.
+  connection failure is labeled `request_winhttp`, not `tls`. Abortion is read by its
+  subject: an aborted *operation* is `abandoned`, because something stopped the request
+  deliberately, while an aborted *connection* is an ordinary transport fault and is
+  labeled accordingly.
 - **Transmission on `invalid_request`.** A rejection decided from request metadata
   happens before any WinHTTP call, so the server saw nothing. A body frame the transport
   cannot send is discovered only when the body yields it, by which point the headers and
   every preceding data frame have gone out. An `invalid_request` therefore does not on
   its own promise that the request had no remote effect.
 
-- **Permanently failed initialization.** A transport that cannot open its WinHTTP session
-  latches that failure instead of retrying it. Every request it subsequently serves returns
-  a fresh `winhttp_initialization` error without performing network I/O.
+- **Permanently failed initialization.** A transport that cannot open or configure its
+  WinHTTP session latches that failure instead of retrying it. Every request it
+  subsequently serves returns a fresh `winhttp_initialization` error without performing
+  network I/O.
 
 ### 7.1 Recoverability rationale
 
@@ -402,11 +406,12 @@ to say.
   find the revocation service able to answer.
 - **Never** (deterministic failures): TLS failures other than that incomplete revocation
   check, because a fixed trust configuration yields the same verdict on a retry, and
-  because a client identity this transport cannot supply will still be missing; and
-  cancellation, abortion, and shutdown, which stop an operation rather than fail it, so
-  re-issuing would work against whatever stopped it. Malformed responses, protocol
-  violations, and responses exceeding a limit WinHTTP enforces are also non-retryable:
-  each indicates a stable server or configuration problem.
+  because a client identity this transport cannot supply will still be missing; and an
+  operation cancelled or aborted, or stopped by WinHTTP shutting down, which stop an
+  operation rather than fail it, so re-issuing would work against whatever stopped it.
+  Malformed responses, protocol violations, and responses exceeding a limit WinHTTP
+  enforces are also non-retryable: each indicates a stable server or configuration
+  problem.
 - **Unknown** (everything else): the recognized codes are a small subset of the many
   codes WinHTTP can return, so an unrecognized code is the ordinary case rather
   than an exception. Such a failure carries unknown recovery guidance instead of being
@@ -439,8 +444,9 @@ Counters:
 
 The counters are deliberately zero-dimensional. No per-request, per-connection, or
 per-endpoint attribute is ever attached to a metric, so metric cardinality does not grow
-with traffic, and the error counter divided by the request counter is a whole-transport
-failure rate.
+with traffic, and the error counter divided by the request counter is the transport's
+failure rate through the point where a response is returned. Failures a caller meets
+later, while reading the response body, are outside both counters.
 
 Log fields carry the higher-cardinality context instead, and appear on log records only:
 

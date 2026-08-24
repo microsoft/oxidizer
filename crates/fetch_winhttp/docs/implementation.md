@@ -428,26 +428,29 @@ one-shot, payload-carrying signal with exactly one waiter.
 
 ### 3.4 `Send` (not `Sync`) across the FFI boundary
 
-Raw WinHTTP handles are `*mut c_void` and thus neither `Send` nor `Sync`. They
-are wrapped in `handle.rs` newtypes with explicit unsafe marker impls justified by
-WinHTTP's documented cross-thread handle usability, mirroring the
-`ThreadSafe<HANDLE>` technique in `oxidizer_io`. The tiers differ because their
-sharing needs differ:
+Raw WinHTTP handles are `*mut c_void` and thus neither `Send` nor `Sync`. The explicit
+unsafe markers live on exactly one type, the `RawHandle` newtype in `handle.rs`, justified
+by WinHTTP's documented cross-thread handle usability and mirroring the
+`ThreadSafe<HANDLE>` technique in `oxidizer_io`. Every owning wrapper is built from that
+token, so no wrapper repeats the assertion; a wrapper instead *withdraws* what it must not
+offer, by holding a `PhantomData<Cell<()>>` that removes `Sync`. The tiers differ because
+their sharing needs differ:
 
 - **Request and connect handles are `Send` but not `Sync`.** Each belongs to one
   request; the handle is only ever *moved* between threads (the future migrates
   across executor threads, and a completion may arrive on a different thread than
   the submit), never shared by reference from two threads at once. The driver keeps
   at most one operation outstanding per handle and holds the only reference, so
-  `Send` alone is what we need and all we can honestly assert.
+  `Send` alone is what we need, and the `not_sync` marker on `ConnectHandle` and
+  `RequestHandle` is what holds them to it.
 - **The session handle is `Send + Sync`.** A session `Arc` is cloned into every
   in-flight request on its core and is touched by WinHTTP's process-global callback
   threads (§3.1), so it is shared by reference across threads.
   The handler that holds it must be `Send + Sync` (a `fetch` requirement), so the session
-  must be too. This is
-  sound because WinHTTP explicitly permits concurrent operations on one session
-  handle, and after its build-time setup the session is read-only from our side (§3.2);
-  the `unsafe impl Sync for WinHttpSession` carries exactly that justification.
+  must be too. `SessionHandle` and `WinHttpSession` reach that by omitting the `not_sync`
+  marker rather than by asserting anything further, which is sound because WinHTTP
+  explicitly permits concurrent operations on one session handle and because the session
+  is read-only from our side after its build-time setup (§3.2).
 
 The future therefore holds only `Send` state: before context installation, the
 request/connect wrappers and session owner; afterward, an `events_once` receiver
@@ -690,14 +693,16 @@ payload under its atomic ownership tag. `HANDLE_CLOSING`, documented as the fina
 notification with no later callbacks, is the only path that reconstructs and drops
 the owning box.
 
-**The one field that is not covered by the temporal handoff** is
-`secure_failure_flags`, and that is why it is atomic rather than a `Cell`.
+**The one field that is not covered by the temporal handoff** is the packed
+`RequestContext::secure_failure` atomic, and that is why it is atomic rather than a `Cell`.
 `SECURE_FAILURE` and `REQUEST_ERROR` may run on different WinHTTP threads and in either
-order. A `SECURE_FAILURE` status publishes its certificate-error bitmask with a `Release`
-store and touches nothing else. `REQUEST_ERROR` classifies the failure from its WinHTTP
-error code and uses an `Acquire` load only to attach whatever diagnostic flags have
-already arrived. A later `SECURE_FAILURE` can still update request-scoped diagnostics
-without touching an operation sender or buffer. Every branch remains non-blocking
+order. A `SECURE_FAILURE` status publishes its certificate-error bitmask into that atomic
+with a `Release` store and touches nothing else. `REQUEST_ERROR` classifies the failure
+from its WinHTTP error code and reads the atomic through the `secure_failure_flags()`
+accessor, whose `Acquire` load attaches whatever diagnostic flags have already arrived to
+the resulting `WinHttpError::secure_failure_flags`. A later `SECURE_FAILURE` can still
+update request-scoped diagnostics without touching an operation sender or buffer. Every
+branch remains non-blocking
 (§2.1).
 
 ### 4.6 The outer connect-timeout race
@@ -730,11 +735,13 @@ has been destroyed.
 - **`plurality::Pool<RequestContext>` behind a `Mutex`.** A request rents one
   `plurality::Box<RequestContext>` at start and holds it for its whole lifetime
   (reclaimed when the callback drops it on `HANDLE_CLOSING`, §4.3). `plurality::Pool`
-  is `Send + !Sync`, so it is the one field we wrap in a `std::sync::Mutex`. The lock
-  is coarse but essentially uncontended: it is taken only to rent a context at request
-  start - never across an `.await`, never by the body reader (which reuses the
-  already-rented context), and never in a callback (the context returns itself to the
-  pool through its own `Drop`, holding no `&Pool`).
+  is `Send + !Sync`, so it is the one field we wrap in a `std::sync::Mutex`. That lock
+  guards allocation alone: `ContextInstallation::new` takes it to call `Pool::alloc_box`
+  and nothing else takes it - never across an `.await`, never by the body reader (which
+  reuses the already-rented context), and never on a callback path. Reclamation needs no
+  lock because installation detached the rented box with `plurality::Box::into_raw`;
+  `HANDLE_CLOSING` reconstructs it with `plurality::Box::from_raw` and drops it, and that
+  `Drop` returns the slot to the pool on its own.
 
 Read buffers come from the separate shared memory pool. `WinHttpDeps` retains a clone
 of its mandatory `bytesbuf::mem::GlobalPool` in the transport extras while also

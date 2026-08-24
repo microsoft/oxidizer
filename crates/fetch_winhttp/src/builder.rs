@@ -19,10 +19,10 @@ use crate::{WinHttpOptions, WinHttpTlsConfig};
 /// WinHTTP-specific options are transport extras and use strict or unlimited
 /// defaults when omitted.
 ///
-/// Internally, `fetch` clones and relocates this configuration before
-/// materializing a transport for each core and connection-pool slot. The global
-/// pool is also retained in the extras because WinHTTP response readers rent
-/// buffers from it independently of the generic response-body builder.
+/// One set of dependencies configures every transport a client materializes
+/// from it. How those transports organize connections is unspecified; what the
+/// transport promises is that clients built independently never share
+/// connections.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDeps {
@@ -66,8 +66,8 @@ impl WinHttpDeps {
 /// Collects the inputs that become relocatable [`WinHttpDeps`].
 ///
 /// The builder keeps mandatory environment services together with optional
-/// WinHTTP configuration without opening a session. Sessions and their
-/// connection pools are created only when the custom transport is materialized.
+/// WinHTTP configuration. Building it performs no I/O; the transport acquires
+/// its operating-system resources only when a client materializes it.
 #[derive(Clone, Debug, ThreadAware)]
 #[non_exhaustive]
 pub struct WinHttpDepsBuilder {
@@ -114,9 +114,10 @@ impl WinHttpDepsBuilder {
 /// [`TlsOptions`](fetch::tls::TlsOptions) are ignored; use
 /// [`WinHttpTlsConfig`] in [`WinHttpDeps`] for supported TLS controls.
 ///
-/// Each independent client build materializes isolated WinHTTP sessions and
-/// connection pools. Clones of an already built client continue to share that
-/// client's materialized transport resources.
+/// Independently built clients never share connections, so a client built with
+/// relaxed TLS validation cannot reuse a connection a strict client
+/// established. Cloning a built client shares that client's transport
+/// resources, as the generic contract requires.
 pub trait HttpClientWinHttpExt {
     /// Creates a WinHTTP-backed HTTP client builder.
     ///
