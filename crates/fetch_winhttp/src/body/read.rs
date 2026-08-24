@@ -1,16 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::task::{Context, Poll};
+use std::{fmt, mem};
 
 use bytesbuf::BytesBuf;
 use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
-use bytesbuf_io::{Read, ReadAsFuturesStream, ReadExt as _};
+use bytesbuf_io::Read;
 use fetch::HttpError;
-use futures_core::Stream as _;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
 
@@ -239,20 +238,74 @@ impl Read for WinHttpBodyReader {
 /// Preserves WinHTTP data and trailers as `http_body` frames.
 ///
 /// A dedicated adapter is required because the generic byte-stream bridge
-/// cannot emit response trailers. It yields data lazily, emits at most one
-/// final trailer frame, and disposes of the reader after completion or error.
-/// The surrounding `HttpBodyBuilder` remains responsible for applying the
-/// configured body idle timeout.
+/// cannot emit response trailers, and because it hands each frame the whole
+/// `BytesBuf` that was read into, so the next read must rent another pooled
+/// block even when the previous one was barely touched. This adapter detaches
+/// only the filled prefix into the frame and keeps the buffer, so a peer that
+/// trickles data refills capacity the emitted frame already holds rather than
+/// accumulating a block per frame.
+///
+/// It yields data lazily, emits at most one final trailer frame, and disposes
+/// of the reader after completion or error. The surrounding `HttpBodyBuilder`
+/// remains responsible for applying the configured body idle timeout.
 pub(crate) struct WinHttpResponseBody {
-    stream: Option<Pin<Box<ReadAsFuturesStream<WinHttpBodyReader>>>>,
-    done: bool,
+    state: BodyState,
+}
+
+/// Tracks which half of the read cycle the body is in.
+///
+/// `Read::read_more_into` borrows the reader for the duration of one read, but
+/// `poll_frame` must be able to return between polls of that read. The reader
+/// therefore moves into the read future and comes back out of it, which keeps
+/// the future free of borrows and lets it be boxed without self-reference.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "retaining the buffer inline is the point of this adapter; boxing it would restore the per-read allocation"
+)]
+enum BodyState {
+    /// No read is outstanding. Holds the reader and whatever capacity the
+    /// previous read left unused.
+    Ready { reader: WinHttpBodyReader, buffer: BytesBuf },
+    /// A read owns the reader and the buffer until it completes.
+    Reading(BodyRead),
+    /// End of stream, an error, or the trailer frame has been delivered.
+    Done,
+}
+
+type BodyRead = Pin<Box<dyn Future<Output = ReadOutcome> + Send>>;
+
+/// Returns the reader and buffer that [`read_step`] borrowed, with the outcome.
+struct ReadOutcome {
+    reader: WinHttpBodyReader,
+    buffer: BytesBuf,
+    result: Result<usize, HttpError>,
+}
+
+/// Performs one read, taking and returning ownership of the reader and buffer.
+async fn read_step(mut reader: WinHttpBodyReader, buffer: BytesBuf) -> ReadOutcome {
+    match reader.read_more_into(buffer).await {
+        Ok((read, buffer)) => ReadOutcome {
+            reader,
+            buffer,
+            result: Ok(read),
+        },
+        // A failed read consumes the buffer and ends the stream, so no capacity
+        // is carried forward.
+        Err(error) => ReadOutcome {
+            reader,
+            buffer: BytesBuf::new(),
+            result: Err(error),
+        },
+    }
 }
 
 impl WinHttpResponseBody {
     pub(crate) fn new(reader: WinHttpBodyReader) -> Self {
         Self {
-            stream: Some(reader.into_futures_stream()),
-            done: false,
+            state: BodyState::Ready {
+                reader,
+                buffer: BytesBuf::new(),
+            },
         }
     }
 }
@@ -260,10 +313,13 @@ impl WinHttpResponseBody {
 impl fmt::Debug for WinHttpResponseBody {
     #[cfg_attr(coverage_nightly, coverage(off))] // We have no API contract here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WinHttpResponseBody")
-            .field("stream", &self.stream)
-            .field("done", &self.done)
-            .finish()
+        let state = match self.state {
+            BodyState::Ready { .. } => "ready",
+            BodyState::Reading(_) => "reading",
+            BodyState::Done => "done",
+        };
+
+        f.debug_struct("WinHttpResponseBody").field("state", &state).finish()
     }
 }
 
@@ -272,39 +328,72 @@ impl Body for WinHttpResponseBody {
     type Error = HttpError;
 
     fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        if self.done {
-            return Poll::Ready(None);
-        }
+        // Every arm either restores a live state or leaves `Done` in place, so
+        // taking the state by value here cannot strand the body in `Done` while
+        // work remains.
+        match mem::replace(&mut self.state, BodyState::Done) {
+            BodyState::Ready { reader, buffer } => {
+                let mut read = Box::pin(read_step(reader, buffer));
+                let outcome = match read.as_mut().poll(cx) {
+                    Poll::Pending => {
+                        self.state = BodyState::Reading(read);
+                        return Poll::Pending;
+                    }
+                    Poll::Ready(outcome) => outcome,
+                };
 
-        let stream = self
-            .stream
-            .as_mut()
-            .expect("a response body that is not done retains its reader stream");
-        match stream.as_mut().poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(Ok(data))) => Poll::Ready(Some(Ok(Frame::data(data)))),
-            Poll::Ready(Some(Err(error))) => {
-                self.stream = None;
-                self.done = true;
-                Poll::Ready(Some(Err(error)))
+                self.deliver(outcome)
             }
-            Poll::Ready(None) => {
-                let stream = self.stream.take().expect("the completed response body retains its reader stream");
-                let mut reader = stream.into_inner();
-                let trailers = reader.take_trailers();
-                self.done = true;
-
-                Poll::Ready(trailers.map(|trailers| Ok(Frame::trailers(trailers))))
-            }
+            BodyState::Reading(mut read) => match read.as_mut().poll(cx) {
+                Poll::Pending => {
+                    self.state = BodyState::Reading(read);
+                    Poll::Pending
+                }
+                Poll::Ready(outcome) => self.deliver(outcome),
+            },
+            BodyState::Done => Poll::Ready(None),
         }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.done
+        matches!(self.state, BodyState::Done)
     }
 
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
+    }
+}
+
+impl WinHttpResponseBody {
+    /// Turns a completed read into the next frame, leaving `self.state` set.
+    ///
+    /// The caller has already replaced the state with `Done`, which is the
+    /// correct final state for both an error and end of stream.
+    fn deliver(mut self: Pin<&mut Self>, outcome: ReadOutcome) -> Poll<Option<Result<Frame<bytesbuf::BytesView>, HttpError>>> {
+        let ReadOutcome {
+            mut reader,
+            mut buffer,
+            result,
+        } = outcome;
+
+        let read = match result {
+            Ok(read) => read,
+            Err(error) => return Poll::Ready(Some(Err(error))),
+        };
+
+        if read == 0 {
+            // The reader queries trailers at the authoritative zero-length
+            // completion, so they are available as soon as it reports EOF.
+            return Poll::Ready(reader.take_trailers().map(|trailers| Ok(Frame::trailers(trailers))));
+        }
+
+        // Detaching the filled prefix leaves the buffer holding the rest of the
+        // block the frame already pins, so the next read refills that capacity
+        // instead of renting a second block.
+        let data = buffer.consume_all();
+        self.state = BodyState::Ready { reader, buffer };
+
+        Poll::Ready(Some(Ok(Frame::data(data))))
     }
 }
 
@@ -444,6 +533,7 @@ mod tests {
         read_calls: AtomicUsize,
         trailer_queries: AtomicUsize,
         requested: Mutex<Vec<u32>>,
+        lent_addresses: Mutex<Vec<usize>>,
         session_closes: AtomicUsize,
         connect_closes: AtomicUsize,
         request_closes: AtomicUsize,
@@ -812,6 +902,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn consecutive_frames_refill_the_retained_block_instead_of_renting_another() {
+        // A peer that trickles data is the case that makes buffer retention
+        // matter: each frame is far smaller than the block that backs it.
+        let harness = reader(
+            [
+                ReadStep::data(3, b"abc".to_vec()),
+                ReadStep::data(2, b"de".to_vec()),
+                ReadStep::data(0, Vec::new()),
+            ],
+            TrailerBehavior::None,
+        )
+        .into_body();
+        let BodyHarness { mut body, context, record } = harness;
+
+        let first = drive(next_frame(&mut body)).unwrap().unwrap();
+        assert_eq!(first.into_data().unwrap(), b"abc");
+        let second = drive(next_frame(&mut body)).unwrap().unwrap();
+        assert_eq!(second.into_data().unwrap(), b"de");
+        assert!(drive(next_frame(&mut body)).is_none());
+
+        // The second read must be lent the tail immediately following the bytes
+        // the first frame took, which only holds while the adapter keeps the
+        // buffer. Renting a fresh block per frame would place it elsewhere.
+        let addresses = record.lent_addresses.lock().unwrap();
+        assert_eq!(addresses.len(), 3);
+        assert_eq!(addresses[1], addresses[0] + 3);
+        assert_eq!(addresses[2], addresses[1] + 2);
+        drop(addresses);
+
+        drop(body);
+        finish_context(context, &record);
+    }
+
+    #[test]
+    fn a_failed_read_ends_the_stream_without_carrying_capacity_forward() {
+        let harness = reader(
+            [
+                ReadStep::data(3, b"abc".to_vec()),
+                ReadStep {
+                    query: QueryBehavior::Available(3),
+                    read: ReadBehavior::SyncError,
+                },
+            ],
+            TrailerBehavior::None,
+        )
+        .into_body();
+        let BodyHarness { mut body, context, record } = harness;
+
+        let first = drive(next_frame(&mut body)).unwrap().unwrap();
+        assert_eq!(first.into_data().unwrap(), b"abc");
+        let error = drive(next_frame(&mut body)).unwrap().unwrap_err();
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(body.is_end_stream());
+        assert!(drive(next_frame(&mut body)).is_none());
+
+        drop(body);
+        finish_context(context, &record);
+    }
+
     async fn next_frame(
         body: &mut Pin<Box<WinHttpResponseBody>>,
     ) -> Option<Result<http_body::Frame<bytesbuf::BytesView>, fetch::HttpError>> {
@@ -909,6 +1059,7 @@ mod tests {
         bindings.expect_read_data().returning(move |_, buffer, len| {
             read_record.read_calls.fetch_add(1, Ordering::SeqCst);
             read_record.requested.lock().unwrap().push(len);
+            read_record.lent_addresses.lock().unwrap().push(buffer.as_ptr().addr());
             let step = read_steps.lock().unwrap().pop_front().unwrap();
             let context = recorded_context(&read_record);
 

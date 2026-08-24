@@ -897,15 +897,22 @@ availability figure carries no size information. `read_any` reserves nothing of 
 and inherits the same availability-proportional reservation.
 
 `WinHttpBodyReader` implements the `bytesbuf_io::Read` methods:
-`read_at_most_into`, `read_more_into`, and `read_any`. Its data path can use
-`ReadExt::into_futures_stream`, whose boxed in-flight read future is `Send`.
+`read_at_most_into`, `read_more_into`, and `read_any`.
 After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
 WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING)`. A missing trailer
 block becomes `None`; returned trailer bytes are parsed into a `HeaderMap`. The final
 response adapter is a custom
 `http_body::Body`, passed through `HttpBodyBuilder::body`, so it yields data frames and
-one final trailer frame instead of erasing trailers through a data-only stream conversion:
+one final trailer frame instead of erasing trailers through a data-only stream conversion.
+It is also what lets the transport retain buffer capacity across frames: a generic
+byte-stream bridge hands each frame the whole `BytesBuf` that was read into, so the next
+read must rent another pooled block, whereas this adapter consumes only the filled prefix
+into the frame and keeps the buffer for the next read. Because the emitted frame already
+pins the block it was cut from, refilling the rest of that block costs nothing the
+consumer is not already holding, while renting per frame would pin a second block. The
+adapter owns the reader between reads and lends it to the in-flight read, which keeps that
+boxed future free of borrows:
 
 ```rust,ignore
 let body = WinHttpResponseBody::new(WinHttpBodyReader::new(/* .. */));
@@ -1611,8 +1618,8 @@ Runtime:
 - `fetch` and `http_extensions` for the transport contract and `HttpError`, `http` and
   `http-body` for message and body types, and `layered` for the `Service` the handler
   implements.
-- `bytesbuf` and `bytesbuf_io` with the `futures-stream` feature, whose
-  `ReadExt::into_futures_stream` feeds the response body (§6.2).
+- `bytesbuf` and `bytesbuf_io` for the pooled buffers and the `Read` trait the
+  response body reader implements (§6.2).
 - `events_once` provides the embedded reusable one-shot event
   ([folo-rs/folo](https://github.com/folo-rs/folo)); placing it in the pinned
   request context avoids both per-operation allocation and callback-side pool

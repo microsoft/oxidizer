@@ -1741,7 +1741,6 @@ dependencies = [
  "events_once",
  "fetch",
  "futures",
- "futures-core",
  "h3",
  "h3-quinn",
  "http",
