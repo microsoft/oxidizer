@@ -903,6 +903,56 @@ mod tests {
     }
 
     #[test]
+    fn a_deferred_read_resumes_and_delivers_its_frame_on_a_later_poll() {
+        // WinHTTP normally answers on a callback thread after the poll that
+        // submitted the operation has already returned Pending, so the frame is
+        // assembled on a later poll rather than inline with the submission.
+        let harness = reader(
+            [
+                ReadStep {
+                    query: QueryBehavior::Pending,
+                    read: ReadBehavior::Data(b"abc".to_vec()),
+                },
+                ReadStep::data(0, Vec::new()),
+            ],
+            TrailerBehavior::None,
+        )
+        .into_body();
+        let BodyHarness { mut body, context, record } = harness;
+
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(body.as_mut().poll_frame(&mut cx).is_pending());
+        assert!(!body.is_end_stream());
+        assert_eq!(record.read_calls.load(Ordering::SeqCst), 0);
+
+        let mut available: u32 = 3;
+        // SAFETY: complete requires an installed, not-yet-reclaimed context, a
+        // payload readable and unmodified for the call, no overlapping
+        // notification, no outstanding exclusive borrow, and no use of the
+        // context after the reclaiming notification. The mock script (`reader`)
+        // installed this context and nothing has reclaimed it; the deferred
+        // availability query left no notification in flight, and the body is
+        // parked between polls so it holds no borrow; and the payload is the
+        // initialized local `available`, which outlives the call and nothing
+        // else can reach.
+        unsafe {
+            complete(
+                context,
+                WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE,
+                (&raw mut available).cast(),
+                status_info_len::<u32>(),
+            );
+        }
+
+        let frame = drive(next_frame(&mut body)).unwrap().unwrap();
+        assert_eq!(frame.into_data().unwrap(), b"abc");
+        assert_eq!(record.read_calls.load(Ordering::SeqCst), 1);
+
+        drop(body);
+        finish_context(context, &record);
+    }
+
+    #[test]
     fn consecutive_frames_refill_the_retained_block_instead_of_renting_another() {
         // A peer that trickles data is the case that makes buffer retention
         // matter: each frame is far smaller than the block that backs it.
