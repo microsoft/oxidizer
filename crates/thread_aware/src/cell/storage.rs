@@ -60,7 +60,7 @@ fn out_of_coordinate_space() -> ! {
 /// prepared in advance.
 ///
 /// This is the caller-facing handle. It fixes the stored type to `sync::Arc<T>` and wraps a private
-/// `SlotTable`, the value-agnostic partitioned table that does the locking.
+/// `SlotTable`, the value-agnostic partitioned table that owns the write-once slots.
 ///
 /// [`Arc::from_storage`]: crate::Arc::from_storage
 #[derive(Debug)]

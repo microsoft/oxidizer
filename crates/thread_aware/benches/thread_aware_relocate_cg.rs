@@ -9,7 +9,7 @@
 //! threads, which the single-threaded Callgrind simulator cannot model.
 //!
 //! The instruction counts here are a regression guard, not a demonstration of
-//! the concurrency win. Single-threaded, a hit is an acquire load and a miss
+//! the concurrency win. Single-threaded, a hit is a cheap lock-free read and a miss
 //! adds a second load, the factory call, and the write-once publish; those cost
 //! nearly the same whether or not other threads are relocating, so the benefit
 //! of the lock-free cells only appears under contention, which the simulator

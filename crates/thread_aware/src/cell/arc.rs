@@ -569,8 +569,7 @@ impl<T, S: Strategy> Arc<T, S> {
     /// separate value with its own reference count.
     ///
     /// The count is approximate under concurrent relocation: a relocation publishing this value
-    /// into another affinity can skew the sample. It saturates at zero rather than wrapping to a
-    /// large value.
+    /// into another affinity can skew the sample. It saturates at zero rather than underflowing.
     ///
     /// # Examples
     ///

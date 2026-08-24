@@ -90,7 +90,7 @@ losing relocation into a rejected `set`, without carrying the machinery for stor
 that never happen. Dereferencing an `Arc<T, S>` — the steady state — never touches
 a slot at all: the holder carries its current value in its own `value` field and
 derefs through that with no synchronization, so the only slot reads are on
-relocation, and on the common hit path each is that single acquire load.
+relocation, and on the common hit path each is that cheap lock-free read.
 
 ## Relocation and publication
 
@@ -137,7 +137,7 @@ cannot deadlock.
 ```
 
 The probe carries the throughput. A slot is never emptied once populated, so a
-relocation into an already-populated affinity is a single acquire load that clones
+relocation into an already-populated affinity is a cheap lock-free read that clones
 a reference out of the cell. Because each slot is an independent cell, these reads
 scale with the number of slots: under `PerCore` a fanout that hands work to every
 core relocates into a different slot per core, and the cores share no lock word to
