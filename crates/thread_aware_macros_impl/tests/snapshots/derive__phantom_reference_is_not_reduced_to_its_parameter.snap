@@ -4,11 +4,13 @@ expression: expand(input)
 ---
 impl<'a, T: 'a> ::thread_aware::ThreadAware for PhantomRef<'a, T>
 where
-    PhantomRef<'a, T>: ::core::marker::Send,
+    core::marker::PhantomData<&'a T>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,
         source: Option<::thread_aware::affinity::Affinity>,
         destination: ::thread_aware::affinity::Affinity,
-    ) {}
+    ) {
+        ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+    }
 }

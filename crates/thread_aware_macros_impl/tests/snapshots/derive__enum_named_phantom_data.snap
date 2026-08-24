@@ -4,7 +4,8 @@ expression: expand(input)
 ---
 impl<T, U> ::thread_aware::ThreadAware for EnumNamedPhantom<T, U>
 where
-    EnumNamedPhantom<T, U>: ::core::marker::Send,
+    core::marker::PhantomData<T>: ::thread_aware::ThreadAware,
+    core::marker::PhantomData<U>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,
@@ -12,11 +13,13 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         match self {
-            Self::Variant { data, marker: _ } => {
+            Self::Variant { data, marker } => {
                 ::thread_aware::ThreadAware::relocate(data, source, destination);
+                ::thread_aware::ThreadAware::relocate(marker, source, destination);
             }
-            Self::Other { value, phantom: _ } => {
+            Self::Other { value, phantom } => {
                 ::thread_aware::ThreadAware::relocate(value, source, destination);
+                ::thread_aware::ThreadAware::relocate(phantom, source, destination);
             }
         }
     }

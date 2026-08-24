@@ -55,7 +55,8 @@ fn tuple_struct_and_enum() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn generics_add_bounds() {
-    // Only T should gain a ThreadAware bound (U appears only inside PhantomData).
+    // Only T should gain a ThreadAware bound; U is named only inside the marker, which takes
+    // a predicate on its own type instead.
     let input = quote! {
         #[derive(ThreadAware)]
         struct Gen<T, U>(T, core::marker::PhantomData<U>);
@@ -128,7 +129,8 @@ fn error_unknown_attr() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
-    // PhantomData in named fields is left out of the generated body; the bound lands on Self.
+    // PhantomData in named fields is relocated through its own no-op impl; the bound lands on
+    // the marker type.
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithPhantom<T> {
@@ -142,7 +144,8 @@ fn phantom_data_named_fields() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
-    // PhantomData in tuple fields is left out of the generated body; the bound lands on Self.
+    // PhantomData in tuple fields is relocated through its own no-op impl; the bound lands on
+    // the marker type.
     let input = quote! {
         #[derive(ThreadAware)]
         struct TupleWithPhantom<T>(Vec<u8>, core::marker::PhantomData<T>);
@@ -202,7 +205,7 @@ fn generics_group_usage_adds_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_unnamed_phantom_data() {
-    // PhantomData in enum unnamed fields is left out of the generated body; the bound lands on Self.
+    // PhantomData in enum unnamed fields is relocated like any other field.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumUnnamedPhantom<T, U> {
@@ -216,7 +219,8 @@ fn enum_unnamed_phantom_data() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn enum_named_phantom_data() {
-    // PhantomData in enum named fields is left out of the generated body; the bound lands on Self.
+    // PhantomData in enum named fields is relocated like any other field, so the binding is
+    // used and no `field: _` pattern is needed.
     let input = quote! {
         #[derive(ThreadAware)]
         enum EnumNamedPhantom<T, U> {
@@ -259,9 +263,10 @@ fn generics_paren_adds_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_only_generic_gets_self_send_predicate() {
+fn phantom_only_generic_gets_marker_predicate() {
     // The original defect: a parameter named only inside `PhantomData` used to gain no bound
-    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait.
+    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait. The marker is
+    // relocated like any other field, so the obligation lands on the marker type.
     let input = quote! {
         #[derive(ThreadAware)]
         struct DirectPhantom<T, U>(T, core::marker::PhantomData<U>);
@@ -273,7 +278,8 @@ fn phantom_only_generic_gets_self_send_predicate() {
 #[cfg_attr(miri, ignore)]
 fn phantom_reference_is_not_reduced_to_its_parameter() {
     // `&'a T` is `Send` only when `T: Sync`. Bounding `T: Send` here produced an impl that
-    // did not compile; the obligation belongs on `Self`, where the compiler reduces it.
+    // did not compile; the obligation belongs on the marker type, where the compiler reduces
+    // it through the marker's own impl.
     let input = quote! {
         #[derive(ThreadAware)]
         struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
@@ -283,12 +289,14 @@ fn phantom_reference_is_not_reduced_to_its_parameter() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn top_level_phantom_raw_pointer_gets_no_unprovable_predicate() {
-    // A TOP-LEVEL raw-pointer marker. A structural predicate would be `where *const T: Send`, which no instantiation can
-    // prove. `Self: Send` is satisfied by the manual `unsafe impl Send` such types carry.
+fn skipped_raw_pointer_marker_gets_only_self_send() {
+    // A raw-pointer marker can never satisfy `PhantomData<*const T>: ThreadAware`, since that
+    // reduces to `*const T: Send`, which no instantiation can prove. Skipping it moves the
+    // obligation to `Self: Send`, which the manual `unsafe impl Send` such types carry
+    // discharges.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct RawMarker<T>(usize, core::marker::PhantomData<*const T>);
+        struct RawMarker<T>(usize, #[thread_aware(skip)] core::marker::PhantomData<*const T>);
     };
     assert_snapshot!(expand(input));
 }
@@ -296,9 +304,8 @@ fn top_level_phantom_raw_pointer_gets_no_unprovable_predicate() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn nested_phantom_gets_thread_aware_predicate() {
-    // The marker sits inside a relocated field, so the enclosing field's own `ThreadAware`
-    // obligation reaches it. `Self: Send` cannot discharge that, as a `Send` bound on the
-    // whole type does not decompose backwards into one on a nested marker.
+    // A marker nested in a relocated field takes the same predicate a top-level one does; the
+    // enclosing field's own obligation reaches it.
     let input = quote! {
         #[derive(ThreadAware)]
         struct NestedPhantom<T>((core::marker::PhantomData<T>,));
@@ -309,7 +316,8 @@ fn nested_phantom_gets_thread_aware_predicate() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn skipped_generic_field_gets_self_send_predicate() {
-    // A skipped field is never relocated, so it needs no `ThreadAware` bound.
+    // A skipped field is never relocated, so it needs no `ThreadAware` bound - only the
+    // `Self: Send` predicate that keeps the supertrait satisfied.
     let input = quote! {
         #[derive(ThreadAware)]
         struct SkippedGeneric<T> {
@@ -358,7 +366,7 @@ fn prebound_bare_thread_aware_assumed_real() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn no_unrelocated_field_means_no_self_send_predicate() {
+fn no_skipped_field_means_no_self_send_predicate() {
     // Every field is relocated, so `Self: Send` follows from the per-parameter bounds.
     let input = quote! {
         #[derive(ThreadAware)]
@@ -369,7 +377,7 @@ fn no_unrelocated_field_means_no_self_send_predicate() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn self_send_predicate_appends_to_existing_where_clause() {
+fn generated_predicate_appends_to_existing_where_clause() {
     // The generated predicate must extend the user's `where` clause, not replace it.
     let input = quote! {
         #[derive(ThreadAware)]

@@ -45,13 +45,18 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
 /// Checks whether the given type is the standard library's `PhantomData` marker.
 ///
 /// Only the canonical spellings are accepted: a bare `PhantomData` from a `use`, or a path
-/// ending in `marker::PhantomData` rooted at `core`, `std` or nothing. A qualified path such
-/// as `my_crate::PhantomData` is a distinct type that merely shares the final segment, and is
-/// treated as an ordinary field so that it is relocated and bound like any other.
+/// ending in `marker::PhantomData` rooted at `core`, `std` or nothing.
 ///
-/// A bare `PhantomData` remains ambiguous - a macro cannot resolve a name to the item it
-/// refers to - but it is by far the most common spelling of the real marker, so it is
-/// accepted. Qualify a look-alike to disambiguate it.
+/// This decides bound selection only, never whether a field is relocated - every field
+/// without the skip attribute is relocated whatever its type is called.
+///
+/// A spelling that matches gets a predicate on the field's own type,
+/// `PhantomData<X>: ThreadAware`, rather than having the traversal descend into `X`. That
+/// stays correct even for a look-alike imported under the bare name, since the predicate
+/// names whatever type the spelling resolves to and that type's own impl decides what it
+/// reduces to. A spelling that does not match, such as `my_crate::PhantomData<T>`, is
+/// traversed normally: the derive descends into the arguments and binds the parameters it
+/// reaches, which is the more general treatment.
 #[must_use]
 pub fn is_phantom_data(ty: &Type) -> bool {
     let Type::Path(tp) = ty else {
@@ -189,7 +194,8 @@ mod tests {
     #[test]
     fn test_is_phantom_data_rejects_lookalike_paths() {
         // A distinct type that merely shares the final segment must not be taken for the
-        // marker: treating it as one leaves its data silently un-relocated.
+        // marker: it gets the more general treatment instead, with the traversal descending
+        // into its arguments rather than a predicate on the type as a whole.
         let cases: Vec<Type> = vec![
             parse_quote! { my_crate::PhantomData<T> },
             parse_quote! { lookalike::inner::PhantomData<T> },

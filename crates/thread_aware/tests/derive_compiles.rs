@@ -251,9 +251,9 @@ fn skipped_generic_field_needs_only_send() {
 /// A real, data-carrying type that merely happens to be named `PhantomData`, named by a
 /// qualified path.
 ///
-/// The marker test accepts only the canonical spellings, so this is treated as an ordinary
-/// field: relocated like any other, and bound like any other. Matching on the final path
-/// segment alone let the derive compile while silently never relocating the data.
+/// Every field is relocated, whatever its type is called, so this carries no special risk.
+/// The name match decides only which predicate the field gets, and here it decides nothing:
+/// a qualified path is not the marker, so the traversal descends into the argument as usual.
 mod lookalike {
     use thread_aware::affinity::Affinity;
 
@@ -284,11 +284,52 @@ fn qualified_type_named_phantom_data_is_relocated() {
     );
 }
 
+/// The same look-alike, imported under the bare name the derive cannot tell apart from the
+/// real marker.
+///
+/// This is the case a syntactic classifier can never get right, and the reason relocation no
+/// longer depends on one. The field is relocated because every field without the skip
+/// attribute is; the name
+/// match only sends the bound to the field's own type, where the look-alike's own impl
+/// reduces it correctly.
+mod bare_lookalike {
+    use thread_aware::affinity::Affinity;
+    use thread_aware_macros::ThreadAware;
+
+    pub(crate) struct Marker<T> {
+        pub(crate) value: T,
+    }
+
+    impl<T: thread_aware::ThreadAware> thread_aware::ThreadAware for Marker<T> {
+        fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+            self.value.relocate(source, destination);
+        }
+    }
+
+    use Marker as PhantomData;
+
+    #[derive(ThreadAware)]
+    pub(crate) struct HoldsBareLookalike<T>(pub(crate) PhantomData<T>);
+}
+
+#[test]
+fn bare_type_named_phantom_data_is_relocated() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = bare_lookalike::HoldsBareLookalike(bare_lookalike::Marker { value: Tracker::default() });
+    value.relocate(source, destination);
+
+    assert_eq!(
+        value.0.value.relocations, 1,
+        "a bare look-alike is a normal field and must be relocated"
+    );
+}
+
 // The two cases below pin the `Send` obligation for types made `Send` by a manual
-// `unsafe impl` rather than structurally. Stating that obligation per field - as
-// `where *const T: Send` or `where Rc<T>: Send` - yields a predicate no instantiation can
-// ever prove, so the impl compiles but nothing can use it. Only `Self: Send` is discharged
-// by the manual impl.
+// `unsafe impl` rather than structurally. A marker whose argument can never be `Send` is
+// relocated like any other field, so its own `PhantomData<X>: ThreadAware` predicate would
+// reduce to `*const T: Send` or `Rc<()>: Send` - unprovable. `#[thread_aware(skip)]` moves it
+// under `where Self: Send`, which the manual impl discharges.
 
 fn assert_thread_aware<X: thread_aware::ThreadAware>() {}
 
@@ -296,6 +337,7 @@ fn assert_thread_aware<X: thread_aware::ThreadAware>() {}
 #[derive(ThreadAware)]
 struct RawMarker<T> {
     len: usize,
+    #[thread_aware(skip)]
     marker: PhantomData<*const T>,
 }
 
@@ -351,13 +393,14 @@ fn skipped_non_send_field_with_manual_send_is_usable() {
     assert_eq!(value.tracked.relocations, 1, "the skipped field emits no relocation");
 }
 
-// The three cases below pin why the `Self: Send` obligation must be emitted unconditionally
-// rather than gated on the field type syntactically naming a generic parameter. Each one has
-// a `Send`-ness that such a scan cannot see.
+// `ManualSendMarker` below pins the one case that still needs `Self: Send`: a skipped field
+// whose type can never be `Send` structurally. The two after it pin the opposite - that a
+// marker's obligation must name the marker type rather than scan for generic-parameter
+// tokens, since each has a `Send`-ness no such scan can see.
 
 /// A marker-only type whose argument is not `Send`, made `Send` by hand.
 #[derive(ThreadAware)]
-struct ManualSendMarker(PhantomData<Rc<()>>);
+struct ManualSendMarker(#[thread_aware(skip)] PhantomData<Rc<()>>);
 
 // SAFETY: test-only. The marker holds no value.
 unsafe impl Send for ManualSendMarker {}
@@ -448,11 +491,12 @@ fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
     value.relocate(source, destination);
 }
 
-/// A named enum variant carrying non-relocated fields.
+/// A named enum variant carrying a skipped field.
 ///
-/// The generated match arm emits no statement for a marker or a skipped field, so binding it
-/// by name left an unused variable. `deny(warnings)` is deliberate: it is what a downstream
-/// crate would hit, and it is what this shape used to fail.
+/// The generated match arm emits no statement for a skipped field, so binding it by name left
+/// an unused variable; the `Skipped` variant is what pins the `field: _` binding. The `Marked`
+/// variant is bound and relocated like any other. `deny(warnings)` is deliberate: it is what a
+/// downstream crate would hit, and it is what this shape used to fail.
 mod enum_named_bindings {
     #![deny(warnings)]
 

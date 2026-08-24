@@ -5,7 +5,7 @@ expression: expand(input)
 impl<'a, T: 'a + ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
 for RelocatedAndPhantom<'a, T>
 where
-    RelocatedAndPhantom<'a, T>: ::core::marker::Send,
+    core::marker::PhantomData<&'a T>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,
@@ -13,5 +13,6 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
     }
 }

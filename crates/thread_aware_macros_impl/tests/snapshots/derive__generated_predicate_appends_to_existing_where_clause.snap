@@ -5,7 +5,7 @@ expression: expand(input)
 impl<T: ::thread_aware::ThreadAware, U> ::thread_aware::ThreadAware for WithWhere<T, U>
 where
     T: Clone,
-    WithWhere<T, U>: ::core::marker::Send,
+    core::marker::PhantomData<U>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,
@@ -13,5 +13,6 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.value, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.marker, source, destination);
     }
 }

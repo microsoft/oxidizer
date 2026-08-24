@@ -4,7 +4,7 @@ expression: expand(input)
 ---
 impl<T> ::thread_aware::ThreadAware for TupleWithPhantom<T>
 where
-    TupleWithPhantom<T>: ::core::marker::Send,
+    core::marker::PhantomData<T>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,
@@ -12,5 +12,6 @@ where
         destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
     }
 }
