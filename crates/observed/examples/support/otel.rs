@@ -58,7 +58,10 @@ fn any_value_of(value: Value) -> AnyValue {
     match value {
         Value::Bool(v) => AnyValue::Boolean(v),
         Value::I64(v) => AnyValue::Int(v),
-        Value::U64(v) => i64::try_from(v).map_or_else(|_| AnyValue::String(v.to_string().into()), AnyValue::Int),
+        // Saturates at `i64::MAX`, matching `observed_utils::any_value_of`:
+        // `AnyValue` has no unsigned variant, and the two must agree because the
+        // doc above points readers at the utility instead of this copy.
+        Value::U64(v) => AnyValue::Int(i64::try_from(v).unwrap_or(i64::MAX)),
         Value::F64(v) => AnyValue::Double(v),
         Value::String(v) => AnyValue::String(string_value_of(v)),
         Value::BoolArray(v) => list_of(v, AnyValue::Boolean),

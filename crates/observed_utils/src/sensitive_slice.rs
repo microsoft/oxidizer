@@ -165,6 +165,7 @@ impl<const N: usize, const D: char> Clone for SensitiveSlice<'_, N, D> {
 mod tests {
     use std::collections::{HashMap, VecDeque};
 
+    use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
     use data_privacy::{DataClass, RedactedToString, RedactionEngine, Sensitive};
 
     use super::*;
@@ -175,8 +176,28 @@ mod tests {
         RedactionEngine::builder().suppress_redaction(TEST_CLASS).build()
     }
 
+    fn redacting_engine() -> RedactionEngine {
+        RedactionEngine::builder()
+            .add_class_redactor(TEST_CLASS, SimpleRedactor::with_mode(SimpleRedactorMode::Insert("X".into())))
+            .build()
+    }
+
     fn s(val: &str) -> Sensitive<String> {
         Sensitive::new(val.to_owned(), TEST_CLASS)
+    }
+
+    #[test]
+    fn items_render_through_the_supplied_redactor() {
+        let v = [s("alpha"), s("beta")];
+        let sc = SensitiveSlice::<5>::new(v.iter());
+
+        // The delimiter is the slice's own, but each item's text comes from the
+        // caller's `Redactor`. Asserting against a redactor that actually
+        // rewrites the text is what pins the delegation: with a pass-through
+        // engine on both sides, dropping or swapping `redactor` would be
+        // invisible.
+        assert_eq!(sc.to_redacted_string(&redacting_engine()), "X, X");
+        assert_eq!(sc.to_redacted_string(&passthrough_engine()), "alpha, beta");
     }
 
     #[test]
