@@ -1,5 +1,0 @@
----
-source: crates/observed_macros_impl/tests/expansion.rs
-expression: "event_error(r#\"\"e\"\"#, \"struct Subject { #[counter] v: u64 }\")"
----
-a metric instrument is a struct-level attribute; place it on the event struct and name this field positionally, e.g. `#[histogram(duration_ms)]`

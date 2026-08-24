@@ -1,8 +1,12 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "report([\"(u8, u8)\", \"<i32 as Copy>::Output\", \"Option\", \"Option<u8, u16>\",\n\"Option<'a>\", \"[T; 4]\",\n\"(T, u8)\",].into_iter().map(|ty|\n(format!(\"field: {ty}\"),\nexpand_event(r#\"\"shapes\"\"#,\n&format!(\"#[info] struct Shapes<'a, T> {{ field: {ty} }}\")),)))"
+expression: output
 ---
-==== field: (u8, u8) ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: (u8, u8) }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: (u8, u8),
 }
@@ -46,7 +50,11 @@ const _: () = {
     }
 };
 
-==== field: <i32 as Copy>::Output ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: <i32 as Copy>::Output }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: <i32 as Copy>::Output,
 }
@@ -90,7 +98,11 @@ const _: () = {
     }
 };
 
-==== field: Option ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: Option }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: Option,
 }
@@ -134,7 +146,11 @@ const _: () = {
     }
 };
 
-==== field: Option<u8, u16> ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: Option<u8, u16> }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: Option<u8, u16>,
 }
@@ -178,7 +194,11 @@ const _: () = {
     }
 };
 
-==== field: Option<'a> ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: Option<'a> }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: Option<'a>,
 }
@@ -222,7 +242,11 @@ const _: () = {
     }
 };
 
-==== field: [T; 4] ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: [T; 4] }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: [T; 4],
 }
@@ -270,7 +294,11 @@ const _: () = {
     }
 };
 
-==== field: (T, u8) ====
+---- input ----
+#[event("shapes")]
+#[info] struct Shapes<'a, T> { field: (T, u8) }
+
+---- yields ----
 struct Shapes<'a, T> {
     field: (T, u8),
 }

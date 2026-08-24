@@ -1,15 +1,31 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "report([\"enum Bad { A }\", \"union Bad { a: i64 }\", \"struct Bad;\",\n\"struct Bad(i64);\"].into_iter().map(|item|\n(item.to_owned(), enrichment_error(item))))"
+expression: output
 ---
-==== enum Bad { A } ====
+---- input ----
+#[derive(Enrichment)]
+enum Bad { A }
+
+---- yields ----
 Enrichment can only be derived for structs, not enums
 
-==== union Bad { a: i64 } ====
+---- input ----
+#[derive(Enrichment)]
+union Bad { a: i64 }
+
+---- yields ----
 Enrichment can only be derived for structs, not unions
 
-==== struct Bad; ====
+---- input ----
+#[derive(Enrichment)]
+struct Bad;
+
+---- yields ----
 Enrichment can only be derived for structs with named fields
 
-==== struct Bad(i64); ====
+---- input ----
+#[derive(Enrichment)]
+struct Bad(i64);
+
+---- yields ----
 Enrichment can only be derived for structs with named fields

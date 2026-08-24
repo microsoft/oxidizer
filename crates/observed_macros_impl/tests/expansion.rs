@@ -10,8 +10,10 @@
 //! branch whose behaviour changes shows up in the diff whether or not anyone thought to
 //! assert on that part.
 //!
-//! A table-driven case joins its rows into one labelled snapshot, so a test still owns
-//! exactly one snapshot and the diff still names the row that moved.
+//! A table-driven case joins its rows into one snapshot, so a test still owns exactly one
+//! snapshot. Every row records the whole source the macro was given before what it produced,
+//! so a snapshot reads on its own and a diff still names the row that moved. A one-line
+//! diagnostic is asserted inline instead, where the input is already next to it.
 //!
 //! insta cannot run under miri: `insta::_macro_support::get_cargo_workspace` reads from disk
 //! and miri's isolation rejects that, so this whole file is compiled out under miri. The
@@ -42,13 +44,25 @@ fn enrichment_error(item: &str) -> String {
     derive_enrichment(tokenize(item)).expect_err("the derive is rejected").to_string()
 }
 
+/// The source a user would write to reach `#[event(...)]`, for the input side of a report row.
+fn event_source(attr: &str, item: &str) -> String {
+    format!("#[event({attr})]\n{}", item.trim())
+}
+
+/// The source a user would write to reach `#[derive(Enrichment)]`.
+fn enrichment_source(item: &str) -> String {
+    format!("#[derive(Enrichment)]\n{}", item.trim())
+}
+
 /// Joins the rows of a table-driven case into a single snapshot.
 ///
-/// Each row is labelled with the input that produced it, so the snapshot stays one file per
-/// test while a diff still points at the row that moved.
+/// Each row records the whole source the macro was given and then what it produced, so the
+/// snapshot reads on its own: working out what a row covers does not mean opening the test
+/// beside it. The source names its own entry point, which is what tells the two rows of one
+/// input apart in a case that drives both macros.
 fn report(rows: impl IntoIterator<Item = (String, String)>) -> String {
     rows.into_iter()
-        .map(|(label, body)| format!("==== {label} ====\n{}\n", body.trim_end()))
+        .map(|(source, result)| format!("---- input ----\n{}\n\n---- yields ----\n{}\n", source.trim(), result.trim_end()))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -383,14 +397,17 @@ fn a_generic_enrichment_spells_out_the_bounds_its_body_relies_on() {
 
 #[test]
 fn each_entry_point_rejects_input_it_cannot_parse() {
-    insta::assert_snapshot!(report(
+    let output = report(
         ["1 + 1", "enum NotAStruct { A }", "fn not_a_struct() {}"]
             .into_iter()
-            .flat_map(|item| [
-                (format!("#[event] {item}"), event_error(r#""e""#, item)),
-                (format!("#[derive(Enrichment)] {item}"), enrichment_error(item)),
-            ])
-    ));
+            .flat_map(|item| {
+                [
+                    (event_source(r#""e""#, item), event_error(r#""e""#, item)),
+                    (enrichment_source(item), enrichment_error(item)),
+                ]
+            }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
@@ -417,12 +434,15 @@ fn an_attribute_the_macro_does_not_own_is_left_untouched() {
 fn every_severity_attribute_maps_to_its_own_variant() {
     // A dropped arm would leave the attribute unrecognized, silently demoting the event
     // to "no log signal" instead of failing to build.
-    insta::assert_snapshot!(report(["trace", "debug", "info", "warning", "error", "fatal"].into_iter().map(
-        |attribute| (
-            format!("#[{attribute}]"),
-            expand_event(r#""severity""#, &format!("#[{attribute}] {ONE_FIELD}")),
-        )
-    )));
+    let output = report(
+        ["trace", "debug", "info", "warning", "error", "fatal"]
+            .into_iter()
+            .map(|attribute| {
+                let item = format!("#[{attribute}] {ONE_FIELD}");
+                (event_source(r#""severity""#, &item), expand_event(r#""severity""#, &item))
+            }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
@@ -460,7 +480,7 @@ fn a_macro_substituted_type_is_seen_through_its_invisible_group() {
 fn a_field_type_that_only_resembles_an_option_is_treated_as_a_plain_field() {
     // `Option<T>` is matched syntactically, so each of these has to fall through to the
     // non-optional path rather than being mistaken for an optional field.
-    insta::assert_snapshot!(report(
+    let output = report(
         [
             "(u8, u8)",              // not a path at all
             "<i32 as Copy>::Output", // a qualified self
@@ -471,11 +491,12 @@ fn a_field_type_that_only_resembles_an_option_is_treated_as_a_plain_field() {
             "(T, u8)",               // a type parameter found before the end of a group
         ]
         .into_iter()
-        .map(|ty| (
-            format!("field: {ty}"),
-            expand_event(r#""shapes""#, &format!("#[info] struct Shapes<'a, T> {{ field: {ty} }}")),
-        ))
-    ));
+        .map(|ty| {
+            let item = format!("#[info] struct Shapes<'a, T> {{ field: {ty} }}");
+            (event_source(r#""shapes""#, &item), expand_event(r#""shapes""#, &item))
+        }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 // ============================================================================================
@@ -484,30 +505,35 @@ fn a_field_type_that_only_resembles_an_option_is_treated_as_a_plain_field() {
 
 #[test]
 fn the_event_attribute_arguments_are_validated() {
-    insta::assert_snapshot!(report(
+    let output = report(
         ["", "bare_ident", "42", r#""e", bogus"#]
             .into_iter()
-            .map(|attr| (format!("#[event({attr})]"), event_error(attr, ONE_FIELD)))
-    ));
+            .map(|attr| (event_source(attr, ONE_FIELD), event_error(attr, ONE_FIELD))),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
 fn the_event_attribute_accepts_the_disabled_flag_and_a_trailing_comma() {
-    insta::assert_snapshot!(report(
+    let output = report(
         [r#""e""#, r#""e","#, r#""e", disabled"#, r#""e", disabled,"#]
             .into_iter()
-            .map(|attr| (format!("#[event({attr})]"), expand_event(attr, ONE_FIELD)))
-    ));
+            .map(|attr| (event_source(attr, ONE_FIELD), expand_event(attr, ONE_FIELD))),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
 fn an_event_requires_named_fields() {
-    insta::assert_snapshot!(event_error(r#""e""#, "#[info] struct Tuple(#[unredacted] i64);"));
+    insta::assert_snapshot!(
+        event_error(r#""e""#, "#[info] struct Tuple(#[unredacted] i64);"),
+        @"#[event] can only be applied to structs with named fields"
+    );
 }
 
 #[test]
 fn the_log_severity_attribute_is_validated() {
-    insta::assert_snapshot!(report(
+    let output = report(
         [
             "#[info] #[warning]",
             r#"#[info(bogus = "x")]"#,
@@ -515,13 +541,17 @@ fn the_log_severity_attribute_is_validated() {
             r#"#[info(name = "a", name = "b")]"#,
         ]
         .into_iter()
-        .map(|attrs| (attrs.to_owned(), event_error(r#""e""#, &format!("{attrs} {ONE_FIELD}")),))
-    ));
+        .map(|attrs| {
+            let item = format!("{attrs} {ONE_FIELD}");
+            (event_source(r#""e""#, &item), event_error(r#""e""#, &item))
+        }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
 fn the_instrument_attribute_is_validated() {
-    insta::assert_snapshot!(report(
+    let output = report(
         [
             // Only `counter` may be fieldless; the rest have nothing to measure without one.
             "#[gauge]",
@@ -537,13 +567,20 @@ fn the_instrument_attribute_is_validated() {
             "#[counter(v)] #[counter(v)]",
         ]
         .into_iter()
-        .map(|attrs| (attrs.to_owned(), event_error(r#""e""#, &format!("{attrs} {ONE_FIELD}")),))
-    ));
+        .map(|attrs| {
+            let item = format!("{attrs} {ONE_FIELD}");
+            (event_source(r#""e""#, &item), event_error(r#""e""#, &item))
+        }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
 fn an_instrument_belongs_on_the_struct_not_on_the_field() {
-    insta::assert_snapshot!(event_error(r#""e""#, "struct Subject { #[counter] v: u64 }"));
+    insta::assert_snapshot!(
+        event_error(r#""e""#, "struct Subject { #[counter] v: u64 }"),
+        @"a metric instrument is a struct-level attribute; place it on the event struct and name this field positionally, e.g. `#[histogram(duration_ms)]`"
+    );
 }
 
 #[test]
@@ -551,7 +588,7 @@ fn an_instrument_only_accepts_a_field_it_can_take_a_measurement_from() {
     // A metric records a number on every emission. Redaction turns the value into a
     // string, the 128-bit widths have no `Value` conversion, an `Option` can be absent,
     // and `counter` / `updown_counter` additionally fix the signedness.
-    insta::assert_snapshot!(report(
+    let output = report(
         [
             ("#[counter(v)]", "#[unredacted] v: i64"),
             ("#[updown_counter(v)]", "#[unredacted] v: u64"),
@@ -564,28 +601,27 @@ fn an_instrument_only_accepts_a_field_it_can_take_a_measurement_from() {
             ("#[counter(v)]", "#[dimension(metric)] #[unredacted] v: u64"),
         ]
         .into_iter()
-        .map(|(attr, field)| (
-            format!("{attr} on `{field}`"),
-            event_error(r#""e""#, &format!("{attr} struct Subject {{ {field} }}")),
-        ))
-    ));
+        .map(|(attr, field)| {
+            let item = format!("{attr} struct Subject {{ {field} }}");
+            (event_source(r#""e""#, &item), event_error(r#""e""#, &item))
+        }),
+    );
+    insta::assert_snapshot!(output);
 }
 
 #[test]
 fn a_log_message_may_only_reference_an_attribute_that_exists() {
     let subject = |message: &str| {
         format!(
-            r#"
-            #[info("{message}")]
-            struct Subject {{
-                #[unredacted]
-                status: i64,
-                #[dimension(log = "renamed")]
-                original: ClassifiedString,
-                #[dimension(log = exclude)]
-                request_id: ClassifiedString,
-            }}
-            "#
+            r#"#[info("{message}")]
+struct Subject {{
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}}"#
         )
     };
 
@@ -593,10 +629,8 @@ fn a_log_message_may_only_reference_an_attribute_that_exists() {
     // is the `#[dimension(log = ...)]` override rather than the field name, and an excluded
     // field is not an attribute at all, so neither is a valid target.
     let rejected = ["absent", "original", "request_id"].into_iter().map(|unknown| {
-        (
-            format!("rejects {{{unknown}}}"),
-            event_error(r#""e""#, &subject(&format!("{{{unknown}}}"))),
-        )
+        let item = subject(&format!("{{{unknown}}}"));
+        (event_source(r#""e""#, &item), event_error(r#""e""#, &item))
     });
 
     // A message with no placeholder at all needs no validation, and an escaped brace, a
@@ -604,9 +638,13 @@ fn a_log_message_may_only_reference_an_attribute_that_exists() {
     // *named* placeholder resolving to nothing is an error.
     let accepted = ["nothing to interpolate", "{{literal}} {status} {} and a dangling {"]
         .into_iter()
-        .map(|message| (format!("accepts {message:?}"), expand_event(r#""e""#, &subject(message))));
+        .map(|message| {
+            let item = subject(message);
+            (event_source(r#""e""#, &item), expand_event(r#""e""#, &item))
+        });
 
-    insta::assert_snapshot!(report(rejected.chain(accepted)));
+    let output = report(rejected.chain(accepted));
+    insta::assert_snapshot!(output);
 }
 
 #[test]
@@ -636,11 +674,12 @@ fn an_instrument_looks_through_parentheses_around_its_value_type() {
 
 #[test]
 fn an_enrichment_requires_a_struct_with_named_fields() {
-    insta::assert_snapshot!(report(
+    let output = report(
         ["enum Bad { A }", "union Bad { a: i64 }", "struct Bad;", "struct Bad(i64);"]
             .into_iter()
-            .map(|item| (item.to_owned(), enrichment_error(item)))
-    ));
+            .map(|item| (enrichment_source(item), enrichment_error(item))),
+    );
+    insta::assert_snapshot!(output);
 }
 
 // ============================================================================================
@@ -653,7 +692,7 @@ fn both_macros_validate_the_shared_field_attributes_identically() {
     // shared implementation, so every diagnostic has to arrive unchanged through either
     // entry point. Both are in the same snapshot so a divergence shows up as a diff
     // between two adjacent rows.
-    insta::assert_snapshot!(report(
+    let output = report(
         [
             r#"#[dimension("positional")] f: T"#,
             r#"#[dimension = "x"] f: T"#,
@@ -675,15 +714,14 @@ fn both_macros_validate_the_shared_field_attributes_identically() {
             "#[if_none(drop)] f: T",
         ]
         .into_iter()
-        .flat_map(|field| [
-            (
-                format!("#[event] on `{field}`"),
-                event_error(r#""e""#, &format!("#[info] struct Subject {{ {field} }}")),
-            ),
-            (
-                format!("Enrichment on `{field}`"),
-                enrichment_error(&format!("struct Subject {{ {field} }}")),
-            ),
-        ])
-    ));
+        .flat_map(|field| {
+            let event_item = format!("#[info] struct Subject {{ {field} }}");
+            let enrichment_item = format!("struct Subject {{ {field} }}");
+            [
+                (event_source(r#""e""#, &event_item), event_error(r#""e""#, &event_item)),
+                (enrichment_source(&enrichment_item), enrichment_error(&enrichment_item)),
+            ]
+        }),
+    );
+    insta::assert_snapshot!(output);
 }

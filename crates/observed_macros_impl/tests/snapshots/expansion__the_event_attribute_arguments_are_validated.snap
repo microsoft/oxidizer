@@ -1,15 +1,31 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: "report([\"\", \"bare_ident\", \"42\",\nr#\"\"e\", bogus\"#].into_iter().map(|attr|\n(format!(\"#[event({attr})]\"), event_error(attr, ONE_FIELD))))"
+expression: output
 ---
-==== #[event()] ====
+---- input ----
+#[event()]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
 `#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
 
-==== #[event(bare_ident)] ====
+---- input ----
+#[event(bare_ident)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
 `#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
 
-==== #[event(42)] ====
+---- input ----
+#[event(42)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
 `#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
 
-==== #[event("e", bogus)] ====
+---- input ----
+#[event("e", bogus)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
 unknown `#[event(...)]` flag `bogus`; expected `disabled`

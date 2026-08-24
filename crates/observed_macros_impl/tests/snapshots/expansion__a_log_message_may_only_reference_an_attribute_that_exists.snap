@@ -1,17 +1,65 @@
 ---
 source: crates/observed_macros_impl/tests/expansion.rs
-expression: report(rejected.into_iter().chain(accepted))
+expression: output
 ---
-==== rejects {absent} ====
+---- input ----
+#[event("e")]
+#[info("{absent}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
 log message references `{absent}` but no log attribute with that name exists; available attributes: [status, renamed]
 
-==== rejects {original} ====
+---- input ----
+#[event("e")]
+#[info("{original}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
 log message references `{original}` but no log attribute with that name exists; available attributes: [status, renamed]
 
-==== rejects {request_id} ====
+---- input ----
+#[event("e")]
+#[info("{request_id}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
 log message references `{request_id}` but no log attribute with that name exists; available attributes: [status, renamed]
 
-==== accepts "nothing to interpolate" ====
+---- input ----
+#[event("e")]
+#[info("nothing to interpolate")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
 struct Subject {
     status: i64,
     original: ClassifiedString,
@@ -65,7 +113,19 @@ const _: () = {
     }
 };
 
-==== accepts "{{literal}} {status} {} and a dangling {" ====
+---- input ----
+#[event("e")]
+#[info("{{literal}} {status} {} and a dangling {")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
 struct Subject {
     status: i64,
     original: ClassifiedString,
