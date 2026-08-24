@@ -79,8 +79,9 @@ fn run_after_factory_update_hook() {
 /// initializing a destination value must not directly or indirectly trigger another relocation that
 /// requires the same value.
 ///
-/// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
-/// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.
+/// Relocation of different clones of the `Arc` results in deduplication in the destination affinity.
+/// The following example demonstrates this using the counter implemented in the documentation for
+/// the [`trait@ThreadAware`] trait.
 ///
 /// ```rust
 /// # use thread_aware::{Arc, ThreadAware, PerCore};
@@ -189,23 +190,19 @@ where
     T: Send + 'static,
     S: Strategy,
 {
-    /// Creates an `Arc` whose constructor materializes each affinity.
+    /// Creates an `Arc` with a constructor used to create affinitized instances.
     ///
-    /// This variant takes a zero-argument constructor function (`fn() -> T`).
-    /// The constructor is invoked lazily and independently for each
-    /// processor the first time a `PerCore` is materialized on that processor (i.e. on
-    /// the first transfer into that processor). This guarantees that every processor obtains its own
-    /// freshly created `T` without requiring `T: Clone` or `T: ThreadAware`.
+    /// This variant takes a zero-argument constructor function (`fn() -> T`). Construction creates
+    /// the initial instance immediately. Additional instances are created lazily for each affinity
+    /// partition, as determined by the strategy `S`, when relocation first reaches that partition.
+    /// Each partition therefore obtains its own freshly created `T` without requiring `T: Clone` or
+    /// `T: ThreadAware`.
     ///
     /// Requirements:
-    /// * `T` must be `Send + 'static` so it can live in the processor storage.
-    /// * The provided function must be pure with respect to per-processor isolation (it should not
-    ///   leak references into other processors). Any captured state should therefore be provided via
-    ///   globally shareable mechanisms or prefer [`new_with`](Self::new_with) if you need to
-    ///   capture data that itself implements [`trait@ThreadAware`].
-    ///
-    /// When transferring to another affinity which doesn't yet contain a value, the constructor is
-    /// called in the destination affinity to create a brand new instance.
+    /// * `T` must be `Send + 'static` so instances can operate in different affinity partitions.
+    /// * The function must create instances that are independent across partitions. Use
+    ///   [`new_with`](Self::new_with) when construction depends on state that itself implements
+    ///   [`trait@ThreadAware`].
     ///
     /// The constructor participates in destination-value initialization and must obey the reentrant
     /// initialization restriction documented on [`Arc`].
