@@ -1,0 +1,21 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([\"1 + 1\", \"enum NotAStruct { A }\",\n\"fn not_a_struct() {}\"].into_iter().flat_map(|item|\n[(format!(\"#[event] {item}\"), event_error(r#\"\"e\"\"#, item)),\n(format!(\"#[derive(Enrichment)] {item}\"), enrichment_error(item)),]))"
+---
+==== #[event] 1 + 1 ====
+expected `struct`
+
+==== #[derive(Enrichment)] 1 + 1 ====
+expected one of: `struct`, `enum`, `union`
+
+==== #[event] enum NotAStruct { A } ====
+expected `struct`
+
+==== #[derive(Enrichment)] enum NotAStruct { A } ====
+Enrichment can only be derived for structs, not enums
+
+==== #[event] fn not_a_struct() {} ====
+expected `struct`
+
+==== #[derive(Enrichment)] fn not_a_struct() {} ====
+expected one of: `struct`, `enum`, `union`

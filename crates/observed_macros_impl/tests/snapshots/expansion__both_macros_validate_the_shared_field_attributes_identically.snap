@@ -1,0 +1,111 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([r#\"#[dimension(\"positional\")] f: T\"#, r#\"#[dimension = \"x\"] f: T\"#,\n\"#[dimension()] f: T\", \"#[dimension(bogus)] f: T\",\n\"#[dimension(log = bogus)] f: T\",\nr#\"#[dimension(log = \"a\", log = \"b\")] f: T\"#,\n\"#[dimension(log = exclude, log = exclude)] f: T\",\nr#\"#[dimension(metric = \"a\", metric = \"b\")] f: T\"#,\n\"#[dimension(metric, metric)] f: T\", \"#[dimension] #[dimension] f: T\",\n\"#[unredacted(foo)] f: T\", r#\"#[unredacted = \"no\"] f: T\"#,\n\"#[unredacted] #[data_class(Euii)] f: T\",\n\"#[data_class(Euii)] #[unredacted] f: T\", \"#[if_none] f: Option<T>\",\n\"#[if_none(bogus)] f: Option<T>\",\n\"#[if_none(drop)] #[if_none(drop)] f: Option<T>\",\n\"#[if_none(drop)] f: T\",].into_iter().flat_map(|field|\n[(format!(\"#[event] on `{field}`\"),\nevent_error(r#\"\"e\"\"#, &format!(\"#[info] struct Subject {{ {field} }}\")),),\n(format!(\"Enrichment on `{field}`\"),\nenrichment_error(&format!(\"struct Subject {{ {field} }}\")),),]))"
+---
+==== #[event] on `#[dimension("positional")] f: T` ====
+a positional string name is not supported; use `#[dimension(log = "...")]` to rename the log key
+
+==== Enrichment on `#[dimension("positional")] f: T` ====
+a positional string name is not supported; use `#[dimension(log = "...")]` to rename the log key
+
+==== #[event] on `#[dimension = "x"] f: T` ====
+`#[dimension]` does not take a `= value`; use `#[dimension]` or `#[dimension(log = ..., metric = ...)]`
+
+==== Enrichment on `#[dimension = "x"] f: T` ====
+`#[dimension]` does not take a `= value`; use `#[dimension]` or `#[dimension(log = ..., metric = ...)]`
+
+==== #[event] on `#[dimension()] f: T` ====
+`#[dimension(...)]` requires at least one of `log` or `metric`
+
+==== Enrichment on `#[dimension()] f: T` ====
+`#[dimension(...)]` requires at least one of `log` or `metric`
+
+==== #[event] on `#[dimension(bogus)] f: T` ====
+expected `log = "..."`, `log = exclude`, `metric`, or `metric = "..."`
+
+==== Enrichment on `#[dimension(bogus)] f: T` ====
+expected `log = "..."`, `log = exclude`, `metric`, or `metric = "..."`
+
+==== #[event] on `#[dimension(log = bogus)] f: T` ====
+`log` expects a string key or the `exclude` keyword
+
+==== Enrichment on `#[dimension(log = bogus)] f: T` ====
+`log` expects a string key or the `exclude` keyword
+
+==== #[event] on `#[dimension(log = "a", log = "b")] f: T` ====
+duplicate `log` setting in `#[dimension(...)]`
+
+==== Enrichment on `#[dimension(log = "a", log = "b")] f: T` ====
+duplicate `log` setting in `#[dimension(...)]`
+
+==== #[event] on `#[dimension(log = exclude, log = exclude)] f: T` ====
+duplicate `log` setting in `#[dimension(...)]`
+
+==== Enrichment on `#[dimension(log = exclude, log = exclude)] f: T` ====
+duplicate `log` setting in `#[dimension(...)]`
+
+==== #[event] on `#[dimension(metric = "a", metric = "b")] f: T` ====
+duplicate `metric` setting in `#[dimension(...)]`
+
+==== Enrichment on `#[dimension(metric = "a", metric = "b")] f: T` ====
+duplicate `metric` setting in `#[dimension(...)]`
+
+==== #[event] on `#[dimension(metric, metric)] f: T` ====
+duplicate `metric` setting in `#[dimension(...)]`
+
+==== Enrichment on `#[dimension(metric, metric)] f: T` ====
+duplicate `metric` setting in `#[dimension(...)]`
+
+==== #[event] on `#[dimension] #[dimension] f: T` ====
+duplicate `#[dimension(...)]` attribute
+
+==== Enrichment on `#[dimension] #[dimension] f: T` ====
+duplicate `#[dimension(...)]` attribute
+
+==== #[event] on `#[unredacted(foo)] f: T` ====
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+==== Enrichment on `#[unredacted(foo)] f: T` ====
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+==== #[event] on `#[unredacted = "no"] f: T` ====
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+==== Enrichment on `#[unredacted = "no"] f: T` ====
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+==== #[event] on `#[unredacted] #[data_class(Euii)] f: T` ====
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+==== Enrichment on `#[unredacted] #[data_class(Euii)] f: T` ====
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+==== #[event] on `#[data_class(Euii)] #[unredacted] f: T` ====
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+==== Enrichment on `#[data_class(Euii)] #[unredacted] f: T` ====
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+==== #[event] on `#[if_none] f: Option<T>` ====
+`#[if_none(...)]` requires an argument: `drop` or a string literal placeholder
+
+==== Enrichment on `#[if_none] f: Option<T>` ====
+`#[if_none(...)]` requires an argument: `drop` or a string literal placeholder
+
+==== #[event] on `#[if_none(bogus)] f: Option<T>` ====
+expected `drop` or a string literal placeholder, e.g. `#[if_none("n/a")]`
+
+==== Enrichment on `#[if_none(bogus)] f: Option<T>` ====
+expected `drop` or a string literal placeholder, e.g. `#[if_none("n/a")]`
+
+==== #[event] on `#[if_none(drop)] #[if_none(drop)] f: Option<T>` ====
+duplicate `#[if_none(...)]` attribute
+
+==== Enrichment on `#[if_none(drop)] #[if_none(drop)] f: Option<T>` ====
+duplicate `#[if_none(...)]` attribute
+
+==== #[event] on `#[if_none(drop)] f: T` ====
+`#[if_none(...)]` is only valid on `Option<T>` fields
+
+==== Enrichment on `#[if_none(drop)] f: T` ====
+`#[if_none(...)]` is only valid on `Option<T>` fields

@@ -1,0 +1,15 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([\"#[info] #[warning]\", r#\"#[info(bogus = \"x\")]\"#, r#\"#[info = \"x\"]\"#,\nr#\"#[info(name = \"a\", name = \"b\")]\"#,].into_iter().map(|attrs|\n(attrs.to_owned(), event_error(r#\"\"e\"\"#, &format!(\"{attrs} {ONE_FIELD}\")),)))"
+---
+==== #[info] #[warning] ====
+only one log-severity attribute (`#[trace]`, `#[debug]`, `#[info]`, `#[warning]`, `#[error]`, `#[fatal]`) is allowed
+
+==== #[info(bogus = "x")] ====
+unknown log option `bogus`; expected `name`
+
+==== #[info = "x"] ====
+a log-severity attribute takes an optional message string and `name = "..."`, not `= value`
+
+==== #[info(name = "a", name = "b")] ====
+duplicate `name` setting

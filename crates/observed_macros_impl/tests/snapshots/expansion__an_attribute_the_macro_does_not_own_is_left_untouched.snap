@@ -1,0 +1,44 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"ignored\"\"#,\nr#\"\n        #[some::other::attr]\n        #[derive(Debug)]\n        #[info]\n        struct Ignored {\n            #[serde(rename = \"renamed\")]\n            #[unredacted]\n            v: i64,\n        }\n        \"#,)"
+---
+#[some::other::attr]
+#[derive(Debug)]
+struct Ignored {
+    #[serde(rename = "renamed")]
+    v: i64,
+}
+const _: () = {
+    impl ::observed::Event for Ignored {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "ignored",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Ignored>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "ignored",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

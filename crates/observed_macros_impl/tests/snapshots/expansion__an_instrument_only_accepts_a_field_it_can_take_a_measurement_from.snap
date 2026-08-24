@@ -1,0 +1,30 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([(\"#[counter(v)]\", \"#[unredacted] v: i64\"),\n(\"#[updown_counter(v)]\", \"#[unredacted] v: u64\"),\n(\"#[counter(v)]\", \"#[unredacted] v: String\"),\n(\"#[counter(v)]\", \"#[unredacted] v: (u8, u8)\"),\n(\"#[counter(v)]\", \"#[unredacted] v: u128\"),\n(\"#[updown_counter(v)]\", \"#[unredacted] v: i128\"),\n(\"#[counter(v)]\", \"v: u64\"),\n(\"#[counter(v)]\", \"#[unredacted] v: Option<u64>\"),\n(\"#[counter(v)]\",\n\"#[dimension(metric)] #[unredacted] v: u64\"),].into_iter().map(|(attr, field)|\n(format!(\"{attr} on `{field}`\"),\nevent_error(r#\"\"e\"\"#, &format!(\"{attr} struct Subject {{ {field} }}\")),)))"
+---
+==== #[counter(v)] on `#[unredacted] v: i64` ====
+`#[counter(...)]` requires field `v` to be a unsigned integer type (u8, u16, u32, u64, usize)
+
+==== #[updown_counter(v)] on `#[unredacted] v: u64` ====
+`#[updown_counter(...)]` requires field `v` to be a signed integer type (i8, i16, i32, i64, isize)
+
+==== #[counter(v)] on `#[unredacted] v: String` ====
+`#[counter(v)]` requires field `v` to be a numeric type that `observed::Value` can carry (i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64)
+
+==== #[counter(v)] on `#[unredacted] v: (u8, u8)` ====
+`#[counter(v)]` requires field `v` to be a numeric type that `observed::Value` can carry (i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64)
+
+==== #[counter(v)] on `#[unredacted] v: u128` ====
+`#[counter(v)]` does not support 128-bit integers; no telemetry backend represents them, so `observed::Value` has no conversion. Use a 64-bit width instead
+
+==== #[updown_counter(v)] on `#[unredacted] v: i128` ====
+`#[updown_counter(v)]` does not support 128-bit integers; no telemetry backend represents them, so `observed::Value` has no conversion. Use a 64-bit width instead
+
+==== #[counter(v)] on `v: u64` ====
+`#[counter(v)]` requires field `v` to be `#[unredacted]`; a classified value is rendered through the redaction engine as a string, which carries no measurement for the instrument to record
+
+==== #[counter(v)] on `#[unredacted] v: Option<u64>` ====
+`#[counter(v)]` requires field `v` to hold a value on every emission, but it is an `Option<T>`; a metric value cannot be optional. Use a non-optional field, or record it as a metric dimension instead (`#[dimension(metric = ...)]`)
+
+==== #[counter(v)] on `#[dimension(metric)] #[unredacted] v: u64` ====
+field `v` cannot be both a metric value and a metric dimension (`#[dimension(metric = ...)]`)

@@ -1,0 +1,5 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "event_error(r#\"\"e\"\"#, \"#[info] struct Tuple(#[unredacted] i64);\")"
+---
+#[event] can only be applied to structs with named fields

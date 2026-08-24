@@ -1,0 +1,36 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([\"#[gauge]\", \"#[histogram]\", \"#[updown_counter]\",\n\"#[counter] #[counter]\", \"#[counter(absent)]\", r#\"#[counter = \"x\"]\"#,\nr#\"#[counter(v, bogus = \"x\")]\"#, r#\"#[counter(v, name = \"a\", name = \"b\")]\"#,\nr#\"#[counter(v, desc = \"a\", desc = \"b\")]\"#,\nr#\"#[counter(v, unit = \"a\", unit = \"b\")]\"#,\n\"#[counter(v)] #[counter(v)]\",].into_iter().map(|attrs|\n(attrs.to_owned(), event_error(r#\"\"e\"\"#, &format!(\"{attrs} {ONE_FIELD}\")),)))"
+---
+==== #[gauge] ====
+`#[gauge(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[gauge(duration_ms)]`
+
+==== #[histogram] ====
+`#[histogram(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[histogram(duration_ms)]`
+
+==== #[updown_counter] ====
+`#[updown_counter(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[updown_counter(duration_ms)]`
+
+==== #[counter] #[counter] ====
+only one event-level metric (a fieldless `#[counter]`) is allowed
+
+==== #[counter(absent)] ====
+`#[counter(absent)]` references field `absent`, which does not exist in the struct
+
+==== #[counter = "x"] ====
+a metric attribute takes an optional field and `name`/`desc`/`unit` options, not `= value`
+
+==== #[counter(v, bogus = "x")] ====
+unknown metric option `bogus`; expected `name`, `desc`, or `unit`
+
+==== #[counter(v, name = "a", name = "b")] ====
+duplicate `name` setting
+
+==== #[counter(v, desc = "a", desc = "b")] ====
+duplicate `desc` setting
+
+==== #[counter(v, unit = "a", unit = "b")] ====
+duplicate `unit` setting
+
+==== #[counter(v)] #[counter(v)] ====
+field `v` already has a metric instrument

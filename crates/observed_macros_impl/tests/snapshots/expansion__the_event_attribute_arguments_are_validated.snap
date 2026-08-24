@@ -1,0 +1,15 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "report([\"\", \"bare_ident\", \"42\",\nr#\"\"e\", bogus\"#].into_iter().map(|attr|\n(format!(\"#[event({attr})]\"), event_error(attr, ONE_FIELD))))"
+---
+==== #[event()] ====
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+==== #[event(bare_ident)] ====
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+==== #[event(42)] ====
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+==== #[event("e", bogus)] ====
+unknown `#[event(...)]` flag `bogus`; expected `disabled`
