@@ -74,9 +74,11 @@ Backtrace:
 ```
 
 Code that logs `{e}` and expects a single line therefore needs review when
-porting. `ErrorExt::message()` drops the enrichment and the backtrace, but it is
-not a single-line guarantee either: with a `#[display]` template and a cause it
-returns `<message>\ncaused by: <cause>`.
+porting. `ErrorExt::message()` drops this level's own enrichment and backtrace,
+but it is not a single-line guarantee: with a `#[display]` template and a cause
+it returns `<message>\ncaused by: <cause>`, and on a transparent wrapper it
+renders the cause's full `Display` — which brings that level's enrichment and
+backtrace back with it.
 
 Because every `ohno` error owns its own `OhnoCore`, and every core renders its
 own backtrace, a chain of wrappers prints the message once and one backtrace

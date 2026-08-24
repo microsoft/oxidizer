@@ -182,9 +182,10 @@
 //!    ...
 //! ```
 //!
-//! Capture is the standard library's decision: a backtrace is taken only when `RUST_LIB_BACKTRACE`
-//! asks for one, or when `RUST_BACKTRACE` does and `RUST_LIB_BACKTRACE` is unset. Use
-//! [`ErrorExt::message()`](ErrorExt::message) to read the message without the backtrace.
+//! Whether a backtrace is captured at all is the standard library's decision — see its
+//! [environment variables](https://doc.rust-lang.org/std/backtrace/index.html#environment-variables).
+//! Use [`ErrorExt::message()`](ErrorExt::message) to read the message without this level's own
+//! backtrace.
 //!
 //! Every error owns its [`OhnoCore`], and every core renders its own backtrace, so a chain of
 //! wrappers that all use the default rendering prints the message once and one backtrace block per
