@@ -91,4 +91,9 @@ level's entries.
 
 `ohno` derives on structs; an enum is rejected. A `thiserror` enum ports to one
 struct per variant, or to a struct holding an enum field that the `#[display]`
-template reads.
+template reads. The first form is the one to reach for: it keeps each failure
+condition a separate type, which
+[M-ERRORS-CANONICAL-STRUCTS](https://microsoft.github.io/rust-guidelines/guidelines/libs/ux/index.html#M-ERRORS-CANONICAL-STRUCTS)
+prefers over an exposed kind enum. See
+[`examples/error_enum_replacement.rs`](../examples/error_enum_replacement.rs) for
+a six-variant enum ported that way.
