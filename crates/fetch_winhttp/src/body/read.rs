@@ -7,8 +7,7 @@ use std::task::{Context, Poll};
 use std::{fmt, mem};
 
 use bytesbuf::BytesBuf;
-use bytesbuf::mem::{GlobalPool, HasMemory, Memory, MemoryShared};
-use bytesbuf_io::Read;
+use bytesbuf::mem::GlobalPool;
 use fetch::HttpError;
 use http::HeaderMap;
 use http_body::{Body, Frame, SizeHint};
@@ -20,11 +19,12 @@ use crate::operation::RequestGuard;
 use crate::query::query_raw_trailers;
 use crate::response_headers::parse_response_trailers;
 
-// When WinHTTP reports zero available bytes, it can still complete a useful
-// read. GlobalPool's largest pooled block is 64 KiB, so use that pool-aligned
-// upper bound for this speculative read. The caller's limit and any existing
-// writable tail can reduce the span actually submitted. Revisit this value if
-// the pool's size classes or measured throughput-to-memory trade-off changes.
+// Bounds every read: it caps the reservation when WinHTTP reports a large
+// availability, and supplies the size when WinHTTP reports zero available bytes
+// yet can still complete a useful read. GlobalPool's largest pooled block is
+// 64 KiB, so use that pool-aligned upper bound. Any existing writable tail can
+// reduce the span actually submitted. Revisit this value if the pool's size
+// classes or measured throughput-to-memory trade-off changes.
 const PREFERRED_READ_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
@@ -33,10 +33,10 @@ const PREFERRED_READ_SIZE: usize = 64 * 1024;
 /// Each caller-driven read first queries available data and then lends one
 /// contiguous writable span from a pooled `BytesBuf` to WinHTTP. Capacity is
 /// reserved only after that query, so the rented pool block is sized from the
-/// bytes actually readable instead of a fixed maximum. A zero availability
-/// figure carries no size information and is the exception: the read is then
-/// speculative and reserves `PREFERRED_READ_SIZE`, bounded by the caller's
-/// limit, however few bytes come back. The retained
+/// bytes actually readable, capped at `PREFERRED_READ_SIZE`, instead of always
+/// taking that maximum. A zero availability figure carries no size information
+/// and is the exception: the read is then speculative and reserves
+/// `PREFERRED_READ_SIZE`, however few bytes come back. The retained
 /// [`RequestGuard`] keeps callback state and handles alive, so dropping the
 /// reader cancels the request without reading ahead. A zero-length
 /// `READ_COMPLETE`, rather than a zero availability query, is authoritative
@@ -67,19 +67,26 @@ impl WinHttpBodyReader {
         self.trailers.take()
     }
 
-    async fn read_into(&mut self, limit: usize, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
-        if limit == 0 || self.eof {
+    /// Reads once, appending to `into`, and returns the byte count with the
+    /// buffer that now owns those bytes.
+    ///
+    /// A zero count is authoritative end-of-stream. Trailers, when the response
+    /// carries them, become available from [`take_trailers`](Self::take_trailers)
+    /// at that point. Reads after end-of-stream report zero without reaching
+    /// the transport.
+    pub(crate) async fn read_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
+        if self.eof {
             return Ok((0, into));
         }
 
-        let result = self.read_once(limit, into).await;
+        let result = self.read_once(into).await;
         if result.is_err() {
             drop(self.guard.take());
         }
         result
     }
 
-    async fn read_once(&mut self, limit: usize, mut into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
+    async fn read_once(&mut self, mut into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
         let available = {
             let bindings = self.bindings.clone();
             let query = self
@@ -113,7 +120,7 @@ impl WinHttpBodyReader {
         } else {
             usize::try_from(available).expect("a u32 always fits usize on supported Windows targets")
         }
-        .min(limit);
+        .min(PREFERRED_READ_SIZE);
         into.reserve(desired, &self.memory);
 
         let (buffer, address, capacity) = {
@@ -197,44 +204,6 @@ impl WinHttpBodyReader {
     }
 }
 
-impl Memory for WinHttpBodyReader {
-    fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        self.memory.reserve(min_bytes)
-    }
-}
-
-impl HasMemory for WinHttpBodyReader {
-    fn memory(&self) -> impl MemoryShared {
-        self.memory.clone()
-    }
-}
-
-impl Read for WinHttpBodyReader {
-    type Error = HttpError;
-
-    async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
-        self.read_into(len, into).await
-    }
-
-    async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
-        self.read_into(PREFERRED_READ_SIZE, into).await
-    }
-
-    async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
-        // No capacity is reserved here on purpose. `GlobalPool` picks its block
-        // size class from the requested size, so reserving `PREFERRED_READ_SIZE`
-        // before `WinHttpQueryDataAvailable` reports availability would rent a
-        // 64 KiB block for every frame, however small. Each returned frame keeps
-        // its block rented for as long as the consumer holds the view, so a peer
-        // that trickles data would amplify a small response into many full
-        // blocks - the hazard documented under `Read::read_any`'s "Security"
-        // heading and contrary to implementation.md section 6.2. `read_once`
-        // reserves after the availability query instead, so the block size
-        // class matches the bytes that are actually readable.
-        self.read_into(PREFERRED_READ_SIZE, BytesBuf::new()).await.map(|(_read, into)| into)
-    }
-}
-
 /// Preserves WinHTTP data and trailers as `http_body` frames.
 ///
 /// A dedicated adapter is required because the generic byte-stream bridge
@@ -254,7 +223,7 @@ pub(crate) struct WinHttpResponseBody {
 
 /// Tracks which half of the read cycle the body is in.
 ///
-/// `Read::read_more_into` borrows the reader for the duration of one read, but
+/// `read_into` borrows the reader for the duration of one read, but
 /// `poll_frame` must be able to return between polls of that read. The reader
 /// therefore moves into the read future and comes back out of it, which keeps
 /// the future free of borrows and lets it be boxed without self-reference.
@@ -283,7 +252,7 @@ struct ReadOutcome {
 
 /// Performs one read, taking and returning ownership of the reader and buffer.
 async fn read_step(mut reader: WinHttpBodyReader, buffer: BytesBuf) -> ReadOutcome {
-    match reader.read_more_into(buffer).await {
+    match reader.read_into(buffer).await {
         Ok((read, buffer)) => ReadOutcome {
             reader,
             buffer,
@@ -442,8 +411,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Waker};
 
-    use bytesbuf::mem::{HasMemory as _, Memory as _};
-    use bytesbuf_io::Read as _;
+    use bytesbuf::BytesBuf;
+    use bytesbuf::mem::GlobalPool;
     use http::HeaderValue;
     use http_body::Body as _;
     use ohno::Labeled as _;
@@ -541,6 +510,7 @@ mod tests {
 
     struct ReaderHarness {
         reader: WinHttpBodyReader,
+        memory: GlobalPool,
         context: *mut RequestContext,
         record: Arc<Record>,
     }
@@ -599,25 +569,32 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_length_read_never_reaches_the_transport() {
-        let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
-        let into = harness.reader.reserve(8);
+    fn a_read_after_end_of_stream_never_reaches_the_transport() {
+        let mut harness = reader([ReadStep::data(0, Vec::new())], TrailerBehavior::None);
 
-        let (read, into) = drive(harness.reader.read_at_most_into(0, into)).unwrap();
+        let (read, into) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
+        assert_eq!(read, 0, "a zero-length completion is authoritative end-of-stream");
+        assert_eq!(harness.record.query_calls.load(Ordering::SeqCst), 1);
+
+        let (read, into) = drive(harness.reader.read_into(into)).unwrap();
 
         assert_eq!(read, 0);
         assert!(into.peek().is_empty());
-        assert_eq!(harness.record.query_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            harness.record.query_calls.load(Ordering::SeqCst),
+            1,
+            "the second read is answered without reaching WinHTTP"
+        );
         harness.finish();
     }
 
     #[test]
-    fn an_unbounded_read_appends_to_the_caller_buffer() {
+    fn a_read_appends_to_the_caller_buffer() {
         let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
-        let mut into = harness.reader.reserve(8);
+        let mut into = harness.memory.reserve(8);
         into.put_slice(*b"prefix");
 
-        let (read, mut into) = drive(harness.reader.read_more_into(into)).unwrap();
+        let (read, mut into) = drive(harness.reader.read_into(into)).unwrap();
 
         assert_eq!(read, 3);
         assert_eq!(into.consume_all(), b"prefixabc");
@@ -639,25 +616,26 @@ mod tests {
     }
 
     #[test]
-    fn reads_preserve_existing_bytes_and_obey_caller_limits_across_partial_reads() {
+    fn reads_preserve_existing_bytes_across_partial_reads() {
         let mut harness = reader(
-            [ReadStep::data(20, b"xy".to_vec()), ReadStep::data(20, b"12345".to_vec())],
+            [ReadStep::data(2, b"xy".to_vec()), ReadStep::data(5, b"12345".to_vec())],
             TrailerBehavior::None,
         );
-        let memory = harness.reader.memory();
-        let mut into = memory.reserve(16);
+        let mut into = harness.memory.reserve(16);
         into.put_slice(*b"prefix");
         let prefix_address = into.peek().first_slice().as_ptr().addr();
 
-        let (first_read, into) = drive(harness.reader.read_at_most_into(3, into)).unwrap();
+        let (first_read, into) = drive(harness.reader.read_into(into)).unwrap();
         assert_eq!(first_read, 2);
         assert_eq!(into.peek(), b"prefixxy");
         assert_eq!(into.peek().first_slice().as_ptr().addr(), prefix_address);
 
-        let (second_read, mut into) = drive(harness.reader.read_at_most_into(5, into)).unwrap();
+        let (second_read, mut into) = drive(harness.reader.read_into(into)).unwrap();
         assert_eq!(second_read, 5);
         assert_eq!(into.consume_all(), b"prefixxy12345");
-        assert_eq!(*harness.record.requested.lock().unwrap(), [3, 5]);
+        // Each read submits the span the availability query reported, so the
+        // buffer grows by exactly what was readable at that moment.
+        assert_eq!(*harness.record.requested.lock().unwrap(), [2, 5]);
 
         harness.finish();
     }
@@ -666,8 +644,9 @@ mod tests {
     fn zero_availability_uses_a_positive_bounded_probe() {
         let mut harness = reader([ReadStep::data(0, b"z".to_vec())], TrailerBehavior::None);
 
-        let data = drive(harness.reader.read_any()).unwrap();
+        let (read, data) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
 
+        assert_eq!(read, 1);
         assert_eq!(data.peek(), b"z");
         // A zero availability result carries no size information, so the
         // speculative read still reserves the full pool-aligned upper bound.
@@ -683,8 +662,9 @@ mod tests {
     fn a_small_availability_rents_a_proportionally_small_block() {
         let mut harness = reader([ReadStep::data(3, b"abc".to_vec())], TrailerBehavior::None);
 
-        let data = drive(harness.reader.read_any()).unwrap();
+        let (read, data) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
 
+        assert_eq!(read, 3);
         assert_eq!(data.peek(), b"abc");
         assert_eq!(harness.record.requested.lock().unwrap()[0], 3);
         // GlobalPool picks its block size class from the requested size, so a
@@ -700,14 +680,13 @@ mod tests {
     #[test]
     fn reads_only_the_first_contiguous_tail_and_bounds_it_by_u32() {
         let mut harness = reader([ReadStep::data(u32::MAX, b"x".to_vec())], TrailerBehavior::None);
-        let memory = harness.reader.memory();
-        let mut into = memory.reserve(8);
+        let mut into = harness.memory.reserve(8);
         let first_tail = into.first_unfilled_slice().len();
         assert!(first_tail < PREFERRED_READ_SIZE, "the test requires a small first allocation");
-        into.reserve(PREFERRED_READ_SIZE, &memory);
+        into.reserve(PREFERRED_READ_SIZE, &harness.memory);
         assert!(into.remaining_capacity() >= PREFERRED_READ_SIZE);
 
-        let (read, mut into) = drive(harness.reader.read_at_most_into(PREFERRED_READ_SIZE, into)).unwrap();
+        let (read, mut into) = drive(harness.reader.read_into(into)).unwrap();
 
         assert_eq!(read, 1);
         assert_eq!(into.consume_all(), b"x");
@@ -821,7 +800,7 @@ mod tests {
 
         for step in cases {
             let mut harness = reader([step], TrailerBehavior::None);
-            let error = drive(harness.reader.read_any()).unwrap_err();
+            let error = drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
             assert_eq!(error.label(), "request_winhttp");
             assert_eq!(harness.record.request_closes.load(Ordering::SeqCst), 1);
             harness.finish();
@@ -838,7 +817,7 @@ mod tests {
             TrailerBehavior::None,
         );
 
-        let error = drive(harness.reader.read_any()).unwrap_err();
+        let error = drive(harness.reader.read_into(BytesBuf::new())).unwrap_err();
 
         assert_eq!(error.label(), "request_winhttp");
         assert!(error.to_string().contains("invalid status information"), "{error}");
@@ -1261,9 +1240,11 @@ mod tests {
         .unwrap();
         let context = installed_context(&guard);
         drop((session, contexts));
+        let memory = GlobalPool::new();
 
         ReaderHarness {
-            reader: WinHttpBodyReader::new(guard, facade, bytesbuf::mem::GlobalPool::new()),
+            reader: WinHttpBodyReader::new(guard, facade, memory.clone()),
+            memory,
             context,
             record,
         }

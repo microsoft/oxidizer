@@ -133,7 +133,7 @@ crates/fetch_winhttp/
     convert.rs           // ConversionError + numeric/duration/UTF-16/option-value
                          //   conversions, the unlimited-timeout sentinel, keep-alive floors
     body/
-      read.rs            // bytesbuf_io::Read over WinHttpReadData (response)
+      read.rs            // response reader over WinHttpReadData + http_body adapter
       write.rs           // bytesbuf_io::Write over WinHttpWriteData + request framing
       mod.rs             // module wiring only (no type definitions)
     tls.rs               // WinHttpTlsConfig -> security flags
@@ -849,17 +849,16 @@ originates in WinHTTP:
 Declared-length or framing failures that WinHTTP detects later - after this
 reconciliation, on the wire - are propagated through the ordinary request error path.
 
-### 6.2 Incoming response body <- `bytesbuf_io::Read`, then an `http_body::Body`
+### 6.2 Incoming response body -> an `http_body::Body`
 
-The read side is a `bytesbuf_io::Read` over WinHTTP:
+The read side is a reader over WinHTTP exposing a single inherent read operation:
 
 ```rust,ignore
-impl bytesbuf_io::Read for WinHttpBodyReader {
-    type Error = HttpError;
-    async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
+impl WinHttpBodyReader {
+    async fn read_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
         // 1. WinHttpQueryDataAvailable -> DATA_AVAILABLE(n)
-        // 2. choose n, or a 64 KiB speculative read when n == 0, then apply
-        //    the caller's limit and reserve that desired capacity
+        // 2. choose n capped at 64 KiB, or a 64 KiB speculative read when
+        //    n == 0, then reserve that desired capacity
         // 3. retain `into`, the exposed tail address, and its submitted
         //    capacity in OperationBuffer::Read
         // 4. WinHttpReadData reads min(desired, contiguous writable tail
@@ -871,13 +870,21 @@ impl bytesbuf_io::Read for WinHttpBodyReader {
 }
 ```
 
+The reader deliberately does not implement `bytesbuf_io::Read`. That trait has three
+required methods, of which the body adapter - the reader's only consumer, since the type
+is crate-private - would use one. Implementing it would add two methods no production
+path calls, force a read-length limit parameter through the read that callers always pin
+to `PREFERRED_READ_SIZE`, and pull in the `Memory` and `HasMemory` supertraits solely to
+satisfy the bound. The write side keeps `bytesbuf_io::Write` because that trait's single
+required method is exactly what `send_body` calls.
+
 EOF is taken from a **zero-length `READ_COMPLETE`**, not from
 `WinHttpQueryDataAvailable` returning 0. Both usually coincide, but WinHTTP's
 documented completion signal is the zero-length read, and reading directly avoids
 depending on `QueryDataAvailable`'s value for correctness. `QueryDataAvailable` is
 used to size ordinary reads. A zero availability result instead uses a speculative
 64 KiB upper bound because WinHTTP can still complete a useful read. This matches
-`GlobalPool`'s largest pooled block; the caller's limit and any existing contiguous
+`GlobalPool`'s largest pooled block; any existing contiguous
 writable tail may reduce the actual submitted span. The authoritative "body
 finished" decision is a `READ_COMPLETE` with `len == 0`.
 Each `WinHttpReadData` call exposes only one contiguous writable tail span from the
@@ -890,14 +897,11 @@ The ordering matters because a rented pool block stays rented for as long as the
 holds a view cut from it: reserving a fixed `PREFERRED_READ_SIZE` up front would pin a
 whole 64 KiB block for every emitted frame regardless of its payload, so a body delivered
 in small chunks would amplify retained memory by up to the ratio of block size to chunk
-size. Only the speculative zero-availability path reserves up to the full
-`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block, and still bounded
-by the caller's limit - because a zero
-availability figure carries no size information. `read_any` reserves nothing of its own
-and inherits the same availability-proportional reservation.
+size. Only the speculative zero-availability path reserves the full
+`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block - because a zero
+availability figure carries no size information. The adapter's first read starts from an
+empty `BytesBuf`, so it too reserves nothing until availability is known.
 
-`WinHttpBodyReader` implements the `bytesbuf_io::Read` methods:
-`read_at_most_into`, `read_more_into`, and `read_any`.
 After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
 WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING)`. A missing trailer
@@ -1085,7 +1089,7 @@ after the table.
   read completes, and request-guard drop closes only the request. The synthetic
   `HANDLE_CLOSING` then reclaims the context, closes the connect handle, and releases
   the session owner exactly once (this runs under Miri where available).
-- **Body streaming.** The `bytesbuf_io::Read` adapter is driven with a scripted
+- **Body streaming.** The response body reader is driven with a scripted
   `DATA_AVAILABLE`/`READ_COMPLETE` sequence: EOF is taken from a
   zero-length `READ_COMPLETE` (not from `QueryDataAvailable`), `ReadComplete`
   returns the same pooled `BytesBuf` (ownership round-trip) with the correct appended
@@ -1618,8 +1622,8 @@ Runtime:
 - `fetch` and `http_extensions` for the transport contract and `HttpError`, `http` and
   `http-body` for message and body types, and `layered` for the `Service` the handler
   implements.
-- `bytesbuf` and `bytesbuf_io` for the pooled buffers and the `Read` trait the
-  response body reader implements (§6.2).
+- `bytesbuf` and `bytesbuf_io` for the pooled buffers and the `Write` trait the
+  request body writer implements (§6.1).
 - `events_once` provides the embedded reusable one-shot event
   ([folo-rs/folo](https://github.com/folo-rs/folo)); placing it in the pinned
   request context avoids both per-operation allocation and callback-side pool
