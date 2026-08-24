@@ -962,12 +962,18 @@ fn adopting_racer_keeps_the_original_factory_source() {
     // source A. Moving the factory update into the publishing closure would leave this adopter stale.
     // Ref: docs/implementation.md, "Relocation and publication".
 
+    /// Reports whether the publisher entered its factory before relocation completed.
+    enum PublisherProgress {
+        FactoryStarted,
+        RelocationFinished,
+    }
+
     /// Coordinates the publisher's first materialization and records factory sources.
     #[derive(Clone)]
     struct ControlledRecorder {
         recorded: sync::Arc<sync::Mutex<Option<Affinity>>>,
         relocations: sync::Arc<AtomicUsize>,
-        publisher_started: sync::Arc<sync::Barrier>,
+        publisher_progress: sync::mpsc::Sender<PublisherProgress>,
         release_publisher: sync::Arc<sync::Barrier>,
     }
 
@@ -979,7 +985,7 @@ fn adopting_racer_keeps_the_original_factory_source() {
             if relocation_index == 0 {
                 // Only the publisher's first factory relocation is held. The later relocation to C
                 // must run normally so its recorded source can be asserted.
-                self.publisher_started.wait();
+                self.publisher_progress.send(PublisherProgress::FactoryStarted).unwrap();
                 self.release_publisher.wait();
             }
         }
@@ -992,16 +998,17 @@ fn adopting_racer_keeps_the_original_factory_source() {
 
     let recorded = sync::Arc::new(sync::Mutex::new(None));
     let relocations = sync::Arc::new(AtomicUsize::new(0));
-    // Each barrier pairs the publisher with the test thread.
-    let publisher_started = sync::Arc::new(sync::Barrier::new(2));
+    let (publisher_progress, progress) = sync::mpsc::channel();
+    // After the channel confirms factory entry, these barriers release the publisher and confirm
+    // that its relocation completed.
     let release_publisher = sync::Arc::new(sync::Barrier::new(2));
     let publisher_done = sync::Arc::new(sync::Barrier::new(2));
 
     let origin = PerCore::new_with(
         ControlledRecorder {
             recorded: sync::Arc::clone(&recorded),
-            relocations,
-            publisher_started: sync::Arc::clone(&publisher_started),
+            relocations: sync::Arc::clone(&relocations),
+            publisher_progress: publisher_progress.clone(),
             release_publisher: sync::Arc::clone(&release_publisher),
         },
         |_recorder: ControlledRecorder| 0_i32,
@@ -1010,15 +1017,28 @@ fn adopting_racer_keeps_the_original_factory_source() {
     let mut publisher = origin.clone();
     let publisher = std::thread::spawn({
         let publisher_done = sync::Arc::clone(&publisher_done);
+        let relocations = sync::Arc::clone(&relocations);
         move || {
             publisher.relocate(Some(a), b);
+
+            if relocations.load(Ordering::Acquire) == 0 {
+                publisher_progress.send(PublisherProgress::RelocationFinished).unwrap();
+                return publisher.into_arc();
+            }
+
             publisher_done.wait();
             publisher.into_arc()
         }
     });
 
-    // The publisher is now inside B's factory, so B remains empty while the adopter starts.
-    publisher_started.wait();
+    // The publisher must be inside B's factory, leaving B empty while the adopter starts. Reporting
+    // an early return makes mutations that bypass materialization fail instead of hanging the test.
+    match progress.recv().unwrap() {
+        PublisherProgress::FactoryStarted => {}
+        PublisherProgress::RelocationFinished => {
+            panic!("the publisher must enter the destination factory before relocation completes");
+        }
+    }
 
     let mut adopter = origin;
     super::arc::set_after_factory_update_hook({

@@ -62,21 +62,22 @@ fn run_after_factory_update_hook() {
 
 /// Transferable reference counted type.
 ///
-/// This type works like a per-affinity (per-thread) [`sync::Arc`]. Each affinity gets a unique value that is shared by clones
-/// of the `Arc`, but the [`trait@ThreadAware`] implementation ensures that when moving to another affinity, the resulting
-/// `Arc` will point to the value in the destination affinity. See [`new`](`Arc::new`) for information on constructing instances.
+/// The strategy parameter `S` partitions the available affinity space. Clones whose affinities map
+/// to the same partition share one value, while different partitions use independently materialized
+/// values. After an object graph moves to another thread, [`ThreadAware`] relocation switches each
+/// `Arc` to the value assigned to the destination thread's affinity. See [`new`](Arc::new) for
+/// construction details.
 ///
-/// Relocate an `Arc` only among affinities that share one coordinate space — those its [`Strategy`]
-/// maps into one fixed set of slots, reporting a consistent slot count (see the design guide,
-/// "Affinities and strategies").
+/// Relocate an `Arc` only among affinities that its [`Strategy`] interprets in one consistent
+/// coordinate space: every such affinity must report the same partition count and map inside that
+/// partitioning (see the design guide, "Affinities and strategies").
 ///
-/// # Initialization dependencies
+/// # Reentrant initialization
 ///
-/// Materializing an empty destination slot runs the configured constructor, clone function, and
-/// captured [`ThreadAware`] state while that slot is being initialized. Code invoked during
-/// materialization must not relocate an `Arc` backed by the same storage into that slot or create a
-/// cycle among slot initializations. [`OnceLock`](std::sync::OnceLock) initialization is
-/// non-reentrant, so violating this requirement can deadlock.
+/// Creating a value for a previously unused strategy partition invokes the configured constructor,
+/// clone function, and captured [`ThreadAware`] state. Reentrant initialization deadlocks: code
+/// initializing a destination value must not directly or indirectly trigger another relocation that
+/// requires the same value.
 ///
 /// `ThreadAware` of different clones of the `Arc` result in "deduplication" in the destination affinity. The following
 /// example demonstrates this using the counter implemented in the documentation for the [`trait@ThreadAware`] trait.
@@ -206,8 +207,8 @@ where
     /// When transferring to another affinity which doesn't yet contain a value, the constructor is
     /// called in the destination affinity to create a brand new instance.
     ///
-    /// The constructor runs while the destination slot is being initialized and must obey the
-    /// initialization dependency requirements documented on [`Arc`].
+    /// The constructor participates in destination-value initialization and must obey the reentrant
+    /// initialization restriction documented on [`Arc`].
     ///
     /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with `new` by passing the constructor function (note the absence of `()`):
@@ -290,8 +291,8 @@ where
     /// trait object (e.g., `dyn Trait`) or other unsized type. The constructor produces a
     /// `Box<T>` which is then stored behind a [`sync::Arc`].
     ///
-    /// The constructor runs while the destination slot is being initialized and must obey the
-    /// initialization dependency requirements documented on [`Arc`].
+    /// The constructor participates in destination-value initialization and must obey the reentrant
+    /// initialization restriction documented on [`Arc`].
     ///
     /// ```rust
     /// # use thread_aware::{Arc, ThreadAware, PerCore};
@@ -333,9 +334,8 @@ where
     /// to another processor. The closure behaves like a `ThreadAwareFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
     ///
-    /// Relocating `data` and invoking `f` happen while the destination slot is being initialized.
-    /// Their implementations must obey the initialization dependency requirements documented on
-    /// [`Arc`].
+    /// Relocating `data` and invoking `f` are part of destination-value initialization. Their
+    /// implementations must obey the reentrant initialization restriction documented on [`Arc`].
     ///
     /// This function can be used to create an `Arc` of a type that itself doesn't implement [`trait@ThreadAware`] because
     /// we can ensure that each affinity will get its own, independently-initialized value:
@@ -455,8 +455,8 @@ where
     /// This is useful for types that do not implement [`trait@ThreadAware`]. In such cases, the same value
     /// is cloned for each affinity without any relocation logic.
     ///
-    /// [`Clone::clone`] runs while the destination slot is being initialized and must obey the
-    /// initialization dependency requirements documented on [`Arc`].
+    /// [`Clone::clone`] participates in destination-value initialization and must obey the reentrant
+    /// initialization restriction documented on [`Arc`].
     ///
     /// For example, the counter type we implemented in the documentation for [`trait@ThreadAware`] trait
     /// can be used with new:
@@ -516,8 +516,8 @@ where
     /// use with `dyn Trait` where `Clone` is not object-safe. Each clone is
     /// [`relocate`](ThreadAware::relocate) to its target affinity.
     ///
-    /// The clone function and the returned value's relocation run while the destination slot is
-    /// being initialized. Their implementations must obey the initialization dependency requirements
+    /// The clone function and the returned value's relocation participate in destination-value
+    /// initialization. Their implementations must obey the reentrant initialization restriction
     /// documented on [`Arc`].
     ///
     /// ```rust
