@@ -198,6 +198,10 @@ impl<T, S: Strategy> SlotTable<T, S> {
 
     /// Returns the slot array, sizing it on first use to hold every affinity.
     fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
+        if let Some(slots) = self.slots.get() {
+            return slots;
+        }
+
         self.slots_with_count(S::count(affinity).get())
     }
 
@@ -249,6 +253,11 @@ impl<T, S: Strategy> SlotTable<T, S> {
     }
 }
 
+std::thread_local! {
+    /// Per-thread handle for the documented out-of-coordinate-space diagnostic event.
+    static ARC_OOB: Event = Event::builder().name("thread_aware_arc_oob").build();
+}
+
 /// Records that a relocation reached an affinity whose slot index falls outside the sized table.
 ///
 /// The table is sized once to one affinity's slot count, so an index past its end means the affinity
@@ -263,10 +272,6 @@ impl<T, S: Strategy> SlotTable<T, S> {
 /// path.
 #[cold]
 pub(crate) fn report_out_of_range_affinity() {
-    std::thread_local! {
-        static ARC_OOB: Event = Event::builder().name("thread_aware_arc_oob").build();
-    }
-
     ARC_OOB.with(Event::observe_once);
 }
 
@@ -307,6 +312,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZero;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::affinity::pinned_affinities;
     use crate::storage::{SlotTable, Storage, Strategy};
@@ -355,6 +361,37 @@ mod tests {
         fn count(_affinity: crate::affinity::Affinity) -> NonZero<usize> {
             NonZero::<usize>::MIN
         }
+    }
+
+    /// A strategy that records how often the slot count is requested.
+    struct CountingStrategy;
+
+    static COUNT_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    impl Strategy for CountingStrategy {
+        fn index(_affinity: crate::affinity::Affinity) -> usize {
+            0
+        }
+
+        fn count(_affinity: crate::affinity::Affinity) -> NonZero<usize> {
+            COUNT_CALLS.fetch_add(1, Ordering::AcqRel);
+            NonZero::<usize>::MIN
+        }
+    }
+
+    #[test]
+    fn initialized_slot_table_does_not_recount_slots() {
+        let affinity = pinned_affinities(&[1])[0];
+        let table = SlotTable::<i32, CountingStrategy>::new();
+        COUNT_CALLS.store(0, Ordering::Release);
+
+        assert!(table.slot(affinity).is_some());
+        assert!(table.slot(affinity).is_some());
+        assert_eq!(
+            COUNT_CALLS.load(Ordering::Acquire),
+            1,
+            "only table initialization may request the strategy's slot count"
+        );
     }
 
     #[test]
