@@ -18,18 +18,19 @@ use crate::affinity::Affinity;
 /// A strategy for storing data in an affinity-aware manner.
 ///
 /// A strategy assigns each affinity a slot index and reports how many slots the storage holds. The
-/// affinities that share one `Arc` are expected to map into a single fixed coordinate space: every
-/// such affinity reports the same slot count, and its index falls within that count. The built-in
-/// strategies satisfy this because the counts are machine properties — the processor and
-/// memory-region counts — that do not vary across the affinities of one machine.
+/// affinities whose values share one thread-aware [`Arc`](crate::Arc) are expected to map into a
+/// single fixed coordinate space: every such affinity reports the same slot count, and its index
+/// falls within that count. The built-in strategies satisfy this because the counts are machine
+/// properties — the processor and memory-region counts — that do not vary across the affinities of
+/// one machine.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
     fn index(affinity: Affinity) -> usize;
 
     /// Returns the number of slots the storage holds.
     ///
-    /// The count is at least one and is expected to be the same for every affinity that shares one
-    /// `Arc`, because the storage is sized to it exactly once.
+    /// The count is at least one and is expected to be the same for every affinity whose value shares
+    /// one thread-aware [`Arc`](crate::Arc), because the storage is sized to it exactly once.
     fn count(affinity: Affinity) -> NonZero<usize>;
 }
 
