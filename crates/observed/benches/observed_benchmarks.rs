@@ -234,7 +234,7 @@ fn bench_with_tracking<R>(
         b.iter_custom(|iters| {
             let _alloc = allocs_op.measure_thread().iterations(iters);
             let _clock = time_op.measure_thread().iterations(iters);
-            let mut results = Vec::with_capacity(iters.min(usize::MAX as u64) as usize);
+            let mut results = Vec::with_capacity(usize::try_from(iters).unwrap_or(usize::MAX));
 
             let start = Instant::now();
 
