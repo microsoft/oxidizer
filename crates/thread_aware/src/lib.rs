@@ -258,7 +258,7 @@ pub use core::ThreadAware;
 /// `::marker::PhantomData` - so a qualified look-alike such as `my_crate::PhantomData` is
 /// relocated like any other field. A trait named `ThreadAware` and referred to by that bare
 /// name is assumed to be this crate's and suppresses the generated bound. In both cases,
-/// qualifying the path disambiguates.
+/// qualify the path to disambiguate.
 ///
 /// # Example
 /// ```rust

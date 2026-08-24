@@ -316,15 +316,24 @@ fn phantom_raw_pointer_with_manual_send_is_usable() {
     assert_eq!(value.len, 3);
 }
 
-/// Exactly what `#[thread_aware(skip)]` exists for: a field that is not itself thread-safe.
+/// Exactly what `#[thread_aware(skip)]` exists for: a field whose type is not `Send`.
+///
+/// The field is a capability-free marker rather than a live `Rc`, so the manual `Send`
+/// implementation below promises nothing about data the type does not own. An unconditional
+/// `unsafe impl Send` over a real `Rc<T>` would be unsound: `skip` only controls whether the
+/// generated body calls `relocate`, it does not stop safe code from cloning the `Rc` and then
+/// moving the outer value across a thread boundary.
+struct NotSendMarker<T>(PhantomData<Rc<T>>);
+
 #[derive(ThreadAware)]
 struct SkippedNotSend<T> {
     tracked: Tracker,
     #[thread_aware(skip)]
-    cache: Rc<T>,
+    cache: NotSendMarker<T>,
 }
 
-// SAFETY: test-only. The `Rc` is never handed to another thread.
+// SAFETY: test-only. `NotSendMarker` owns no value and exposes no destructor, dereference or
+// safe accessor, so `SkippedNotSend` carries no thread-affine capability to transfer.
 #[expect(clippy::non_send_fields_in_send_ty, reason = "deliberate: this is the shape `skip` exists for")]
 unsafe impl<T> Send for SkippedNotSend<T> {}
 
@@ -335,12 +344,11 @@ fn skipped_non_send_field_with_manual_send_is_usable() {
     let (source, destination) = affinity_pair();
     let mut value = SkippedNotSend {
         tracked: Tracker::default(),
-        cache: Rc::new(7_i32),
+        cache: NotSendMarker::<i32>(PhantomData),
     };
     value.relocate(source, destination);
 
-    assert_eq!(value.tracked.relocations, 1);
-    assert_eq!(*value.cache, 7, "the skipped field is left untouched");
+    assert_eq!(value.tracked.relocations, 1, "the skipped field emits no relocation");
 }
 
 // The three cases below pin why the `Self: Send` obligation must be emitted unconditionally
@@ -354,9 +362,13 @@ struct ManualSendMarker(PhantomData<Rc<()>>);
 // SAFETY: test-only. The marker holds no value.
 unsafe impl Send for ManualSendMarker {}
 
-struct MaybeSend<const N: usize>(*const ());
+/// A const-parameterised type that owns no data: no pointee, no destructor, no dereference and
+/// no safe accessor. The raw pointer inside the marker exists only to stop the compiler from
+/// deriving `Send` automatically.
+struct MaybeSend<const N: usize>(PhantomData<*const ()>);
 
-// SAFETY: test-only. Only this one const value is declared thread-safe.
+// SAFETY: test-only. The type holds no value, so moving one transfers no capability at all.
+// `N == 0` is singled out purely to exercise `Send`-ness that depends on a const parameter.
 unsafe impl Send for MaybeSend<0> {}
 
 /// `Send`-ness depending on a const parameter, which a type-parameter scan never sees.

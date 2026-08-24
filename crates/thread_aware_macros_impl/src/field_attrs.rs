@@ -51,7 +51,7 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
 ///
 /// A bare `PhantomData` remains ambiguous - a macro cannot resolve a name to the item it
 /// refers to - but it is by far the most common spelling of the real marker, so it is
-/// accepted. Qualifying a look-alike disambiguates it.
+/// accepted. Qualify a look-alike to disambiguate it.
 #[must_use]
 pub fn is_phantom_data(ty: &Type) -> bool {
     let Type::Path(tp) = ty else {
