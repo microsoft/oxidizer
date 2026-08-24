@@ -42,8 +42,7 @@
 //!
 //! Derive macro for automatically implementing error traits.
 //!
-//! When applied to a struct or enum containing an [`OhnoCore`] field,
-//! this macro automatically implements [`std::error::Error`], [`std::fmt::Display`], [`std::fmt::Debug`], and [`From`] conversions.
+//! When applied to a struct containing an [`OhnoCore`] field, this macro automatically implements [`std::error::Error`], [`std::fmt::Display`], [`std::fmt::Debug`], and [`From`] conversions.
 //!
 //! > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`] macro.
 //!
@@ -112,7 +111,8 @@
 //!
 //! println!("{error}");
 //! // Output: no such file: /etc/app.toml
-//! # assert!(error.to_string().starts_with("no such file: /etc/app.toml"));
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "no such file: /etc/app.toml");
 //! ```
 //!
 //! A cause given as a string renders the same way, but it does not join the chain: it is a message
@@ -132,7 +132,8 @@
 //!
 //! println!("{error}");
 //! // Output: ConfigError
-//! # assert!(error.to_string().starts_with("ConfigError"));
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "ConfigError");
 //! ```
 //!
 //! That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
@@ -140,8 +141,9 @@
 //!
 //! ## Enrichment and backtraces
 //!
-//! The message is only the first line of what `Display` writes. Each enrichment entry follows it
-//! on its own line, marked with `>` and tagged with the place it was added:
+//! The message is only the first part of what `Display` writes — with a template and a cause it is
+//! already two lines. Each enrichment entry follows it on its own line, marked with `>` and tagged
+//! with the place it was added:
 //!
 //! ```rust
 //! use std::io;
@@ -165,7 +167,7 @@
 //! # assert!(error.to_string().contains("> failed to load the service configuration (at "));
 //! ```
 //!
-//! A captured backtrace comes last, after any enrichment:
+//! A captured backtrace comes last for that level, after that level's enrichment:
 //!
 //! ```text
 //! no such file: /etc/app.toml
@@ -180,12 +182,15 @@
 //!    ...
 //! ```
 //!
-//! A backtrace is captured only when `RUST_BACKTRACE` asks for one. Use
-//! [`ErrorExt::message()`](ErrorExt::message) to read the message on its own.
+//! Capture is the standard library's decision: a backtrace is taken only when `RUST_LIB_BACKTRACE`
+//! asks for one, or when `RUST_BACKTRACE` does and `RUST_LIB_BACKTRACE` is unset. Use
+//! [`ErrorExt::message()`](ErrorExt::message) to read the message without the backtrace.
 //!
 //! Every error owns its [`OhnoCore`], and every core renders its own backtrace, so a chain of
 //! wrappers that all use the default rendering prints the message once and one backtrace block per
-//! level:
+//! level. The levels are written in turn, innermost first — a wrapper's own enrichment and
+//! backtrace follow the complete rendering of the level it wraps, so an outer enrichment entry
+//! appears *after* the inner level's `Backtrace:` block, not alongside the other enrichment:
 //!
 //! ```text
 //! no such file: /etc/app.toml
@@ -220,6 +225,8 @@
 //! let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 //!
 //! // Output: "Failed to read config with path: /etc/config.toml\ncaused by: file not found"
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "Failed to read config with path: /etc/config.toml\ncaused by: file not found");
 //! ```
 //!
 //! The template string supports field interpolation using `{field_name}` syntax. Unlike the

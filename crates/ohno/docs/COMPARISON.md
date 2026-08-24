@@ -30,36 +30,39 @@ declared, which is where the defaults differ most.
 to compile without one. `ohno` treats it as an override: a type with no
 `#[display]` still implements `Display`, and renders one of two defaults.
 
-**With a source**, the source's message is printed as it stands — no type name,
+**With a cause**, the cause's message is printed as it stands — no type name,
 and no `caused by:` line. This is what `#[error(transparent)]` is written for in
 `thiserror`, except that it is the default here rather than an opt-in, and it
 carries none of that attribute's restrictions: the type may hold other fields,
 and no attribute has to be spelled to get it.
 
-**Without a source**, the type's own name is printed, so a caller sees
-`Error: ConfigError` rather than a message. `thiserror` has no equivalent,
-because it will not compile a type that declares no message.
+**Without a cause**, the type's own name is printed, so a log line reads
+`ConfigError` rather than a message. (`Error: ` in front of it, as `main`
+printing a `Result` produces, comes from the caller — `ohno` never writes a
+prefix.) `thiserror` has no equivalent, because it will not compile a type that
+declares no message.
 
-The two defaults sit one source apart, which is worth knowing when porting a
+The two defaults sit one cause apart, which is worth knowing when porting a
 `#[error(transparent)]` wrapper: in `thiserror` such a wrapper cannot exist
 without its single inner error, while the `ohno` equivalent can be constructed
 empty, and then renders as its own bare name.
 
-See "How error text is rendered" in the crate documentation for the full account
-with examples.
+See [How error text is rendered](../README.md#how-error-text-is-rendered) for the
+full account with examples.
 
 ## A string cause is not a source
 
 `ohno` constructors accept either an error value or a string. Both render
 identically, but only an error value joins the chain — for a string cause,
-`source()` returns `None`. `thiserror` has no counterpart, since a source there
-is always a typed field.
+`source()` returns `None`. That is why the defaults above are stated in terms of
+a *cause* rather than a *source*: `source()` does not predict what is rendered.
+`thiserror` has no counterpart, since a source there is always a typed field.
 
 ## `Display` carries more than the message
 
-In `thiserror`, `format!("{e}")` is the message and nothing else. In `ohno` it is
-the message, then any enrichment entries added along the way, then the backtrace
-if one was captured:
+In `thiserror`, `format!("{e}")` is the message and nothing else. In `ohno` it is,
+for each level of the chain: the message, then that level's enrichment entries,
+then that level's backtrace if one was captured:
 
 ```text
 no such file: /etc/app.toml
@@ -71,11 +74,16 @@ Backtrace:
 ```
 
 Code that logs `{e}` and expects a single line therefore needs review when
-porting. `ErrorExt::message()` returns the message on its own.
+porting. `ErrorExt::message()` drops the enrichment and the backtrace, but it is
+not a single-line guarantee either: with a `#[display]` template and a cause it
+returns `<message>\ncaused by: <cause>`.
 
 Because every `ohno` error owns its own `OhnoCore`, and every core renders its
 own backtrace, a chain of wrappers prints the message once and one backtrace
-block per level.
+block per level. The ordering above holds *per level*, not across the chain: the
+levels are written innermost first, so a wrapper's enrichment entries appear
+after the inner level's `Backtrace:` block rather than grouped with the inner
+level's entries.
 
 ## Structs only
 

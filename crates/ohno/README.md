@@ -46,8 +46,7 @@ fn open_file(path: impl AsRef<Path>) -> Result<String, ConfigError> {
 
 Derive macro for automatically implementing error traits.
 
-When applied to a struct or enum containing an [`OhnoCore`][__link5] field,
-this macro automatically implements [`std::error::Error`][__link6], [`std::fmt::Display`][__link7], [`std::fmt::Debug`][__link8], and [`From`][__link9] conversions.
+When applied to a struct containing an [`OhnoCore`][__link5] field, this macro automatically implements [`std::error::Error`][__link6], [`std::fmt::Display`][__link7], [`std::fmt::Debug`][__link8], and [`From`][__link9] conversions.
 
  > 
  > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`][__link10] macro.
@@ -143,8 +142,9 @@ that it needs either a cause or a template.
 
 ### Enrichment and backtraces
 
-The message is only the first line of what `Display` writes. Each enrichment entry follows it
-on its own line, marked with `>` and tagged with the place it was added:
+The message is only the first part of what `Display` writes — with a template and a cause it is
+already two lines. Each enrichment entry follows it on its own line, marked with `>` and tagged
+with the place it was added:
 
 ```rust
 use std::io;
@@ -167,7 +167,7 @@ println!("{error}");
 //         > failed to load the service configuration (at src/config.rs:6)
 ```
 
-A captured backtrace comes last, after any enrichment:
+A captured backtrace comes last for that level, after that level’s enrichment:
 
 ```text
 no such file: /etc/app.toml
@@ -182,12 +182,15 @@ Backtrace:
    ...
 ```
 
-A backtrace is captured only when `RUST_BACKTRACE` asks for one. Use
-[`ErrorExt::message()`][__link12] to read the message on its own.
+Capture is the standard library’s decision: a backtrace is taken only when `RUST_LIB_BACKTRACE`
+asks for one, or when `RUST_BACKTRACE` does and `RUST_LIB_BACKTRACE` is unset. Use
+[`ErrorExt::message()`][__link12] to read the message without the backtrace.
 
 Every error owns its [`OhnoCore`][__link13], and every core renders its own backtrace, so a chain of
 wrappers that all use the default rendering prints the message once and one backtrace block per
-level:
+level. The levels are written in turn, innermost first — a wrapper’s own enrichment and
+backtrace follow the complete rendering of the level it wraps, so an outer enrichment entry
+appears *after* the inner level’s `Backtrace:` block, not alongside the other enrichment:
 
 ```text
 no such file: /etc/app.toml
@@ -457,7 +460,7 @@ uniformly via [`Labeled::label`][__link25].
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbytrpabsE8xobjqG9axpJ2FMbPtKXWLOg3e8bzFvTXkcI6oFhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbNR5mLV9Kcl8bZv6w7esxE5UbZsOYl4G8UygbmNzvN7_GkWxhZIKCZG9obm9lMC40LjCCa29obm9fbWFjcm9zZTAuNC4w
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
