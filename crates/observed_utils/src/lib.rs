@@ -17,8 +17,8 @@
 //!
 //! - [`any_value_of`], [`otel_value_of`] and [`otel_severity_of`] convert an
 //!   [`observed::Value`] or [`observed::Severity`] into its OpenTelemetry
-//!   counterpart. OpenTelemetry has no unsigned value, so a `u64` past
-//!   `i64::MAX` converts to its decimal string rather than wrapping.
+//!   counterpart. OpenTelemetry has no unsigned value, so a `u64` converts to an
+//!   `i64` saturating at `i64::MAX` rather than wrapping.
 //! - [`metric_number_of`] extracts the number a metric instrument records.
 //! - [`format_any_value`] renders an [`AnyValue`](opentelemetry::logs::AnyValue)
 //!   in human-readable form instead of its `Debug` shape.

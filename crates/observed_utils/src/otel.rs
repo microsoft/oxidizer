@@ -30,32 +30,24 @@ fn list_of<T>(values: Vec<T>, mut f: impl FnMut(T) -> AnyValue) -> AnyValue {
     AnyValue::ListAny(Box::new(values.into_iter().map(&mut f).collect()))
 }
 
-/// Converts a `u64` into an `OTel` [`AnyValue`].
+/// Converts a `u64` into an `i64`, saturating at [`i64::MAX`].
 ///
-/// `AnyValue` has no unsigned variant, so a value past `i64::MAX` is exported as
-/// its decimal string rather than wrapping into a negative number.
-fn unsigned_any_value(value: u64) -> AnyValue {
-    i64::try_from(value).map_or_else(|_| AnyValue::String(value.to_string().into()), AnyValue::Int)
-}
-
-/// Converts a `u64` into an `OTel` [`opentelemetry::Value`].
-///
-/// See [`unsigned_any_value`]: `opentelemetry::Value` has no unsigned variant
-/// either.
-fn unsigned_otel_value(value: u64) -> opentelemetry::Value {
-    i64::try_from(value).map_or_else(
-        |_| opentelemetry::Value::String(value.to_string().into()),
-        opentelemetry::Value::I64,
-    )
+/// Neither `AnyValue` nor [`opentelemetry::Value`] has an unsigned variant, so a
+/// `u64` must become an `i64` to be exported as a number at all. Saturating
+/// keeps the value numeric and ordered, at the cost of collapsing everything
+/// past `i64::MAX` onto the same reading; wrapping would instead report a large
+/// count as a negative one.
+fn saturating_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 /// Converts a [`Value`] into an `OTel` [`AnyValue`], as used for log record
 /// attributes and bodies.
 ///
-/// One conversion is not variant-for-variant: a [`Value::U64`] up to `i64::MAX`
-/// becomes [`AnyValue::Int`], while a larger one becomes an [`AnyValue::String`]
-/// holding the decimal digits. `AnyValue` has no unsigned variant, so the
-/// alternatives would be wrapping into a negative number or dropping the value.
+/// One conversion is not variant-for-variant: a [`Value::U64`] becomes an
+/// [`AnyValue::Int`], saturating at [`i64::MAX`]. `AnyValue` has no unsigned
+/// variant, so the alternatives would be wrapping into a negative number or
+/// changing the exported type for large values.
 // The last arm guards the `#[non_exhaustive]` `Value`, so no variant that exists
 // today can reach it, and coverage instrumentation counts an arm that is never
 // taken as an uncovered line. The match is therefore excluded from the coverage
@@ -63,15 +55,15 @@ fn unsigned_otel_value(value: u64) -> opentelemetry::Value {
 // upstream would either fail to compile here or silently lose data.
 //
 // The exclusion covers the inline arms as well, not only the guard. What stays
-// measured is the work these arms delegate: `unsigned_any_value`, `list_of` and
-// the element closures. Mutation testing still applies to everything here.
+// measured is the work these arms delegate: `saturating_i64`, `list_of` and the
+// element closures. Mutation testing still applies to everything here.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
 pub fn any_value_of(value: Value) -> AnyValue {
     match value {
         Value::Bool(v) => AnyValue::Boolean(v),
         Value::I64(v) => AnyValue::Int(v),
-        Value::U64(v) => unsigned_any_value(v),
+        Value::U64(v) => AnyValue::Int(saturating_i64(v)),
         Value::F64(v) => AnyValue::Double(v),
         Value::String(v) => AnyValue::String(string_value_of(v)),
         Value::BoolArray(v) => list_of(v, AnyValue::Boolean),
@@ -88,8 +80,9 @@ pub fn any_value_of(value: Value) -> AnyValue {
 /// Converts a [`Value`] into an `OTel` [`opentelemetry::Value`], as used for
 /// metric dimensions.
 ///
-/// As in [`any_value_of`], a [`Value::U64`] past `i64::MAX` is exported as its
-/// decimal string: `opentelemetry::Value` has no unsigned variant either.
+/// As in [`any_value_of`], a [`Value::U64`] becomes an
+/// [`I64`](opentelemetry::Value::I64) saturating at [`i64::MAX`]:
+/// `opentelemetry::Value` has no unsigned variant either.
 // Excluded from the coverage gate for the reason given above `any_value_of`.
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[must_use]
@@ -99,7 +92,7 @@ pub fn otel_value_of(value: Value) -> opentelemetry::Value {
     match value {
         Value::Bool(v) => opentelemetry::Value::Bool(v),
         Value::I64(v) => opentelemetry::Value::I64(v),
-        Value::U64(v) => unsigned_otel_value(v),
+        Value::U64(v) => opentelemetry::Value::I64(saturating_i64(v)),
         Value::F64(v) => opentelemetry::Value::F64(v),
         Value::String(v) => opentelemetry::Value::String(string_value_of(v)),
         Value::BoolArray(v) => opentelemetry::Value::Array(Array::Bool(v)),
@@ -207,13 +200,18 @@ mod tests {
     }
 
     #[test]
-    fn unsigned_values_past_i64_max_convert_to_strings() {
-        let big = u64::MAX;
-        assert_eq!(any_value_of(Value::from(big)), AnyValue::String(big.to_string().into()));
-        assert_eq!(
-            otel_value_of(Value::from(big)),
-            opentelemetry::Value::String(big.to_string().into())
-        );
+    fn unsigned_values_at_i64_max_convert_exactly() {
+        let edge = i64::MAX as u64;
+        assert_eq!(any_value_of(Value::from(edge)), AnyValue::Int(i64::MAX));
+        assert_eq!(otel_value_of(Value::from(edge)), opentelemetry::Value::I64(i64::MAX));
+    }
+
+    #[test]
+    fn unsigned_values_past_i64_max_saturate() {
+        for big in [i64::MAX as u64 + 1, u64::MAX] {
+            assert_eq!(any_value_of(Value::from(big)), AnyValue::Int(i64::MAX));
+            assert_eq!(otel_value_of(Value::from(big)), opentelemetry::Value::I64(i64::MAX));
+        }
     }
 
     #[test]

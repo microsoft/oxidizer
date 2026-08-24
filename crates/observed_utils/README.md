@@ -23,8 +23,8 @@ exporter.
 
 * [`any_value_of`][__link1], [`otel_value_of`][__link2] and [`otel_severity_of`][__link3] convert an
   [`observed::Value`][__link4] or [`observed::Severity`][__link5] into its OpenTelemetry
-  counterpart. OpenTelemetry has no unsigned value, so a `u64` past
-  `i64::MAX` converts to its decimal string rather than wrapping.
+  counterpart. OpenTelemetry has no unsigned value, so a `u64` converts to an
+  `i64` saturating at `i64::MAX` rather than wrapping.
 * [`metric_number_of`][__link6] extracts the number a metric instrument records.
 * [`format_any_value`][__link7] renders an [`AnyValue`][__link8]
   in human-readable form instead of its `Debug` shape.
@@ -40,7 +40,7 @@ This crate is less stable than `observed` itself and may have breaking changes.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed_utils">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbtHrgr56eiRobTkuMXFMdzlEbzwMUaJ9ajN8bbmNlP2ykslphZIOCaG9ic2VydmVkZjAuMjQuMIJub2JzZXJ2ZWRfdXRpbHNlMC4xLjCCbW9wZW50ZWxlbWV0cnlmMC4zMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbRrqGsb3cxdEbOysBQ_WLZMwbnd9RXJQ5msMbnMdmNajwvJBhZIOCaG9ic2VydmVkZjAuMjQuMIJub2JzZXJ2ZWRfdXRpbHNlMC4xLjCCbW9wZW50ZWxlbWV0cnlmMC4zMi4w
  [__link0]: https://crates.io/crates/observed/0.24.0
  [__link1]: https://docs.rs/observed_utils/0.1.0/observed_utils/?search=any_value_of
  [__link2]: https://docs.rs/observed_utils/0.1.0/observed_utils/?search=otel_value_of
