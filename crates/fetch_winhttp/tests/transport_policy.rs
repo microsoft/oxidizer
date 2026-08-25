@@ -219,16 +219,23 @@ fn compression_redirects_and_cookies_follow_transport_policy() {
     ]);
     let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
-    let gzip = futures::executor::block_on(test_client.client.get(server.url("/gzip")).fetch_text_body()).unwrap();
-    let deflate = futures::executor::block_on(test_client.client.get(server.url("/deflate")).fetch_text_body()).unwrap();
+    let gzip = futures::executor::block_on(test_client.client.get(server.url("/gzip")).fetch()).unwrap();
+    let deflate = futures::executor::block_on(test_client.client.get(server.url("/deflate")).fetch()).unwrap();
     let brotli = futures::executor::block_on(test_client.client.get(server.url("/brotli")).fetch()).unwrap();
     let zstd = futures::executor::block_on(test_client.client.get(server.url("/zstd")).fetch()).unwrap();
     let redirect = futures::executor::block_on(test_client.client.get(server.url("/redirect")).fetch()).unwrap();
     futures::executor::block_on(test_client.client.get(server.url("/set-cookie")).fetch_text_body()).unwrap();
     futures::executor::block_on(test_client.client.get(server.url("/check-cookie")).fetch_text_body()).unwrap();
 
-    assert_eq!(gzip, "hello");
-    assert_eq!(deflate, "hello");
+    // Transparent decoding strips the encoding metadata so callers never see a
+    // Content-Encoding that no longer describes the body, or a Content-Length
+    // that still measures the compressed wire form.
+    assert!(gzip.headers().get(CONTENT_ENCODING).is_none());
+    assert!(gzip.headers().get(CONTENT_LENGTH).is_none());
+    assert!(deflate.headers().get(CONTENT_ENCODING).is_none());
+    assert!(deflate.headers().get(CONTENT_LENGTH).is_none());
+    assert_eq!(futures::executor::block_on(gzip.into_body().into_text()).unwrap(), "hello");
+    assert_eq!(futures::executor::block_on(deflate.into_body().into_text()).unwrap(), "hello");
     assert_eq!(brotli.headers().get(CONTENT_ENCODING).unwrap(), "br");
     assert_eq!(zstd.headers().get(CONTENT_ENCODING).unwrap(), "zstd");
     assert_eq!(
