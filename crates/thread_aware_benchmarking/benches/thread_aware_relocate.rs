@@ -53,9 +53,9 @@ use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 /// Oversubscription is the point of that shape: it puts more runnable workers in
 /// the scheduler queue than there are processors to run them, the regime a
 /// thread-per-core runtime reaches whenever it has more runnable work than cores.
-/// Every worker still relocates into its own already-filled slot, so no two
-/// workers ever share a cell; the shape exposes how the uncontended hit path
-/// behaves under scheduler pressure, not cell contention.
+/// Every worker still relocates between its own already-filled source and
+/// destination slots, so no two workers share a cell; the shape exposes how the
+/// uncontended hit path behaves under scheduler pressure, not cell contention.
 ///
 /// A small multiple is enough to reach that regime. Higher factors only add more
 /// scheduler queueing without exercising a different code path.
@@ -80,7 +80,7 @@ fn materialized(affinities: &[Affinity]) -> Arc<Payload, PerCore> {
     ids.sort_unstable();
     let distinct = ids.len();
     ids.dedup();
-    assert_eq!(ids.len(), distinct, "every affinity must hold its own value");
+    assert_eq!(ids.len(), distinct, "every affinity's partition must hold its own value");
 
     arc
 }
@@ -115,7 +115,11 @@ fn materialized_tree(affinities: &[Affinity]) -> Tree {
     ids.sort_unstable();
     let distinct = ids.len();
     ids.dedup();
-    assert_eq!(ids.len(), distinct, "every layer of every affinity must hold its own value");
+    assert_eq!(
+        ids.len(),
+        distinct,
+        "every layer of every affinity's partition must hold its own value"
+    );
 
     tree
 }
@@ -131,25 +135,43 @@ fn bench_hit_path(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("thread_aware_relocate/hit_path");
 
-    let mut subject = arc.clone();
     group.bench_function("pre_materialized", |b| {
-        b.iter(|| {
-            black_box(&mut subject).relocate(black_box(Some(source)), black_box(destination));
-        });
+        b.iter_batched(
+            || {
+                let mut subject = arc.clone();
+                subject.relocate(None, source);
+                subject
+            },
+            |mut subject| {
+                black_box(&mut subject).relocate(black_box(Some(source)), black_box(destination));
+                subject
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     let mut subject = arc;
+    subject.relocate(None, destination);
     group.bench_function("same_affinity", |b| {
         b.iter(|| {
             black_box(&mut subject).relocate(black_box(Some(destination)), black_box(destination));
         });
     });
 
-    let mut subject = materialized_tree(&affinities);
+    let tree = materialized_tree(&affinities);
     group.bench_function("tree", |b| {
-        b.iter(|| {
-            black_box(&mut subject).relocate(black_box(Some(source)), black_box(destination));
-        });
+        b.iter_batched(
+            || {
+                let mut subject = tree.clone();
+                subject.relocate(None, source);
+                subject
+            },
+            |mut subject| {
+                black_box(&mut subject).relocate(black_box(Some(source)), black_box(destination));
+                subject
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
@@ -246,10 +268,9 @@ impl ConcurrentRelocation {
     where
         T: ThreadAware + Clone + Send + 'static,
     {
-        // Force an affinity floor even for the single-worker case, so that every
-        // shape performs a cross-affinity relocation. A worker whose source equals
-        // its destination would be measuring a different operation.
-        let affinity_count = thread_count.max(2);
+        // Give every worker distinct source and destination partitions. Two partitions per worker
+        // keep both directions of the repeated handoff uncontended by other workers.
+        let affinity_count = thread_count.saturating_mul(2);
         let affinities = pinned_affinities(&[affinity_count]);
         let subject = make(&affinities);
 
@@ -261,12 +282,10 @@ impl ConcurrentRelocation {
 
         let workers = (0..thread_count)
             .map(|index| {
-                let destination = affinities[index];
-
-                // Neighbouring affinity as the source, so the arguments differ per worker
-                // the way they do when work fans out from one core to all the others.
-                let source = affinities[index.wrapping_add(1) % affinity_count];
+                let source = affinities[index];
+                let destination = affinities[index.saturating_add(thread_count)];
                 let mut subject = subject.clone();
+                subject.relocate(None, source);
 
                 let ready = sync::Arc::clone(&ready);
                 let start = sync::Arc::clone(&start);
@@ -275,6 +294,8 @@ impl ConcurrentRelocation {
                 let shutdown = sync::Arc::clone(&shutdown);
 
                 thread::spawn(move || {
+                    let mut at_source = true;
+
                     loop {
                         ready.wait();
                         start.wait();
@@ -283,9 +304,38 @@ impl ConcurrentRelocation {
                             break;
                         }
 
-                        for _ in 0..batch.load(Ordering::Acquire) {
-                            subject.relocate(Some(source), destination);
-                            black_box(&subject);
+                        let iterations = batch.load(Ordering::Acquire);
+                        let pairs = iterations / 2;
+
+                        // Alternate between two valid populated partitions. Unrolling pairs keeps
+                        // direction selection outside the per-relocation hot path; only an odd tail
+                        // changes which direction begins the next batch.
+                        if at_source {
+                            for _ in 0..pairs {
+                                subject.relocate(Some(source), destination);
+                                black_box(&subject);
+                                subject.relocate(Some(destination), source);
+                                black_box(&subject);
+                            }
+
+                            if !iterations.is_multiple_of(2) {
+                                subject.relocate(Some(source), destination);
+                                black_box(&subject);
+                                at_source = false;
+                            }
+                        } else {
+                            for _ in 0..pairs {
+                                subject.relocate(Some(destination), source);
+                                black_box(&subject);
+                                subject.relocate(Some(source), destination);
+                                black_box(&subject);
+                            }
+
+                            if !iterations.is_multiple_of(2) {
+                                subject.relocate(Some(destination), source);
+                                black_box(&subject);
+                                at_source = true;
+                            }
                         }
 
                         end.wait();

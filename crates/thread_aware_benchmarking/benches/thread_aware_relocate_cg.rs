@@ -53,14 +53,23 @@ mod linux {
     // Destination affinity already holds a value.
     fn materialized() -> (Arc<Payload, PerCore>, Affinity, Affinity) {
         let affinities = affinities();
-        let arc = Arc::<Payload, PerCore>::new(Payload::new);
+        let mut arc = Arc::<Payload, PerCore>::new(Payload::new);
 
         for &affinity in &affinities {
             let mut probe = arc.clone();
             probe.relocate(None, affinity);
         }
 
+        arc.relocate(None, affinities[0]);
         (arc, affinities[0], affinities[1])
+    }
+
+    // Destination affinity holds the value carried by the returned Arc.
+    fn materialized_at_destination() -> (Arc<Payload, PerCore>, Affinity, Affinity) {
+        let (mut arc, source, destination) = materialized();
+        arc.relocate(Some(source), destination);
+
+        (arc, destination, destination)
     }
 
     // A primer affinity sizes the shared slot table before timing; the source and
@@ -94,8 +103,14 @@ mod linux {
         ids.sort_unstable();
         let distinct = ids.len();
         ids.dedup();
-        assert_eq!(ids.len(), distinct, "every layer of every affinity must hold its own value");
+        assert_eq!(
+            ids.len(),
+            distinct,
+            "every layer of every affinity's partition must hold its own value"
+        );
 
+        let mut tree = tree;
+        tree.relocate(None, affinities[0]);
         (tree, affinities[0], affinities[1])
     }
 
@@ -122,11 +137,11 @@ mod linux {
     }
 
     #[library_benchmark]
-    #[bench::run(materialized())]
+    #[bench::run(materialized_at_destination())]
     fn hit_path_same_affinity(input: (Arc<Payload, PerCore>, Affinity, Affinity)) -> u64 {
-        let (mut arc, _source, destination) = input;
+        let (mut arc, source, destination) = input;
 
-        arc.relocate(black_box(Some(destination)), black_box(destination));
+        arc.relocate(black_box(Some(source)), black_box(destination));
 
         black_box(arc.id)
     }

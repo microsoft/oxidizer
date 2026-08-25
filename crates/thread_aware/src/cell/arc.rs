@@ -756,8 +756,9 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
 
         // Relocation reads the destination's write-once cell with a plain acquire load. The steady
         // state of any affinity is "already materialized", so this hit is the overwhelmingly common
-        // outcome and carries no lock-word contention: concurrent relocations into distinct
-        // affinities never serialize, because a published cell is only ever read.
+        // outcome and carries no cell or table lock-word contention. Cloning the stored `sync::Arc`
+        // and dropping the previously carried value still update their strong counts, which can
+        // contend when callers share either allocation.
         // Ref: docs/implementation.md, "Relocation and publication".
         if let Some(value) = self.storage.probe(destination) {
             self.value = value;

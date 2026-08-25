@@ -15,9 +15,10 @@ is relocated into it and read by every relocation thereafter. The strategy maps
 affinities to slots: `PerCore` gives each processor its own slot, while `PerNuma`
 and `PerProcess` fold several affinities onto one shared slot. A published slot is
 read with a plain acquire load and is never mutated again, so relocations into
-already-populated slots carry no lock-word contention and never serialize — not
-even into the *same* slot. Under `PerCore` a fanout across cores spreads across
-slots that are all read-only in the steady state.
+already-populated slots carry no slot or table lock-word contention. Adopting the
+stored `sync::Arc` still updates its strong count, so callers that share a partition
+can contend on that allocation's reference count. Under `PerCore` a fanout across
+cores spreads across slots that are all read-only in the steady state.
 
 The table is sized once, on first use, to the slot count the strategy reports —
 `Strategy::count` returns a `NonZero<usize>`, so the table always has at least one
