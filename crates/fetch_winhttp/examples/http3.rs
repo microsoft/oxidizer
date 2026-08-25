@@ -4,10 +4,10 @@
 //! Issues a request over HTTP/3.
 //!
 //! Protocol selection is explicit. `supported_http_versions` lists what the client may
-//! negotiate, and listing HTTP/3 alone makes it mandatory: WinHTTP is asked for QUIC and the
-//! request fails if QUIC cannot be established, rather than quietly falling back to TCP. That
-//! failure is what a caller who requires HTTP/3 wants to see, so the example provokes it too
-//! by pointing the same client at a TCP-only fixture.
+//! negotiate, and listing HTTP/3 alone makes it mandatory: the request fails if HTTP/3
+//! cannot be established, rather than quietly falling back to HTTP/1.1 or HTTP/2. That
+//! failure is what a caller who requires HTTP/3 wants to see, so the example provokes it
+//! too by pointing the same client at a fixture that only speaks HTTP over TCP.
 //!
 //! Run with `cargo run -p fetch_winhttp --example http3`.
 
@@ -31,14 +31,14 @@ mod example {
     use tick::Clock;
 
     pub(super) async fn run() {
-        succeed_over_quic().await;
-        fail_without_quic().await;
+        succeed_over_http3().await;
+        fail_without_http3().await;
     }
 
-    async fn succeed_over_quic() {
-        let trailers = HeaderMap::from_iter([(HeaderName::from_static("x-served-by"), HeaderValue::from_static("quic"))]);
+    async fn succeed_over_http3() {
+        let trailers = HeaderMap::from_iter([(HeaderName::from_static("x-served-by"), HeaderValue::from_static("http3"))]);
         let server = Http3Server::start([ResponsePlan::chunks([Bytes::from_static(b"http3 response")]).trailers(trailers)]);
-        // The QUIC fixture presents a self-signed certificate.
+        // The HTTP/3 fixture presents a self-signed certificate.
         let test_client = client(
             &[Version::HTTP_3],
             WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
@@ -50,7 +50,7 @@ mod example {
             .get(server.url("/h3"))
             .fetch()
             .await
-            .expect("the QUIC fixture answers");
+            .expect("the HTTP/3 fixture answers");
 
         println!("negotiated version: {:?}", response.version());
         let (body, trailers) = collect_frames(response.into_body()).await;
@@ -59,7 +59,7 @@ mod example {
         drop(server.finish());
     }
 
-    async fn fail_without_quic() {
+    async fn fail_without_http3() {
         let server = TestServer::https([ResponsePlan::ok("never reached")], &["localhost"]);
         let test_client = client(
             &[Version::HTTP_3],
@@ -72,7 +72,7 @@ mod example {
             .get(server.url("/h3"))
             .fetch()
             .await
-            .expect_err("a TCP-only peer cannot satisfy a required HTTP/3 request");
+            .expect_err("a peer without HTTP/3 cannot satisfy a required HTTP/3 request");
 
         println!("required HTTP/3 does not fall back: {error}");
         drop(server.finish());
