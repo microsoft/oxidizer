@@ -172,8 +172,14 @@
 //!     override_var_name("x86_64-pc-windows-msvc"),
 //!     "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc"
 //! );
-//! assert_eq!(SpectreArch::from_target_arch("x86_64"), Some(SpectreArch::X64));
-//! assert_eq!(SpectreArch::from_target_arch("aarch64"), Some(SpectreArch::Arm64));
+//! assert_eq!(
+//!     SpectreArch::from_target_arch("x86_64"),
+//!     Some(SpectreArch::X64)
+//! );
+//! assert_eq!(
+//!     SpectreArch::from_target_arch("aarch64"),
+//!     Some(SpectreArch::Arm64)
+//! );
 //! assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 //! ```
 

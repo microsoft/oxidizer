@@ -45,9 +45,15 @@ impl SpectreArch {
     /// ```
     /// use msvc_spectre_libs::resolve::SpectreArch;
     ///
-    /// assert_eq!(SpectreArch::from_target_arch("x86_64"), Some(SpectreArch::X64));
+    /// assert_eq!(
+    ///     SpectreArch::from_target_arch("x86_64"),
+    ///     Some(SpectreArch::X64)
+    /// );
     /// // Arm64EC objects ship inside the 64-bit Arm libraries.
-    /// assert_eq!(SpectreArch::from_target_arch("arm64ec"), Some(SpectreArch::Arm64));
+    /// assert_eq!(
+    ///     SpectreArch::from_target_arch("arm64ec"),
+    ///     Some(SpectreArch::Arm64)
+    /// );
     /// assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
     /// ```
     #[must_use]
