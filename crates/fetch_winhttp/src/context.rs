@@ -24,19 +24,6 @@ use crate::session::WinHttpSession;
 const OPERATION_IDLE: u8 = 0;
 // One callback or the submitting thread has claimed the initialized payload.
 const OPERATION_CLAIMED: u8 = 1;
-// The low 32 bits store WinHTTP's secure-failure flags. This bit distinguishes
-// "no callback observed" from a callback that reported a zero flag mask.
-const SECURE_FAILURE_PRESENT: u64 = 1 << u32::BITS;
-
-/// Packs the WinHTTP secure-failure flags together with the presence bit.
-///
-/// The flags occupy the low 32 bits and the presence bit sits above them, so
-/// `|` and `^` compute the same value and a mutation between them is equivalent
-/// rather than a defect.
-#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
-fn encode_secure_failure(flags: u32) -> u64 {
-    SECURE_FAILURE_PRESENT | u64::from(flags)
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -494,7 +481,7 @@ fn active_kind(state: u8) -> Option<OperationKind> {
 ///
 /// The callback records these states independently of operation completions so
 /// a later failure can be attributed to a cold connection attempt. The numeric
-/// values are stored directly in `RequestContext::cold_connect`.
+/// values are stored directly in `ColdConnectDiagnostics`.
 ///
 /// `Unobserved` means no connection-establishment callback was seen.
 /// `Connecting` and `Connected` both identify work associated with a newly
@@ -504,6 +491,85 @@ pub(crate) enum ColdConnectState {
     Unobserved = 0,
     Connecting = 1,
     Connected = 2,
+}
+
+/// Stores the WinHTTP secure-failure flags observed for one request.
+///
+/// TLS validation problems arrive on a `SECURE_FAILURE` callback separate from the
+/// `REQUEST_ERROR` that reports the failure itself, so the flags belong to the
+/// request rather than to any single operation. Successive callbacks for one request
+/// handle run on different WinHTTP worker threads, which is why the storage is
+/// atomic.
+///
+/// The flags occupy the low 32 bits of the packed value and a presence marker sits
+/// above them, so a callback that reports no flags stays distinguishable from a
+/// request where no such callback arrived.
+#[derive(Debug)]
+struct SecureFailureDiagnostics {
+    packed: AtomicU64,
+}
+
+impl SecureFailureDiagnostics {
+    /// Marks the packed value as carrying flags from an observed callback.
+    const PRESENT: u64 = 1 << u32::BITS;
+
+    const fn new() -> Self {
+        Self { packed: AtomicU64::new(0) }
+    }
+
+    fn record(&self, flags: u32) {
+        self.packed.store(Self::pack(flags), Ordering::Release);
+    }
+
+    fn observed(&self) -> Option<u32> {
+        let packed = self.packed.load(Ordering::Acquire);
+
+        if packed & Self::PRESENT == 0 {
+            return None;
+        }
+
+        Some(u32::try_from(packed & u64::from(u32::MAX)).expect("masking to the low 32 bits guarantees a u32 value"))
+    }
+
+    /// The presence marker and the flags occupy disjoint bits, so `|` and `^`
+    /// compute the same value and a mutation between them is equivalent rather
+    /// than a defect.
+    #[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
+    fn pack(flags: u32) -> u64 {
+        Self::PRESENT | u64::from(flags)
+    }
+}
+
+/// Stores connection-establishment progress observed for one request.
+///
+/// WinHTTP reports connection establishment through callbacks that are independent
+/// of operation completions, so the state belongs to the request and is read when a
+/// failure needs cold-connection attribution. Successive callbacks for one request
+/// handle run on different WinHTTP worker threads, which is why the storage is
+/// atomic.
+#[derive(Debug)]
+struct ColdConnectDiagnostics {
+    state: AtomicU8,
+}
+
+impl ColdConnectDiagnostics {
+    const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(ColdConnectState::Unobserved as u8),
+        }
+    }
+
+    fn record(&self, state: ColdConnectState) {
+        self.state.store(state as u8, Ordering::Release);
+    }
+
+    fn observed(&self) -> ColdConnectState {
+        match self.state.load(Ordering::Acquire) {
+            value if value == ColdConnectState::Connecting as u8 => ColdConnectState::Connecting,
+            value if value == ColdConnectState::Connected as u8 => ColdConnectState::Connected,
+            _ => ColdConnectState::Unobserved,
+        }
+    }
 }
 
 /// Owns callback-visible state and parent handles for one request.
@@ -523,10 +589,10 @@ pub(crate) enum ColdConnectState {
 pub(crate) struct RequestContext {
     // Publishes the current event sender and retained I/O buffer to callbacks.
     operation: CallbackOperationSlot,
-    // Low 32 bits are WinHTTP secure-failure flags; bit 32 marks their presence.
-    secure_failure: AtomicU64,
-    // Stores a ColdConnectState discriminant for later telemetry attribution.
-    cold_connect: AtomicU8,
+    // Records TLS validation flags reported outside the operation slot.
+    secure_failure: SecureFailureDiagnostics,
+    // Records connection-establishment progress for telemetry attribution.
+    cold_connect: ColdConnectDiagnostics,
     // Keeps the request's parent connect handle alive through HANDLE_CLOSING.
     connect: ConnectHandle,
     // Keeps the owning session and its connection pool alive with the request.
@@ -538,8 +604,8 @@ impl RequestContext {
     pub(crate) fn new(connect: ConnectHandle, session: Arc<WinHttpSession>) -> Self {
         Self {
             operation: CallbackOperationSlot::new(),
-            secure_failure: AtomicU64::new(0),
-            cold_connect: AtomicU8::new(ColdConnectState::Unobserved as u8),
+            secure_failure: SecureFailureDiagnostics::new(),
+            cold_connect: ColdConnectDiagnostics::new(),
             connect,
             session,
             _pinned: PhantomPinned,
@@ -603,33 +669,23 @@ impl RequestContext {
     }
 
     pub(crate) fn record_secure_failure(&self, flags: u32) {
-        self.secure_failure.store(encode_secure_failure(flags), Ordering::Release);
+        self.secure_failure.record(flags);
     }
 
     pub(crate) fn secure_failure_flags(&self) -> Option<u32> {
-        let value = self.secure_failure.load(Ordering::Acquire);
-
-        if value & SECURE_FAILURE_PRESENT == 0 {
-            None
-        } else {
-            Some(u32::try_from(value & u64::from(u32::MAX)).expect("masking to the low 32 bits guarantees a u32 value"))
-        }
+        self.secure_failure.observed()
     }
 
     pub(crate) fn mark_connecting(&self) {
-        self.cold_connect.store(ColdConnectState::Connecting as u8, Ordering::Release);
+        self.cold_connect.record(ColdConnectState::Connecting);
     }
 
     pub(crate) fn mark_connected(&self) {
-        self.cold_connect.store(ColdConnectState::Connected as u8, Ordering::Release);
+        self.cold_connect.record(ColdConnectState::Connected);
     }
 
     pub(crate) fn cold_connect_state(&self) -> ColdConnectState {
-        match self.cold_connect.load(Ordering::Acquire) {
-            value if value == ColdConnectState::Connecting as u8 => ColdConnectState::Connecting,
-            value if value == ColdConnectState::Connected as u8 => ColdConnectState::Connected,
-            _ => ColdConnectState::Unobserved,
-        }
+        self.cold_connect.observed()
     }
 }
 

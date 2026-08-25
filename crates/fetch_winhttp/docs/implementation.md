@@ -203,22 +203,24 @@ crate-root initialization runs and that binary invokes
 
 ## 2. WinHTTP asynchronous model primer
 
-A single request drives this WinHTTP handle chain and callback sequence:
+A single request drives this WinHTTP handle chain and callback sequence. `S` steps
+configure the session once when the transport instance is built; `R` steps run once
+per request.
 
 | Step | Call | Sync/async | Completion callback |
 |------|------|-----------|---------------------|
 | S1 | `WinHttpOpen(WINHTTP_FLAG_ASYNC)` | sync | - (build-time) |
 | S2 | `WinHttpSetTimeouts`, session-scoped pool/callback/keep-alive options, `WinHttpSetStatusCallback` | sync | - (build-time; mask in §4.3) |
-| 3 | `WinHttpConnect` | sync, inline (see §2.1) | - |
-| 4 | `WinHttpOpenRequest` | sync | - |
-| 5 | `WinHttpSetOption`xN (including context and request behavior) | sync | - |
-| 6 | `WinHttpSendRequest` | async | `SENDREQUEST_COMPLETE` |
-| 6a| `WinHttpWriteData` (streaming body, per chunk) | async | `WRITE_COMPLETE` |
-| 7 | `WinHttpReceiveResponse` | async | `HEADERS_AVAILABLE` |
-| 8 | `WinHttpQueryHeaders` | sync (buffered) | - |
-| 9 | `WinHttpQueryDataAvailable` | async | `DATA_AVAILABLE` (n bytes) |
-| 10| `WinHttpReadData` | async | `READ_COMPLETE` (n bytes) then loop 9/10 until 0 |
-| 11| `WinHttpCloseHandle` | sync | `HANDLE_CLOSING` (final callback) |
+| R1 | `WinHttpConnect` | sync, inline (see §2.1) | - |
+| R2 | `WinHttpOpenRequest` | sync | - |
+| R3 | `WinHttpSetOption`xN (including context and request behavior) | sync | - |
+| R4 | `WinHttpSendRequest` | async | `SENDREQUEST_COMPLETE` |
+| R5 | `WinHttpWriteData` (streaming body, per chunk) | async | `WRITE_COMPLETE` |
+| R6 | `WinHttpReceiveResponse` | async | `HEADERS_AVAILABLE` |
+| R7 | `WinHttpQueryHeaders` | sync (buffered) | - |
+| R8 | `WinHttpQueryDataAvailable` | async | `DATA_AVAILABLE` (n bytes) |
+| R9 | `WinHttpReadData` | async | `READ_COMPLETE` (n bytes) then loop R8/R9 until 0 |
+| R10 | `WinHttpCloseHandle` | sync | `HANDLE_CLOSING` (final callback) |
 
 Errors on any async step arrive as `REQUEST_ERROR` carrying a
 `WINHTTP_ASYNC_RESULT { dwResult, dwError }`. TLS validation problems may also raise
@@ -431,8 +433,13 @@ enum CompletionResult {
 }
 ```
 
-The `_buffer` fields retain callback-owned read or write storage until the
-completion payload is consumed and dropped.
+The `_buffer` fields keep callback-owned read or write storage alive until the
+driver consumes the completion payload. On `READ_COMPLETE` the driver needs the
+buffer back, because it holds the bytes just received. On write and error
+completions the buffer carries nothing the driver needs; it is retained purely so
+that the trampoline does not run `BytesView`/`BytesBuf` destructors, and with them
+a `GlobalPool` block release, on a WinHTTP callback thread. Deallocation happens on
+the driver's own thread instead.
 
 `events_once` is the right primitive because each step is a single, non-blocking,
 one-shot, payload-carrying signal with exactly one waiter.
@@ -463,10 +470,10 @@ their sharing needs differ:
   explicitly permits concurrent operations on one session handle and because the session
   is read-only from our side after its build-time setup (§3.2).
 
-The future therefore holds only `Send` state: before context installation, the
+`RequestDriver` therefore holds only `Send` state: before context installation, the
 request/connect wrappers and session owner; afterward, an `events_once` receiver
 and the request guard, while the context owns the parent handles. This satisfies
-`fetch`'s `Out: Send` requirement.
+`fetch`'s `Out: Send` requirement for the future that drives it.
 
 ## 4. Cancellation model and FFI ownership
 
@@ -496,25 +503,29 @@ every notification for that request handle.
 The request handle lives in the driver (§4.4), not in this context: the callback
 only recovers the context, takes the sender and buffer, and signals (§2.1), while
 the driver uses the handle to issue the next call and, once, to close. The connect
-handle and session owner move into the context before it is installed so closing the
+handle and session owner move into the context before the context pointer is handed
+to WinHTTP, so closing the
 request cannot invalidate its parents while WinHTTP is still tearing it down.
+WinHTTP specifies that closing a handle invalidates its children, so a connect or
+session handle must outlive every request opened from it
+([`WinHttpCloseHandle`](https://learn.microsoft.com/en-us/windows/win32/api/winhttp/nf-winhttp-winhttpclosehandle)).
 
 ```rust,ignore
 struct RequestContext {
-    // Reused callback handoff storage; OperationFuture owns the request handle
+    // Reused storage through which the callback hands completions back to the
+    // driver. The request handle itself is not here: OperationFuture owns it
     // until its receiver endpoint is destroyed.
     operation: CallbackOperationSlot,
-    // Retained until HANDLE_CLOSING drops the context. Microsoft documents that
-    // closing a parent invalidates children and pending child operations cannot
-    // be relied on to complete correctly.
+    // Parent handles, retained until HANDLE_CLOSING drops the context. They must
+    // outlive the request because Microsoft documents that closing a parent
+    // invalidates its children and that pending child operations cannot then be
+    // relied on to complete correctly.
     connect: ConnectHandle,
     session: std::sync::Arc<WinHttpSession>,
     // Request-scoped, best-effort diagnostics independent of operation state.
     // The REQUEST_ERROR code, not callback order, determines classification.
-    // Low 32 bits contain flags; bit 32 records that a callback was observed.
-    secure_failure: core::sync::atomic::AtomicU64,
-    // Stores a ColdConnectState discriminant for telemetry attribution.
-    cold_connect: core::sync::atomic::AtomicU8,
+    secure_failure: SecureFailureDiagnostics,
+    cold_connect: ColdConnectDiagnostics,
 }
 
 struct ActiveOperation {
@@ -554,6 +565,15 @@ struct CallbackOperationSlot {
 }
 ```
 
+The two diagnostic fields are dedicated types rather than bare atomics, so the
+encoding stays with the data instead of being reconstructed at each use site.
+`SecureFailureDiagnostics` wraps an `AtomicU64` and exposes `record(flags)` /
+`observed() -> Option<u32>`; it packs the certificate-error flags in the low 32 bits
+and a presence marker above them, which is what makes a zero-valued flag set
+distinguishable from "no callback arrived". `ColdConnectDiagnostics` wraps an
+`AtomicU8` holding a `ColdConnectState` discriminant and exposes typed transitions
+and a typed read. Both keep `RequestContext` free of bit arithmetic.
+
 The active operation makes the field relationships explicit: it always carries a
 completion sender and at most one borrowed buffer (a handle never has a read and a write
 outstanding at once); the idle state carries neither. Sequential submission is
@@ -570,8 +590,9 @@ callback, a synchronous submission failure, or final handle closure claim and
 move out the sender and buffer. Competing or late callbacks fail that claim and
 do nothing. The `UnsafeCell` is therefore not unsynchronized mutation: the atomic
 tag grants one claimant access to the initialized contents. Secure-failure flags
-remain independent because `SECURE_FAILURE` and `REQUEST_ERROR` have no documented
-relative ordering. Their packed atomic value records presence separately from the
+are kept outside the slot because they are request-scoped diagnostics rather than
+per-operation payload: they must survive the operation that produced them. Their
+packed atomic value records presence separately from the
 flags, so even a zero-valued diagnostic is representable.
 
 ### 4.2 dwContext is pointer-sized
@@ -620,7 +641,10 @@ context and moves the connect handle and session owner into it. If that final op
 call fails, the still-owned context returns to the pool, closing the connect handle
 and releasing the session owner. This is safe because WinHTTP initializes a handle's
 context to null, and the trampoline ignores any callback (including
-`HANDLE_CLOSING`) whose context is null.
+`HANDLE_CLOSING`) whose context is null. That null check is correctness-critical
+rather than defensive: this is precisely the path where the request handle is closed
+while its context has already been reclaimed, and dereferencing the echoed value
+would be a use-after-free.
 
 After `SetOption` succeeds, dropping the `RequestGuard` owner (the driver or the
 `WinHttpBodyReader` it moves into, §6.3) synchronously closes only the request
@@ -647,7 +671,8 @@ The "state machine" that issues the calls above is `RequestDriver` in
 polls. It walks the steps of §2, awaiting each step's `events_once` receiver. Before
 context installation it owns the request and connect handles plus a session
 `Arc<WinHttpSession>` clone. It moves the connect/session parents into
-`RequestContext`, then installs that context and retains a `RequestGuard` containing
+`RequestContext`, then hands that context pointer to WinHTTP through
+`WINHTTP_OPTION_CONTEXT_VALUE` and retains a `RequestGuard` containing
 the request handle and raw context pointer. Dropping the guard closes the request;
 the final callback drops the context and parents as described in §4.3.
 
@@ -681,8 +706,10 @@ enforcement mechanisms:
 - A **completion** - inline on the submitting thread or later on a worker - validates
   that its status matches the published operation kind and uses compare-exchange
   to claim the payload. Only the winner moves out the sender and buffer and returns
-  the slot to `Idle`; competing error/success notifications and late callbacks
-  observe a failed claim and are harmless.
+  the slot to `Idle`. We do not expect competing error/success notifications to
+  occur at all - WinHTTP serializes callbacks for one request handle - so the claim
+  is a correctness backstop, not a race the design plans around. A loser observes a
+  failed claim and returns without touching the payload.
 - **`HANDLE_CLOSING` must not overlap another callback for the same handle.** The
   atomic tag deliberately does not cover final reclamation: the claim is not atomic
   with the read-out of the payload, and the claimed `events_once` sender points into
@@ -704,12 +731,19 @@ notification with no later callbacks, is the only path that reconstructs and dro
 the owning box.
 
 **The one field that is not covered by the temporal handoff** is the packed
-`RequestContext::secure_failure` atomic, and that is why it is atomic rather than a `Cell`.
-`SECURE_FAILURE` and `REQUEST_ERROR` may run on different WinHTTP threads and in either
-order. A `SECURE_FAILURE` status publishes its certificate-error bitmask into that atomic
+`RequestContext::secure_failure` atomic. WinHTTP serializes callbacks for a single
+request handle, and `SECURE_FAILURE` in practice precedes the `REQUEST_ERROR` raised
+by the same send: both are emitted from the send-completion path, the secure-failure
+flags being already-cached handshake results rather than a schannel worker's late
+report. The field is nevertheless atomic rather than a `Cell` because successive
+callbacks for one handle run on *different* WinHTTP worker threads. The
+happens-before edge that orders them lives inside WinHTTP's own lock, which is
+invisible to the Rust memory model, so a `Cell` would be both unsound and `!Sync`.
+A `SECURE_FAILURE` status publishes its certificate-error bitmask into that atomic
 with a `Release` store and touches nothing else. `REQUEST_ERROR` classifies the failure
-from its WinHTTP error code and reads the atomic through the `secure_failure_flags()`
-accessor, whose `Acquire` load attaches whatever diagnostic flags have already arrived to
+from its WinHTTP error code - never from callback order - and reads the atomic through
+the `secure_failure_flags()`
+accessor, whose `Acquire` load attaches whatever diagnostic flags have arrived to
 the resulting `WinHttpError::secure_failure_flags`. A later `SECURE_FAILURE` can still
 update request-scoped diagnostics without touching an operation sender or buffer. Every
 branch remains non-blocking
