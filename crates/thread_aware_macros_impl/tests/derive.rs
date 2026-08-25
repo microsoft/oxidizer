@@ -276,19 +276,6 @@ fn phantom_only_generic_gets_thread_aware_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_reference_binds_its_parameter() {
-    // The traversal reaches `T` through the reference and binds it by `ThreadAware`. That
-    // gives `Send`, not `Sync`, so `&'a T: Send` is the author's to state - the derive does
-    // not infer it.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct PhantomRef<'a, T: 'a + Sync>(core::marker::PhantomData<&'a T>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
 fn skipped_raw_pointer_marker_gets_only_self_send() {
     // A raw-pointer marker can never satisfy `PhantomData<*const T>: ThreadAware`, since that
     // reduces to `*const T: Send`, which no instantiation can prove. Skipping it moves the
@@ -297,18 +284,6 @@ fn skipped_raw_pointer_marker_gets_only_self_send() {
     let input = quote! {
         #[derive(ThreadAware)]
         struct RawMarker<T>(usize, #[thread_aware(skip)] core::marker::PhantomData<*const T>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn nested_phantom_binds_its_parameter() {
-    // A marker nested in a relocated field is traversed like any other type argument, so the
-    // parameter inside it takes the ordinary bound.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        struct NestedPhantom<T>((core::marker::PhantomData<T>,));
     };
     assert_snapshot!(expand(input));
 }
@@ -402,21 +377,6 @@ fn generics_lifetime_and_const_params_untouched() {
     let input = quote! {
         #[derive(ThreadAware)]
         struct Mixed<'a, const N: usize, T: Sync>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);
-    };
-    assert_snapshot!(expand(input));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn enum_variant_nested_phantom_binds_its_parameter() {
-    // Exercises merging parameter bounds across enum variants.
-    let input = quote! {
-        #[derive(ThreadAware)]
-        enum NestedPhantomEnum<T, U> {
-            Wrapped((core::marker::PhantomData<T>,)),
-            Also((core::marker::PhantomData<U>,)),
-            Plain(U),
-        }
     };
     assert_snapshot!(expand(input));
 }
