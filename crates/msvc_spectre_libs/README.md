@@ -23,6 +23,11 @@ directive emitted by the build script propagates to every crate that links
 this one, up to and including the final artifact. On every
 non-Windows-MSVC target the crate does nothing.
 
+This crate exposes **no Rust API**. Everything it does happens in its build
+script, so there is nothing to import and nothing to call. The policy that
+build script carries out lives in [`msvc_spectre_libs_build`][__link0], which also
+exposes the naming and path helpers a build system may want to reuse.
+
 ## Usage
 
 ```toml
@@ -96,11 +101,9 @@ in this order:
    through the Windows registry and derives the `lib\spectre\<arch>`
    directory that ships with the Visual Studio C++ build tools.
 
-Use [`resolve::override_var_name`][__link0] to compute the target-specific override
-variable name, [`resolve::SpectreArch::from_target_arch`][__link1] to map a Rust
-target architecture to the matching Spectre architecture, and
-[`resolve::spectre_lib_dir`][__link2] to build the `lib\spectre\<arch>` path beneath
-a toolchain root.
+A build system that wants to compute those variable names itself can use
+`msvc_spectre_libs_build::resolve`, which holds the override-name,
+architecture-mapping, and path helpers the build script uses.
 
 The resolved directory is always emitted as a search path. An explicit
 search path is consulted before the `LIB` environment variable, so emitting
@@ -120,7 +123,7 @@ Because a `RUSTFLAGS` environment variable *replaces* rather than merges
 with `target.<triple>.rustflags` from `.cargo/config.toml`, an unrelated
 ambient `RUSTFLAGS` silently drops those arguments. To turn that silent
 drop into a build diagnostic, list them in
-[`flags::REQUIRED_LINK_ARGS_VAR`][__link3]; the build script then inspects
+`MSVC_SPECTRE_REQUIRED_LINK_ARGS`; the build script then inspects
 `CARGO_ENCODED_RUSTFLAGS` and reports any that did not reach `rustc`:
 
 ```toml
@@ -132,16 +135,19 @@ MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc = "/CETCOMPAT"
 rustflags = ["-Clink-arg=/CETCOMPAT"]
 ```
 
-The target-suffixed variable takes precedence over the target-agnostic
-`MSVC_SPECTRE_REQUIRED_LINK_ARGS`; see
-[`flags::required_link_args_var_name`][__link4]. Prefer it whenever a requirement is
+The value is a `;`-separated list of linker arguments. The target-suffixed
+variable takes precedence over the target-agnostic
+`MSVC_SPECTRE_REQUIRED_LINK_ARGS`. Prefer it whenever a requirement is
 architecture-specific, as `/CETCOMPAT` is: the `[env]` table of Cargo
 applies to every selected target, so a target-agnostic requirement would be
 reported as missing on the targets whose `rustflags` cannot carry it.
 
 The check is off by default: which arguments are required depends on the
 toolchain and on the compliance requirements that integrators must meet, so
-this crate imposes no policy of its own.
+this crate imposes no policy of its own. Listing an argument the toolchain
+already emits (commonly `/guard:cf`, `/DYNAMICBASE`, `/HIGHENTROPYVA`, and
+`/NXCOMPAT`) would demand a redundant second copy of a flag that is already
+in effect; verify with `dumpbin /headers` before adding one.
 
 ## Assurance boundary
 
@@ -164,31 +170,12 @@ required.
 
 ## Further reading
 
-[`docs/design.md`][__link5]
+[`docs/design.md`][__link1]
 records the user-visible contract and the design tenets, and
-[`docs/implementation.md`][__link6]
-records the implementation strategy: the host/target model, the discovery
-flow, shared source, flag parsing, path handling, emission, and diagnostics.
-
-## Examples
-
-```rust
-use msvc_spectre_libs::resolve::{SpectreArch, override_var_name};
-
-assert_eq!(
-    override_var_name("x86_64-pc-windows-msvc"),
-    "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc"
-);
-assert_eq!(
-    SpectreArch::from_target_arch("x86_64"),
-    Some(SpectreArch::X64)
-);
-assert_eq!(
-    SpectreArch::from_target_arch("aarch64"),
-    Some(SpectreArch::Arm64)
-);
-assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
-```
+[`docs/implementation.md`][__link2]
+records the implementation strategy: the package split, the host/target
+model, the discovery flow, flag parsing, path handling, emission, and
+diagnostics.
 
 
 <hr/>
@@ -196,11 +183,6 @@ assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUn8nrcuk7cQbI0WHvGEUdjUbaKaMPOBXaY8b_WT7TyBwonRhZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
- [__link0]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::override_var_name
- [__link1]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::SpectreArch::from_target_arch
- [__link2]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::spectre_lib_dir
- [__link3]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=flags::REQUIRED_LINK_ARGS_VAR
- [__link4]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=flags::required_link_args_var_name
- [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/design.md
- [__link6]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/implementation.md
+ [__link0]: https://docs.rs/msvc_spectre_libs_build
+ [__link1]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/design.md
+ [__link2]: https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/implementation.md

@@ -90,7 +90,7 @@ pub const REQUIRED_LINK_ARGS_VAR: &str = "MSVC_SPECTRE_REQUIRED_LINK_ARGS";
 /// # Examples
 ///
 /// ```
-/// use msvc_spectre_libs::flags::required_link_args_var_name;
+/// use msvc_spectre_libs_build::flags::required_link_args_var_name;
 ///
 /// assert_eq!(
 ///     required_link_args_var_name("x86_64-pc-windows-msvc"),
@@ -110,7 +110,7 @@ pub fn required_link_args_var_name(target: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use msvc_spectre_libs::flags::required_link_args;
+/// use msvc_spectre_libs_build::flags::required_link_args;
 ///
 /// assert_eq!(
 ///     required_link_args(" /CETCOMPAT ; ;/guard:ehcont"),
@@ -133,7 +133,7 @@ pub fn required_link_args(value: &str) -> Vec<&str> {
 /// # Examples
 ///
 /// ```
-/// use msvc_spectre_libs::flags::codegen_values;
+/// use msvc_spectre_libs_build::flags::codegen_values;
 ///
 /// let encoded = "-C\u{1f}link-arg=/CETCOMPAT\u{1f}-Ctarget-cpu=x86-64-v3";
 /// assert_eq!(
@@ -174,7 +174,7 @@ pub fn codegen_values(encoded: &str) -> Vec<String> {
 /// # Examples
 ///
 /// ```
-/// use msvc_spectre_libs::flags::missing_required_link_args;
+/// use msvc_spectre_libs_build::flags::missing_required_link_args;
 ///
 /// assert!(missing_required_link_args("-Clink-arg=/cetcompat", &["/CETCOMPAT"]).is_empty());
 /// // `link-args` carries several whitespace-separated arguments.

@@ -127,14 +127,20 @@ arguments. Which arguments are mandatory depends on the toolchain version and on
 the compliance regime the consumer is subject to, neither of which this crate
 can determine.
 
-### 2.8 The public API is the integrator's surface
+### 2.8 The consumed crate has no public API
 
-The library exposes the naming and mapping rules that the build script itself
-uses -- override and requirement variable names, the target-architecture to
-Spectre-architecture mapping, and the `lib\spectre\<arch>` layout. They are
-public so that a build system computing these values ahead of time derives them
-from the same source as the crate, instead of re-deriving a string format that
-could drift.
+`msvc_spectre_libs` is added as a dependency for its build-script effect alone.
+It therefore exposes no Rust items: nothing about the mechanism is frozen into a
+versioned surface, and a consumer cannot come to depend on an internal detail
+that the crate would then owe compatibility for.
+
+The naming and mapping rules the build script uses -- override and requirement
+variable names, the target-architecture to Spectre-architecture mapping, and the
+`lib\spectre\<arch>` layout -- live in the companion `msvc_spectre_libs_build`
+package. A build system that computes these values ahead of time can depend on
+that package directly and derive them from the same source as the crate, instead
+of re-deriving a string format that could drift. Making that an explicit, separate
+dependency keeps the contract intentional rather than incidental.
 
 ## 3. Design tenets
 

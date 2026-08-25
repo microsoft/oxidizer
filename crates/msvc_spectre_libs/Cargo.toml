@@ -21,20 +21,21 @@ build = "build.rs"
 [package.metadata.docs.rs]
 all-features = true
 
-# `cc` is used only by `build.rs`. cargo-machete does not scan build scripts,
-# so it reports a false positive; ignore it here.
+# `msvc_spectre_libs_build` is used only by `build.rs`. cargo-machete does not
+# scan build scripts, so it reports a false positive; ignore it here.
 [package.metadata.cargo-machete]
-ignored = ["cc"]
+ignored = ["msvc_spectre_libs_build"]
 
 [features]
 # Turn the "libraries not found" build warning into a hard build error.
 error = []
 
-# `cc` must be an unconditional build-dependency, not a target-scoped one:
-# `[target.'cfg(...)'.build-dependencies]` is evaluated against the *host*, so a
-# non-Windows host cross-compiling to a Windows MSVC target would not select it.
+# The policy crate must be an unconditional build-dependency, not a
+# target-scoped one: `[target.'cfg(...)'.build-dependencies]` is evaluated
+# against the *host*, so a non-Windows host cross-compiling to a Windows MSVC
+# target would not select it.
 [build-dependencies]
-cc = { workspace = true }
+msvc_spectre_libs_build = { workspace = true }
 
 # >>> anvil-managed: anvil-lints
 [lints]

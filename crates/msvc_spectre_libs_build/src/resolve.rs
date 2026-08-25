@@ -43,7 +43,7 @@ impl SpectreArch {
     /// # Examples
     ///
     /// ```
-    /// use msvc_spectre_libs::resolve::SpectreArch;
+    /// use msvc_spectre_libs_build::resolve::SpectreArch;
     ///
     /// assert_eq!(
     ///     SpectreArch::from_target_arch("x86_64"),
@@ -75,7 +75,7 @@ impl SpectreArch {
     /// # Examples
     ///
     /// ```
-    /// use msvc_spectre_libs::resolve::SpectreArch;
+    /// use msvc_spectre_libs_build::resolve::SpectreArch;
     ///
     /// assert_eq!(SpectreArch::X64.dir_name(), "x64");
     /// ```
@@ -108,7 +108,7 @@ impl fmt::Display for SpectreArch {
 /// # Examples
 ///
 /// ```
-/// use msvc_spectre_libs::resolve::override_var_name;
+/// use msvc_spectre_libs_build::resolve::override_var_name;
 ///
 /// assert_eq!(
 ///     override_var_name("x86_64-pc-windows-msvc"),
@@ -133,7 +133,7 @@ pub fn override_var_name(target: &str) -> String {
 /// ```
 /// use std::path::Path;
 ///
-/// use msvc_spectre_libs::resolve::{SpectreArch, spectre_lib_dir};
+/// use msvc_spectre_libs_build::resolve::{SpectreArch, spectre_lib_dir};
 ///
 /// let dir = spectre_lib_dir(Path::new("C:/VC/Tools/MSVC/14.40"), SpectreArch::X64);
 /// assert!(dir.ends_with("lib/spectre/x64"));

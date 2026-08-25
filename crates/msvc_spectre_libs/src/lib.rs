@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg")]
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg")]
@@ -15,6 +14,11 @@
 //! directive emitted by the build script propagates to every crate that links
 //! this one, up to and including the final artifact. On every
 //! non-Windows-MSVC target the crate does nothing.
+//!
+//! This crate exposes **no Rust API**. Everything it does happens in its build
+//! script, so there is nothing to import and nothing to call. The policy that
+//! build script carries out lives in [`msvc_spectre_libs_build`], which also
+//! exposes the naming and path helpers a build system may want to reuse.
 //!
 //! # Usage
 //!
@@ -89,11 +93,9 @@
 //!    through the Windows registry and derives the `lib\spectre\<arch>`
 //!    directory that ships with the Visual Studio C++ build tools.
 //!
-//! Use [`resolve::override_var_name`] to compute the target-specific override
-//! variable name, [`resolve::SpectreArch::from_target_arch`] to map a Rust
-//! target architecture to the matching Spectre architecture, and
-//! [`resolve::spectre_lib_dir`] to build the `lib\spectre\<arch>` path beneath
-//! a toolchain root.
+//! A build system that wants to compute those variable names itself can use
+//! `msvc_spectre_libs_build::resolve`, which holds the override-name,
+//! architecture-mapping, and path helpers the build script uses.
 //!
 //! The resolved directory is always emitted as a search path. An explicit
 //! search path is consulted before the `LIB` environment variable, so emitting
@@ -113,7 +115,7 @@
 //! with `target.<triple>.rustflags` from `.cargo/config.toml`, an unrelated
 //! ambient `RUSTFLAGS` silently drops those arguments. To turn that silent
 //! drop into a build diagnostic, list them in
-//! [`flags::REQUIRED_LINK_ARGS_VAR`]; the build script then inspects
+//! `MSVC_SPECTRE_REQUIRED_LINK_ARGS`; the build script then inspects
 //! `CARGO_ENCODED_RUSTFLAGS` and reports any that did not reach `rustc`:
 //!
 //! ```toml
@@ -125,16 +127,19 @@
 //! rustflags = ["-Clink-arg=/CETCOMPAT"]
 //! ```
 //!
-//! The target-suffixed variable takes precedence over the target-agnostic
-//! `MSVC_SPECTRE_REQUIRED_LINK_ARGS`; see
-//! [`flags::required_link_args_var_name`]. Prefer it whenever a requirement is
+//! The value is a `;`-separated list of linker arguments. The target-suffixed
+//! variable takes precedence over the target-agnostic
+//! `MSVC_SPECTRE_REQUIRED_LINK_ARGS`. Prefer it whenever a requirement is
 //! architecture-specific, as `/CETCOMPAT` is: the `[env]` table of Cargo
 //! applies to every selected target, so a target-agnostic requirement would be
 //! reported as missing on the targets whose `rustflags` cannot carry it.
 //!
 //! The check is off by default: which arguments are required depends on the
 //! toolchain and on the compliance requirements that integrators must meet, so
-//! this crate imposes no policy of its own.
+//! this crate imposes no policy of its own. Listing an argument the toolchain
+//! already emits (commonly `/guard:cf`, `/DYNAMICBASE`, `/HIGHENTROPYVA`, and
+//! `/NXCOMPAT`) would demand a redundant second copy of a flag that is already
+//! in effect; verify with `dumpbin /headers` before adding one.
 //!
 //! # Assurance boundary
 //!
@@ -160,28 +165,8 @@
 //! [`docs/design.md`](https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/design.md)
 //! records the user-visible contract and the design tenets, and
 //! [`docs/implementation.md`](https://github.com/microsoft/oxidizer/blob/main/crates/msvc_spectre_libs/docs/implementation.md)
-//! records the implementation strategy: the host/target model, the discovery
-//! flow, shared source, flag parsing, path handling, emission, and diagnostics.
+//! records the implementation strategy: the package split, the host/target
+//! model, the discovery flow, flag parsing, path handling, emission, and
+//! diagnostics.
 //!
-//! # Examples
-//!
-//! ```
-//! use msvc_spectre_libs::resolve::{SpectreArch, override_var_name};
-//!
-//! assert_eq!(
-//!     override_var_name("x86_64-pc-windows-msvc"),
-//!     "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc"
-//! );
-//! assert_eq!(
-//!     SpectreArch::from_target_arch("x86_64"),
-//!     Some(SpectreArch::X64)
-//! );
-//! assert_eq!(
-//!     SpectreArch::from_target_arch("aarch64"),
-//!     Some(SpectreArch::Arm64)
-//! );
-//! assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
-//! ```
-
-pub mod flags;
-pub mod resolve;
+//! [`msvc_spectre_libs_build`]: https://docs.rs/msvc_spectre_libs_build

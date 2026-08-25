@@ -2950,7 +2950,15 @@ dependencies = [
 name = "msvc_spectre_libs"
 version = "0.2.0"
 dependencies = [
+ "msvc_spectre_libs_build",
+]
+
+[[package]]
+name = "msvc_spectre_libs_build"
+version = "0.1.0"
+dependencies = [
  "cc",
+ "ohno 0.4.0",
 ]
 
 [[package]]
