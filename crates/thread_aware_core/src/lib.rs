@@ -12,7 +12,7 @@
 //!   closest to it.
 //!
 //! The crate has no dependencies. It also works without `std`: turn off default features,
-//! and [`Place`] loses its thread id, keeping [`Origin`] and [`Numa`]. The companion
+//! and [`Place`] loses its thread id, keeping [`Origin`] and [`NumaNode`]. The companion
 //! `thread_aware` crate adds the conveniences: a `#[derive(ThreadAware)]` macro, wrappers
 //! for foreign types, and a per-core `Arc`. Depend on this crate directly if you only need
 //! to implement the trait.
@@ -47,7 +47,7 @@
 //! ```
 //! use std::thread;
 //!
-//! use thread_aware_core::{Numa, Origin, Place, ThreadAware};
+//! use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
 //!
 //! // What a library author writes.
 //! struct Worker {
@@ -65,8 +65,8 @@
 //! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
 //! let origin = Origin::from(1);
-//! let first = Place::new(origin, here, Numa::from(0));
-//! let second = Place::new(origin, there, Numa::from(1));
+//! let first = Place::new(origin, here, NumaNode::from(0));
+//! let second = Place::new(origin, there, NumaNode::from(1));
 //!
 //! let mut worker = Worker { thread: None };
 //!
@@ -94,9 +94,9 @@
 //! is unique among the threads alive at the same time, so state keyed on it is never shared
 //! by accident, not even between two runtimes in the same process.
 //!
-//! [`Numa`] identifies the memory closest to that thread. Unlike the thread id it is shared:
-//! every thread near the same memory reports the same [`Numa`]. That is what makes it useful
-//! for state you want to share within a region but not across the machine.
+//! [`NumaNode`] identifies the memory closest to that thread. Unlike the thread id it is
+//! shared: every thread near the same memory reports the same [`NumaNode`]. That is what
+//! makes it useful for state you want to share within a region but not across the machine.
 //!
 //! That sharing only works while every runtime in the process numbers the regions the same
 //! way, for example from the numbering the operating system reports. Nothing checks it, and
@@ -111,17 +111,17 @@
 //!
 //! - State that must not be shared at all, such as a per-thread cache or a handle to a
 //!   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
-//! - State that only cares about memory locality, such as a buffer pool, keys on [`Numa`]
-//!   and survives a move to another thread near the same memory.
+//! - State that only cares about memory locality, such as a buffer pool, keys on
+//!   [`NumaNode`] and survives a move to another thread near the same memory.
 //! - State owned by the runtime, such as a scheduler handle, also checks [`Origin`] and lets
 //!   go when it changes.
 //!
-//! The ids mean nothing beyond identity. [`Origin`] and [`Numa`] need not start at zero or
-//! run consecutively, there is no count, and you cannot list the places in use. Keep
+//! The ids mean nothing beyond identity. [`Origin`] and [`NumaNode`] need not start at zero
+//! or run consecutively, there is no count, and you cannot list the places in use. Keep
 //! per-place state in a map keyed by the id rather than an array you index into.
 //!
 //! Without `std` there is no thread id: `Place::new` and `Place::thread` are gone and only
-//! [`Origin`] and [`Numa`] remain. A `no_std` library can still implement [`ThreadAware`]
+//! [`Origin`] and [`NumaNode`] remain. A `no_std` library can still implement [`ThreadAware`]
 //! and use whatever it is handed; the runtime that drives relocation needs `std` anyway.
 //!
 //! # Relation to `Send`
@@ -162,7 +162,7 @@ mod impls;
 mod place;
 
 #[doc(inline)]
-pub use place::{Numa, Origin, Place};
+pub use place::{NumaNode, Origin, Place};
 
 /// Tells a value that it has moved to a different [`Place`].
 ///
@@ -193,9 +193,9 @@ pub use place::{Numa, Origin, Place};
 ///        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
 ///    }
 ///    ```
-/// 2. **Remember where you are.** Store the new thread id, [`Numa`] or [`Origin`] and use
+/// 2. **Remember where you are.** Store the new thread id, [`NumaNode`] or [`Origin`] and use
 ///    it later.
-/// 3. **Swap a resource.** Check the id it depends on: [`Numa`] for a buffer pool, the
+/// 3. **Swap a resource.** Check the id it depends on: [`NumaNode`] for a buffer pool, the
 ///    thread id for a driver handle, [`Origin`] for anything the runtime owns. If it
 ///    changed, let the old one go and get one for the new place, moving out any real data it
 ///    holds first.
@@ -228,7 +228,7 @@ pub use place::{Numa, Origin, Place};
 /// * **Handle no call at all.** The value has to stay correct either way.
 /// * **Handle a place you know nothing about.** A `destination` may name a thread the value
 ///   has never seen, and carry an [`Origin`] belonging to another runtime. That must stay
-///   sound. Let go of anything the old runtime owned; state keyed on [`Numa`] may still be
+///   sound. Let go of anything the old runtime owned; state keyed on [`NumaNode`] may still be
 ///   fine, subject to the caveat in [what the ids mean](crate#what-the-ids-mean). Things may
 ///   be slower afterwards, but not forever: back on a place it can serve, the value should
 ///   pick up what it released.
@@ -247,11 +247,11 @@ pub use place::{Numa, Origin, Place};
 /// left alone.
 ///
 /// ```
-/// use thread_aware_core::{Numa, Place, ThreadAware};
+/// use thread_aware_core::{NumaNode, Place, ThreadAware};
 ///
 /// struct Encoder {
 ///     name: String,
-///     numa: Option<Numa>,
+///     numa_node: Option<NumaNode>,
 ///     /// Reused between calls purely to avoid re-allocating; empty outside a call.
 ///     scratch: Vec<u8>,
 /// }
@@ -259,12 +259,12 @@ pub use place::{Numa, Origin, Place};
 /// impl ThreadAware for Encoder {
 ///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
 ///         // Only pay for re-allocation when the nearest memory actually changed.
-///         if source.map(Place::numa) == Some(destination.numa()) {
+///         if source.map(Place::numa_node) == Some(destination.numa_node()) {
 ///             return;
 ///         }
 ///
 ///         // Re-allocate so the scratch space is local to the destination.
-///         self.numa = Some(destination.numa());
+///         self.numa_node = Some(destination.numa_node());
 ///         self.scratch = Vec::with_capacity(self.scratch.capacity());
 ///     }
 /// }

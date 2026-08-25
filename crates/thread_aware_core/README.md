@@ -22,7 +22,7 @@ This crate contains the small API shared by thread-aware libraries:
   closest to it.
 
 The crate has no dependencies. It also works without `std`: turn off default features,
-and [`Place`][__link2] loses its thread id, keeping [`Origin`][__link3] and [`Numa`][__link4]. The companion
+and [`Place`][__link2] loses its thread id, keeping [`Origin`][__link3] and [`NumaNode`][__link4]. The companion
 `thread_aware` crate adds the conveniences: a `#[derive(ThreadAware)]` macro, wrappers
 for foreign types, and a per-core `Arc`. Depend on this crate directly if you only need
 to implement the trait.
@@ -57,7 +57,7 @@ The example below plays the part of the runtime so the order is visible.
 ```rust
 use std::thread;
 
-use thread_aware_core::{Numa, Origin, Place, ThreadAware};
+use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
 
 // What a library author writes.
 struct Worker {
@@ -75,8 +75,8 @@ let here = thread::current().id();
 let there = thread::spawn(|| thread::current().id()).join().unwrap();
 
 let origin = Origin::from(1);
-let first = Place::new(origin, here, Numa::from(0));
-let second = Place::new(origin, there, Numa::from(1));
+let first = Place::new(origin, here, NumaNode::from(0));
+let second = Place::new(origin, there, NumaNode::from(1));
 
 let mut worker = Worker { thread: None };
 
@@ -104,9 +104,9 @@ The thread id is `std::thread::ThreadId`. It identifies one thread and nothing e
 is unique among the threads alive at the same time, so state keyed on it is never shared
 by accident, not even between two runtimes in the same process.
 
-[`Numa`][__link13] identifies the memory closest to that thread. Unlike the thread id it is shared:
-every thread near the same memory reports the same [`Numa`][__link14]. That is what makes it useful
-for state you want to share within a region but not across the machine.
+[`NumaNode`][__link13] identifies the memory closest to that thread. Unlike the thread id it is
+shared: every thread near the same memory reports the same [`NumaNode`][__link14]. That is what
+makes it useful for state you want to share within a region but not across the machine.
 
 That sharing only works while every runtime in the process numbers the regions the same
 way, for example from the numbering the operating system reports. Nothing checks it, and
@@ -121,17 +121,17 @@ So use only the ids your state depends on:
 
 * State that must not be shared at all, such as a per-thread cache or a handle to a
   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
-* State that only cares about memory locality, such as a buffer pool, keys on [`Numa`][__link16]
-  and survives a move to another thread near the same memory.
+* State that only cares about memory locality, such as a buffer pool, keys on
+  [`NumaNode`][__link16] and survives a move to another thread near the same memory.
 * State owned by the runtime, such as a scheduler handle, also checks [`Origin`][__link17] and lets
   go when it changes.
 
-The ids mean nothing beyond identity. [`Origin`][__link18] and [`Numa`][__link19] need not start at zero or
-run consecutively, there is no count, and you cannot list the places in use. Keep
+The ids mean nothing beyond identity. [`Origin`][__link18] and [`NumaNode`][__link19] need not start at zero
+or run consecutively, there is no count, and you cannot list the places in use. Keep
 per-place state in a map keyed by the id rather than an array you index into.
 
 Without `std` there is no thread id: `Place::new` and `Place::thread` are gone and only
-[`Origin`][__link20] and [`Numa`][__link21] remain. A `no_std` library can still implement [`ThreadAware`][__link22]
+[`Origin`][__link20] and [`NumaNode`][__link21] remain. A `no_std` library can still implement [`ThreadAware`][__link22]
 and use whatever it is handed; the runtime that drives relocation needs `std` anyway.
 
 ## Relation to `Send`
@@ -170,22 +170,22 @@ be split per thread depends on what is inside it. Use the per-core `Arc` in
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbBdJ8qTAQY04boYI-_BlafNobmb1mJzNH5NQbK7R-siIsAJRhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfCv1T73cY1MbZtIIDN51f48bRkNe3vWDEewbZruvF3exEWBhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link10]: https://doc.rust-lang.org/stable/std/?search=ops::Drop::drop
  [__link11]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link12]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
- [__link13]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
- [__link14]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
+ [__link13]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
+ [__link14]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link15]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
- [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
+ [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link17]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
  [__link18]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
- [__link19]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
+ [__link19]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link2]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link20]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
- [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
+ [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link23]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link24]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
@@ -196,7 +196,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link29]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link3]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
  [__link30]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
- [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Numa
+ [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link5]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link6]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link7]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html

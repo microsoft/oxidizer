@@ -17,7 +17,7 @@ use std::collections::HashMap;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use crate::{Numa, Origin, Place, ThreadAware};
+use crate::{NumaNode, Origin, Place, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -71,7 +71,7 @@ impl_transfer!(str);
 impl_transfer!(&str);
 
 impl_transfer!(Origin);
-impl_transfer!(Numa);
+impl_transfer!(NumaNode);
 #[cfg(feature = "std")]
 impl_transfer!(std::thread::ThreadId);
 impl_transfer!(Place);
@@ -268,12 +268,15 @@ mod tests {
         NonZeroU128, NonZeroUsize,
     };
 
-    use crate::{Numa, Origin, Place, ThreadAware};
+    use crate::{NumaNode, Origin, Place, ThreadAware};
 
     fn sample_places() -> [Place; 2] {
         let origin = Origin::from(0);
         let thread = std::thread::current().id();
-        [Place::new(origin, thread, Numa::from(0)), Place::new(origin, thread, Numa::from(1))]
+        [
+            Place::new(origin, thread, NumaNode::from(0)),
+            Place::new(origin, thread, NumaNode::from(1)),
+        ]
     }
 
     #[test]
