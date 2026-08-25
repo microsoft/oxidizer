@@ -171,7 +171,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
 </sub>
 
  [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbfCv1T73cY1MbZtIIDN51f48bRkNe3vWDEewbZruvF3exEWBhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
- [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link10]: https://doc.rust-lang.org/stable/std/?search=ops::Drop::drop
  [__link11]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
@@ -186,19 +186,19 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link2]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link20]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
  [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
- [__link23]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link23]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link24]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link25]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link26]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link26]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link27]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
  [__link28]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
- [__link29]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link29]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
  [__link30]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link5]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link5]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link6]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
- [__link7]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link7]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link8]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link9]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
