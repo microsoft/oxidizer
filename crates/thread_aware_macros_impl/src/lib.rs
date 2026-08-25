@@ -252,13 +252,18 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
         Type::Array(a) => collect_generics_in_type(&a.elem, generic_idents, acc)?,
         Type::Group(g) => collect_generics_in_type(&g.elem, generic_idents, acc)?,
         Type::Paren(p) => collect_generics_in_type(&p.elem, generic_idents, acc)?,
-        // Deliberately not traversed: `Type::Slice`, `Type::Ptr`, `Type::BareFn`,
-        // `Type::TraitObject` and `Type::ImplTrait`. None of them has a `ThreadAware` impl, so
-        // an enclosing field cannot be relocated through one and no bound is owed. That is a
-        // property of `impls.rs`, not of this function - if an impl is added there, and
-        // `impls.rs` still carries a `//TODO impl_transfer_array!` suggesting one might be,
-        // the matching arm has to be added here or the header will silently under-constrain
-        // the body.
+        // Not traversed: `Type::Slice`, `Type::Ptr`, `Type::BareFn`, `Type::TraitObject` and
+        // `Type::ImplTrait`. A bare `fn` pointer does have `ThreadAware` impls
+        // (`impls.rs:82`), but they are unconditional - no bound on the argument or return
+        // types - so descending would emit a bound nothing requires. The rest have no impl, so
+        // an enclosing field cannot be relocated through one and no bound is owed.
+        //
+        // The split is not a mirror of `impls.rs`, and should not be read as one: `Array` and
+        // `Reference` are traversed here while `impls.rs` implements neither, so those emit a
+        // bound for a field that cannot be relocated at all. That is pre-existing. What does
+        // follow is the maintenance rule - adding a *conditional* impl in `impls.rs` for any
+        // shape listed above means adding the matching arm here, or the header will
+        // under-constrain the body.
         _ => {}
     }
     Ok(())

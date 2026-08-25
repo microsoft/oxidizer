@@ -282,7 +282,7 @@ fn phantom_reference_binds_its_parameter() {
     // not infer it.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
+        struct PhantomRef<'a, T: 'a + Sync>(core::marker::PhantomData<&'a T>);
     };
     assert_snapshot!(expand(input));
 }
@@ -335,7 +335,7 @@ fn relocated_and_phantom_param_shares_one_bound() {
     // `ThreadAware` bound - the two traversal paths converge on the same parameter.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<&'a T>);
+        struct RelocatedAndPhantom<'a, T: 'a + Sync>(T, core::marker::PhantomData<&'a T>);
     };
     assert_snapshot!(expand(input));
 }
@@ -401,7 +401,7 @@ fn generics_lifetime_and_const_params_untouched() {
     // that cannot compile is the blind spot this PR exists to close.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct Mixed<'a, const N: usize, T>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);
+        struct Mixed<'a, const N: usize, T: Sync>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);
     };
     assert_snapshot!(expand(input));
 }

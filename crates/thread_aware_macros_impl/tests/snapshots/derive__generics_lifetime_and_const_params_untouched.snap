@@ -2,8 +2,11 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<'a, const N: usize, T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
-for Mixed<'a, N, T> {
+impl<
+    'a,
+    const N: usize,
+    T: Sync + ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for Mixed<'a, N, T> {
     fn relocate(
         &mut self,
         __thread_aware_source: ::core::option::Option<
