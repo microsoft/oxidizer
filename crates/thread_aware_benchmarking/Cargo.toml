@@ -1,0 +1,50 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "thread_aware_benchmarking"
+description = "Benchmark suite and support model for thread_aware."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+publish = false
+
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
+# public-API surface, so allow all external types.
+allowed_external_types = ["*"]
+
+# Benchmark-only package: the support library is exercised by benchmark targets,
+# not by the regular test suite, so it may legitimately produce no coverage data.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[dependencies]
+thread_aware = { workspace = true, features = ["derive", "std"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+many_cpus = { workspace = true }
+mutants = { workspace = true }
+
+# Workspace dependency declarations disable default features. Re-enable the
+# benchmark macros only on Linux, where Gungraun can use Valgrind.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[[bench]]
+name = "thread_aware_relocate"
+harness = false
+
+[[bench]]
+name = "thread_aware_relocate_cg"
+harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -4849,7 +4849,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "bytes",
  "criterion",
@@ -4859,9 +4859,21 @@ dependencies = [
  "jiff",
  "many_cpus",
  "mutants",
+ "nm",
  "static_assertions",
  "thread_aware_macros",
  "uuid",
+]
+
+[[package]]
+name = "thread_aware_benchmarking"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "gungraun",
+ "many_cpus",
+ "mutants",
+ "thread_aware",
 ]
 
 [[package]]

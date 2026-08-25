@@ -17,7 +17,7 @@ Essential building blocks for thread-per-core libraries.
 
 ## Crate features
 
-* The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+* The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
   hosted-only type implementations.
 * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 * **`threads`** enables the `registry` module and implies `std`.
@@ -108,7 +108,7 @@ from types that implement [`ThreadAware`][__link24].
 
 ## Features
 
-* The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+* The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
   requires `alloc` and pointer-width atomics.
 * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
@@ -195,36 +195,36 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUpEHEN0wyqMbT69q7SZ3jhAb-itdqiIRp1EbkJGs8OCz_nBhZIKCbHRocmVhZF9hd2FyZWUwLjkuMIJzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuNQ
- [__link0]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link1]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUbHFZqBf9MsbIdlZrkyww6sbNpUTMOOpy3sbXQ2vhYWhjORhZIKCbHRocmVhZF9hd2FyZWYwLjEwLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
+ [__link0]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link1]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link10]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link11]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link11]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link12]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link13]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link14]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link15]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Unaware
- [__link16]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Unaware
- [__link17]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link18]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link19]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link13]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link14]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link15]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=Unaware
+ [__link16]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=Unaware
+ [__link17]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link18]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link19]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link2]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
- [__link20]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link20]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link21]: https://doc.rust-lang.org/stable/std/?search=thread::spawn
- [__link22]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link22]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link23]: https://doc.rust-lang.org/stable/alloc/?search=sync::Arc
- [__link24]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link25]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link24]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link25]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link26]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
  [__link27]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
- [__link28]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link29]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link3]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link30]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
- [__link31]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
- [__link4]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link5]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
- [__link6]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=Arc
+ [__link28]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link29]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link3]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link30]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=Arc
+ [__link31]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=Arc
+ [__link4]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link5]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
+ [__link6]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=Arc
  [__link7]: https://doc.rust-lang.org/stable/alloc/?search=sync::Arc
- [__link8]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=storage::Strategy
- [__link9]: https://docs.rs/thread_aware/0.9.0/thread_aware/?search=core::ThreadAware
+ [__link8]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=storage::Strategy
+ [__link9]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
