@@ -19,8 +19,8 @@ This Windows-only crate adds a WinHTTP transport constructor to
 [`HttpClient`][__link1]. Callers supply the clock, memory pool, and telemetry sink
 required by the transport through [`WinHttpDeps`][__link2].
 
-WinHTTP-specific TLS and timeout configuration is available through
-[`WinHttpTlsConfig`][__link3] and [`WinHttpOptions`][__link4]. Independently built clients do
+WinHTTP-specific TLS configuration is available through
+[`WinHttpTlsConfig`][__link3]. Independently built clients do
 not share connections.
 
 ### Platform requirements
@@ -57,10 +57,10 @@ fixed by the operating system.
 
 The full contract - error classification, timeout semantics, and the
 fidelity of every generic option - is documented in
-[`docs/design.md`][__link5].
+[`docs/design.md`][__link4].
 
 Requests are serviced through the operating system’s
-[WinHTTP][__link6]
+[WinHTTP][__link5]
 API.
 
 
@@ -69,11 +69,10 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbmvxQeX0ag5YbBMfTPKLOe88bdPXrM3isACIbJC4dXt1ptuZhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbi6-kKIHoMcQbYbzSYIXh6N0bOjgiLQ5-DwgbsNYZKhpkINRhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps
  [__link3]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpTlsConfig
- [__link4]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpOptions
- [__link5]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
- [__link6]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp
+ [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
+ [__link5]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp

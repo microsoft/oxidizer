@@ -9,6 +9,12 @@
 //! distinguish from a failed measurement. This module keeps a single trivially
 //! exercised item in the build so that the measurement remains meaningful, and
 //! carries no behavior of its own.
+//!
+//! The file is named for the platform the workspace supports besides Windows,
+//! which is the naming the tooling matches on to skip platform-gated code that
+//! it cannot build. The module is gated on the absence of Windows rather than
+//! on Linux specifically, so that the library keeps its instrumented item on
+//! any other target as well.
 
 /// Reports whether the current target supports the WinHTTP transport.
 ///

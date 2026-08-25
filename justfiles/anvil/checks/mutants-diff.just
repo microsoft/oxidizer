@@ -56,14 +56,17 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     # the file system unless the argument is a quoted token, and it does so even
     # for arguments supplied from a variable or a splatted array -- which would
     # turn a directory glob into a list of paths cargo-mutants rejects.
+    #
+    # A bare name such as `linux` matches any path component, so a module
+    # directory holding platform-gated code is excluded by naming it. The file
+    # globs omit the separator before the platform name so that both `linux.rs`
+    # and `socket_linux.rs` match.
     if ($IsWindows) {
-        # The second glob is the non-Windows placeholder inside the otherwise
-        # Windows-only `fetch_winhttp` crate.
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*_linux.rs" --exclude "crates/fetch_winhttp/src/unsupported_platform.rs"
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*linux.rs" --exclude "linux"
     } else {
         # `fetch_winhttp` implements nothing outside Windows, so the whole crate
         # goes rather than individual files.
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*_windows.rs" --exclude "crates/fetch_winhttp/**"
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*windows.rs" --exclude "windows" --exclude "crates/fetch_winhttp/**"
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

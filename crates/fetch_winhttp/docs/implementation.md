@@ -137,7 +137,7 @@ crates/fetch_winhttp/
       write.rs           // bytesbuf_io::Write over WinHttpWriteData + request framing
       mod.rs             // module wiring only (no type definitions)
     tls.rs               // WinHttpTlsConfig -> security flags
-    options.rs           // WinHttpOptions and the validated ProtocolOptions
+    options.rs           // The validated ProtocolOptions
     telemetry.rs         // observed::Sink metrics and log events (§12)
     handle.rs            // RAII handle wrappers (Send/Sync assertions)
     error.rs             // Win32 -> HttpError mapping + the shared error constructors
@@ -1060,7 +1060,7 @@ after the table.
 | TLS (design.md §4) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`, each flag setting only its own `SECURITY_FLAGS` bit (they are independent, not coupled); WinHTTP secure error code -> `tls` label, with deterministic validation failures non-retryable and revocation-server unavailability retryable; `SECURE_FAILURE` flags are optional diagnostics | mTLS out of scope (design.md §4.1) - nothing to assert |
 | Compression / redirects / statelessness (design.md §5) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
 | Connection management (design.md §2) | connect handle opened per request and retained until the request's final close callback; finite `max_connections` causes no max-conns option call; `ConnectionKeepAlive` maps to `HTTP2/3_KEEPALIVE`, with the 5000 ms floor applied to HTTP/2 (§10.3); `connection_idle_timeout` maps to `CONNECTION_IDLE_TIMEOUT` on the session, with the same 5000 ms floor and `Unlimited` encoded as the largest `DWORD`; `DISABLE_GLOBAL_POOLING` on the session | generic lifetime settings are accepted and ignored without diagnostics |
-| Timeouts (design.md §6) | native timers initialize to unlimited; only explicit `WinHttpOptions::resolve_timeout` changes a native timer; frozen-clock connect deadline (design.md §6.2); `ResponseTimeout` remains owned by `fetch`; `BodyTimeout` is passed to `HttpBodyBuilder` | a connect completing first drops its timer unfired; request body options override client body defaults through the existing merge rules |
+| Timeouts (design.md §6) | native timers initialize to unlimited and stay there; frozen-clock connect deadline (design.md §6.2); `ResponseTimeout` remains owned by `fetch`; `BodyTimeout` is passed to `HttpBodyBuilder` | a connect completing first drops its timer unfired; request body options override client body defaults through the existing merge rules |
 
 - **Inline / reentrant completion.** `MockBindings` is configured so an async call
   (e.g. `read_data`) fires its completion *synchronously, inline, on the submitting
@@ -1186,9 +1186,8 @@ mirroring `fetch`'s existing `requests` integration test structure.
 ### 7.4 Timeout testing
 
 Timeout *configuration* is asserted in unit tests: the mock bindings record the
-`WinHttpSetTimeouts` arguments, so tests assert that all native timers begin unlimited
-and only an explicitly configured `WinHttpOptions::resolve_timeout` changes the resolve
-field. `ResponseTimeout` coverage remains in `fetch::HttpClient`, while body tests assert
+`WinHttpSetTimeouts` arguments, so tests assert that every native timer is programmed
+unlimited. `ResponseTimeout` coverage remains in `fetch::HttpClient`, while body tests assert
 that the request's `BodyTimeout` reaches `HttpBodyBuilder` and merges with client-level
 body options.
 
@@ -1199,14 +1198,12 @@ past `connect_timeout` and asserts the driver closes the handle and yields
 `HttpError::timeout`, and conversely that a connect completing before the deadline
 drops the timer without firing.
 
-Timeout *firing against the real OS* cannot be made deterministic: the real
-WinHTTP DNS timer uses the real OS clock, which tests cannot freeze or fast-forward.
-Real-time integration tests are therefore unacceptable. Integration tests leave native
-timers unlimited and build their clients on a frozen `tick::Clock` that no test advances,
-so every `fetch`-layer and transport-scheduled deadline is structurally unable to fire.
-The connect deadline and response/body timeout behavior are covered with controlled
-clocks; the native resolve timeout is covered by asserting its configuration rather than
-waiting for it to expire.
+Timeout *firing against the real OS* cannot be made deterministic: native WinHTTP timers
+use the real OS clock, which tests cannot freeze or fast-forward. Real-time integration
+tests are therefore unacceptable. Integration tests leave native timers unlimited and
+build their clients on a frozen `tick::Clock` that no test advances, so every
+`fetch`-layer and transport-scheduled deadline is structurally unable to fire. The
+connect deadline and response/body timeout behavior are covered with controlled clocks.
 
 ## 8. Client construction
 
@@ -1475,7 +1472,10 @@ The behaviors in design.md §5 are configured through these options.
   rather than clamping it, and a rejected option would fail session construction, so an
   aggressive idle policy must not become an unbuildable transport. `Unlimited` sets the
   largest representable `DWORD`, because the option's value is a plain unsigned
-  millisecond count with no reserved "never expire" encoding. Setting the option also
+  millisecond count with no reserved "never expire" encoding. That window is finite - a
+  little over 49 days - rather than a true infinity, which is why the design documents
+  `Unlimited` as honored: the difference is not observable within a process lifetime.
+  Setting the option also
   disables the process-wide keep-alive pool, which the session disables explicitly in
   any case, so the settings agree rather than conflict. The window bounds *reuse*:
   a connection past it is never selected again, because the lookup path re-checks the
@@ -1522,7 +1522,7 @@ the required interval:
 | Response timeout | `fetch::HttpClient::execute` wraps the whole pipeline through response headers | Native send/receive-response timers unlimited |
 | Body idle timeout | `HttpBodyBuilder::body` wraps the returned body after merging request and client defaults | Native receive timer unlimited |
 | Seatbelt request timeout | `seatbelt::TimeoutLayer` above the transport | n/a |
-| Resolve timeout | WinHTTP, because DNS resolution is not exposed as a separately awaitable stage | `WinHttpSetTimeouts` resolve field; unlimited by default and finite only when `WinHttpOptions::resolve_timeout` is explicitly configured |
+| Name resolution | Not separately bounded; it falls inside the connect timeout above | `WinHttpSetTimeouts` resolve field unlimited |
 
 Session initialization explicitly programs the native resolve, connect, send, and receive
 timers to their documented unlimited values rather than inheriting WinHTTP's finite
@@ -1715,6 +1715,6 @@ the `fetch` API or profiling data makes them actionable:
   buffer sizing, TCP autotuning and initial retransmission timeout, allocation
   lookasides and heap extension, and response-body fast-forwarding that may bear on the
   read path in §6.2. None maps onto a generic `fetch` option, so adopting any would mean
-  either a `WinHttpOptions` knob or an unconditional transport policy, and a knob earns
-  its place only with demonstrated value. Recorded here so the option surface is known
+  either a new transport-specific knob or an unconditional transport policy, and a knob
+  earns its place only with demonstrated value. Recorded here so the option surface is known
   the next time profiling identifies a bottleneck rather than rediscovered then.

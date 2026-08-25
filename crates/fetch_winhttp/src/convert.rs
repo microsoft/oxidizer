@@ -71,8 +71,7 @@ const CONNECTION_IDLE_TIMEOUT_MINIMUM_MS: u32 = 5_000;
 /// Native sentinel that disables one `WinHttpSetTimeouts` deadline.
 ///
 /// `WinHttpSetTimeouts` takes four signed millisecond parameters and reads -1
-/// in any of them as "no timeout", so this single constant covers both the
-/// resolve timeout that [`timeout_millis`] leaves unset and the three
+/// in any of them as "no timeout", so this single constant covers all four
 /// deadlines [`crate::session`] deliberately delegates to the generic `fetch`
 /// client (design.md section 6.1). Keeping one definition keeps the citation
 /// reachable from every argument that encodes the sentinel.
@@ -170,14 +169,6 @@ pub(crate) struct UnexpectedByteLengthError {
 #[display("WinHTTP does not support requested HTTP version {version:?}")]
 struct UnsupportedHttpVersionError {
     version: Version,
-}
-
-pub(crate) fn timeout_millis(timeout: Option<Duration>) -> i32 {
-    match timeout {
-        None => UNLIMITED_TIMEOUT,
-        Some(duration) => i32::try_from(ceil_millis(duration).clamp(1, u128::from(i32::MAX.cast_unsigned())))
-            .expect("value is clamped to i32::MAX before conversion"),
-    }
 }
 
 pub(crate) fn dword_millis(duration: Duration) -> u32 {
@@ -392,7 +383,7 @@ mod tests {
         WINHTTP_DECOMPRESSION_FLAG_GZIP, WINHTTP_DISABLE_AUTHENTICATION, WINHTTP_DISABLE_COOKIES, WINHTTP_FLAG_AUTOMATIC_CHUNKING,
         WINHTTP_FLAG_SECURE, connection_idle_timeout_millis, context_bytes, decompression_mask, disable_feature_mask, dword_bytes,
         dword_millis, header_buffer_units, headers_to_utf16, host_to_utf16, http2_keep_alive_millis, http3_keep_alive_millis,
-        method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options, request_open_flags, timeout_millis,
+        method_to_utf16, parse_header_buffer, parse_protocol_used, path_to_utf16, protocol_options, request_open_flags,
         validate_request_header_unit_count,
     };
 
@@ -408,16 +399,6 @@ mod tests {
     assert_not_impl_any!(ReturnedLengthOutOfBoundsError: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(UnexpectedByteLengthError: UnwindSafe, RefUnwindSafe);
     assert_not_impl_any!(UnsupportedHttpVersionError: UnwindSafe, RefUnwindSafe);
-
-    #[test]
-    fn signed_timeout_conversion_covers_boundaries() {
-        assert_eq!(timeout_millis(None), -1);
-        assert_eq!(timeout_millis(Some(Duration::ZERO)), 1);
-        assert_eq!(timeout_millis(Some(Duration::from_nanos(1))), 1);
-        assert_eq!(timeout_millis(Some(Duration::from_millis(i32::MAX as u64))), i32::MAX);
-        assert_eq!(timeout_millis(Some(Duration::from_millis(i32::MAX as u64 + 1))), i32::MAX);
-        assert_eq!(timeout_millis(Some(Duration::MAX)), i32::MAX);
-    }
 
     #[test]
     fn dword_timeout_conversion_ceils_and_clamps() {

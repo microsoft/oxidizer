@@ -35,10 +35,15 @@ const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 /// group is skipped rather than excluded by path.
 const WINDOWS_ONLY_PACKAGES: &[&str] = &["fetch_winhttp"];
 
-/// Source files that individual crates gate to a single platform.
-const WINDOWS_ONLY_SOURCES: &[&str] = &["**/*_windows.rs"];
-const LINUX_ONLY_SOURCES: &[&str] =
-    &["**/*_linux.rs", "crates/fetch_winhttp/src/unsupported_platform.rs"];
+/// Source files and directories that individual crates gate to a single platform.
+///
+/// Entries are globs matched against source paths, so a bare name such as
+/// `windows` matches any path component: a module directory holding
+/// platform-gated code is excluded by naming it. The file globs deliberately
+/// omit the separator before the platform name so that both `windows.rs` and
+/// `socket_windows.rs` match.
+const WINDOWS_ONLY_SOURCES: &[&str] = &["**/*windows.rs", "windows"];
+const LINUX_ONLY_SOURCES: &[&str] = &["**/*linux.rs", "linux"];
 
 /// Run mutation testing on the workspace
 #[derive(FromArgs)]

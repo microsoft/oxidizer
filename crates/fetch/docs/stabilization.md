@@ -133,8 +133,9 @@ timeout but has no concept for resolve or send timeouts. That absence is *not* t
 problem: different transports support different sets of fine-grained timers, measure
 them against different phase boundaries (what each timer includes or excludes), or
 cannot express some of them at all. Per the scope split above, *network-phase* timers
-(resolve, connect, send, receive) are transport-specific, which is why this transport
-exposes them as `WinHttpOptions` knobs (see fetch_winhttp design.md §6.1). The mismatch
+(resolve, connect, send, receive) are transport-specific: which of them a transport can
+express, and against which phase boundaries, is its own concern (see fetch_winhttp
+design.md §6.1). The mismatch
 today is that `fetch` reaches down to model a connect timeout while leaving the rest to
 transports - it should leave all network-phase timers to the transport and keep only
 pipeline-level deadlines.

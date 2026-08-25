@@ -36,7 +36,7 @@ pub(crate) struct WinHttpTransport {
 impl WinHttpTransport {
     pub(crate) fn new(inputs: TransportInputs, bindings: BindingsFacade) -> Self {
         let telemetry = Telemetry::new(inputs.sink);
-        let state = match WinHttpSession::new(bindings, &inputs.session_options, &inputs.options) {
+        let state = match WinHttpSession::new(bindings, &inputs.options) {
             Ok(session) => TransportState::Ready(Box::new(ReadyTransport {
                 session: Arc::new(session),
                 body_builder: inputs.body_builder,
@@ -156,7 +156,6 @@ pub(crate) struct TransportInputs {
     pub(crate) sink: Sink,
     pub(crate) options: TransportOptions,
     pub(crate) tls: WinHttpTlsConfig,
-    pub(crate) session_options: crate::WinHttpOptions,
 }
 
 #[cfg(test)]
@@ -236,9 +235,9 @@ mod tests {
             names,
             [
                 "fetch.winhttp.session.initialization.failure",
-                "fetch.winhttp.request",
+                "fetch.winhttp.request.accepted",
                 "fetch.winhttp.request.error",
-                "fetch.winhttp.request",
+                "fetch.winhttp.request.accepted",
                 "fetch.winhttp.request.error",
             ]
         );
@@ -277,7 +276,7 @@ mod tests {
             .into_iter()
             .map(|event| event.name().to_owned())
             .collect::<Vec<_>>();
-        assert_eq!(names, ["fetch.winhttp.request", "fetch.winhttp.request.error",]);
+        assert_eq!(names, ["fetch.winhttp.request.accepted", "fetch.winhttp.request.error",]);
     }
 
     #[test]
@@ -300,7 +299,7 @@ mod tests {
                 .into_iter()
                 .map(|event| event.name().to_owned())
                 .collect::<Vec<_>>(),
-            ["fetch.winhttp.request"]
+            ["fetch.winhttp.request.accepted"]
         );
         assert_eq!(closes.load(Ordering::SeqCst), 0, "the response body owns the request guard");
         drop(response);
@@ -362,7 +361,7 @@ mod tests {
                 .into_iter()
                 .map(|event| event.name().to_owned())
                 .collect::<Vec<_>>(),
-            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+            ["fetch.winhttp.request.accepted", "fetch.winhttp.request.error"]
         );
         finish_failed_request(transport, &context, &closes);
     }
@@ -411,7 +410,7 @@ mod tests {
                 .into_iter()
                 .map(|event| event.name().to_owned())
                 .collect::<Vec<_>>(),
-            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+            ["fetch.winhttp.request.accepted", "fetch.winhttp.request.error"]
         );
         finish_failed_request(transport, &context, &closes);
     }
@@ -455,7 +454,7 @@ mod tests {
                 .into_iter()
                 .map(|event| event.name().to_owned())
                 .collect::<Vec<_>>(),
-            ["fetch.winhttp.request", "fetch.winhttp.request.error"]
+            ["fetch.winhttp.request.accepted", "fetch.winhttp.request.error"]
         );
         finish_failed_request(transport, &context, &closes);
     }
@@ -479,7 +478,7 @@ mod tests {
         assert_eq!(
             processor.events(),
             [
-                ExpectedEvent::without_severity("fetch.winhttp.request").metric(),
+                ExpectedEvent::without_severity("fetch.winhttp.request.accepted").metric(),
                 ExpectedEvent::new("fetch.winhttp.request.error", Severity::Error)
                     .body("WinHTTP transport request failed")
                     .dimension("winhttp.connect.duration", 0.25_f64)
@@ -583,7 +582,6 @@ mod tests {
             sink,
             options: TransportOptions::default(),
             tls: WinHttpTlsConfig::default(),
-            session_options: crate::WinHttpOptions::default(),
         }
     }
 

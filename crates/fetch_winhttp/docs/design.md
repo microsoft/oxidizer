@@ -37,16 +37,13 @@ except the constructors arrive through an extension trait this crate implements 
 
 ```rust,ignore
 use fetch::HttpClient;
-use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpOptions, WinHttpTlsConfig};
+use fetch_winhttp::{HttpClientWinHttpExt, WinHttpDeps, WinHttpTlsConfig};
 
 // Clock, memory pool, and telemetry sink come from the application's environment.
-// TLS and WinHTTP-specific user configuration default when omitted.
+// TLS configuration defaults when omitted.
 let deps = WinHttpDeps::builder(clock, global_pool, sink)
     .tls(WinHttpTlsConfig::builder()
         .accept_invalid_certs(true)                 // Schannel knobs, §4
-        .build())
-    .options(WinHttpOptions::builder()
-        .resolve_timeout(Duration::from_secs(10))   // optional DNS-resolution deadline, §6
         .build())
     .build();
 
@@ -58,7 +55,7 @@ The result is an ordinary `fetch` `HttpClient`; no other caller code changes.
 `WinHttpDeps` carries the mandatory environment dependencies needed by this transport:
 the timer-capable `tick::Clock`, `bytesbuf::mem::GlobalPool`, and `observed::Sink`.
 These values cannot be invented by the crate and therefore have no defaults. Its TLS
-and WinHTTP option fields are user configuration and do default. `WinHttpDeps` and its
+configuration is user configuration and does default. `WinHttpDeps` and its
 component config types are `#[non_exhaustive]` and constructed through builders so new
 fields can be added compatibly:
 
@@ -66,7 +63,7 @@ fields can be added compatibly:
 /// WinHTTP-specific dependencies. Construct with [`WinHttpDeps::builder`].
 #[derive(thread_aware::ThreadAware)]
 #[non_exhaustive]
-pub struct WinHttpDeps { /* clock, global pool, sink, TLS, options - private */ }
+pub struct WinHttpDeps { /* clock, global pool, sink, TLS - private */ }
 
 impl WinHttpDeps {
     /// Starts building a `WinHttpDeps`.
@@ -84,8 +81,7 @@ pub trait HttpClientWinHttpExt {
 }
 ```
 
-`WinHttpTlsConfig` (§4) and `WinHttpOptions` (§6) follow the same
-builder + `#[non_exhaustive]` pattern.
+`WinHttpTlsConfig` (§4) follows the same builder + `#[non_exhaustive]` pattern.
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
 
@@ -131,11 +127,11 @@ approximate, and some ignored:
 | `multiple_pools` | Accepted; its behavior remains defined by the generic `fetch` client contract. |
 | `max_connections = usize::MAX` (default) | Honored as no caller-imposed limit. |
 | finite `max_connections` | Ignored. |
-| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. `Unlimited` requests the longest window the platform can express - over 49 days - rather than an unbounded one. |
+| `connection_idle_timeout` | Honored, raised to a minimum of 5 seconds. Bounds how long an unused connection stays eligible for reuse; it does not promise prompt socket release. |
 | `connection_lifetime = Unlimited` (default) | Honored. |
 | `connection_lifetime = Fixed(_)` / `PerConnection(_)` | Ignored (§2.2). |
 | `ConnectionKeepAlive::Disabled` (default) | Uses Windows defaults. |
-| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored, raised to a minimum of 5 seconds for HTTP/2 and 1 millisecond for HTTP/3. The generic `timeout` is ignored; HTTP/1.1 has no equivalent behavior. |
+| `ConnectionKeepAlive::ActiveConnections { interval, timeout }` | The interval is honored on HTTP/2, raised to a minimum of 5 seconds, and on HTTP/3, raised to a minimum of 1 millisecond. It does not apply to HTTP/1.1, which has no keep-alive probe to send. The generic `timeout` is ignored. |
 | `ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout }` | Behaves like `ActiveConnections`; Windows does not distinguish these modes. |
 | `Http2Options::initial_max_send_streams` | Ignored; Windows owns HTTP/2 stream concurrency. |
 | `Http2Options::adaptive_window` | Ignored; Windows owns HTTP/2 flow control. |
@@ -271,11 +267,11 @@ behaves consistently with the rest of `fetch`:
   than being silently dropped. A trailer frame is reached only once the body yields it,
   so that failure arrives after the headers and every preceding data frame have been
   sent (§7).
-- **`Transfer-Encoding` is rejected.** The transport derives request framing from the
-  body itself, so a caller-supplied transfer coding fails the request with
-  `invalid_request` (§7) before anything is sent. Removing the header does not change how
-  the body is framed on the wire. Code that forwards an inbound request's headers verbatim
-  is the common case that trips on this.
+- **`Transfer-Encoding` is rejected in request headers.** The transport derives request
+  framing from the body itself, so a caller-supplied transfer coding fails the request
+  with `invalid_request` (§7) before anything is sent. Removing the header does not change
+  how the body is framed on the wire. Code that forwards an inbound request's headers
+  verbatim is the common case that trips on this.
 - **`Content-Length` must be a single well-formed value**, with repeated fields in
   agreement. A body that reports its own length is authoritative: the header must equal
   it, and a disagreement fails the request before anything is sent. A body that cannot
@@ -307,13 +303,9 @@ The enforcement mechanisms are documented in implementation.md §10.4.
   extensions): the maximum idle gap between response body frames, reset on progress.
 - **Seatbelt request timeout**: honored by the client pipeline without transport-specific
   configuration.
-- **Send timeout**: not a distinct concept. Sending the request and waiting for the
-  response headers (without touching the body) is exactly the span `ResponseTimeout`
-  already governs, after which `BodyTimeout` takes over; there is no separate send
-  deadline to honor.
-- **Resolve timeout**: `fetch` has no concept for a standalone DNS-resolution deadline
-  and therefore exposes `WinHttpOptions::resolve_timeout` as transport-specific
-  configuration. It defaults to unlimited.
+
+Name resolution has no separate deadline. It is covered by the connect timeout, which
+spans it along with the rest of connection establishment (§6.2).
 
 ### 6.2 Connect timeout scope
 
@@ -398,6 +390,9 @@ without the caller changing anything. Idempotency and retry budgets are
 transport noise, a deterministic condition, or a code we do not recognize well enough
 to say.
 
+Which condition falls in which class is descriptive rather than contractual: the
+mapping below reflects the transport's current judgement and may change.
+
 - **Retryable** (transient transport/connection faults): a connection reset, aborted, or
   closed mid-flight; a name that did not resolve (DNS can be flaky); a peer that refused
   the connection or could not be reached (transient server/pool state); an operation that
@@ -432,14 +427,14 @@ alerts bind to; they are part of the contract, not incidental diagnostics.
 | Event | Signal | Emitted when |
 |-------|--------|--------------|
 | `fetch.winhttp.session.initialization.failure` | log (error) | A transport instance cannot open or configure its WinHTTP session and becomes permanently failed (§7). |
-| `fetch.winhttp.request` | metric | The transport accepts a request, before any of it is processed. |
+| `fetch.winhttp.request.accepted` | metric | The transport accepts a request, before any of it is processed. |
 | `fetch.winhttp.request.error` | log (error) + metric | A request returns `Err`. Requests that fail while the caller reads the response body are not counted, because the response was already returned successfully. |
 
 Counters:
 
 | Counter | Unit | Dimensions |
 |---------|------|------------|
-| `fetch.winhttp.request.count` | `{request}` | none |
+| `fetch.winhttp.request.accepted.count` | `{request}` | none |
 | `fetch.winhttp.request.error.count` | `{error}` | none |
 
 The counters are deliberately zero-dimensional. No per-request, per-connection, or

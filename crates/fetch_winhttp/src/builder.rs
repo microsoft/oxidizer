@@ -8,9 +8,9 @@ use observed::Sink;
 use thread_aware::ThreadAware;
 use tick::Clock;
 
+use crate::WinHttpTlsConfig;
 use crate::bindings::BindingsFacade;
 use crate::transport::{TransportInputs, WinHttpTransport};
-use crate::{WinHttpOptions, WinHttpTlsConfig};
 
 /// Supplies the environment and transport extras needed by WinHTTP.
 ///
@@ -30,7 +30,6 @@ pub struct WinHttpDeps {
     global_pool: GlobalPool,
     sink: Sink,
     tls: WinHttpTlsConfig,
-    options: WinHttpOptions,
 }
 
 impl WinHttpDeps {
@@ -42,7 +41,6 @@ impl WinHttpDeps {
             global_pool,
             sink,
             tls: WinHttpTlsConfig::default(),
-            options: WinHttpOptions::default(),
         }
     }
 
@@ -56,10 +54,6 @@ impl WinHttpDeps {
 
     pub(crate) fn tls(&self) -> &WinHttpTlsConfig {
         &self.tls
-    }
-
-    pub(crate) fn options(&self) -> &WinHttpOptions {
-        &self.options
     }
 }
 
@@ -75,7 +69,6 @@ pub struct WinHttpDepsBuilder {
     global_pool: GlobalPool,
     sink: Sink,
     tls: WinHttpTlsConfig,
-    options: WinHttpOptions,
 }
 
 impl WinHttpDepsBuilder {
@@ -83,13 +76,6 @@ impl WinHttpDepsBuilder {
     #[must_use]
     pub fn tls(mut self, tls: WinHttpTlsConfig) -> Self {
         self.tls = tls;
-        self
-    }
-
-    /// Sets the WinHTTP-specific transport options.
-    #[must_use]
-    pub fn options(mut self, options: WinHttpOptions) -> Self {
-        self.options = options;
         self
     }
 
@@ -101,7 +87,6 @@ impl WinHttpDepsBuilder {
             global_pool: self.global_pool,
             sink: self.sink,
             tls: self.tls,
-            options: self.options,
         }
     }
 }
@@ -149,7 +134,6 @@ fn create_handler(context: CustomContext<WinHttpDeps>, bindings: BindingsFacade)
         sink: context.extras.sink().clone(),
         options: context.options,
         tls: context.extras.tls().clone(),
-        session_options: context.extras.options().clone(),
     };
     let _ = (context.pool_index, context.tls, context.meter);
 
@@ -185,11 +169,11 @@ mod tests {
     use tick::{Clock, ClockControl};
 
     use super::{WinHttpDeps, WinHttpDepsBuilder, create_builder_with_bindings, into_custom_deps};
+    use crate::WinHttpTlsConfig;
     use crate::bindings::{BindingsFacade, MockBindings};
     use crate::handle::RawHandle;
     use crate::session::SESSION_OPTIONS_WITHOUT_KEEP_ALIVE;
     use crate::testing::drive;
-    use crate::{WinHttpOptions, WinHttpTlsConfig};
 
     assert_impl_all!(WinHttpDeps: Send, Sync, Clone, Debug, ThreadAware);
     assert_impl_all!(WinHttpDepsBuilder: Send, Sync, Clone, Debug, ThreadAware);
@@ -203,22 +187,18 @@ mod tests {
     fn optional_configuration_uses_defaults() {
         let deps = complete_builder().build();
 
-        assert_eq!(deps.options().resolve_timeout(), None);
         assert!(!deps.tls().accepts_invalid_certs());
         assert!(!deps.tls().accepts_invalid_hostnames());
     }
 
     #[test]
     fn optional_configuration_is_forwarded() {
-        let timeout = Duration::from_secs(10);
         let deps = complete_builder()
             .tls(WinHttpTlsConfig::builder().accept_invalid_certs(true).build())
-            .options(WinHttpOptions::builder().resolve_timeout(timeout).build())
             .build();
         let custom_deps = into_custom_deps(deps);
 
         assert_eq!(custom_deps.extras.sink().id(), Sink::noop().id());
-        assert_eq!(custom_deps.extras.options().resolve_timeout(), Some(timeout));
         assert!(custom_deps.extras.tls().accepts_invalid_certs());
 
         let _body_pool_buffer = custom_deps.global_pool.reserve(1);

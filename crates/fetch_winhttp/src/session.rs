@@ -14,15 +14,12 @@ use windows::Win32::Networking::WinHttp::{
     WINHTTP_OPTION_DISABLE_GLOBAL_POOLING,
 };
 
-use crate::WinHttpOptions;
 use crate::bindings::{
     Bindings as _, BindingsFacade, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT, WINHTTP_OPTION_HTTP2_KEEPALIVE,
     WINHTTP_OPTION_HTTP3_KEEPALIVE,
 };
 use crate::callback::status_callback;
-use crate::convert::{
-    UNLIMITED_TIMEOUT, connection_idle_timeout_millis, dword_bytes, http2_keep_alive_millis, http3_keep_alive_millis, timeout_millis,
-};
+use crate::convert::{UNLIMITED_TIMEOUT, connection_idle_timeout_millis, dword_bytes, http2_keep_alive_millis, http3_keep_alive_millis};
 use crate::error::WinHttpError;
 use crate::handle::SessionHandle;
 
@@ -76,11 +73,7 @@ pub(crate) struct WinHttpSession {
 }
 
 impl WinHttpSession {
-    pub(crate) fn new(
-        bindings: BindingsFacade,
-        session_options: &WinHttpOptions,
-        transport_options: &TransportOptions,
-    ) -> Result<Self, SessionInitializationFailure> {
+    pub(crate) fn new(bindings: BindingsFacade, transport_options: &TransportOptions) -> Result<Self, SessionInitializationFailure> {
         let user_agent = U16CString::from_str(USER_AGENT).expect("the static WinHTTP user agent contains no NUL characters");
         // SAFETY: open requires the trait-level invariants, WINHTTP_FLAG_ASYNC
         // among the flags, and a returned handle that immediately acquires one
@@ -102,7 +95,7 @@ impl WinHttpSession {
         unsafe {
             handle.bindings().set_timeouts(
                 handle.raw(),
-                timeout_millis(session_options.resolve_timeout()),
+                UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
                 UNLIMITED_TIMEOUT,
@@ -308,14 +301,13 @@ mod tests {
         SESSION_NOTIFICATION_FLAGS, SessionInitializationFailure, SessionInitializationOperation, TRUE_BYTES, UNLIMITED_TIMEOUT,
         USER_AGENT, WinHttpSession,
     };
-    use crate::WinHttpOptions;
     use crate::bindings::{
         BindingsFacade, MockBindings, StatusCallback, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT,
         WINHTTP_OPTION_HTTP2_KEEPALIVE, WINHTTP_OPTION_HTTP3_KEEPALIVE,
     };
     use crate::callback::status_callback;
     use crate::context::OperationKind;
-    use crate::convert::{connection_idle_timeout_millis, dword_bytes, timeout_millis};
+    use crate::convert::{connection_idle_timeout_millis, dword_bytes};
     use crate::error::{WinHttpError, WinHttpOperation};
     use crate::handle::RawHandle;
 
@@ -346,7 +338,6 @@ mod tests {
     /// Describes the native call script one session construction should produce.
     struct SetupScript {
         failure: Option<FailurePoint>,
-        resolve_timeout: i32,
         idle_timeout_millis: u32,
         keep_alive: bool,
     }
@@ -355,7 +346,6 @@ mod tests {
         fn new() -> Self {
             Self {
                 failure: None,
-                resolve_timeout: UNLIMITED_TIMEOUT,
                 idle_timeout_millis: default_idle_timeout_millis(),
                 keep_alive: true,
             }
@@ -389,14 +379,9 @@ mod tests {
 
     #[test]
     fn session_setup_succeeds_in_exact_order_with_expected_values() {
-        let script = SetupScript {
-            resolve_timeout: timeout_millis(Some(Duration::from_micros(1_500))),
-            ..SetupScript::new()
-        };
-        let bindings = configured_bindings(script);
-        let options = WinHttpOptions::builder().resolve_timeout(Duration::from_micros(1_500)).build();
+        let bindings = configured_bindings(SetupScript::new());
 
-        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options, &active_transport_options()).unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &active_transport_options()).unwrap();
 
         assert_eq!(session.handle().raw(), raw_handle());
         drop(session);
@@ -409,12 +394,7 @@ mod tests {
             ..SetupScript::new()
         });
 
-        let session = WinHttpSession::new(
-            BindingsFacade::mock(Arc::new(bindings)),
-            &WinHttpOptions::default(),
-            &TransportOptions::default(),
-        )
-        .unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &TransportOptions::default()).unwrap();
 
         drop(session);
     }
@@ -428,7 +408,7 @@ mod tests {
         let mut options = active_transport_options();
         options.connection_pool.connection_idle_timeout = ConnectionIdleTimeout::Unlimited;
 
-        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &options).unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options).unwrap();
 
         drop(session);
     }
@@ -442,7 +422,7 @@ mod tests {
         let mut options = active_transport_options();
         options.connection_pool.connection_idle_timeout = ConnectionIdleTimeout::Limited(Duration::from_millis(1));
 
-        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &WinHttpOptions::default(), &options).unwrap();
+        let session = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &options).unwrap();
 
         drop(session);
     }
@@ -578,12 +558,7 @@ mod tests {
             failure: Some(point),
             ..SetupScript::new()
         });
-        let error = WinHttpSession::new(
-            BindingsFacade::mock(Arc::new(bindings)),
-            &WinHttpOptions::default(),
-            &active_transport_options(),
-        )
-        .unwrap_err();
+        let error = WinHttpSession::new(BindingsFacade::mock(Arc::new(bindings)), &active_transport_options()).unwrap_err();
 
         assert_eq!(error.code(), error_code(point));
         assert_eq!(error.operation(), initialization_operation(point));
@@ -602,12 +577,11 @@ mod tests {
             .return_once(move |_, _| script.result(FailurePoint::Open).map(|()| raw));
 
         if script.reaches(FailurePoint::SetTimeouts) {
-            let resolve_timeout = script.resolve_timeout;
             bindings
                 .expect_set_timeouts()
                 .withf(move |handle, resolve, connect, send, receive| {
                     *handle == raw
-                        && *resolve == resolve_timeout
+                        && *resolve == UNLIMITED_TIMEOUT
                         && *connect == UNLIMITED_TIMEOUT
                         && *send == UNLIMITED_TIMEOUT
                         && *receive == UNLIMITED_TIMEOUT

@@ -7,8 +7,8 @@
 //! [`HttpClient`]. Callers supply the clock, memory pool, and telemetry sink
 //! required by the transport through [`WinHttpDeps`].
 //!
-//! WinHTTP-specific TLS and timeout configuration is available through
-//! [`WinHttpTlsConfig`] and [`WinHttpOptions`]. Independently built clients do
+//! WinHTTP-specific TLS configuration is available through
+//! [`WinHttpTlsConfig`]. Independently built clients do
 //! not share connections.
 //!
 //! ## Platform requirements
@@ -61,8 +61,7 @@
 #![cfg_attr(
     not(windows),
     doc = "[`WinHttpDeps`]: https://docs.rs/fetch_winhttp",
-    doc = "[`WinHttpTlsConfig`]: https://docs.rs/fetch_winhttp",
-    doc = "[`WinHttpOptions`]: https://docs.rs/fetch_winhttp"
+    doc = "[`WinHttpTlsConfig`]: https://docs.rs/fetch_winhttp"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // The attribute this feature enables appears in the WinHTTP modules, which are
@@ -76,7 +75,7 @@
 // Every module below implements the WinHTTP transport and is therefore
 // configured out on other platforms. The gate is applied per item rather than
 // at the crate root so that the crate still compiles to an instrumented, if
-// empty, library elsewhere; see `unsupported_platform` below.
+// empty, library elsewhere; see `linux` below.
 #[cfg(windows)]
 mod bindings;
 #[cfg(windows)]
@@ -119,11 +118,9 @@ mod tls;
 mod transport;
 
 #[cfg(not(windows))]
-mod unsupported_platform;
+mod linux;
 
 #[cfg(windows)]
 pub use builder::{HttpClientWinHttpExt, WinHttpDeps, WinHttpDepsBuilder};
-#[cfg(windows)]
-pub use options::{WinHttpOptions, WinHttpOptionsBuilder};
 #[cfg(windows)]
 pub use tls::{WinHttpTlsConfig, WinHttpTlsConfigBuilder};
