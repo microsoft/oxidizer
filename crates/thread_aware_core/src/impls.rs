@@ -7,6 +7,10 @@ use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
+use core::num::{
+    NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128,
+    NonZeroUsize,
+};
 use core::time::Duration;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -40,6 +44,19 @@ impl_transfer!(isize);
 impl_transfer!(f32);
 impl_transfer!(f64);
 impl_transfer!(char);
+
+impl_transfer!(NonZeroU8);
+impl_transfer!(NonZeroU16);
+impl_transfer!(NonZeroU32);
+impl_transfer!(NonZeroU64);
+impl_transfer!(NonZeroU128);
+impl_transfer!(NonZeroUsize);
+impl_transfer!(NonZeroI8);
+impl_transfer!(NonZeroI16);
+impl_transfer!(NonZeroI32);
+impl_transfer!(NonZeroI64);
+impl_transfer!(NonZeroI128);
+impl_transfer!(NonZeroIsize);
 
 impl_transfer!(String);
 #[cfg(feature = "std")]
@@ -210,7 +227,7 @@ where
     }
 }
 
-impl<'a, B> ThreadAware for Cow<'a, B>
+impl<B> ThreadAware for Cow<'_, B>
 where
     B: ToOwned + Sync + ?Sized,
     B::Owned: ThreadAware,
@@ -245,6 +262,10 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::{Cell, RefCell};
+    use core::num::{
+        NonZero, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64,
+        NonZeroU128, NonZeroUsize,
+    };
 
     use crate::{Core, Location, MemoryRegion, ThreadAware, Topology};
 
@@ -253,6 +274,26 @@ mod tests {
             Location::new(Topology::from(0), Core::from(0), MemoryRegion::from(0)),
             Location::new(Topology::from(0), Core::from(1), MemoryRegion::from(0)),
         ]
+    }
+
+    #[test]
+    fn all_nonzero_integer_types_are_thread_aware() {
+        fn assert_thread_aware<T: ThreadAware>() {}
+
+        assert_thread_aware::<NonZeroU8>();
+        assert_thread_aware::<NonZeroU16>();
+        assert_thread_aware::<NonZeroU32>();
+        assert_thread_aware::<NonZeroU64>();
+        assert_thread_aware::<NonZeroU128>();
+        assert_thread_aware::<NonZeroUsize>();
+        assert_thread_aware::<NonZeroI8>();
+        assert_thread_aware::<NonZeroI16>();
+        assert_thread_aware::<NonZeroI32>();
+        assert_thread_aware::<NonZeroI64>();
+        assert_thread_aware::<NonZeroI128>();
+        assert_thread_aware::<NonZeroIsize>();
+
+        assert_thread_aware::<NonZero<u32>>();
     }
 
     #[test]
