@@ -13,9 +13,10 @@ pub const INTERNAL_CRATES: &[&str] = &[
     "benchmarking",
     "fetch_winhttp_testing",
     "observed_testing",
-    "testing_aids",
     "rest_over_grpc_examples",
     "rest_over_grpc_tests",
+    "testing_aids",
+    "thread_aware_benchmarking",
 ];
 
 /// Run a cargo command and pipe the output to stdout/stderr
