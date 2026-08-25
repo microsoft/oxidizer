@@ -1,0 +1,5 @@
+error: unknown field `typ` in `#[display(...)]`, available fields: `r#type`
+ --> tests/ui/display_raw_identifier_unknown_field.rs:9:11
+  |
+9 | #[display("bad: {typ}")]
+  |           ^^^^^^^^^^^^

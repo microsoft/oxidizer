@@ -4,7 +4,7 @@
 [package]
 name = "ohno"
 description = "High-quality Rust error handling."
-version = "0.3.9"
+version = "0.4.0"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
@@ -43,6 +43,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+trybuild = { workspace = true }
 
 [[example]]
 name = "app_err_automatic_conversion"

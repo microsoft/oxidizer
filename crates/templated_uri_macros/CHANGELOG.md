@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - establish a compatibility boundary for macros that generate code against `templated_uri` 0.4
+  - Now requires `0.4.0` of `templated_uri_macros_impl`
+
 ## [0.3.0] - 2026-07-31
 
 - ⚠️ Breaking

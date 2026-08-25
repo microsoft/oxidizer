@@ -310,6 +310,12 @@ Describe 'ConvertFrom-SemverChecksOutput' {
         { ConvertFrom-SemverChecksOutput -Output 'some unexpected tooling error' -PackageName 'foo' } |
             Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
     }
+
+    It 'includes the Windows path-length hint on build failures' -Skip:(-not $IsWindows) {
+        { ConvertFrom-SemverChecksOutput -Output 'LINK : fatal error LNK1104' -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage '*shorten the repository path*'
+    }
+
 }
 
 Describe 'Get-StrongerChangeType' {
@@ -526,5 +532,251 @@ Describe 'Reduce-DependencyChains' {
         ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' |
             Should -Be (($b | ForEach-Object { $_ -join ' -> ' }) -join '|')
         ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' | Should -Be 'a -> baz|z -> baz'
+    }
+}
+
+Describe 'Test-PackageExposesTarget' {
+    BeforeAll {
+        function New-Dependent {
+            param($Allowed, $DepAliases = @{})
+            [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
+        }
+    }
+
+    It 'reports exposure when an entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes', 'std::io::Error')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in the target package name to underscores' {
+        # Crate `bytesbuf-io` is referred to as `bytesbuf_io` in Rust paths.
+        $dep = New-Dependent -Allowed @('bytesbuf_io::Reader')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf-io' | Should -BeTrue
+    }
+
+    It 'reports no exposure when no entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('std::io::Error', 'core::fmt::Debug')
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'fails closed when the metadata is absent entirely' {
+        Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $null) -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'fails closed on a wildcard root that could match anything' {
+        foreach ($pattern in @('*', 'byte?buf::Bytes', '[bc]ytesbuf::Bytes')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($pattern)) -TargetPackageName 'bytesbuf' |
+                Should -BeTrue -Because "'$pattern' may match the target"
+        }
+    }
+
+    It 'fails closed on a malformed entry rather than silently reporting no exposure' {
+        # `-split` coerces anything to a string, so these do not throw: they
+        # collapse to '' and match nothing, which would let a breaking
+        # dependency bump ship as a compatible release.
+        foreach ($bad in @($null, '', '   ', 42, @{ a = 1 })) {
+            $rendered = if ($null -eq $bad) { '$null' } else { "'$bad'" }
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($bad)) -TargetPackageName 'bytesbuf' |
+                Should -BeTrue -Because "$rendered carries no exposure information"
+        }
+    }
+
+    It 'fails closed when an entry has an empty root' {
+        foreach ($bad in @('::Bytes', ' ::Bytes')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @($bad)) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue `
+                -Because "'$bad' has no usable crate root"
+        }
+    }
+
+    It 'fails closed when a malformed entry follows valid ones' {
+        $dep = New-Dependent -Allowed @('std::io::Error', $null)
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'reports no exposure for an empty allowlist' {
+        # An explicit empty list means the crate exposes no external types at
+        # all, which is information -- unlike absent metadata.
+        Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @()) -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'reports exposure when the entry is rooted at the alias of a renamed dependency' {
+        # `buf = { package = "bytesbuf", ... }`: Rust
+        # source -- and therefore the allowlist -- can only name it as `buf`.
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in a rename alias' {
+        $dep = New-Dependent -Allowed @('bytes_buf::Bytes') -DepAliases @{ bytesbuf = @('bytes_buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'reports exposure under any one of several aliases for the same dependency' {
+        $aliases = @{ bytesbuf = @('buf_v1', 'buf_v2') }
+        foreach ($root in @('buf_v1', 'buf_v2')) {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @("$root::Bytes") -DepAliases $aliases) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue -Because "'$root' is an alias of the target"
+        }
+    }
+
+    It 'does not treat an alias of a different dependency as exposure of the target' {
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ other_crate = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'still matches the real package name when that dependency is also aliased elsewhere' {
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeTrue
+    }
+
+    It 'tolerates a package record that predates the DepAliases field' {
+        $dep = [pscustomobject]@{ AllowedExternalTypes = @('std::io::Error') }
+        Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    Context 'bytesbuf_io -> bytesbuf (real workspace topology)' {
+        # The production instance this whole cascade exists for. bytesbuf_io
+        # describes itself as "Asynchronous I/O abstractions expressed via
+        # `bytesbuf` types" and its public API says so literally --
+        # `pub fn reserve(&self, ...) -> BytesBuf`, `pub fn contents(&self) ->
+        # &BytesBuf`, plus BytesView/Memory/HasMemory in trait signatures. A
+        # breaking bytesbuf release is therefore a breaking bytesbuf_io release.
+        #
+        # The allowlist comes from Get-BytesBufIoAllowlist (_common), which
+        # holds the literal copied from crates/bytesbuf_io/Cargo.toml.
+        # ExposureCascade-RealWorkspace.Tests.ps1 asserts the real manifest
+        # still equals that literal exactly, so this stays honest: if the
+        # manifest gains or loses an entry, that test fails rather than this
+        # one quietly asserting against a stale copy.
+        BeforeAll {
+            $script:BytesBufIoAllowed = Get-BytesBufIoAllowlist
+        }
+
+        It 'reports exposure of bytesbuf' {
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                -TargetPackageName 'bytesbuf' | Should -BeTrue
+        }
+
+        It 'reports exposure of the other allowlisted roots' {
+            foreach ($target in @('ohno', 'futures_core')) {
+                Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                    -TargetPackageName $target | Should -BeTrue -Because "'$target' is an allowlisted root"
+            }
+        }
+
+        It 'does not report exposure of a dependency that is absent from the allowlist' {
+            # bytesbuf_io depends on trait-variant, but it is a macro crate that
+            # never surfaces in the public API, so it is deliberately not
+            # allowlisted. This is the branch that must stay $false -- if it ever
+            # returns $true the cascade degenerates into "bump everything".
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed $script:BytesBufIoAllowed) `
+                -TargetPackageName 'trait-variant' | Should -BeFalse
+        }
+
+        It 'is not fooled by a crate whose name merely prefixes an allowlisted root' {
+            # 'bytesbuf' is a strict prefix of 'bytesbuf_io'. Root comparison is
+            # exact, so an allowlist naming one must not report the other.
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @('bytesbuf::BytesBuf')) `
+                -TargetPackageName 'bytesbuf_io' | Should -BeFalse
+            Test-PackageExposesTarget -Dependent (New-Dependent -Allowed @('bytesbuf_io::Read')) `
+                -TargetPackageName 'bytesbuf' | Should -BeFalse
+        }
+    }
+}
+Describe 'Test-PackageAllowlistNamesTarget' {
+    BeforeAll {
+        function New-Dependent {
+            param($Allowed, $DepAliases = @{})
+            [pscustomobject]@{ AllowedExternalTypes = $Allowed; DepAliases = $DepAliases }
+        }
+    }
+
+    It 'reports a match when an entry is rooted at the target package' {
+        $dep = New-Dependent -Allowed @('recoverable::Recovery', 'std::io::Error')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+    }
+
+    It 'normalizes hyphens in the target package name' {
+        $dep = New-Dependent -Allowed @('data_privacy_core::Sensitive')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'data-privacy-core' | Should -BeTrue
+    }
+
+    It "reports a match when an entry is rooted at the target's divergent crate root" {
+        $dep = New-Dependent -Allowed @('buf_core::Bytes')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' `
+            -TargetCrateRoot 'buf_core' | Should -BeTrue
+    }
+
+    It 'does not match the package name when a divergent crate root is known' {
+        # `[lib] name` replaces the package name as the Rust root. Keeping both
+        # would let an unrelated crate with the package-name root force a
+        # spurious breaking bump on this indirect target.
+        $dep = New-Dependent -Allowed @('bytesbuf::Bytes')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' `
+            -TargetCrateRoot 'buf_core' | Should -BeFalse
+    }
+
+    It 'does not consult dependency-edge aliases for an indirect target' {
+        # An indirect dependent declares no edge to the target, so production
+        # can never populate this alias. Pin that the helper does not turn an
+        # impossible fixture state into supported behaviour.
+        $dep = New-Dependent -Allowed @('buf::Bytes') -DepAliases @{ bytesbuf = @('buf') }
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'bytesbuf' | Should -BeFalse
+    }
+
+    It 'reports no match when no entry is rooted at the target' {
+        $dep = New-Dependent -Allowed @('std::io::Error', 'core::fmt::Debug')
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeFalse
+    }
+
+    Context 'divergence from Test-PackageExposesTarget' {
+        # These are the cases the two functions answer differently, and the
+        # difference is the whole point: this predicate gates the INDIRECT
+        # dependency edge, where "no evidence" must not be read as exposure.
+        # Treating absent metadata as a match there would force every transitive
+        # dependent in the graph to breaking.
+
+        It 'reports no match for absent metadata, where exposure fails closed' {
+            $dep = New-Dependent -Allowed $null
+            Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeFalse
+            # Contrast: the direct-edge predicate must fail closed on the same input.
+            Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+        }
+
+        It 'skips malformed entries instead of failing closed on them' {
+            foreach ($bad in @($null, '', '   ', 42, @{ a = 1 })) {
+                $dep = New-Dependent -Allowed @($bad)
+                Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' |
+                    Should -BeFalse -Because 'a malformed entry is not positive evidence'
+                Test-PackageExposesTarget -Dependent $dep -TargetPackageName 'recoverable' |
+                    Should -BeTrue -Because 'the direct edge still fails closed'
+            }
+        }
+
+        It 'still finds a valid entry that follows a malformed one' {
+            # Skipping malformed entries must not abandon the rest of the list.
+            $dep = New-Dependent -Allowed @($null, 'recoverable::Recovery')
+            Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
+        }
+
+        It 'treats a wildcard root as a match, unlike other unknowns' {
+            # A wildcard is a deliberate declaration that can expand to the
+            # target, not an absence of information.
+            foreach ($pattern in @('*', 'recover?ble::Recovery', '[rs]ecoverable::Recovery')) {
+                Test-PackageAllowlistNamesTarget -Dependent (New-Dependent -Allowed @($pattern)) `
+                    -TargetPackageName 'recoverable' | Should -BeTrue -Because "'$pattern' may expand to the target"
+            }
+        }
+    }
+
+    It 'reports no match for an explicit empty allowlist' {
+        Test-PackageAllowlistNamesTarget -Dependent (New-Dependent -Allowed @()) `
+            -TargetPackageName 'recoverable' | Should -BeFalse
+    }
+
+    It 'tolerates a package record that predates the DepAliases field' {
+        $dep = [pscustomobject]@{ AllowedExternalTypes = @('recoverable::Recovery') }
+        Test-PackageAllowlistNamesTarget -Dependent $dep -TargetPackageName 'recoverable' | Should -BeTrue
     }
 }

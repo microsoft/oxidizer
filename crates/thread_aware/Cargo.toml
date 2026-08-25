@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware"
 description = "Facilities to support thread-isolated state."
-version = "0.8.0"
+version = "0.10.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
 categories = ["data-structures", "no-std"]
@@ -58,7 +58,7 @@ all-features = true
 default = ["std", "derive"]
 # Enables the per-affinity Arc and hosted-only type impls. Disable for `#![no_std]`
 # environments; the crate then requires only `alloc`.
-std = []
+std = ["dep:nm"]
 derive = ["dep:thread_aware_macros"]
 threads = ["std", "dep:many_cpus"]
 
@@ -88,6 +88,7 @@ uuid = ["dep:uuid"]
 [dependencies]
 many_cpus = { workspace = true, optional = true }
 
+nm = { workspace = true, optional = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 bytes = { version = "1.11.1", default-features = false, optional = true }
@@ -103,6 +104,7 @@ http = { version = "1.4.1", default-features = false, features = ["std"] }
 jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
+nm = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
 uuid = { version = "1.21.0", default-features = false }
@@ -126,6 +128,17 @@ required-features = ["bytes", "http", "jiff02", "uuid"]
 name = "gungraun_third_party"
 harness = false
 required-features = ["bytes", "http", "jiff02", "uuid"]
+
+# These integration tests exercise `#[derive(ThreadAware)]`, so they compile only
+# when the `derive` feature is enabled. Gating them keeps every additive feature
+# combination (for example `--no-default-features --features std`) buildable.
+[[test]]
+name = "derive_compiles"
+required-features = ["derive"]
+
+[[test]]
+name = "transfer_pass"
+required-features = ["derive"]
 
 # >>> anvil-managed: anvil-lints
 [lints]

@@ -1,11 +1,31 @@
-# Plurality — Unimplemented Ideas & Future Work
+# TODO
 
-These are designs and ideas carried over from the original design plan that are
-**not yet implemented**. The shipped architecture is documented in
-[`DESIGN.md`](./DESIGN.md). Items here range from a fully settled design
-(`KeyedPool`) to smaller follow-ups.
+The forward-looking backlog of open work for the `plurality` crate. It records
+only what is still worth doing: completed items are deleted rather than marked
+done, so the length of this file is a real measure of outstanding work. The
+shipped architecture is documented in [`DESIGN.md`](./DESIGN.md).
 
-## 1. `KeyedPool` — copyable generational keys (`keys` feature)
+## Contents
+
+### Competitive feature gaps
+- [CFG1](#cfg1) — Add `KeyedPool`, a copyable generational key sibling to `Pool`
+
+### Features
+- [F1](#f1) — Add batch allocation (`alloc_*_many` / `alloc_*_with_many`)
+- [F2](#f2) — Add guaranteed in-place construction (`alloc_*_emplace`)
+- [F3](#f3) — Add an aggregate byte budget for `MultiPool`
+
+### Performance
+- [P1](#p1) — Pack the `MultiPool` directory routing key
+
+## Competitive feature gaps
+
+<a id="cfg1"></a>
+### CFG1 — Add `KeyedPool`, a copyable generational key sibling to `Pool`
+
+**Area:** new `keys` feature · **Priority:** Medium · **Effort:** Large
+**Competitor:** `slotmap` (`SlotMap`/`DenseSlotMap`) offers copyable
+generational keys; plurality offers only owning handles.
 
 A dedicated, **keyed-only** sibling type that hands out copyable, generational
 `Key`s instead of owning `Box`/`Arc` pointers. It reuses the chunked store,
@@ -13,7 +33,7 @@ directory, growth, and `!Sync` single-allocator model, but is a *separate type*
 (`KeyedPool`) rather than extra methods on `Pool` — that separation is what lets
 its slots reach `slotmap`'s size while staying address-stable.
 
-### Why a separate type (not methods on `Pool`)
+#### Why a separate type (not methods on `Pool`)
 
 Keys are the *non-owning* complement to `Box`/`Arc`:
 
@@ -31,7 +51,7 @@ keyed slot needs neither a refcount nor a stored in-chunk `index` (the `Key`
 carries the index; access is index → directory → slot, never bare-pointer
 recovery).
 
-### Slot layout — 4 bytes, matching slotmap
+#### Slot layout — 4 bytes, matching slotmap
 
 ```rust
 union KeyedValue<T> { value: ManuallyDrop<T>, next_free: u32 }
@@ -47,7 +67,7 @@ because the free list is threaded through the value union (requires
 `size_of::<T>() >= 4`). The `directory` and `ChunkHeader` (`base_index`) are
 unchanged; `get(key)` maps `key.index` to a slot exactly like `Pool`'s `pop`.
 
-### Handle: the `Key` trait + newtype pattern
+#### Handle: the `Key` trait + newtype pattern
 
 `KeyedPool<K, T, A>` is parameterized by a key *type*, where `K` is a user
 newtype implementing a `Key` trait — slotmap's "custom key type" idea, but made
@@ -65,7 +85,7 @@ pub trait Key: Copy + Eq + core::hash::Hash {
 // RawKey: Key too, as a quick-prototyping escape hatch (the DefaultKey analog).
 ```
 
-### Construction: `keyed_pool!` / `new_key_type!` macros
+#### Construction: `keyed_pool!` / `new_key_type!` macros
 
 A single macro declares the key newtype *and* builds a correctly-typed pool, so
 the easiest thing to write is also the safe, distinctly-typed thing:
@@ -91,7 +111,7 @@ let mut graph = KeyedPool::<NodeKey, Node>::builder().chunk_size(1024).build();
 The macros forward doc comments and visibility; generic code can be written over
 `<K: Key, T>`.
 
-### API (generic over the key type)
+#### API (generic over the key type)
 
 ```rust
 impl<K: Key, T, A: Allocator> KeyedPool<K, T, A> {
@@ -119,7 +139,7 @@ impl<K: Key, T, A: Allocator> KeyedPool<K, T, A> {
 forbids holding a `&T` from `get` across a `remove` that frees that slot. `get`
 / `contains_key` stay `&self`. (Mirrors `slotmap`.)
 
-### Cross-pool key identity — layered
+#### Cross-pool key identity — layered
 
 1. **Per-key-*type*, compile-time (the `Key` trait + macro).** Different key
    types can't be mixed; the macro makes a fresh distinct type the default
@@ -136,14 +156,14 @@ could provide per-instance protection at *compile* time for users who don't need
 serialization — but it is not the default because its invariant lifetime infects
 every type that stores a key and defeats key serialization.
 
-### Generation / staleness
+#### Generation / staleness
 
 `version` is bumped on `remove`; `get` returns `None` on mismatch (stale key).
 Parity (odd = occupied) doubles as the liveness flag. Generation wraps after
 2³² reuses of a single slot (negligible; a 64-bit generation is available if
 desired).
 
-### Positioning vs `slotmap`
+#### Positioning vs `slotmap`
 
 `KeyedPool` is **"slotmap with stable addresses."** It is *not* trying to beat
 `DenseSlotMap` on iteration (values are scattered across chunks; iteration is a
@@ -162,7 +182,19 @@ reallocates and moves values on growth:
 Build it only if the stable-address niche is a goal; for plain high-frequency,
 iterate-all-each-tick workloads, point users at `slotmap`/`DenseSlotMap`.
 
-## 2. Batch allocation — `alloc_*_many` / `alloc_*_with_many` (push API)
+**Done when:** the stable-address niche is confirmed as a goal; then `KeyedPool`
+ships behind a `keys` feature with 4-byte per-slot overhead, both construction
+macros, the listed API, compile-time rejection of cross-key-type use, a
+`debug_assert` on `pool_id` for same-type cross-pool use, stale keys resolving
+to `None`, and a benchmark against `slotmap::SlotMap` documenting where each
+wins.
+
+## Features
+
+<a id="f1"></a>
+### F1 — Add batch allocation (`alloc_*_many` / `alloc_*_with_many`)
+
+**Area:** `pool` · **Priority:** Medium · **Effort:** Large
 
 Bulk allocation that hands each new handle to a consumer closure one at a time,
 as a complement to every singular `alloc_*` call. A batch can be made faster
@@ -173,7 +205,7 @@ whole demand and handing out a freshly-grown chunk's slots by direct pointer bum
 overhead out of the loop. The win scales with the batch size and is largest for
 the `Alloc` flavor, whose per-item work is otherwise just a pop + value write.
 
-### Shape — mirrors the singular `alloc` / `alloc_with` split
+#### Shape — mirrors the singular `alloc` / `alloc_with` split
 
 Each variant takes a `count`, initializes every object internally (exactly as the
 singular calls do), and delivers each handle to an output closure `each` that
@@ -208,7 +240,7 @@ pub fn try_alloc_with_many(&self, count: usize, make: impl FnMut(usize) -> T, ea
 `each` and `make` must be generic (`impl FnMut`, inlined) — not `&mut dyn FnMut`,
 which would cost an indirect call per item and defeat fusing.
 
-### The complement across all flavors
+#### The complement across all flavors
 
 ```rust
 // owned
@@ -228,7 +260,7 @@ alloc_rc_with_many / try_alloc_rc_with_many    (count, make, each)
 16 methods (4 flavors × {`_many`, `_with_many`} × {panicking, `try_`}). The
 `uninit` family is intentionally left out (no batch uninit tier for now).
 
-### Semantics
+#### Semantics
 
 - **`count` is an explicit parameter** in every variant.
 - **Reserved up front.** The implementation claims all `count` slots
@@ -248,7 +280,7 @@ alloc_rc_with_many / try_alloc_rc_with_many    (count, make, each)
   `alloc*` inside `each` sees a consistent free list and cannot touch in-flight
   slots; a handle the consumer drops is properly freed and becomes reusable.
 
-### Implementation notes
+#### Implementation notes
 
 - Snapshot `slot.next` (the free-list link) *before* invoking `each`: once the
   consumer owns the handle, dropping it runs `push_free`, which overwrites that
@@ -257,7 +289,7 @@ alloc_rc_with_many / try_alloc_rc_with_many    (count, make, each)
 - For `Box`/`Arc`/`Rc`, the per-item `pool_refcount` bump can be batched into a
   single `fetch_add(count)` over the reserved segment.
 
-### Usage sketches
+#### Usage sketches
 
 ```rust
 // `_with_many`: generate from the index, link each as it arrives — no buffer.
@@ -272,7 +304,19 @@ pool.alloc_with_many(
 pool.alloc_box_many(template, n, |b| sink.push(b));
 ```
 
-## 3. Guaranteed in-place construction — `alloc_*_emplace` (initializer closure)
+**Done when:** all 16 methods exist with the stated semantics, a mid-batch panic
+in `Clone`/`make`/`each` leaks no capacity, `try_*` delivers either all or zero
+handles, a nested allocation inside `each` is exercised by a test, and a
+benchmark shows the batch path beating N singular calls for the `Alloc` flavor.
+
+**See also:** F2 (its open question on a batched emplace tier)
+
+---
+
+<a id="f2"></a>
+### F2 — Add guaranteed in-place construction (`alloc_*_emplace`)
+
+**Area:** `pool` · **Priority:** Medium · **Effort:** Large
 
 `alloc(value)` and `alloc_with(|| value)` both produce a `T` *by value* and then
 move it into the slot, so whether construction lands directly in the pool memory
@@ -287,7 +331,7 @@ destination — no stack temporary, no caller-visible `assume_init`. This is the
 `pin-init` pattern (as used by Rust-for-Linux for `Box::pin_init`/`Arc::pin_init`,
 precisely because `Box::new` cannot place large pinned structs).
 
-### Soundness constraint — the API cannot be a naive safe `fn`
+#### Soundness constraint — the API cannot be a naive safe `fn`
 
 The obvious signature is **unsound as a safe `fn`** and must not ship as one:
 
@@ -310,9 +354,9 @@ methods are fine because a returned-by-value `T` is initialized by construction;
 that guarantee is exactly what the raw-pointer initializer drops.) The internal
 `assume_init` is unsafe either way — that is expected and not the issue; the
 question is solely whether the *public* signature can be safe. There are two
-viable shapes, and item 3 must pick one:
+viable shapes, and this item must pick one:
 
-### Shape A — `unsafe fn`, caller-initializes contract
+#### Shape A — `unsafe fn`, caller-initializes contract
 
 ```rust
 // Alloc<T> flavor; the others mirror this exactly.
@@ -329,7 +373,7 @@ pub unsafe fn try_alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>))
 Minimal and closure-shape-preserving, at the cost of pushing the initialization
 proof onto the caller as an `unsafe` obligation.
 
-### Shape B — safe `fn` with a proof-carrying initializer
+#### Shape B — safe `fn` with a proof-carrying initializer
 
 Keep the API safe by making full initialization a *type-system* requirement: the
 closure receives an uninit guard and can only return the proof token by writing
@@ -349,7 +393,7 @@ guard for a slightly looser contract.
 In every shape the RAII uninit handle frees the slot if `init` panics — no
 capacity leak (same guarantee as the `*_with` methods).
 
-### The complement across all flavors
+#### The complement across all flavors
 
 ```rust
 alloc_box_emplace   / try_alloc_box_emplace    (init: FnOnce(&mut MaybeUninit<T>)) -> Box<T, A>
@@ -360,7 +404,7 @@ alloc_rc_emplace    / try_alloc_rc_emplace     (init) -> Rc<T, A>
 
 8 methods (4 flavors × {panicking, `try_`}).
 
-### Why an initializer closure beats `_with`
+#### Why an initializer closure beats `_with`
 
 - **Guaranteed in place.** `init` writes through the pointer; there is no
   by-value return slot for the optimizer to (maybe) elide.
@@ -371,15 +415,84 @@ alloc_rc_emplace    / try_alloc_rc_emplace     (init) -> Rc<T, A>
   `assume_init_pin`. A future `alloc_pin_emplace` returning a pinned handle is the
   obvious extension.
 
-### Open questions
+#### Open questions
 
 - **Fallible init.** A second tier `init: FnOnce(&mut MaybeUninit<T>) -> Result<(), E>`
   (freeing the slot and surfacing `E` on error) would mirror `pin-init`'s
   fallible initializers; deferred until a user needs it.
 - **Batch.** `alloc_*_emplace_many(count, init: impl FnMut(usize, &mut MaybeUninit<T>))`
   is the guaranteed-in-place batch form — the single-closure `uninit` tier that
-  item 2 intentionally left out. It composes the segment-claim reservation of
-  item 2 with the emplace contract here.
+  batch allocation intentionally left out. It composes the segment-claim
+  reservation of that item with the emplace contract here.
 - **Ergonomics.** Writing through `&mut MaybeUninit<T>` is more verbose than
   `|| value`; `alloc_with` should remain the default for small/medium `T`, with
   `alloc_emplace` reserved for large or pinned values where the guarantee matters.
+
+**Done when:** Shape A or Shape B is chosen and recorded, the 8 methods ship
+with that signature, no safe caller can reach `assume_init` on uninitialized
+memory, a panicking initializer returns the slot to the free list, and a
+benchmark shows the reduced peak stack usage for a large aggregate.
+
+**See also:** CFG1 (`insert_with` covers the self-referential case for keys),
+F1 (segment-claim reservation reused by a batched emplace tier)
+
+---
+
+<a id="f3"></a>
+### F3 — Add an aggregate byte budget for `MultiPool`
+
+**Area:** `multi_pool` · **Priority:** Low · **Effort:** Medium
+
+`MultiPool` bounds growth with a per-geometry chunk cap and a cap on the number
+of layout pools. Total memory is therefore bounded in *chunks*, by the product
+of the two caps. Converting that to bytes also requires knowing the largest
+layout the program will present, because the chunk byte target is a target
+rather than a ceiling: a value too large to fit it still gets a chunk, and a
+caller who fixes the slot count instead sizes chunks by stride. The bound is
+also coarse, since every layout pool is charged its full allowance whether or
+not it uses it.
+
+A tighter alternative is an aggregate byte budget shared by every layout pool
+under one `MultiPool`, consulted when a layout pool acquires a chunk and
+released when it deallocates one. The check itself is free — chunk acquisition
+is already a cold path — but the budget is cross-pool mutable state with an
+awkward lifetime: it must outlive every layout pool, and layout pools outlive
+the `MultiPool` whenever handles do. That implies a third reference count
+(multi-pool core, alongside the existing per-slot and pool-level counts) and a
+release step in layout-pool teardown.
+
+The two caps are the right default either way, because they are the bounds that
+map onto the existing per-pool machinery with no shared state at all.
+
+**Done when:** a bounded-memory deployment asks for a byte ceiling, the budget
+ships with the third reference count it implies, and a test drives a pool to the
+ceiling across several geometries.
+
+## Performance
+
+<a id="p1"></a>
+### P1 — Pack the `MultiPool` directory routing key
+
+**Area:** `multi_pool` · **Priority:** Low · **Effort:** Small
+
+The router scans a `Vec<Layout>` of routing keys, comparing 16 bytes per entry
+on a 64-bit target even though a key only carries a size and one of a handful of
+alignments. Packing each key into a `u64` — size in the low bits, the base-two
+logarithm of the cell alignment in the high bits — halves the bytes the scan
+touches, so a directory of sixteen entries spans two cache lines instead of
+four. The keys are produced by `geometry::routing_key`, which already normalizes
+alignment, so the packing has one producer.
+
+The measured cost of the scan is a few instructions per entry examined, and the
+entries a program presents are few, so this trades readability for a win that
+only appears at directory sizes the design does not expect. Wall clock is
+weaker still: at sixteen entries the longer scan does not separate from the
+one-entry case, because the processor overlaps a predictable walk over a
+contiguous vector with the pool's own pointer chasing. Nothing reads a
+stored key back as a `Layout` today — the vector is only pushed to, compared
+against and counted — so the change is confined to the key type and its one
+producer, with `install` taking the unpacked layout it already receives.
+
+**Done when:** a profile of a wide directory asks for it and the
+`multi_box_val_spread` row confirms a shorter scan, rather than the change being
+justified by reasoning about cache lines.

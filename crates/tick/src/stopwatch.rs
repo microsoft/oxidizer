@@ -30,11 +30,12 @@ pub struct Stopwatch {
 }
 
 impl Stopwatch {
-    /// Creates a high-accuracy stopwatch that measures elapsed time.
+    /// Creates a stopwatch that measures elapsed time using the supplied clock's precision.
     ///
     /// The stopwatch accepts any source that can be referenced as a [`SimpleClock`], including a
     /// [`Clock`][crate::Clock] and a [`SimpleClock`]. It measures time using the source's clock, so
-    /// stopwatches created from a controlled clock respect the controlled passage of time.
+    /// stopwatches created from a controlled clock respect the controlled passage of time, while
+    /// stopwatches created from a fast-configured clock use its lower-precision instant source.
     ///
     /// > **Note**: Consider using [`Clock::stopwatch()`][crate::Clock::stopwatch] or
     /// > [`SimpleClock::stopwatch()`] as a shortcut for creating stopwatches.

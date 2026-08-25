@@ -68,6 +68,10 @@ use crate::timers::TimerKey;
 /// Any timers you register or time adjustments you perform through one clone are visible to every other clone
 /// created from the same clock.
 ///
+/// With the `fast-instant` feature, the instant retrieval setting is local to each clone. This allows
+/// precise and fast clones to share timers while independently selecting their instant source.
+/// Timer scheduling remains on the driver's precise time source.
+///
 /// ```
 /// use tick::Clock;
 ///
@@ -316,6 +320,43 @@ impl Clock {
         crate::ClockControl::new_at(time).to_clock()
     }
 
+    /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
+    ///
+    /// The setting belongs to this clock instance. A differently configured clone can be used
+    /// independently, and stopwatches retain the setting of the clock they were created from.
+    ///
+    /// On Linux and Windows, enabling this option uses a lower-precision source whose resolution is
+    /// platform-dependent; on Windows it is normally 10 to 16 milliseconds. Timer scheduling
+    /// continues to use the clock driver's precise time source and is unaffected by this setting.
+    /// On other platforms, fast retrieval delegates to [`Instant::now`]. Controlled clocks are
+    /// unaffected.
+    ///
+    /// # Performance
+    ///
+    /// Only enable fast instant retrieval when instrumentation shows that the default
+    /// [`Clock::instant`] retrieval is a performance bottleneck. Otherwise, retain the default
+    /// precise source.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tick::Clock;
+    ///
+    /// # fn configure_clock(clock: Clock) {
+    /// let precise_clock = clock;
+    /// let fast_clock = precise_clock.clone().with_fast_instant(true);
+    ///
+    /// let precise_watch = precise_clock.stopwatch();
+    /// let fast_watch = fast_clock.stopwatch();
+    /// # }
+    /// ```
+    #[cfg(any(feature = "fast-instant", test))]
+    #[must_use]
+    pub fn with_fast_instant(mut self, enabled: bool) -> Self {
+        self.time = self.time.with_fast_instant(enabled);
+        self
+    }
+
     /// Retrieves the current system time as [`SystemTime`].
     ///
     /// > **Note**: The system time is not monotonic and can be affected by system clock changes.
@@ -373,9 +414,10 @@ impl Clock {
 
     /// Retrieves the current [`Instant`] time.
     ///
-    /// An [`Instant`] represents a monotonic time point guaranteed to always increase.
-    /// Unlike [`system_time`][Self::system_time], the instant is not affected by system clock
-    /// changes and provides a stable reference point for measuring elapsed time.
+    /// An [`Instant`] represents a monotonically non-decreasing time point. Consecutive reads may be
+    /// equal, but later reads do not go backward. Unlike [`system_time`][Self::system_time], the
+    /// instant is not affected by system clock changes and provides a stable reference point for
+    /// measuring elapsed time.
     ///
     /// > **Note**: For time measurements, consider using [`Stopwatch`][super::Stopwatch] instead,
     /// > which provides a more convenient API for measuring elapsed time.
@@ -453,6 +495,19 @@ impl Clock {
     #[must_use]
     pub fn stopwatch(&self) -> crate::Stopwatch {
         crate::Stopwatch::new(self)
+    }
+
+    /// Returns time in the same comparison domain used to advance this clock's timers.
+    ///
+    /// Controlled timers must follow their manually advanced clock. System timers must instead
+    /// use the precise source used by the driver: a coarse read can still lag after the driver
+    /// removes and wakes a deadline, leaving the future pending without another wake-up.
+    pub(super) fn timer_instant(&self) -> Instant {
+        match self.clock_state() {
+            #[cfg(any(feature = "test-util", test))]
+            ClockState::ClockControl(control) => control.instant(),
+            ClockState::System(_) => Instant::now(),
+        }
     }
 
     pub(super) fn register_timer(&self, when: Instant, waker: Waker) -> TimerKey {
@@ -569,6 +624,16 @@ mod tests {
             (system_instant.duration_since(clock_instant)) < Duration::from_secs(10),
             "the `Instant` retrieved from the clock is not the same as the system one"
         );
+    }
+
+    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
+    #[test]
+    fn test_configured_fast_instant_now() {
+        let precise_clock = Clock::new_system_frozen();
+        let fast_clock = precise_clock.clone().with_fast_instant(true);
+
+        _ = precise_clock.instant();
+        _ = fast_clock.instant();
     }
 
     #[cfg_attr(miri, ignore)] // Miri is not compatible with FFI calls this needs to make.

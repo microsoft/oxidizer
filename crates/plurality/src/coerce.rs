@@ -10,6 +10,7 @@
 //! [`Coercion::new`] is an unsafe escape hatch whose validity is instead the
 //! caller's responsibility.
 
+use core::any::type_name;
 use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
@@ -64,7 +65,7 @@ impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> Coercion<T, U, F> {
 
 impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> fmt::Debug for Coercion<T, U, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Coercion").finish_non_exhaustive()
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -127,7 +128,7 @@ macro_rules! coerce {
         unsafe {
             $crate::Coercion::new({
                 #[allow(unused_parens)]
-                fn coerce<'lt, $($generic: 'lt),+>(
+                fn coerce<'lt, $($generic),+>(
                     ptr: *const (impl $($bounds)* + 'lt),
                 ) -> *const (dyn $($bounds)* + 'lt) {
                     ptr

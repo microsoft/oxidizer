@@ -33,7 +33,7 @@ Implement all required methods of [`CacheTier`][__link4]:
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use cachet_tier::{CacheEntry, CacheTier, Error};
+use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome};
 
 struct SimpleCache<K, V>(RwLock<HashMap<K, CacheEntry<V>>>);
 
@@ -46,9 +46,9 @@ where
         Ok(self.0.read().unwrap().get(key).cloned())
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         self.0.write().unwrap().insert(key.clone(), entry);
-        Ok(())
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
@@ -74,10 +74,10 @@ for multi-tier caches with heterogeneous storage backends.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbSFGoN9aDWgMbkFPVkj7eiZMblYTgYHQyDnsb4bh5vMZ5KTlhZIGCa2NhY2hldF90aWVyZTAuMi43
- [__link0]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=CacheTier
- [__link1]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=CacheEntry
- [__link2]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=Error
- [__link3]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=CacheTier
- [__link4]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=CacheTier
- [__link5]: https://docs.rs/cachet_tier/0.2.7/cachet_tier/?search=DynamicCache
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbkK3ZIh7H21Qb8RI07wzt6w4b6hwplYQCIE0bNBusZa2PFF9hZIGCa2NhY2hldF90aWVyZTAuNC4w
+ [__link0]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=CacheTier
+ [__link1]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=CacheEntry
+ [__link2]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=Error
+ [__link3]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=CacheTier
+ [__link4]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=CacheTier
+ [__link5]: https://docs.rs/cachet_tier/0.4.0/cachet_tier/?search=DynamicCache

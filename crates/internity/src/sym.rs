@@ -142,6 +142,26 @@ impl Sym {
     }
 }
 
+/// The 0-based position of a dense handle, or `None` if it is out of range for a
+/// lexicon or reader holding `len` strings.
+///
+/// Shared by `LocalLexicon` and `LocalReader` so the mapping that
+/// `LocalLexicon::freeze` is required to preserve has one definition.
+#[inline]
+pub(crate) fn dense_index_of(len: usize, sym: Sym) -> Option<usize> {
+    let index = sym.dense();
+    (index < len).then_some(index)
+}
+
+/// The dense handle at 0-based position `index`, or `None` if a lexicon or reader
+/// holding `len` strings does not reach that far.
+///
+/// The inverse of [`dense_index_of`].
+#[inline]
+pub(crate) fn dense_sym_at(len: usize, index: usize) -> Option<Sym> {
+    (index < len).then(|| Sym::pack_dense(index))
+}
+
 impl From<Sym> for u32 {
     /// Returns the handle's raw non-zero `u32` value (see [`Sym::as_u32`]).
     #[inline]

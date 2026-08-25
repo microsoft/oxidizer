@@ -3,7 +3,7 @@
 
 [package]
 name = "internity"
-version = "0.1.0"
+version = "0.2.0"
 description = "Blazingly fast string interning with compact handles, compact storage, and concurrent fill support"
 readme = "README.md"
 keywords = ["intern", "interner", "string", "symbol", "concurrent"]
@@ -48,8 +48,11 @@ serde = { workspace = true, features = ["alloc"], optional = true }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 foldhash = { workspace = true }
+internity_macros = { path = "../internity_macros" }
 lasso = { workspace = true, features = ["multi-threaded"] }
 mutants = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true, features = ["alloc"] }
 serde_json = { workspace = true, features = ["std"] }
 string-interner = { workspace = true, features = ["backends", "inline-more", "std"] }
 string_cache = { workspace = true }

@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.7.1"
+version = "0.8.1"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -70,7 +70,7 @@ ptr_meta = { workspace = true }
 serde = { workspace = true, features = ["alloc"], optional = true }
 serde_json = { workspace = true, features = ["alloc", "raw_value"], optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
-zerocopy = { workspace = true, optional = true }
+zerocopy = { workspace = true, features = ["derive"], optional = true }
 
 # Loom is only used under `--cfg loom` for the model-checked tests.
 # `target.'cfg(loom)'` is matched by Cargo when `RUSTFLAGS="--cfg loom"` is set.
@@ -78,18 +78,26 @@ zerocopy = { workspace = true, optional = true }
 loom = { workspace = true }
 
 [dev-dependencies]
-alloc_tracker = "0.6"
+alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
+benchmarking = { path = "../benchmarking" }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
 # because bolero-libfuzzer 0.13.0 references `bolero_engine::any::run`
 # but does not itself activate that feature on `bolero-engine`.
 bumpalo = { workspace = true, features = ["collections"] }
+bytemuck = { workspace = true, features = ["derive"] }
+bytes = { workspace = true }
+bytesbuf = { path = "../bytesbuf" }
 criterion = { workspace = true }
+hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"] }
 mimalloc = { workspace = true }
+multitude_macros = { path = "../multitude_macros" }
 mutants = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["raw_value"] }
+serde = { workspace = true, features = ["alloc", "derive"] }
+serde_json = { workspace = true, features = ["alloc", "raw_value"] }
+widestring = { workspace = true, features = ["alloc"] }
+zerocopy = { workspace = true }
 
 [target.'cfg(loom)'.dev-dependencies]
 loom = { workspace = true }
@@ -188,8 +196,8 @@ required-features = ["serde_json"]
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
 # discover this target authoritatively; the tests still build under `--cfg loom`.
 [[test]]
-name = "loom"
-path = "tests/loom.rs"
+name = "loom_arena"
+path = "tests/loom_arena.rs"
 required-features = ["loom"]
 
 # >>> anvil-managed: anvil-lints

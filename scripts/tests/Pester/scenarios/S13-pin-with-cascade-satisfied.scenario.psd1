@@ -3,7 +3,7 @@
 
 @{
     Name        = 'S13-pin-with-cascade-satisfied'
-    Description = 'Bundled-input feature: user explicitly pins a target version for one package, and a cascade from another user-source package strengthens the change-type tag but the pin still numerically satisfies the cascade requirement. Validates that Resolve-ReleaseSet keeps the pinned version verbatim (does not bump it to the cascade-required minimum) while still updating EffectiveChangeType so any dependent cascade decisions are correct.'
+    Description = 'Bundled-input feature: user explicitly pins a target version for one package, and a cascade from another user-source package strengthens the change-type tag but the pin still numerically satisfies the cascade requirement. Validates that Resolve-ReleaseSet keeps the pinned version verbatim (does not bump it to the cascade-required minimum) while recording the stronger requirement in EffectiveChangeType; dependent exposure propagation follows the actual version transition instead of that tag.'
 
     Workspace = @{
         Spec = @{

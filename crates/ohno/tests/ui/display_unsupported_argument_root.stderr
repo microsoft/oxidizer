@@ -1,0 +1,11 @@
+error: `#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`
+ --> tests/ui/display_unsupported_argument_root.rs:8:22
+  |
+8 | #[display("bad: {}", Self::LABEL.len())]
+  |                      ^^^^^^^^^^^^^^^^^
+
+error: `#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self`
+  --> tests/ui/display_unsupported_argument_root.rs:14:22
+   |
+14 | #[display("bad: {}", "prefix".len())]
+   |                      ^^^^^^^^^^^^^^

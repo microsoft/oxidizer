@@ -326,6 +326,17 @@ impl CacheTelemetry {
         );
     }
 
+    pub(crate) fn record_insert_rejected_with_duration(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_info_with_duration(tier_name, attributes::EVENT_INSERT_REJECTED, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INSERT_REJECTED,
+            duration,
+            fallback,
+        );
+    }
+
     /// Records that an entry was evicted from the cache due to capacity limits.
     ///
     /// When moka evicts during an `insert()`, the eviction listener runs
@@ -571,6 +582,13 @@ mod tests {
                 async { t.record_insert_rejected("c", false) }.with_request_id(request_id).await;
             });
         });
+        assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
+            futures::executor::block_on(async {
+                async { t.record_insert_rejected_with_duration("c", Duration::from_nanos(1), false) }
+                    .with_request_id(request_id)
+                    .await;
+            });
+        });
         assert_emits(attributes::EVENT_INSERT_ERROR, |t, request_id| {
             futures::executor::block_on(async {
                 async { t.record_insert_error("c", Duration::ZERO, false) }
@@ -705,39 +723,31 @@ mod tests {
 
     #[test]
     fn nested_with_request_id_restores_outer_id() {
-        use std::task::{Context, Poll, Waker};
+        use testing_aids::FutureTestExt;
 
         let outer_id = next_request_id();
         let inner_id = next_request_id();
 
-        let waker = Waker::noop();
-
         // Poll outer WithRequestId, which sets outer_id
-        let mut outer = std::pin::pin!(
+        async {
+            assert_eq!(CacheTelemetry::current_request_id(), outer_id);
+
+            // Poll inner WithRequestId — sets inner_id, should restore outer_id on completion
             async {
-                assert_eq!(CacheTelemetry::current_request_id(), outer_id);
-
-                // Poll inner WithRequestId — sets inner_id, should restore outer_id on completion
-                let mut inner = std::pin::pin!(
-                    async {
-                        assert_eq!(CacheTelemetry::current_request_id(), inner_id);
-                    }
-                    .with_request_id(inner_id)
-                );
-                let mut inner_cx = Context::from_waker(waker);
-                assert!(matches!(inner.as_mut().poll(&mut inner_cx), Poll::Ready(())));
-
-                // After inner completes, outer_id should be restored
-                assert_eq!(
-                    CacheTelemetry::current_request_id(),
-                    outer_id,
-                    "outer request_id should be restored after nested WithRequestId"
-                );
+                assert_eq!(CacheTelemetry::current_request_id(), inner_id);
             }
-            .with_request_id(outer_id)
-        );
-        let mut outer_cx = Context::from_waker(waker);
-        assert!(matches!(outer.as_mut().poll(&mut outer_cx), Poll::Ready(())));
+            .with_request_id(inner_id)
+            .unwrap_ready();
+
+            // After inner completes, outer_id should be restored
+            assert_eq!(
+                CacheTelemetry::current_request_id(),
+                outer_id,
+                "outer request_id should be restored after nested WithRequestId"
+            );
+        }
+        .with_request_id(outer_id)
+        .unwrap_ready();
 
         // After outer completes, should be reset to 0
         assert_eq!(CacheTelemetry::current_request_id(), 0);

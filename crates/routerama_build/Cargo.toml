@@ -43,7 +43,10 @@ unicode-ident = { workspace = true }
 criterion = { workspace = true }
 mutants = { workspace = true }
 prettyplease = { workspace = true }
-syn = { workspace = true, features = ["full", "parsing"] }
+proc-macro-crate = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["clone-impls", "parsing", "proc-macro", "printing", "derive", "full", "visit"] }
 
 [lints]
 workspace = true

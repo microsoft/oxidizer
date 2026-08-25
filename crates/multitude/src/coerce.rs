@@ -121,7 +121,7 @@ macro_rules! coerce {
         unsafe {
             $crate::Coercion::new({
                 #[allow(unused_parens)]
-                fn coerce<'lt, $($generic: 'lt),+>(
+                fn coerce<'lt, $($generic),+>(
                     ptr: *const (impl $($bounds)* + 'lt),
                 ) -> *const (dyn $($bounds)* + 'lt) {
                     ptr

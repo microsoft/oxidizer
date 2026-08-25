@@ -78,6 +78,7 @@ use std::time::Duration;
 
 mod io;
 
+#[cfg(any(doc, test))]
 pub mod _documentation;
 
 // Naming Convention for Get/Set:

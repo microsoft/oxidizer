@@ -60,12 +60,20 @@ Describe 'Format-PackageMenu' {
             param(
                 [string]$Folder = 'ohno',
                 [object[]]$Chains = @(@('a', 'ohno')),
-                [string]$CurrentVersion = '1.2.3'
+                [string]$CurrentVersion = '1.2.3',
+                [bool]$InReleaseSet = $false,
+                [string]$PlannedCurrentVersion = $null,
+                [string]$EffectiveChangeType = $null,
+                [string]$EffectiveTargetVersion = $null
             )
             return [pscustomobject]@{
                 Folder                    = $Folder
                 PackageName               = $Folder
                 CurrentVersion            = $CurrentVersion
+                InReleaseSet              = $InReleaseSet
+                PlannedCurrentVersion     = $PlannedCurrentVersion
+                EffectiveChangeType       = $EffectiveChangeType
+                EffectiveTargetVersion    = $EffectiveTargetVersion
                 ChangedFileCount          = 1
                 # DependencyChains stays release-set-rooted for the PR comment
                 # and non-interactive bail-out paths; the menu reads only
@@ -84,11 +92,13 @@ Describe 'Format-PackageMenu' {
 
     Context 'manual proc-macro SemVer review' {
         It 'renders the same menu as an ordinary package already in the release plan' {
-            $ordinary = NewFinding -Folder 'macros' -CurrentVersion '1.2.3'
-            $ordinary | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $ordinary = NewFinding -Folder 'macros' -CurrentVersion '1.2.3' `
+                -InReleaseSet $true -PlannedCurrentVersion '1.2.3' `
+                -EffectiveChangeType 'patch' -EffectiveTargetVersion '1.2.4'
 
-            $finding = NewFinding -Folder 'macros' -CurrentVersion '1.2.3'
-            $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $finding = NewFinding -Folder 'macros' -CurrentVersion '1.2.3' `
+                -InReleaseSet $true -PlannedCurrentVersion '1.2.3' `
+                -EffectiveChangeType 'patch' -EffectiveTargetVersion '1.2.4'
             $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro'
             $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @()
@@ -97,16 +107,18 @@ Describe 'Format-PackageMenu' {
 
             $out | Should -Be (Format-PackageMenu -Finding $ordinary -RemainingCount 0)
             $out | Should -Match 'Detected package with unreleased modifications: macros'
-            $out | Should -Match '2\. Keep the release level already in the plan'
+            $out | Should -Match '2\. Keep the release level already in the plan \(patch: 1\.2\.3 -> 1\.2\.4\)'
             $out | Should -Not -Match 'Manual SemVer|cargo-semver-checks|proc-macro'
         }
 
         It 'renders the same menu for a mandatory downstream review as for an ordinary package' {
-            $ordinary = NewFinding -Folder 'facade' -CurrentVersion '1.2.3'
-            $ordinary | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $ordinary = NewFinding -Folder 'facade' -CurrentVersion '1.2.3' `
+                -InReleaseSet $true -PlannedCurrentVersion '1.2.3' `
+                -EffectiveChangeType 'non-breaking' -EffectiveTargetVersion '1.3.0'
 
-            $finding = NewFinding -Folder 'facade' -CurrentVersion '1.2.3'
-            $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+            $finding = NewFinding -Folder 'facade' -CurrentVersion '1.2.3' `
+                -InReleaseSet $true -PlannedCurrentVersion '1.2.3' `
+                -EffectiveChangeType 'non-breaking' -EffectiveTargetVersion '1.3.0'
             $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro-dependent'
             $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @('macros')
@@ -117,6 +129,33 @@ Describe 'Format-PackageMenu' {
             $out | Should -Match 'Detected package with unreleased modifications: facade'
             $out | Should -Not -Match 'Manual SemVer|cargo-semver-checks|proc-macro'
         }
+    }
+
+    It 'shows the planned release level and target version in option 2' {
+        $finding = NewFinding -Folder 'anyspawn' -CurrentVersion '0.6.0' `
+            -InReleaseSet $true -PlannedCurrentVersion '0.6.0' `
+            -EffectiveChangeType 'patch' -EffectiveTargetVersion '0.6.1'
+
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 30
+
+        $out | Should -Match '2\. Keep the release level already in the plan \(patch: 0\.6\.0 -> 0\.6\.1\)'
+    }
+
+    It 'keeps the legacy option 2 wording when a hand-crafted finding lacks plan details' {
+        $finding = [pscustomobject]@{
+            Folder                    = 'ohno'
+            PackageName               = 'ohno'
+            CurrentVersion            = '1.2.3'
+            InReleaseSet              = $true
+            ChangedFileCount          = 1
+            DependencyChains          = @()
+            WorkspaceDependencyChains = @()
+        }
+
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $option2 = $out -split "`r?`n" | Where-Object { $_ -match '^\s*2\. ' } | Select-Object -First 1
+
+        $option2.Trim() | Should -Be '2. Keep the release level already in the plan'
     }
 
     Context 'no-changes (-All-mode) finding' {
@@ -385,6 +424,48 @@ Describe 'Format-PackageMenu' {
             $out | Should -Match 'Direct dependent in this workspace: b\b'
             $out | Should -Not -Match 'release_set_root'
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Get-UnreleasedModifiedDependencies (planned release details)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-UnreleasedModifiedDependencies: planned release details' {
+
+    It 'carries the effective release level and version into in-plan findings' {
+        Mock -CommandName Get-WorkspacePackages -MockWith {
+            @([pscustomobject]@{
+                Folder          = 'anyspawn'
+                Name            = 'anyspawn'
+                Version         = '0.6.0'
+                Published       = $true
+                Deps            = @()
+                IsProcMacroOnly = $false
+            })
+        }
+        Mock -CommandName Get-InWorkspaceDependencyChains -MockWith { @() }
+
+        $resolved = @{
+            anyspawn = [pscustomobject]@{
+                Folder                 = 'anyspawn'
+                Name                   = 'anyspawn'
+                CurrentVersion         = '0.6.0'
+                EffectiveChangeType    = 'patch'
+                EffectiveTargetVersion = '0.6.1'
+                Source                 = 'cascade'
+            }
+        }
+
+        $finding = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $TestDrive `
+            -ResolvedReleaseSet $resolved `
+            -ModifiedSnapshot @{ anyspawn = 1 })[0]
+
+        $finding.InReleaseSet          | Should -BeTrue
+        $finding.PlannedCurrentVersion | Should -Be '0.6.0'
+        $finding.EffectiveChangeType   | Should -Be 'patch'
+        $finding.EffectiveTargetVersion | Should -Be '0.6.1'
     }
 }
 

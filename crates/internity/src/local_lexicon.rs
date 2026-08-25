@@ -11,9 +11,9 @@ use core::hash::{BuildHasher, Hasher};
 use hashbrown::HashTable;
 use rustc_hash::FxBuildHasher;
 
-use crate::flat_reader::FlatReader;
+use crate::local_reader::LocalReader;
 use crate::reader::Reader;
-use crate::sym::Sym;
+use crate::sym::{Sym, dense_index_of, dense_sym_at};
 
 /// A single-threaded string interner.
 ///
@@ -24,12 +24,44 @@ use crate::sym::Sym;
 ///
 /// The usual lifecycle is **intern, then freeze, then read**: call
 /// [`freeze`](LocalLexicon::freeze) once you're done interning to get a cheap,
-/// `Send + Sync` [`Reader`] whose lookups are lock-free. Existing [`Sym`] handles
-/// stay valid across the freeze.
+/// `Send + Sync` [`LocalReader`] whose lookups are lock-free. Existing [`Sym`]
+/// handles stay valid across the freeze, and keep their dense numbering.
 ///
-/// By default, [`LocalLexicon`] uses a fast, non-cryptographic hasher; supply your own with
-/// [`with_hasher`](LocalLexicon::with_hasher) (for example a DoS-resistant one when
-/// interning untrusted input). Capacity is bounded by a 4 GiB string buffer.
+/// Capacity is bounded by a 4 GiB string buffer.
+///
+/// # Choosing a hasher
+///
+/// <div class="warning">
+///
+/// The default hasher is fast but **not collision-attack resistant**. Interning
+/// attacker-controlled strings — names off the wire in an XML, JSON, or other
+/// protocol parser — with the default hasher invites hash-collision denial of
+/// service. Supply a defensive hasher with
+/// [`with_hasher`](LocalLexicon::with_hasher) whenever an attacker can choose the
+/// strings.
+///
+/// This differs from `lasso`, which defaults to a collision-resistant hasher. A
+/// type-for-type migration therefore needs a deliberate hasher choice, or it
+/// silently loses that protection.
+///
+/// </div>
+///
+/// # Memory and resolve cost
+///
+/// Strings are stored as one contiguous buffer plus a table of `u32` boundaries,
+/// so each string costs **4 bytes** of index overhead. An interner built on
+/// `Vec<&str>` — `lasso`, for example — stores a pointer-and-length pair per
+/// string instead, which is two machine words: 16 bytes on a 64-bit target, 8 on
+/// a 32-bit one.
+///
+/// The trade is on the read side: resolving reconstructs the string from two
+/// adjacent boundaries, which is one extra dependent memory load compared with
+/// loading a ready-made pointer and length. Expect resolve to cost a few
+/// instructions more than a `Vec<&str>` design, in exchange for a quarter of the
+/// per-string overhead on a 64-bit target (half on a 32-bit one) and far better
+/// locality. For resolve-heavy workloads,
+/// [`freeze`](LocalLexicon::freeze) first — a [`LocalReader`] is faster than the
+/// live lexicon.
 ///
 /// # Examples
 ///
@@ -311,6 +343,84 @@ impl<S: BuildHasher> LocalLexicon<S> {
         self.offsets.len() - 1
     }
 
+    /// Returns the 0-based position of `sym` in insertion order, or `None` if it
+    /// is out of range for this lexicon.
+    ///
+    /// Positions are assigned consecutively from zero in insertion order, so this
+    /// index is a *dense* key: per-symbol data can live in a `Vec<T>` indexed by
+    /// it, rather than a hash map keyed by the handle. That avoids hashing and
+    /// probing entirely, and makes set membership a bitset. See
+    /// [`SymMap`](crate::SymMap) for the hash map alternative when a dense table
+    /// would be too sparse.
+    ///
+    /// The raw handle value from [`Sym::as_u32`] is 1-based, so it is *not* a
+    /// side-table index; `index_of` and [`sym_at`](Self::sym_at) are the supported
+    /// conversions.
+    ///
+    /// This numbering is a guarantee, not an implementation detail, and
+    /// [`freeze`](Self::freeze) preserves it — see
+    /// [`LocalReader::index_of`](crate::LocalReader::index_of).
+    ///
+    /// The range check is against the *current* length: a handle from a different
+    /// `LocalLexicon` that happens to be in range returns an index here, and a
+    /// side table indexed with it would silently read the wrong row. This is not a
+    /// memory-safety problem, but it is silent, so keep side tables with the
+    /// lexicon they describe.
+    ///
+    /// `ThreadedLexicon` handles are **not** dense — they encode a shard index in
+    /// their high bits — so it deliberately offers no equivalent.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use internity::LocalLexicon;
+    ///
+    /// let mut lexicon = LocalLexicon::new();
+    /// let a = lexicon.intern("a");
+    /// let b = lexicon.intern("b");
+    ///
+    /// assert_eq!(lexicon.index_of(a), Some(0));
+    /// assert_eq!(lexicon.index_of(b), Some(1));
+    ///
+    /// // A dense side table: one slot per symbol, no hashing.
+    /// let mut lengths = vec![0usize; lexicon.len()];
+    /// for (sym, s) in lexicon.iter() {
+    ///     let i = lexicon
+    ///         .index_of(sym)
+    ///         .expect("handle came from this lexicon");
+    ///     lengths[i] = s.len();
+    /// }
+    /// assert_eq!(lengths, vec![1, 1]);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn index_of(&self, sym: Sym) -> Option<usize> {
+        dense_index_of(self.len(), sym)
+    }
+
+    /// Returns the handle at 0-based position `index`, or `None` if fewer than
+    /// `index + 1` strings have been interned.
+    ///
+    /// The inverse of [`index_of`](Self::index_of); see it for what the index
+    /// means.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use internity::LocalLexicon;
+    ///
+    /// let mut lexicon = LocalLexicon::new();
+    /// let a = lexicon.intern("a");
+    ///
+    /// assert_eq!(lexicon.sym_at(0), Some(a));
+    /// assert_eq!(lexicon.sym_at(1), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn sym_at(&self, index: usize) -> Option<Sym> {
+        dense_sym_at(self.len(), index)
+    }
+
     /// Returns `true` if nothing has been interned yet.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -334,14 +444,60 @@ impl<S: BuildHasher> LocalLexicon<S> {
         (0..offsets.len() - 1).map(move |i| (Sym::pack_dense(i), crate::storage::str_at(offsets, bytes, i)))
     }
 
-    /// Freezes into a `Send + Sync` [`Reader`]. Handles remain valid.
+    /// Freezes into a `Send + Sync` [`LocalReader`]. Handles remain valid.
+    ///
+    /// This trades interning for a smaller, read-optimized table: the dedup hash
+    /// map is dropped and the storage is shrunk to fit, which is where the memory
+    /// saving comes from. The consequence is that a frozen reader can
+    /// [`resolve`](Reader::resolve) handles but has no
+    /// [`get`](LocalLexicon::get) — looking a string up is exactly the hash map
+    /// that was just freed.
+    ///
+    /// If you need string lookup on a frozen table, keep the lexicon live instead,
+    /// or rebuild a smaller index from [`iter`](Reader::iter). A sorted handle
+    /// list costs 4 bytes per string against the roughly 7 the hash map costs,
+    /// and answers lookups in `O(log n)`:
+    ///
+    /// ```
+    /// use internity::{LocalLexicon, LocalReader, Reader, Sym};
+    ///
+    /// struct Frozen {
+    ///     reader: LocalReader,
+    ///     by_string: Box<[Sym]>,
+    /// }
+    ///
+    /// impl Frozen {
+    ///     fn new(reader: LocalReader) -> Self {
+    ///         let mut by_string: Vec<Sym> = reader.iter().map(|(sym, _)| sym).collect();
+    ///         by_string.sort_by_cached_key(|&sym| reader.resolve(sym));
+    ///         Self {
+    ///             by_string: by_string.into_boxed_slice(),
+    ///             reader,
+    ///         }
+    ///     }
+    ///
+    ///     fn get(&self, needle: &str) -> Option<Sym> {
+    ///         self.by_string
+    ///             .binary_search_by(|&sym| self.reader.resolve(sym).cmp(needle))
+    ///             .ok()
+    ///             .map(|i| self.by_string[i])
+    ///     }
+    /// }
+    ///
+    /// let mut lexicon = LocalLexicon::new();
+    /// let hello = lexicon.intern("hello");
+    /// let frozen = Frozen::new(lexicon.freeze());
+    ///
+    /// assert_eq!(frozen.get("hello"), Some(hello));
+    /// assert_eq!(frozen.get("absent"), None);
+    /// ```
     #[must_use]
-    pub fn freeze(self) -> impl Reader {
+    pub fn freeze(self) -> LocalReader {
         self.into_reader()
     }
 
-    fn into_reader(self) -> FlatReader {
-        FlatReader::new(self.offsets.into_boxed_slice(), self.buffer.into_bytes().into_boxed_slice())
+    fn into_reader(self) -> LocalReader {
+        LocalReader::new(self.offsets.into_boxed_slice(), self.buffer.into_bytes().into_boxed_slice())
     }
 
     pub(crate) fn into_boxed_reader(self) -> Box<dyn Reader> {

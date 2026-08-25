@@ -187,10 +187,31 @@ function Write-PackageCargoToml {
         $entries = ($Package.AllowedExternalTypes | ForEach-Object { "`"$_`"" }) -join ', '
         $lines += "allowed_external_types = [$entries]"
     }
+    # Emits the value verbatim, bypassing the array wrapping above, so a test
+    # can build the malformed shapes cargo accepts. `[package.metadata]` is
+    # arbitrary TOML that cargo passes through unvalidated, so a scalar reaches
+    # the planner exactly as written here.
+    elseif ($Package.ContainsKey('RawAllowedExternalTypes') -and
+        -not [string]::IsNullOrWhiteSpace($Package.RawAllowedExternalTypes)) {
+        $lines += ''
+        $lines += '[package.metadata.cargo_check_external_types]'
+        $lines += "allowed_external_types = $($Package.RawAllowedExternalTypes)"
+    }
     if ($Package.ContainsKey('ProcMacro') -and $Package.ProcMacro) {
         $lines += ''
         $lines += '[lib]'
         $lines += 'proc-macro = true'
+        if ($Package.ContainsKey('LibName') -and -not [string]::IsNullOrWhiteSpace($Package.LibName)) {
+            $lines += "name = `"$($Package.LibName)`""
+        }
+    }
+    elseif ($Package.ContainsKey('LibName') -and -not [string]::IsNullOrWhiteSpace($Package.LibName)) {
+        # `[lib] name` renames the crate root without renaming the package, so
+        # consumers must `use <LibName>::...` while still depending on Name.
+        # src/lib.rs stays where it is; cargo only needs the target name.
+        $lines += ''
+        $lines += '[lib]'
+        $lines += "name = `"$($Package.LibName)`""
     }
 
     $allDeps = @()
@@ -203,25 +224,65 @@ function Write-PackageCargoToml {
         $lines += ''
         $lines += '[dependencies]'
         foreach ($d in $deps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
     if ($buildDeps.Count -gt 0) {
         $lines += ''
         $lines += '[build-dependencies]'
         foreach ($d in $buildDeps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
     if ($devDeps.Count -gt 0) {
         $lines += ''
         $lines += '[dev-dependencies]'
         foreach ($d in $devDeps) {
-            $lines += "$($d.Name).workspace = true"
+            $lines += Format-DependencyLine -Dep $d
         }
     }
 
     Set-Content -Path $Path -Value ($lines -join "`n") -NoNewline
+}
+
+# Renders one dependency line for a member manifest.
+#
+# Ordinary deps use workspace inheritance (`bar.workspace = true`), matching the
+# real repo. A dep carrying `Rename` is emitted in the inline `package = "..."`
+# form instead, mirroring production (see multitude's `allocator-api2-02`):
+# workspace inheritance keys the [workspace.dependencies] table by real name, so
+# it cannot express an alias without also rewriting that table. Path-only is
+# sufficient here because these fixtures are read via `cargo metadata` and never
+# packaged.
+function Format-DependencyLine {
+    param([Parameter(Mandatory = $true)][hashtable]$Dep)
+
+    # A dep marked External lives outside crates/, so it is not a workspace
+    # member and cannot use workspace inheritance. Used by tests that need a
+    # non-member dependency sharing a member's package name.
+    if ($Dep.ContainsKey('External') -and $Dep.External) {
+        if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
+            return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../../external/$($Dep.Name)`" }"
+        }
+        return "$($Dep.Name) = { path = `"../../external/$($Dep.Name)`" }"
+    }
+
+    if ($Dep.ContainsKey('Rename') -and -not [string]::IsNullOrWhiteSpace($Dep.Rename)) {
+        return "$($Dep.Rename) = { package = `"$($Dep.Name)`", path = `"../$($Dep.Name)`" }"
+    }
+    return "$($Dep.Name).workspace = true"
+}
+
+# Returns the spec's non-member packages, or an empty array when it declares none.
+# A spec may be a hashtable or a psd1-loaded object, so membership is probed
+# rather than assumed.
+function Get-SpecExternalPackages {
+    param([Parameter(Mandatory = $true)]$Spec)
+
+    if ($Spec -isnot [hashtable]) { return @() }
+    if (-not $Spec.ContainsKey('ExternalPackages')) { return @() }
+    if ($null -eq $Spec.ExternalPackages) { return @() }
+    return @($Spec.ExternalPackages)
 }
 
 function Write-RootCargoToml {
@@ -235,6 +296,12 @@ function Write-RootCargoToml {
         'resolver = "2"'
         'members = ["crates/*"]'
     )
+    # Non-member packages sit under external/, which is inside the workspace
+    # directory, so cargo would otherwise reject them as unlisted members.
+    $externals = @(Get-SpecExternalPackages -Spec $Spec)
+    if ($externals.Count -gt 0) {
+        $lines += 'exclude = ["external"]'
+    }
     # Optional [workspace.package] inheritance block. Tests that exercise
     # `publish.workspace = true` / `version.workspace = true` need the
     # workspace root to define a default; expose this via Spec.WorkspacePackage.
@@ -308,6 +375,19 @@ function New-SyntheticWorkspace {
         Write-PackageCargoToml -Package $package -Path (Join-Path $packageDir 'Cargo.toml')
         Set-Content -Path (Join-Path $srcDir 'lib.rs') -Value "// $($package.Name)" -NoNewline
         Set-Content -Path (Join-Path $packageDir 'CHANGELOG.md') -Value "# Changelog`n`n## [Unreleased]" -NoNewline
+    }
+
+    # Packages under external/, deliberately outside `members = ["crates/*"]`
+    # and named in the root `exclude` list so cargo treats them as their own
+    # thing rather than as unlisted members. They exist so a member can declare
+    # a path dependency that is NOT a workspace member -- the only shape that
+    # tells name matching apart from identity matching.
+    foreach ($external in @(Get-SpecExternalPackages -Spec $Spec)) {
+        $externalDir = Join-Path $Path "external\$($external.Name)"
+        $externalSrc = Join-Path $externalDir 'src'
+        New-Item -ItemType Directory -Path $externalSrc -Force | Out-Null
+        Write-PackageCargoToml -Package $external -Path (Join-Path $externalDir 'Cargo.toml')
+        Set-Content -Path (Join-Path $externalSrc 'lib.rs') -Value "// $($external.Name)" -NoNewline
     }
 
     Initialize-GitRepo -Path $Path

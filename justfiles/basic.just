@@ -186,7 +186,7 @@ test-docs FILTER="":
 
 # Runs doctests with only default features enabled. Doctests that reference
 # items behind a non-default feature must still compile in this configuration —
-# see AGENTS-feature-gated-doctests.md.
+# see docs/feature-gated-doctests.md.
 [script]
 test-docs-default FILTER="":
     $ErrorActionPreference = "Stop"
@@ -220,6 +220,35 @@ test-more FILTER="":
     # We separate this from "test" because the benchmark infra is quite slow, so we want to avoid
     # running them for quick iterative testing, only running them in thorough validation workflows.
     cargo +$env:RUST_MSRV nextest run {{ target_package }} --no-fail-fast --all-features --locked --tests --benches -- {{ FILTER }}
+
+# Run the compile-fail tests that pin macro diagnostics.
+#
+# These are ordinary integration tests, so `just test` runs them too. This recipe
+# runs them alone while iterating on a macro's messages: pass the test target's
+# name as the filter, for example `just package=ohno trybuild display_diagnostics`.
+[script]
+trybuild FILTER="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    # cargo test rather than nextest: one trybuild target drives every case in it
+    # from a single test function, and its own output is what names the case that
+    # failed. nextest would report the whole target as one opaque failure.
+    cargo +$env:RUST_MSRV test {{ target_package }} --no-fail-fast --all-features --locked --tests -- {{ FILTER }}
+
+# Rewrite the `.stderr` snapshots the compile-fail tests compare against.
+#
+# A `.stderr` snapshot pins both the text of a diagnostic and the span it points
+# at, so changing what a macro reports requires rewriting them. Always read the
+# resulting diff: a snapshot that changed for a reason you cannot name is a
+# regression in a diagnostic, not a refresh.
+[script]
+trybuild-overwrite FILTER="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    $env:TRYBUILD = "overwrite"
+    cargo +$env:RUST_MSRV test {{ target_package }} --no-fail-fast --all-features --locked --tests -- {{ FILTER }}
 
 # Detect unused dependencies.
 [script]

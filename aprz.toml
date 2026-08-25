@@ -84,6 +84,11 @@ advisories_cache_ttl = "1 week"
 name = "quick-xml"
 version = "=0.39.4"
 
+# Workspace-only helper crates do not have registry appraisal metadata.
+[[allow_list]]
+name = "benchmarking"
+version = "=0.1.0"
+
 # ----------------------------------------------------------------------------
 # Expressions
 #

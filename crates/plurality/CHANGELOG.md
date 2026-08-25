@@ -5,7 +5,53 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.2] - 2026-08-13
+
+### Added
+
+- `MultiPool<A>` and `MultiPoolBuilder` — an object pool that accepts values of
+  any type. The element type moves from the pool to each allocation call, so one
+  pool serves a heterogeneous mix of values while every handle keeps the size,
+  handle flavors, and reclamation cost of the typed pool.
+
+### Changed
+
+- `Pool<T, A>: Send` no longer requires `T: Send`, only `A: Send`. A pool owns
+  no values and offers no route to one, so a pool of non-`Send` values may
+  itself cross a thread boundary while its handles keep their own bounds.
+- The allocator-failure `AllocError` message and predicate documentation no
+  longer name chunks specifically, because the same error covers a pool's other
+  internal allocations.
+
+### Fixed
+
+- An allocator that allocates from the pool it serves no longer corrupts the
+  pool. Growth derives a chunk's identity after the allocator call rather than
+  before, and directory capacity is reserved without holding a borrow across
+  the allocation, so a nested allocation can no longer claim the same global
+  slot indices or alias the directory.
+- Freeing a pool through the last surviving handle no longer deallocates through
+  a pointer derived from a shared borrow, which was undefined behaviour (caught
+  by Miri as a borrow-stack violation).
+
+## [0.2.1] - 2026-08-09
+
+### Added
+
+- `UnwindSafe` and `RefUnwindSafe` impls for `Pool`, `Box`, `Alloc`, `Rc`, and
+  `Arc`.
+
+### Changed
+
+- Minimum supported Rust version raised to 1.93.1.
+
+### Fixed
+
+- `coerce!` accepts trait objects naming an enclosing generic type parameter,
+  such as `coerce!(<T> dyn Trait<T>)`, without over-constraining that
+  parameter's lifetime.
+
+## [0.2.0] - 2026-07-24
 
 ### Added
 

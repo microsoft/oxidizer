@@ -13,6 +13,43 @@ use core::{mem, str};
 
 use super::in_chunk::InChunk;
 
+const FIXED_COPY_BYTES: usize = 64;
+
+/// Unroll factor for the element-wise clone loop in
+/// [`Uninit::init_clone_from_slice`].
+///
+/// Eight matches [`FIXED_COPY_BYTES`] for pointer-sized elements — one cache
+/// line per unrolled step — which is wide enough for LLVM to emit inline
+/// vector copies for trivially-cloneable `T` while keeping the scalar
+/// remainder loop short.
+const CLONE_UNROLL: usize = 8;
+
+// The clone loop body writes out one clone site per unrolled step by hand, so
+// the two must be changed together.
+const _: () = assert!(
+    CLONE_UNROLL == 8,
+    "init_clone_from_slice spells out exactly CLONE_UNROLL clone sites"
+);
+
+/// Copies one cache-line-sized region without a dynamic `memcpy` dispatch.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid for [`FIXED_COPY_BYTES`] non-overlapping
+/// bytes.
+//
+// `#[inline(never)]` is load-bearing: an isolated fixed-size body compiles to
+// inline vector moves, whereas merging it with the dynamic fallback lets LLVM
+// fold both into a libc `memcpy` call. Do not inline this or fuse it with the
+// dynamic path without re-checking the generated code.
+#[inline(never)]
+unsafe fn copy_fixed_bytes_nonoverlapping(src: *const u8, dst: *mut u8) {
+    // SAFETY: the caller guarantees both regions cover `FIXED_COPY_BYTES`.
+    unsafe {
+        ptr::copy_nonoverlapping(src.cast::<[u8; FIXED_COPY_BYTES]>(), dst.cast::<[u8; FIXED_COPY_BYTES]>(), 1);
+    }
+}
+
 /// Copies bytes into non-overlapping storage, inlining common short lengths
 /// instead of dispatching to dynamic `memcpy`.
 ///
@@ -157,7 +194,9 @@ impl<'a, T> Uninit<'a, [T]> {
         // provenance (no narrow `&mut [T]` retag).
         unsafe {
             let dst = slice_ptr.as_ptr().cast::<T>();
-            if const { mem::size_of::<T>() == 1 } {
+            if mem::size_of_val(src) == FIXED_COPY_BYTES {
+                copy_fixed_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast());
+            } else if const { mem::size_of::<T>() == 1 } {
                 copy_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast(), len);
             } else {
                 ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
@@ -177,12 +216,54 @@ impl<'a, T> Uninit<'a, [T]> {
     where
         T: Clone,
     {
-        debug_assert_eq!(
-            src.len(),
-            self.ptr.as_non_null().len(),
-            "init_clone_from_slice: source length must match reservation"
-        );
-        self.init_with(|i| src[i].clone())
+        let slice_ptr = self.ptr.as_non_null();
+        let len = slice_ptr.len();
+        debug_assert_eq!(src.len(), len, "init_clone_from_slice: source length must match reservation");
+        // The `CLONE_UNROLL` clone sites are written out individually so LLVM
+        // keeps them visible and emits inline vector copies for short
+        // trivially-cloneable slices. Both a plain iterator loop and a
+        // constant-trip-count inner loop over `CLONE_UNROLL` coalesce the
+        // copies into out-of-line `memcpy` calls instead, so neither
+        // simplification is safe to apply without re-checking the disassembly.
+        // SAFETY: `dst` has `len` uninitialized `T` slots, `src` has the same
+        // length, and the guard drops exactly the initialized prefix on panic.
+        unsafe {
+            let dst = slice_ptr.as_ptr().cast::<T>();
+            let mut guard = InitGuard { dst, initialized: 0 };
+            while len - guard.initialized >= CLONE_UNROLL {
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+                let index = guard.initialized;
+                dst.add(index).write((*src.as_ptr().add(index)).clone());
+                guard.initialized += 1;
+            }
+            for value in &src[guard.initialized..] {
+                let index = guard.initialized;
+                dst.add(index).write(value.clone());
+                guard.initialized += 1;
+            }
+            mem::forget(guard);
+            core::slice::from_raw_parts_mut(dst, len)
+        }
     }
 
     /// Initializes the reserved slice by calling `f(i)` for each index

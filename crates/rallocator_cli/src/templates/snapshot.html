@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>rallocator snapshot</title>
+<style>
+:root{--bg:#0b1020;--panel:#141b2d;--panel2:#192238;--text:#eef2ff;--muted:#9eabc7;--accent:#70d6ff;--good:#72e0a8;--warn:#ffcf70;--line:#2b3651}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#080c18,#101a31);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1400px;margin:auto;padding:40px 24px 64px}h1{font-size:34px;margin:0}h2{font-size:19px;margin:0 0 16px}h3{font-size:15px;margin:18px 0 8px}.subtitle,.muted{color:var(--muted)}
+.hero{display:flex;justify-content:space-between;gap:24px;align-items:end;margin-bottom:28px}.version{text-align:right}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0 28px}.card,section{background:rgba(20,27,45,.94);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px #0004}
+.card{padding:18px}.metric{font-size:25px;font-weight:700;color:var(--accent)}.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+section{padding:22px;margin:16px 0;overflow:auto}table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.bar{height:8px;min-width:120px;background:#26314b;border-radius:9px;overflow:hidden}.bar>span{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--good))}
+code{color:#b9e8ff}ol{padding-left:24px}li{margin:14px 0}.stack{overflow-wrap:anywhere;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.region{display:grid;grid-template-columns:minmax(280px,520px) 1fr;gap:24px;align-items:start}.slice-map{width:100%;aspect-ratio:1;background:#090d18;border:1px solid var(--line);border-radius:8px;image-rendering:pixelated}
+.slice-map .small{fill:#70d6ff}.slice-map .medium,.slice-map .medium-continuation{fill:#ffcf70}.slice-map .bump{fill:#72e0a8}.slice-map .unknown{fill:#7d879e}
+.topology-owner .slice-map rect{fill:var(--owner-color)}.topology-owner .kind-legend,.topology-kind .owner-legend{display:none}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0;color:var(--muted);font-size:12px}.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}.small-bg{background:#70d6ff}.medium-bg{background:#ffcf70}.bump-bg{background:#72e0a8}.unknown-bg{background:#7d879e}.free-bg{background:#090d18;border:1px solid #39435a}
+.owner-sample-a{background:hsl(210 68% 58%)}.topology-modes{display:flex;gap:18px;border:0;padding:0;margin:0 0 8px;color:var(--muted)}.topology-modes legend{font-weight:600;color:var(--text);margin-right:8px}.topology-modes label{cursor:pointer}
+.domain-bar{display:flex;min-width:150px;height:14px;overflow:hidden;background:#090d18;border:1px solid var(--line);border-radius:4px}.domain-bar span{display:block;height:100%}
+details{margin-top:12px}summary{cursor:pointer;color:#cbd7f2}.compact td,.compact th{padding:7px 9px}.section-note{margin:-8px 0 14px;color:var(--muted)}
+.histogram-controls{display:flex;gap:18px;border:0;padding:0;margin:0 0 10px;color:var(--muted)}.histogram-controls legend{font-weight:600;color:var(--text);margin-right:8px}.histogram-controls label{cursor:pointer}.histogram{display:flex;align-items:stretch;gap:8px;height:250px;padding:10px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto}.histogram-bucket{display:grid;grid-template-rows:190px 48px;flex:0 0 62px;align-items:end;text-align:center}.histogram-plot{display:flex;align-items:end;justify-content:center;gap:4px;width:100%;height:190px}.histogram-plot i{display:none;width:24px;min-height:1px;border-radius:4px 4px 0 0}.histogram-live .histogram-plot .live{display:block;background:var(--good)}.histogram-allocated .histogram-plot .allocated{display:block;background:var(--accent)}.histogram-label{display:flex;align-items:flex-start;justify-content:center;height:48px;padding-top:7px;color:var(--muted);font-size:11px;line-height:1.15;white-space:nowrap}.hotspot-stacks{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}.stack-details{margin-top:7px}.stack-details summary{font-size:12px}.thread-flow-scroll{width:100%;overflow-x:auto;margin-top:12px}.thread-flow{display:block;width:100%;min-width:980px;background:#090d18;border:1px solid var(--line);border-radius:10px}.thread-flow text{fill:var(--text);font:12px system-ui}.thread-flow .flow-heading{fill:var(--muted);font-size:13px;font-weight:700}.thread-flow-row{stroke:#202a40;stroke-width:1}.thread-flow-endpoint{cursor:pointer;outline:none;transition:opacity .15s}.thread-flow-endpoint:hover .thread-flow-node,.thread-flow-endpoint:focus .thread-flow-node,.thread-flow-endpoint.selected .thread-flow-node{stroke:#eef2ff;stroke-width:2}.thread-flow-node{fill:#141b2d;stroke:#3b4969;stroke-width:1.25}.thread-flow .flow-thread-name{font-size:12px;font-weight:700}.thread-flow .flow-thread-total{fill:var(--muted);font-size:10px}.thread-flow-link{fill:none;stroke-opacity:.72;transition:opacity .15s}.thread-flow-link.cross{stroke:var(--accent);marker-end:url(#thread-flow-arrow-cross)}.thread-flow-link.local{stroke:var(--good);marker-end:url(#thread-flow-arrow-local)}#thread-flow-arrow-cross path{fill:var(--accent)}#thread-flow-arrow-local path{fill:var(--good)}.thread-flow-label{font-size:10px;font-weight:700;paint-order:stroke;stroke:#090d18;stroke-width:4px;stroke-linejoin:round;transition:opacity .15s}.thread-flow-label.cross{fill:var(--accent)}.thread-flow-label.local{fill:var(--good)}.flow-legend .thread-flow-link{stroke-width:3px}.thread-flow.has-selection .thread-flow-endpoint.dimmed,.thread-flow.has-selection .thread-flow-link.dimmed,.thread-flow.has-selection .thread-flow-label.dimmed{opacity:.12}
+.info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:5px;border:1px solid #71809f;border-radius:50%;color:#b9c8e8;font:700 10px/1 system-ui;cursor:help;text-transform:none;letter-spacing:0;vertical-align:1px;outline:none}
+.info .tip{position:fixed;z-index:1000;left:0;top:0;bottom:auto;width:min(290px,calc(100vw - 16px));padding:9px 11px;border:1px solid #52617f;border-radius:8px;background:#080d19;color:#e8edfa;font:12px/1.4 system-ui;text-align:left;text-transform:none;letter-spacing:0;white-space:normal;box-shadow:0 8px 24px #000a;opacity:0;visibility:hidden;transform:none;transition:opacity .12s}
+.info .tip::after{content:"";position:absolute;left:var(--arrow-x,50%);top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:#52617f}.info .tip.below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#52617f}.info:hover .tip,.info:focus .tip,.info:focus-within .tip{opacity:1;visibility:visible;transform:none}th .info{vertical-align:-2px}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}.hero{display:block}.version{text-align:left;margin-top:10px}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+{{REPORT_BODY}}
+</main>
+<script>
+(() => {
+  const margin = 8;
+  const gap = 9;
+  let active = null;
+
+  function position(bubble) {
+    const tip = bubble.querySelector('.tip');
+    if (!tip) return;
+    const anchor = bubble.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    const height = tip.offsetHeight;
+    const idealLeft = anchor.left + anchor.width / 2 - width / 2;
+    const left = Math.max(margin, Math.min(idealLeft, innerWidth - width - margin));
+    const fitsAbove = anchor.top >= height + gap + margin;
+    const top = fitsAbove
+      ? anchor.top - height - gap
+      : Math.min(anchor.bottom + gap, innerHeight - height - margin);
+    tip.classList.toggle('below', !fitsAbove);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${Math.max(margin, top)}px`;
+    tip.style.setProperty(
+      '--arrow-x',
+      `${Math.max(8, Math.min(width - 8, anchor.left + anchor.width / 2 - left))}px`
+    );
+  }
+
+  document.querySelectorAll('.info').forEach((bubble) => {
+    bubble.addEventListener('mouseenter', () => { active = bubble; position(bubble); });
+    bubble.addEventListener('focus', () => { active = bubble; position(bubble); });
+    bubble.addEventListener('mouseleave', () => { if (active === bubble) active = null; });
+    bubble.addEventListener('blur', () => { if (active === bubble) active = null; });
+  });
+  const topology = document.querySelector('#physical-topology');
+  document.querySelectorAll('input[name="topology-mode"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!topology || !input.checked) return;
+      topology.classList.toggle('topology-owner', input.value === 'owner');
+      topology.classList.toggle('topology-kind', input.value === 'kind');
+    });
+  });
+  document.querySelectorAll('.histogram-controls input').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      const controls = input.closest('.histogram-controls');
+      const histogram = controls?.nextElementSibling;
+      if (!histogram?.classList.contains('histogram')) return;
+      histogram.classList.toggle('histogram-live', input.value === 'live');
+      histogram.classList.toggle('histogram-allocated', input.value === 'allocated');
+    });
+  });
+  document.querySelectorAll('.thread-flow').forEach((flow) => {
+    let selection = null;
+    const endpoints = [...flow.querySelectorAll('.thread-flow-endpoint')];
+    const links = [...flow.querySelectorAll('.thread-flow-link[data-source]')];
+    const labels = [...flow.querySelectorAll('.thread-flow-label[data-source]')];
+    const update = (endpoint) => {
+      const side = endpoint?.dataset.side;
+      const thread = endpoint?.dataset.thread;
+      selection = selection?.side === side && selection?.thread === thread
+        ? null
+        : endpoint ? { side, thread } : null;
+      flow.classList.toggle('has-selection', selection !== null);
+      endpoints.forEach((candidate) => {
+        const sameSide = selection && candidate.dataset.side === selection.side;
+        candidate.classList.toggle(
+          'dimmed',
+          Boolean(sameSide && candidate.dataset.thread !== selection.thread)
+        );
+        candidate.classList.toggle(
+          'selected',
+          Boolean(sameSide && candidate.dataset.thread === selection.thread)
+        );
+      });
+      [...links, ...labels].forEach((item) => {
+        const related = !selection || item.dataset[selection.side] === selection.thread;
+        item.classList.toggle('dimmed', !related);
+      });
+    };
+    endpoints.forEach((endpoint) => {
+      endpoint.addEventListener('click', () => update(endpoint));
+      endpoint.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        update(endpoint);
+      });
+    });
+  });
+  addEventListener('resize', () => { if (active) position(active); });
+  addEventListener('scroll', () => { if (active) position(active); }, true);
+})();
+</script>
+</body>
+</html>

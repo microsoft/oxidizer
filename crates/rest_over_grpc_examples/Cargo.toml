@@ -69,8 +69,8 @@ workspace = true
 # --- serving-layer examples ---
 
 [[example]]
-name = "tower_service"
-path = "examples/serving/tower_service.rs"
+name = "generated_tower_service"
+path = "examples/serving/generated_tower_service.rs"
 
 [[example]]
 name = "axum_app"

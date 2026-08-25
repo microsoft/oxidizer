@@ -15,7 +15,7 @@ testing_aids::init_tracing!();
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, CacheTier, InsertPolicy, TimeToRefresh};
+use cachet::{Cache, CacheEntry, CacheTier, InsertOutcome, InsertPolicy, TimeToRefresh};
 use cachet_tier::MockCache;
 use tick::Clock;
 
@@ -129,7 +129,8 @@ fn failing_cache() -> MockCache<String, i32> {
 async fn fallback_cache_insert_error_propagation() {
     let clock = Clock::new_frozen();
 
-    let primary_storage = cachet_memory::InMemoryCache::<String, i32>::new();
+    let primary_storage = MockCache::<String, i32>::new();
+    let primary_check = primary_storage.clone();
     let fallback_storage = failing_cache();
 
     let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
@@ -140,6 +141,38 @@ async fn fallback_cache_insert_error_propagation() {
         .build();
 
     let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
+    result.unwrap_err();
+    assert!(primary_check.contains_key(&"key".to_string()));
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_insert_rejection_and_error_returns_error() {
+    let clock = Clock::new_frozen();
+    let fallback = Cache::builder::<String, i32>(clock.clone()).storage(failing_cache());
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .insert_policy(InsertPolicy::never())
+        .fallback(fallback)
+        .build();
+
+    let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
+
+    result.unwrap_err();
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_insert_both_errors_returns_error() {
+    let clock = Clock::new_frozen();
+    let fallback = Cache::builder::<String, i32>(clock.clone()).storage(failing_cache());
+    let cache = Cache::builder::<String, i32>(clock)
+        .storage(failing_cache())
+        .fallback(fallback)
+        .build();
+
+    let result = cache.insert("key".to_string(), CacheEntry::new(42)).await;
+
     result.unwrap_err();
 }
 
@@ -211,7 +244,8 @@ async fn fallback_builder_with_insert_policy_always() {
     let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
 
     let key = "key".to_string();
-    cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
+    let outcome = cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
+    assert_eq!(outcome, InsertOutcome::Accepted);
     let entry = cache.get(&key).await.unwrap();
     assert_eq!(*entry.unwrap().value(), 42);
 }
@@ -230,9 +264,68 @@ async fn fallback_builder_with_insert_policy_never() {
         .build();
 
     let key = "key".to_string();
-    cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
+    let outcome = cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
+    assert_eq!(outcome, InsertOutcome::Accepted);
     let entry = cache.get(&key).await.unwrap();
     assert_eq!(*entry.unwrap().value(), 42);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_insert_rejected_when_both_tiers_reject() {
+    let clock = Clock::new_frozen();
+    let fallback = Cache::builder::<String, i32>(clock.clone())
+        .memory()
+        .insert_policy(InsertPolicy::never());
+    let cache = Cache::builder::<String, i32>(clock)
+        .memory()
+        .insert_policy(InsertPolicy::never())
+        .fallback(fallback)
+        .build();
+
+    let outcome = cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+    assert_eq!(outcome, InsertOutcome::Rejected);
+    assert!(cache.get("key").await.unwrap().is_none());
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_insert_accepted_when_primary_accepts_and_fallback_rejects() {
+    let clock = Clock::new_frozen();
+    let fallback = Cache::builder::<String, i32>(clock.clone())
+        .memory()
+        .insert_policy(InsertPolicy::never());
+    let cache = Cache::builder::<String, i32>(clock).memory().fallback(fallback).build();
+
+    let outcome = cache.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+
+    assert_eq!(outcome, InsertOutcome::Accepted);
+    assert_eq!(*cache.get("key").await.unwrap().unwrap().value(), 42);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn fallback_acceptance_does_not_imply_immediate_read_visibility() {
+    let clock = Clock::new_frozen();
+    let key = "key".to_string();
+    let primary_storage = MockCache::<String, i32>::new();
+    primary_storage.insert(key.clone(), CacheEntry::new(1)).await.unwrap();
+    let fallback_storage = MockCache::<String, i32>::new();
+    let fallback_check = fallback_storage.clone();
+
+    let fallback = Cache::builder::<String, i32>(clock.clone()).storage(fallback_storage);
+    let cache = Cache::builder::<String, i32>(clock)
+        .storage(primary_storage)
+        .insert_policy(InsertPolicy::never())
+        .fallback(fallback)
+        .build();
+
+    let outcome = cache.insert(key.clone(), CacheEntry::new(2)).await.unwrap();
+
+    assert_eq!(outcome, InsertOutcome::Accepted);
+    assert_eq!(*fallback_check.get(&key).await.unwrap().unwrap().value(), 2);
+    assert_eq!(*cache.get(&key).await.unwrap().unwrap().value(), 1);
 }
 
 #[cfg_attr(miri, ignore)]

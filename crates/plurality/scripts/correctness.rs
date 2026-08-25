@@ -194,7 +194,7 @@ fn run_loom(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
 
 fn run_bolero(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
     let mut cmd = cargo(root, &tc.nightly);
-    cmd.args(["test", "-p", PACKAGE, "--test", "bolero_pool", "--all-features", "--locked"]);
+    cmd.args(["test", "-p", PACKAGE, "--test", "bolero_pool", "--test", "bolero_multi_pool", "--all-features", "--locked"]);
 
     run_step("Bolero", cmd, failures);
 }

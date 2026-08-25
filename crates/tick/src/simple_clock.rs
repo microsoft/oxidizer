@@ -44,6 +44,9 @@ pub struct SimpleClock(TimeKind);
 enum TimeKind {
     /// Reads real OS time. Stateless and zero-cost.
     System,
+    /// Reads lower-precision OS time with lower overhead.
+    #[cfg(any(feature = "fast-instant", test))]
+    SystemFast,
     /// Reads time controlled by a [`ClockControl`][crate::ClockControl].
     #[cfg(any(feature = "test-util", test))]
     Controlled(crate::ClockControl),
@@ -58,6 +61,44 @@ impl SimpleClock {
     #[must_use]
     pub fn new_system() -> Self {
         Self(TimeKind::System)
+    }
+
+    /// Configures this clock to use lower-overhead [`Instant`] retrieval where supported.
+    ///
+    /// On Linux and Windows, enabling this option uses a lower-precision source whose resolution is
+    /// platform-dependent; on Windows it is normally 10 to 16 milliseconds. On other platforms,
+    /// it delegates to [`Instant::now`].
+    ///
+    /// The setting belongs to this clock instance. A differently configured clone can be used
+    /// independently, and stopwatches created from each clock retain that clock's setting.
+    /// Controlled clocks are unaffected.
+    ///
+    /// # Performance
+    ///
+    /// Only enable fast instant retrieval when instrumentation shows that the default
+    /// [`SimpleClock::instant`] retrieval is a performance bottleneck. Otherwise, retain the
+    /// default precise source.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tick::SimpleClock;
+    ///
+    /// let precise_clock = SimpleClock::new_system();
+    /// let fast_clock = precise_clock.clone().with_fast_instant(true);
+    ///
+    /// let precise = precise_clock.instant();
+    /// let fast = fast_clock.instant();
+    /// ```
+    #[cfg(any(feature = "fast-instant", test))]
+    #[must_use]
+    pub fn with_fast_instant(self, enabled: bool) -> Self {
+        match self.0 {
+            TimeKind::System | TimeKind::SystemFast if enabled => Self(TimeKind::SystemFast),
+            TimeKind::System | TimeKind::SystemFast => Self(TimeKind::System),
+            #[cfg(any(feature = "test-util", test))]
+            TimeKind::Controlled(control) => Self(TimeKind::Controlled(control)),
+        }
     }
 
     /// Creates a new frozen `SimpleClock`.
@@ -141,6 +182,8 @@ impl SimpleClock {
     pub fn system_time(&self) -> SystemTime {
         match &self.0 {
             TimeKind::System => SystemTime::now(),
+            #[cfg(any(feature = "fast-instant", test))]
+            TimeKind::SystemFast => SystemTime::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.system_time(),
         }
@@ -173,11 +216,14 @@ impl SimpleClock {
 
     /// Retrieves the current [`Instant`].
     ///
-    /// An [`Instant`] is monotonic and unaffected by system clock changes.
+    /// An [`Instant`] is monotonically non-decreasing and unaffected by system clock changes.
+    /// Consecutive reads may be equal, but later reads do not go backward.
     #[must_use]
     pub fn instant(&self) -> Instant {
         match &self.0 {
             TimeKind::System => Instant::now(),
+            #[cfg(any(feature = "fast-instant", test))]
+            TimeKind::SystemFast => crate::fast_instant::now(),
             #[cfg(any(feature = "test-util", test))]
             TimeKind::Controlled(control) => control.instant(),
         }
@@ -216,6 +262,32 @@ mod tests {
         let first = clock.instant();
         let second = clock.instant();
         assert!(second >= first);
+    }
+
+    #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
+    #[test]
+    fn configured_fast_instant_is_clone_local() {
+        let precise_clock = SimpleClock::new_system();
+        let fast_clock = precise_clock.clone().with_fast_instant(true);
+        let precise_again = fast_clock.clone().with_fast_instant(false);
+
+        assert!(matches!(precise_clock.0, TimeKind::System));
+        assert!(matches!(fast_clock.0, TimeKind::SystemFast));
+        assert!(matches!(precise_again.0, TimeKind::System));
+
+        _ = fast_clock.system_time();
+        _ = fast_clock.instant();
+    }
+
+    #[test]
+    fn fast_instant_configuration_does_not_affect_controlled_clock() {
+        let control = ClockControl::new();
+        let clock = control.to_simple_clock().with_fast_instant(true);
+        let start = clock.instant();
+
+        control.advance(Duration::from_secs(5));
+
+        assert_eq!(clock.instant().duration_since(start), Duration::from_secs(5));
     }
 
     #[test]

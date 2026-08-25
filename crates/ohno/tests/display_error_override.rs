@@ -135,6 +135,16 @@ fn test_tuple_display_with_subfield() {
 }
 
 #[test]
+fn test_tuple_index_literal_root() {
+    #[ohno::error]
+    #[display("Invalid data: {} - {}", 0, 1.abs())]
+    struct InvalidData(u32, i32);
+
+    let error = InvalidData::new(789u32, -444i32);
+    assert_error_message!(error, "Invalid data: 789 - 444");
+}
+
+#[test]
 fn test_mixed_display_syntax() {
     #[derive(Debug)]
     #[expect(dead_code, reason = "Test")]
@@ -199,4 +209,113 @@ fn test_deep_subfields() {
 
     let error = TestError::new(t);
     assert_error_message!(error, "Error Struct, Struct:Level0 - Level1 => Level2");
+}
+
+#[test]
+fn test_raw_identifier_field() {
+    // A field name reaches the template as text, so a raw identifier arrives spelled `r#type`.
+    // Rebuilding it with `Ident::new` rejects that spelling and panics, turning a template into a
+    // macro crash, so the prefix has to survive both the placeholder and the positional argument.
+    #[ohno::error]
+    #[display("{r#type} at {}", r#type.len())]
+    struct TestError {
+        r#type: String,
+    }
+
+    let error = TestError::new("timeout".to_string());
+    assert_error_message!(error, "timeout at 7");
+}
+
+#[test]
+fn test_documented_fields_stay_referenceable() {
+    // The injected core is marked with a reserved doc string, so an ordinary doc comment must not
+    // be mistaken for it and hide the field it documents from the display template
+    #[ohno::error]
+    #[display("{path} failed with {code}")]
+    struct TestError {
+        /// Where the failure happened.
+        path: String,
+        /// The ohno generated core field is not this one.
+        code: u32,
+    }
+
+    let error = TestError::new("/etc/hosts".to_string(), 13_u32);
+    assert_error_message!(error, "/etc/hosts failed with 13");
+}
+
+/// A count whose `Mul` differs by receiver, so a rendered value says which one ran.
+///
+/// `&(self.count * 2)` multiplies the field and borrows the result. `&self.count * 2`, the
+/// expansion before positional arguments were parenthesized, multiplies a reference instead.
+#[derive(Debug, Clone, Copy)]
+struct Count(u32);
+
+impl std::ops::Mul<u32> for Count {
+    type Output = u32;
+
+    fn mul(self, rhs: u32) -> u32 {
+        self.0 * rhs
+    }
+}
+
+impl std::ops::Mul<u32> for &Count {
+    type Output = u32;
+
+    fn mul(self, _: u32) -> u32 {
+        0
+    }
+}
+
+#[test]
+fn test_binary_argument_applies_to_the_field_value() {
+    #[ohno::error]
+    #[display("{}", count * 2)]
+    struct TestError {
+        count: Count,
+    }
+
+    let error = TestError::new(Count(21));
+
+    // 0 is what the reference-side `Mul` returns, so it reports the operator having been applied
+    // around the borrow rather than under it
+    assert_error_message!(error, "42");
+}
+
+#[test]
+fn test_cast_argument_applies_to_the_field_value() {
+    // Casting the borrow instead of the value is not merely wrong, it does not compile: this is
+    // the `casting &u32 as u64 is invalid` that reached users as an error in generated code
+    #[ohno::error]
+    #[display("{}", size as u64)]
+    struct TestError {
+        size: u32,
+    }
+
+    let error = TestError::new(7_u32);
+    assert_error_message!(error, "7");
+}
+
+/// A positional argument may call a method of `self`, which is what the diagnostic for an
+/// unsupported root promises.
+#[derive(Error)]
+#[display("{}", describe())]
+struct MethodArgumentError {
+    code: u32,
+    inner: OhnoCore,
+}
+
+impl MethodArgumentError {
+    fn describe(&self) -> String {
+        format!("code {}", self.code)
+    }
+}
+
+#[test]
+fn test_display_argument_calls_a_method_of_self() {
+    let error = MethodArgumentError {
+        code: 7,
+        inner: OhnoCore::default(),
+    };
+
+    assert_error_message!(error, "code 7");
 }

@@ -214,8 +214,9 @@ rebuilds the baseline rustdoc from the crate's source at that commit, so
 **no registry access is required** and the check behaves identically for
 open-source (crates.io) and enterprise/offline consumers. The current
 working-tree API is analysed, so a coordinated release's in-progress
-edits — including a dependency whose public types a dependent re-exports
-— are reflected in the dependent's own API diff.
+edits are reflected rather than only what has been committed. That is
+necessary but not sufficient on its own — see the exposed-dependency
+cascade below, which covers the breaks a rustdoc diff cannot show.
 
 Versioning is treated as a **source-level** concern: the baseline is the
 version the repository last *declared*, regardless of whether it was ever
@@ -225,17 +226,60 @@ published content lags the source), and it means an aborted release that
 bumped a crate to `4.0.0` without publishing is still the baseline the
 next change is measured against.
 
-This replaces the former
-`[package.metadata.cargo_check_external_types]` allowlist heuristic. That
-allowlist is a hand-maintained list of the external types a crate is
-*permitted* to expose; it was repurposed as a proxy for the types a
-crate *actually* re-exports. When the two drift apart — an entry missing
-or stale — the heuristic misjudged whether a dependent re-exports a
-changed dependency, so a breaking change in an exposed dependency could
-be cascaded as `patch` instead of `breaking` (the motivating defect: a
-breaking change in `bytesbuf` was not propagated to `bytesbuf_io`, which
-re-exports `bytesbuf` types). Analysing the real API with
-`cargo semver-checks` removes the proxy entirely.
+`cargo semver-checks` is combined with an exposed-dependency cascade.
+Rustdoc comparison cannot detect that an otherwise-unchanged signature
+now names a type from an incompatible version of an external crate. The
+planner therefore also consults
+`[package.metadata.cargo_check_external_types].allowed_external_types`.
+If the dependency's planned version transition is breaking and the
+dependent allows that dependency's types in its public API, the dependent
+is floored at `breaking`. The planner repeats this check to a fixpoint so
+the result propagates through chains such as `bytesbuf` → `bytesbuf_io` →
+another facade.
+
+Two kinds of path are considered. They treat missing evidence
+differently, and a crate that holds both is judged on each in turn rather
+than on whichever one is found first:
+
+- **Direct dependency edges** fail closed. Absent metadata, a malformed
+  entry, or a wildcard root all count as possible exposure, because an
+  unknown must not ship a break as compatible.
+
+- **Indirect paths to a transitive dependency** require positive allowlist
+  evidence: either a literal root naming the dependency under the crate root
+  it defines (`[lib] name = "..."` when set, otherwise its package name), or
+  a wildcard root that may expand to it. A `package = "..."` alias cannot apply
+  here -- only a crate that *declares* a dependency can rename it, and an
+  indirect path crosses no edge to the target to carry a rename. This exists
+  because `cargo-check-external-types` attributes a
+  re-exported type to the crate that *defines* it: `fetch_azure`
+  allowlists `typespec_client_core::*` for a trait `azure_core`
+  re-exports, while depending only on `azure_core`. Such a path is
+  invisible to a direct-dependency scan.
+
+  Here absent or malformed metadata is *not* read as exposure. Failing
+  closed on an indirect path would match every transitive dependency of
+  every crate that declares no allowlist, forcing unrelated crates to
+  breaking. Nothing is missed: a crate with no allowlist that really does
+  expose the type still fails closed on its direct edge to whichever
+  intermediate carries it, and the fixpoint propagates that upward.
+
+Both are tested because the roots they accept differ. A crate that imports
+the target directly under a `package = "..."` rename, and *also* reaches it
+through a conduit that re-exports its types, legitimately carries the
+target's own crate root — earned on the indirect path, and one the renamed
+direct edge could never supply. Judging it on the direct edge alone reports
+"not exposed" and leaves it on the patch floor while its public API is the
+target's types.
+
+The indirect test therefore asks whether a path exists through *some other
+package*, not merely whether the crate is reachable from the target.
+Plain reachability would count the direct edge itself and readmit the
+renamed root that the direct predicate deliberately rejected.
+
+The policy must remain validated by `cargo-check-external-types`: an
+extra allowlist entry can cause an unnecessary breaking bump, while
+omitting an actually exposed type is a policy-validation failure.
 
 **How the change type is determined.** `cargo semver-checks` is invoked
 as a CLI (not as a library) and its textual result is parsed into one of
@@ -253,8 +297,26 @@ notion (major / minor / none); the exact parsing lives in
 
 Cascade dependents are floored at `patch` (they must re-release to pick
 up the new dependency version even when their own public API is
-unchanged), then raised to whatever their own `cargo semver-checks`
-result requires.
+unchanged), then raised to the stronger of their own
+`cargo semver-checks` result and the exposed-dependency cascade.
+
+#### Windows (MSVC): baseline builds link with rust-lld
+
+The MSVC `link.exe` is not long-path aware, so a baseline build under a
+deep target directory fails with `LNK1104`. On an `*-msvc` host the
+release scripts therefore set `CARGO_TARGET_<HOST>_LINKER` to
+`rust-lld.exe` around the cargo-semver-checks call, pointing it at the
+`rust-lld` bundled with the active toolchain, which handles those paths.
+This is applied by these scripts, not by cargo-semver-checks itself, so
+running the tool directly keeps the default linker. Only the linker is
+overridden, so the repository's own rustflags still apply, and the
+override lasts only for the duration of that call.
+
+The override steps aside in two cases: if `CARGO_TARGET_<HOST>_LINKER` is
+already set, that explicit choice is kept, and if the host triple cannot
+be read from `rustc -vV` the default linker stands (with a warning).
+Other hosts are unaffected — `*-windows-gnu` and non-Windows targets
+already default to linkers that handle long paths.
 
 #### Proc-macro-only packages require manual SemVer review
 
@@ -364,9 +426,11 @@ suppress a change type the API analysis requires.
   semver token as a hard pin — if the explicit version is below what the
   analysis requires the planner errors instead of silently overriding
   the caller. Pass `-Force` to override: the pin is honored verbatim, the
-  package's effective change-type tag is still upgraded so further
-  cascade decisions are correct, and a warning is printed flagging that
-  consumers may break.)
+  package's effective change-type tag is still upgraded to record the
+  stronger unmet requirement, and a warning is printed flagging that
+  consumers may break. Exposure propagation continues past a forced pin:
+  the pin lowers the version number, not the incompatibility, so dependents
+  that expose the crate still inherit the break.)
 
 ---
 

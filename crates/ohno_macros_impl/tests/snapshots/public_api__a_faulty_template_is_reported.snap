@@ -1,0 +1,91 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== unknown placeholder lists the available fields ========
+
+#[derive(Error)]
+#[display("failed for {missing}")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+
+// ======== nothing is referenceable when every field is generated ========
+
+#[derive(Error)]
+#[display("failed for {missing}")]
+struct T {
+    /// ohno::generated-core@7f3d9c2a
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, the error type has no fields that can be referenced"
+}
+
+// ======== stray closing brace ========
+
+#[derive(Error)]
+#[display("stray } brace")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace"
+}
+
+// ======== unbalanced opening brace ========
+
+#[derive(Error)]
+#[display("unbalanced { brace")]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace"
+}
+
+// ======== two display attributes ========
+
+#[derive(Error)]
+#[display("first")]
+#[display("second")]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "only one `#[display(...)]` may be given, and this is the second"
+}
+
+// ======== a non-literal template ========
+
+#[derive(Error)]
+#[display(not_a_literal)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "expected string literal"
+}

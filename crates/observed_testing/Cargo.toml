@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_testing"
+description = "Test harness and integration tests for the observed crate family."
+version = "0.0.0"
+publish = false
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Its
+# public surface intentionally re-exposes the observed/data_privacy types it is
+# a test harness for.
+#
+# This is NOT redundant with INTERNAL_CRATES membership: that list is only read
+# by scripts/check-external-types.rs (the `external-type-exposure` job). The
+# `anvil-external-types` recipe behind `pr-fast` scopes itself from cargo
+# metadata and never consults it, so without this block that job fails.
+allowed_external_types = ["*"]
+
+[dependencies]
+data_privacy = { workspace = true }
+observed = { workspace = true, features = ["test-util"] }
+observed_utils = { workspace = true }
+tick = { workspace = true, features = ["test-util"] }
+
+[dev-dependencies]
+testing_aids = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
+[lints]
+workspace = true

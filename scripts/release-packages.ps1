@@ -60,12 +60,19 @@
     commit in git history (the most recent commit that changed the crate's
     `[package] version`, with the baseline rustdoc rebuilt from source via
     `--baseline-rev`, so no registry access is required and it works in OSS and
-    enterprise/offline environments alike): a dependent whose own public API is
-    unaffected by the release cascades as a `patch` (it still re-releases to pick
-    up the new dependency version), while a dependent whose API actually changes
-    (e.g. because it re-exports a changed type) cascades at the severity
-    `cargo semver-checks` reports. Dev-only dependents are skipped — they
-    automatically pick up the new workspace version.
+    enterprise/offline environments alike). Because rustdoc comparison cannot
+    identify an incompatible version change in an otherwise-unchanged exposed
+    dependency type, the planner also consults each dependent's
+    `[package.metadata.cargo_check_external_types].allowed_external_types`.
+    Exposing a dependency whose planned version transition is breaking floors
+    the dependent at `breaking`, recursively. This applies to direct dependency
+    edges, and also to a transitive dependency whose types the dependent
+    explicitly allowlists — cargo-check-external-types attributes a re-exported
+    type to the crate that defines it, so `fetch_azure` allowlists
+    `typespec_client_core` while depending on `azure_core`.
+    Other unaffected dependents cascade as `patch` so they still pick up the new
+    dependency version. Dev-only dependents are skipped — they automatically
+    pick up the new workspace version.
 
     Proc-macro-only packages are detected from `cargo metadata` before
     cargo-semver-checks runs. The tool cannot inspect procedural macro names,
@@ -81,7 +88,15 @@
     consumer's final result is breaking, and stops on any weaker result.
 
     cargo-semver-checks remains a hard dependency for ordinary library packages
-    (install the version pinned in constants.env); there is no heuristic fallback.
+    (install the version pinned in constants.env). Missing external-type metadata
+    is treated conservatively as possible exposure.
+
+    On an MSVC host, these scripts set CARGO_TARGET_<HOST>_LINKER to rust-lld.exe
+    for the duration of the cargo-semver-checks call, because MSVC link.exe is
+    not long-path aware and fails with LNK1104 under a deep target directory.
+    cargo-semver-checks does not do this on its own, so invoking it directly
+    keeps the default linker. An explicitly configured CARGO_TARGET_<HOST>_LINKER
+    is left alone, and other hosts keep their default linker.
 
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a
@@ -155,10 +170,12 @@
     version than an explicit `<name>@<major>.<minor>.<patch>` pin
     allows, the release plan is rejected (the script refuses to
     silently override an explicit pin). With -Force, the explicit pin
-    is honored verbatim, the package's EffectiveChangeType tag is
-    upgraded to match the cascade so any further cascade decisions are
-    correct, and a warning is printed flagging that consumers
-    may break.
+    is honored verbatim, and the package's EffectiveChangeType tag is
+    upgraded to record the stronger unmet requirement for warnings and
+    bookkeeping. Exposure propagation continues past the forced pin: the
+    pin lowers the version number, not the incompatibility of the API
+    being shipped, so dependents exposing the crate still inherit the
+    break. A warning is printed flagging that consumers may break.
 
     -Force does NOT relax the always-fatal "pin is not strictly greater
     than the current on-disk version" check, and has no effect on

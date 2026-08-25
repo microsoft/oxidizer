@@ -23,6 +23,8 @@ of the design.
 - [Configuration and tuning](#configuration-and-tuning)
 - [Failure modes and edge cases](#failure-modes-and-edge-cases)
 - [Safety invariants](#safety-invariants)
+- [Risk areas and novel aspects](#risk-areas-and-novel-aspects)
+- [Testing and verification](#testing-and-verification)
 
 ## The problem being solved
 
@@ -186,12 +188,19 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
         acquire (fresh or from cache)
                   │
                   ▼
-            ┌───────────┐   fills up / reset
-            │  CURRENT  │──────────────┐
-            │ (mutating)│              │
-            └───────────┘              ▼
-                              reconcile surplus, then:
-                    ┌───────────────────┴───────────────────┐
+            ┌───────────┐
+            │  CURRENT  │
+            │ (mutating)│
+            └───────────┘
+```
+
+**Refill** (the chunk fills up) always rotates the chunk out of `CURRENT`:
+
+```text
+            ┌───────────┐  fills up
+            │  CURRENT  │────────────► reconcile surplus, then:
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
         handed out an Alloc?                         smart-pointer-only?
                     │ yes                                    │ no
                     ▼                                        ▼
@@ -204,6 +213,28 @@ depends entirely on whether the chunk ever handed out an arena-lifetime
                     │ reset / arena drop        drops
                     ▼                             │
               → cache or free  ◄──────────────────┘
+```
+
+**Reset** releases every older retired chunk, then keeps or detaches the
+current one depending on whether a smart owner escaped from it:
+
+```text
+            ┌───────────┐  reset
+            │  CURRENT  │────────────► no smart owner escaped?
+            └───────────┘                          │
+                    ┌──────────────────────────────┴────────┐
+                    │ yes                                   │ no
+                    ▼                                       ▼
+            ┌────────────────────┐          reconcile surplus and detach;
+            │  RETAINED          │          the chunk lives on until the
+            │ (stays CURRENT,    │          last escaped handle drops
+            │  cursor rewound,   │                      │
+            │  marker cleared)   │                      ▼
+            └─────────┬──────────┘                → cache or free
+                      │                                 │
+                      ▼                                 ▼
+        serves the next generation           next alloc acquires a
+                                             fresh CURRENT chunk
 ```
 
 **Pinned chunks.** If a chunk handed out any `Alloc` handle (including the
@@ -223,15 +254,32 @@ after the arena is gone.
 smart pointer is pinned until reset even after its `Arc`s drop. This is the
 deliberate, acknowledged cost of letting one current chunk serve both
 styles; the arena tracks a single "did this chunk hand out a reference?"
-flag so that only genuinely mixed chunks pay it.
+flag so that only genuinely mixed chunks pay it. Local reservations sample
+that flag after bounds checks but before committing the bump cursor, and write
+it only for the false-to-true transition. This keeps the steady-state path free
+of repeated marker stores and avoids a marker load after the cursor store.
+The marker transition and chunk-exhaustion edges are laid out as cold blocks,
+leaving the marked, in-capacity path as straight-line fall-through code.
 
 **Reset is a cursor rewind.** `Arena::reset` takes `&mut self`, which
 statically guarantees no `Alloc` (which borrows `&self`) is live. It runs
 **no** destructors — every `Alloc` already ran its own on drop, and
-smart-pointer values remain owned by their still-live handles. It simply
-reconciles the current chunk's refcount surplus (below) and returns chunk
-bytes to the cache (or leaves chunks alive if escaped handles still hold
-them).
+smart-pointer values remain owned by their still-live handles. A current chunk
+that handed out no smart pointer is retained with its pre-credited refcount and
+rewound in place. Otherwise reset reconciles the current chunk's refcount
+surplus (below) and detaches it, returning its bytes to the cache when the last
+escaped handle releases it. Reset similarly releases only the list-owned
+reference to each older retired chunk; an outstanding smart owner keeps that
+chunk alive until the owner releases it.
+
+The marker is cleared even when reset retains the current chunk: the next
+generation may use that chunk exclusively for smart pointers and must still
+qualify for early reclamation. Leaving a stale mark would silently pin it.
+Encoding an additional "rewound but previously local" state would remove a
+small part of the first-allocation boundary, but the measured path already
+executes fewer instructions than Bumpalo and the extra lifecycle state is not
+justified by the remaining wall-clock delta in
+[`PERF.md`](PERF.md#reset-plus-the-next-allocation).
 
 `ArenaStats` keeps its lifetime counters and live gauges across this boundary,
 while its explicitly named `*_since_reset` counters start a new generation
@@ -346,10 +394,13 @@ Consequences of the masking scheme, each a real edge case:
 - **Oversized chunks** are still 64 KiB-aligned and place their single
   value at the payload start, inside the first tile, so the same mask works.
 - **End-of-chunk ZST guard.** A zero-sized allocation landing exactly at
-  `chunk_base + CHUNK_ALIGN` would mask to the *next* chunk. The bump
-  cursor therefore always advances by at least one byte per reservation,
-  routing such a case through refill rather than returning a boundary
-  pointer.
+  `chunk_base + CHUNK_ALIGN` would mask to the *next* chunk. Two rules
+  prevent it. Every reservation must fit `size.max(1)` bytes below the
+  chunk limit, so a request whose payload would end exactly at the
+  boundary is routed through refill instead of returning a one-past-end
+  pointer. Independently, every smart-pointer reservation floors its
+  payload at one byte, so each ZST handle gets its own distinct in-chunk
+  address and a chunk can host only a bounded number of them.
 
 The alignment is enforced at allocation time via the `Layout`, not via
 `repr(align)` on the chunk struct — keeping the struct's structural
@@ -379,7 +430,7 @@ path is a plain bump with no atomics. When it can't grow in place it
 the abandoned buffer is dead space reclaimed at reset.
 
 The headline feature is **zero-copy freeze**. Every freezable buffer
-reserves the full shared-slice freeze prefix (`[strong][len]`) in front
+reserves the full shared-slice freeze prefix (`[strong][pad][len]`) in front
 of its payload at allocation time. The bit pattern is suitable for
 `Arc<[T]>` and `Rc<[T]>`; `Box<[T]>` uses the length and ignores the
 strong field. Freezing into any of those owners then:
@@ -601,12 +652,13 @@ Every allocation comes in two flavors: `try_alloc_*` returns
 `Result<_, AllocError>`; `alloc_*` panics on the same conditions. Choose
 `try_*` on paths that must degrade gracefully.
 
-**Refcount overflow aborts.** If a chunk refcount or an `Arc::clone`
-strong count would wrap to zero, the process aborts (`std::process::abort`,
-or a forced double-panic under `no_std`). This mirrors `std::sync::Arc`: a
-wraparound would race live pointers against a free, and termination is the
-only sound response. The abort helper is `#[cold]`/`#[inline(never)]` so
-the hot path stays small.
+**Refcount overflow aborts.** The chunk refcount aborts the process if it
+would overflow, and a shared strong count aborts once a clone would push it
+past a saturation threshold of `u32::MAX >> 1` — before the count can wrap.
+The abort is `std::process::abort`, or a forced double-panic under `no_std`.
+This mirrors `std::sync::Arc`: a wraparound would race live pointers against
+a free, and termination is the only sound response. The abort helper is
+`#[cold]`/`#[inline(never)]` so the hot path stays small.
 
 **Panic safety.** Smart-pointer construction takes a protective `+1` guard
 on the chunk *before* invoking the user's initialization closure; on
@@ -638,8 +690,9 @@ unsound, so they are maintained centrally rather than at each call site:
 - **Smart-pointer alignment < 32 KiB** — guarantees every value pointer
   lies strictly inside its chunk's first tile, so the mask never walks to
   a neighbor. Enforced at allocation.
-- **Non-zero cursor advance** — no reservation returns the one-past-end
-  boundary pointer, protecting the ZST edge case.
+- **In-chunk payload address** — no reservation returns the one-past-end
+  boundary pointer, and every smart-pointer payload occupies at least one
+  byte, protecting the ZST edge case.
 - **Pin-if-referenced** — any chunk that handed out a refcount-free
   `Alloc` stays alive until `&mut self` reset, so an `Alloc`'s borrow can
   never dangle.
@@ -653,3 +706,168 @@ unsound, so they are maintained centrally rather than at each call site:
 - **Prefix counts accessed only as raw reads/writes**, never through a
   reference spanning possibly-uninitialized payload — which keeps the
   scheme sound under Miri.
+
+## Risk areas and novel aspects
+
+This section is for the reader about to change the code. It names what is
+unusual about the design, which invariants are load bearing, and what
+enforces each of them today. It does not restate the invariants themselves;
+those live in [Safety invariants](#safety-invariants) and
+[Failure modes and edge cases](#failure-modes-and-edge-cases).
+
+### What is unusual compared with a textbook bump allocator
+
+A classic bump allocator is a cursor, a limit, and a bulk reset. Everything
+in the list below is a departure from that model, and each one has
+consequences that are not obvious from reading a single call site.
+
+| Aspect | Why it is unusual |
+|---|---|
+| Four ownership styles in one chunk | `Alloc`, `Box`, `Rc`, and `Arc` bump from the same cursor. The chunk, not the arena, is the unit of lifetime, and one chunk can simultaneously host refcount-free and refcounted handles. |
+| Early chunk reclamation | A chunk that served only smart pointers is reclaimed when its last handle drops, possibly long before reset, possibly on another thread. A textbook arena reclaims nothing before teardown. |
+| Handles outliving the allocator | `Box`/`Rc`/`Arc` remain valid after the `Arena` is dropped. The chunk carries its own allocator handle and a `Weak` back-reference to the provider so it can free or re-cache itself with no arena present. |
+| Pre-credited refcount surplus | The per-allocation atomic is removed entirely, replaced by one atomic at chunk install and one at retire, with a non-atomic per-arena tally in between. |
+| Alignment masking instead of back-pointers | The owning chunk header is recovered arithmetically from any value pointer. No value stores a pointer to its chunk, so no per-value bookkeeping word exists. |
+| Defaulted sealed metadata parameter | Handles for sized and `usize`-metadata pointees stay one word; only vtable-carrying handles pay a second word, without a runtime tag or branch. |
+| Zero-copy freeze | A growable builder becomes an immutable `Box`/`Rc`/`Arc` slice with no copy, because the shared-owner prefix was reserved before the first push. |
+| Stable-Rust unsizing | `coerce!` synthesizes a proof token from a compiler-generated raw-pointer coercion, so trait-object handles work without `CoerceUnsized`/`Unsize`. |
+| Arena-threading Serde | The arena is carried through every recursive deserialization step rather than being consulted once at the root. |
+
+### Fragile invariants
+
+Each row states the invariant, what breaks if a change violates it, and what
+currently keeps it true. These are the places where a small, locally
+reasonable edit has non-local consequences.
+
+| Invariant | What breaks if violated | What enforces it |
+|---|---|---|
+| Chunks are allocated 64 KiB-aligned | Header recovery by masking reads a non-header address; every `Drop` becomes a wild write | The chunk allocation `Layout` (base alignment is raised to `CHUNK_ALIGN` independently of the struct's own alignment); unit tests over the computed layout; `tests/chunk_footprint.rs` pins the *requested* size to the size class so the alignment is not obtained by inflating every chunk to 64 KiB |
+| Smart-pointer alignment stays below 32 KiB | An over-aligned payload can be pushed past the first 64 KiB tile, so its mask resolves to the *neighboring* chunk | The allocation path rejects requests at or above `CHUNK_ALIGN / 2` with an `AllocError`; `buffer_freezable` gates the freeze prefix on the same bound |
+| Chunk header size is independent of the allocator type `A` | A large `A` embedded by value in the header would push the first payload out of the first tile | The chunk stores a shared handle to the allocator rather than an `A` by value; `tests/audit_repro.rs` allocates through a deliberately huge allocator type and checks payloads still resolve |
+| Surplus reconcile is balanced and happens exactly once per install | An under-refund pins the chunk forever (a leak); an over-refund frees a chunk that still has live handles (use-after-free) | The install and retire paths are the single writer of `local_shared_count`; every retire route — refill, `reset`, arena drop — funnels through the same `refund = SURPLUS - local` computation; loom models a worker `Arc::drop` racing the owner's reconcile |
+| The chunk refcount is adopted before the value destructor runs | A panicking `T::drop` unwinds past the release and leaks the chunk permanently | The drop paths bind the recovered `ChunkRef` before calling `drop_in_place`, so the release happens in the guard's own `Drop`; `tests/unwind_safe.rs` and `tests/drop_reentrancy.rs` exercise the unwinding and re-entrant cases |
+| Prefix counts are touched only through raw reads/writes | Forming a reference that spans uninitialized payload is UB even if never read, and is reported by Miri | The strong-count and length accessors take raw pointers and use (un)aligned raw loads/stores chosen per policy; `Rc`'s non-atomic count is deliberately accessed unaligned so its reservation need not carry `STRONG_ALIGN` |
+| The arena is `!Sync` | The chunk cache stops being single-consumer, reintroducing Treiber-stack ABA and use-after-free between the head load and the CAS | `Arena` is structurally `!Sync` (interior cells, current chunk, retired list); `tests/send_sync.rs` locks the auto-trait contract so a new field cannot silently change it |
+| A chunk that handed out an `Alloc` is never reclaimed early | A refcount-free `&mut T` borrow dangles while the borrow checker still believes it is live | The `current_has_reference` flag is set by every arena-lifetime reservation path and consulted on rotation; `reset` takes `&mut self` so no `Alloc` can be live across it |
+| No reservation returns a one-past-end pointer | The masked header resolves to the following chunk | The bump path requires `size.max(1)` bytes of headroom below the limit; smart-pointer reservations additionally floor the payload at one byte |
+
+Two further hazards are behavioral rather than structural:
+
+- **Mixed chunks pay a pinning cost.** A chunk that served both an `Alloc`
+  and a smart pointer stays alive until reset even after every smart pointer
+  is gone. A change that widens which paths call the reference-handout marker
+  silently converts early-reclaim chunks into pinned ones: no test fails, but
+  steady-state footprint grows.
+- **Deserialization is not transactional.** A failure part-way through leaves
+  consumed arena capacity consumed and may leave escape-capable owners already
+  constructed. Adding a rollback would be unsound for exactly that reason, so
+  error paths must be written to tolerate partial progress rather than assume
+  it can be undone.
+
+### Sharp edges for users
+
+- Values with alignment at or above 32 KiB cannot be placed in a
+  smart pointer; the fallible APIs report `AllocError` and the infallible
+  ones panic. Arena-lifetime allocations are not subject to the same cap.
+- A chunk that served any arena-lifetime handle stays resident until
+  `reset`, even if every value in it is already dropped.
+- `mem::forget` on a smart pointer leaks its chunk refcount and therefore
+  keeps the whole chunk resident for the life of the process.
+- Refcount exhaustion terminates the process rather than returning an error.
+- Deserialization failures consume arena capacity and are not rolled back.
+- `Vec::leak` is allocation-free only for types that need no drop, and its
+  result still does not outlive the arena.
+
+## Testing and verification
+
+The crate's correctness argument does not rest on one test suite. Each of
+the properties the design depends on — memory-model correctness, provenance
+discipline, unwind safety, cross-thread reclamation, and the absence of
+global-allocator traffic — is falsifiable by a different tool, so the
+verification layers are chosen to match the failure modes rather than to
+maximize coverage percentages.
+
+| Layer | What it can falsify that nothing else can |
+|---|---|
+| Integration and unit tests | Functional behavior and the API contracts that are statically checkable (auto traits, variance, unwind-safety bounds) |
+| Miri, base profile | Out-of-bounds access, invalid aliasing, uninitialized reads, and misaligned access across the whole unsafe surface |
+| Miri, `-Zmiri-tree-borrows` | Aliasing violations that Stacked Borrows accepts, which matters because payload writes go through shared `&Chunk` borrows |
+| Miri, `-Zmiri-strict-provenance` | Provenance loss — directly relevant because chunk recovery is address arithmetic on a value pointer |
+| Miri, `-Zmiri-many-seeds` | Data races and ordering bugs whose manifestation depends on the scheduler seed |
+| `cargo careful` | UB that a hardened `std` catches at runtime, on real threads that Miri does not execute |
+| Loom | Memory-ordering bugs in the refcount and cache protocols, by exhaustively permuting legal interleavings |
+| Bolero | Lifecycle invariant violations reachable only through long, unplanned operation sequences |
+| `cargo mutants` | Assertions that never actually constrain behavior — a test suite that passes with the logic removed |
+| `alloc_tracker` | Silent regressions to global-allocator traffic, which no functional test would notice |
+
+**Miri** runs over the library and integration tests with all features in
+CI, and the tree-borrows, strict-provenance, and many-seeds profiles run on
+a nightly schedule. A repo-root suppression file, `.miri-tree-borrows-skip`,
+excludes individual tests from the tree-borrows profile only. Entries there
+are memory-budget exclusions, not soundness exclusions: tree borrows tracks
+provenance per byte, and a test that takes repeated nested borrows into a
+64 KiB chunk can exceed the CI runner's memory limit while remaining
+correct. Two test binaries opt out of Miri entirely for structural
+reasons — the Bolero driver needs filesystem access for corpus replay, and
+the allocation-tracking tests measure real system-allocator traffic that
+Miri's allocator model does not represent. Both have Miri-visible
+counterparts covering the same unsafe paths.
+
+**Loom** model-checks the concurrent protocols. The test target is gated
+behind a marker feature, built under `--cfg loom`, and driven by
+`just loom`. It covers five protocol families:
+
+| Interleaving explored | Invariant defended |
+|---|---|
+| Concurrent `Arc::clone`/`drop` on the same allocation, including a sized handle racing a trait-object view of it | The value's destructor runs exactly once no matter which handle observes the last decrement, and coerced handles participate in the same family count |
+| The owner's surplus reconcile racing a worker's `Arc::drop` | The single `fetch_sub(SURPLUS - local)` and concurrent per-handle decrements settle to exactly zero, with teardown running once |
+| Handle drops racing `Arena::reset` and `Arena` drop, including allocation from a chunk shared with a prior generation | A chunk retained by an escaped handle survives reset, and reclamation is neither doubled nor skipped when the owner tears down first |
+| Two threads pushing chunks onto the cache, and a push racing the owner's pop | The Treiber stack's CAS retry loops are correct, and the popper's read of the head's `next` is sound against a concurrent push — the property that MPSC discipline is supposed to buy |
+| Cross-thread `assume_init` on clones of one uninitialized allocation | The release/acquire chain that publishes the drop shim before chunk teardown reads it |
+
+**Bolero** drives generated sequences over an operation alphabet spanning
+every allocation style, freeze path, and `reset`, then asserts that the
+number of constructed payloads equals the number dropped once the arena is
+gone. The payload types are chosen to hit the awkward paths: a ZST, a
+256-byte-aligned type, and a payload larger than `max_normal_alloc` that
+forces the oversized-chunk route. Dedicated variants force LIFO drop
+ordering and interleave a `reset` between every operation, which is the
+cheapest way to reach the eviction-and-cache-pop orderings.
+
+**Mutation testing** runs diff-scoped on pull requests and in full on a
+nightly schedule. Paths where a mutant would turn a fallible reservation
+into an infinite refill spin carry explicit `mutants::skip` annotations with
+the reason recorded at the site, so surviving mutants indicate real gaps
+rather than known-unkillable ones.
+
+**Allocation tracking** pins the property the whole design exists to
+deliver. Using a counting global allocator, it warms an arena until the
+size-class ratchet and the chunk cache reach steady state, then repeats the
+identical workload and asserts that the number of bytes requested from the
+system allocator is exactly zero — across both `reset` and the
+all-handles-dropped reclamation path. A regression that quietly stops
+reusing cached chunks would still be functionally correct and would still
+pass every other layer.
+
+**Integration tests** are grouped by the failure class they defend, not by
+API surface:
+
+| Class | What it protects |
+|---|---|
+| Allocation styles | That each of `Alloc`, `Box`, `Rc`, `Arc`, `Vec`, `String`, and `Utf16String` honors its own ownership, escape, and drop-timing contract |
+| Unwind safety | That a panic in a user closure, a `Clone`, or a destructor leaks no refcount and never queues a drop on uninitialized memory, including the growable-collection resize guard, which is isolated in its own binary so its process-global panic hook cannot perturb other tests |
+| Drop re-entrancy | That a destructor which itself drops arena handles — including the last handle on another chunk, and including teardown re-entering allocation — cannot corrupt the chunk being torn down |
+| ZST edge cases | That zero-sized payloads receive distinct in-chunk addresses, initialize and drop exactly once, and never produce a boundary pointer that masks into the next chunk |
+| DST and unsizing | That trait-object coercion preserves the data-pointer address, that hybrid one-word and two-word handle layouts interoperate, and that coercion of built-in trait objects such as `dyn Any` works without the optional DST feature |
+| Variance and auto traits | Compile-time assertions that the handles are covariant in `T` and that `Send`/`Sync`/`UnwindSafe` follow ownership, so a new field cannot silently widen a bound |
+| Layout and footprint | That the bytes requested from the backing allocator match the intended size class rather than being inflated to the chunk alignment, and that a large allocator type does not displace payloads out of the first tile |
+| Standard-library parity | That the `std`-shaped surface on the growable collections — `From`-based freezing, `leak`, `split_off`, `spare_capacity_mut`, indexing, and the conversion traits — behaves as the equivalent `std` API does |
+| Cache behavior | That the size-class floor ratchets monotonically and that below-floor chunks are evicted or destroyed rather than accumulating |
+| Third-party integration | That the `bytemuck`, `zerocopy`, `bytes`, `bytesbuf`, and `hashbrown` bridges uphold their own crates' contracts over arena storage, including `hashbrown` table growth |
+| Serialization | Arena-aware deserialization round-trips, borrow-versus-copy decisions, limit enforcement, and the non-transactional failure semantics |
+| Pinning | That the three pinning policies hold for scalar, uninitialized, slice, and DST allocations |
+
+**Benchmarks** pair Criterion wall-clock suites with Callgrind
+instruction-count suites over shared measured bodies, so a change can be
+attributed to instruction count rather than host noise. A curated
+wall-clock subset is published in [`PERF.md`](PERF.md).

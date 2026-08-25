@@ -14,7 +14,7 @@
 use std::alloc::System;
 
 use alloc_tracker::{Allocator, Session};
-use plurality::{Arc as PoolArc, Box as PoolBox, Pool, Rc as PoolRc};
+use plurality::{Arc as PoolArc, Box as PoolBox, MultiPool, Pool, Rc as PoolRc};
 
 /// Single-operation bodies for the pooled fat-pointer comparison. Kept as a
 /// self-contained copy (rather than an include shared with the benches) so this
@@ -24,7 +24,7 @@ mod dyn_box_ops {
     use std::hint::black_box;
 
     use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-    use plurality::{Box as PoolBox, Pool, coerce};
+    use plurality::{Box as PoolBox, MultiPool, Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
     pub(crate) const CAP: usize = 1024;
@@ -68,6 +68,19 @@ mod dyn_box_ops {
         let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
         drop(warm);
         assert!(pool.capacity() >= n as u64);
+        assert!(pool.is_empty());
+        let handle = pool.alloc_box(Obj::new(n as u64));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+        assert_eq!(handle.tag(), 0xFF);
+        drop(handle);
+        pool
+    }
+
+    pub(crate) fn setup_plurality_multi(n: usize) -> MultiPool {
+        let pool = MultiPool::new();
+        let warm: Vec<_> = (0..n).map(|i| pool.alloc_box(Obj::new(i as u64))).collect();
+        drop(warm);
+        assert!(pool.capacity_of::<Obj>() >= n as u64);
         assert!(pool.is_empty());
         let handle = pool.alloc_box(Obj::new(n as u64));
         let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
@@ -146,6 +159,14 @@ mod dyn_box_ops {
     }
 
     #[inline]
+    pub(crate) fn plurality_multi_box(pool: &MultiPool, i: u64) {
+        let handle = pool.alloc_box(black_box(Obj::new(i)));
+        let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
+        invoke_dyn(&*handle);
+        drop(black_box(handle));
+    }
+
+    #[inline]
     pub(crate) fn infinity_pinned(pool: &PinnedPool<Obj>, i: u64) {
         let handle = pool.insert(black_box(Obj::new(i))).cast_marker();
         invoke_dyn(&*handle);
@@ -197,20 +218,31 @@ fn quiet_session() -> Session {
     Session::new().no_stdout().no_file()
 }
 
+fn total_bytes_allocated(session: &Session, operation_name: &str) -> u64 {
+    let missing_operation = format!("operation {operation_name:?} must match a name registered with Session::operation on this session");
+
+    session
+        .to_report()
+        .operations()
+        .find_map(|(name, operation)| (name == operation_name).then(|| operation.total_bytes_allocated()))
+        .expect(&missing_operation)
+}
+
 fn assert_no_system_allocations(session: &Session, name: &str, mut f: impl FnMut()) {
     let operation = session.operation(name);
     {
-        let _span = operation.measure_thread();
+        let _span = operation.measure_thread().iterations(dyn_box_ops::CAP as u64);
         for _ in 0..dyn_box_ops::CAP {
             f();
         }
     }
-    assert_eq!(operation.total_bytes_allocated(), 0, "{name} must reuse pre-warmed storage");
+    assert_eq!(total_bytes_allocated(session, name), 0, "{name} must reuse pre-warmed storage");
 }
 
 #[test]
 fn dyn_box_benchmark_allocation_behavior_matches_design() {
     let plurality = dyn_box_ops::setup_plurality(dyn_box_ops::CAP);
+    let plurality_multi = dyn_box_ops::setup_plurality_multi(dyn_box_ops::CAP);
     let infinity = dyn_box_ops::setup_infinity_pinned(dyn_box_ops::CAP);
     let infinity_local = dyn_box_ops::setup_infinity_local_pinned(dyn_box_ops::CAP);
     let infinity_blind = dyn_box_ops::setup_infinity_blind(dyn_box_ops::CAP);
@@ -219,6 +251,9 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
 
     assert_no_system_allocations(&session, "plurality_dyn_box", || {
         dyn_box_ops::plurality_box(&plurality, 0);
+    });
+    assert_no_system_allocations(&session, "plurality_multi_dyn_box", || {
+        dyn_box_ops::plurality_multi_box(&plurality_multi, 0);
     });
     assert_no_system_allocations(&session, "infinity_pinned_dyn_box", || {
         dyn_box_ops::infinity_pinned(&infinity, 0);
@@ -236,11 +271,11 @@ fn dyn_box_benchmark_allocation_behavior_matches_design() {
     dyn_box_ops::setup_std_box(dyn_box_ops::CAP);
     let heap = session.operation("std_dyn_box");
     {
-        let _span = heap.measure_thread();
+        let _span = heap.measure_thread().iterations(1);
         dyn_box_ops::std_box(0);
     }
     assert!(
-        heap.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "std_dyn_box") > 0,
         "std::Box must include its per-operation heap allocation"
     );
 }
@@ -262,13 +297,13 @@ fn first_fill_allocates_then_steady_state_is_zero() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("first_fill");
     {
-        let _span = first.measure_thread();
+        let _span = first.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(pool.alloc_box(i as u64));
         }
     }
     assert!(
-        first.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "first_fill") > 0,
         "the first fill must grow chunk(s) from the system"
     );
     hold.clear();
@@ -276,13 +311,13 @@ fn first_fill_allocates_then_steady_state_is_zero() {
     // Steady state: an identical fill after dropping all handles reuses slots.
     let reused = session.operation("refill");
     {
-        let _span = reused.measure_thread();
+        let _span = reused.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(pool.alloc_box(i as u64));
         }
     }
     assert_eq!(
-        reused.total_bytes_allocated(),
+        total_bytes_allocated(&session, "refill"),
         0,
         "after warm-up, refilling must reuse the pool's chunks rather than reallocate"
     );
@@ -305,7 +340,7 @@ fn steady_state_box_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("box_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_box(i as u64));
@@ -314,7 +349,7 @@ fn steady_state_box_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "box_steady_state"),
         0,
         "steady-state Box fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -337,7 +372,7 @@ fn steady_state_arc_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("arc_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_arc(i as u64));
@@ -346,7 +381,7 @@ fn steady_state_arc_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "arc_steady_state"),
         0,
         "steady-state Arc fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -369,7 +404,7 @@ fn steady_state_rc_fill_and_drop_does_not_allocate() {
 
     let steady = session.operation("rc_steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(pool.alloc_rc(i as u64));
@@ -378,7 +413,7 @@ fn steady_state_rc_fill_and_drop_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "rc_steady_state"),
         0,
         "steady-state Rc fill/drop cycles must reuse slots, not allocate from the system"
     );
@@ -409,7 +444,7 @@ fn steady_state_rolling_churn_does_not_allocate() {
 
     let steady = session.operation("rolling_churn");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
         for _ in 0..STEADY_CYCLES {
             for (i, slot) in hold.iter_mut().enumerate() {
                 *slot = None;
@@ -418,8 +453,53 @@ fn steady_state_rolling_churn_does_not_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "rolling_churn"),
         0,
         "steady-state rolling churn must reuse the just-freed slot, not allocate from the system"
+    );
+}
+
+/// One value of each layout the multi-pool workload presents. Holding them in a
+/// tuple keeps every layout live simultaneously and makes each cycle alternate
+/// between layout pools, so every allocation runs a directory scan.
+type MixedRow = (PoolBox<u8>, PoolBox<u32>, PoolBox<u64>, PoolBox<[u64; 4]>);
+
+fn fill_mixed(pool: &MultiPool, hold: &mut Vec<MixedRow>) {
+    for i in 0..WORKLOAD {
+        let wide = i as u64;
+        hold.push((
+            u8::try_from(i % 256).map(|v| pool.alloc_box(v)).unwrap(),
+            u32::try_from(i).map(|v| pool.alloc_box(v)).unwrap(),
+            pool.alloc_box(wide),
+            pool.alloc_box([wide; 4]),
+        ));
+    }
+}
+
+/// A warmed multi pool must reuse slots exactly as a typed pool does, including
+/// when the workload spans several layouts.
+#[test]
+fn steady_state_multi_mix_does_not_allocate() {
+    let pool = MultiPool::new();
+    let session = quiet_session();
+    let mut hold: Vec<MixedRow> = Vec::with_capacity(WORKLOAD);
+
+    for _ in 0..WARMUP_CYCLES {
+        fill_mixed(&pool, &mut hold);
+        hold.clear();
+    }
+
+    let steady = session.operation("multi_mix_steady_state");
+    {
+        let _span = steady.measure_thread().iterations((STEADY_CYCLES * WORKLOAD) as u64);
+        for _ in 0..STEADY_CYCLES {
+            fill_mixed(&pool, &mut hold);
+            hold.clear();
+        }
+    }
+    assert_eq!(
+        total_bytes_allocated(&session, "multi_mix_steady_state"),
+        0,
+        "steady-state multi-pool fill/drop cycles must reuse slots across every layout, not allocate from the system"
     );
 }

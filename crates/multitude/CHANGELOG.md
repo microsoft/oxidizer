@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.8.0] - 2026-08-09
+
+- ⚠️ Breaking
+
+  - trait-object handles are no longer thin ([#617](https://github.com/microsoft/oxidizer/pull/617))
+
+    `Box<T>`, `Rc<T>`, and `Arc<T>` stay 8 bytes on 64-bit for sized values, `str`, and `[T]`, but a pointee carrying vtable metadata now stores that vtable in the handle, making such handles one word wider. The former guarantee of 8 bytes for every `T` no longer covers trait objects or custom DSTs with trait-object tails.
+
+  - smart-pointer pointees are bounded by `SmartPointerPointee` rather than `ptr_meta::Pointee` ([#617](https://github.com/microsoft/oxidizer/pull/617))
+
+    `Box`, `Rc`, `Arc`, `Cow`, and the `Arena::alloc_dst_*` families accept only pointees whose metadata is `()`, `usize`, or `DynMetadata`. Downstream generic code bounded on `ptr_meta::Pointee` must switch to `multitude::SmartPointerPointee`.
+
+  - Now requires `0.8.0` of `bytesbuf`
+
+- ✨ Features
+
+  - support trait object coercion ([#617](https://github.com/microsoft/oxidizer/pull/617))
+
+    Adds `Coercion`, the `coerce!` macro, and `Box::unsize`, `Rc::unsize`, `Rc::unsize_pin`, `Arc::unsize`, and `Arc::unsize_pin`, which convert an owner into a trait-object owner without moving or reallocating the value.
+
+  - `UnwindSafe` and `RefUnwindSafe` impls for the smart pointers
+  - the `bytesbuf` feature now also enables `bytesbuf/std`
+
+- 🐛 Bug Fixes
+
+  - allow borrowed type arguments in trait-object coercion ([#624](https://github.com/microsoft/oxidizer/pull/624))
+  - eliminate missed mutation cases ([#610](https://github.com/microsoft/oxidizer/pull/610))
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+  - Now requires `0.1.1` of `multitude_macros`
+
 ## [0.7.1] - 2026-07-24
 
 - 🔧 Maintenance

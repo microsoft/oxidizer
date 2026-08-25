@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt_http"
 description = "HTTP-specific extensions for the seatbelt crate."
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "seatbelt", "http", "recovery"]
 categories = ["data-structures", "network-programming"]
@@ -50,6 +50,7 @@ http_extensions = { path = "../http_extensions", features = ["test-util"] }
 layered = { path = "../layered" }
 mutants = { workspace = true }
 ohno = { path = "../ohno" }
+templated_uri = { path = "../templated_uri" }
 tick = { path = "../tick", features = ["test-util"] }
 
 # >>> anvil-managed: anvil-lints

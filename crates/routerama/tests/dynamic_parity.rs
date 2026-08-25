@@ -296,9 +296,18 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
     let methods = ["GET", "POST", "DELETE"];
     let verbs = ["", ":archive", ":other"];
 
-    let mut checked = 0_u64;
+    // The path space grows as `segments.len() ^ depth`, so depth 4 enumerates
+    // 7_381 paths and ~66_000 request checks. That breadth is worth it natively,
+    // but under Miri it re-interprets the same few resolver code paths tens of
+    // thousands of times for no additional aliasing coverage, so cap the depth.
+    #[cfg(miri)]
+    let max_depth = 2;
+    #[cfg(not(miri))]
+    let max_depth = 4;
+
+    let mut checked = 0_usize;
     for method in methods {
-        for depth in 0..=4 {
+        for depth in 0..=max_depth {
             let mut indices = vec![0_usize; depth];
             loop {
                 let mut path = String::new();
@@ -355,7 +364,19 @@ fn dynamic_agrees_with_static_over_a_generated_path_space() {
             }
         }
     }
-    assert!(checked > 50_000, "expected a large path space, checked {checked}");
+    // Each method walks one path per index combination of every length up to
+    // `max_depth`, and each path is checked once per verb, so the size of the
+    // sweep follows from the arrays above. Asserting the exact figure rather
+    // than a hand-tuned floor keeps the guard correct if those arrays are edited
+    // later, and catches an early exit in the odometer above that a floor misses.
+    let paths: usize = std::iter::successors(Some(1_usize), |combinations| Some(combinations * segments.len()))
+        .take(max_depth + 1)
+        .sum();
+    assert_eq!(
+        checked,
+        paths * methods.len() * verbs.len(),
+        "generated path space was not enumerated in full"
+    );
 }
 
 fn exotic_resolver() -> ExoticRouteResolver {

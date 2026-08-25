@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 #[cfg(feature = "test-util")]
 use cachet_tier::MockCache;
-use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, SizeErrorKind};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, Error, InsertOutcome, SizeErrorKind};
 
 /// Minimal implementation that only provides required methods
 struct MinimalCache<K, V> {
@@ -32,9 +32,9 @@ where
         Ok(self.data.lock().expect("lock poisoned").get(key).cloned())
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         self.data.lock().expect("lock poisoned").insert(key, entry);
-        Ok(())
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
@@ -60,7 +60,8 @@ async fn minimal_cachet_get_miss() {
 #[tokio::test]
 async fn minimal_cachet_get_hit() {
     let cache = MinimalCache::<String, i32>::new();
-    let _: () = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let outcome = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    assert_eq!(outcome, InsertOutcome::Accepted);
     let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
     assert_eq!(*result.unwrap().value(), 42);
@@ -68,9 +69,10 @@ async fn minimal_cachet_get_hit() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn default_insert_wraps_insert() {
+async fn insert_returns_accepted() {
     let cache = MinimalCache::<String, i32>::new();
-    let _: () = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let outcome = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    assert_eq!(outcome, InsertOutcome::Accepted);
     let result: Option<CacheEntry<i32>> = cache.get(&"key".to_string()).await.expect("error on get");
     assert!(result.is_some());
 }
@@ -84,7 +86,7 @@ async fn default_invalidate_returns_ok() {
     let _: () = cache.invalidate(&"nonexistent".to_string()).await.unwrap();
 
     // Should return Ok for existing keys
-    let _: () = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _ = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
     let _: () = cache.invalidate(&"key".to_string()).await.unwrap();
 }
 
@@ -97,7 +99,7 @@ async fn default_clear_returns_ok() {
     let _: () = cache.clear().await.unwrap();
 
     // Should return Ok even with entries
-    let _: () = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
+    let _ = cache.insert("key".to_string(), CacheEntry::new(42)).await.expect("error on insert");
     let _: () = cache.clear().await.unwrap();
 }
 

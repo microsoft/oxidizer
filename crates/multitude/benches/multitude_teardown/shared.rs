@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use core::hint::black_box;
+
 use multitude::{Alloc, Arena};
 
 pub(crate) const SMALL: usize = 1;
@@ -50,4 +52,16 @@ pub(crate) fn reset_multitude(arena: &mut Arena) {
 #[inline(never)]
 pub(crate) fn reset_bumpalo(bump: &mut bumpalo::Bump) {
     bump.reset();
+}
+
+#[inline(never)]
+pub(crate) fn reset_allocate_multitude(arena: &mut Arena) {
+    arena.reset();
+    let _ = black_box(Alloc::leak(arena.alloc_with(|| payload(0))));
+}
+
+#[inline(never)]
+pub(crate) fn reset_allocate_bumpalo(bump: &mut bumpalo::Bump) {
+    bump.reset();
+    let _ = black_box(bump.alloc_with(|| payload(0)));
 }

@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, CacheTier, Error, TimeToRefresh};
+use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome, TimeToRefresh};
 use tick::Clock;
 
 #[derive(Clone)]
@@ -25,8 +25,8 @@ impl CacheTier<String, String> for Database {
         Ok(Some(CacheEntry::new(format!("{key}_v{v}"))))
     }
 
-    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<(), Error> {
-        Ok(())
+    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, _: &String) -> Result<(), Error> {

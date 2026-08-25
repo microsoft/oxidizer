@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf"
 description = "Types for creating and manipulating byte sequences."
-version = "0.7.0"
+version = "0.8.0"
 readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
@@ -49,10 +49,13 @@ thread_aware = { workspace = true, default-features = false, features = ["derive
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytes = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
 mutants = { workspace = true }
 new_zealand = { workspace = true }
+nm = { workspace = true }
+plurality = { path = "../plurality" }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
@@ -63,7 +66,11 @@ gungraun = { workspace = true, features = ["default"] }
 libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
-windows-sys = { workspace = true }
+# `windows-sys` enables no Win32 modules by default; each module used must be listed.
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+] }
 
 [[bench]]
 name = "buf"

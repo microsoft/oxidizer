@@ -11,6 +11,15 @@ use std::future::Future;
 
 use crate::{CacheEntry, Error, SizeError};
 
+/// Whether a cache tier accepted an insertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertOutcome {
+    /// The tier accepted the insertion.
+    Accepted,
+    /// The tier rejected the insertion without an error.
+    Rejected,
+}
+
 /// Trait for cache tier implementations.
 ///
 /// Implement this trait to create custom cache backends. The cache system
@@ -18,18 +27,14 @@ use crate::{CacheEntry, Error, SizeError};
 ///
 /// # Consistency
 ///
-/// Implementations must provide **read-after-write monotonicity** on a single
-/// instance: once `insert(key, entry)` returns `Ok(())`, any subsequent call to
-/// `get(key)` on the same instance must never return data older than what was
-/// written. It may return `None` (e.g., if the entry was evicted or invalidated)
-/// or a newer value, but never a stale one that predates the most recent write.
-///
-/// This guarantee is scoped to a **single instance** - if the same backing store
-/// is accessed through multiple `CacheTier` instances (e.g., separate processes
-/// connected to the same Redis cluster), replication lag or network partitions
-/// may cause one instance to observe stale data written through another. The
-/// monotonicity guarantee only applies to reads and writes through the same
-/// Rust object.
+/// [`Accepted`](InsertOutcome::Accepted) means that this tier, or at least one
+/// tier in a composite cache, accepted the write. It does not guarantee that the
+/// next read returns that entry. The entry may be evicted or invalidated, and a
+/// higher-priority tier in a composite cache may still contain an older value.
+/// The outcome is intentionally aggregate and does not describe which child of
+/// a composite accepted the write. Individual implementations may document
+/// stronger consistency guarantees or expose topology-specific diagnostics
+/// separately.
 ///
 /// `len` and `is_empty` have default implementations:
 /// - `len`: Returns `Err(SizeError::unsupported())` (not all tiers track size)
@@ -45,10 +50,8 @@ pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;
 
-    /// Inserts or replaces a value, returning an error if the operation fails.
-    ///
-    /// If the key already exists, the previous entry is replaced with the new one.
-    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<(), Error>> + Send;
+    /// Inserts or replaces a value and reports whether the tier accepted it.
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send;
 
     /// Invalidates a value, returning an error if the operation fails.
     fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send;

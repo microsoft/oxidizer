@@ -266,6 +266,40 @@
 //! - **`serde`** - Adds serialization and deserialization support via [serde](https://serde.rs/).
 //! - **`fmt`** - Enables the [`fmt`] module with utilities for formatting `SystemTime` into
 //!   various formats (e.g., ISO 8601, RFC 2822).
+//! - **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
+//!   lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer
+//!   scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`]. Clocks
+//!   remain precise by default.
+//!
+//! ## Fast instant contract
+//!
+//! Fast instant retrieval is disabled by default and configured independently on each clock clone.
+//! Its values are monotonically non-decreasing, but consecutive reads may be equal and precision is
+//! platform-dependent. Stopwatches inherit the configured retrieval source. `system_time()`,
+//! controlled clocks, and precise timer scheduling for delays and periodic timers are unaffected.
+//! On unsupported platforms, enabling the option preserves the standard instant source.
+//!
+//! ## Using precise and fast clocks together
+//!
+//! A component that already receives a [`Clock`] can derive a fast clone locally instead of
+//! requiring a separate application-level dependency. The original clock remains precise:
+//!
+//! ```
+//! # fn main() {
+//! # #[cfg(feature = "fast-instant")] {
+//! use tick::Clock;
+//!
+//! fn process(clock: &Clock) {
+//!     let fast_clock = clock.clone().with_fast_instant(true);
+//!
+//!     let decision_time = clock.instant();
+//!     let telemetry_time = fast_clock.instant();
+//!     // Use `decision_time` for logic and `telemetry_time` for debug instrumentation.
+//! #   let _ = (decision_time, telemetry_time);
+//! }
+//! # }
+//! # }
+//! ```
 //!
 //! # Additional Examples
 //!
@@ -277,6 +311,8 @@ mod clock;
 mod clock_control;
 mod delay;
 mod error;
+#[cfg(any(feature = "fast-instant", test))]
+mod fast_instant;
 
 #[cfg(any(feature = "fmt", test))]
 pub mod fmt;

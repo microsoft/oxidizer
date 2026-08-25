@@ -61,6 +61,13 @@
 //! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/BUMPALO.md)
 //! for a feature-by-feature comparison with [`bumpalo`](https://crates.io/crates/bumpalo).
 //!
+//! # Performance
+//!
+//! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/PERF.md)
+//! for measured wall-clock timings of customer-facing scenarios, including
+//! head-to-head comparisons against the system allocator, `bumpalo`, and
+//! standard `serde_json` deserialization.
+//!
 //! # Example
 //!
 //! ```

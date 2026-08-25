@@ -858,6 +858,7 @@ pub mod resilience;
 pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).
+#[cfg(any(doc, test))]
 pub mod _documentation;
 
 // Installs a silent, always-interested global `tracing` subscriber before any

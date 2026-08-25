@@ -1,0 +1,5 @@
+error: unknown field `1` in `#[display(...)]`, available fields: `0`
+  --> tests/ui/display_tuple_index_reaching_injected_core.rs:14:11
+   |
+14 | #[display("bad path: {1}")]
+   |           ^^^^^^^^^^^^^^^

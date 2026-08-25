@@ -12,8 +12,7 @@
 //! A [`Pool<T>`] allocates `T` values from reusable slots and returns
 //! single-pointer-wide smart pointers that deref to `&T`. It grows on demand and
 //! never moves a value once allocated, so the pointers stay valid until they are
-//! dropped. There are four handle types, covering owned vs. shared and bound vs.
-//! `'static`:
+//! dropped. The handle types cover owned vs. shared and bound vs. `'static`:
 //!
 //! - [`Box<T>`] — unique owner, `Send` when `T: Send` and `A: Send + Sync`, may
 //!   outlive the pool.
@@ -24,14 +23,31 @@
 //! - [`Rc<T>`] — shared, non-atomically reference-counted, `!Send` (cheaper
 //!   clone/drop than [`Arc`] for single-threaded sharing).
 //!
-//! All four deref to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
+//! Every handle derefs to `&T`; [`Box`] and [`Alloc`] also give `&mut T`. Dropping a
 //! handle runs `T`'s destructor and returns the slot to the pool.
 //!
-//! Pools suit frequently recycled values of one type, stable-address data
-//! structures, and workloads that need a capacity limit. Slots are reused
-//! without a backing-allocator call, and `max_chunks` bounds growth. Prefer a
-//! general allocator for heterogeneous, long-lived values or an arena when
-//! values can all be reclaimed together.
+//! A [`MultiPool`] moves the element type from the pool to each allocation, so
+//! one pool object backs values of many types. It creates an internal layout
+//! pool for each distinct slot shape it sees and routes each value to the pool
+//! serving that shape, so a value occupies exactly the space a pool dedicated
+//! to its type would give it, while handing out the same handles with the same
+//! guarantees.
+//!
+//! Use [`Pool<T>`] for a working set that repeatedly allocates one value type,
+//! and [`MultiPool`] for heterogeneous recycled values. Both flavors suit
+//! stable-address data structures and workloads that need a capacity limit.
+//! Slots are reused without a chunk-allocation call. `max_chunks` bounds a
+//! [`Pool<T>`] or one [`MultiPool`] layout pool; bounding aggregate
+//! [`MultiPool`] growth also requires `max_layouts`, and total memory depends
+//! on the layouts and effective chunk sizes. Prefer a general allocator for
+//! long-lived values or an arena when values can all be reclaimed together.
+//!
+//! # Performance
+//!
+//! See [`PERF.md`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/docs/PERF.md)
+//! for measured wall-clock numbers: the cost of each handle type, the cost of
+//! serving many types from one pool, a churn workload against the system
+//! allocator, and head-to-head comparisons with the other Rust pooling crates.
 //!
 //! # Concurrency model
 //!
@@ -39,6 +55,18 @@
 //! thread allocates at a time (the whole pool can still be *moved* between
 //! threads). The `Send` handles ([`Box`]/[`Arc`]) may be dropped from any thread;
 //! the `!Send` handles ([`Alloc`]/[`Rc`]) stay on their thread.
+//!
+//! Moving a pool is independent of moving its values: [`Pool<T>`] is `Send`
+//! when the allocator is, whatever `T` is, because a pool owns no values and
+//! offers no way to reach one. Thread mobility for values is carried entirely
+//! by the handles. [`MultiPool`] follows the same rule, which is what lets one
+//! pool hold values of types with different thread affinities at once.
+//!
+//! Serving several threads from one pool is ordinary: wrap it in a `Mutex` and
+//! keep only allocation inside the critical section. Dropping a detachable
+//! handle ([`Box`]/[`Arc`]/[`Rc`]) needs no lock, so reclamation runs unlocked
+//! and in parallel. [`Alloc`] is the exception: it borrows the pool, so the
+//! guard must outlive it.
 //!
 //! # Memory allocation
 //!
@@ -52,9 +80,10 @@
 //!   `no_std` (it needs only [`alloc`]); disable default features to build for
 //!   a `no_std` target.
 //! - **`stats`** *(disabled by default)* — enables runtime allocation
-//!   statistics: the `PoolStats` type and the `Pool::stats` method. The
-//!   accounting counters are compiled in only when this feature is active, so
-//!   leaving it off keeps the pool free of any tracking overhead.
+//!   statistics: the `PoolStats` type and the `Pool::stats` and
+//!   `MultiPool::stats` methods. The accounting counters are compiled in only
+//!   when this feature is active, so leaving it off keeps the pool free of any
+//!   tracking overhead.
 //!
 //! [`allocator-api2`]: https://crates.io/crates/allocator-api2
 //!
@@ -110,6 +139,13 @@
 //! // The single slot is taken, so this reports failure instead of panicking.
 //! assert!(pool.try_alloc_box(2).is_err());
 //! ```
+//!
+//! Runnable programs covering larger scenarios:
+//!
+//! - [`pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_basic.rs): The handle flavors, address stability, and slot reuse.
+//! - [`pool_across_threads`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/pool_across_threads.rs): Sharing a pool through a `Mutex` and reclaiming slots from worker threads.
+//! - [`multi_pool_basic`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/multi_pool_basic.rs): Values of unrelated types in one pool, and per-layout capacity.
+//! - [`multi_pool_dyn_dispatch`](https://github.com/microsoft/oxidizer/blob/main/crates/plurality/examples/multi_pool_dyn_dispatch.rs): A pipeline of differently sized trait objects backed by one pool.
 
 extern crate alloc;
 
@@ -120,7 +156,12 @@ mod builder;
 mod chunk;
 mod coerce;
 mod common;
+mod directory;
 mod error;
+mod geometry;
+mod layout_pool;
+mod multi_builder;
+mod multi_pool;
 mod pool;
 #[cfg(feature = "stats")]
 mod pool_stats;
@@ -133,6 +174,8 @@ pub use boxed::Box;
 pub use builder::PoolBuilder;
 pub use coerce::Coercion;
 pub use error::AllocError;
+pub use multi_builder::MultiPoolBuilder;
+pub use multi_pool::MultiPool;
 pub use pool::Pool;
 #[cfg(feature = "stats")]
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]

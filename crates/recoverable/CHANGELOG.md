@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - Now requires `0.4.0` of `ohno`
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.1.7] - 2026-06-26
 
 - 🐛 Bug Fixes

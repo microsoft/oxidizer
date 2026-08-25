@@ -105,7 +105,7 @@ impl PeriodicTimer {
     }
 
     fn register_timer(&mut self, waker: Waker) {
-        match self.clock.instant().checked_add(self.period) {
+        match self.clock.timer_instant().checked_add(self.period) {
             Some(when) => {
                 self.current_timer = Some(self.clock.register_timer(when, waker));
             }
@@ -131,7 +131,7 @@ impl Stream for PeriodicTimer {
         }
 
         match this.current_timer {
-            Some(key) if key.tick() <= this.clock.instant() => {
+            Some(key) if key.tick() <= this.clock.timer_instant() => {
                 // Reset the timer. It will be registered again on the next poll.
                 this.current_timer = None;
 
@@ -194,6 +194,19 @@ mod tests {
         .timeout(&clock, Duration::from_secs(5))
         .await
         .unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn next_with_fast_instant_completes() {
+        use futures::StreamExt;
+
+        let clock = Clock::new_tokio().with_fast_instant(true);
+        let mut timer = PeriodicTimer::new(&clock, Duration::from_millis(1));
+
+        tokio::time::timeout(Duration::from_secs(1), timer.next())
+            .await
+            .expect("timer scheduling uses the driver's precise time source");
     }
 
     #[test]

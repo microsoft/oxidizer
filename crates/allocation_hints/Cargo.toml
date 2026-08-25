@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "allocation_hints"
+version = "0.1.0"
+description = "Allocator-independent heap ownership and scoped allocation hints."
+readme = "README.md"
+keywords = ["allocator", "heap", "memory", "bump"]
+categories = ["memory-management"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints"
+links = "allocation_hints_backend"
+
+[dev-dependencies]
+mutants.workspace = true
+static_assertions.workspace = true
+
+[lints]
+workspace = true

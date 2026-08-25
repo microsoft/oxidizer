@@ -570,7 +570,24 @@ function Get-CrateRequiredChangeType {
 #   Name                  - cargo package name
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
-#   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   Deps                  - array of normalized names of the WORKSPACE MEMBERS this package
+#                           depends on (kind 'normal' or 'build', not 'dev'). Membership is
+#                           decided by the dependency's resolved path, not its name, so a
+#                           registry crate or an out-of-workspace path dependency is excluded
+#                           even when it shares a member's package name.
+#   DepAliases            - hashtable mapping a normalized dependency name to additional
+#                           normalized crate roots observed for it -- a `package = "..."`
+#                           alias, or the dependency's own `[lib] name`. An entry does not say
+#                           whether a separate unrenamed declaration also exists, so this is
+#                           not a complete or exclusive set of reachable roots. Covers the same
+#                           workspace-member dependencies as Deps.
+#   CrateRoot             - the package's own normalized crate root (its `[lib] name` when it
+#                           sets one, else its normalized package name), or $null when the
+#                           package has no library target at all. This is the name a crate's
+#                           types are written under by anything that does not rename it, so it
+#                           is the root an allowlist carries for a re-exported type.
+#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
+#                           or $null if the package does not declare them
 #   HasLibraryTarget      - $true when cargo metadata reports a regular 'lib' target
 #   IsProcMacroOnly       - $true when the package has a 'proc-macro' target and no regular 'lib' target
 function Get-WorkspacePackages {
@@ -580,6 +597,47 @@ function Get-WorkspacePackages {
     $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
 
     $packages = @()
+
+    # A dependency is nameable in Rust source -- and so in an
+    # allowed_external_types entry -- by its *crate root*, which is not always
+    # its package name: `[lib] name = "..."` renames the crate root while the
+    # package keeps its own name. Map each workspace package to its crate root
+    # so the dependency loop below can resolve the name an allowlist will
+    # actually carry.
+    #
+    # Only workspace members are covered, because `cargo metadata --no-deps`
+    # reports targets for nothing else. That is sufficient here: the exposure
+    # cascade only ever asks about workspace packages, since a registry crate
+    # is never a release target.
+    $crateRootByPackage = @{}
+    foreach ($package in $metadata.packages) {
+        $libTarget = $package.targets |
+            Where-Object { @($_.kind) -contains 'lib' -or @($_.kind) -contains 'proc-macro' } |
+            Select-Object -First 1
+        if ($null -eq $libTarget) { continue }
+        $crateRootByPackage[$package.name.Replace('-', '_')] = ([string]$libTarget.name).Replace('-', '_')
+    }
+
+    # Manifest directories of the packages this function returns, used to decide
+    # whether a dependency is a workspace edge.
+    #
+    # Cargo reports a dependency's package name but nothing that distinguishes a
+    # workspace member from a registry crate or a path dependency outside the
+    # workspace. Every consumer of Deps asks a workspace-reachability question --
+    # which crates can carry a released package's types to their own public API --
+    # so matching on the text name alone lets an unrelated external crate stand in
+    # for a workspace conduit and fabricate a path that does not exist.
+    #
+    # Identity therefore comes from the resolved path, not the name.
+    $memberDirs = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($package in $metadata.packages) {
+        $memberDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
+        if ($memberDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            [void]$memberDirs.Add($memberDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar))
+        }
+    }
+
     foreach ($package in $metadata.packages) {
         $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -587,9 +645,88 @@ function Get-WorkspacePackages {
         }
 
         $deps = @()
+        $depAliases = @{}
         foreach ($dep in $package.dependencies) {
-            if ($dep.kind -ne 'dev') {
-                $deps += $dep.name.Replace('-', '_')
+            if ($dep.kind -eq 'dev') {
+                continue
+            }
+
+            # A dependency joins the workspace graph only when its `path`
+            # resolves to a member directory. `path` is absent for a registry
+            # dependency and points outside crates/ for a non-member path
+            # dependency; in neither case can the edge carry a workspace
+            # package's types, so it must not participate in reachability --
+            # nor contribute an alias, which would let an external crate's
+            # rename supply an allowlist root for a same-named member.
+            $depPathProp = $dep.PSObject.Properties['path']
+            if (-not $depPathProp -or [string]::IsNullOrWhiteSpace($depPathProp.Value)) {
+                continue
+            }
+            $depDir = [System.IO.Path]::GetFullPath([string]$depPathProp.Value).
+                TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+            if (-not $memberDirs.Contains($depDir)) {
+                continue
+            }
+
+            $depCargoName = $dep.name.Replace('-', '_')
+            $deps += $depCargoName
+
+            # `rename` is the `package = "..."` form in Cargo.toml: the crate is
+            # declared under one name but reachable in Rust source -- and hence
+            # in an allowed_external_types entry -- only under the alias. Record
+            # it so Test-PackageExposesTarget can recognize the aliased root.
+            $renameProp = $dep.PSObject.Properties['rename']
+            if ($renameProp -and -not [string]::IsNullOrWhiteSpace($renameProp.Value)) {
+                $alias = ([string]$renameProp.Value).Replace('-', '_')
+                # A package may be depended on more than once under different
+                # aliases (per-target or per-feature), so collect them all.
+                $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $alias |
+                        Where-Object { $_ } | Sort-Object -Unique)
+            }
+            else {
+                # No `package = "..."`, so the crate root is whatever the
+                # dependency's own manifest calls its lib target. A crate whose
+                # `[lib] name` differs from its package name is nameable only
+                # under the lib name, so that -- not the package name -- is what
+                # an allowlist entry carries.
+                #
+                # Only reached when `rename` is absent, because `rename` wins:
+                # `foo = { package = "bar" }` makes the crate nameable as `foo`
+                # regardless of what bar calls its lib target.
+                $crateRoot = $crateRootByPackage[$depCargoName]
+                if ($crateRoot -and $crateRoot -ne $depCargoName) {
+                    $depAliases[$depCargoName] = @(@($depAliases[$depCargoName]) + $crateRoot |
+                            Where-Object { $_ } | Sort-Object -Unique)
+                }
+            }
+        }
+
+        $allowedTypes = $null
+        $pkgMeta = $package.PSObject.Properties['metadata']
+        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
+            $externalTypes = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
+            if ($externalTypes -and $null -ne $externalTypes.Value) {
+                $allowed = $externalTypes.Value.PSObject.Properties['allowed_external_types']
+                # Only a genuine array is a declared policy. The schema demands
+                # one, so any other shape is malformed metadata -- and leaving
+                # $allowedTypes as $null routes it to the absent-metadata branch
+                # in Test-PackageExposesTarget, which fails closed.
+                #
+                # Wrapping instead would be a fail-OPEN: `@("std::*")` turns the
+                # malformed scalar `allowed_external_types = "std::*"` into a
+                # well-formed one-entry allowlist that matches nothing, so the
+                # crate reads as provably exposing nothing. `[package.metadata]`
+                # is arbitrary TOML that cargo passes through unvalidated, so
+                # such a value reaches the planner intact.
+                #
+                # A string is itself IEnumerable (over its characters), so it
+                # must be excluded explicitly or it would read as an array of
+                # single-character entries.
+                if ($allowed -and $null -ne $allowed.Value -and
+                    $allowed.Value -is [System.Collections.IEnumerable] -and
+                    $allowed.Value -isnot [string]) {
+                    $allowedTypes = @($allowed.Value)
+                }
             }
         }
 
@@ -602,12 +739,331 @@ function Get-WorkspacePackages {
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
+            DepAliases           = $depAliases
+            CrateRoot            = $crateRootByPackage[$package.name.Replace('-', '_')]
+            AllowedExternalTypes = $allowedTypes
             HasLibraryTarget     = $hasLibraryTarget
             IsProcMacroOnly      = (-not $hasLibraryTarget) -and ($targetKinds -contains 'proc-macro')
         }
     }
 
     return $packages
+}
+
+# Returns the allowlist roots that count as naming $TargetPackageName in the
+# dependent's public API: the target's own normalized name, plus any crate root
+# it is reachable under.
+#
+# This is for DECLARED edges only -- it is called solely by
+# Test-PackageExposesTarget. A package name is not always the name its types
+# are written under, and on a declared edge two things divert it, both already
+# recorded in the dependent's DepAliases:
+#   - `package = "..."` on the dependency, which makes the crate nameable only
+#     under the alias; and
+#   - `[lib] name = "..."` in the dependency's own manifest, which renames the
+#     crate root for every consumer.
+#
+# DepAliases is therefore the whole story here, and deliberately so. It is
+# authoritative *over the target's global crate root*, because a
+# `package = "..."` rename shadows the lib name entirely: a dependent that
+# imports the crate as `aliased_dep` cannot write `dep_core::Handle` no matter
+# what the target's manifest says. Adding the target's global root back on such
+# an edge would re-accept a name the dependent provably cannot use, turning an
+# unrelated allowlist entry that happens to collide with it into a false
+# exposure and a spurious breaking bump. That is why this function takes no
+# crate-root parameter.
+#
+# A third diversion exists but is not this function's problem: the same
+# `[lib] name` carried by an allowlist entry earned on an INDIRECT path. A
+# re-exported type is attributed to its defining crate, so a dependent several
+# hops away names it under that root -- and having crossed no edge to the
+# target, no alias applies to it. Test-PackageAllowlistNamesTarget handles that
+# case, building its roots from the target's own record instead. A crate can
+# hold both kinds of path at once, so the two are evaluated independently
+# rather than as alternatives; see Get-PublishedDependentsExposingTarget.
+#
+# The real package name below is a known over-acceptance, not a considered
+# exception to that rule: a rename shadows the package name exactly as it
+# shadows the lib name, so `dependency::*` is equally unwritable on an edge
+# reachable only as `aliased_dep`. Narrowing it needs data this record does not
+# carry -- whether an *unrenamed* edge to the target also exists, since a
+# package may be depended on twice, once aliased and once not. Dropping the
+# name without that would fail open on the ordinary unrenamed edge, which is
+# the far worse direction, so it stays until the edge data can distinguish the
+# two. It errs toward a spurious bump, never toward a missed break.
+#
+# Any of these roots is one an allowed_external_types entry may carry. Matching
+# solely on the real package name would find nothing and report "not exposed"
+# -- a fail-open that ships a break as compatible.
+function Get-AcceptedExposureRoots {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    $normalizedTarget = $TargetPackageName.Replace('-', '_')
+
+    $roots = @($normalizedTarget)
+    if ($Dependent.PSObject.Properties['DepAliases'] -and $null -ne $Dependent.DepAliases) {
+        $roots += @($Dependent.DepAliases[$normalizedTarget])
+    }
+
+    return @($roots | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# Returns $true unless the package's cargo-check-external-types allowlist is
+# positive evidence that its public API cannot name types rooted at the target
+# package. Anything short of that evidence counts as exposure: an unknown must
+# not permit a breaking dependency bump to ship as a compatible release.
+#
+# This predicate is for DECLARED edges only, so it deliberately takes no
+# TargetCrateRoot: the dependent's own DepAliases entry already records the
+# name the target is reachable under on this edge, rename included, and is
+# authoritative over the target's global crate root.
+function Test-PackageExposesTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName
+    )
+
+    # `$null` here means the crate declares no allowed_external_types policy at
+    # all. That is deliberately *not* the same as declaring an empty one:
+    # `@()` is a positive claim -- "my public API names nothing foreign" -- so
+    # it skips this branch, matches nothing in the loop below, and correctly
+    # returns $false. Absent metadata makes no claim at all, so it cannot be
+    # read as the stricter of the two. Hence absent => $true, empty => $false.
+    #
+    # Absent is *nearly* proof of non-exposure anyway: CI runs
+    # cargo-check-external-types with an empty allowlist when a crate declares
+    # none, so any foreign type in the public API fails the required
+    # external-type-exposure job.
+    #
+    # It is not proof, because CI validates *merged* code while release
+    # planning analyses the *working tree* (see Invoke-CrateSemverCheck): an
+    # in-progress edit that exposes a dependency's type without adding the
+    # allowlist entry has never been checked by anything. A brand-new crate has
+    # the same gap until its first CI run. Assume exposure.
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $true
+    }
+
+    $acceptedRoots = Get-AcceptedExposureRoots -Dependent $Dependent `
+        -TargetPackageName $TargetPackageName
+
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        # An entry that is not a usable non-empty string carries no information
+        # about what this crate exposes. Skipping it would let the loop fall
+        # through to "not exposed" and ship a breaking dependency bump as a
+        # compatible release, so treat it the same as absent metadata. (`-split`
+        # coerces anything to a string, so a malformed entry does not throw --
+        # it silently collapses to '' and matches nothing, which is worse.)
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            return $true
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            return $true
+        }
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            return $true
+        }
+        if ($acceptedRoots -contains $root) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# Returns $true when the dependent's allowlist is positive evidence that its
+# public API names types rooted at $TargetPackageName.
+#
+# This is the affirmative half of Test-PackageExposesTarget with none of its
+# fail-closed branches: absent or malformed metadata answers $false here.
+# The two are used for different edges, and the difference is deliberate.
+#
+# Test-PackageExposesTarget answers "may this crate expose the target?" for a
+# DIRECT dependency, where absent metadata is a genuine unknown that must fail
+# closed.
+#
+# This function answers "does this crate claim to name the target's types?" for
+# an INDIRECT path. cargo-check-external-types attributes a re-exported
+# type to its DEFINING crate, so a crate that reaches `a::T` through `b`
+# allowlists `a` while depending only on `b` (fetch_azure documents exactly this
+# for typespec_client_core). Such a path is invisible to a direct-dependency
+# scan, so it needs its own check.
+#
+# Because the path crosses no edge to the target, the name the allowlist
+# carries comes from the target itself -- its crate root -- and never from a
+# rename, which only a crate that declares the dependency can apply. Hence
+# -TargetCrateRoot. That holds even when the same crate separately declares a
+# direct edge: the two paths are judged independently, since a crate can hold
+# both and earn a root on one that the other cannot supply.
+#
+# It must not inherit the fail-closed branches, because "no allowlist" would
+# then match every transitive dependency in the graph and force unrelated
+# crates breaking. A crate with no allowlist that truly does expose the target
+# is still caught: it fails closed on its direct edge to whichever intermediate
+# carries the type, and the fixpoint walks that up the graph.
+#
+# A wildcard root is the one unknown still treated as a match: it can expand to
+# the target, and unlike absent metadata it is a deliberate, rare declaration.
+function Test-PackageAllowlistNamesTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName,
+        # Matters most on this path: a crate reached indirectly crosses no edge
+        # to the target, so no DepAliases entry applies to it. The target's own
+        # crate root is the only place the diverted name can come from.
+        [string]$TargetCrateRoot
+    )
+
+    if ($null -eq $Dependent.AllowedExternalTypes) {
+        return $false
+    }
+
+    # This predicate judges an INDIRECT path, which crosses no edge to the
+    # target. DepAliases is therefore not consulted even when the dependent
+    # also declares a direct edge: an alias applies only to the edge that
+    # declares it, and a type arriving re-exported through a conduit is
+    # attributed to the target's own crate root regardless of what any direct
+    # edge renames it to. The direct edge is judged separately, by
+    # Test-PackageExposesTarget, against its own aliases.
+    #
+    # When the target's crate root is known it is exclusive: `[lib] name`
+    # replaces the package name as the usable Rust root. The package name
+    # remains only as compatibility for older synthetic records that predate
+    # CrateRoot.
+    if (-not [string]::IsNullOrWhiteSpace($TargetCrateRoot)) {
+        $acceptedRoots = @($TargetCrateRoot.Replace('-', '_'))
+    } else {
+        $acceptedRoots = @($TargetPackageName.Replace('-', '_'))
+    }
+
+    foreach ($entry in $Dependent.AllowedExternalTypes) {
+        if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+            continue
+        }
+
+        $root = ($entry -split '::', 2)[0]
+        if ($root.Contains('*') -or $root.Contains('?') -or $root.Contains('[')) {
+            return $true
+        }
+        if ($acceptedRoots -contains $root) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# Returns the Cargo variable that overrides the linker for the host target
+# (e.g. CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER), or $null when the
+# toolchain default should stand.
+#
+# MSVC link.exe is not long-path aware, so baseline builds under a deep target
+# directory fail with LNK1104; rust-lld handles those paths. Only *-msvc hosts
+# need this -- other targets already default to long-path-safe linkers, and on
+# *-windows-gnu rust-lld would stand in for the gcc driver and invoke lld
+# directly, a different link path this fix has no reason to disturb.
+function Get-SemverChecksLinkerEnvName {
+    [CmdletBinding()]
+    param()
+
+    if (-not $IsWindows) {
+        return $null
+    }
+
+    # A missing or failing rustc yields no usable output, which the match below
+    # already rejects; $LASTEXITCODE would be no help here anyway, since it is
+    # only updated for native executables and would hold a stale value whenever
+    # rustc resolves to a shim.
+    $version = try { & rustc -vV 2>$null | Out-String } catch { '' }
+
+    # Read the capture off the Match object rather than $Matches, which -match
+    # leaves untouched when it fails and so can hold a stale value.
+    $hostMatch = [regex]::Match($version, '(?m)^host:\s*(\S+)')
+    if (-not $hostMatch.Success) {
+        # Fail open -- a probe must never break a release. Say so, though:
+        # otherwise the LNK1104 this override exists to prevent comes back with
+        # nothing to suggest the remedy simply never ran.
+        Write-Warning 'Could not read the host triple from `rustc -vV`; leaving the toolchain default linker in place. Baseline builds under a long path may fail with LNK1104.'
+        return $null
+    }
+
+    $hostTriple = $hostMatch.Groups[1].Value
+    if ($hostTriple -notmatch '(?i)-msvc$') {
+        return $null
+    }
+
+    $triple = $hostTriple.ToUpperInvariant() -replace '[^A-Z0-9]', '_'
+    return "CARGO_TARGET_${triple}_LINKER"
+}
+
+# Runs cargo semver-checks, linking with rust-lld where link.exe would overflow
+# MAX_PATH.
+#
+# The setting travels by environment variable because that is the only channel
+# that reaches the cargo invocation which matters. cargo-semver-checks exposes
+# no flag to forward cargo configuration (checked against 0.47.0), and as an
+# external subcommand it receives `--config` itself rather than letting cargo
+# interpret it -- while the build that overflows MAX_PATH is the one the tool
+# spawns internally.
+#
+# Two details keep the rest short. The bare linker name is enough: rustc puts
+# its own linker directory on PATH when it invokes the linker, so rust-lld
+# resolves without locating the sysroot. And overriding only the linker leaves
+# the repository's rustflags (such as -C target-cpu) intact, which setting
+# RUSTFLAGS would not -- that replaces target.<triple>.rustflags wholesale.
+function Invoke-SemverChecksCli {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$BaselineSha,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    Push-Location $RepoRoot
+    try {
+        # Probe from inside the repository. rustup resolves toolchain overrides
+        # against the working directory, so a probe run elsewhere can name a
+        # variable for a different host triple -- one cargo then ignores,
+        # leaving the baseline to link with the default linker after all.
+        $linkerVar = Get-SemverChecksLinkerEnvName
+        $applied = $false
+
+        if ($linkerVar) {
+            $path = "Env:\$linkerVar"
+            if (Test-Path $path) {
+                # An explicit choice wins. The premise for overriding is that
+                # link.exe cannot handle long paths; whoever set this variable
+                # has already steered cargo away from link.exe.
+                Write-Verbose "$linkerVar is already set; leaving the configured linker in place."
+            } else {
+                Set-Item -Path $path -Value 'rust-lld.exe'
+                $applied = $true
+            }
+        }
+
+        try {
+            # A required version bump produces an expected non-zero exit code.
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & cargo semver-checks --package $PackageName --baseline-rev $BaselineSha --all-features --color never 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            if ($applied) {
+                Remove-Item -Path "Env:\$linkerVar" -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        Pop-Location
+    }
+
+    return [pscustomobject]@{
+        Output   = $output
+        ExitCode = $exitCode
+    }
 }
 
 # Runs `cargo semver-checks` for a single crate against its previous version-bump
@@ -625,10 +1081,23 @@ function Get-WorkspacePackages {
 # or 'none' when there is no prior version-bump commit to compare against (a
 # brand-new crate).
 #
-# The current API is analysed from the working tree, so a coordinated release's
-# in-progress source edits (including a dependency whose public types this crate
-# re-exports) are reflected — this is what lets an exposed-dependency breaking
-# change cascade correctly, without the old allowed_external_types heuristic.
+# The current API is analysed from the working tree, not from HEAD, so a
+# coordinated release's in-progress source edits are reflected rather than only
+# what has been committed.
+#
+# That is necessary but NOT sufficient for exposed-dependency breaks, and this
+# function must not be read as covering them. When a dependency's version bump
+# is incompatible without its type *shapes* changing, this crate's rustdoc is
+# identical on both sides of the comparison, so semver-checks correctly reports
+# no required bump — yet releasing this crate compatibly is still wrong, because
+# type identity in Rust is per-version: a consumer cannot hand a `dep 0.7` type
+# to an API expecting `dep 0.8`. Nothing in a rustdoc diff can show that.
+#
+# Exposure is therefore decided separately, from the crate's declared
+# allowed_external_types (Test-PackageExposesTarget), and propagated to a
+# fixpoint by Resolve-ReleaseSet. The two are complementary: semver-checks
+# supplies each crate's own floor, the exposure cascade supplies the floor its
+# dependencies impose on it.
 function Invoke-CrateSemverCheck {
     [CmdletBinding()]
     param(
@@ -645,22 +1114,15 @@ function Invoke-CrateSemverCheck {
         return 'none'
     }
 
-    Push-Location $RepoRoot
-    try {
-        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
-        # bump is required, which is expected and not an error for our purposes.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --baseline-rev $bump.Sha --all-features --color never 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
+    $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
 
-    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
+    return ConvertFrom-SemverChecksOutput -Output $result.Output -ExitCode $result.ExitCode -PackageName $PackageName
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
-# so it can be unit-tested against captured tool output. With the git-history
+# so it can be unit-tested against captured tool output, with one caveat: the
+# failure message carries a platform-conditional path-length hint, so it is a
+# function of the arguments *and* $IsWindows. With the git-history
 # baseline (`--baseline-rev`) cargo-semver-checks always builds the baseline from
 # source, so the only outcomes are a semver verdict or a genuine tool/build
 # failure. Mapping:
@@ -689,7 +1151,12 @@ function ConvertFrom-SemverChecksOutput {
         return 'patch'
     }
 
-    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build. Output:`n$Output"
+    $pathHint = if ($IsWindows) {
+        ' If the output contains LNK1104 or a path-length error, a MAX_PATH-bound tool was reached; shorten the repository path.'
+    } else {
+        ''
+    }
+    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build.$pathHint Output:`n$Output"
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published
@@ -1120,6 +1587,10 @@ function New-ResolvedReleaseSetFromBaseRef {
 #                       with below-breaking change type); $false otherwise.
 #                       The caller uses this to distinguish "needs review for
 #                       elevation" from "needs review for primary release".
+#   PlannedCurrentVersion    - release plan's starting version, or $null when
+#                              the package is not yet in the release set
+#   EffectiveChangeType      - release level already in the plan, or $null
+#   EffectiveTargetVersion   - target version already in the plan, or $null
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
 #                       - chains rooted in release-set members (or, in
@@ -1267,6 +1738,9 @@ function Get-UnreleasedModifiedDependencies {
                             PackageName                = $depPackage.Name
                             CurrentVersion             = $depPackage.Version
                             InReleaseSet               = $isInReleaseSet
+                            PlannedCurrentVersion      = if ($isInReleaseSet) { $depEntry.CurrentVersion } else { $null }
+                            EffectiveChangeType        = if ($isInReleaseSet) { $depEntry.EffectiveChangeType } else { $null }
+                            EffectiveTargetVersion     = if ($isInReleaseSet) { $depEntry.EffectiveTargetVersion } else { $null }
                             ChangedFileCount           = $modifiedMap[$depFolder]
                             DependencyChains           = @(, $depChain)
                             RequiresManualSemverReview = [bool]$depPackage.IsProcMacroOnly
@@ -1313,11 +1787,15 @@ function Get-UnreleasedModifiedDependencies {
         if ($findings.Contains($folder)) { continue }
         if (-not (& $shouldSurface $folder)) { continue }
         $pkg = $byFolder[$folder]
+        $entry = $ResolvedReleaseSet[$folder]
         $findings[$folder] = [pscustomobject]@{
             Folder                     = $folder
             PackageName                = $pkg.Name
             CurrentVersion             = $pkg.Version
-            InReleaseSet               = $ResolvedReleaseSet.ContainsKey($folder)
+            InReleaseSet               = $null -ne $entry
+            PlannedCurrentVersion      = if ($null -ne $entry) { $entry.CurrentVersion } else { $null }
+            EffectiveChangeType        = if ($null -ne $entry) { $entry.EffectiveChangeType } else { $null }
+            EffectiveTargetVersion     = if ($null -ne $entry) { $entry.EffectiveTargetVersion } else { $null }
             ChangedFileCount           = $modifiedMap[$folder]
             DependencyChains           = @()
             RequiresManualSemverReview = [bool]$pkg.IsProcMacroOnly

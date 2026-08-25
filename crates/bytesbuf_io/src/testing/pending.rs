@@ -194,10 +194,8 @@ impl PendingBuilder {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::pin::pin;
-    use std::task::{Context, Poll, Waker};
-
     use bytesbuf::mem::CallbackMemory;
+    use testing_aids::FutureTestExt;
 
     use super::*;
 
@@ -255,15 +253,9 @@ mod tests {
         let mut stream = Pending::new();
         let buffer = BytesBuf::new();
 
-        let mut future = pin!(stream.read_at_most_into(100, buffer));
-        let waker = Waker::noop();
-        let mut cx = Context::from_waker(waker);
-
-        let result = future.as_mut().poll(&mut cx);
-        assert!(
-            matches!(result, Poll::Pending),
-            "read_at_most_into should return Pending on first poll"
-        );
+        stream
+            .read_at_most_into(100, buffer)
+            .unwrap_pending_for(1, "read_at_most_into should return Pending on first poll");
     }
 
     #[test]
@@ -271,27 +263,18 @@ mod tests {
         let mut stream = Pending::new();
         let buffer = BytesBuf::new();
 
-        let mut future = pin!(stream.read_more_into(buffer));
-        let waker = Waker::noop();
-        let mut cx = Context::from_waker(waker);
-
-        let result = future.as_mut().poll(&mut cx);
-        assert!(
-            matches!(result, Poll::Pending),
-            "read_more_into should return Pending on first poll"
-        );
+        stream
+            .read_more_into(buffer)
+            .unwrap_pending_for(1, "read_more_into should return Pending on first poll");
     }
 
     #[test]
     fn read_any_returns_pending_on_first_poll() {
         let mut stream = Pending::new();
 
-        let mut future = pin!(stream.read_any());
-        let waker = Waker::noop();
-        let mut cx = Context::from_waker(waker);
-
-        let result = future.as_mut().poll(&mut cx);
-        assert!(matches!(result, Poll::Pending), "read_any should return Pending on first poll");
+        stream
+            .read_any()
+            .unwrap_pending_for(1, "read_any should return Pending on first poll");
     }
 
     #[test]
@@ -299,11 +282,8 @@ mod tests {
         let mut stream = Pending::new();
         let data = BytesView::default();
 
-        let mut future = pin!(stream.write(data));
-        let waker = Waker::noop();
-        let mut cx = Context::from_waker(waker);
-
-        let result = future.as_mut().poll(&mut cx);
-        assert!(matches!(result, Poll::Pending), "write should return Pending on first poll");
+        stream
+            .write(data)
+            .unwrap_pending_for(1, "write should return Pending on first poll");
     }
 }

@@ -1439,6 +1439,7 @@ mod tests {
         assert!(container_inner(&lifetime_option, "Option", &generic_types).is_none());
 
         let empty_path = Type::Path(syn::TypePath {
+            attrs: Vec::new(),
             qself: None,
             path: syn::Path {
                 leading_colon: None,
@@ -1483,6 +1484,7 @@ mod tests {
         let qualified_primitive: Type = parse_quote!(u8::Value);
         assert!(primitive_encoder(&qualified_primitive).is_none());
         let qualified_self = Type::Path(syn::TypePath {
+            attrs: Vec::new(),
             qself: Some(syn::QSelf {
                 lt_token: syn::token::Lt::default(),
                 ty: Box::new(parse_quote!(u8)),

@@ -111,6 +111,13 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
 impl<T: CircuitEngine> EngineTelemetry<T> {
     /// Emits telemetry events for circuit state changes produced by `exit`.
+    #[cfg_attr(
+        not(any(feature = "metrics", feature = "logs", test)),
+        expect(
+            clippy::unused_self,
+            reason = "the body is entirely telemetry emission, which compiles away when neither `metrics` nor `logs` is enabled"
+        )
+    )]
     fn report_state_change(&self, exit_result: &ExitCircuitResult) {
         match exit_result {
             ExitCircuitResult::Opened(health) => {

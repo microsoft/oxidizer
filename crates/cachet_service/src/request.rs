@@ -3,7 +3,7 @@
 
 //! Request and response types for cache operations exposed through the Service trait.
 
-use cachet_tier::CacheEntry;
+use cachet_tier::{CacheEntry, InsertOutcome};
 
 /// A cache operation request.
 ///
@@ -76,8 +76,8 @@ impl<K> InvalidateRequest<K> {
 pub enum CacheResponse<V> {
     /// Response from a get operation
     Get(Option<CacheEntry<V>>),
-    /// Response from an insert operation
-    Insert,
+    /// Response from an insert operation, including whether it was accepted
+    Insert(InsertOutcome),
     /// Response from an invalidate operation
     Invalidate,
     /// Response from a clear operation
@@ -189,21 +189,21 @@ mod tests {
 
     #[test]
     fn cache_response_into_entry_non_get() {
-        let response: CacheResponse<i32> = CacheResponse::Insert;
+        let response: CacheResponse<i32> = CacheResponse::Insert(InsertOutcome::Accepted);
         let extracted = response.into_entry();
         assert!(extracted.is_none());
     }
 
     #[test]
     fn cache_response_is_hit_false_for_non_get() {
-        assert!(!CacheResponse::<i32>::Insert.is_hit());
+        assert!(!CacheResponse::<i32>::Insert(InsertOutcome::Accepted).is_hit());
         assert!(!CacheResponse::<i32>::Invalidate.is_hit());
         assert!(!CacheResponse::<i32>::Clear.is_hit());
     }
 
     #[test]
     fn cache_response_is_miss_false_for_non_get() {
-        assert!(!CacheResponse::<i32>::Insert.is_miss());
+        assert!(!CacheResponse::<i32>::Insert(InsertOutcome::Accepted).is_miss());
         assert!(!CacheResponse::<i32>::Invalidate.is_miss());
         assert!(!CacheResponse::<i32>::Clear.is_miss());
     }

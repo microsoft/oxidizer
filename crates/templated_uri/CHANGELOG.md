@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - hide documentation modules from public API ([#635](https://github.com/microsoft/oxidizer/pull/635))
+  - Now requires `0.4.0` of `ohno`
+  - Now requires `0.4.0` of `templated_uri_macros`
+
 ## [0.3.6] - 2026-07-31
 
 - 🐛 Bug Fixes

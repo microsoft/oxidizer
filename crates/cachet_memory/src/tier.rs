@@ -12,7 +12,7 @@
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
-use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
+use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 use foldhash::fast::RandomState;
 use moka::Expiry;
 use moka::future::Cache;
@@ -198,9 +198,9 @@ where
         Ok(self.inner.get(key).await)
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         self.inner.insert(key.clone(), entry).await;
-        Ok(())
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {

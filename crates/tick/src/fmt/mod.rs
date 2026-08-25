@@ -134,6 +134,8 @@ use jiff::Timestamp;
 mod ecmascript;
 mod iso_8601;
 mod rfc_2822;
+#[cfg(any(feature = "serde", test))]
+mod serde;
 mod unix_seconds;
 
 pub use ecmascript::EcmaScript;
@@ -187,8 +189,8 @@ fn system_time_out_of_range() -> Error {
 mod tests {
     use std::time::Duration;
 
+    use ::serde::{Deserialize, Serialize};
     use jiff::SignedDuration;
-    use serde::{Deserialize, Serialize};
 
     use super::*;
     use crate::Clock;

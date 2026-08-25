@@ -42,8 +42,7 @@
 //!
 //! Derive macro for automatically implementing error traits.
 //!
-//! When applied to a struct or enum containing an [`OhnoCore`] field,
-//! this macro automatically implements [`std::error::Error`], [`std::fmt::Display`], [`std::fmt::Debug`], and [`From`] conversions.
+//! When applied to a struct containing an [`OhnoCore`] field, this macro automatically implements [`std::error::Error`], [`std::fmt::Display`], [`std::fmt::Debug`], and [`From`] conversions.
 //!
 //! > **Note**: `From<std::convert::Infallible>` is implemented by default and calls via [`unreachable!`] macro.
 //!
@@ -59,8 +58,17 @@
 //! # `ohno::error`
 //!
 //! The `#[ohno::error]` attribute macro is a convenience wrapper that automatically adds a `OhnoCore`
-//! field to your struct and applies `#[derive(Error)]`. This is the simplest way to create error types
+//! field to the struct and applies `#[derive(Error)]`. This is the simplest way to create error types
 //! without manually managing the error infrastructure.
+//!
+//! The attribute always adds that field and always generates the error representation from it, so
+//! no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use
+//! `#[derive(Error)]` directly to place the core by hand.
+//!
+//! A field of type `OhnoCore` may still be declared, and is then treated as data rather than as the
+//! error: it is passed to the generated constructors like any other field, appears in the generated
+//! `Debug`, and can be referenced from a `#[display(...)]` template — but it is never read for
+//! `source()`, the backtrace, or enrichment, which all come from the injected field.
 //!
 //! ```rust
 //! // Simple error without extra fields
@@ -75,10 +83,135 @@
 //! }
 //! ```
 //!
-//! # Display Error Override
+//! # How error text is rendered
 //!
-//! The `#[display("...")]` attribute allows you to customize the main error message
-//! while preserving the underlying error as a cause in the error chain.
+//! Without a `#[display("...")]` attribute, the text an error renders depends on whether it has a
+//! cause — an error or a string handed to `caused_by`.
+//!
+//! **With a cause**, the cause's message is printed as it stands: no type name, and no
+//! `caused by:` line, so the wrapper leaves no trace in the message line. Enrichment and a
+//! backtrace, described below, are still written after it.
+//! A cause that is an error also stays in the [`source()`](std::error::Error::source) chain, so a
+//! caller that walks the chain still finds it.
+//!
+//! ```rust
+//! use std::io;
+//!
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! fn read_config() -> Result<String, ConfigError> {
+//!     Err(ConfigError::caused_by(io::Error::new(
+//!         io::ErrorKind::NotFound,
+//!         "no such file: /etc/app.toml",
+//!     )))
+//! }
+//!
+//! let error = read_config().unwrap_err();
+//!
+//! println!("{error}");
+//! // Output: no such file: /etc/app.toml
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "no such file: /etc/app.toml");
+//! ```
+//!
+//! A cause given as a string renders the same way, but it does not join the chain: it is a message
+//! rather than an error, so `source()` returns `None` for it.
+//!
+//! Wrapping therefore adds nothing to the text. A wrapper that should say what it was attempting —
+//! "failed to load the configuration", say — has to be given a template; see
+//! [Overriding error text](#overriding-error-text).
+//!
+//! **Without a cause**, there is no message to pass through, so the type's own name is printed:
+//!
+//! ```rust
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! let error = ConfigError::new();
+//!
+//! println!("{error}");
+//! // Output: ConfigError
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "ConfigError");
+//! ```
+//!
+//! That is a symbol, not an explanation, so an error that renders as its own bare name is a sign
+//! that it needs either a cause or a template.
+//!
+//! ## Enrichment and backtraces
+//!
+//! The message is only the first part of what `Display` writes — with a template and a cause it is
+//! already two lines. Each enrichment entry follows it on its own line, marked with `>` and tagged
+//! with the place it was added:
+//!
+//! ```rust
+//! use std::io;
+//!
+//! #[ohno::error]
+//! pub struct ConfigError;
+//!
+//! #[ohno::enrich_err("failed to load the service configuration")]
+//! fn read_config() -> Result<String, ConfigError> {
+//!     Err(ConfigError::caused_by(io::Error::new(
+//!         io::ErrorKind::NotFound,
+//!         "no such file: /etc/app.toml",
+//!     )))
+//! }
+//!
+//! let error = read_config().unwrap_err();
+//!
+//! println!("{error}");
+//! // Output: no such file: /etc/app.toml
+//! //         > failed to load the service configuration (at src/config.rs:6)
+//! # assert!(error.to_string().contains("> failed to load the service configuration (at "));
+//! ```
+//!
+//! A captured backtrace comes last for that level, after that level's enrichment:
+//!
+//! ```text
+//! no such file: /etc/app.toml
+//! > failed to load the service configuration (at src/config.rs:6)
+//!
+//! Backtrace:
+//!    0: std::backtrace::Backtrace::capture
+//!    1: ohno::backtrace::Backtrace::capture
+//!    2: ohno::core::OhnoCore::from_source
+//!    3: my_app::config::ConfigError::caused_by
+//!    4: my_app::config::read_config
+//!    ...
+//! ```
+//!
+//! Whether a backtrace is captured at all is the standard library's decision — see its
+//! [environment variables](https://doc.rust-lang.org/std/backtrace/index.html#environment-variables).
+//! Use [`ErrorExt::message()`](ErrorExt::message) to read the message without this level's own
+//! enrichment or backtrace.
+//!
+//! Every error owns its [`OhnoCore`], and every core renders its own backtrace, so a chain of
+//! wrappers that all use the default rendering prints the message once and one backtrace block per
+//! level. The levels are written in turn, innermost first — a wrapper's own enrichment and
+//! backtrace follow the complete rendering of the level it wraps, so an outer enrichment entry
+//! appears *after* the inner level's `Backtrace:` block, not alongside the other enrichment:
+//!
+//! ```text
+//! no such file: /etc/app.toml
+//!
+//! Backtrace:
+//!    ... frames from where ConfigError wrapped the io::Error ...
+//!
+//! Backtrace:
+//!    ... frames from where StartupError wrapped the ConfigError ...
+//! ```
+//!
+//! This follows from each type holding its own core, and is worth knowing before a type is wrapped
+//! several layers deep.
+//!
+//! # Overriding error text
+//!
+//! The `#[display("...")]` attribute replaces the rendered message with a template of its own,
+//! while still printing the cause after it. A cause that is an error also stays in the
+//! [`source()`](std::error::Error::source) chain; a cause given as a string is printed the same way
+//! but does not join the chain, exactly as under the default rendering.
 //!
 //! ```rust
 //! use std::path::PathBuf;
@@ -92,12 +225,42 @@
 //! // Usage
 //! let error = ConfigError::caused_by("/etc/config.toml", "file not found");
 //!
-//! // Output: "Failed to read config with path: /etc/config.toml\nCaused by:\n\tfile not found"
+//! // Output: "Failed to read config with path: /etc/config.toml\ncaused by: file not found"
+//! # use ohno::ErrorExt;
+//! # assert_eq!(error.message(), "Failed to read config with path: /etc/config.toml\ncaused by: file not found");
 //! ```
 //!
-//! The template string supports field interpolation using `{field_name}` syntax. The underlying
-//! error (if any) is automatically shown as "Caused by:" in the error chain. If the inner error
-//! has no source, only the custom message is displayed.
+//! The template string supports field interpolation using `{field_name}` syntax. Unlike the
+//! default rendering, the cause is never printed on its own: the custom message always leads, and
+//! the cause (if any) follows on the next line, after a `caused by:` label. If the error has no
+//! cause, only the custom message is displayed — the type name is never used once a template is
+//! given.
+//!
+//! Fields of a tuple struct are interpolated by index, using `{0}`, `{1}`, and so on.
+//!
+//! ## Format Arguments
+//!
+//! Anything that is not a plain field reference is passed as a positional argument, with
+//! `format!`'s placeholder and argument-counting semantics:
+//!
+//! ```rust
+//! use std::path::PathBuf;
+//!
+//! #[ohno::error]
+//! #[display("failed to read config: {}", path.display())]
+//! pub struct ConfigError {
+//!     pub path: PathBuf,
+//! }
+//! ```
+//!
+//! Positional arguments are implicitly scoped to `self`, so a field is referenced by its bare
+//! name. Neither the `self.` prefix nor the leading-dot form is accepted:
+//!
+//! | Argument | Accepted |
+//! | --- | --- |
+//! | `path.display()` | yes |
+//! | `self.path.display()` | no, the `self.` prefix is implicit |
+//! | `.path.display()` | no, not a valid expression |
 //!
 //! # Automatic Constructors
 //!
@@ -110,16 +273,29 @@
 //! }
 //!
 //! // The derive macro automatically generates:
-//! // - ConfigError::new(path: String) -> Self
-//! // - ConfigError::caused_by(path: String, error: impl Into<Box<dyn Error...>>) -> Self
+//! //
+//! // impl ConfigError {
+//! //     pub(crate) fn new(path: impl Into<String>) -> Self { ... }
+//! //     pub(crate) fn caused_by(path: impl Into<String>, error: impl Into<Box<dyn Error...>>) -> Self { ... }
+//! // }
 //!
 //! let error = ConfigError::new("/etc/config.toml");
 //! let error_with_cause = ConfigError::caused_by("/etc/config.toml", "File not found");
 //! ```
 //!
+//! **The generated constructors are `pub(crate)`, regardless of the visibility of the error type
+//! itself.** They are an implementation convenience for the crate that defines the error, not part
+//! of its public API, so a `pub struct` error exported from a library cannot be constructed with
+//! `new()` or `caused_by()` by a downstream crate. This is deliberate: it keeps the set of ways an
+//! error can be built under the control of the crate that owns it, so adding a field is not a
+//! breaking change for callers.
+//!
 //! **Disabling Automatic Constructors:**
 //!
-//! Use `#[no_constructors]` to disable automatic generation when you need custom constructors:
+//! `#[no_constructors]` disables the generated constructors, leaving the names `new` and
+//! `caused_by` free for hand-written versions. It works only with `#[derive(Error)]`, which
+//! requires the `OhnoCore` field to be declared explicitly — and that field is the one the
+//! hand-written constructor has to initialize:
 //!
 //! ```rust
 //! use ohno::{Error, OhnoCore};
@@ -132,7 +308,7 @@
 //!
 //! impl CustomError {
 //!     pub fn new(custom_logic: bool) -> Self {
-//!         // Your custom constructor logic here
+//!         // Custom constructor logic here
 //!         Self {
 //!             inner_error: OhnoCore::default(),
 //!         }

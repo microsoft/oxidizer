@@ -216,8 +216,8 @@ fn arena_stats_report_cache_reuse_and_resets() {
 
     arena.reset();
     let reset = arena.stats();
-    assert_eq!(reset.cached_chunks, 1);
-    assert_eq!(reset.cached_bytes, 64 * 1024);
+    assert_eq!(reset.cached_chunks, 0);
+    assert_eq!(reset.cached_bytes, 0);
     assert_eq!(reset.resets, 1);
     assert_eq!(reset.normal_chunks_allocated_since_reset, 0);
     assert_eq!(reset.oversized_chunks_allocated_since_reset, 0);
@@ -228,8 +228,8 @@ fn arena_stats_report_cache_reuse_and_resets() {
     let value = arena.alloc(2_u64);
     drop(value);
     let reused = arena.stats();
-    assert_eq!(reused.normal_chunks_reused, 2);
-    assert_eq!(reused.normal_chunks_reused_since_reset, 1);
+    assert_eq!(reused.normal_chunks_reused, 1);
+    assert_eq!(reused.normal_chunks_reused_since_reset, 0);
 }
 
 #[cfg(feature = "stats")]
@@ -444,7 +444,6 @@ mod reset {
 
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -501,11 +500,10 @@ mod reset {
 
     #[cfg(feature = "stats")]
     #[test]
-    fn reset_returns_chunks_to_cache_and_avoids_fresh_alloc() {
-        // Seed the high-water mark to the largest class up front so the
-        // chunk that backs our single allocation isn't evicted from the
-        // cache when it returns (the high-water filter requires
-        // `cap >= class_to_bytes(high_water)`).
+    fn reset_retains_local_current_and_avoids_fresh_alloc() {
+        // Use the largest class so a regression that returns the current
+        // chunk would leave it visible in the cache instead of evicting it
+        // through the high-water filter.
         let mut arena = Arena::builder().with_capacity(64 * 1024).build();
         let _ = arena.alloc(0_u64);
 
@@ -516,13 +514,44 @@ mod reset {
 
         let stats_after_reset = arena.stats();
         assert_eq!(stats_after_reset.normal_chunks_allocated, stats_before.normal_chunks_allocated);
+        assert_eq!(stats_after_reset.cached_chunks, 0, "the rewound current chunk stays installed");
 
         let _ = arena.alloc(1_u64);
         let stats_after_realloc = arena.stats();
         assert_eq!(
             stats_after_realloc.normal_chunks_allocated, stats_before.normal_chunks_allocated,
-            "reset should not allocate a fresh chunk; cache reuse expected"
+            "reset should retain the current chunk instead of allocating a fresh one"
         );
+        assert_eq!(
+            stats_after_realloc.normal_chunks_reused, stats_before.normal_chunks_reused,
+            "allocating after reset must not need a cache pop"
+        );
+    }
+
+    #[test]
+    fn reset_preserves_smart_owner_from_retired_mixed_chunk() {
+        let allocator = common::SendTrackingAllocator::new();
+        let mut arena = Arena::builder_in(allocator.clone()).with_capacity(512).build();
+
+        drop(arena.alloc(0_u8));
+        let escaped = arena.alloc_arc(0xABCD_u32);
+        drop(arena.alloc([0_u8; 1024]));
+        assert_eq!(allocator.live_chunks(), 2, "the larger allocation must rotate the mixed chunk");
+
+        arena.reset();
+
+        assert_eq!(*escaped, 0xABCD);
+        assert_eq!(
+            allocator.live_chunks(),
+            2,
+            "reset must release only the retired list's reference while the Arc is live"
+        );
+
+        drop(arena);
+        assert_eq!(*escaped, 0xABCD);
+        assert_eq!(allocator.live_chunks(), 1);
+        drop(escaped);
+        assert_eq!(allocator.live_chunks(), 0);
     }
 
     #[cfg(feature = "stats")]
@@ -542,13 +571,13 @@ mod reset {
     }
 
     #[test]
-    fn reset_clears_byte_budget_for_cached_chunks() {
+    fn reset_reuses_current_chunk_with_tight_byte_budget() {
         // Tight budget: only one chunk worth.
         let mut arena: Arena = Arena::builder().byte_budget(8 * 1024).build();
 
         let _ = arena.alloc(0_u8); // forces fresh chunk allocation
         arena.reset();
-        // Should be able to allocate again from the cached chunk without
+        // Should be able to allocate again from the retained chunk without
         // tripping the budget.
         let _ = arena.alloc(1_u8);
     }
@@ -559,7 +588,7 @@ mod reset {
         // Allocate a couple of near-max_normal_alloc buffers to put the
         // (class-7, 64 KiB) starter chunk into use. `MaybeUninit<[u8;
         // 4000]>` skips per-byte init; a couple of them is enough to
-        // exercise the reset→cache→reuse path without a long alloc loop.
+        // exercise the reset-and-rewind path without a long alloc loop.
         let mut arena: Arena = Arena::builder().max_normal_alloc(4 * 1024).with_capacity(64 * 1024).build();
         for _ in 0..2 {
             let _ = arena.alloc(core::mem::MaybeUninit::<[u8; 4000]>::uninit());
@@ -1256,6 +1285,13 @@ mod fast_path_correctness {
     }
 
     #[test]
+    fn alloc_slice_copy_cache_line_preserves_contents() {
+        let arena = Arena::new();
+        let src = [0_u64, 1, 2, 3, 4, 5, 6, 7];
+        assert_eq!(&*arena.alloc_slice_copy(src), &src);
+    }
+
+    #[test]
     fn alloc_u128_is_aligned() {
         let arena = Arena::new();
         for _ in 0..100 {
@@ -1613,6 +1649,25 @@ mod fast_path_correctness {
         fn drop(&mut self) {
             let _ = DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
         }
+    }
+
+    #[test]
+    fn slice_clone_panic_drops_unrolled_and_tail_prefix() {
+        let _lock = DROP_TEST_LOCK.lock().unwrap();
+        DROP_COUNTER.store(0, Ordering::SeqCst);
+        let src: Vec<_> = (0..11).map(|id| PanicOnClone { id, panic_at: 9 }).collect();
+        let arena = Arena::new();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = arena.alloc_slice_clone(&src);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            DROP_COUNTER.load(Ordering::SeqCst),
+            9,
+            "all successful clones from the eight-wide block and tail must be dropped"
+        );
     }
 }
 
@@ -2968,7 +3023,7 @@ mod oversized_routing {
         assert_eq!(v.capacity(), v.len(), "Vec strictly below max_normal_alloc must reclaim tail");
     }
 
-    // The cache floor preserves reusable saturated-class chunks after reset.
+    // The saturated current chunk remains reusable after reset.
     #[test]
     fn local_cache_floor_advances_so_post_reset_alloc_reuses_chunk() {
         let mut arena = Arena::new();
@@ -2980,7 +3035,7 @@ mod oversized_routing {
         }
         let before_reset = arena.stats().normal_chunks_allocated;
         arena.reset();
-        // Reset caches only chunks at or above the saturated floor.
+        // Reset retains and rewinds the saturated current chunk.
         let _ = arena.alloc(0_u8);
         let after_reset = arena.stats().normal_chunks_allocated;
         assert!(

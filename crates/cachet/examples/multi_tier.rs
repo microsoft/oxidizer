@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cachet::{Cache, CacheEntry, CacheTier, Error, InsertPolicy};
+use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome, InsertPolicy};
 use parking_lot::Mutex;
 use tick::Clock;
 
@@ -40,8 +40,8 @@ impl CacheTier<String, UserData> for Arc<Database> {
         Ok(Some(CacheEntry::new(data)))
     }
 
-    async fn insert(&self, _: String, _: CacheEntry<UserData>) -> Result<(), Error> {
-        Ok(())
+    async fn insert(&self, _: String, _: CacheEntry<UserData>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, _: &String) -> Result<(), Error> {

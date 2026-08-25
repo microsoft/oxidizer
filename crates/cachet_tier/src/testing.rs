@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use crate::{CacheEntry, CacheTier, Error, SizeError};
+use crate::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 
 /// Recorded cache operation with full context.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,7 +236,7 @@ where
         Ok(self.data.lock().get(key).cloned())
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let op = CacheOp::Insert {
             key: key.clone(),
             entry: entry.clone(),
@@ -247,7 +247,7 @@ where
         }
         self.record(op);
         self.data.lock().insert(key, entry);
-        Ok(())
+        Ok(InsertOutcome::Accepted)
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {

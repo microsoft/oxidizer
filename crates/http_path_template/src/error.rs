@@ -74,15 +74,17 @@ enum MaybeBacktrace {
 
 impl MaybeBacktrace {
     /// Captures a backtrace, allocating only if capture is actually enabled.
+    #[cfg(feature = "std")]
     fn capture() -> Self {
-        #[cfg(feature = "std")]
-        {
-            Self::from_backtrace(Backtrace::capture())
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            Self::Disabled
-        }
+        Self::from_backtrace(Backtrace::capture())
+    }
+
+    /// Returns [`MaybeBacktrace::Disabled`]; backtrace capture is unavailable without `std`.
+    #[cfg(not(feature = "std"))]
+    #[cfg_attr(coverage_nightly, coverage(off))] // no_std-only path (AGENTS.md, "no_std Support").
+    #[cfg_attr(test, mutants::skip)] // no_std-only path (AGENTS.md, "no_std Support").
+    fn capture() -> Self {
+        Self::Disabled
     }
 
     /// Wraps a `std::backtrace::Backtrace`, boxing it only when it

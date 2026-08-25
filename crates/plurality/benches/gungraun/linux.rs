@@ -28,7 +28,7 @@ use std::hint::black_box;
 
 use gungraun::prelude::*;
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool};
-use plurality::{Arc, Pool, Rc};
+use plurality::{Arc, MultiPool, Pool, Rc};
 
 use crate::ops::{self, Obj};
 
@@ -60,6 +60,24 @@ alloc_bench!(rc_val);
 alloc_bench!(rc_with);
 alloc_bench!(rc_uninit);
 
+/// Defines a `#[library_benchmark]` that runs `ops::<name>` once against a
+/// multi pool whose directory `$setup` has populated to the shape the
+/// measurement calls for.
+macro_rules! multi_alloc_bench {
+    ($name:ident, $setup:ident) => {
+        #[library_benchmark]
+        #[bench::op(args = (ops::CAP,), setup = ops::$setup)]
+        fn $name(pool: MultiPool) -> MultiPool {
+            ops::$name(black_box(&pool), 0);
+            pool
+        }
+    };
+}
+
+multi_alloc_bench!(multi_box_val, setup_multi_pool);
+multi_alloc_bench!(multi_box_val_spread, setup_multi_pool_spread);
+multi_alloc_bench!(multi_box_val_miss, setup_multi_pool_miss);
+
 #[library_benchmark]
 #[bench::op(args = (ops::CAP,), setup = ops::setup_arc)]
 fn arc_clone((pool, base): (Pool<Obj>, Arc<Obj>)) -> (Pool<Obj>, Arc<Obj>) {
@@ -78,6 +96,13 @@ fn rc_clone((pool, base): (Pool<Obj>, Rc<Obj>)) -> (Pool<Obj>, Rc<Obj>) {
 #[bench::op(args = (ops::CAP,), setup = ops::setup_plurality)]
 fn plurality_box(pool: Pool<Obj>) -> Pool<Obj> {
     ops::plurality_box(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_plurality_multi)]
+fn plurality_multi_box(pool: MultiPool) -> MultiPool {
+    ops::plurality_multi_box(black_box(&pool), 0);
     pool
 }
 
@@ -131,7 +156,10 @@ library_benchmark_group!(
         alloc_uninit,
         rc_val,
         rc_with,
-        rc_uninit
+        rc_uninit,
+        multi_box_val,
+        multi_box_val_spread,
+        multi_box_val_miss
     ]
 );
 
@@ -141,6 +169,7 @@ library_benchmark_group!(
     name = dyn_box,
     benchmarks = [
         plurality_box,
+        plurality_multi_box,
         infinity_pinned,
         infinity_local_pinned,
         infinity_blind,

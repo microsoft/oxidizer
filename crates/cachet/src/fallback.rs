@@ -10,7 +10,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use cachet_tier::{CacheEntry, CacheTier, SizeError};
+use cachet_tier::{CacheEntry, CacheTier, InsertOutcome, SizeError};
 use futures::join;
 use tick::Clock;
 
@@ -138,13 +138,19 @@ where
         self.get_from_fallback(key).await
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         let (primary_result, fallback_result) = join!(
             self.inner.primary.insert(key.clone(), entry.clone()),
-            self.inner.fallback.insert(key.clone(), entry)
+            self.inner.fallback.insert(key, entry)
         );
-        primary_result?;
-        fallback_result
+        let primary_outcome = primary_result?;
+        let fallback_outcome = fallback_result?;
+
+        if primary_outcome == InsertOutcome::Accepted || fallback_outcome == InsertOutcome::Accepted {
+            Ok(InsertOutcome::Accepted)
+        } else {
+            Ok(InsertOutcome::Rejected)
+        }
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {

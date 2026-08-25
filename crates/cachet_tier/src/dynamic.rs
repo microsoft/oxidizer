@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use crate::tier::DynCacheTier;
-use crate::{CacheEntry, CacheTier, Error, SizeError};
+use crate::{CacheEntry, CacheTier, Error, InsertOutcome, SizeError};
 
 /// A cloneable dynamic cache tier with type erasure.
 ///
@@ -52,7 +52,7 @@ impl<K: Send + Sync, V: Send> CacheTier<K, V> for DynamicCache<K, V> {
         self.0.get(key).await
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
         self.0.insert(key, entry).await
     }
 
@@ -81,7 +81,8 @@ mod tests {
         let dynamic = DynamicCache::new(cache);
         let clone = dynamic.clone();
 
-        dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        let outcome = dynamic.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
+        assert_eq!(outcome, InsertOutcome::Accepted);
 
         let entry = clone.get(&"key".to_string()).await.unwrap().unwrap();
         assert_eq!(*entry.value(), 42);

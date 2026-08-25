@@ -250,10 +250,39 @@ This crate provides several optional features that can be enabled in your `Cargo
 * **`serde`** - Adds serialization and deserialization support via [serde][__link44].
 * **`fmt`** - Enables the [`fmt`][__link45] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
+* **`fast-instant`** - Allows individual clock clones to use a lower-overhead,
+  lower-precision instant source for retrieval and stopwatches on Linux and Windows. Timer
+  scheduling remains precise. Other platforms delegate to [`std::time::Instant::now`][__link46]. Clocks
+  remain precise by default.
+
+### Fast instant contract
+
+Fast instant retrieval is disabled by default and configured independently on each clock clone.
+Its values are monotonically non-decreasing, but consecutive reads may be equal and precision is
+platform-dependent. Stopwatches inherit the configured retrieval source. `system_time()`,
+controlled clocks, and precise timer scheduling for delays and periodic timers are unaffected.
+On unsupported platforms, enabling the option preserves the standard instant source.
+
+### Using precise and fast clocks together
+
+A component that already receives a [`Clock`][__link47] can derive a fast clone locally instead of
+requiring a separate application-level dependency. The original clock remains precise:
+
+```rust
+use tick::Clock;
+
+fn process(clock: &Clock) {
+    let fast_clock = clock.clone().with_fast_instant(true);
+
+    let decision_time = clock.instant();
+    let telemetry_time = fast_clock.instant();
+    // Use `decision_time` for logic and `telemetry_time` for debug instrumentation.
+}
+```
 
 ## Additional Examples
 
-The [time examples][__link46]
+The [time examples][__link48]
 contain additional examples of how to use the time primitives.
 
 
@@ -262,51 +291,53 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbn-ALXM8UiC8bIRESNiZavEAb64zavGelG-YbgLo76yq99ClhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJkdGlja2UwLjQuMA
- [__link0]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.4.0/tick/?search=Error
- [__link11]: https://docs.rs/tick/0.4.0/tick/fmt/index.html
- [__link12]: https://docs.rs/tick/0.4.0/tick/runtime/index.html
- [__link13]: https://docs.rs/tick/0.4.0/tick/?search=FutureExt
- [__link14]: https://docs.rs/tick/0.4.0/tick/?search=SystemTimeExt
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWYwLjEwLjCCZHRpY2tlMC41LjA
+ [__link0]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl
+ [__link1]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link10]: https://docs.rs/tick/0.5.0/tick/?search=Error
+ [__link11]: https://docs.rs/tick/0.5.0/tick/fmt/index.html
+ [__link12]: https://docs.rs/tick/0.5.0/tick/runtime/index.html
+ [__link13]: https://docs.rs/tick/0.5.0/tick/?search=FutureExt
+ [__link14]: https://docs.rs/tick/0.5.0/tick/?search=SystemTimeExt
  [__link15]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
- [__link16]: https://docs.rs/tick/0.4.0/tick/?search=SimpleClock
- [__link17]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link18]: https://docs.rs/tick/0.4.0/tick/?search=SimpleClock::new_system
- [__link19]: https://docs.rs/tick/0.4.0/tick/?search=SimpleClock
- [__link2]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link20]: https://docs.rs/tick/0.4.0/tick/?search=Clock
+ [__link16]: https://docs.rs/tick/0.5.0/tick/?search=SimpleClock
+ [__link17]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link18]: https://docs.rs/tick/0.5.0/tick/?search=SimpleClock::new_system
+ [__link19]: https://docs.rs/tick/0.5.0/tick/?search=SimpleClock
+ [__link2]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link20]: https://docs.rs/tick/0.5.0/tick/?search=Clock
  [__link21]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link22]: https://docs.rs/tick/0.4.0/tick/?search=Clock::simple_clock
- [__link23]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl::to_simple_clock
- [__link24]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
- [__link25]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link26]: https://docs.rs/tick/0.4.0/tick/?search=Stopwatch
+ [__link22]: https://docs.rs/tick/0.5.0/tick/?search=Clock::simple_clock
+ [__link23]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl::to_simple_clock
+ [__link24]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl
+ [__link25]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link26]: https://docs.rs/tick/0.5.0/tick/?search=Stopwatch
  [__link27]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
  [__link28]: https://crates.io/crates/jiff
  [__link29]: https://crates.io/crates/chrono
- [__link3]: https://docs.rs/tick/0.4.0/tick/?search=SimpleClock
+ [__link3]: https://docs.rs/tick/0.5.0/tick/?search=SimpleClock
  [__link30]: https://crates.io/crates/time
- [__link31]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=ThreadAware
- [__link32]: https://docs.rs/tick/0.4.0/tick/?search=runtime::InactiveClock
- [__link33]: https://docs.rs/thread_aware/0.8.0/thread_aware/?search=ThreadAware::relocate
- [__link34]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link35]: https://docs.rs/tick/0.4.0/tick/?search=runtime::ClockDriver
- [__link36]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
- [__link37]: https://docs.rs/tick/0.4.0/tick/runtime/index.html
- [__link38]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link39]: https://docs.rs/tick/0.4.0/tick/?search=Clock::instant
+ [__link31]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=ThreadAware
+ [__link32]: https://docs.rs/tick/0.5.0/tick/?search=runtime::InactiveClock
+ [__link33]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=ThreadAware::relocate
+ [__link34]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link35]: https://docs.rs/tick/0.5.0/tick/?search=runtime::ClockDriver
+ [__link36]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl
+ [__link37]: https://docs.rs/tick/0.5.0/tick/runtime/index.html
+ [__link38]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link39]: https://docs.rs/tick/0.5.0/tick/?search=Clock::instant
  [__link4]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link40]: https://docs.rs/tick/0.4.0/tick/?search=Stopwatch
+ [__link40]: https://docs.rs/tick/0.5.0/tick/?search=Stopwatch
  [__link41]: https://tokio.rs/
- [__link42]: https://docs.rs/tick/0.4.0/tick/?search=Clock::new_tokio
- [__link43]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
+ [__link42]: https://docs.rs/tick/0.5.0/tick/?search=Clock::new_tokio
+ [__link43]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl
  [__link44]: https://serde.rs/
- [__link45]: https://docs.rs/tick/0.4.0/tick/fmt/index.html
- [__link46]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
- [__link5]: https://docs.rs/tick/0.4.0/tick/?search=Clock
- [__link6]: https://docs.rs/tick/0.4.0/tick/?search=ClockControl
- [__link7]: https://docs.rs/tick/0.4.0/tick/?search=Stopwatch
- [__link8]: https://docs.rs/tick/0.4.0/tick/?search=Delay
- [__link9]: https://docs.rs/tick/0.4.0/tick/?search=PeriodicTimer
+ [__link45]: https://docs.rs/tick/0.5.0/tick/fmt/index.html
+ [__link46]: https://doc.rust-lang.org/stable/std/?search=time::Instant::now
+ [__link47]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link48]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
+ [__link5]: https://docs.rs/tick/0.5.0/tick/?search=Clock
+ [__link6]: https://docs.rs/tick/0.5.0/tick/?search=ClockControl
+ [__link7]: https://docs.rs/tick/0.5.0/tick/?search=Stopwatch
+ [__link8]: https://docs.rs/tick/0.5.0/tick/?search=Delay
+ [__link9]: https://docs.rs/tick/0.5.0/tick/?search=PeriodicTimer

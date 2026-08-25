@@ -8,7 +8,15 @@ use ohno::AppError;
 /// These are workspace-internal, `publish = false` crates — tooling, test
 /// helpers, worked examples, and benchmarks — that expose no stable public API
 /// and whose code is not meaningful to mutation-test or external-type-check.
-pub const INTERNAL_CRATES: &[&str] = &["automation", "testing_aids", "rest_over_grpc_examples", "rest_over_grpc_tests"];
+pub const INTERNAL_CRATES: &[&str] = &[
+    "automation",
+    "benchmarking",
+    "observed_testing",
+    "rest_over_grpc_examples",
+    "rest_over_grpc_tests",
+    "testing_aids",
+    "thread_aware_benchmarking",
+];
 
 /// Run a cargo command and pipe the output to stdout/stderr
 pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppError> {

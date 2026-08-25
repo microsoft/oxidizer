@@ -1,0 +1,84 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== a self. prefix ========
+
+#[derive(Error)]
+#[display("value {}", self.path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix"
+}
+
+// ======== an unknown root ========
+
+#[derive(Error)]
+#[display("value {}", missing.len())]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+
+// ======== an argument with no placeholder ========
+
+#[derive(Error)]
+#[display("no placeholder", path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[display(...)]` argument is not consumed by any `{}` placeholder"
+}
+
+// ======== more placeholders than arguments ========
+
+#[derive(Error)]
+#[display("{} and {}", path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[display(...)]` template has more `{}` placeholders than arguments"
+}
+
+// ======== every fault in one template together ========
+
+#[derive(Error)]
+#[display("{missing} {} {}", self.path)]
+struct T {
+    path: String,
+    other: u32,
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "unknown field `missing` in `#[display(...)]`, available fields: `path`, `other`, `inner`"
+}
+::core::compile_error! {
+    "`#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix"
+}
+::core::compile_error! {
+    "`#[display(...)]` template has more `{}` placeholders than arguments"
+}

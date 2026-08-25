@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.6.1"
+version = "0.7.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -73,6 +73,7 @@ tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 ctor = { workspace = true }
 fastrand = { workspace = true }
@@ -89,7 +90,7 @@ opentelemetry-stdout = { workspace = true, default-features = false, features = 
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["metrics", "testing", "experimental_metrics_custom_reader"] }
 rstest = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }

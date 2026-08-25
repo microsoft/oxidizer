@@ -211,6 +211,58 @@ function Parse-ReleaseTokens {
     return $results.ToArray()
 }
 
+# BFS over a workspace baseline collecting every transitive dependent of a
+# cargo package (identified by its underscore-normalized cargo name), in the
+# two shapes the cascade needs:
+#
+#   PublishedFolders    - folders of the published dependents only. What joins
+#                         a release set.
+#   DependentCargoNames - cargo names of ALL dependents, published or not.
+#                         Used to decide whether a crate reaches the target
+#                         through some *other* package, which requires seeing
+#                         unpublished conduits too.
+#
+# The target itself appears in neither: it is seeded into the visited set so
+# the walk terminates, but it is not its own dependent.
+#
+# Operates against an in-memory baseline snapshot rather than disk, so it
+# produces deterministic answers even after disk state changes.
+function Get-TransitiveDependentClosureFromBaseline {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Baseline,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName
+    )
+
+    $toVisit = [System.Collections.Generic.Queue[string]]::new()
+    $toVisit.Enqueue($TargetCargoName)
+    $visited = [System.Collections.Generic.HashSet[string]]::new()
+    [void]$visited.Add($TargetCargoName)
+
+    $dependents = New-Object 'System.Collections.Generic.List[string]'
+    $dependentNames = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    while ($toVisit.Count -gt 0) {
+        $current = $toVisit.Dequeue()
+        foreach ($candidate in $Baseline) {
+            $candidateNorm = $candidate.Name.Replace('-', '_')
+            if ($visited.Contains($candidateNorm)) { continue }
+            if ($candidate.Deps -contains $current) {
+                [void]$visited.Add($candidateNorm)
+                [void]$dependentNames.Add($candidateNorm)
+                $toVisit.Enqueue($candidateNorm)
+                if ($candidate.Published) {
+                    $dependents.Add($candidate.Folder)
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        PublishedFolders    = @($dependents)
+        DependentCargoNames = $dependentNames
+    }
+}
+
 # BFS over a workspace baseline to find all published transitive dependents of
 # a cargo package (identified by its underscore-normalized cargo name). Mirrors
 # Get-AllTransitiveDependents but operates against an in-memory baseline
@@ -225,28 +277,8 @@ function Get-TransitivePublishedDependentsFromBaseline {
         [Parameter(Mandatory = $true)][string]$TargetCargoName
     )
 
-    $toVisit = [System.Collections.Generic.Queue[string]]::new()
-    $toVisit.Enqueue($TargetCargoName)
-    $visited = [System.Collections.Generic.HashSet[string]]::new()
-    [void]$visited.Add($TargetCargoName)
-
-    $dependents = New-Object 'System.Collections.Generic.List[string]'
-    while ($toVisit.Count -gt 0) {
-        $current = $toVisit.Dequeue()
-        foreach ($candidate in $Baseline) {
-            $candidateNorm = $candidate.Name.Replace('-', '_')
-            if ($visited.Contains($candidateNorm)) { continue }
-            if ($candidate.Deps -contains $current) {
-                [void]$visited.Add($candidateNorm)
-                $toVisit.Enqueue($candidateNorm)
-                if ($candidate.Published) {
-                    $dependents.Add($candidate.Folder)
-                }
-            }
-        }
-    }
-
-    return @($dependents)
+    return @((Get-TransitiveDependentClosureFromBaseline `
+                -Baseline $Baseline -TargetCargoName $TargetCargoName).PublishedFolders)
 }
 
 # Raises a resolved release-set entry's EffectiveChangeType to at least
@@ -292,8 +324,8 @@ function Update-EntryForRequiredChangeType {
                 throw "Cannot release '$($Entry.Folder)' as v$($Entry.RequestedTargetVersion): $RequirementLabel requires at least v$requiredVersion because of $RequirementDetail. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (consumers may break)."
             }
         } else {
-            # Pin still satisfies. Bump the tag so downstream cascade decisions
-            # are correct, but keep the pinned version.
+            # Pin still satisfies. Bump the tag to record the stronger
+            # requirement for diagnostics, but keep the pinned version.
             $Entry.EffectiveChangeType = $RequiredChangeType
         }
     } else {
@@ -303,6 +335,265 @@ function Update-EntryForRequiredChangeType {
             $Entry.AutoUpgraded = $true
         }
     }
+}
+
+# Records one cascade reason on an entry, keyed by target package name.
+# Re-recording the same target on a later strengthening pass overwrites the
+# prior reason in place instead of appending a duplicate, so the list stays
+# one-per-target however many fixpoint iterations run.
+#
+# The key is a package, not a graph edge. CascadeReasons answers "which
+# released packages forced this entry into the set, and did any of them force
+# it breaking?", and its entries arrive from two different relationships:
+#
+#   * MEMBERSHIP -- the target this entry was reached from during the
+#     Get-TransitivePublishedDependentsFromBaseline walk. That walk is
+#     transitive, so the target need not be a direct dependency; it can sit
+#     several crates away, possibly behind unpublished conduits.
+#   * EXPOSURE -- a target whose types this entry names in its own public API,
+#     recorded by Update-EntryForExposedDependency. Since re-exported types are
+#     attributed to their defining crate, this too can name a package the entry
+#     does not depend on directly.
+#
+# So a reason means "this package caused that release", not "this package is a
+# direct dependency". Changelog attribution needs the narrower direct-dependency
+# relation and must derive it from the dependency graph rather than reading it
+# out of this collection.
+function Set-CascadeReason {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry,
+        [Parameter(Mandatory = $true)][pscustomobject]$Reason
+    )
+
+    for ($i = 0; $i -lt $Entry.CascadeReasons.Count; $i++) {
+        if ($Entry.CascadeReasons[$i].Target -eq $Reason.Target) {
+            $Entry.CascadeReasons[$i] = $Reason
+            return
+        }
+    }
+
+    $Entry.CascadeReasons.Add($Reason)
+}
+
+# Returns $true when this entry ships an API incompatible with its previous
+# release -- whether or not the version number admits it.
+#
+# The version transition is the primary signal, derived from the versions
+# rather than from EffectiveChangeType so that 0.x semantics are applied by
+# the same rules that produced the number (under 0.x a minor bump is itself
+# breaking).
+#
+# PinHonoredAgainstCascade is the second signal, and it is not redundant. It is
+# set only when -Force honored an explicit pin BELOW a required version, which
+# writes a numerically compatible version over an API that the requirement says
+# is not. When the suppressed requirement was itself breaking, the break is
+# real: a crate pinned to 1.1.0 while exposing a dependency that went 2.0.0 is
+# still compiled against that 2.0.0, so its public API names different types
+# than 1.0.0 did. Under caret semantics a consumer of `1.0` upgrades into it
+# silently. Judging that entry by its version alone stops the cascade at
+# exactly the crate whose break was suppressed, letting dependents ship
+# compatible releases over it -- the silent SemVer break this cascade exists to
+# prevent.
+#
+# -Force means "write my number and warn me", not "the incompatibility is not
+# there". Propagation must follow the API, so it follows the unmet requirement
+# too.
+#
+# The suppressed requirement is tested with the same Test-IsBreakingChange used
+# for the planned transition, NOT compared against the literal 'breaking'. The
+# flag is set for any suppressed requirement, including a merely additive one,
+# and a forced non-breaking pin must not drag exposing dependents to a major
+# release. Routing it through the same predicate also keeps 0.x semantics
+# consistent between the two branches.
+#
+# Only the exposure fixpoint calls this, and it already skips proc-macro-only
+# sources -- so a 'breaking' tag arising from proc-macro manual review, which
+# need not imply any rustdoc-visible break, never reaches here.
+function Test-EntryPlansBreakingRelease {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry
+    )
+
+    if ($Entry.PinHonoredAgainstCascade -and
+        (Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $Entry.EffectiveChangeType)) {
+        return $true
+    }
+
+    $plannedChangeType = Get-ChangeTypeFromVersions `
+        -oldVersion $Entry.CurrentVersion `
+        -newVersion $Entry.EffectiveTargetVersion
+
+    return Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $plannedChangeType
+}
+
+# Returns $true when a package reaches $TargetCargoName through some package
+# other than the target itself -- that is, when a path of length two or more
+# exists, independently of any direct edge.
+#
+# The cascade needs this separately from plain reachability because the two
+# exposure predicates accept different allowlist roots, and which roots are
+# legitimate depends on how the crate reaches the target rather than on whether
+# a direct edge happens to exist. A crate holding both kinds of path may
+# legitimately name the target's own crate root, earned on the indirect path,
+# even though the direct edge renames the target and so cannot supply it.
+#
+# $DependentCargoNames is the closure of everything that transitively depends
+# on the target, so a dependency listed there is a package the target's types
+# can travel through.
+function Test-PackageReachesTargetIndirectly {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName,
+        # AllowEmptyCollection: a target with no dependents at all yields an
+        # empty set, which PowerShell would otherwise reject as a missing
+        # mandatory argument.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$DependentCargoNames
+    )
+
+    foreach ($dep in @($Dependent.Deps)) {
+        # Belt and braces: the target seeds the BFS visited set, so it is never
+        # added to its own dependent closure and the Contains test below would
+        # reject it anyway. Skipping it explicitly keeps "some package other
+        # than the target" true by construction rather than by a property of a
+        # different function.
+        if ($dep -eq $TargetCargoName) { continue }
+        if ($DependentCargoNames.Contains($dep)) { return $true }
+    }
+
+    return $false
+}
+
+# Returns the baseline packages that must inherit a breaking bump from
+# $TargetPackage: those already in the release set that reach it and name its
+# types in their own public API.
+#
+# Two kinds of edge qualify, and they are tested independently rather than as
+# alternatives, because one crate can hold both:
+#
+#   * A DIRECT dependency that may expose the target. "May" is the operative
+#     word: an absent or malformed allowlist fails closed here, because an
+#     unknown must not ship a break as compatible.
+#   * An INDIRECT path whose allowlist explicitly names the target.
+#     cargo-check-external-types attributes a re-exported type to its defining
+#     crate, so a crate reaching `a::T` through `b` allowlists `a` while
+#     depending only on `b`. Requiring a direct edge missed these entirely.
+#     The root matched here is the target's own crate root (its [lib] name),
+#     not a rename alias: renames live on edges, and an indirect path crosses
+#     no edge to the target that could rename it.
+#     This branch demands positive evidence rather than failing closed, so it
+#     cannot drag in transitive dependents that merely lack metadata -- those
+#     are already covered by their own direct edges, walked up by the fixpoint.
+#
+# Testing only one of the two would lose a mixed topology: a crate that imports
+# the target directly under a rename *and* also reaches it through a conduit
+# that re-exports its types. The direct predicate deliberately refuses the
+# target's global crate root on a renamed edge -- the rename shadows it, so an
+# allowlist entry carrying that root cannot have been earned there and would
+# be a false match. But the indirect path can earn exactly that root, so
+# judging such a crate solely on its direct edge reports "not exposed" and
+# leaves it on the patch floor while its API is the target's types.
+#
+# The indirect test therefore keys off a path that exists independently of the
+# direct edge, not merely off reachability: plain reachability counts the
+# direct edge itself, which would readmit the renamed root the direct
+# predicate just rejected and reintroduce that false match.
+#
+# Proc-macro-only dependents are excluded because they have no rustdoc API to
+# expose anything through; they reach the release set via the manual-review
+# queue instead.
+function Get-PublishedDependentsExposingTarget {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$TargetPackage,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        # Read-only: used only to test release-set membership. Typed as
+        # IDictionary rather than [hashtable] because the caller's dictionary is
+        # [ordered], which is not a Hashtable -- PowerShell would satisfy a
+        # [hashtable] annotation by silently substituting a converted copy.
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Resolved,
+        # Optional memo of target cargo name -> dependent closure. The baseline
+        # is fixed for the duration of a resolve, so the BFS answer is stable;
+        # the fixpoint would otherwise recompute it for every breaking source on
+        # every pass.
+        [System.Collections.IDictionary]$TransitiveDependentCache
+    )
+
+    # Cargo dependency names use underscores; package names may use hyphens.
+    $targetCargoName = $TargetPackage.Name.Replace('-', '_')
+
+    if ($null -ne $TransitiveDependentCache -and $TransitiveDependentCache.Contains($targetCargoName)) {
+        $closure = $TransitiveDependentCache[$targetCargoName]
+    } else {
+        $closure = Get-TransitiveDependentClosureFromBaseline `
+            -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoName
+        if ($null -ne $TransitiveDependentCache) {
+            $TransitiveDependentCache[$targetCargoName] = $closure
+        }
+    }
+
+    $dependentNames = $closure.DependentCargoNames
+
+    return @($WorkspaceBaseline | Where-Object {
+            $_.Published -and
+            -not $_.IsProcMacroOnly -and
+            $Resolved.Contains($_.Folder) -and
+            (Test-PackageExposesTargetOnAnyEdge -Dependent $_ -TargetPackage $TargetPackage `
+                -TargetCargoName $targetCargoName -DependentCargoNames $dependentNames)
+        })
+}
+
+# Returns $true when either qualifying exposure relationship holds between a
+# candidate and the target. Split out of Get-PublishedDependentsExposingTarget's
+# filter so each edge is evaluated on its own terms, and so neither nested
+# pipeline shadows the enclosing $_.
+function Test-PackageExposesTargetOnAnyEdge {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Dependent,
+        [Parameter(Mandatory = $true)][pscustomobject]$TargetPackage,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName,
+        # AllowEmptyCollection: see Test-PackageReachesTargetIndirectly.
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.HashSet[string]]$DependentCargoNames
+    )
+
+    if (($Dependent.Deps -contains $TargetCargoName) -and
+        (Test-PackageExposesTarget -Dependent $Dependent -TargetPackageName $TargetPackage.Name)) {
+        return $true
+    }
+
+    if ((Test-PackageReachesTargetIndirectly -Dependent $Dependent `
+                -TargetCargoName $TargetCargoName -DependentCargoNames $DependentCargoNames) -and
+        (Test-PackageAllowlistNamesTarget -Dependent $Dependent -TargetPackageName $TargetPackage.Name `
+                -TargetCrateRoot $TargetPackage.CrateRoot)) {
+        return $true
+    }
+
+    return $false
+}
+
+# Raises one dependent entry to 'breaking' because it exposes an incompatibly
+# versioned dependency, records the reason, and returns $true when that actually
+# strengthened the entry. The return value is what drives fixpoint termination:
+# once a pass strengthens nothing, the cascade is complete.
+function Update-EntryForExposedDependency {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName,
+        [switch]$Force
+    )
+
+    $previousChangeType    = $Entry.EffectiveChangeType
+    $previousTargetVersion = $Entry.EffectiveTargetVersion
+
+    Update-EntryForRequiredChangeType -Entry $Entry -RequiredChangeType 'breaking' `
+        -RequirementLabel 'exposed-dependency cascade' `
+        -RequirementDetail "this crate's own public API naming types from the incompatible planned version of '$TargetPackageName'" `
+        -Force:$Force
+
+    Set-CascadeReason -Entry $Entry -Reason ([pscustomobject]@{ Target = $TargetPackageName; Breaking = $true })
+
+    return ($Entry.EffectiveChangeType -ne $previousChangeType -or
+        $Entry.EffectiveTargetVersion -ne $previousTargetVersion)
 }
 
 # Turns the parsed token entries from Parse-ReleaseTokens into a *resolved
@@ -320,11 +611,13 @@ function Update-EntryForRequiredChangeType {
 #   -Force            : if set, an explicit version pin that numerically
 #                       undershoots the cascade-required version is honored
 #                       verbatim instead of throwing. EffectiveChangeType is
-#                       still upgraded so dependent cascade decisions are
-#                       correct; PinHonoredAgainstCascade is set so callers
-#                       (and Show-ReleasePlan) can warn the user. -Force does
-#                       NOT relax the always-fatal "pin is not strictly
-#                       greater than the current on-disk version" check.
+#                       still upgraded to record the stronger unmet requirement;
+#                       PinHonoredAgainstCascade lets callers warn the user and
+#                       keeps the exposure cascade running past the pin, since
+#                       the pin lowers the version number rather than the
+#                       incompatibility of the API being shipped.
+#                       -Force does NOT relax the always-fatal "pin is not
+#                       strictly greater than the current on-disk version" check.
 #
 # Returns: an array of pscustomobject entries, one per resolved package:
 #
@@ -341,7 +634,7 @@ function Update-EntryForRequiredChangeType {
 #     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
 #     IsProcMacroOnly           = $true|$false   # cargo metadata target classification
 #     RequiresManualSemverReview = $true|$false  # proc-macro API cannot be checked automatically
-#     CascadeReasons            = [List<{Target,Breaking}>]                  # one per (target → dep) edge
+#     CascadeReasons            = [List<{Target,Breaking}>]                  # one per target package cause
 #     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
 #
@@ -359,25 +652,34 @@ function Update-EntryForRequiredChangeType {
 #          auto-upgrade silently and set AutoUpgraded=$true. For user-source
 #          entries with an explicit version pin, throw if the pin would
 #          numerically undershoot the cascade-required version (or, with
-#          -Force, honor the pin verbatim, upgrade the change-type tag, and
-#          set PinHonoredAgainstCascade=$true); otherwise honour the pin and
-#          bump only the change-type tag.
+#          -Force, honor the pin verbatim, record the unmet requirement in the
+#          change-type tag, and set PinHonoredAgainstCascade=$true); otherwise
+#          honour the pin and bump only the diagnostic change-type tag.
 #        - or create a new cascade-source entry.
 #      Ordinary library dependents use their own cargo-semver-checks result,
-#      floored at patch. Proc-macro-only dependents use a provisional patch floor
-#      and are explicitly classified in the interactive review.
-#      Cascade reasons are recorded per (target → dep) edge with dedup by
-#      target name (re-encountering an edge for an already-strengthened target
-#      overwrites the prior reason in place).
+#      floored at patch. A second pass raises a dependent to breaking when it
+#      exposes a dependency that ships an incompatible API -- an incompatible
+#      planned version transition, or a forced pin that suppressed one.
+#      That pass considers direct dependency edges (failing closed on absent or
+#      malformed allowlist metadata) plus indirect edges to a transitive
+#      dependency whose types the dependent explicitly allowlists, which is how
+#      a re-exported type -- attributed by cargo-check-external-types to its
+#      defining crate -- is caught. The pass repeats to a fixpoint so exposure
+#      chains cascade.
+#      Proc-macro-only dependents use a provisional patch floor and are explicitly
+#      classified in the interactive review.
+#      Cascade reasons are package-level release causes, recorded once per
+#      target package name for membership or exposure strengthening. They do
+#      not assert a direct dependency edge; callers needing edges must query
+#      the dependency graph.
 #
-# Note: cascade is one-level. The set of dependents reachable from a user
-# target is the transitive published dependents BFS. For an ordinary library,
-# the dependent's cascade-applied change type is derived from cargo-semver-checks
-# analysing its OWN current working-tree public API vs its previous version-bump
-# commit, floored at patch because it must re-release to pick up the dependency
-# version. A proc-macro-only dependent starts at that mechanical patch floor and
-# is then classified by the user in the standard review dialog. This replaces
-# the former allowed_external_types exposure heuristic.
+# The release-set membership walk starts from user targets and includes every
+# transitive published dependent. Severity is then resolved from two independent
+# signals: cargo-semver-checks analyses each crate's own API diff, while
+# allowed_external_types detects incompatible version changes in dependencies
+# exposed through otherwise-unchanged public signatures. A proc-macro-only
+# dependent starts at the mechanical patch floor and is then classified by the
+# user in the standard review dialog.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
@@ -456,12 +758,30 @@ function Resolve-ReleaseSet {
         }
     }
 
-    # Snapshot the user-source folder names before cascade adds cascade-source
-    # entries — cascade-source entries are not themselves iterated for further
-    # cascades (one-level cascade semantics).
-    $userFolders = @($resolved.Keys) | ForEach-Object { $_ }
+    # Snapshot the folders requested for release before cascade adds pulled-in
+    # entries: these are the origins the cascade expands from, and everything
+    # added later is derived from them. Must stay a snapshot -- the loops below
+    # add to $resolved, and $resolved.Keys is a live view that throws if
+    # enumerated during mutation.
+    $requestedFolders = @($resolved.Keys) | ForEach-Object { $_ }
 
-    foreach ($targetFolder in $userFolders) {
+    # Self-floor requested folders before dependency exposure is evaluated. A
+    # crate the caller requested as patch may itself require a breaking release,
+    # and that stronger planned transition must cascade to consumers exposing
+    # its types.
+    foreach ($folder in $requestedFolders) {
+        $entry = $resolved[$folder]
+        if ($entry.IsProcMacroOnly) { continue }
+        $required = & $GetRequiredChangeType $entry.Folder $entry.Name
+        if ($required -eq 'manual') {
+            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+        }
+        if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
+        Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
+            -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
+    }
+
+    foreach ($targetFolder in $requestedFolders) {
         $targetEntry = $resolved[$targetFolder]
         $targetPkg   = $baselineByFolder[$targetFolder]
 
@@ -497,20 +817,11 @@ function Resolve-ReleaseSet {
                 $existing = $resolved[$depFolder]
 
                 # Dedup cascade reasons by target name (re-encountering the
-                # same edge after a strengthening pass overwrites the prior
-                # reason in place rather than adding a duplicate).
-                $existingReasonIdx = -1
-                for ($i = 0; $i -lt $existing.CascadeReasons.Count; $i++) {
-                    if ($existing.CascadeReasons[$i].Target -eq $cascadeReason.Target) {
-                        $existingReasonIdx = $i
-                        break
-                    }
-                }
-                if ($existingReasonIdx -ge 0) {
-                    $existing.CascadeReasons[$existingReasonIdx] = $cascadeReason
-                } else {
-                    $existing.CascadeReasons.Add($cascadeReason)
-                }
+                # same target after a strengthening pass overwrites the prior
+                # reason in place rather than adding a duplicate). This target
+                # was reached transitively, so it is not necessarily a direct
+                # dependency of $depFolder -- see Set-CascadeReason.
+                Set-CascadeReason -Entry $existing -Reason $cascadeReason
 
                 $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
                 Update-EntryForRequiredChangeType -Entry $existing -RequiredChangeType $dependentChangeType `
@@ -538,22 +849,38 @@ function Resolve-ReleaseSet {
         }
     }
 
-    # Self-floor: raise each USER-source entry's change type to at least what
-    # cargo-semver-checks requires for its OWN public API vs its previous
-    # version-bump commit. The cascade above already floored dependents; this catches
-    # user-source ROOTS that nothing cascades into (e.g. releasing a single leaf
-    # crate whose own API broke). Author intent is never downgraded — only raised
-    # when the real API diff demands a stronger change type.
-    foreach ($folder in $userFolders) {
-        $entry    = $resolved[$folder]
-        if ($entry.IsProcMacroOnly) { continue }
-        $required = & $GetRequiredChangeType $entry.Folder $entry.Name
-        if ($required -eq 'manual') {
-            throw "Internal error: '$($entry.Name)' requires manual SemVer review but cargo metadata did not classify it as proc-macro-only."
+    # cargo-semver-checks compares one crate's rustdoc API and cannot identify
+    # that an unchanged signature now names a type from an incompatible version
+    # of an external crate. Propagate that condition over dependency edges --
+    # direct, plus indirect edges where a re-exported type is allowlisted under
+    # its defining crate -- until no dependent is strengthened. Each source is
+    # classified by Test-EntryPlansBreakingRelease, which asks whether the entry
+    # ships an incompatible API: normally the version it will actually write,
+    # and additionally a -Force pin that suppressed a breaking requirement,
+    # since such a pin lowers the version number without removing the break.
+    $transitiveDependentCache = @{}
+    $exposureChanged = $true
+    while ($exposureChanged) {
+        $exposureChanged = $false
+
+        foreach ($sourceEntry in @($resolved.Values)) {
+            $sourcePkg = $baselineByFolder[$sourceEntry.Folder]
+            if ($null -eq $sourcePkg -or $sourcePkg.IsProcMacroOnly) { continue }
+            if (-not (Test-EntryPlansBreakingRelease -Entry $sourceEntry)) { continue }
+
+            $dependentPkgs = Get-PublishedDependentsExposingTarget -TargetPackage $sourcePkg `
+                -WorkspaceBaseline $WorkspaceBaseline -Resolved $resolved `
+                -TransitiveDependentCache $transitiveDependentCache
+
+            foreach ($dependentPkg in $dependentPkgs) {
+                $strengthened = Update-EntryForExposedDependency `
+                    -Entry $resolved[$dependentPkg.Folder] `
+                    -TargetPackageName $sourcePkg.Name `
+                    -Force:$Force
+
+                if ($strengthened) { $exposureChanged = $true }
+            }
         }
-        if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
-        Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
-            -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
     }
 
     return @($resolved.Values)
@@ -600,6 +927,9 @@ function Get-ManualSemverReviewFindings {
             PackageName                = $entry.Name
             CurrentVersion             = $entry.CurrentVersion
             InReleaseSet               = $true
+            PlannedCurrentVersion      = $entry.CurrentVersion
+            EffectiveChangeType        = $entry.EffectiveChangeType
+            EffectiveTargetVersion     = $entry.EffectiveTargetVersion
             ChangedFileCount           = $changedFileCount
             DependencyChains           = @()
             WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $entry.Folder
@@ -656,6 +986,9 @@ function Get-ManualSemverReviewFindings {
                 PackageName                = $dependentEntry.Name
                 CurrentVersion             = $dependentEntry.CurrentVersion
                 InReleaseSet               = $true
+                PlannedCurrentVersion      = $dependentEntry.CurrentVersion
+                EffectiveChangeType        = $dependentEntry.EffectiveChangeType
+                EffectiveTargetVersion     = $dependentEntry.EffectiveTargetVersion
                 ChangedFileCount           = $changedFileCount
                 DependencyChains           = @()
                 WorkspaceDependencyChains  = Get-InWorkspaceDependencyChains -Packages $WorkspaceBaseline -TargetFolder $dependentFolder
@@ -1299,7 +1632,29 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
     if ($inReleaseSet) {
-        [void]$sb.AppendLine('  2. Keep the release level already in the plan')
+        $plannedCurrentVersion = if ($null -ne $Finding.PSObject.Properties['PlannedCurrentVersion']) {
+            [string]$Finding.PlannedCurrentVersion
+        } else {
+            ''
+        }
+        $plannedChangeType = if ($null -ne $Finding.PSObject.Properties['EffectiveChangeType']) {
+            [string]$Finding.EffectiveChangeType
+        } else {
+            ''
+        }
+        $plannedTargetVersion = if ($null -ne $Finding.PSObject.Properties['EffectiveTargetVersion']) {
+            [string]$Finding.EffectiveTargetVersion
+        } else {
+            ''
+        }
+        $plannedHint = if (-not [string]::IsNullOrWhiteSpace($plannedChangeType) -and
+            -not [string]::IsNullOrWhiteSpace($plannedCurrentVersion) -and
+            -not [string]::IsNullOrWhiteSpace($plannedTargetVersion)) {
+            " ($($plannedChangeType): $plannedCurrentVersion -> $plannedTargetVersion)"
+        } else {
+            ''
+        }
+        [void]$sb.AppendLine("  2. Keep the release level already in the plan$plannedHint")
     } else {
         [void]$sb.AppendLine('  2. No material changes - release only if another package requires it')
     }
@@ -2392,10 +2747,14 @@ function Invoke-ReleasePackagesMain {
     # the targeted flow.
     $planReviewMode = if ($Mode -eq 'targeted') { 'targeted' } else { 'all-changed' }
 
-    # Classifier passed to the planner: decides every change type in the plan
-    # (user-source and cascade) from each crate's real API diff vs its previous
-    # version-bump commit in git history — no allowed_external_types heuristic,
-    # no registry, no fallback. $script:DefaultSemverClassifier is a module-scope
+    # Classifier passed to the planner: decides each crate's OWN change-type
+    # floor (user-source and cascade alike) from its real API diff vs its
+    # previous version-bump commit in git history — no registry, no fallback.
+    # This is only half the verdict: Resolve-ReleaseSet's exposed-dependency
+    # cascade can raise an entry above this floor, using
+    # allowed_external_types to decide exposure (a dependency version bump
+    # changes type identity without changing any rustdoc, so no API diff can
+    # surface it). $script:DefaultSemverClassifier is a module-scope
     # scriptblock (defined below Resolve-ReleaseSet) so it resolves
     # Get-CrateRequiredChangeType and $script:ReleaseRepoRoot in the module
     # session state; that also lets the test suites Mock Get-CrateRequiredChangeType.

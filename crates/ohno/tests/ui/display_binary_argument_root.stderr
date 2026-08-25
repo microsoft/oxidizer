@@ -1,0 +1,5 @@
+error: unknown field `cnt` in `#[display(...)]`, available fields: `count`
+ --> tests/ui/display_binary_argument_root.rs:9:22
+  |
+9 | #[display("bad: {}", cnt * 2)]
+  |                      ^^^

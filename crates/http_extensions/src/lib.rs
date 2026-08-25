@@ -255,4 +255,5 @@ pub use fake_handler::FakeHandler;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod testing;
 
+#[cfg(any(doc, test))]
 pub mod _documentation;

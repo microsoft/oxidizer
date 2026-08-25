@@ -86,3 +86,51 @@ fn test_from_attribute_with_custom_error_field() {
     assert_error_message!(custom_err, "timeout");
     assert!(custom_err.metadata.is_empty());
 }
+#[test]
+fn test_from_attribute_generic_source_type() {
+    #[derive(Debug)]
+    struct PairError<A, B>(A, B);
+
+    impl<A: std::fmt::Debug, B: std::fmt::Debug> std::fmt::Display for PairError<A, B> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "pair error {:?} and {:?}", self.0, self.1)
+        }
+    }
+
+    impl<A: std::fmt::Debug, B: std::fmt::Debug> std::error::Error for PairError<A, B> {}
+
+    // The comma inside `<...>` separates generic arguments, not `#[from(...)]` entries.
+    #[derive(Error, Default)]
+    #[from(PairError<u32, bool>)]
+    struct GenericSourceError {
+        inner: OhnoCore,
+        note: String,
+    }
+
+    let pair_err = PairError(7u32, true);
+    let generic_err: GenericSourceError = pair_err.into();
+
+    assert_error_message!(generic_err, "pair error 7 and true");
+    assert!(generic_err.note.is_empty());
+}
+
+#[test]
+fn test_from_attribute_initializer_reaches_an_outer_item() {
+    // The locals the derive binds initializers to must not shadow an item a later initializer
+    // names. `__ohno_field_0` is the name the first local would take.
+    #[expect(non_upper_case_globals, reason = "the name is what the test is about")]
+    const __ohno_field_0: u32 = 99;
+
+    #[derive(Error)]
+    #[from(std::io::Error(first: 1, second: __ohno_field_0))]
+    struct ShadowError {
+        first: u32,
+        second: u32,
+        inner: OhnoCore,
+    }
+
+    let shadow_err: ShadowError = std::io::Error::other("shadow").into();
+
+    assert_eq!(shadow_err.first, 1);
+    assert_eq!(shadow_err.second, 99);
+}

@@ -1,0 +1,5 @@
+error: `#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly
+  --> tests/ui/ohno_error_marked_field.rs:13:5
+   |
+13 |     #[error]
+   |     ^^^^^^^^

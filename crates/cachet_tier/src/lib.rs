@@ -23,7 +23,7 @@
 //! use std::collections::HashMap;
 //! use std::sync::RwLock;
 //!
-//! use cachet_tier::{CacheEntry, CacheTier, Error};
+//! use cachet_tier::{CacheEntry, CacheTier, Error, InsertOutcome};
 //!
 //! struct SimpleCache<K, V>(RwLock<HashMap<K, CacheEntry<V>>>);
 //!
@@ -36,9 +36,9 @@
 //!         Ok(self.0.read().unwrap().get(key).cloned())
 //!     }
 //!
-//!     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<(), Error> {
+//!     async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
 //!         self.0.write().unwrap().insert(key.clone(), entry);
-//!         Ok(())
+//!         Ok(InsertOutcome::Accepted)
 //!     }
 //!
 //!     async fn invalidate(&self, key: &K) -> Result<(), Error> {
@@ -76,4 +76,4 @@ pub use error::{Error, Result, SizeError, SizeErrorKind};
 #[doc(inline)]
 pub use testing::{CacheOp, MockCache};
 #[doc(inline)]
-pub use tier::CacheTier;
+pub use tier::{CacheTier, InsertOutcome};

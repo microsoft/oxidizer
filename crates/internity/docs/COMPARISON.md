@@ -8,11 +8,12 @@ treated as a distinct row.
 
 > **Sources.** Design/handle/threading/limit facts are drawn from each crate's
 > public API and source (and, for `internity`, its own `src/`). Performance numbers
-> come from `internity`'s in-repo head-to-head harness (`docs/PERF.md`,
-> `cargo bench --bench internity_compare` / `--bench internity_compare_cg`) over a corpus of ≈6000
-> identifier-like strings on one dev box (`--release`, fat LTO). Treat timings as
-> *relative signal on this workload*, not universal constants — interner ranking
-> shifts with string length, corpus size, hit/miss ratio, and thread count.
+> come from `internity`'s in-repo head-to-head harness ([`docs/PERF.md`](PERF.md),
+> `cargo bench --bench internity_compare`) over a corpus of ≈6000
+> identifier-like strings on one dev box (`--release`, fat LTO). All timings are
+> wall-clock medians measured by Criterion; treat them as *relative signal on this
+> workload*, not universal constants — interner ranking shifts with string length,
+> corpus size, hit/miss ratio, and thread count.
 
 ---
 
@@ -22,7 +23,7 @@ treated as a distinct row.
 |---|---|---|---|:--:|---|---|---|:--:|:--:|---|
 | **internity** `LocalLexicon` (single-thread) | `Sym(NonZeroU32)` = dense 1-based index | **4 B** | ✅ 4 B | ✅ | One contiguous `String` buffer + `Vec<u32>` CSR offsets (start/end, branch-free resolve); `hashbrown::HashTable<Sym>` dedup (store handle, probe by hash) — flat & cache-coherent, à la `string-interner` `StringBackend` | single-thread (`&mut` intern, `&self` resolve) | leak-until-drop | contained (`storage`) | ✅ | `str` |
 | **internity** `ThreadedLexicon` (concurrent) | `Sym(NonZeroU32)` = `[shard:6\|local:26]` | **4 B** | ✅ 4 B | ✅ | 64 `align(128)` shards, each `RwLock<{ offsets:Vec<u32>, bytes:Vec<u8>, HashTable<Sym> }>`; upgradable-read hit path (cross-shard intern independent, same-shard intern serialized); **fill-then-freeze** (no live resolve); cheap `Clone` `Arc` handle | concurrent (`&self` intern, per-shard `RwLock`) | leak-until-drop | contained (`storage`) | ❌ (`std`) | `str` |
-| **internity** `Reader` (frozen) | `Sym(NonZeroU32)` (same) | **4 B** | ✅ 4 B | ✅ | `freeze()` → flat `(offsets:[u32], bytes:[u8])` blob (CSR start/end, branch-free) — one blob for `LocalLexicon`, per-shard for `ThreadedLexicon`; `Reader` is a **trait**, `freeze` returns `impl Reader` (static dispatch, concrete types hidden) | immutable, **lock-free + atomic-free** resolve | leak-until-drop | contained (`storage`) | ✅ flat / ❌ sharded | `str` |
+| **internity** `Reader` (frozen) | `Sym(NonZeroU32)` (same) | **4 B** | ✅ 4 B | ✅ | `freeze()` → flat `(offsets:[u32], bytes:[u8])` blob (CSR start/end, branch-free) — one blob for `LocalLexicon`, per-shard for `ThreadedLexicon`; `Reader` is a sealed **trait**, `freeze` returns the concrete `LocalReader` / `ThreadedReader` (static dispatch, nameable and storable by value) | immutable, **lock-free + atomic-free** resolve | leak-until-drop | contained (`storage`) | ✅ flat / ❌ sharded | `str` |
 | **lasso** `Rodeo` | `Spur`=`NonZeroU32` (Mini/Micro/Large: 1–8 B) | 4 B (1–8 B) | ✅ | ✅ | Doubling bump-arena buckets; hashbrown raw-entry (store key, probe by hash) | single-thread (`&mut`) | leak-until-drop | yes (`Key` trait) | ✅ | `str` |
 | **lasso** `ThreadedRodeo` | `Spur` (as above) | 4 B | ✅ | ✅ | **Two `DashMap`s** (str→key, key→str) + lock-free CAS arena | fully concurrent (`&self`) | leak-until-drop | yes | ✅ | `str` |
 | **lasso** `RodeoReader` | `Spur` | 4 B | ✅ | ✅ | Frozen: drops the str→key map, keeps both directions read-only | concurrent read (`Sync`) | frozen | yes | ✅ | `str` |
@@ -80,7 +81,7 @@ re-hash (and downstream maps can identity-hash the handle).
 
 **Cached-hash takeaway:** only **ustr** and **string_cache** persist the string's
 hash in the handle/entry, which is why their repeated-lookup / map-key paths are so
-cheap (ustr's `resolve` is ~4 instructions; its maps skip re-hashing entirely).
+cheap (ustr's `resolve` is a handful of instructions; its maps skip re-hashing entirely).
 Index-handle interners (internity, lasso, string-interner, symbol_table) recompute
 the hash on each `intern` probe and on table growth.
 
@@ -99,73 +100,36 @@ is the true wall-clock of the parallel phase (including scheduling latency), not
 the maximum individual worker time. The **full matrix** (all thread counts, all
 crates) lives in [`docs/PERF.md`](PERF.md); highlights below.
 
-### Single-threaded (one core) — wall-clock, ⭐ = fastest
+### Wall-clock timings
 
-| Op | internity | lasso | string-interner | symbol_table | ustr | string_cache |
-|---|---|---|---|---|---|---|
-| **insert** | **259 µs** ⭐ | 623 µs | 324 µs | 505 µs | —¹ | —¹ |
-| **reuse** | **110 µs** ⭐ | 288 µs | 137 µs | 174 µs | 312 µs | 279 µs |
-| **lookup** | 12.0 µs live / 11.4 µs frozen | 9.9 µs | 14.5 µs | 49.7 µs | **7.5 µs** ⭐ | 10.2 µs |
-
-¹ Global/cache-backed rows do not have a repeatable single-threaded Criterion
-`insert` timing in this suite; their single-insert cost is captured in the
-instruction microprobe below.
-
-**Instruction counts (gungraun/Callgrind, deterministic)** — a **standalone**
-single-operation microprobe against a table of 1000 filler entries plus the fixed
-key (1001 preloaded; fixed-seed hashers for `lasso`/`string-interner`). Its setup — occupancy, key distribution, hashers,
-and one measured op — differs from the ≈6000-operation wall-clock loop above, so
-these counts are **not** a per-row explanation of the timings; read them only as a
-separate, reproducible complexity signal:
-
-| Op | internity | lasso | string-interner | symbol_table | ustr | string_cache |
-|---|---|---|---|---|---|---|
-| insert | 220 | 272 | 198 | 490 | 164 | 654 |
-| reuse | 150 | 172 | 178 | 441 | 130 | 292 |
-| lookup | 30 live / 26 frozen | 31 | 40 | 510 | 4 | 20 |
-
-### Multi-threaded — wall-clock (total work = threads × corpus), ⭐ = fastest
-
-| Op / threads | internity | lasso | symbol_table | ustr | string_cache |
-|---|---|---|---|---|---|
-| **insert** ×2 | **1.44 ms** ⭐ | 2.60 ms | 1.96 ms | — | — |
-| **insert** ×4 | 2.03 ms | 2.38 ms | **1.77 ms** ⭐ | — | — |
-| **insert** ×8 | 2.23 ms | 2.42 ms | **1.96 ms** ⭐ | — | — |
-| **reuse** ×4 | 1.35 ms | 1.36 ms | **1.27 ms** ⭐ | 1.47 ms | 1.86 ms |
-| **reuse** ×8 | 2.68 ms | **2.17 ms** ⭐ | 2.86 ms | 3.08 ms | 2.76 ms |
-| **lookup** ×4 | 377 µs | **376 µs** ⭐ | 631 µs | 380 µs | 399 µs |
-| **lookup** ×8 | **701 µs** ⭐ | 734 µs | 1.19 ms | 749 µs | 874 µs |
-
-For insert/reuse, `lasso` is `ThreadedRodeo`; for lookup, `lasso` is the frozen
-`RodeoResolver`, matching internity's frozen `Reader` comparison.
+All wall-clock tables — the single-threaded per-operation comparison and the
+concurrent scaling tables at 1/2/4/8 threads — live in
+[`docs/PERF.md`](PERF.md) and are not duplicated here, so they cannot drift out of
+sync with it. Global/cache-backed rows (`ustr`, `string_cache`) keep their table
+alive for the whole process and therefore have no repeatable first-time
+single-threaded `insert` timing. For insert/reuse, `lasso` is `ThreadedRodeo`; for
+lookup, `lasso` is the frozen `RodeoResolver`, matching internity's frozen
+`Reader` comparison.
 
 **Read of the numbers:**
-- **Single-threaded insert:** internity is the fastest owned interner on wall clock
-  in this run (259 µs), ahead of `string-interner` (324 µs) and well clear of `lasso`
-  and `symbol_table`. The separate instruction microprobe puts internity at a
-  ~220-instruction insert path, close to `string-interner` and far below `symbol_table`.
-- **Single-threaded reuse:** internity leads on retained-hit dedupe (110 µs vs
-  `string-interner`'s 137 µs). In the standalone instruction microprobe internity uses
-  fewer instructions than the owned competitors (150 vs 172–441), while the
-  process-global `ustr` has the lowest instruction count yet slower corpus-level wall
+- **Single-threaded insert:** internity is the fastest owned interner on wall clock,
+  ahead of `string-interner` and well clear of `lasso` and `symbol_table`.
+- **Single-threaded reuse:** internity leads on retained-hit dedupe. The
+  process-global `ustr` does less work per hit but is slower at corpus-level wall
   time on this workload.
-- **Single-threaded lookup:** flat-array designs are all cheap. internity's live
-  resolve is **12.0 µs** and its frozen `Reader` **11.4 µs** on wall clock; `lasso`,
-  `ustr`, and `string_cache` edge it here. In the separate instruction microprobe the
-  frozen path is **26 instructions** vs **30** live — fewer than `lasso` — but the two
-  datasets are not directly comparable. Recommended pattern: intern → `freeze` → resolve.
-- **Multi-threaded insert:** `ThreadedLexicon` leads at 2 threads, while
-  `symbol_table` is fastest at 4–8 threads in this run. internity still stays ahead
-  of `lasso::ThreadedRodeo` at every measured insert thread count.
-- **Multi-threaded reuse:** internity is neck-and-neck with `lasso::ThreadedRodeo`
-  and `symbol_table` through 4 threads, but `lasso` pulls ahead at 8 threads on
-  retained hits.
+- **Single-threaded lookup:** flat-array designs are all cheap, and internity's
+  frozen `Reader` resolves faster than its live interner; `lasso` and `ustr` edge
+  it here. Recommended pattern: intern → `freeze` → resolve.
+- **Multi-threaded insert:** `ThreadedLexicon` and `symbol_table` trade the lead,
+  and internity stays ahead of `lasso::ThreadedRodeo` at every measured insert
+  thread count.
+- **Multi-threaded reuse:** internity is competitive through 4 threads, but
+  `lasso::ThreadedRodeo` pulls ahead at 8 threads on retained hits.
 - **Multi-threaded lookup:** compared frozen-to-frozen, internity's frozen sharded
-  `Reader` is level with `lasso::RodeoResolver` at 4 threads and fastest at 8
-  threads, staying far ahead of `symbol_table`. At this granularity the
-  coordinator-owned interval is dominated by cross-thread scheduling, so the crates
-  with a compact frozen reader (internity, `lasso`, `ustr`) cluster within tens of
-  microseconds.
+  `Reader` is level with `lasso::RodeoResolver` and stays far ahead of
+  `symbol_table`. At this granularity the coordinator-owned interval is dominated
+  by cross-thread scheduling, so the crates with a compact frozen reader
+  (internity, `lasso`, `ustr`) cluster closely.
 
 ### Memory footprint (live heap, ≈6000 identifiers ≈ 73 KiB of text)
 
@@ -197,13 +161,14 @@ win on top of the speed results above.
 
 - **internity** — ships **two front-ends over one 4-byte `Sym` and one `Reader`**:
   a single-threaded **`LocalLexicon`** (flat `String` buffer + `Vec<u32>` CSR offsets,
-  `&mut` intern) that is effectively tied with `string-interner` on insert and
+  `&mut` intern) that leads `string-interner` on both insert and
   reuse, and a concurrent **`ThreadedLexicon`** (64 `align(128)` shards, per-shard
   `RwLock` with an upgradable-read hit path, cheap `Clone` `Arc` handle) that
   leads `lasso` concurrent insert at every measured thread count and remains much
   faster than `symbol_table` for concurrent lookup.
   Both are **fill-then-freeze**: `freeze()` yields a lock-free/atomic-free `Reader`
-  whose resolve uses **fewer instructions than `lasso`**. All unchecked UTF-8
+  whose resolve is faster than the live interner's and costs a quarter of its index
+  memory. All unchecked UTF-8
   reconstruction is centralized in one `storage` module; every other module forbids `unsafe`.
   Miri-clean, range-checkable ids, generic hasher (FxHash default).
 - **lasso** — the concurrent workhorse with a **progressive-freezing pipeline**
@@ -217,7 +182,7 @@ win on top of the speed results above.
   smallest memory). Safe `Symbol` trait, serde by default. No concurrent variant.
 - **ustr** — the fastest **global concurrent** interner and repeated-lookup king:
   the handle is a **bare pointer straight at the UTF-8**, with hash+len stored in a
-  header before the chars, so `resolve` is ~4 instructions and pointer equality ≡
+  header before the chars, so `resolve` is a handful of instructions and pointer equality ≡
   string equality. Identity-hashed `UstrMap`/`UstrSet`. Trade-off: **leaks
   forever**, lots of `unsafe`, no `no_std`, fixed hash seed.
 - **internment** — the **generic** interner: interns any `T` (with DST `Intern<str>`),
@@ -248,8 +213,8 @@ win on top of the speed results above.
 | If you need… | Pick |
 |---|---|
 | Fastest single-thread insert/reuse, simple API | **internity** `LocalLexicon` leads both insert and reuse on this workload, with **string-interner** (`StringBackend`) next; pick `lasso` `Rodeo` for its fallible/memory-limit API |
-| Highest concurrent-insert throughput with a 4-byte handle | **internity** `ThreadedLexicon` at 1–2 threads; **symbol_table** at 4–8 threads. Both lead `lasso`-threaded on this workload. |
-| Fastest concurrent lookup with a compact handle | **internity** frozen `Reader` and **lasso** `RodeoResolver` are level at 4 threads and internity leads at 8 in the frozen-reader comparison; both are far faster than `symbol_table` and internity keeps the smallest measured owned footprint |
+| Highest concurrent-insert throughput with a 4-byte handle | **internity** `ThreadedLexicon` and **symbol_table** trade the lead across thread counts; both lead `lasso`-threaded on this workload. |
+| Fastest concurrent lookup with a compact handle | **internity** frozen `Reader` and **lasso** `RodeoResolver` are level in the frozen-reader comparison; both are far faster than `symbol_table` and internity keeps the smallest measured owned footprint |
 | Fastest repeated lookup / `HashMap` keys / global pointer-equality | **ustr** |
 | Progressive memory shedding after an intern phase | **lasso** `RodeoReader`/`RodeoResolver`, or **internity** `freeze()` |
 | Smallest memory footprint | **string-interner** `BufferBackend` |
@@ -266,12 +231,12 @@ win on top of the speed results above.
 | Solution | Great for | Ill-suited / avoid when |
 |---|---|---|
 | **internity** `LocalLexicon` (single-thread) | Single-threaded build-up of a symbol table with near-best insert/reuse, a 4-byte `Copy`, range-checkable handle, and unchecked UTF-8 isolated in one storage module; then `freeze()` for compact resolve | Concurrent interning (use `ThreadedLexicon`); resolve-heavy access **before** `freeze()`; a single corpus **> ~4 GB** of bytes |
-| **internity** `ThreadedLexicon` (concurrent) | Concurrent build-up from many threads (compilers, parsers, log/label ingestion); fastest unique insertion at 1–2 threads and ahead of `lasso` through 8 threads; frozen lookup is much faster than `symbol_table`; cross-shard dedup hits proceed independently; cheap `Clone` `Arc` handle | Needing to **resolve while still interning** — it's fill-then-freeze, so resolve happens on the frozen `Reader`; read-heavy repeated interning of values in one shard (one upgradable-read slot); maximum unique-insert throughput at 4–8 threads on this workload (`symbol_table` leads); absolute fastest frozen concurrent lookup on this run (`lasso::RodeoResolver` leads); a single string **> ~4 GB** (its shard's buffer) |
-| **internity** `Reader` (frozen) | Intern once, then resolve forever, lock-free and atomic-free, keeping existing `Sym`s valid; frozen `LocalLexicon` resolve uses fewer instructions than `lasso` (26 vs 31) at ¼ its index memory | Any further interning (it's immutable); still behind `ustr`'s pointer-*is*-the-string resolve |
+| **internity** `ThreadedLexicon` (concurrent) | Concurrent build-up from many threads (compilers, parsers, log/label ingestion); ahead of `lasso` at every measured insert thread count; frozen lookup is much faster than `symbol_table`; cross-shard dedup hits proceed independently; cheap `Clone` `Arc` handle | Needing to **resolve while still interning** — it's fill-then-freeze, so resolve happens on the frozen `Reader`; read-heavy repeated interning of values in one shard (one upgradable-read slot); retained-hit throughput at 8 threads on this workload (`lasso::ThreadedRodeo` leads); a single string **> ~4 GB** (its shard's buffer) |
+| **internity** `Reader` (frozen) | Intern once, then resolve forever, lock-free and atomic-free, keeping existing `Sym`s valid; frozen `LocalLexicon` resolve is faster than the live interner's at ¼ its index memory | Any further interning (it's immutable); still behind `ustr`'s pointer-*is*-the-string resolve |
 | **lasso** `Rodeo` | Single-threaded interning with a clean, fallible API, tunable key width, and a **hard memory cap** | Concurrent writers (needs `ThreadedRodeo`); resolve-latency-critical paths where `ustr`/flat arrays win |
-| **lasso** `ThreadedRodeo` | Shared concurrent interner with both directions and fallible ops | **High core counts** — the dual-`DashMap` design scales poorly past ~24 threads and trails internity/symbol_table ~1.1–2.4× on concurrent insert; heaviest memory of the lasso family |
+| **lasso** `ThreadedRodeo` | Shared concurrent interner with both directions and fallible ops | **High core counts** — the dual-`DashMap` design scales poorly past ~24 threads and trails internity/symbol_table ~1.2–3× on concurrent insert; heaviest memory of the lasso family |
 | **lasso** `RodeoReader` / `RodeoResolver` | Freezing after a build phase to shed memory and share read-only across threads; `Resolver` is the smallest-footprint resolve-only option | Workloads that still intern; `Resolver` when you also need string→key lookups (it drops that map) |
-| **string-interner** `StringBackend` | Cache-coherent single-threaded fill/hit (neck-and-neck with internity's `LocalLexicon`); the default "just works" choice; serde | Any multithreading (no `Sync` interner); when you need stable `&str` refs (buffer relocates) or `&'static` static interning |
+| **string-interner** `StringBackend` | Cache-coherent single-threaded fill/hit (the closest owned competitor to internity's `LocalLexicon`); the default "just works" choice; serde | Any multithreading (no `Sync` interner); when you need stable `&str` refs (buffer relocates) or `&'static` static interning |
 | **string-interner** `BufferBackend` | **Tightest memory** footprint (varint-packed single allocation) | Resolve-heavy use (slower unpack); corpora **> ~4 GB** (symbol is a byte offset) |
 | **string-interner** `BucketBackend` | Single-thread interning that needs stable string refs + `intern_static` | Concurrency; absolute lowest memory (buckets cost more than the buffer backend) |
 | **ustr** | **Fastest repeated lookup & map keys** (cached hash, pointer-eq, identity-hashed maps), heavy concurrent interning, FFI/C interop, `&'static str` escape | Long-running processes that intern **unbounded/attacker-controlled** strings — it **leaks forever** (memory-exhaustion risk); `no_std`; needing a DoS-resistant/seedable hash; needing a compact integer handle (it's pointer-sized, global-only) |

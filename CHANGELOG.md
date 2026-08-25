@@ -29,6 +29,7 @@ Please see each crate's change log below:
 - [`multitude`](./crates/multitude/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
+- [`ohno_macros_impl`](./crates/ohno_macros_impl/CHANGELOG.md)
 - [`plurality`](./crates/plurality/CHANGELOG.md)
 - [`recoverable`](./crates/recoverable/CHANGELOG.md)
 - [`rest_over_grpc`](./crates/rest_over_grpc/CHANGELOG.md)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] - 2026-08-09
+
+- 🔧 Maintenance
+
+  - Now requires Rust `1.93.1` ([#629](https://github.com/microsoft/oxidizer/pull/629))
+
+- ⚠️ Breaking
+
+  - improve `#[display]` and `#[error]` diagnostics ([#634](https://github.com/microsoft/oxidizer/pull/634))
+
+- 🏗️ Build System
+
+  - adopt cargo-anvil check catalog (github backend) ([#534](https://github.com/microsoft/oxidizer/pull/534))
+
 ## [0.3.5] - 2026-06-26
 
 - ✨ Features

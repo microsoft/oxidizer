@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.8.0"
+version = "0.9.0"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -63,7 +63,7 @@ json = ["dep:serde_core", "dep:serde_json"]
 test-util = ["tick/test-util"]
 
 [dependencies]
-bytes = { workspace = true }
+bytes = { workspace = true, features = ["std"] }
 bytesbuf = { workspace = true, features = ["bytes-compat", "std"] }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
@@ -81,6 +81,7 @@ tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
@@ -94,7 +95,7 @@ serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { path = "../templated_uri", features = ["uuid"] }
-tick = { path = "../tick", features = ["test-util", "tokio"] }
+tick = { path = "../tick", features = ["fmt", "test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
 
