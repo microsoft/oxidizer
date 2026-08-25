@@ -257,8 +257,9 @@ pub use core::ThreadAware;
 /// Two names are matched syntactically, because a macro cannot resolve a path to the item it
 /// refers to. Neither affects whether a field is relocated - every field without the skip
 /// attribute is - but both affect the bound it gets:
-/// * `PhantomData` counts as the marker only when spelled canonically: bare, or `core`/`std`
-///   `::marker::PhantomData`. A qualified look-alike such as `my_crate::PhantomData` has the
+/// * `PhantomData` counts as the marker only when spelled canonically: bare, as
+///   `marker::PhantomData`, or rooted at `core`/`std`. A qualified look-alike such as
+///   `my_crate::PhantomData` has the
 ///   traversal descend into its arguments instead, which is the more general treatment; a
 ///   look-alike imported under the bare name takes the predicate on itself, where its own
 ///   impl decides what that reduces to. A marker spelled through a type alias or a type macro
