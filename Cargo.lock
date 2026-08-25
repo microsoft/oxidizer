@@ -1736,7 +1736,6 @@ version = "0.1.0"
 dependencies = [
  "bytesbuf",
  "bytesbuf_io",
- "ctor",
  "events_once",
  "fetch",
  "futures",

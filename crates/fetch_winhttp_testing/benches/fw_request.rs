@@ -17,6 +17,7 @@
     not(windows),
     allow(
         unused_crate_dependencies,
+        clippy::needless_pass_by_ref_mut,
         reason = "the transport under test only exists on Windows, so the benchmark body is compiled away"
     )
 )]

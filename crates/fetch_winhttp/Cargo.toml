@@ -30,12 +30,6 @@ allowed_external_types = [
 all-features = true
 default-target = "x86_64-pc-windows-msvc"
 
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
-
 [target.'cfg(windows)'.dependencies]
 bytesbuf = { workspace = true }
 bytesbuf_io = { workspace = true }
@@ -59,7 +53,6 @@ windows = { workspace = true, features = [
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
-ctor = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
 mutants = { workspace = true }

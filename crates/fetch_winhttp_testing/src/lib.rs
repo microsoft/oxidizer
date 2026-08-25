@@ -10,15 +10,13 @@
 //! to the fixtures it uses. That also keeps the server ecosystem's dependencies
 //! out of the transport package.
 //!
-//! [`TestServer`] serves plaintext or TLS traffic over TCP, negotiating HTTP/1.1
-//! or HTTP/2; [`Http3Server`] serves HTTP/3 over QUIC. Both are scripted with
-//! [`ResponsePlan`] values and observed through a [`ServerSnapshot`]. No fixture
+//! `TestServer` serves plaintext or TLS traffic over TCP, negotiating HTTP/1.1
+//! or HTTP/2; `Http3Server` serves HTTP/3 over QUIC. Both are scripted with
+//! `ResponsePlan` values and observed through a `ServerSnapshot`. No fixture
 //! depends on wall-clock time: a plan that must stay in flight stalls
 //! indefinitely and is aborted at shutdown.
 
 #![cfg(windows)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(coverage_nightly, coverage(off))]
 #![allow(
     clippy::missing_panics_doc,
     clippy::must_use_candidate,

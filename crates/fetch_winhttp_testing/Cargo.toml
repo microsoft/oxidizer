@@ -25,11 +25,13 @@ include = { workspace = true }
 # metadata and never consults it, so without this block that job fails.
 allowed_external_types = ["*"]
 
-# Fixture crate: its own library is scaffolding for the tests, examples and
-# benchmarks it hosts, and is marked `coverage(off)` throughout, so it
-# legitimately produces no coverage data.
+# Fixture crate: its library is scaffolding driven by the tests it hosts, and
+# some of it exists only for the benchmarks and examples, which the coverage run
+# does not execute. It is measured rather than opted out, because opting out
+# would remove the package - and with it the transport's integration tests - from
+# the measured set entirely.
 [package.metadata.coverage-gate]
-min-lines-percent = 0
+min-lines-percent = 90
 
 # `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
 # (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
