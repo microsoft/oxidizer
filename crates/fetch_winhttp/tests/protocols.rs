@@ -18,12 +18,13 @@ use fetch_winhttp::WinHttpTlsConfig;
 use fetch_winhttp_impl::testing::{Http3Server, ResponsePlan, TestServer, client, collect_frames};
 use http::{HeaderMap, HeaderValue, Version};
 use http_extensions::HttpBodyOptions;
+use tick::Clock;
 
 #[cfg_attr(miri, ignore)]
 #[test]
 fn unknown_length_upload_is_streamed_before_the_response() {
     let server = TestServer::http([ResponsePlan::ok("stream received")]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
     let chunks = [
         Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
         Ok(BytesView::copied_from_slice(b"request", &test_client.body_builder)),
@@ -60,7 +61,11 @@ fn http1_is_negotiated_and_reported() {
     // string, so only a live connection proves that real `WinHTTP` takes that path and returns a
     // value the parser accepts.
     let server = TestServer::https([ResponsePlan::ok("http1")], &["localhost"]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+    let test_client = client(
+        &[Version::HTTP_11],
+        WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+        Clock::new_frozen(),
+    );
 
     let response = futures::executor::block_on(test_client.client.get(server.url("/http1")).fetch()).unwrap();
 
@@ -75,7 +80,11 @@ fn http1_is_negotiated_and_reported() {
 #[test]
 fn http2_is_negotiated_and_reported() {
     let server = TestServer::https([ResponsePlan::ok("http2")], &["localhost"]);
-    let test_client = client(&[Version::HTTP_2], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+    let test_client = client(
+        &[Version::HTTP_2],
+        WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+        Clock::new_frozen(),
+    );
 
     let response = futures::executor::block_on(test_client.client.get(server.url("/http2")).fetch()).unwrap();
 
@@ -98,7 +107,11 @@ fn http2_streams_unknown_length_uploads_and_preserves_response_trailers() {
         ],
         &["localhost"],
     );
-    let test_client = client(&[Version::HTTP_2], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+    let test_client = client(
+        &[Version::HTTP_2],
+        WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+        Clock::new_frozen(),
+    );
     let body = test_client.body_builder.stream(
         futures::stream::iter([
             Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
@@ -127,7 +140,11 @@ fn http3_streams_an_unknown_length_request_and_reports_the_protocol() {
             HeaderValue::from_static("value"),
         )])),
     ]);
-    let test_client = client(&[Version::HTTP_3], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+    let test_client = client(
+        &[Version::HTTP_3],
+        WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+        Clock::new_frozen(),
+    );
     let body = test_client.body_builder.stream(
         futures::stream::iter([
             Ok(BytesView::copied_from_slice(b"streamed ", &test_client.body_builder)),
@@ -152,7 +169,11 @@ fn http3_streams_an_unknown_length_request_and_reports_the_protocol() {
 #[test]
 fn required_http3_does_not_fall_back_when_quic_is_unavailable() {
     let tcp_only_server = TestServer::https([ResponsePlan::ok("must not fall back")], &["localhost"]);
-    let test_client = client(&[Version::HTTP_3], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+    let test_client = client(
+        &[Version::HTTP_3],
+        WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+        Clock::new_frozen(),
+    );
 
     let error = futures::executor::block_on(test_client.client.get(tcp_only_server.url("/http3-required")).fetch()).unwrap_err();
     assert!(

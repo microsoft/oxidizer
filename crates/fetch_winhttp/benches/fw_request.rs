@@ -56,6 +56,7 @@ mod windows {
     use futures::executor::block_on;
     use http::{HeaderName, HeaderValue, Version};
     use http_extensions::HttpBodyOptions;
+    use tick::Clock;
 
     /// Payload size for the "low" leg of every parameterized body scenario.
     ///
@@ -249,7 +250,7 @@ mod windows {
     /// Builds a client and issues one request through it, so that the measured iterations all run
     /// against an established pooled connection instead of one of them paying connection setup.
     fn warmed_client(versions: &[Version], tls: WinHttpTlsConfig, url: &str) -> TestClient {
-        let test_client = client(versions, tls);
+        let test_client = client(versions, tls, Clock::new_frozen());
         drop(block_on(test_client.client.get(url).fetch_text_body()).unwrap());
         test_client
     }

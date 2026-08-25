@@ -1754,6 +1754,7 @@ dependencies = [
  "observed",
  "testing_aids",
  "tick",
+ "tokio",
 ]
 
 [[package]]

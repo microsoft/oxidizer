@@ -12,11 +12,14 @@
 //!
 //! Run with `cargo run -p fetch_winhttp --example streaming_upload`.
 
-fn main() {
-    #[cfg(windows)]
-    example::run();
+#[cfg(windows)]
+#[tokio::main]
+async fn main() {
+    example::run().await;
+}
 
-    #[cfg(not(windows))]
+#[cfg(not(windows))]
+fn main() {
     println!("fetch_winhttp is a Windows-only transport, so this example does nothing here.");
 }
 
@@ -31,15 +34,16 @@ mod example {
     use http_body::Frame;
     use http_body_util::StreamBody;
     use http_extensions::HttpBodyOptions;
+    use tick::Clock;
 
-    pub(super) fn run() {
-        stream_an_unknown_length_body();
-        reject_request_trailers();
+    pub(super) async fn run() {
+        stream_an_unknown_length_body().await;
+        reject_request_trailers().await;
     }
 
-    fn stream_an_unknown_length_body() {
+    async fn stream_an_unknown_length_body() {
         let server = TestServer::http([ResponsePlan::ok("upload received")]);
-        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
 
         // A stream carries no length, so neither the caller nor `fetch` declares one.
         let body = test_client.body_builder.stream(
@@ -50,7 +54,12 @@ mod example {
             &HttpBodyOptions::default(),
         );
 
-        let response = futures::executor::block_on(test_client.client.post(server.url("/upload")).body(body).fetch_text_body())
+        let response = test_client
+            .client
+            .post(server.url("/upload"))
+            .body(body)
+            .fetch_text_body()
+            .await
             .expect("the fixture accepts the upload");
 
         println!("response: {response}");
@@ -60,9 +69,9 @@ mod example {
         println!("Content-Length sent: {:?}", snapshot.requests[0].headers.get(CONTENT_LENGTH));
     }
 
-    fn reject_request_trailers() {
+    async fn reject_request_trailers() {
         let server = TestServer::http([]);
-        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
         let body = StreamBody::new(futures::stream::iter([
             Ok::<_, HttpError>(Frame::data(BytesView::copied_from_slice(b"data", &test_client.body_builder))),
             Ok(Frame::trailers(HeaderMap::from_iter([(
@@ -72,7 +81,12 @@ mod example {
         ]));
         let body = test_client.body_builder.body(body, &HttpBodyOptions::default());
 
-        let error = futures::executor::block_on(test_client.client.post(server.url("/trailers")).body(body).fetch())
+        let error = test_client
+            .client
+            .post(server.url("/trailers"))
+            .body(body)
+            .fetch()
+            .await
             .expect_err("WinHTTP cannot submit request trailers");
 
         println!("request trailers are refused: {error}");

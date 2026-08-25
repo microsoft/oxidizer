@@ -22,6 +22,7 @@ use http::{HeaderMap, HeaderValue, Method, StatusCode, Version};
 use http_body::Frame;
 use http_body_util::StreamBody;
 use http_extensions::HttpBodyOptions;
+use tick::Clock;
 
 #[cfg_attr(miri, ignore)]
 #[test]
@@ -33,7 +34,7 @@ fn small_and_large_get_and_post_round_trips() {
         ResponsePlan::ok("known upload received"),
         ResponsePlan::ok("large upload received"),
     ]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     let small = futures::executor::block_on(test_client.client.get(server.url("/small")).fetch_text_body()).unwrap();
     let large_response = futures::executor::block_on(test_client.client.get(server.url("/large")).fetch_text_body()).unwrap();
@@ -70,7 +71,7 @@ fn small_and_large_get_and_post_round_trips() {
 #[test]
 fn a_bracketed_ipv6_authority_reaches_the_server() {
     let server = TestServer::http_ipv6([ResponsePlan::ok("ipv6")]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     let body = futures::executor::block_on(test_client.client.get(server.url("/ipv6")).fetch_text_body()).unwrap();
 
@@ -86,7 +87,7 @@ fn a_caller_supplied_content_length_reaches_the_wire_exactly_once() {
     const BODY: &str = "framed body";
 
     let server = TestServer::http([ResponsePlan::ok("declared length received")]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     // Below the `DWORD` boundary the transport keeps an agreeing caller-supplied
     // `Content-Length` header *and* passes the same length as `dwTotalLength` to
@@ -145,7 +146,7 @@ fn a_disagreeing_caller_supplied_content_length_never_reaches_the_wire() {
     const BODY: &str = "framed body";
 
     let server = TestServer::http([ResponsePlan::ok("must not be reached")]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     let error = futures::executor::block_on(
         test_client
@@ -170,7 +171,7 @@ fn a_disagreeing_caller_supplied_content_length_never_reaches_the_wire() {
 #[test]
 fn request_trailers_fail_explicitly() {
     let request_server = TestServer::http([]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
     let request_body = StreamBody::new(futures::stream::iter([
         Ok::<_, HttpError>(Frame::data(BytesView::copied_from_slice(b"data", &test_client.body_builder))),
         Ok(Frame::trailers(HeaderMap::from_iter([(
@@ -216,7 +217,7 @@ fn compression_redirects_and_cookies_follow_transport_policy() {
         ResponsePlan::ok("cookie set").header(SET_COOKIE, HeaderValue::from_static("session=secret; Path=/")),
         ResponsePlan::ok("cookie check"),
     ]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     let gzip = futures::executor::block_on(test_client.client.get(server.url("/gzip")).fetch_text_body()).unwrap();
     let deflate = futures::executor::block_on(test_client.client.get(server.url("/deflate")).fetch_text_body()).unwrap();
@@ -253,7 +254,7 @@ fn authentication_challenges_are_surfaced_without_automatic_retry() {
     let server = TestServer::http([
         ResponsePlan::status(StatusCode::UNAUTHORIZED).header(WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"test\""))
     ]);
-    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+    let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
 
     let response = futures::executor::block_on(test_client.client.get(server.url("/authentication")).fetch()).unwrap();
 

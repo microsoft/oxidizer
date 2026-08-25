@@ -9,16 +9,20 @@
 //! constructor arguments. Nothing defaults, so the transport never picks a clock or an
 //! allocator on the caller's behalf.
 //!
-//! The client is driven here without any async runtime installed, which is what
-//! runtime-neutrality buys: the transport's I/O completes on WinHTTP's own worker threads.
+//! The example runs on Tokio. The transport itself is runtime-neutral - its I/O completes on
+//! WinHTTP's own worker threads - but a real application still supplies the clock its runtime
+//! drives, here via `Clock::new_tokio()`.
 //!
 //! Run with `cargo run -p fetch_winhttp --example quick_start`.
 
-fn main() {
-    #[cfg(windows)]
-    example::run();
+#[cfg(windows)]
+#[tokio::main]
+async fn main() {
+    example::run().await;
+}
 
-    #[cfg(not(windows))]
+#[cfg(not(windows))]
+fn main() {
     println!("fetch_winhttp is a Windows-only transport, so this example does nothing here.");
 }
 
@@ -32,12 +36,10 @@ mod example {
     use observed::Sink;
     use tick::Clock;
 
-    pub(super) fn run() {
+    pub(super) async fn run() {
         let server = TestServer::http([ResponsePlan::ok("hello from the fixture")]);
 
-        // A frozen clock keeps the example free of wall-clock dependencies. A real caller
-        // passes the clock its async runtime drives, such as `Clock::new_tokio()`.
-        let deps = WinHttpDeps::builder(Clock::new_frozen(), GlobalPool::new(), Sink::noop()).build();
+        let deps = WinHttpDeps::builder(Clock::new_tokio(), GlobalPool::new(), Sink::noop()).build();
 
         let client = HttpClient::builder_winhttp(deps)
             // The fixture speaks plaintext, which production callers should not allow.
@@ -46,10 +48,14 @@ mod example {
             .minimal_pipeline()
             .build();
 
-        let response = futures::executor::block_on(client.get(server.url("/hello")).fetch()).expect("the fixture answers every request");
+        let response = client
+            .get(server.url("/hello"))
+            .fetch()
+            .await
+            .expect("the fixture answers every request");
 
         println!("negotiated version: {:?}", response.version());
-        let body = futures::executor::block_on(response.into_body().into_text()).expect("the fixture sends a complete body");
+        let body = response.into_body().into_text().await.expect("the fixture sends a complete body");
         println!("body: {body}");
 
         let snapshot = server.finish();

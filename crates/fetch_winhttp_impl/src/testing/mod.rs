@@ -59,10 +59,11 @@ pub struct TestClient {
 /// Builds a ready-to-use client over the WinHTTP transport.
 ///
 /// An empty `versions` slice leaves protocol selection to the `fetch` default.
-/// The clock is frozen and the connect timeout is unbounded, so no fixture can
-/// be decided by wall-clock time.
-pub fn client(versions: &[Version], tls: WinHttpTlsConfig) -> TestClient {
-    let (builder, body_builder) = client_builder(versions, tls);
+/// The connect timeout is unbounded so a fixture is never decided by wall-clock
+/// time; callers supply the clock so tests can freeze it while examples drive a
+/// real runtime clock.
+pub fn client(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> TestClient {
+    let (builder, body_builder) = client_builder(versions, tls, clock);
 
     TestClient {
         client: builder.build(),
@@ -73,8 +74,7 @@ pub fn client(versions: &[Version], tls: WinHttpTlsConfig) -> TestClient {
 /// Builds an unfinished client, for callers that need to configure it further.
 ///
 /// Plain HTTP is allowed so a fixture can be reached without TLS.
-pub fn client_builder(versions: &[Version], tls: WinHttpTlsConfig) -> (HttpClientBuilder, HttpBodyBuilder) {
-    let clock = Clock::new_frozen();
+pub fn client_builder(versions: &[Version], tls: WinHttpTlsConfig, clock: Clock) -> (HttpClientBuilder, HttpBodyBuilder) {
     let global_pool = GlobalPool::new();
     let body_builder = HttpBodyBuilder::new(global_pool.clone(), &clock);
     let deps = WinHttpDeps::builder(clock, global_pool, Sink::noop()).tls(tls).build();

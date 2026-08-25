@@ -11,11 +11,14 @@
 //!
 //! Run with `cargo run -p fetch_winhttp --example http3`.
 
-fn main() {
-    #[cfg(windows)]
-    example::run();
+#[cfg(windows)]
+#[tokio::main]
+async fn main() {
+    example::run().await;
+}
 
-    #[cfg(not(windows))]
+#[cfg(not(windows))]
+fn main() {
     println!("fetch_winhttp is a Windows-only transport, so this example does nothing here.");
 }
 
@@ -25,32 +28,50 @@ mod example {
     use fetch_winhttp::WinHttpTlsConfig;
     use fetch_winhttp_impl::testing::{Http3Server, ResponsePlan, TestServer, client, collect_frames};
     use http::{HeaderMap, HeaderName, HeaderValue, Version};
+    use tick::Clock;
 
-    pub(super) fn run() {
-        succeed_over_quic();
-        fail_without_quic();
+    pub(super) async fn run() {
+        succeed_over_quic().await;
+        fail_without_quic().await;
     }
 
-    fn succeed_over_quic() {
+    async fn succeed_over_quic() {
         let trailers = HeaderMap::from_iter([(HeaderName::from_static("x-served-by"), HeaderValue::from_static("quic"))]);
         let server = Http3Server::start([ResponsePlan::chunks([Bytes::from_static(b"http3 response")]).trailers(trailers)]);
         // The QUIC fixture presents a self-signed certificate.
-        let test_client = client(&[Version::HTTP_3], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+        let test_client = client(
+            &[Version::HTTP_3],
+            WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+            Clock::new_tokio(),
+        );
 
-        let response = futures::executor::block_on(test_client.client.get(server.url("/h3")).fetch()).expect("the QUIC fixture answers");
+        let response = test_client
+            .client
+            .get(server.url("/h3"))
+            .fetch()
+            .await
+            .expect("the QUIC fixture answers");
 
         println!("negotiated version: {:?}", response.version());
-        let (body, trailers) = futures::executor::block_on(collect_frames(response.into_body()));
+        let (body, trailers) = collect_frames(response.into_body()).await;
         println!("body: {}", String::from_utf8_lossy(&body));
         println!("trailers: {trailers:?}");
         drop(server.finish());
     }
 
-    fn fail_without_quic() {
+    async fn fail_without_quic() {
         let server = TestServer::https([ResponsePlan::ok("never reached")], &["localhost"]);
-        let test_client = client(&[Version::HTTP_3], WinHttpTlsConfig::builder().accept_invalid_certs(true).build());
+        let test_client = client(
+            &[Version::HTTP_3],
+            WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
+            Clock::new_tokio(),
+        );
 
-        let error = futures::executor::block_on(test_client.client.get(server.url("/h3")).fetch())
+        let error = test_client
+            .client
+            .get(server.url("/h3"))
+            .fetch()
+            .await
             .expect_err("a TCP-only peer cannot satisfy a required HTTP/3 request");
 
         println!("required HTTP/3 does not fall back: {error}");

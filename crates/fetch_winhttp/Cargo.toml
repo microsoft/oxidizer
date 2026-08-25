@@ -74,7 +74,10 @@ http-body-util = { workspace = true }
 http_extensions = { workspace = true }
 observed = { workspace = true }
 testing_aids = { path = "../testing_aids" }
-tick = { path = "../tick", features = ["test-util"] }
+# `test-util` freezes time in tests and benches; `tokio` drives a real clock in
+# the standalone examples.
+tick = { path = "../tick", features = ["test-util", "tokio"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [[test]]
 name = "non_windows"

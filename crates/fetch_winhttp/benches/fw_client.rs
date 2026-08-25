@@ -50,6 +50,7 @@ mod windows {
     use fetch_winhttp_impl::testing::{ResponsePlan, TestServer, client, client_builder};
     use futures::executor::block_on;
     use http::Version;
+    use tick::Clock;
 
     pub(crate) fn entrypoint(c: &mut Criterion) {
         let allocs = AllocSession::new();
@@ -65,11 +66,11 @@ mod windows {
         let mut group = c.benchmark_group("fw_client/construction");
 
         measure(&mut group, allocs, time, "build", || {
-            let (builder, body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default());
+            let (builder, body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
             black_box((builder.build(), body_builder));
         });
 
-        let template = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+        let template = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
         measure(&mut group, allocs, time, "clone", || {
             black_box(template.client.clone());
         });
@@ -81,7 +82,7 @@ mod windows {
         let server = TestServer::http_repeating(ResponsePlan::ok(""));
         let url = server.url("/first");
         measure(&mut group, allocs, time, "first_request", || {
-            let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+            let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
             black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
         });
         drop(server.finish());
@@ -100,7 +101,7 @@ mod windows {
         drop(listener);
         let url = format!("http://127.0.0.1:{port}/refused");
 
-        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default());
+        let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
         measure(&mut group, allocs, time, "connect_refused", || {
             black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap_err());
         });
