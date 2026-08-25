@@ -267,7 +267,7 @@ pub use core::ThreadAware;
 /// tried and reverted, since real code writes the imported form and the duplicate trips
 /// `clippy::trait_duplication_in_bounds` at the author's own declaration. Qualify the path to
 /// disambiguate.
-////// # Example
+/// # Example
 /// ```rust
 /// use thread_aware::ThreadAware;
 /// use thread_aware::affinity::Affinity;

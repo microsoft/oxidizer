@@ -172,8 +172,9 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 /// rejects at the user's own declaration. A user-defined trait sharing the name is the rarer
 /// case, and it has a workaround: qualify it, or qualify the real one.
 ///
-/// This is the same limitation as the syntactic `PhantomData` test - a macro cannot resolve a
-/// name to the item it refers to - and it is documented on the derive.
+/// This is now the only place the derive decides anything from how a name is spelled. The
+/// `PhantomData` test that used to sit beside it is gone, so the exception is deliberate and
+/// singular rather than one of a family, and the derive documents it as such.
 fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
     let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
     let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();

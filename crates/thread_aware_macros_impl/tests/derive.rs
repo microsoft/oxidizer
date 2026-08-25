@@ -55,8 +55,8 @@ fn tuple_struct_and_enum() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn generics_add_bounds() {
-    // Only T should gain a ThreadAware bound; U is named only inside the marker, which takes
-    // a predicate on its own type instead.
+    // Both parameters gain a ThreadAware bound: the traversal reaches U through the marker's
+    // type argument exactly as it reaches T directly.
     let input = quote! {
         #[derive(ThreadAware)]
         struct Gen<T, U>(T, core::marker::PhantomData<U>);
@@ -129,8 +129,8 @@ fn error_unknown_attr() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_named_fields() {
-    // PhantomData in named fields is relocated through its own no-op impl; the bound lands on
-    // the marker type.
+    // PhantomData in named fields is relocated through its own no-op impl, and the parameter
+    // inside it takes the ordinary bound.
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithPhantom<T> {
@@ -144,8 +144,8 @@ fn phantom_data_named_fields() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_data_unnamed_fields() {
-    // PhantomData in tuple fields is relocated through its own no-op impl; the bound lands on
-    // the marker type.
+    // PhantomData in tuple fields is relocated through its own no-op impl, and the parameter
+    // inside it takes the ordinary bound.
     let input = quote! {
         #[derive(ThreadAware)]
         struct TupleWithPhantom<T>(Vec<u8>, core::marker::PhantomData<T>);
@@ -263,10 +263,10 @@ fn generics_paren_adds_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_only_generic_gets_marker_predicate() {
+fn phantom_only_generic_gets_thread_aware_bound() {
     // The original defect: a parameter named only inside `PhantomData` used to gain no bound
-    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait. The marker is
-    // relocated like any other field, so the obligation lands on the marker type.
+    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait. It now takes
+    // the ordinary bound, like a parameter reached anywhere else.
     let input = quote! {
         #[derive(ThreadAware)]
         struct DirectPhantom<T, U>(T, core::marker::PhantomData<U>);
@@ -276,10 +276,10 @@ fn phantom_only_generic_gets_marker_predicate() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn phantom_reference_is_not_reduced_to_its_parameter() {
-    // `&'a T` is `Send` only when `T: Sync`. Bounding `T: Send` here produced an impl that
-    // did not compile; the obligation belongs on the marker type, where the compiler reduces
-    // it through the marker's own impl.
+fn phantom_reference_binds_its_parameter() {
+    // The traversal reaches `T` through the reference and binds it by `ThreadAware`. That
+    // gives `Send`, not `Sync`, so `&'a T: Send` is the author's to state - the derive does
+    // not infer it.
     let input = quote! {
         #[derive(ThreadAware)]
         struct PhantomRef<'a, T: 'a>(core::marker::PhantomData<&'a T>);
@@ -303,9 +303,9 @@ fn skipped_raw_pointer_marker_gets_only_self_send() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn nested_phantom_gets_thread_aware_predicate() {
-    // A marker nested in a relocated field takes the same predicate a top-level one does; the
-    // enclosing field's own obligation reaches it.
+fn nested_phantom_binds_its_parameter() {
+    // A marker nested in a relocated field is traversed like any other type argument, so the
+    // parameter inside it takes the ordinary bound.
     let input = quote! {
         #[derive(ThreadAware)]
         struct NestedPhantom<T>((core::marker::PhantomData<T>,));
@@ -407,8 +407,8 @@ fn generics_lifetime_and_const_params_untouched() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn enum_variant_nested_phantom_gets_thread_aware_predicate() {
-    // Exercises merging a nested-marker obligation across enum variants.
+fn enum_variant_nested_phantom_binds_its_parameter() {
+    // Exercises merging parameter bounds across enum variants.
     let input = quote! {
         #[derive(ThreadAware)]
         enum NestedPhantomEnum<T, U> {

@@ -254,9 +254,8 @@ fn skipped_generic_field_needs_only_send() {
 /// A real, data-carrying type that merely happens to be named `PhantomData`, named by a
 /// qualified path.
 ///
-/// Every field is relocated, whatever its type is called, so this carries no special risk.
-/// The name match decides only which predicate the field gets, and here it decides nothing:
-/// a qualified path is not the marker, so the traversal descends into the argument as usual.
+/// The derive does no name matching on field types at all, so this is an ordinary field:
+/// relocated, and traversed for the parameters it contains.
 mod lookalike {
     use thread_aware::affinity::Affinity;
 
@@ -287,14 +286,11 @@ fn qualified_type_named_phantom_data_is_relocated() {
     );
 }
 
-/// The same look-alike, imported under the bare name the derive cannot tell apart from the
-/// real marker.
+/// The same look-alike, imported under the bare name that used to be read as the real marker.
 ///
-/// This is the case a syntactic classifier can never get right, and the reason relocation no
-/// longer depends on one. The field is relocated because every field without the skip
-/// attribute is; the name
-/// match only sends the bound to the field's own type, where the look-alike's own impl
-/// reduces it correctly.
+/// This is the case a syntactic classifier could never get right, and the reason the derive no
+/// longer has one. The field is relocated and traversed like any other, and the look-alike's
+/// own impl decides what its bound reduces to.
 mod bare_lookalike {
     use thread_aware::affinity::Affinity;
     use thread_aware_macros::ThreadAware;
@@ -622,10 +618,9 @@ fn empty_enum_derives_a_usable_impl() {
     assert_thread_aware::<Uninhabited>();
 }
 
-// `ManualSendMarker` below pins the one case that still needs `Self: Send`: a skipped field
-// whose type can never be `Send` structurally. The two after it pin the opposite - that a
-// marker's obligation must name the marker type rather than scan for generic-parameter
-// tokens, since each has a `Send`-ness no such scan can see.
+// The three below are what `#[thread_aware(skip)]` is for: a field whose obligation the
+// derive cannot state, because no bound it could generate would satisfy it. Each one moves
+// the obligation to `Self: Send`, where a manual `unsafe impl Send` discharges it.
 
 /// A marker-only type whose argument is not `Send`, made `Send` by hand.
 #[derive(ThreadAware)]
