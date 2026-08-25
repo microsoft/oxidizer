@@ -11,7 +11,7 @@
 //!
 //! The example serves three certificates from a localhost fixture to show each combination.
 //!
-//! Run with `cargo run -p fetch_winhttp --example tls_validation`.
+//! Run with `cargo run -p fetch_winhttp_testing --example tls_validation`.
 
 fn main() {
     #[cfg(windows)]

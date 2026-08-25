@@ -10,7 +10,7 @@
 //! request outright rather than dropping the trailers silently. Callers that would otherwise
 //! send request trailers must carry that data in headers instead.
 //!
-//! Run with `cargo run -p fetch_winhttp --example streaming_upload`.
+//! Run with `cargo run -p fetch_winhttp_testing --example streaming_upload`.
 
 fn main() {
     #[cfg(windows)]

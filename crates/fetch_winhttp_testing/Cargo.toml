@@ -70,10 +70,27 @@ tokio = { workspace = true, features = [
 ] }
 tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
 
+# The benchmark harness is not target-gated: `--all-targets` builds benchmark
+# targets on every platform, so these must resolve even where the benchmark body
+# itself compiles away.
+[dev-dependencies]
+all_the_time = { workspace = true }
+alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
+criterion = { workspace = true }
+
 [target.'cfg(windows)'.dev-dependencies]
 ctor = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 testing_aids = { path = "../testing_aids" }
+
+[[bench]]
+name = "fw_request"
+harness = false
+
+[[bench]]
+name = "fw_client"
+harness = false
 
 [lints]
 workspace = true

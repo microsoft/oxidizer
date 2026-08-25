@@ -9,7 +9,7 @@ use std::thread::{self, JoinHandle};
 use bytes::{Buf as _, BytesMut};
 use h3_quinn::Connection;
 use http::header::CONTENT_LENGTH;
-use http::{HeaderValue, Response, StatusCode, Version};
+use http::{HeaderValue, Response, Version};
 use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint, Incoming, ServerConfig, VarInt};
 use rcgen::{CertifiedKey, generate_simple_self_signed};
@@ -17,11 +17,11 @@ use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 
-use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ResponseScript, ServerSnapshot};
 
 #[derive(Debug)]
 struct State {
-    responses: Vec<ResponsePlan>,
+    script: ResponseScript,
     next_response: AtomicUsize,
     requests: Mutex<Vec<RecordedRequest>>,
     connections: AtomicUsize,
@@ -49,8 +49,17 @@ impl Http3Server {
     /// Starts the fixture on an ephemeral loopback UDP port with a self-signed
     /// `localhost` certificate, serving `responses` in order.
     pub fn start(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
+        Self::start_scripted(ResponseScript::Sequence(responses.into_iter().collect()))
+    }
+
+    /// Starts the fixture answering every request with `plan`.
+    pub fn start_repeating(plan: ResponsePlan) -> Self {
+        Self::start_scripted(ResponseScript::Repeat(plan))
+    }
+
+    fn start_scripted(script: ResponseScript) -> Self {
         let state = Arc::new(State {
-            responses: responses.into_iter().collect(),
+            script,
             next_response: AtomicUsize::new(0),
             requests: Mutex::new(Vec::new()),
             connections: AtomicUsize::new(0),
@@ -184,19 +193,17 @@ async fn serve_connection(incoming: Incoming, state: Arc<State>) {
             return;
         };
         let index = state.next_response.fetch_add(1, Ordering::SeqCst);
-        state.requests.lock().unwrap().push(RecordedRequest {
-            method: request.method().clone(),
-            uri: request.uri().clone(),
-            version: Version::HTTP_3,
-            headers: request.headers().clone(),
-            body: body.freeze(),
-            trailers,
-        });
-        let plan = state
-            .responses
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| ResponsePlan::status(StatusCode::INTERNAL_SERVER_ERROR));
+        if state.script.records() {
+            state.requests.lock().unwrap().push(RecordedRequest {
+                method: request.method().clone(),
+                uri: request.uri().clone(),
+                version: Version::HTTP_3,
+                headers: request.headers().clone(),
+                body: body.freeze(),
+                trailers,
+            });
+        }
+        let plan = state.script.plan(index);
         let body_length = plan.body_length();
         let ResponsePlan {
             status,

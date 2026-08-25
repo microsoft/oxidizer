@@ -11,7 +11,7 @@
 //! discarding it. Trailers are an HTTP/2 and HTTP/3 feature as WinHTTP exposes them, so this
 //! example uses an HTTP/2 fixture over TLS.
 //!
-//! Run with `cargo run -p fetch_winhttp --example streaming_download`.
+//! Run with `cargo run -p fetch_winhttp_testing --example streaming_download`.
 
 fn main() {
     #[cfg(windows)]

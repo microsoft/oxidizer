@@ -115,6 +115,36 @@ impl ResponsePlan {
     }
 }
 
+/// How a fixture chooses the response plan for each request it serves.
+#[derive(Clone, Debug)]
+pub enum ResponseScript {
+    /// One plan per request, in order. A request past the end of the sequence is answered with
+    /// `500`, and every request is recorded into the [`ServerSnapshot`].
+    Sequence(Vec<ResponsePlan>),
+    /// The same plan for every request, with no per-request recording. Benchmarks drive an
+    /// unbounded number of requests this way, so fixture memory does not grow with the iteration
+    /// count.
+    Repeat(ResponsePlan),
+}
+
+impl ResponseScript {
+    /// The plan to serve for the request at `index`.
+    pub(crate) fn plan(&self, index: usize) -> ResponsePlan {
+        match self {
+            Self::Sequence(plans) => plans
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| ResponsePlan::status(StatusCode::INTERNAL_SERVER_ERROR)),
+            Self::Repeat(plan) => plan.clone(),
+        }
+    }
+
+    /// Whether the fixture should retain a [`RecordedRequest`] for each request it serves.
+    pub(crate) fn records(&self) -> bool {
+        matches!(self, Self::Sequence(_))
+    }
+}
+
 /// What a fixture observed on the wire for one request.
 ///
 /// This is the only channel through which a test can assert on what the transport actually sent,

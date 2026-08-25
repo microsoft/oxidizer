@@ -9,7 +9,7 @@
 //! failure is what a caller who requires HTTP/3 wants to see, so the example provokes it too
 //! by pointing the same client at a TCP-only fixture.
 //!
-//! Run with `cargo run -p fetch_winhttp --example http3`.
+//! Run with `cargo run -p fetch_winhttp_testing --example http3`.
 
 fn main() {
     #[cfg(windows)]

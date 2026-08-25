@@ -5,10 +5,10 @@
 //! tests, examples and benchmarks that drive them.
 //!
 //! This crate is not published. `fetch_winhttp` cannot dev-depend on a package
-//! that depends on it - that is a dependency cycle, which the workspace forbids
-//! - so the transport's out-of-process test code lives here, next to the
-//! fixtures it uses. That also keeps the server ecosystem's dependencies out of
-//! the transport package.
+//! that depends on it, because that is a dependency cycle and the workspace
+//! forbids those, so the transport's out-of-process test code lives here next
+//! to the fixtures it uses. That also keeps the server ecosystem's dependencies
+//! out of the transport package.
 //!
 //! [`TestServer`] serves plaintext or TLS traffic over TCP, negotiating HTTP/1.1
 //! or HTTP/2; [`Http3Server`] serves HTTP/3 over QUIC. Both are scripted with
@@ -42,7 +42,7 @@ use http::{HeaderMap, Version};
 use http_body::Body as _;
 pub use http3_server::Http3Server;
 use observed::Sink;
-pub use recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+pub use recording::{RecordedRequest, ResponseFrame, ResponsePlan, ResponseScript, ServerSnapshot};
 pub use server::TestServer;
 use tick::Clock;
 

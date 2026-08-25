@@ -11,7 +11,7 @@
 //!
 //! The fixture counts accepted connections, which is what makes the difference observable.
 //!
-//! Run with `cargo run -p fetch_winhttp --example connection_pools`.
+//! Run with `cargo run -p fetch_winhttp_testing --example connection_pools`.
 
 fn main() {
     #[cfg(windows)]

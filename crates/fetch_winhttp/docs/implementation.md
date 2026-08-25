@@ -244,6 +244,59 @@ non-Windows targets where the crate itself is empty. They drive futures with
 `futures::executor::block_on` rather than a runtime macro, which doubles as a
 demonstration that the transport is runtime-neutral.
 
+### 1.4 Benchmarks
+
+`crates/fetch_winhttp_testing/benches/` holds two Criterion benchmark binaries,
+each also reporting allocation counts through `alloc_tracker` and processor time
+through `all_the_time` (../../../docs/benchmarks.md):
+
+```text
+crates/fetch_winhttp_testing/benches/
+  fw_request.rs  // fw_request/roundtrip  - per-request cost by request and response shape
+                 // fw_request/protocol   - the same round trip over h1, h1+TLS, h2, h3
+  fw_client.rs   // fw_client/construction - client build, clone, and first (cold) request
+                 // fw_client/error_path   - a request that never reaches a server
+```
+
+The transport's own work cannot be isolated from WinHTTP's through the public
+API - `MockBindings` is `cfg(test)`-only and unreachable from a benchmark
+target, and exposing it through a published feature would put test scaffolding in
+the public surface. Scenarios are therefore designed to be read by **differencing**
+neighbours within a group: `get_headers_high` minus `get_minimal` is header
+translation, `get_body_high` minus `get_body_low` is the per-byte read path,
+`post_unknown_high` minus `post_known_high` is automatic chunking, and
+`first_request` minus `get_minimal` is session creation plus connection setup.
+Each leg is parameterized with one low and one high value only, which is enough to
+separate the fixed cost from the scaling cost.
+
+Two properties make an in-process fixture usable despite the transport's
+cross-thread nature:
+
+- Measurement uses `measure_thread()`, not `measure_process()`. WinHTTP completes
+  I/O on its own worker threads and the fixture serves on Tokio runtime threads, so
+  neither the callback trampoline's own cost nor the server's appears in the
+  numbers. What remains is the cost the *caller's* thread pays, which is the figure
+  a caller can act on.
+- Fixtures are built from `ResponseScript::Repeat`, which answers every request
+  from one cloned plan and records nothing. A `Sequence` fixture would run out of
+  scripted responses after a few iterations and would grow a `RecordedRequest` per
+  request, so fixture memory would scale with the iteration count and pollute the
+  allocation figures.
+
+Benchmarks measure warm paths unless the scenario is explicitly about a cold one:
+`warmed_client` issues one request before the measured region so the pooled
+connection is already established. `fw_client/construction/first_request` is the
+deliberate exception.
+
+No benchmark waits for elapsed real time. `connect_refused` targets a port that was
+bound and immediately released, so loopback answers with an immediate reset rather
+than a timeout.
+
+There is no paired Callgrind (`_cg.rs`) file. Gungraun requires Valgrind, which
+does not run on Windows, and every scenario here is dominated by syscalls and
+cross-thread wakeups that instruction counting would not model faithfully in any
+case (../../../docs/naming.md).
+
 ## 2. WinHTTP asynchronous model primer
 
 A single request drives this WinHTTP handle chain and callback sequence. `S` steps

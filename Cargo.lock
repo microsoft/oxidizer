@@ -1763,8 +1763,12 @@ dependencies = [
 name = "fetch_winhttp_testing"
 version = "0.0.0"
 dependencies = [
+ "all_the_time",
+ "alloc_tracker",
+ "benchmarking",
  "bytes",
  "bytesbuf",
+ "criterion",
  "ctor",
  "fetch",
  "fetch_winhttp",

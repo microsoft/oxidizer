@@ -12,7 +12,7 @@
 //! The client is driven here without any async runtime installed, which is what
 //! runtime-neutrality buys: the transport's I/O completes on WinHTTP's own worker threads.
 //!
-//! Run with `cargo run -p fetch_winhttp --example quick_start`.
+//! Run with `cargo run -p fetch_winhttp_testing --example quick_start`.
 
 fn main() {
     #[cfg(windows)]

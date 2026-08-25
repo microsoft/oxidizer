@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
-use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ResponseScript, ServerSnapshot};
 
 type ResponseBody = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -70,7 +70,7 @@ enum Transport {
 
 #[derive(Debug)]
 struct State {
-    responses: Vec<ResponsePlan>,
+    script: ResponseScript,
     next_response: AtomicUsize,
     requests: Mutex<Vec<(usize, RecordedRequest)>>,
     connections: AtomicUsize,
@@ -93,13 +93,28 @@ pub struct TestServer {
 impl TestServer {
     /// Serves plaintext HTTP over the IPv4 loopback.
     pub fn http(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
-        Self::start(responses, Transport::Http, None, IpAddr::V4(Ipv4Addr::LOCALHOST))
+        Self::start(
+            ResponseScript::Sequence(responses.into_iter().collect()),
+            Transport::Http,
+            None,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        )
+    }
+
+    /// Serves plaintext HTTP over the IPv4 loopback, answering every request with `plan`.
+    pub fn http_repeating(plan: ResponsePlan) -> Self {
+        Self::start(ResponseScript::Repeat(plan), Transport::Http, None, IpAddr::V4(Ipv4Addr::LOCALHOST))
     }
 
     /// Serves plaintext HTTP over the IPv6 loopback, so a caller reaches it through a bracketed
     /// authority.
     pub fn http_ipv6(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
-        Self::start(responses, Transport::Http, None, IpAddr::V6(Ipv6Addr::LOCALHOST))
+        Self::start(
+            ResponseScript::Sequence(responses.into_iter().collect()),
+            Transport::Http,
+            None,
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        )
     }
 
     /// Serves TLS over the IPv4 loopback with a self-signed certificate issued
@@ -108,6 +123,15 @@ impl TestServer {
     /// Naming something other than `localhost` is how a test produces a
     /// hostname mismatch, since callers reach the fixture through `localhost`.
     pub fn https(responses: impl IntoIterator<Item = ResponsePlan>, certificate_names: &[&str]) -> Self {
+        Self::start_tls(ResponseScript::Sequence(responses.into_iter().collect()), certificate_names)
+    }
+
+    /// Serves TLS over the IPv4 loopback, answering every request with `plan`.
+    pub fn https_repeating(plan: ResponsePlan, certificate_names: &[&str]) -> Self {
+        Self::start_tls(ResponseScript::Repeat(plan), certificate_names)
+    }
+
+    fn start_tls(script: ResponseScript, certificate_names: &[&str]) -> Self {
         let certificate_names = certificate_names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
         let CertifiedKey { cert, signing_key } = generate_simple_self_signed(certificate_names).unwrap();
         let private_key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
@@ -118,24 +142,19 @@ impl TestServer {
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
         Self::start(
-            responses,
+            script,
             Transport::Https,
             Some(TlsAcceptor::from(Arc::new(config))),
             IpAddr::V4(Ipv4Addr::LOCALHOST),
         )
     }
 
-    fn start(
-        responses: impl IntoIterator<Item = ResponsePlan>,
-        transport: Transport,
-        tls_acceptor: Option<TlsAcceptor>,
-        bind: IpAddr,
-    ) -> Self {
+    fn start(script: ResponseScript, transport: Transport, tls_acceptor: Option<TlsAcceptor>, bind: IpAddr) -> Self {
         let listener = StdTcpListener::bind((bind, 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let state = Arc::new(State {
-            responses: responses.into_iter().collect(),
+            script,
             next_response: AtomicUsize::new(0),
             requests: Mutex::new(Vec::new()),
             connections: AtomicUsize::new(0),
@@ -265,12 +284,9 @@ async fn handle_request(request: Request<Incoming>, state: Arc<State>) -> Result
             return Ok(into_response(ResponsePlan::status(StatusCode::BAD_REQUEST)));
         }
     };
-    state.requests.lock().unwrap().push((index, recorded));
+    if state.script.records() {
+        state.requests.lock().unwrap().push((index, recorded));
+    }
 
-    let response = state
-        .responses
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| ResponsePlan::status(StatusCode::INTERNAL_SERVER_ERROR));
-    Ok(into_response(response))
+    Ok(into_response(state.script.plan(index)))
 }
