@@ -43,6 +43,10 @@
 //!   the headers and preceding body data have already been sent. The request
 //!   body is sent in full before response reception begins.
 //!
+//! Failures carry a stable error label and retry guidance. The label is
+//! contractual; the retry guidance attached to any particular failure is not,
+//! and may change as the transport's classification is refined.
+//!
 //! The full contract - error classification, timeout semantics, and the
 //! fidelity of every generic option - is documented in
 //! [`docs/design.md`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md).

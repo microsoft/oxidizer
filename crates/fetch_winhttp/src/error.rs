@@ -76,12 +76,14 @@ impl fmt::Display for WinHttpOperation {
 ///
 /// Conversion to [`HttpError`] preserves this value as the source while adding a
 /// stable public label and [`RecoveryInfo`] derived from the Win32 error code.
+/// The label is contractual; which recovery guidance a given code receives is
+/// not, and may change as classification is refined (design.md section 7.1).
 /// Secure-failure flags are best-effort certificate diagnostics captured from a
 /// separate callback.
 ///
-/// WinHTTP does not define the relative order of secure-failure and request-error
-/// callbacks. Classification therefore depends on the request-error code alone;
-/// only secure diagnostics observed in time are attached to the source.
+/// Classification depends on the request-error code alone, never on the order in
+/// which the secure-failure and request-error callbacks arrive; only secure
+/// diagnostics observed in time are attached to the source.
 pub(crate) struct WinHttpError {
     code: u32,
     operation: WinHttpOperation,
@@ -169,7 +171,8 @@ const HRESULT_CODE_MASK: u32 = 0x0000_ffff;
 /// [`RecoveryInfo`] consumed by retry and breaker layers. Transient connection,
 /// timeout, request, or revocation-check failures may be retryable; deterministic
 /// protocol, cancellation, and certificate failures are not, while unknown codes
-/// retain unknown recovery guidance.
+/// retain unknown recovery guidance. That split is descriptive rather than
+/// contractual and may be refined without a breaking change.
 enum ErrorClass {
     Abandoned,
     Connect,

@@ -55,6 +55,10 @@ fixed by the operating system.
   the headers and preceding body data have already been sent. The request
   body is sent in full before response reception begins.
 
+Failures carry a stable error label and retry guidance. The label is
+contractual; the retry guidance attached to any particular failure is not,
+and may change as the transport’s classification is refined.
+
 The full contract - error classification, timeout semantics, and the
 fidelity of every generic option - is documented in
 [`docs/design.md`][__link4].
@@ -69,7 +73,7 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbi6-kKIHoMcQbYbzSYIXh6N0bOjgiLQ5-DwgbsNYZKhpkINRhZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyfmNznPTP1QbQnRFLMyOxK0baKMAeblxeQsbrWmEPvMhHIthZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
  [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps
