@@ -608,8 +608,9 @@ fn variant_fields_named_after_relocate_parameters_compile() {
 
 /// An enum with no variants has nothing to relocate.
 ///
-/// The derive emits no body for it. `match self {}` would be rejected as non-exhaustive,
-/// because a `&mut` reference is inhabited however uninhabited its referent is.
+/// The derive emits `match *self {}`, which is accepted because `*self` is a place of an
+/// uninhabited type. `match self {}` would not be: a `&mut` reference is inhabited however
+/// uninhabited its referent is.
 #[derive(ThreadAware)]
 enum Uninhabited {}
 

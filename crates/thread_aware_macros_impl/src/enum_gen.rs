@@ -21,15 +21,6 @@ fn field_binding(index: usize) -> syn::Ident {
 }
 
 pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
-    // An enum with no variants has nothing to relocate, so emit no body. An empty
-    // `match *self {}` would also compile - `*self` is a place of an uninhabited type - but
-    // saying nothing is clearer, and it keeps this independent of how the match is spelled.
-    // `match self {}`, which the derive emitted until the bindings were reworked, was rejected
-    // outright: a `&mut` reference counts as inhabited however uninhabited its referent is.
-    if data.variants.is_empty() {
-        return Ok(proc_macro2::TokenStream::new());
-    }
-
     let (source, destination) = param_idents();
 
     let mut arms = Vec::new();
