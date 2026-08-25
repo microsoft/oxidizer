@@ -116,22 +116,35 @@ over shaving cycles.
 
 ## Coordinate space
 
-[`Core`][__link11] and [`MemoryRegion`][__link12] are real hardware coordinates of the physical machine, not
-dense indices into the worker list of one runtime. Their values are meaningful
-process-wide: two runtimes on the same machine that both use core 2 report the same
-[`Core`][__link13], and state keyed by it can legitimately be shared between them. Preserving that
-sharing is why the API exposes identities rather than re-numbered indices.
+[`Core`][__link11] and [`MemoryRegion`][__link12] name hardware on the physical machine rather than indexing
+the worker list of one runtime. Their values are intended to be meaningful process-wide:
+two runtimes on the same machine that both use core 2 report the same [`Core`][__link13], and state
+keyed by it can legitimately be shared between them. Preserving that sharing is why the
+API exposes identities rather than re-numbered indices.
 
-[`Topology`][__link14] identifies the runtime that produced the location. It does not scope the
+This crate cannot enforce it. [`Core::from`][__link14] and [`MemoryRegion::from`][__link15] accept any `u16`,
+so cross-runtime sharing is sound only while every runtime in the process derives these
+values from the same physical numbering — the operating system’s logical processor and
+NUMA node ids, say. If two runtimes number the same hardware differently, state shared
+between them on a [`Core`][__link16] key is wrong, not merely slow. Share across runtimes only when
+you control every runtime in the process; otherwise treat the state as runtime-bound.
+
+[`Topology`][__link17] identifies the runtime that produced the location. It does not scope the
 hardware coordinates; it tells an implementation whether it is still inside the runtime
 whose resources it holds.
 
 Which coordinates an implementation reads is its own choice:
 
 * Hardware-keyed state — a per-core cache, a region-local buffer pool — can key on
-  [`Core`][__link15] or [`MemoryRegion`][__link16] alone and stay valid across topologies.
-* Runtime-bound state — a task scheduler, a handle to a thread-local I/O driver — must
-  also compare [`Topology`][__link17] and detach when it changes.
+  [`Core`][__link18] or [`MemoryRegion`][__link19] alone and stay valid across topologies, provided it is
+  backed by resources that outlive any single runtime.
+* Runtime-bound state — a task scheduler, a handle to a thread-local I/O driver, memory
+  allocated by a particular runtime — must also compare [`Topology`][__link20] and detach when
+  it changes.
+
+State keyed on hardware but *backed* by runtime-owned resources counts as runtime-bound;
+when in doubt classify it that way, since the only cost is a re-acquire that a purely
+hardware-keyed value could have skipped.
 
 The values themselves are opaque identities:
 
@@ -145,25 +158,31 @@ The values themselves are opaque identities:
 
 ## Relation to `Send`
 
-[`ThreadAware`][__link18] requires [`Send`][__link19] as a supertrait, and the two happen in that order: a
-value is first sent to another thread, and only then told where it landed. [`Send`][__link20]
-remains the safety property; [`ThreadAware`][__link21] adds nothing to it.
+[`ThreadAware`][__link21] requires [`Send`][__link22] as a supertrait, and the two happen in that order: a
+value is first sent to another thread, and only then told where it landed. [`Send`][__link23]
+remains the safety property; [`ThreadAware`][__link24] adds nothing to it.
 
 ## Thread versus core semantics
 
 This crate targets thread-per-core runtimes, where each worker thread is pinned to one
 logical processor, so “moved to another thread” and “moved to another core” describe the
-same event. A runtime that runs several threads per core, or leaves threads unpinned, is
-expected to surface that fact rather than pretend otherwise.
+same event. [`Location`][__link25] cannot express more than one worker per core: a runtime that
+runs several threads per core, or leaves threads unpinned, has to give each worker a
+distinct [`Core`][__link26], which forfeits sharing between workers that really do sit on the same
+processor. [`Location`][__link27] has no way to say “not pinned to this dimension”.
 
 ## Provided implementations
 
-[`ThreadAware`][__link22] is implemented for types with no location-dependent state (primitives,
-location identifiers, `Duration`, strings, function pointers, and, with the `std`
-feature, paths). It is forwarded through container types such as [`Option`][__link23], [`Result`][__link24],
+[`ThreadAware`][__link28] is implemented for types with no location-dependent state (primitives,
+location identifiers, `Duration`, strings, safe function pointers, and, with the `std`
+feature, paths). It is forwarded through container types such as [`Option`][__link29], [`Result`][__link30],
 arrays, slices, `Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples up to twelve elements and
-map values. Map keys and set elements are deliberately not relocated because changing
-their equality, hashing or ordering would violate collection invariants.
+map values. A `Cow` forwards only when it is `Cow::Owned`; a borrowed one is left alone.
+Map keys are deliberately not relocated, because changing their equality,
+hashing or ordering would violate the collection’s invariants. For the same reason no
+set implementation is provided at all: a set has only elements, so a `HashSet` or
+`BTreeSet` field is simply not [`ThreadAware`][__link31]. Hold location-sensitive set contents in a
+map, or in a newtype you relocate explicitly.
 
 `Arc` is deliberately **not** implemented. Whether a shared allocation should stay shared
 across cores or be split per core is a policy decision that depends on what the `Arc`
@@ -183,26 +202,33 @@ per-core `Arc` for when splitting is the right answer.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYmjGHoQs1a0bpBtOwWo2ioMbZss_4zm_UuwbwGyS2AC0uoVhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPpf1myAraf0bGcRZ6NeIVXsbctzYtSggUawbtEGAPL6tDjVhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Location
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link11]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
  [__link12]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=MemoryRegion
  [__link13]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
- [__link14]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Topology
- [__link15]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
- [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=MemoryRegion
+ [__link14]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core::from
+ [__link15]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=MemoryRegion::from
+ [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
  [__link17]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Topology
- [__link18]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
- [__link19]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link18]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
+ [__link19]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=MemoryRegion
  [__link2]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
- [__link20]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link20]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Topology
  [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
- [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
- [__link23]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
- [__link24]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
+ [__link22]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link23]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link24]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link25]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Location
+ [__link26]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Core
+ [__link27]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Location
+ [__link28]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
+ [__link29]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
  [__link3]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
+ [__link30]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
+ [__link31]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/trait.ThreadAware.html
  [__link5]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link6]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Location

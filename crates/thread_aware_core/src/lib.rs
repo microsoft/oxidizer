@@ -106,11 +106,18 @@
 //!
 //! # Coordinate space
 //!
-//! [`Core`] and [`MemoryRegion`] are real hardware coordinates of the physical machine, not
-//! dense indices into the worker list of one runtime. Their values are meaningful
-//! process-wide: two runtimes on the same machine that both use core 2 report the same
-//! [`Core`], and state keyed by it can legitimately be shared between them. Preserving that
-//! sharing is why the API exposes identities rather than re-numbered indices.
+//! [`Core`] and [`MemoryRegion`] name hardware on the physical machine rather than indexing
+//! the worker list of one runtime. Their values are intended to be meaningful process-wide:
+//! two runtimes on the same machine that both use core 2 report the same [`Core`], and state
+//! keyed by it can legitimately be shared between them. Preserving that sharing is why the
+//! API exposes identities rather than re-numbered indices.
+//!
+//! This crate cannot enforce it. [`Core::from`] and [`MemoryRegion::from`] accept any `u16`,
+//! so cross-runtime sharing is sound only while every runtime in the process derives these
+//! values from the same physical numbering — the operating system's logical processor and
+//! NUMA node ids, say. If two runtimes number the same hardware differently, state shared
+//! between them on a [`Core`] key is wrong, not merely slow. Share across runtimes only when
+//! you control every runtime in the process; otherwise treat the state as runtime-bound.
 //!
 //! [`Topology`] identifies the runtime that produced the location. It does not scope the
 //! hardware coordinates; it tells an implementation whether it is still inside the runtime
@@ -119,9 +126,15 @@
 //! Which coordinates an implementation reads is its own choice:
 //!
 //! - Hardware-keyed state — a per-core cache, a region-local buffer pool — can key on
-//!   [`Core`] or [`MemoryRegion`] alone and stay valid across topologies.
-//! - Runtime-bound state — a task scheduler, a handle to a thread-local I/O driver — must
-//!   also compare [`Topology`] and detach when it changes.
+//!   [`Core`] or [`MemoryRegion`] alone and stay valid across topologies, provided it is
+//!   backed by resources that outlive any single runtime.
+//! - Runtime-bound state — a task scheduler, a handle to a thread-local I/O driver, memory
+//!   allocated by a particular runtime — must also compare [`Topology`] and detach when
+//!   it changes.
+//!
+//! State keyed on hardware but *backed* by runtime-owned resources counts as runtime-bound;
+//! when in doubt classify it that way, since the only cost is a re-acquire that a purely
+//! hardware-keyed value could have skipped.
 //!
 //! The values themselves are opaque identities:
 //!
@@ -143,17 +156,23 @@
 //!
 //! This crate targets thread-per-core runtimes, where each worker thread is pinned to one
 //! logical processor, so "moved to another thread" and "moved to another core" describe the
-//! same event. A runtime that runs several threads per core, or leaves threads unpinned, is
-//! expected to surface that fact rather than pretend otherwise.
+//! same event. [`Location`] cannot express more than one worker per core: a runtime that
+//! runs several threads per core, or leaves threads unpinned, has to give each worker a
+//! distinct [`Core`], which forfeits sharing between workers that really do sit on the same
+//! processor. [`Location`] has no way to say "not pinned to this dimension".
 //!
 //! # Provided implementations
 //!
 //! [`ThreadAware`] is implemented for types with no location-dependent state (primitives,
-//! location identifiers, `Duration`, strings, function pointers, and, with the `std`
+//! location identifiers, `Duration`, strings, safe function pointers, and, with the `std`
 //! feature, paths). It is forwarded through container types such as [`Option`], [`Result`],
 //! arrays, slices, `Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples up to twelve elements and
-//! map values. Map keys and set elements are deliberately not relocated because changing
-//! their equality, hashing or ordering would violate collection invariants.
+//! map values. A `Cow` forwards only when it is `Cow::Owned`; a borrowed one is left alone.
+//! Map keys are deliberately not relocated, because changing their equality,
+//! hashing or ordering would violate the collection's invariants. For the same reason no
+//! set implementation is provided at all: a set has only elements, so a `HashSet` or
+//! `BTreeSet` field is simply not [`ThreadAware`]. Hold location-sensitive set contents in a
+//! map, or in a newtype you relocate explicitly.
 //!
 //! `Arc` is deliberately **not** implemented. Whether a shared allocation should stay shared
 //! across cores or be split per core is a policy decision that depends on what the `Arc`
@@ -206,7 +225,8 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 ///    primitives do.
 ///
 ///    ```
-///    # use thread_aware_core::{Location, ThreadAware};
+///    use thread_aware_core::{Location, ThreadAware};
+///
 ///    struct RequestId(u64);
 ///
 ///    impl ThreadAware for RequestId {
@@ -215,37 +235,62 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 ///    ```
 /// 2. **Record the destination.** Cache the new [`Core`] or [`MemoryRegion`] so that later
 ///    operations can route by it.
-/// 3. **Re-acquire location-local resources.** Release the handle, pool or scratch buffer
-///    obtained at the old location and acquire the equivalent one for the destination.
+/// 3. **Re-acquire resources whose coordinate changed.** Compare the coordinate the resource
+///    is keyed on — a region-local pool against [`MemoryRegion`], a driver handle against
+///    [`Topology`] — and only if it changed, release the old resource and acquire the
+///    destination's. A resource holding the only copy of observable data must be flushed or
+///    migrated first, never simply dropped.
 /// 4. **Forward to fields.** Composite types call `relocate` on each part. Prefer the
 ///    `#[derive(ThreadAware)]` macro from the `thread_aware` crate over hand-writing this.
 ///
+/// To **detach** is to release a resource and leave the field empty, so that the value either
+/// re-acquires an equivalent at the current location later or runs without one. Fields tied
+/// to a runtime therefore need a representation that can be left empty, such as
+/// `Option<Handle>`; a plain handle cannot be detached and is the wrong shape for such state.
+///
 /// # Contract
 ///
-/// [`relocate`](Self::relocate) is best-effort and infallible. Implementations must:
+/// [`relocate`](Self::relocate) is best-effort and infallible — there is no error channel,
+/// so every failure has to be absorbed. Implementations must:
 ///
-/// * **Preserve logical state.** Relocation may rebuild caches, pools and handles — state
-///   that exists only for speed. It must never discard or alter data the value's users can
-///   observe.
-/// * **Not fail.** There is no error channel. When the ideal adaptation is unavailable,
-///   degrade to something workable — for example, detach from the old location's resources
-///   and operate without location-specific optimizations — and carry on.
-/// * **Not panic** and not block for long.
+/// * **Preserve observable state.** Relocation may rebuild state that exists only for speed:
+///   caches, pools, scratch buffers and handles whose contents can be regenerated, or dropped
+///   with no effect visible through the value's API or its side effects. It must not touch
+///   anything else. A write-back cache still holding entries that have not been written back,
+///   or a pool holding the only copy of buffered data, cannot be rebuilt — flush or migrate
+///   it rather than releasing it.
+/// * **Not fail.** When the ideal adaptation is unavailable, stay correct and give up
+///   performance instead: detach from the old location's resources and run without
+///   location-specific optimization. If staying correct means keeping the old resource, keep
+///   it. Degraded locality always beats a wrong answer.
+/// * **Not panic, and do only bounded local work.** `relocate` runs inline on the placement
+///   path of the runtime, so it must not block on anything unbounded — no network or disk
+///   I/O, no
+///   waiting on another worker, no contended lock. Defer such work by detaching now and
+///   re-acquiring lazily on first use.
 /// * **Tolerate repetition.** Relocating twice to the same destination, or with `source`
-///   equal to `destination`, must be harmless.
+///   equal to `destination`, must be harmless — and should also be cheap: compare the
+///   coordinates you care about and return early when they are unchanged, rather than
+///   rebuilding state that was already correct.
 /// * **Tolerate omission.** The value must stay correct if relocation is never reported.
 /// * **Tolerate a foreign topology.** A value may be handed a `destination` whose
 ///   [`Topology`] differs from anything it has seen before, for instance when it crosses
-///   between two runtimes in the same process. This must remain sound. Hardware-keyed state
-///   stays valid across such a move, because [`Core`] and [`MemoryRegion`] describe the
-///   same physical machine; runtime-bound state must instead detach, and good performance
-///   after such a move is not promised.
+///   between two runtimes in the same process. This must remain sound. Runtime-bound state
+///   detaches; hardware-keyed state may stay valid, subject to the numbering caveat in the
+///   [coordinate space](crate#coordinate-space) section. Good performance after such a move
+///   is not promised, but the degradation should not be permanent: a value relocated back to
+///   a topology it can serve is expected to re-acquire what it released.
+///
+/// A [`Location`] is a plain value and may be cloned, but the ids inside it are only
+/// meaningful while the runtime that issued them is alive; do not treat a stored [`Topology`]
+/// as proof of identity once that runtime may have exited.
 ///
 /// Runtimes that drive relocation carry their own, different obligations. They must call
 /// [`relocate`](Self::relocate) only after the value has actually been placed or moved, pass
 /// `None` as the source whenever the previous location is unknown rather than inventing one,
-/// assign each concurrently live runtime a distinct [`Topology`], and never depend on the
-/// callback for correctness — a value they fail to notify must still work.
+/// keep [`Topology`] values distinct across concurrently live runtimes, and never depend on
+/// the callback for correctness — a value they fail to notify must still work. None of these
+/// are checked by the compiler or by this crate.
 ///
 /// # Examples
 ///

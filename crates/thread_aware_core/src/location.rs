@@ -15,15 +15,21 @@
 //! The guarantees these ids carry are documented in the crate-level
 //! [coordinate space](crate#coordinate-space) section.
 //!
-//! The id types wrap a `u16` and are built with `From`. If that range is ever too small, a
-//! `From<u32>` (or wider) can be added later without a breaking change.
+//! The id types wrap a `u16` and are built with `From`.
 
 /// Identifies the runtime that produced a [`Location`].
 ///
-/// Runtimes must give each concurrently live instance a distinct topology, so that two
-/// runtimes in the same process are always distinguishable even when they run on the same
-/// hardware. A topology does not scope [`Core`] or [`MemoryRegion`]; it lets an
-/// implementation tell whether it is still inside the runtime whose resources it holds.
+/// Runtimes are expected to give each concurrently live instance a distinct topology, so
+/// that two runtimes in the same process stay distinguishable even when they run on the
+/// same hardware. Nothing enforces this — [`Topology::from`] accepts any `u16` — and the
+/// consequence of a collision is not merely degraded locality: a value carrying
+/// runtime-bound state that crosses into a second runtime with the same topology concludes
+/// it is still at home and keeps using resources owned by the first runtime. Runtimes that
+/// share a
+/// process own this uniqueness between them.
+///
+/// A topology does not scope [`Core`] or [`MemoryRegion`]; it lets an implementation tell
+/// whether it is still inside the runtime whose resources it holds.
 ///
 /// See the [coordinate space](crate#coordinate-space) notes for what the wrapped value does
 /// and does not promise.
@@ -32,9 +38,10 @@ pub struct Topology(u16);
 
 /// A logical processor on the physical machine.
 ///
-/// Values are hardware coordinates rather than indices into a worker list, so the same core
-/// carries the same [`Core`] in every topology and state keyed by it alone can be shared
-/// across runtimes. See the [coordinate space](crate#coordinate-space) notes.
+/// Values name hardware rather than indexing a worker list, so state keyed on [`Core`] alone
+/// can be shared between runtimes — provided every runtime in the process derives the value
+/// from the same physical numbering. This crate cannot check that; see the
+/// [coordinate space](crate#coordinate-space) notes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Core(u16);
 
@@ -72,8 +79,7 @@ impl From<u16> for MemoryRegion {
 /// per-core cache keys on [`core`](Self::core), a memory pool on
 /// [`memory_region`](Self::memory_region) — and ignore the rest.
 ///
-/// `Location` is cheap to clone but deliberately not `Copy`, which leaves room to carry
-/// richer data (such as a runtime handle) in the future without a breaking change. It is
+/// `Location` is cheap to clone but deliberately not `Copy`. It is
 /// passed by reference to [`relocate`](crate::ThreadAware::relocate), so consumers rarely
 /// clone it.
 ///
