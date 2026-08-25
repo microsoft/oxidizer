@@ -4,7 +4,7 @@
 [package]
 name = "thread_aware_core"
 description = "Stable core traits and types for thread-aware state."
-version = "1.0.0"
+version = "0.1.0"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
 categories = ["data-structures", "no-std"]
