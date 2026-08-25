@@ -138,7 +138,11 @@ pub fn missing_required_link_args<'a>(encoded: &str, required: &[&'a str]) -> Ve
 }
 
 /// Returns whether `encoded` already adds `dir` as a native library search
-/// path (`-L native=<dir>` or the bare `-L <dir>` form).
+/// path.
+///
+/// Only the `native=` and `all=` kinds count, along with the bare
+/// `-L <dir>` form, which defaults to `all`. Kinds that do not feed the native
+/// search path, such as `dependency=`, are ignored.
 ///
 /// Used to keep the build script idempotent when an integrator has already
 /// supplied the Spectre directory through `RUSTFLAGS`.
@@ -153,6 +157,10 @@ pub fn missing_required_link_args<'a>(encoded: &str, required: &[&'a str]) -> Ve
 /// let encoded = "-L\u{1f}native=C:\\VC\\lib\\spectre\\x64";
 /// assert!(adds_link_search(encoded, Path::new("C:/VC/lib/spectre/x64")));
 /// assert!(!adds_link_search(encoded, Path::new("C:/VC/lib/spectre/arm64")));
+///
+/// // A `dependency=` entry is not a native library search path.
+/// let encoded = "-L\u{1f}dependency=C:\\VC\\lib\\spectre\\x64";
+/// assert!(!adds_link_search(encoded, Path::new("C:/VC/lib/spectre/x64")));
 /// ```
 #[must_use]
 pub fn adds_link_search(encoded: &str, dir: &Path) -> bool {
@@ -171,13 +179,20 @@ pub fn adds_link_search(encoded: &str, dir: &Path) -> bool {
             arg.strip_prefix("-L")
         };
 
-        // Strip the optional `<kind>=` prefix (`native=`, `dependency=`, ...).
-        // A bare Windows path such as `C:\lib` also contains `=`-free text, so
-        // only strip a prefix that is a known-shaped kind (no path separator).
+        // Strip the optional `<kind>=` prefix. Only `native` and `all` -- the
+        // default when no kind is given -- place the directory on the *native*
+        // library search path; `dependency`, `crate`, and `framework` do not,
+        // so they must never suppress our own entry.
+        //
+        // A bare Windows path such as `C:\lib` contains no `=` and so parses
+        // as the kindless form. One that does contain `=` is read as an
+        // unrecognised kind and skipped, which errs toward emitting a possibly
+        // redundant search path rather than dropping a required one.
         if let Some(value) = value {
             let path = match value.split_once('=') {
-                Some((kind, rest)) if !kind.contains(['\\', '/', ':']) => rest,
-                _ => value,
+                Some((kind, rest)) if kind.eq_ignore_ascii_case("native") || kind.eq_ignore_ascii_case("all") => rest,
+                Some(_) => continue,
+                None => value,
             };
             if same_path(Path::new(path), dir) {
                 return true;
@@ -291,6 +306,8 @@ mod tests {
         let dir = Path::new("C:/VC/lib/spectre/x64");
         assert!(adds_link_search("-L\u{1f}native=C:\\VC\\lib\\spectre\\x64", dir));
         assert!(adds_link_search("-Lnative=C:\\VC\\lib\\spectre\\x64", dir));
+        // `all` is the default kind and covers the native search path.
+        assert!(adds_link_search("-L\u{1f}all=C:\\VC\\lib\\spectre\\x64", dir));
         // Bare path with no `<kind>=` prefix.
         assert!(adds_link_search("-L\u{1f}C:\\VC\\lib\\spectre\\x64", dir));
         // A drive-letter path must not be mistaken for a `<kind>=` prefix.
@@ -302,8 +319,12 @@ mod tests {
         let dir = Path::new("C:/VC/lib/spectre/x64");
         assert!(!adds_link_search("", dir));
         assert!(!adds_link_search("-L\u{1f}native=C:\\VC\\lib\\spectre\\arm64", dir));
-        // `dependency=` paths are search paths too, but for a different dir.
-        assert!(!adds_link_search("-L\u{1f}dependency=C:\\target\\debug\\deps", dir));
+        // Kinds other than `native`/`all` do not place the directory on the
+        // native search path, so they must not suppress our own entry even
+        // when they name the very same directory.
+        assert!(!adds_link_search("-L\u{1f}dependency=C:\\VC\\lib\\spectre\\x64", dir));
+        assert!(!adds_link_search("-L\u{1f}crate=C:\\VC\\lib\\spectre\\x64", dir));
+        assert!(!adds_link_search("-L\u{1f}framework=C:\\VC\\lib\\spectre\\x64", dir));
         // A `-C` option that merely mentions the path is not a search path.
         assert!(!adds_link_search("-Clink-arg=C:\\VC\\lib\\spectre\\x64", dir));
     }

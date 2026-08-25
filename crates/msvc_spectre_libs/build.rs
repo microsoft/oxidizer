@@ -39,21 +39,20 @@ fn main() {
         return;
     }
 
-    let failure = add_spectre_link_search().err();
+    // Evaluate both steps before reporting anything, so a single build
+    // surfaces every problem instead of one per iteration. The search-path
+    // step runs first because it is the one that emits a cargo directive.
+    let search_failure = add_spectre_link_search().err();
+    let flags_failure = verify_required_link_args().err();
 
-    // Report the hardening flags this crate cannot deliver itself. Runs even
-    // when the search-path step failed, so one build surfaces every problem.
-    if let Err(message) = verify_required_link_args() {
-        // Always surface the problem. `println!` is line-buffered, so the
-        // warning reaches cargo before any `error`-feature exit below.
+    // `println!` is line-buffered, so every warning reaches cargo before the
+    // `error`-feature exit below.
+    for message in [search_failure.as_ref(), flags_failure.as_ref()].into_iter().flatten() {
         println!("cargo:warning={message}");
-        #[cfg(feature = "error")]
-        std::process::exit(1);
     }
 
-    if let Some(message) = failure {
-        println!("cargo:warning={message}");
-        #[cfg(feature = "error")]
+    #[cfg(feature = "error")]
+    if search_failure.is_some() || flags_failure.is_some() {
         std::process::exit(1);
     }
 }
