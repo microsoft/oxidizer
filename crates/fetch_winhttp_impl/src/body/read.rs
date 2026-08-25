@@ -335,6 +335,7 @@ impl Body for WinHttpResponseBody {
         matches!(self.state, BodyState::Done)
     }
 
+    #[cfg_attr(test, mutants::skip)] // Intentionally unbounded; WinHTTP does not expose a remaining length.
     fn size_hint(&self) -> SizeHint {
         SizeHint::default()
     }
@@ -367,6 +368,15 @@ impl WinHttpResponseBody {
         // block the frame already pins, so the next read refills that capacity
         // instead of renting a second block.
         let data = buffer.consume_all();
+        // A positive read count with no bytes is a protocol break. Rejecting it
+        // here also stops a mutant that fabricates a nonzero count without a
+        // buffer from spinning the body forever (AGENTS.md, "Code must not hang
+        // even under mutation testing").
+        if data.is_empty() {
+            return Poll::Ready(Some(Err(callback_protocol_error(
+                "WinHTTP reported a nonempty read without returning any bytes",
+            ))));
+        }
         self.state = BodyState::Ready { reader, buffer };
 
         Poll::Ready(Some(Ok(Frame::data(data))))

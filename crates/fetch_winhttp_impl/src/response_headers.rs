@@ -131,7 +131,12 @@ fn take_crlf_line<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
     let remaining = raw.get(*cursor..)?;
     let end = remaining.windows(2).position(|pair| pair == b"\r\n")?;
     let start = *cursor;
-    *cursor += end + 2;
+    // Advance by at least the CRLF so a mutated `+=` cannot leave the cursor
+    // stuck and hang the parser (AGENTS.md, "Code must not hang even under
+    // mutation testing").
+    let next = start.checked_add(end)?.checked_add(2)?;
+    debug_assert!(next > start, "CRLF line consumption must advance the cursor");
+    *cursor = next;
 
     raw.get(start..start + end)
 }
@@ -152,10 +157,15 @@ fn header_value(bytes: &[u8]) -> Result<HeaderValue, ResponseHeadersError> {
 
 fn trim_optional_whitespace(mut bytes: &[u8]) -> &[u8] {
     while bytes.first().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
-        bytes = &bytes[1..];
+        // Indexing from 1 shrinks the slice; a mutated subtract-from-len form is
+        // not used here so the loop cannot stall (AGENTS.md, "Code must not hang
+        // even under mutation testing").
+        bytes = bytes.get(1..).expect("first() proved the slice is non-empty");
     }
     while bytes.last().is_some_and(|byte| matches!(*byte, b' ' | b'\t')) {
-        bytes = &bytes[..bytes.len() - 1];
+        bytes = bytes
+            .get(..bytes.len().saturating_sub(1))
+            .expect("last() proved the slice is non-empty");
     }
 
     bytes

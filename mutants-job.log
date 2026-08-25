@@ -1,0 +1,1042 @@
+﻿2026-08-25T15:53:29.4558465Z Current runner version: '2.336.0'
+2026-08-25T15:53:29.4586927Z ##[group]Runner Image Provisioner
+2026-08-25T15:53:29.4587716Z Hosted Compute Agent
+2026-08-25T15:53:29.4588342Z Version: 20260729.566
+2026-08-25T15:53:29.4588995Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+2026-08-25T15:53:29.4589697Z Build Date: 2026-07-29T19:17:02Z
+2026-08-25T15:53:29.4590471Z Worker ID: {9404d0da-1c60-4839-bbb7-a5fca0b945bc}
+2026-08-25T15:53:29.4591590Z Azure Region: eastus
+2026-08-25T15:53:29.4592295Z ##[endgroup]
+2026-08-25T15:53:29.4593743Z ##[group]Operating System
+2026-08-25T15:53:29.4594390Z Microsoft Windows Server 2025
+2026-08-25T15:53:29.4595061Z 10.0.26100
+2026-08-25T15:53:29.4595581Z Datacenter
+2026-08-25T15:53:29.4596102Z ##[endgroup]
+2026-08-25T15:53:29.4596622Z ##[group]Runner Image
+2026-08-25T15:53:29.4597200Z Image: windows-2025-vs2026
+2026-08-25T15:53:29.4598023Z Version: 20260818.207.1
+2026-08-25T15:53:29.4599688Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260818.207/images/windows/Windows2025-VS2026-Readme.md
+2026-08-25T15:53:29.4601498Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260818.207
+2026-08-25T15:53:29.4602499Z ##[endgroup]
+2026-08-25T15:53:29.4603836Z ##[group]GITHUB_TOKEN Permissions
+2026-08-25T15:53:29.4605675Z Contents: read
+2026-08-25T15:53:29.4606442Z Metadata: read
+2026-08-25T15:53:29.4607002Z PullRequests: write
+2026-08-25T15:53:29.4607577Z ##[endgroup]
+2026-08-25T15:53:29.4609851Z Secret source: Actions
+2026-08-25T15:53:29.4610948Z Prepare workflow directory
+2026-08-25T15:53:29.4999508Z Prepare all required actions
+2026-08-25T15:53:29.5073991Z Getting action download info
+2026-08-25T15:53:29.6577095Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-08-25T15:53:29.9150600Z Uses: microsoft/oxidizer/.github/workflows/anvil-pr-impl.yml@refs/pull/687/merge (3849c1a16e0924fa2a8bcab62a258502d31913ea)
+2026-08-25T15:53:29.9155613Z ##[group] Inputs
+2026-08-25T15:53:29.9156273Z   linux_runner: ubuntu-latest
+2026-08-25T15:53:29.9157601Z   windows_runner: windows-latest
+2026-08-25T15:53:29.9158295Z   linux_arm_runner: ubuntu-24.04-arm
+2026-08-25T15:53:29.9159010Z   windows_arm_runner: windows-11-arm
+2026-08-25T15:53:29.9159609Z ##[endgroup]
+2026-08-25T15:53:29.9160204Z Complete job name: anvil-pr / pr-mutants (windows)
+2026-08-25T15:53:30.0956963Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-08-25T15:53:30.0958605Z with:
+2026-08-25T15:53:30.0959090Z   fetch-depth: 0
+2026-08-25T15:53:30.0959619Z   repository: microsoft/oxidizer
+2026-08-25T15:53:30.0965749Z   token: ***
+2026-08-25T15:53:30.0966245Z   ssh-strict: true
+2026-08-25T15:53:30.0966747Z   ssh-user: git
+2026-08-25T15:53:30.0967252Z   persist-credentials: true
+2026-08-25T15:53:30.0967814Z   clean: true
+2026-08-25T15:53:30.0968323Z   sparse-checkout-cone-mode: true
+2026-08-25T15:53:30.0968933Z   fetch-tags: false
+2026-08-25T15:53:30.0969484Z   show-progress: true
+2026-08-25T15:53:30.0969990Z   lfs: false
+2026-08-25T15:53:30.0970454Z   submodules: false
+2026-08-25T15:53:30.0970968Z   set-safe-directory: true
+2026-08-25T15:53:30.0971552Z   allow-unsafe-pr-checkout: false
+2026-08-25T15:53:30.0972449Z ##[endgroup]
+2026-08-25T15:53:30.2521621Z Syncing repository: microsoft/oxidizer
+2026-08-25T15:53:30.2523465Z ##[group]Getting Git version info
+2026-08-25T15:53:30.2524113Z Working directory is 'D:\a\oxidizer\oxidizer'
+2026-08-25T15:53:30.3473275Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-08-25T15:53:30.7363209Z git version 2.55.0.windows.4
+2026-08-25T15:53:30.7418111Z ##[endgroup]
+2026-08-25T15:53:30.7435237Z Temporarily overriding HOME='D:\a\_temp\bd5fb5db-06f0-4982-9909-0d8ca8bfb7cb' before making global git config changes
+2026-08-25T15:53:30.7436568Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-25T15:53:30.7446153Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\oxidizer\oxidizer
+2026-08-25T15:53:30.8083410Z Deleting the contents of 'D:\a\oxidizer\oxidizer'
+2026-08-25T15:53:30.8089037Z ##[group]Determining repository object format
+2026-08-25T15:53:30.8091467Z ##[endgroup]
+2026-08-25T15:53:30.8092707Z ##[group]Initializing the repository
+2026-08-25T15:53:30.8100715Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\oxidizer\oxidizer
+2026-08-25T15:53:30.9103414Z Initialized empty Git repository in D:/a/oxidizer/oxidizer/.git/
+2026-08-25T15:53:30.9155348Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/microsoft/oxidizer
+2026-08-25T15:53:30.9771720Z ##[endgroup]
+2026-08-25T15:53:30.9772680Z ##[group]Disabling automatic garbage collection
+2026-08-25T15:53:30.9783955Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-08-25T15:53:31.0162634Z ##[endgroup]
+2026-08-25T15:53:31.0163895Z ##[group]Setting up auth
+2026-08-25T15:53:31.0164693Z Removing SSH command configuration
+2026-08-25T15:53:31.0178568Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-08-25T15:53:31.0495972Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-08-25T15:53:32.6004742Z Removing HTTP extra header
+2026-08-25T15:53:32.6014788Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-08-25T15:53:32.6334908Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-08-25T15:53:33.1707941Z Removing includeIf entries pointing to credentials config files
+2026-08-25T15:53:33.1709618Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-08-25T15:53:33.2034493Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-08-25T15:53:33.7837411Z [command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-08-25T15:53:33.8144444Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/oxidizer/oxidizer/.git.path D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T15:53:33.8476617Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/oxidizer/oxidizer/.git/worktrees/*.path D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T15:53:33.8882227Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T15:53:33.9260627Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T15:53:33.9590687Z ##[endgroup]
+2026-08-25T15:53:33.9591646Z ##[group]Fetching the repository
+2026-08-25T15:53:33.9604537Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/* +3849c1a16e0924fa2a8bcab62a258502d31913ea:refs/remotes/pull/687/merge
+2026-08-25T15:53:42.8568165Z From https://github.com/microsoft/oxidizer
+2026-08-25T15:53:42.8575903Z  * [new branch]        autoresolve                              -> origin/autoresolve
+2026-08-25T15:53:42.8577009Z  * [new branch]        autoresolve-2                            -> origin/autoresolve-2
+2026-08-25T15:53:42.8580105Z  * [new branch]        cache-rustler                            -> origin/cache-rustler
+2026-08-25T15:53:42.8581441Z  * [new branch]        cachet-redis-test-service                -> origin/cachet-redis-test-service
+2026-08-25T15:53:42.8582787Z  * [new branch]        cachet_encrypt                           -> origin/cachet_encrypt
+2026-08-25T15:53:42.8584111Z  * [new branch]        cancelable-crate                         -> origin/cancelable-crate
+2026-08-25T15:53:42.8585493Z  * [new branch]        cargo-check-cyclic-deps                  -> origin/cargo-check-cyclic-deps
+2026-08-25T15:53:42.8587176Z  * [new branch]        chore/dependabot-ignore-minor-bumps      -> origin/chore/dependabot-ignore-minor-bumps
+2026-08-25T15:53:42.8588683Z  * [new branch]        chore/update-toolchain-and-deps-2026-03  -> origin/chore/update-toolchain-and-deps-2026-03
+2026-08-25T15:53:42.8590184Z  * [new branch]        ci-draft-trigger-test                    -> origin/ci-draft-trigger-test
+2026-08-25T15:53:42.8592507Z  * [new branch]        copilot/address-feedback-on-layered-crate -> origin/copilot/address-feedback-on-layered-crate
+2026-08-25T15:53:42.8595176Z  * [new branch]        copilot/fix-codecov-coverage-issue       -> origin/copilot/fix-codecov-coverage-issue
+2026-08-25T15:53:42.8601482Z  * [new branch]        copilot/refine-timestamp-min-max-values  -> origin/copilot/refine-timestamp-min-max-values
+2026-08-25T15:53:42.8605499Z  * [new branch]        copilot/setup-gungraun-tests-validation  -> origin/copilot/setup-gungraun-tests-validation
+2026-08-25T15:53:42.8606745Z  * [new branch]        copilot/sub-pr-106                       -> origin/copilot/sub-pr-106
+2026-08-25T15:53:42.8607741Z  * [new branch]        copilot/sub-pr-62                        -> origin/copilot/sub-pr-62
+2026-08-25T15:53:42.8608873Z  * [new branch]        copilot/switch-back-to-hard-coded-names  -> origin/copilot/switch-back-to-hard-coded-names
+2026-08-25T15:53:42.8610019Z  * [new branch]        copilot/try-again                        -> origin/copilot/try-again
+2026-08-25T15:53:42.8611216Z  * [new branch]        copilot/use-serde-core-where-possible    -> origin/copilot/use-serde-core-where-possible
+2026-08-25T15:53:42.8613156Z  * [new branch]        error-label-compact-string               -> origin/error-label-compact-string
+2026-08-25T15:53:42.8615494Z  * [new branch]        feature/concurrent-read-write-traits     -> origin/feature/concurrent-read-write-traits
+2026-08-25T15:53:42.8617371Z  * [new branch]        feature/task-019fd7a8-070f-7183-ae93-5b3e9e6decf7 -> origin/feature/task-019fd7a8-070f-7183-ae93-5b3e9e6decf7
+2026-08-25T15:53:42.8618990Z  * [new branch]        fetch-tokio-no-aws-lc                    -> origin/fetch-tokio-no-aws-lc
+2026-08-25T15:53:42.8619827Z  * [new branch]        file                                     -> origin/file
+2026-08-25T15:53:42.8620690Z  * [new branch]        fix/snapshot-stack-scroll                -> origin/fix/snapshot-stack-scroll
+2026-08-25T15:53:42.8622080Z  * [new branch]        fix/thread-aware-relocate-source-equals-dest-dedup -> origin/fix/thread-aware-relocate-source-equals-dest-dedup
+2026-08-25T15:53:42.8667577Z  * [new branch]        gh-readonly-queue/main/pr-577-ee31f7ca477af96c7b5138a536db907b0a480d0a -> origin/gh-readonly-queue/main/pr-577-ee31f7ca477af96c7b5138a536db907b0a480d0a
+2026-08-25T15:53:42.8673789Z  * [new branch]        kchuranov/fix-install-tools-script-path  -> origin/kchuranov/fix-install-tools-script-path
+2026-08-25T15:53:42.8675302Z  * [new branch]        kchuranov/fix-multitude-over-aligned-tests -> origin/kchuranov/fix-multitude-over-aligned-tests
+2026-08-25T15:53:42.8676712Z  * [new branch]        kchuranov/templated-uri-redacted-base    -> origin/kchuranov/templated-uri-redacted-base
+2026-08-25T15:53:42.8677795Z  * [new branch]        labeled                                  -> origin/labeled
+2026-08-25T15:53:42.8683461Z  * [new branch]        main                                     -> origin/main
+2026-08-25T15:53:42.8685300Z  * [new branch]        makolnek/tick-patch-bump-esrp-test       -> origin/makolnek/tick-patch-bump-esrp-test
+2026-08-25T15:53:42.8688170Z  * [new branch]        martintmk-seatbelt-boxed-future-macro    -> origin/martintmk-seatbelt-boxed-future-macro
+2026-08-25T15:53:42.8689636Z  * [new branch]        martintmk/multitude-arc-array-bench      -> origin/martintmk/multitude-arc-array-bench
+2026-08-25T15:53:42.8691149Z  * [new branch]        martintmk/multitude-object-tree-example  -> origin/martintmk/multitude-object-tree-example
+2026-08-25T15:53:42.8692304Z  * [new branch]        mem-thread-aware                         -> origin/mem-thread-aware
+2026-08-25T15:53:42.8693431Z  * [new branch]        overly-restrictive-static-bounds         -> origin/overly-restrictive-static-bounds
+2026-08-25T15:53:42.8694788Z  * [new branch]        patosandana/msvc-spectre-libs-override   -> origin/patosandana/msvc-spectre-libs-override
+2026-08-25T15:53:42.8695935Z  * [new branch]        perf-http-stack                          -> origin/perf-http-stack
+2026-08-25T15:53:42.8697224Z  * [new branch]        perf-report                              -> origin/perf-report
+2026-08-25T15:53:42.8699162Z  * [new branch]        release-seatbelt                         -> origin/release-seatbelt
+2026-08-25T15:53:42.8701347Z  * [new branch]        release/20251118.1                       -> origin/release/20251118.1
+2026-08-25T15:53:42.8702711Z  * [new branch]        release/20251126.2                       -> origin/release/20251126.2
+2026-08-25T15:53:42.8703995Z  * [new branch]        release/20251127.1                       -> origin/release/20251127.1
+2026-08-25T15:53:42.8705039Z  * [new branch]        release/20251201.4                       -> origin/release/20251201.4
+2026-08-25T15:53:42.8706054Z  * [new branch]        release/20251203.1                       -> origin/release/20251203.1
+2026-08-25T15:53:42.8706943Z  * [new branch]        release/20251205.3                       -> origin/release/20251205.3
+2026-08-25T15:53:42.8708185Z  * [new branch]        release/20251210.3                       -> origin/release/20251210.3
+2026-08-25T15:53:42.8709168Z  * [new branch]        release/20251210.4                       -> origin/release/20251210.4
+2026-08-25T15:53:42.8710122Z  * [new branch]        release/20251211.1                       -> origin/release/20251211.1
+2026-08-25T15:53:42.8712101Z  * [new branch]        release/20251215.2                       -> origin/release/20251215.2
+2026-08-25T15:53:42.8713145Z  * [new branch]        release/20251216.3                       -> origin/release/20251216.3
+2026-08-25T15:53:42.8718539Z  * [new branch]        release/20251216.5                       -> origin/release/20251216.5
+2026-08-25T15:53:42.8720163Z  * [new branch]        release/20251217.4                       -> origin/release/20251217.4
+2026-08-25T15:53:42.8722224Z  * [new branch]        release/20260102.1                       -> origin/release/20260102.1
+2026-08-25T15:53:42.8725712Z  * [new branch]        release/20260105.2                       -> origin/release/20260105.2
+2026-08-25T15:53:42.8727770Z  * [new branch]        release/20260107.2                       -> origin/release/20260107.2
+2026-08-25T15:53:42.8730190Z  * [new branch]        release/20260108.1                       -> origin/release/20260108.1
+2026-08-25T15:53:42.8731210Z  * [new branch]        release/20260112.2                       -> origin/release/20260112.2
+2026-08-25T15:53:42.8732420Z  * [new branch]        release/20260115.1                       -> origin/release/20260115.1
+2026-08-25T15:53:42.8735684Z  * [new branch]        release/20260119.4                       -> origin/release/20260119.4
+2026-08-25T15:53:42.8737356Z  * [new branch]        release/20260120.1                       -> origin/release/20260120.1
+2026-08-25T15:53:42.8739127Z  * [new branch]        release/20260121.1                       -> origin/release/20260121.1
+2026-08-25T15:53:42.8740119Z  * [new branch]        release/20260122.3                       -> origin/release/20260122.3
+2026-08-25T15:53:42.8742337Z  * [new branch]        release/20260127.1                       -> origin/release/20260127.1
+2026-08-25T15:53:42.8743313Z  * [new branch]        release/20260128.3                       -> origin/release/20260128.3
+2026-08-25T15:53:42.8744305Z  * [new branch]        release/20260128.5                       -> origin/release/20260128.5
+2026-08-25T15:53:42.8745233Z  * [new branch]        release/20260128.6                       -> origin/release/20260128.6
+2026-08-25T15:53:42.8746327Z  * [new branch]        release/20260129.2                       -> origin/release/20260129.2
+2026-08-25T15:53:42.8747578Z  * [new branch]        routerama                                -> origin/routerama
+2026-08-25T15:53:42.8748513Z  * [new branch]        seatbelt-http-client                     -> origin/seatbelt-http-client
+2026-08-25T15:53:42.8749845Z  * [new branch]        sentinel/fix/7734570-parking-lot-strict-provenance -> origin/sentinel/fix/7734570-parking-lot-strict-provenance
+2026-08-25T15:53:42.8751065Z  * [new branch]        skills                                   -> origin/skills
+2026-08-25T15:53:42.8751936Z  * [new branch]        split-macros-impl                        -> origin/split-macros-impl
+2026-08-25T15:53:42.8752929Z  * [new branch]        technical-release-2                      -> origin/technical-release-2
+2026-08-25T15:53:42.8754228Z  * [new branch]        telemetry_events                         -> origin/telemetry_events
+2026-08-25T15:53:42.8755077Z  * [new branch]        thunk                                    -> origin/thunk
+2026-08-25T15:53:42.8756029Z  * [new branch]        u/abekeras/thread-aware-types            -> origin/u/abekeras/thread-aware-types
+2026-08-25T15:53:42.8757231Z  * [new branch]        u/afoxman/cache-memory-threadaware       -> origin/u/afoxman/cache-memory-threadaware
+2026-08-25T15:53:42.8758843Z  * [new branch]        u/emengesha/bump-cachet-memory-0.2.0     -> origin/u/emengesha/bump-cachet-memory-0.2.0
+2026-08-25T15:53:42.8760502Z  * [new branch]        u/eshutov/pr-682-public-api-only-tests   -> origin/u/eshutov/pr-682-public-api-only-tests
+2026-08-25T15:53:42.8761722Z  * [new branch]        u/eshutov/pr-682-public-api-testing      -> origin/u/eshutov/pr-682-public-api-testing
+2026-08-25T15:53:42.8762991Z  * [new branch]        u/eshutov/split-observed-macros-impl     -> origin/u/eshutov/split-observed-macros-impl
+2026-08-25T15:53:42.8763686Z  * [new branch]        u/improved-telemetry                     -> origin/u/improved-telemetry
+2026-08-25T15:53:42.8764316Z  * [new branch]        u/kchuranov/bench-no-stdout-check        -> origin/u/kchuranov/bench-no-stdout-check
+2026-08-25T15:53:42.8765036Z  * [new branch]        u/kchuranov/changelog-generator-spike    -> origin/u/kchuranov/changelog-generator-spike
+2026-08-25T15:53:42.8765709Z  * [new branch]        u/kchuranov/fetch-improvements           -> origin/u/kchuranov/fetch-improvements
+2026-08-25T15:53:42.8766404Z  * [new branch]        u/kchuranov/release-script-readme-filter -> origin/u/kchuranov/release-script-readme-filter
+2026-08-25T15:53:42.8767105Z  * [new branch]        u/makolnek/fetch-builder-redesign        -> origin/u/makolnek/fetch-builder-redesign
+2026-08-25T15:53:42.8767694Z  * [new branch]        u/makolnek/winhttp                       -> origin/u/makolnek/winhttp
+2026-08-25T15:53:42.8768307Z  * [new branch]        u/mhavelka/docs-ohno-error-modelling     -> origin/u/mhavelka/docs-ohno-error-modelling
+2026-08-25T15:53:42.8769072Z  * [new branch]        u/mhavelka/fix-thread-aware-phantomdata-bound -> origin/u/mhavelka/fix-thread-aware-phantomdata-bound
+2026-08-25T15:53:42.8769890Z  * [new branch]        u/mhavelka/multitude-alignment-capped-backend -> origin/u/mhavelka/multitude-alignment-capped-backend
+2026-08-25T15:53:42.8770863Z  * [new branch]        u/patosandana/test-coverage              -> origin/u/patosandana/test-coverage
+2026-08-25T15:53:42.8771443Z  * [new branch]        u/ralfbiedert/fundle_new3                -> origin/u/ralfbiedert/fundle_new3
+2026-08-25T15:53:42.8773391Z  * [new branch]        u/sasaares/2026-06-01-releases_vol2      -> origin/u/sasaares/2026-06-01-releases_vol2
+2026-08-25T15:53:42.8774472Z  * [new branch]        u/sasaares/frombytes-soundness           -> origin/u/sasaares/frombytes-soundness
+2026-08-25T15:53:42.8775156Z  * [new branch]        u/sasaares/opentelemetry-rescaled        -> origin/u/sasaares/opentelemetry-rescaled
+2026-08-25T15:53:42.8775784Z  * [new branch]        u/sasaares/oxidizer-winhttp              -> origin/u/sasaares/oxidizer-winhttp
+2026-08-25T15:53:42.8776447Z  * [new branch]        u/sasaares/release-threadaware-fallout   -> origin/u/sasaares/release-threadaware-fallout
+2026-08-25T15:53:42.8777190Z  * [new branch]        u/sasaares/threadregistry-public-hardware -> origin/u/sasaares/threadregistry-public-hardware
+2026-08-25T15:53:42.8777913Z  * [new branch]        u/sasaares/unbreak-gh-publishing         -> origin/u/sasaares/unbreak-gh-publishing
+2026-08-25T15:53:42.8778501Z  * [new branch]        u/schgoo/compress                        -> origin/u/schgoo/compress
+2026-08-25T15:53:42.8779042Z  * [new branch]        u/schgoo/distributedcache                -> origin/u/schgoo/distributedcache
+2026-08-25T15:53:42.8779583Z  * [new branch]        u/schgoo/encrypt                         -> origin/u/schgoo/encrypt
+2026-08-25T15:53:42.8780110Z  * [new branch]        u/schgoo/insert_policy                   -> origin/u/schgoo/insert_policy
+2026-08-25T15:53:42.8780678Z  * [new branch]        u/schgoo/simplestampede                  -> origin/u/schgoo/simplestampede
+2026-08-25T15:53:42.8781242Z  * [new branch]        u/schgoo/size-error-fixes                -> origin/u/schgoo/size-error-fixes
+2026-08-25T15:53:42.8781788Z  * [new branch]        u/schgoo/timed_to_tick                   -> origin/u/schgoo/timed_to_tick
+2026-08-25T15:53:42.8782379Z  * [new branch]        u/st-dev-gh/anvil-scheduled              -> origin/u/st-dev-gh/anvil-scheduled
+2026-08-25T15:53:42.8783304Z  * [new branch]        u/timmypeters/bug-7312281                -> origin/u/timmypeters/bug-7312281
+2026-08-25T15:53:42.8784409Z  * [new branch]        u/vaiz/2025/11/27/unimplemented          -> origin/u/vaiz/2025/11/27/unimplemented
+2026-08-25T15:53:42.8785520Z  * [new branch]        u/vaiz/2026/01/16/ohno_backtrace         -> origin/u/vaiz/2026/01/16/ohno_backtrace
+2026-08-25T15:53:42.8787800Z  * [new branch]        u/vaiz/2026/02/09/frozen_buf             -> origin/u/vaiz/2026/02/09/frozen_buf
+2026-08-25T15:53:42.8788487Z  * [new branch]        u/vaiz/2026/04/23/bypass_redaction       -> origin/u/vaiz/2026/04/23/bypass_redaction
+2026-08-25T15:53:42.8789098Z  * [new branch]        u/vaiz/2026/07/27/move-observed          -> origin/u/vaiz/2026/07/27/move-observed
+2026-08-25T15:53:42.8789675Z  * [new branch]        u/vaiz/20260714/observed_2               -> origin/u/vaiz/20260714/observed_2
+2026-08-25T15:53:42.8790328Z  * [new branch]        u/vaiz/20260714/observed_2-backup-rt-helpers -> origin/u/vaiz/20260714/observed_2-backup-rt-helpers
+2026-08-25T15:53:42.8790947Z  * [new branch]        u/zacwalk/cache                          -> origin/u/zacwalk/cache
+2026-08-25T15:53:42.8791482Z  * [new branch]        u/zacwalk/codecov-optional               -> origin/u/zacwalk/codecov-optional
+2026-08-25T15:53:42.8791968Z  * [new branch]        uri                                      -> origin/uri
+2026-08-25T15:53:42.8792516Z  * [new branch]        user/martintmk/20260709-coverage-nextest -> origin/user/martintmk/20260709-coverage-nextest
+2026-08-25T15:53:42.8793245Z  * [new branch]        user/martintmk/20260710-add-fetch-grpc-crate -> origin/user/martintmk/20260710-add-fetch-grpc-crate
+2026-08-25T15:53:42.8794418Z  * [new branch]        user/martintmk/20260728-add-heapwatch-crate -> origin/user/martintmk/20260728-add-heapwatch-crate
+2026-08-25T15:53:42.8795194Z  * [new branch]        user/martintmk/20260803-tick-api-guidelines -> origin/user/martintmk/20260803-tick-api-guidelines
+2026-08-25T15:53:42.8796083Z  * [new branch]        user/martintmk/20260806-bytesbuf-ado-7688114 -> origin/user/martintmk/20260806-bytesbuf-ado-7688114
+2026-08-25T15:53:42.8796807Z  * [new branch]        user/martintmk/20260821-use-opaque-pool  -> origin/user/martintmk/20260821-use-opaque-pool
+2026-08-25T15:53:42.8797509Z  * [new branch]        user/martintomka/20260806-add-bytesbuf-io -> origin/user/martintomka/20260806-add-bytesbuf-io
+2026-08-25T15:53:42.8798273Z  * [new branch]        user/martintomka/20260806-stabilize-thread-aware -> origin/user/martintomka/20260806-stabilize-thread-aware
+2026-08-25T15:53:42.8799086Z  * [new branch]        user/martintomka/20260812-release-agentic-skill -> origin/user/martintomka/20260812-release-agentic-skill
+2026-08-25T15:53:42.8799855Z  * [new branch]        user/martintomka/20260813-release-simulation -> origin/user/martintomka/20260813-release-simulation
+2026-08-25T15:53:42.8800603Z  * [new branch]        users/merlinbot/1es-pt-auto-baselining-pr -> origin/users/merlinbot/1es-pt-auto-baselining-pr
+2026-08-25T15:53:42.8801240Z  * [new branch]        version-downgrade                        -> origin/version-downgrade
+2026-08-25T15:53:42.8801744Z  * [new tag]           allocation_hints-v0.1.0                  -> allocation_hints-v0.1.0
+2026-08-25T15:53:42.8802204Z  * [new tag]           anyspawn-v0.1.0                          -> anyspawn-v0.1.0
+2026-08-25T15:53:42.8802629Z  * [new tag]           anyspawn-v0.2.0                          -> anyspawn-v0.2.0
+2026-08-25T15:53:42.8803049Z  * [new tag]           anyspawn-v0.3.0                          -> anyspawn-v0.3.0
+2026-08-25T15:53:42.8803458Z  * [new tag]           anyspawn-v0.4.0                          -> anyspawn-v0.4.0
+2026-08-25T15:53:42.8803867Z  * [new tag]           anyspawn-v0.5.0                          -> anyspawn-v0.5.0
+2026-08-25T15:53:42.8804275Z  * [new tag]           anyspawn-v0.5.2                          -> anyspawn-v0.5.2
+2026-08-25T15:53:42.8804684Z  * [new tag]           anyspawn-v0.5.3                          -> anyspawn-v0.5.3
+2026-08-25T15:53:42.8805108Z  * [new tag]           anyspawn-v0.5.4                          -> anyspawn-v0.5.4
+2026-08-25T15:53:42.8805513Z  * [new tag]           anyspawn-v0.6.0                          -> anyspawn-v0.6.0
+2026-08-25T15:53:42.8805932Z  * [new tag]           anyspawn-v0.7.0                          -> anyspawn-v0.7.0
+2026-08-25T15:53:42.8806456Z  * [new tag]           anyspawn_azure-v0.1.2                    -> anyspawn_azure-v0.1.2
+2026-08-25T15:53:42.8806926Z  * [new tag]           anyspawn_azure-v0.1.3                    -> anyspawn_azure-v0.1.3
+2026-08-25T15:53:42.8807384Z  * [new tag]           anyspawn_azure-v0.2.0                    -> anyspawn_azure-v0.2.0
+2026-08-25T15:53:42.8807814Z  * [new tag]           bytesbuf-v0.1.2                          -> bytesbuf-v0.1.2
+2026-08-25T15:53:42.8808276Z  * [new tag]           bytesbuf-v0.2.0                          -> bytesbuf-v0.2.0
+2026-08-25T15:53:42.8808869Z  * [new tag]           bytesbuf-v0.2.1                          -> bytesbuf-v0.2.1
+2026-08-25T15:53:42.8809647Z  * [new tag]           bytesbuf-v0.2.2                          -> bytesbuf-v0.2.2
+2026-08-25T15:53:42.8810408Z  * [new tag]           bytesbuf-v0.3.0                          -> bytesbuf-v0.3.0
+2026-08-25T15:53:42.8811240Z  * [new tag]           bytesbuf-v0.4.0                          -> bytesbuf-v0.4.0
+2026-08-25T15:53:42.8811848Z  * [new tag]           bytesbuf-v0.4.1                          -> bytesbuf-v0.4.1
+2026-08-25T15:53:42.8812275Z  * [new tag]           bytesbuf-v0.4.2                          -> bytesbuf-v0.4.2
+2026-08-25T15:53:42.8812687Z  * [new tag]           bytesbuf-v0.5.0                          -> bytesbuf-v0.5.0
+2026-08-25T15:53:42.8813097Z  * [new tag]           bytesbuf-v0.5.2                          -> bytesbuf-v0.5.2
+2026-08-25T15:53:42.8813502Z  * [new tag]           bytesbuf-v0.5.3                          -> bytesbuf-v0.5.3
+2026-08-25T15:53:42.8813914Z  * [new tag]           bytesbuf-v0.5.4                          -> bytesbuf-v0.5.4
+2026-08-25T15:53:42.8814880Z  * [new tag]           bytesbuf-v0.5.5                          -> bytesbuf-v0.5.5
+2026-08-25T15:53:42.8815303Z  * [new tag]           bytesbuf-v0.6.0                          -> bytesbuf-v0.6.0
+2026-08-25T15:53:42.8815716Z  * [new tag]           bytesbuf-v0.7.0                          -> bytesbuf-v0.7.0
+2026-08-25T15:53:42.8816132Z  * [new tag]           bytesbuf-v0.8.0                          -> bytesbuf-v0.8.0
+2026-08-25T15:53:42.8816557Z  * [new tag]           bytesbuf_io-v0.1.1                       -> bytesbuf_io-v0.1.1
+2026-08-25T15:53:42.8816990Z  * [new tag]           bytesbuf_io-v0.2.0                       -> bytesbuf_io-v0.2.0
+2026-08-25T15:53:42.8817417Z  * [new tag]           bytesbuf_io-v0.3.0                       -> bytesbuf_io-v0.3.0
+2026-08-25T15:53:42.8817843Z  * [new tag]           bytesbuf_io-v0.4.0                       -> bytesbuf_io-v0.4.0
+2026-08-25T15:53:42.8818265Z  * [new tag]           bytesbuf_io-v0.5.0                       -> bytesbuf_io-v0.5.0
+2026-08-25T15:53:42.8818693Z  * [new tag]           bytesbuf_io-v0.5.2                       -> bytesbuf_io-v0.5.2
+2026-08-25T15:53:42.8819115Z  * [new tag]           bytesbuf_io-v0.5.4                       -> bytesbuf_io-v0.5.4
+2026-08-25T15:53:42.8819536Z  * [new tag]           bytesbuf_io-v0.5.5                       -> bytesbuf_io-v0.5.5
+2026-08-25T15:53:42.8819962Z  * [new tag]           bytesbuf_io-v0.5.6                       -> bytesbuf_io-v0.5.6
+2026-08-25T15:53:42.8820382Z  * [new tag]           bytesbuf_io-v0.5.7                       -> bytesbuf_io-v0.5.7
+2026-08-25T15:53:42.8820812Z  * [new tag]           bytesbuf_io-v0.6.0                       -> bytesbuf_io-v0.6.0
+2026-08-25T15:53:42.8821235Z  * [new tag]           bytesbuf_io-v0.7.0                       -> bytesbuf_io-v0.7.0
+2026-08-25T15:53:42.8821659Z  * [new tag]           bytesbuf_io-v0.8.0                       -> bytesbuf_io-v0.8.0
+2026-08-25T15:53:42.8822082Z  * [new tag]           cachet-v0.1.0                            -> cachet-v0.1.0
+2026-08-25T15:53:42.8822489Z  * [new tag]           cachet-v0.10.0                           -> cachet-v0.10.0
+2026-08-25T15:53:42.8822889Z  * [new tag]           cachet-v0.11.0                           -> cachet-v0.11.0
+2026-08-25T15:53:42.8823509Z  * [new tag]           cachet-v0.12.0                           -> cachet-v0.12.0
+2026-08-25T15:53:42.8824141Z  * [new tag]           cachet-v0.2.0                            -> cachet-v0.2.0
+2026-08-25T15:53:42.8824567Z  * [new tag]           cachet-v0.3.0                            -> cachet-v0.3.0
+2026-08-25T15:53:42.8824976Z  * [new tag]           cachet-v0.4.0                            -> cachet-v0.4.0
+2026-08-25T15:53:42.8825366Z  * [new tag]           cachet-v0.5.0                            -> cachet-v0.5.0
+2026-08-25T15:53:42.8825754Z  * [new tag]           cachet-v0.5.1                            -> cachet-v0.5.1
+2026-08-25T15:53:42.8826149Z  * [new tag]           cachet-v0.6.2                            -> cachet-v0.6.2
+2026-08-25T15:53:42.8826551Z  * [new tag]           cachet-v0.6.4                            -> cachet-v0.6.4
+2026-08-25T15:53:42.8826943Z  * [new tag]           cachet-v0.6.5                            -> cachet-v0.6.5
+2026-08-25T15:53:42.8827337Z  * [new tag]           cachet-v0.6.6                            -> cachet-v0.6.6
+2026-08-25T15:53:42.8827735Z  * [new tag]           cachet-v0.7.0                            -> cachet-v0.7.0
+2026-08-25T15:53:42.8828126Z  * [new tag]           cachet-v0.7.1                            -> cachet-v0.7.1
+2026-08-25T15:53:42.8828770Z  * [new tag]           cachet-v0.7.2                            -> cachet-v0.7.2
+2026-08-25T15:53:42.8829518Z  * [new tag]           cachet-v0.7.4                            -> cachet-v0.7.4
+2026-08-25T15:53:42.8830205Z  * [new tag]           cachet-v0.8.0                            -> cachet-v0.8.0
+2026-08-25T15:53:42.8830898Z  * [new tag]           cachet-v0.9.0                            -> cachet-v0.9.0
+2026-08-25T15:53:42.8831935Z  * [new tag]           cachet_memory-v0.1.0                     -> cachet_memory-v0.1.0
+2026-08-25T15:53:42.8832475Z  * [new tag]           cachet_memory-v0.1.1                     -> cachet_memory-v0.1.1
+2026-08-25T15:53:42.8832922Z  * [new tag]           cachet_memory-v0.2.0                     -> cachet_memory-v0.2.0
+2026-08-25T15:53:42.8833759Z  * [new tag]           cachet_memory-v0.2.1                     -> cachet_memory-v0.2.1
+2026-08-25T15:53:42.8834873Z  * [new tag]           cachet_memory-v0.3.1                     -> cachet_memory-v0.3.1
+2026-08-25T15:53:42.8835761Z  * [new tag]           cachet_memory-v0.3.3                     -> cachet_memory-v0.3.3
+2026-08-25T15:53:42.8836585Z  * [new tag]           cachet_memory-v0.3.4                     -> cachet_memory-v0.3.4
+2026-08-25T15:53:42.8837047Z  * [new tag]           cachet_memory-v0.3.5                     -> cachet_memory-v0.3.5
+2026-08-25T15:53:42.8837494Z  * [new tag]           cachet_memory-v0.3.6                     -> cachet_memory-v0.3.6
+2026-08-25T15:53:42.8837957Z  * [new tag]           cachet_memory-v0.4.0                     -> cachet_memory-v0.4.0
+2026-08-25T15:53:42.8838408Z  * [new tag]           cachet_memory-v0.5.0                     -> cachet_memory-v0.5.0
+2026-08-25T15:53:42.8838859Z  * [new tag]           cachet_memory-v0.5.1                     -> cachet_memory-v0.5.1
+2026-08-25T15:53:42.8839310Z  * [new tag]           cachet_memory-v0.6.0                     -> cachet_memory-v0.6.0
+2026-08-25T15:53:42.8839749Z  * [new tag]           cachet_memory-v0.6.1                     -> cachet_memory-v0.6.1
+2026-08-25T15:53:42.8840199Z  * [new tag]           cachet_service-v0.1.0                    -> cachet_service-v0.1.0
+2026-08-25T15:53:42.8840656Z  * [new tag]           cachet_service-v0.2.2                    -> cachet_service-v0.2.2
+2026-08-25T15:53:42.8841108Z  * [new tag]           cachet_service-v0.2.3                    -> cachet_service-v0.2.3
+2026-08-25T15:53:42.8841563Z  * [new tag]           cachet_service-v0.2.4                    -> cachet_service-v0.2.4
+2026-08-25T15:53:42.8842010Z  * [new tag]           cachet_service-v0.2.5                    -> cachet_service-v0.2.5
+2026-08-25T15:53:42.8842458Z  * [new tag]           cachet_service-v0.2.6                    -> cachet_service-v0.2.6
+2026-08-25T15:53:42.8843058Z  * [new tag]           cachet_service-v0.2.7                    -> cachet_service-v0.2.7
+2026-08-25T15:53:42.8843523Z  * [new tag]           cachet_service-v0.2.9                    -> cachet_service-v0.2.9
+2026-08-25T15:53:42.8843975Z  * [new tag]           cachet_service-v0.3.0                    -> cachet_service-v0.3.0
+2026-08-25T15:53:42.8844430Z  * [new tag]           cachet_service-v0.4.0                    -> cachet_service-v0.4.0
+2026-08-25T15:53:42.8844874Z  * [new tag]           cachet_tier-v0.1.0                       -> cachet_tier-v0.1.0
+2026-08-25T15:53:42.8845305Z  * [new tag]           cachet_tier-v0.2.1                       -> cachet_tier-v0.2.1
+2026-08-25T15:53:42.8845739Z  * [new tag]           cachet_tier-v0.2.2                       -> cachet_tier-v0.2.2
+2026-08-25T15:53:42.8846165Z  * [new tag]           cachet_tier-v0.2.3                       -> cachet_tier-v0.2.3
+2026-08-25T15:53:42.8846610Z  * [new tag]           cachet_tier-v0.2.4                       -> cachet_tier-v0.2.4
+2026-08-25T15:53:42.8847033Z  * [new tag]           cachet_tier-v0.2.5                       -> cachet_tier-v0.2.5
+2026-08-25T15:53:42.8847459Z  * [new tag]           cachet_tier-v0.2.7                       -> cachet_tier-v0.2.7
+2026-08-25T15:53:42.8847883Z  * [new tag]           cachet_tier-v0.3.0                       -> cachet_tier-v0.3.0
+2026-08-25T15:53:42.8848306Z  * [new tag]           cachet_tier-v0.4.0                       -> cachet_tier-v0.4.0
+2026-08-25T15:53:42.8848740Z  * [new tag]           data_privacy-v0.1.0                      -> data_privacy-v0.1.0
+2026-08-25T15:53:42.8849193Z  * [new tag]           data_privacy-v0.10.0                     -> data_privacy-v0.10.0
+2026-08-25T15:53:42.8850368Z  * [new tag]           data_privacy-v0.10.1                     -> data_privacy-v0.10.1
+2026-08-25T15:53:42.8850835Z  * [new tag]           data_privacy-v0.11.0                     -> data_privacy-v0.11.0
+2026-08-25T15:53:42.8851286Z  * [new tag]           data_privacy-v0.11.2                     -> data_privacy-v0.11.2
+2026-08-25T15:53:42.8851741Z  * [new tag]           data_privacy-v0.12.0                     -> data_privacy-v0.12.0
+2026-08-25T15:53:42.8852181Z  * [new tag]           data_privacy-v0.12.1                     -> data_privacy-v0.12.1
+2026-08-25T15:53:42.8852619Z  * [new tag]           data_privacy-v0.12.2                     -> data_privacy-v0.12.2
+2026-08-25T15:53:42.8853066Z  * [new tag]           data_privacy-v0.12.4                     -> data_privacy-v0.12.4
+2026-08-25T15:53:42.8853537Z  * [new tag]           data_privacy-v0.2.11                     -> data_privacy-v0.2.11
+2026-08-25T15:53:42.8853992Z  * [new tag]           data_privacy-v0.2.9                      -> data_privacy-v0.2.9
+2026-08-25T15:53:42.8854434Z  * [new tag]           data_privacy-v0.3.0                      -> data_privacy-v0.3.0
+2026-08-25T15:53:42.8855357Z  * [new tag]           data_privacy-v0.4.0                      -> data_privacy-v0.4.0
+2026-08-25T15:53:42.8855810Z  * [new tag]           data_privacy-v0.5.0                      -> data_privacy-v0.5.0
+2026-08-25T15:53:42.8856244Z  * [new tag]           data_privacy-v0.6.0                      -> data_privacy-v0.6.0
+2026-08-25T15:53:42.8856681Z  * [new tag]           data_privacy-v0.7.0                      -> data_privacy-v0.7.0
+2026-08-25T15:53:42.8857112Z  * [new tag]           data_privacy-v0.8.0                      -> data_privacy-v0.8.0
+2026-08-25T15:53:42.8857540Z  * [new tag]           data_privacy-v0.9.0                      -> data_privacy-v0.9.0
+2026-08-25T15:53:42.8858001Z  * [new tag]           data_privacy_core-v0.1.0                 -> data_privacy_core-v0.1.0
+2026-08-25T15:53:42.8858489Z  * [new tag]           data_privacy_core-v0.1.1                 -> data_privacy_core-v0.1.1
+2026-08-25T15:53:42.8858981Z  * [new tag]           data_privacy_macros-v0.1.0               -> data_privacy_macros-v0.1.0
+2026-08-25T15:53:42.8859485Z  * [new tag]           data_privacy_macros-v0.10.0              -> data_privacy_macros-v0.10.0
+2026-08-25T15:53:42.8860532Z  * [new tag]           data_privacy_macros-v0.10.1              -> data_privacy_macros-v0.10.1
+2026-08-25T15:53:42.8861109Z  * [new tag]           data_privacy_macros-v0.10.2              -> data_privacy_macros-v0.10.2
+2026-08-25T15:53:42.8861629Z  * [new tag]           data_privacy_macros-v0.2.6               -> data_privacy_macros-v0.2.6
+2026-08-25T15:53:42.8862125Z  * [new tag]           data_privacy_macros-v0.2.7               -> data_privacy_macros-v0.2.7
+2026-08-25T15:53:42.8862619Z  * [new tag]           data_privacy_macros-v0.2.8               -> data_privacy_macros-v0.2.8
+2026-08-25T15:53:42.8863114Z  * [new tag]           data_privacy_macros-v0.2.9               -> data_privacy_macros-v0.2.9
+2026-08-25T15:53:42.8863608Z  * [new tag]           data_privacy_macros-v0.3.0               -> data_privacy_macros-v0.3.0
+2026-08-25T15:53:42.8864100Z  * [new tag]           data_privacy_macros-v0.4.0               -> data_privacy_macros-v0.4.0
+2026-08-25T15:53:42.8864594Z  * [new tag]           data_privacy_macros-v0.7.0               -> data_privacy_macros-v0.7.0
+2026-08-25T15:53:42.8865083Z  * [new tag]           data_privacy_macros-v0.8.0               -> data_privacy_macros-v0.8.0
+2026-08-25T15:53:42.8865578Z  * [new tag]           data_privacy_macros-v0.9.0               -> data_privacy_macros-v0.9.0
+2026-08-25T15:53:42.8866070Z  * [new tag]           data_privacy_macros-v0.9.2               -> data_privacy_macros-v0.9.2
+2026-08-25T15:53:42.8866595Z  * [new tag]           data_privacy_macros_impl-v0.10.0         -> data_privacy_macros_impl-v0.10.0
+2026-08-25T15:53:42.8867246Z  * [new tag]           data_privacy_macros_impl-v0.10.1         -> data_privacy_macros_impl-v0.10.1
+2026-08-25T15:53:42.8867788Z  * [new tag]           data_privacy_macros_impl-v0.10.2         -> data_privacy_macros_impl-v0.10.2
+2026-08-25T15:53:42.8868325Z  * [new tag]           data_privacy_macros_impl-v0.7.0          -> data_privacy_macros_impl-v0.7.0
+2026-08-25T15:53:42.8868862Z  * [new tag]           data_privacy_macros_impl-v0.8.0          -> data_privacy_macros_impl-v0.8.0
+2026-08-25T15:53:42.8933214Z  * [new tag]           data_privacy_macros_impl-v0.9.0          -> data_privacy_macros_impl-v0.9.0
+2026-08-25T15:53:42.8934289Z  * [new tag]           data_privacy_macros_impl-v0.9.2          -> data_privacy_macros_impl-v0.9.2
+2026-08-25T15:53:42.8935195Z  * [new tag]           fetch-v0.10.2                            -> fetch-v0.10.2
+2026-08-25T15:53:42.8935871Z  * [new tag]           fetch-v0.11.0                            -> fetch-v0.11.0
+2026-08-25T15:53:42.8936541Z  * [new tag]           fetch-v0.11.1                            -> fetch-v0.11.1
+2026-08-25T15:53:42.8937251Z  * [new tag]           fetch-v0.11.2                            -> fetch-v0.11.2
+2026-08-25T15:53:42.8937940Z  * [new tag]           fetch-v0.12.0                            -> fetch-v0.12.0
+2026-08-25T15:53:42.8938648Z  * [new tag]           fetch-v0.12.2                            -> fetch-v0.12.2
+2026-08-25T15:53:42.8939365Z  * [new tag]           fetch-v0.13.0                            -> fetch-v0.13.0
+2026-08-25T15:53:42.8940134Z  * [new tag]           fetch-v0.14.0                            -> fetch-v0.14.0
+2026-08-25T15:53:42.8940864Z  * [new tag]           fetch-v0.15.0                            -> fetch-v0.15.0
+2026-08-25T15:53:42.8941635Z  * [new tag]           fetch_azure-v0.1.1                       -> fetch_azure-v0.1.1
+2026-08-25T15:53:42.8942450Z  * [new tag]           fetch_azure-v0.2.0                       -> fetch_azure-v0.2.0
+2026-08-25T15:53:42.8943250Z  * [new tag]           fetch_azure-v0.2.2                       -> fetch_azure-v0.2.2
+2026-08-25T15:53:42.8944079Z  * [new tag]           fetch_azure-v0.3.0                       -> fetch_azure-v0.3.0
+2026-08-25T15:53:42.8944883Z  * [new tag]           fetch_azure-v0.4.0                       -> fetch_azure-v0.4.0
+2026-08-25T15:53:42.8945704Z  * [new tag]           fetch_azure-v0.5.0                       -> fetch_azure-v0.5.0
+2026-08-25T15:53:42.8946824Z  * [new tag]           fetch_hyper-v0.1.4                       -> fetch_hyper-v0.1.4
+2026-08-25T15:53:42.8947668Z  * [new tag]           fetch_hyper-v0.2.0                       -> fetch_hyper-v0.2.0
+2026-08-25T15:53:42.8948527Z  * [new tag]           fetch_hyper-v0.3.2                       -> fetch_hyper-v0.3.2
+2026-08-25T15:53:42.8949341Z  * [new tag]           fetch_hyper-v0.3.4                       -> fetch_hyper-v0.3.4
+2026-08-25T15:53:42.8950101Z  * [new tag]           fetch_hyper-v0.4.0                       -> fetch_hyper-v0.4.0
+2026-08-25T15:53:42.8950569Z  * [new tag]           fetch_hyper-v0.4.1                       -> fetch_hyper-v0.4.1
+2026-08-25T15:53:42.8951030Z  * [new tag]           fetch_hyper-v0.4.2                       -> fetch_hyper-v0.4.2
+2026-08-25T15:53:42.8951460Z  * [new tag]           fetch_hyper-v0.4.3                       -> fetch_hyper-v0.4.3
+2026-08-25T15:53:42.8951881Z  * [new tag]           fetch_hyper-v0.4.5                       -> fetch_hyper-v0.4.5
+2026-08-25T15:53:42.8952320Z  * [new tag]           fetch_hyper-v0.4.6                       -> fetch_hyper-v0.4.6
+2026-08-25T15:53:42.8952761Z  * [new tag]           fetch_hyper-v0.5.0                       -> fetch_hyper-v0.5.0
+2026-08-25T15:53:42.8953630Z  * [new tag]           fetch_hyper-v0.6.0                       -> fetch_hyper-v0.6.0
+2026-08-25T15:53:42.8954085Z  * [new tag]           fetch_options-v0.2.1                     -> fetch_options-v0.2.1
+2026-08-25T15:53:42.8954537Z  * [new tag]           fetch_options-v0.2.2                     -> fetch_options-v0.2.2
+2026-08-25T15:53:42.8955230Z  * [new tag]           fetch_tls-v0.2.0                         -> fetch_tls-v0.2.0
+2026-08-25T15:53:42.8955651Z  * [new tag]           fetch_tls-v0.2.2                         -> fetch_tls-v0.2.2
+2026-08-25T15:53:42.8956070Z  * [new tag]           fetch_tls-v0.2.3                         -> fetch_tls-v0.2.3
+2026-08-25T15:53:42.8956480Z  * [new tag]           fetch_tls-v0.2.4                         -> fetch_tls-v0.2.4
+2026-08-25T15:53:42.8956898Z  * [new tag]           fetch_tls-v0.2.6                         -> fetch_tls-v0.2.6
+2026-08-25T15:53:42.8957303Z  * [new tag]           fetch_tls-v0.3.0                         -> fetch_tls-v0.3.0
+2026-08-25T15:53:42.8957734Z  * [new tag]           fetch_winhttp-v0.1.0                     -> fetch_winhttp-v0.1.0
+2026-08-25T15:53:42.8958175Z  * [new tag]           fundle-v0.2.0                            -> fundle-v0.2.0
+2026-08-25T15:53:42.8958577Z  * [new tag]           fundle-v0.2.1                            -> fundle-v0.2.1
+2026-08-25T15:53:42.8958977Z  * [new tag]           fundle-v0.3.2                            -> fundle-v0.3.2
+2026-08-25T15:53:42.8959369Z  * [new tag]           fundle-v0.3.3                            -> fundle-v0.3.3
+2026-08-25T15:53:42.8959759Z  * [new tag]           fundle-v0.3.5                            -> fundle-v0.3.5
+2026-08-25T15:53:42.8960189Z  * [new tag]           fundle_macros-v0.2.0                     -> fundle_macros-v0.2.0
+2026-08-25T15:53:42.8960648Z  * [new tag]           fundle_macros-v0.2.1                     -> fundle_macros-v0.2.1
+2026-08-25T15:53:42.8961107Z  * [new tag]           fundle_macros-v0.3.2                     -> fundle_macros-v0.3.2
+2026-08-25T15:53:42.8961547Z  * [new tag]           fundle_macros-v0.3.3                     -> fundle_macros-v0.3.3
+2026-08-25T15:53:42.8961982Z  * [new tag]           fundle_macros-v0.3.5                     -> fundle_macros-v0.3.5
+2026-08-25T15:53:42.8962453Z  * [new tag]           fundle_macros_impl-v0.2.0                -> fundle_macros_impl-v0.2.0
+2026-08-25T15:53:42.8962951Z  * [new tag]           fundle_macros_impl-v0.2.1                -> fundle_macros_impl-v0.2.1
+2026-08-25T15:53:42.8963440Z  * [new tag]           fundle_macros_impl-v0.3.2                -> fundle_macros_impl-v0.3.2
+2026-08-25T15:53:42.8963920Z  * [new tag]           fundle_macros_impl-v0.3.3                -> fundle_macros_impl-v0.3.3
+2026-08-25T15:53:42.8964508Z  * [new tag]           fundle_macros_impl-v0.3.5                -> fundle_macros_impl-v0.3.5
+2026-08-25T15:53:42.8965006Z  * [new tag]           http_extensions-v0.3.1                   -> http_extensions-v0.3.1
+2026-08-25T15:53:42.8965485Z  * [new tag]           http_extensions-v0.4.0                   -> http_extensions-v0.4.0
+2026-08-25T15:53:42.8965953Z  * [new tag]           http_extensions-v0.4.4                   -> http_extensions-v0.4.4
+2026-08-25T15:53:42.8966417Z  * [new tag]           http_extensions-v0.5.0                   -> http_extensions-v0.5.0
+2026-08-25T15:53:42.8966885Z  * [new tag]           http_extensions-v0.5.1                   -> http_extensions-v0.5.1
+2026-08-25T15:53:42.8967353Z  * [new tag]           http_extensions-v0.6.0                   -> http_extensions-v0.6.0
+2026-08-25T15:53:42.8967815Z  * [new tag]           http_extensions-v0.6.1                   -> http_extensions-v0.6.1
+2026-08-25T15:53:42.8968278Z  * [new tag]           http_extensions-v0.6.2                   -> http_extensions-v0.6.2
+2026-08-25T15:53:42.8968743Z  * [new tag]           http_extensions-v0.6.3                   -> http_extensions-v0.6.3
+2026-08-25T15:53:42.8969208Z  * [new tag]           http_extensions-v0.6.5                   -> http_extensions-v0.6.5
+2026-08-25T15:53:42.8969670Z  * [new tag]           http_extensions-v0.7.0                   -> http_extensions-v0.7.0
+2026-08-25T15:53:42.8970138Z  * [new tag]           http_extensions-v0.8.0                   -> http_extensions-v0.8.0
+2026-08-25T15:53:42.8970608Z  * [new tag]           http_extensions-v0.9.0                   -> http_extensions-v0.9.0
+2026-08-25T15:53:42.8971170Z  * [new tag]           http_path_template-v0.1.0                -> http_path_template-v0.1.0
+2026-08-25T15:53:42.8971657Z  * [new tag]           http_path_template-v0.2.0                -> http_path_template-v0.2.0
+2026-08-25T15:53:42.8972118Z  * [new tag]           internity-v0.1.0                         -> internity-v0.1.0
+2026-08-25T15:53:42.8972546Z  * [new tag]           internity-v0.2.0                         -> internity-v0.2.0
+2026-08-25T15:53:42.8973001Z  * [new tag]           internity_macros-v0.1.0                  -> internity_macros-v0.1.0
+2026-08-25T15:53:42.8973884Z  * [new tag]           internity_macros_impl-v0.1.0             -> internity_macros_impl-v0.1.0
+2026-08-25T15:53:42.8974376Z  * [new tag]           layered-v0.1.0                           -> layered-v0.1.0
+2026-08-25T15:53:42.8974786Z  * [new tag]           layered-v0.2.0                           -> layered-v0.2.0
+2026-08-25T15:53:42.8975189Z  * [new tag]           layered-v0.3.0                           -> layered-v0.3.0
+2026-08-25T15:53:42.8975595Z  * [new tag]           layered-v0.3.2                           -> layered-v0.3.2
+2026-08-25T15:53:42.8975991Z  * [new tag]           layered-v0.3.3                           -> layered-v0.3.3
+2026-08-25T15:53:42.8976393Z  * [new tag]           layered-v0.3.4                           -> layered-v0.3.4
+2026-08-25T15:53:42.8976795Z  * [new tag]           layered-v0.3.6                           -> layered-v0.3.6
+2026-08-25T15:53:42.8977220Z  * [new tag]           multitude-v0.1.0                         -> multitude-v0.1.0
+2026-08-25T15:53:42.8977643Z  * [new tag]           multitude-v0.1.2                         -> multitude-v0.1.2
+2026-08-25T15:53:42.8978062Z  * [new tag]           multitude-v0.1.3                         -> multitude-v0.1.3
+2026-08-25T15:53:42.8978480Z  * [new tag]           multitude-v0.2.0                         -> multitude-v0.2.0
+2026-08-25T15:53:42.8978893Z  * [new tag]           multitude-v0.3.0                         -> multitude-v0.3.0
+2026-08-25T15:53:42.8979312Z  * [new tag]           multitude-v0.3.1                         -> multitude-v0.3.1
+2026-08-25T15:53:42.8979729Z  * [new tag]           multitude-v0.3.2                         -> multitude-v0.3.2
+2026-08-25T15:53:42.8980145Z  * [new tag]           multitude-v0.4.0                         -> multitude-v0.4.0
+2026-08-25T15:53:42.8980689Z  * [new tag]           multitude-v0.6.1                         -> multitude-v0.6.1
+2026-08-25T15:53:42.8981115Z  * [new tag]           multitude-v0.6.2                         -> multitude-v0.6.2
+2026-08-25T15:53:42.8981530Z  * [new tag]           multitude-v0.7.0                         -> multitude-v0.7.0
+2026-08-25T15:53:42.8981945Z  * [new tag]           multitude-v0.7.1                         -> multitude-v0.7.1
+2026-08-25T15:53:42.8982360Z  * [new tag]           multitude-v0.8.0                         -> multitude-v0.8.0
+2026-08-25T15:53:42.8982782Z  * [new tag]           multitude-v0.8.1                         -> multitude-v0.8.1
+2026-08-25T15:53:42.8983240Z  * [new tag]           multitude_macros-v0.1.0                  -> multitude_macros-v0.1.0
+2026-08-25T15:53:42.8983721Z  * [new tag]           multitude_macros-v0.1.1                  -> multitude_macros-v0.1.1
+2026-08-25T15:53:42.8984236Z  * [new tag]           multitude_macros_impl-v0.1.0             -> multitude_macros_impl-v0.1.0
+2026-08-25T15:53:42.8984791Z  * [new tag]           multitude_macros_impl-v0.1.1             -> multitude_macros_impl-v0.1.1
+2026-08-25T15:53:42.8985277Z  * [new tag]           observed-v0.24.0                         -> observed-v0.24.0
+2026-08-25T15:53:42.8985738Z  * [new tag]           observed_macros-v0.24.0                  -> observed_macros-v0.24.0
+2026-08-25T15:53:42.8986173Z  * [new tag]           ohno-v0.1.0                              -> ohno-v0.1.0
+2026-08-25T15:53:42.8986559Z  * [new tag]           ohno-v0.2.0                              -> ohno-v0.2.0
+2026-08-25T15:53:42.8986938Z  * [new tag]           ohno-v0.2.1                              -> ohno-v0.2.1
+2026-08-25T15:53:42.8987411Z  * [new tag]           ohno-v0.3.0                              -> ohno-v0.3.0
+2026-08-25T15:53:42.8987780Z  * [new tag]           ohno-v0.3.1                              -> ohno-v0.3.1
+2026-08-25T15:53:42.8988147Z  * [new tag]           ohno-v0.3.2                              -> ohno-v0.3.2
+2026-08-25T15:53:42.8988533Z  * [new tag]           ohno-v0.3.4                              -> ohno-v0.3.4
+2026-08-25T15:53:42.8988903Z  * [new tag]           ohno-v0.3.5                              -> ohno-v0.3.5
+2026-08-25T15:53:42.8989275Z  * [new tag]           ohno-v0.3.6                              -> ohno-v0.3.6
+2026-08-25T15:53:42.8989647Z  * [new tag]           ohno-v0.3.7                              -> ohno-v0.3.7
+2026-08-25T15:53:42.8990018Z  * [new tag]           ohno-v0.3.9                              -> ohno-v0.3.9
+2026-08-25T15:53:42.8990387Z  * [new tag]           ohno-v0.4.0                              -> ohno-v0.4.0
+2026-08-25T15:53:42.8990798Z  * [new tag]           ohno_macros-v0.1.0                       -> ohno_macros-v0.1.0
+2026-08-25T15:53:42.8991236Z  * [new tag]           ohno_macros-v0.2.0                       -> ohno_macros-v0.2.0
+2026-08-25T15:53:42.8991669Z  * [new tag]           ohno_macros-v0.3.0                       -> ohno_macros-v0.3.0
+2026-08-25T15:53:42.8992088Z  * [new tag]           ohno_macros-v0.3.2                       -> ohno_macros-v0.3.2
+2026-08-25T15:53:42.8992508Z  * [new tag]           ohno_macros-v0.3.3                       -> ohno_macros-v0.3.3
+2026-08-25T15:53:42.8992933Z  * [new tag]           ohno_macros-v0.3.4                       -> ohno_macros-v0.3.4
+2026-08-25T15:53:42.8993350Z  * [new tag]           ohno_macros-v0.4.0                       -> ohno_macros-v0.4.0
+2026-08-25T15:53:42.8994180Z  * [new tag]           ohno_macros_impl-v0.5.0                  -> ohno_macros_impl-v0.5.0
+2026-08-25T15:53:42.8994655Z  * [new tag]           plurality-v0.1.1                         -> plurality-v0.1.1
+2026-08-25T15:53:42.8995103Z  * [new tag]           plurality-v0.2.0                         -> plurality-v0.2.0
+2026-08-25T15:53:42.8995521Z  * [new tag]           plurality-v0.2.1                         -> plurality-v0.2.1
+2026-08-25T15:53:42.8995936Z  * [new tag]           plurality-v0.2.2                         -> plurality-v0.2.2
+2026-08-25T15:53:42.8996474Z  * [new tag]           rallocator-v0.1.0                        -> rallocator-v0.1.0
+2026-08-25T15:53:42.8996936Z  * [new tag]           rallocator_cli-v0.1.0                    -> rallocator_cli-v0.1.0
+2026-08-25T15:53:42.8997431Z  * [new tag]           rallocator_telemetry-v0.1.0              -> rallocator_telemetry-v0.1.0
+2026-08-25T15:53:42.8997933Z  * [new tag]           rallocator_wire-v0.1.0                   -> rallocator_wire-v0.1.0
+2026-08-25T15:53:42.8998402Z  * [new tag]           recoverable-v0.1.0                       -> recoverable-v0.1.0
+2026-08-25T15:53:42.8998839Z  * [new tag]           recoverable-v0.1.1                       -> recoverable-v0.1.1
+2026-08-25T15:53:42.8999276Z  * [new tag]           recoverable-v0.1.2                       -> recoverable-v0.1.2
+2026-08-25T15:53:42.8999711Z  * [new tag]           recoverable-v0.1.4                       -> recoverable-v0.1.4
+2026-08-25T15:53:42.9000148Z  * [new tag]           recoverable-v0.1.5                       -> recoverable-v0.1.5
+2026-08-25T15:53:42.9000583Z  * [new tag]           recoverable-v0.1.6                       -> recoverable-v0.1.6
+2026-08-25T15:53:42.9001015Z  * [new tag]           recoverable-v0.2.0                       -> recoverable-v0.2.0
+2026-08-25T15:53:42.9001460Z  * [new tag]           rest_over_grpc-v0.2.0                    -> rest_over_grpc-v0.2.0
+2026-08-25T15:53:42.9001903Z  * [new tag]           routerama-v0.1.0                         -> routerama-v0.1.0
+2026-08-25T15:53:42.9002351Z  * [new tag]           routerama_build-v0.1.0                   -> routerama_build-v0.1.0
+2026-08-25T15:53:42.9002919Z  * [new tag]           routerama_macros-v0.1.0                  -> routerama_macros-v0.1.0
+2026-08-25T15:53:42.9003379Z  * [new tag]           seatbelt-v0.2.0                          -> seatbelt-v0.2.0
+2026-08-25T15:53:42.9003795Z  * [new tag]           seatbelt-v0.3.0                          -> seatbelt-v0.3.0
+2026-08-25T15:53:42.9004205Z  * [new tag]           seatbelt-v0.3.1                          -> seatbelt-v0.3.1
+2026-08-25T15:53:42.9004613Z  * [new tag]           seatbelt-v0.4.0                          -> seatbelt-v0.4.0
+2026-08-25T15:53:42.9005028Z  * [new tag]           seatbelt-v0.4.1                          -> seatbelt-v0.4.1
+2026-08-25T15:53:42.9005433Z  * [new tag]           seatbelt-v0.4.2                          -> seatbelt-v0.4.2
+2026-08-25T15:53:42.9005837Z  * [new tag]           seatbelt-v0.4.4                          -> seatbelt-v0.4.4
+2026-08-25T15:53:42.9006247Z  * [new tag]           seatbelt-v0.5.0                          -> seatbelt-v0.5.0
+2026-08-25T15:53:42.9006667Z  * [new tag]           seatbelt-v0.5.10                         -> seatbelt-v0.5.10
+2026-08-25T15:53:42.9007082Z  * [new tag]           seatbelt-v0.5.3                          -> seatbelt-v0.5.3
+2026-08-25T15:53:42.9007491Z  * [new tag]           seatbelt-v0.5.4                          -> seatbelt-v0.5.4
+2026-08-25T15:53:42.9007939Z  * [new tag]           seatbelt-v0.5.5                          -> seatbelt-v0.5.5
+2026-08-25T15:53:42.9008356Z  * [new tag]           seatbelt-v0.5.6                          -> seatbelt-v0.5.6
+2026-08-25T15:53:42.9008764Z  * [new tag]           seatbelt-v0.5.7                          -> seatbelt-v0.5.7
+2026-08-25T15:53:42.9009171Z  * [new tag]           seatbelt-v0.5.8                          -> seatbelt-v0.5.8
+2026-08-25T15:53:42.9009577Z  * [new tag]           seatbelt-v0.6.0                          -> seatbelt-v0.6.0
+2026-08-25T15:53:42.9009982Z  * [new tag]           seatbelt-v0.6.1                          -> seatbelt-v0.6.1
+2026-08-25T15:53:42.9010403Z  * [new tag]           seatbelt-v0.7.0                          -> seatbelt-v0.7.0
+2026-08-25T15:53:42.9010835Z  * [new tag]           seatbelt_http-v0.2.4                     -> seatbelt_http-v0.2.4
+2026-08-25T15:53:42.9011295Z  * [new tag]           seatbelt_http-v0.3.0                     -> seatbelt_http-v0.3.0
+2026-08-25T15:53:42.9011831Z  * [new tag]           seatbelt_http-v0.3.1                     -> seatbelt_http-v0.3.1
+2026-08-25T15:53:42.9012284Z  * [new tag]           seatbelt_http-v0.4.0                     -> seatbelt_http-v0.4.0
+2026-08-25T15:53:42.9012725Z  * [new tag]           seatbelt_http-v0.4.1                     -> seatbelt_http-v0.4.1
+2026-08-25T15:53:42.9013169Z  * [new tag]           seatbelt_http-v0.4.2                     -> seatbelt_http-v0.4.2
+2026-08-25T15:53:42.9013988Z  * [new tag]           seatbelt_http-v0.4.3                     -> seatbelt_http-v0.4.3
+2026-08-25T15:53:42.9014455Z  * [new tag]           seatbelt_http-v0.4.5                     -> seatbelt_http-v0.4.5
+2026-08-25T15:53:42.9014919Z  * [new tag]           seatbelt_http-v0.5.0                     -> seatbelt_http-v0.5.0
+2026-08-25T15:53:42.9015366Z  * [new tag]           seatbelt_http-v0.6.0                     -> seatbelt_http-v0.6.0
+2026-08-25T15:53:42.9015809Z  * [new tag]           seatbelt_http-v0.7.0                     -> seatbelt_http-v0.7.0
+2026-08-25T15:53:42.9016257Z  * [new tag]           templated_uri-v0.1.0                     -> templated_uri-v0.1.0
+2026-08-25T15:53:42.9016708Z  * [new tag]           templated_uri-v0.1.1                     -> templated_uri-v0.1.1
+2026-08-25T15:53:42.9017150Z  * [new tag]           templated_uri-v0.1.2                     -> templated_uri-v0.1.2
+2026-08-25T15:53:42.9017589Z  * [new tag]           templated_uri-v0.2.0                     -> templated_uri-v0.2.0
+2026-08-25T15:53:42.9018033Z  * [new tag]           templated_uri-v0.2.3                     -> templated_uri-v0.2.3
+2026-08-25T15:53:42.9018482Z  * [new tag]           templated_uri-v0.3.0                     -> templated_uri-v0.3.0
+2026-08-25T15:53:42.9019047Z  * [new tag]           templated_uri-v0.3.1                     -> templated_uri-v0.3.1
+2026-08-25T15:53:42.9019493Z  * [new tag]           templated_uri-v0.3.2                     -> templated_uri-v0.3.2
+2026-08-25T15:53:42.9019938Z  * [new tag]           templated_uri-v0.3.3                     -> templated_uri-v0.3.3
+2026-08-25T15:53:42.9020386Z  * [new tag]           templated_uri-v0.3.5                     -> templated_uri-v0.3.5
+2026-08-25T15:53:42.9020833Z  * [new tag]           templated_uri-v0.3.6                     -> templated_uri-v0.3.6
+2026-08-25T15:53:42.9021279Z  * [new tag]           templated_uri-v0.4.0                     -> templated_uri-v0.4.0
+2026-08-25T15:53:42.9021772Z  * [new tag]           templated_uri_macros-v0.1.0              -> templated_uri_macros-v0.1.0
+2026-08-25T15:53:42.9022288Z  * [new tag]           templated_uri_macros-v0.1.1              -> templated_uri_macros-v0.1.1
+2026-08-25T15:53:42.9022803Z  * [new tag]           templated_uri_macros-v0.2.0              -> templated_uri_macros-v0.2.0
+2026-08-25T15:53:42.9023307Z  * [new tag]           templated_uri_macros-v0.2.2              -> templated_uri_macros-v0.2.2
+2026-08-25T15:53:42.9023813Z  * [new tag]           templated_uri_macros-v0.2.3              -> templated_uri_macros-v0.2.3
+2026-08-25T15:53:42.9024323Z  * [new tag]           templated_uri_macros-v0.2.4              -> templated_uri_macros-v0.2.4
+2026-08-25T15:53:42.9024827Z  * [new tag]           templated_uri_macros-v0.2.5              -> templated_uri_macros-v0.2.5
+2026-08-25T15:53:42.9025335Z  * [new tag]           templated_uri_macros-v0.2.7              -> templated_uri_macros-v0.2.7
+2026-08-25T15:53:42.9025836Z  * [new tag]           templated_uri_macros-v0.3.0              -> templated_uri_macros-v0.3.0
+2026-08-25T15:53:42.9026339Z  * [new tag]           templated_uri_macros-v0.4.0              -> templated_uri_macros-v0.4.0
+2026-08-25T15:53:42.9026873Z  * [new tag]           templated_uri_macros_impl-v0.1.0         -> templated_uri_macros_impl-v0.1.0
+2026-08-25T15:53:42.9027432Z  * [new tag]           templated_uri_macros_impl-v0.1.1         -> templated_uri_macros_impl-v0.1.1
+2026-08-25T15:53:42.9027975Z  * [new tag]           templated_uri_macros_impl-v0.2.0         -> templated_uri_macros_impl-v0.2.0
+2026-08-25T15:53:42.9028603Z  * [new tag]           templated_uri_macros_impl-v0.2.2         -> templated_uri_macros_impl-v0.2.2
+2026-08-25T15:53:42.9029156Z  * [new tag]           templated_uri_macros_impl-v0.2.3         -> templated_uri_macros_impl-v0.2.3
+2026-08-25T15:53:42.9029694Z  * [new tag]           templated_uri_macros_impl-v0.2.4         -> templated_uri_macros_impl-v0.2.4
+2026-08-25T15:53:42.9030236Z  * [new tag]           templated_uri_macros_impl-v0.2.5         -> templated_uri_macros_impl-v0.2.5
+2026-08-25T15:53:42.9030773Z  * [new tag]           templated_uri_macros_impl-v0.2.7         -> templated_uri_macros_impl-v0.2.7
+2026-08-25T15:53:42.9031785Z  * [new tag]           templated_uri_macros_impl-v0.3.0         -> templated_uri_macros_impl-v0.3.0
+2026-08-25T15:53:42.9032381Z  * [new tag]           templated_uri_macros_impl-v0.4.0         -> templated_uri_macros_impl-v0.4.0
+2026-08-25T15:53:42.9032880Z  * [new tag]           thread_aware-v0.10.0                     -> thread_aware-v0.10.0
+2026-08-25T15:53:42.9033347Z  * [new tag]           thread_aware-v0.2.0                      -> thread_aware-v0.2.0
+2026-08-25T15:53:42.9033793Z  * [new tag]           thread_aware-v0.3.0                      -> thread_aware-v0.3.0
+2026-08-25T15:53:42.9034231Z  * [new tag]           thread_aware-v0.4.0                      -> thread_aware-v0.4.0
+2026-08-25T15:53:42.9034669Z  * [new tag]           thread_aware-v0.5.0                      -> thread_aware-v0.5.0
+2026-08-25T15:53:42.9035103Z  * [new tag]           thread_aware-v0.6.0                      -> thread_aware-v0.6.0
+2026-08-25T15:53:42.9035536Z  * [new tag]           thread_aware-v0.6.1                      -> thread_aware-v0.6.1
+2026-08-25T15:53:42.9036105Z  * [new tag]           thread_aware-v0.6.2                      -> thread_aware-v0.6.2
+2026-08-25T15:53:42.9036738Z  * [new tag]           thread_aware-v0.7.0                      -> thread_aware-v0.7.0
+2026-08-25T15:53:42.9037180Z  * [new tag]           thread_aware-v0.7.2                      -> thread_aware-v0.7.2
+2026-08-25T15:53:42.9037620Z  * [new tag]           thread_aware-v0.7.3                      -> thread_aware-v0.7.3
+2026-08-25T15:53:42.9038059Z  * [new tag]           thread_aware-v0.7.4                      -> thread_aware-v0.7.4
+2026-08-25T15:53:42.9038492Z  * [new tag]           thread_aware-v0.8.0                      -> thread_aware-v0.8.0
+2026-08-25T15:53:42.9038955Z  * [new tag]           thread_aware-v0.9.0                      -> thread_aware-v0.9.0
+2026-08-25T15:53:42.9039424Z  * [new tag]           thread_aware_macros-v0.2.0               -> thread_aware_macros-v0.2.0
+2026-08-25T15:53:42.9039935Z  * [new tag]           thread_aware_macros-v0.3.0               -> thread_aware_macros-v0.3.0
+2026-08-25T15:53:42.9040435Z  * [new tag]           thread_aware_macros-v0.4.0               -> thread_aware_macros-v0.4.0
+2026-08-25T15:53:42.9040928Z  * [new tag]           thread_aware_macros-v0.5.0               -> thread_aware_macros-v0.5.0
+2026-08-25T15:53:42.9041423Z  * [new tag]           thread_aware_macros-v0.6.0               -> thread_aware_macros-v0.6.0
+2026-08-25T15:53:42.9041921Z  * [new tag]           thread_aware_macros-v0.6.1               -> thread_aware_macros-v0.6.1
+2026-08-25T15:53:42.9042414Z  * [new tag]           thread_aware_macros-v0.7.0               -> thread_aware_macros-v0.7.0
+2026-08-25T15:53:42.9042906Z  * [new tag]           thread_aware_macros-v0.7.2               -> thread_aware_macros-v0.7.2
+2026-08-25T15:53:42.9043400Z  * [new tag]           thread_aware_macros-v0.7.3               -> thread_aware_macros-v0.7.3
+2026-08-25T15:53:42.9043904Z  * [new tag]           thread_aware_macros-v0.7.4               -> thread_aware_macros-v0.7.4
+2026-08-25T15:53:42.9044424Z  * [new tag]           thread_aware_macros_impl-v0.2.0          -> thread_aware_macros_impl-v0.2.0
+2026-08-25T15:53:42.9044964Z  * [new tag]           thread_aware_macros_impl-v0.3.0          -> thread_aware_macros_impl-v0.3.0
+2026-08-25T15:53:42.9045497Z  * [new tag]           thread_aware_macros_impl-v0.4.0          -> thread_aware_macros_impl-v0.4.0
+2026-08-25T15:53:42.9046124Z  * [new tag]           thread_aware_macros_impl-v0.5.0          -> thread_aware_macros_impl-v0.5.0
+2026-08-25T15:53:42.9046666Z  * [new tag]           thread_aware_macros_impl-v0.6.0          -> thread_aware_macros_impl-v0.6.0
+2026-08-25T15:53:42.9047202Z  * [new tag]           thread_aware_macros_impl-v0.6.1          -> thread_aware_macros_impl-v0.6.1
+2026-08-25T15:53:42.9047734Z  * [new tag]           thread_aware_macros_impl-v0.7.0          -> thread_aware_macros_impl-v0.7.0
+2026-08-25T15:53:42.9048268Z  * [new tag]           thread_aware_macros_impl-v0.7.1          -> thread_aware_macros_impl-v0.7.1
+2026-08-25T15:53:42.9048803Z  * [new tag]           thread_aware_macros_impl-v0.7.2          -> thread_aware_macros_impl-v0.7.2
+2026-08-25T15:53:42.9049334Z  * [new tag]           thread_aware_macros_impl-v0.7.3          -> thread_aware_macros_impl-v0.7.3
+2026-08-25T15:53:42.9049799Z  * [new tag]           tick-v0.1.0                              -> tick-v0.1.0
+2026-08-25T15:53:42.9050192Z  * [new tag]           tick-v0.1.2                              -> tick-v0.1.2
+2026-08-25T15:53:42.9050569Z  * [new tag]           tick-v0.2.0                              -> tick-v0.2.0
+2026-08-25T15:53:42.9050953Z  * [new tag]           tick-v0.2.1                              -> tick-v0.2.1
+2026-08-25T15:53:42.9051323Z  * [new tag]           tick-v0.3.0                              -> tick-v0.3.0
+2026-08-25T15:53:42.9051904Z  * [new tag]           tick-v0.3.2                              -> tick-v0.3.2
+2026-08-25T15:53:42.9052283Z  * [new tag]           tick-v0.3.3                              -> tick-v0.3.3
+2026-08-25T15:53:42.9053446Z  * [new tag]           tick-v0.3.4                              -> tick-v0.3.4
+2026-08-25T15:53:42.9053840Z  * [new tag]           tick-v0.3.6                              -> tick-v0.3.6
+2026-08-25T15:53:42.9054222Z  * [new tag]           tick-v0.4.0                              -> tick-v0.4.0
+2026-08-25T15:53:42.9054611Z  * [new tag]           tick-v0.5.0                              -> tick-v0.5.0
+2026-08-25T15:53:42.9055026Z  * [new tag]           uniflight-v0.1.0                         -> uniflight-v0.1.0
+2026-08-25T15:53:42.9055474Z  * [new tag]           uniflight-v0.2.0                         -> uniflight-v0.2.0
+2026-08-25T15:53:42.9055909Z  * [new tag]           uniflight-v0.2.2                         -> uniflight-v0.2.2
+2026-08-25T15:53:42.9056335Z  * [new tag]           uniflight-v0.2.3                         -> uniflight-v0.2.3
+2026-08-25T15:53:42.9057005Z  * [new tag]           uniflight-v0.2.4                         -> uniflight-v0.2.4
+2026-08-25T15:53:42.9057445Z  * [new tag]           uniflight-v0.3.0                         -> uniflight-v0.3.0
+2026-08-25T15:53:42.9057869Z  * [new tag]           uniflight-v0.4.0                         -> uniflight-v0.4.0
+2026-08-25T15:53:42.9058317Z  * [new ref]           3849c1a16e0924fa2a8bcab62a258502d31913ea -> pull/687/merge
+2026-08-25T15:53:42.9059575Z ##[endgroup]
+2026-08-25T15:53:42.9059916Z ##[group]Determining the checkout info
+2026-08-25T15:53:42.9060287Z ##[endgroup]
+2026-08-25T15:53:42.9060629Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-08-25T15:53:42.9261866Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-08-25T15:53:42.9574049Z ##[group]Checking out the ref
+2026-08-25T15:53:42.9582859Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/remotes/pull/687/merge
+2026-08-25T15:53:44.5956245Z Updating files:   3% (78/2125)
+2026-08-25T15:53:44.6033066Z Updating files:   4% (85/2125)
+2026-08-25T15:53:44.6113826Z Updating files:   5% (107/2125)
+2026-08-25T15:53:44.6195233Z Updating files:   6% (128/2125)
+2026-08-25T15:53:44.6265770Z Updating files:   7% (149/2125)
+2026-08-25T15:53:44.6332011Z Updating files:   8% (170/2125)
+2026-08-25T15:53:44.6395597Z Updating files:   9% (192/2125)
+2026-08-25T15:53:44.6498107Z Updating files:  10% (213/2125)
+2026-08-25T15:53:44.6562502Z Updating files:  11% (234/2125)
+2026-08-25T15:53:44.6632689Z Updating files:  12% (255/2125)
+2026-08-25T15:53:44.6701241Z Updating files:  13% (277/2125)
+2026-08-25T15:53:44.6787028Z Updating files:  14% (298/2125)
+2026-08-25T15:53:44.6846376Z Updating files:  15% (319/2125)
+2026-08-25T15:53:44.6921603Z Updating files:  16% (340/2125)
+2026-08-25T15:53:44.6982754Z Updating files:  17% (362/2125)
+2026-08-25T15:53:44.7044613Z Updating files:  18% (383/2125)
+2026-08-25T15:53:44.7103280Z Updating files:  19% (404/2125)
+2026-08-25T15:53:44.7172649Z Updating files:  20% (425/2125)
+2026-08-25T15:53:44.7244747Z Updating files:  21% (447/2125)
+2026-08-25T15:53:44.7316190Z Updating files:  22% (468/2125)
+2026-08-25T15:53:44.7372867Z Updating files:  23% (489/2125)
+2026-08-25T15:53:44.7454367Z Updating files:  24% (510/2125)
+2026-08-25T15:53:44.7522778Z Updating files:  25% (532/2125)
+2026-08-25T15:53:44.7603068Z Updating files:  26% (553/2125)
+2026-08-25T15:53:44.7676778Z Updating files:  27% (574/2125)
+2026-08-25T15:53:44.7744348Z Updating files:  28% (595/2125)
+2026-08-25T15:53:44.7805603Z Updating files:  29% (617/2125)
+2026-08-25T15:53:44.7853171Z Updating files:  30% (638/2125)
+2026-08-25T15:53:44.7925645Z Updating files:  31% (659/2125)
+2026-08-25T15:53:44.7997888Z Updating files:  32% (680/2125)
+2026-08-25T15:53:44.8082446Z Updating files:  33% (702/2125)
+2026-08-25T15:53:44.8142301Z Updating files:  34% (723/2125)
+2026-08-25T15:53:44.8206566Z Updating files:  35% (744/2125)
+2026-08-25T15:53:44.8285128Z Updating files:  36% (765/2125)
+2026-08-25T15:53:44.8357973Z Updating files:  37% (787/2125)
+2026-08-25T15:53:44.8426403Z Updating files:  38% (808/2125)
+2026-08-25T15:53:44.8799787Z Updating files:  39% (829/2125)
+2026-08-25T15:53:44.8872401Z Updating files:  40% (850/2125)
+2026-08-25T15:53:44.8932635Z Updating files:  41% (872/2125)
+2026-08-25T15:53:44.9012739Z Updating files:  42% (893/2125)
+2026-08-25T15:53:44.9090269Z Updating files:  43% (914/2125)
+2026-08-25T15:53:44.9170667Z Updating files:  44% (935/2125)
+2026-08-25T15:53:44.9255996Z Updating files:  45% (957/2125)
+2026-08-25T15:53:44.9328984Z Updating files:  46% (978/2125)
+2026-08-25T15:53:44.9385768Z Updating files:  47% (999/2125)
+2026-08-25T15:53:44.9469900Z Updating files:  48% (1020/2125)
+2026-08-25T15:53:44.9531773Z Updating files:  49% (1042/2125)
+2026-08-25T15:53:44.9599397Z Updating files:  50% (1063/2125)
+2026-08-25T15:53:44.9683634Z Updating files:  51% (1084/2125)
+2026-08-25T15:53:44.9754733Z Updating files:  52% (1105/2125)
+2026-08-25T15:53:44.9802745Z Updating files:  53% (1127/2125)
+2026-08-25T15:53:44.9874379Z Updating files:  54% (1148/2125)
+2026-08-25T15:53:44.9929980Z Updating files:  55% (1169/2125)
+2026-08-25T15:53:44.9979728Z Updating files:  56% (1190/2125)
+2026-08-25T15:53:45.0043794Z Updating files:  57% (1212/2125)
+2026-08-25T15:53:45.0085691Z Updating files:  58% (1233/2125)
+2026-08-25T15:53:45.0112233Z Updating files:  58% (1246/2125)
+2026-08-25T15:53:45.0177802Z Updating files:  59% (1254/2125)
+2026-08-25T15:53:45.0250048Z Updating files:  60% (1275/2125)
+2026-08-25T15:53:45.0325307Z Updating files:  61% (1297/2125)
+2026-08-25T15:53:45.0390336Z Updating files:  62% (1318/2125)
+2026-08-25T15:53:45.0448541Z Updating files:  63% (1339/2125)
+2026-08-25T15:53:45.0520631Z Updating files:  64% (1360/2125)
+2026-08-25T15:53:45.0589071Z Updating files:  65% (1382/2125)
+2026-08-25T15:53:45.0671239Z Updating files:  66% (1403/2125)
+2026-08-25T15:53:45.0740256Z Updating files:  67% (1424/2125)
+2026-08-25T15:53:45.0815156Z Updating files:  68% (1445/2125)
+2026-08-25T15:53:45.0897007Z Updating files:  69% (1467/2125)
+2026-08-25T15:53:45.0962013Z Updating files:  70% (1488/2125)
+2026-08-25T15:53:45.1024535Z Updating files:  71% (1509/2125)
+2026-08-25T15:53:45.1096662Z Updating files:  72% (1530/2125)
+2026-08-25T15:53:45.1155624Z Updating files:  73% (1552/2125)
+2026-08-25T15:53:45.1212492Z Updating files:  74% (1573/2125)
+2026-08-25T15:53:45.1290185Z Updating files:  75% (1594/2125)
+2026-08-25T15:53:45.1360601Z Updating files:  76% (1615/2125)
+2026-08-25T15:53:45.1427250Z Updating files:  77% (1637/2125)
+2026-08-25T15:53:45.1505805Z Updating files:  78% (1658/2125)
+2026-08-25T15:53:45.1566402Z Updating files:  79% (1679/2125)
+2026-08-25T15:53:45.1629367Z Updating files:  80% (1700/2125)
+2026-08-25T15:53:45.1688437Z Updating files:  81% (1722/2125)
+2026-08-25T15:53:45.1751674Z Updating files:  82% (1743/2125)
+2026-08-25T15:53:45.1821642Z Updating files:  83% (1764/2125)
+2026-08-25T15:53:45.1901436Z Updating files:  84% (1785/2125)
+2026-08-25T15:53:45.1968539Z Updating files:  85% (1807/2125)
+2026-08-25T15:53:45.2016816Z Updating files:  86% (1828/2125)
+2026-08-25T15:53:45.2079986Z Updating files:  87% (1849/2125)
+2026-08-25T15:53:45.2164599Z Updating files:  88% (1870/2125)
+2026-08-25T15:53:45.2229158Z Updating files:  89% (1892/2125)
+2026-08-25T15:53:45.2280161Z Updating files:  90% (1913/2125)
+2026-08-25T15:53:45.2354196Z Updating files:  91% (1934/2125)
+2026-08-25T15:53:45.2418831Z Updating files:  92% (1955/2125)
+2026-08-25T15:53:45.2488585Z Updating files:  93% (1977/2125)
+2026-08-25T15:53:45.2547514Z Updating files:  94% (1998/2125)
+2026-08-25T15:53:45.2599937Z Updating files:  95% (2019/2125)
+2026-08-25T15:53:45.2661592Z Updating files:  96% (2040/2125)
+2026-08-25T15:53:45.2744301Z Updating files:  97% (2062/2125)
+2026-08-25T15:53:45.2799734Z Updating files:  98% (2083/2125)
+2026-08-25T15:53:45.2868374Z Updating files:  99% (2104/2125)
+2026-08-25T15:53:45.2868839Z Updating files: 100% (2125/2125)
+2026-08-25T15:53:45.2869217Z Updating files: 100% (2125/2125), done.
+2026-08-25T15:53:45.3004304Z Note: switching to 'refs/remotes/pull/687/merge'.
+2026-08-25T15:53:45.3004588Z 
+2026-08-25T15:53:45.3004790Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-08-25T15:53:45.3005259Z changes and commit them, and you can discard any commits you make in this
+2026-08-25T15:53:45.3006091Z state without impacting any branches by switching back to a branch.
+2026-08-25T15:53:45.3006627Z 
+2026-08-25T15:53:45.3006836Z If you want to create a new branch to retain commits you create, you may
+2026-08-25T15:53:45.3007278Z do so (now or later) by using -c with the switch command. Example:
+2026-08-25T15:53:45.3007769Z 
+2026-08-25T15:53:45.3007927Z   git switch -c <new-branch-name>
+2026-08-25T15:53:45.3008103Z 
+2026-08-25T15:53:45.3008193Z Or undo this operation with:
+2026-08-25T15:53:45.3008338Z 
+2026-08-25T15:53:45.3008413Z   git switch -
+2026-08-25T15:53:45.3008522Z 
+2026-08-25T15:53:45.3008726Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-08-25T15:53:45.3009035Z 
+2026-08-25T15:53:45.3009377Z HEAD is now at 3849c1a1 Merge 10113de221728971c1614a92e14a69ee658d22be into 43818f2e7d25f1bc3476a5c502cf277d6dde4bfd
+2026-08-25T15:53:45.6682322Z ##[endgroup]
+2026-08-25T15:53:45.7161614Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-08-25T15:53:45.7479226Z 3849c1a16e0924fa2a8bcab62a258502d31913ea
+2026-08-25T15:53:45.7988078Z Prepare all required actions
+2026-08-25T15:53:45.7988706Z Getting action download info
+2026-08-25T15:53:45.8100230Z ##[group]Run ./.github/actions/anvil-pr-mutants
+2026-08-25T15:53:45.8100537Z with:
+2026-08-25T15:53:45.8101015Z   include_modified: --package bytesbuf_io@0.8.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0
+2026-08-25T15:53:45.8101726Z   include_affected: --package bytesbuf_io@0.8.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0
+2026-08-25T15:53:45.8105775Z   include_required: --package anyspawn@0.7.0 --package benchmarking@0.1.0 --package bytesbuf@0.8.0 --package bytesbuf_io@0.8.0 --package data_privacy@0.12.4 --package data_privacy_core@0.1.2 --package data_privacy_macros@0.10.3 --package data_privacy_macros_impl@0.10.3 --package fetch@0.15.0 --package fetch_hyper@0.6.0 --package fetch_options@0.2.3 --package fetch_tls@0.3.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0 --package fundle@0.3.5 --package fundle_macros@0.3.5 --package fundle_macros_impl@0.3.5 --package http_extensions@0.9.0 --package layered@0.3.6 --package observed@0.24.0 --package observed_macros@0.24.0 --package observed_testing@0.0.0 --package observed_utils@0.1.0 --package ohno@0.4.0 --package ohno_macros@0.4.0 --package ohno_macros_impl@0.5.0 --package plurality@0.2.2 --package recoverable@0.2.0 --package seatbelt@0.7.0 --package seatbelt_http@0.7.0 --package templated_uri@0.4.0 --package templated_uri_macros@0.4.0 --package templated_uri_macros_impl@0.4.0 --package testing_aids@0.0.0 --package thread_aware@0.10.0 --package thread_aware_macros@0.7.5 --package thread_aware_macros_impl@0.7.4 --package tick@0.5.0
+2026-08-25T15:53:45.8110275Z   free-disk-space: false
+2026-08-25T15:53:45.8110478Z env:
+2026-08-25T15:53:45.8110691Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:45.8110964Z ##[endgroup]
+2026-08-25T15:53:45.8171321Z ##[start-action display=Run ./.github/actions/anvil-setup;id=__self.__self]
+2026-08-25T15:53:45.8425177Z Prepare all required actions
+2026-08-25T15:53:45.8426010Z Getting action download info
+2026-08-25T15:53:45.9343577Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+2026-08-25T15:53:46.0959354Z Download action repository 'cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4' (SHA:ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4)
+2026-08-25T15:53:46.4719438Z ##[group]Run ./.github/actions/anvil-setup
+2026-08-25T15:53:46.4719708Z with:
+2026-08-25T15:53:46.4719885Z   group: pr-mutants
+2026-08-25T15:53:46.4720283Z   free-disk-space: false
+2026-08-25T15:53:46.4720477Z env:
+2026-08-25T15:53:46.4720681Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:46.4720971Z ##[endgroup]
+2026-08-25T15:53:46.4728817Z ##[start-action display=Free disk space (Linux);id=__self.__self.__run]
+2026-08-25T15:53:46.4742750Z ##[end-action id=__self.__self.__run;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-25T15:53:46.4744933Z ##[start-action display=Free disk space (Windows);id=__self.__self.__run_2]
+2026-08-25T15:53:46.4750447Z ##[end-action id=__self.__self.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-25T15:53:46.4753150Z ##[start-action display=Run echo "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT";id=__self.__self.rustc-version]
+2026-08-25T15:53:46.4941752Z ##[group]Run echo "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+2026-08-25T15:53:46.4942384Z [36;1mecho "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"[0m
+2026-08-25T15:53:46.4964399Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-08-25T15:53:46.4964803Z env:
+2026-08-25T15:53:46.4965030Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:46.4965312Z ##[endgroup]
+2026-08-25T15:53:50.2281604Z ##[end-action id=__self.__self.rustc-version;outcome=success;conclusion=success;duration_ms=3752]
+2026-08-25T15:53:50.2287367Z ##[start-action display=Restore cargo cache;id=__self.__self.cargo-cache]
+2026-08-25T15:53:50.4912750Z ##[group]Run actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-08-25T15:53:50.4913113Z with:
+2026-08-25T15:53:50.4913571Z   key: anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-pr-mutants
+2026-08-25T15:53:50.4914620Z   restore-keys: anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-
+anvil-v1-Windows-X64-rust1.97.1-
+anvil-v1-Windows-X64-
+
+2026-08-25T15:53:50.4915644Z   path: ~/.cargo/registry/cache/
+~/.cargo/registry/index/
+~/.cargo/bin/
+~/.cargo/.crates.toml
+~/.cargo/.crates2.json
+target/
+
+2026-08-25T15:53:50.4916175Z   enableCrossOsArchive: false
+2026-08-25T15:53:50.4916402Z   fail-on-cache-miss: false
+2026-08-25T15:53:50.4916606Z   lookup-only: false
+2026-08-25T15:53:50.4916780Z env:
+2026-08-25T15:53:50.4916986Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:50.4917250Z ##[endgroup]
+2026-08-25T15:53:50.8743023Z ##[warning]You've hit a rate limit, your rate limit will reset in 10 seconds
+2026-08-25T15:53:50.8744956Z ##[warning]Failed to restore: Failed to GetCacheEntryDownloadURL: Rate limited: Failed request: (429) Too Many Requests: rate limit exceeded
+2026-08-25T15:53:50.8747001Z Cache not found for input keys: anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-pr-mutants, anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-, anvil-v1-Windows-X64-rust1.97.1-, anvil-v1-Windows-X64-
+2026-08-25T15:53:50.8835408Z ##[end-action id=__self.__self.cargo-cache;outcome=success;conclusion=success;duration_ms=654]
+2026-08-25T15:53:50.8838749Z ##[start-action display=Install libclang (Linux);id=__self.__self.__run_3]
+2026-08-25T15:53:50.8843703Z ##[end-action id=__self.__self.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-25T15:53:50.8846556Z ##[start-action display=Ensure default toolchain is installed;id=__self.__self.__run_4]
+2026-08-25T15:53:50.8999747Z ##[group]Run rustup show active-toolchain || rustup default stable
+2026-08-25T15:53:50.9000233Z [36;1mrustup show active-toolchain || rustup default stable[0m
+2026-08-25T15:53:50.9016310Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-08-25T15:53:50.9016695Z env:
+2026-08-25T15:53:50.9016910Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:50.9017191Z ##[endgroup]
+2026-08-25T15:53:51.6489352Z stable-x86_64-pc-windows-msvc (default)
+2026-08-25T15:53:51.6570980Z ##[end-action id=__self.__self.__run_4;outcome=success;conclusion=success;duration_ms=772]
+2026-08-25T15:53:51.6574568Z ##[start-action display=Install cargo-binstall;id=__self.__self.__cargo-bins_cargo-binstall]
+2026-08-25T15:53:51.6737196Z ##[group]Run cargo-bins/cargo-binstall@ead08b90bd7b2e6d81963fb9cf0b7239f66d5db4
+2026-08-25T15:53:51.6737589Z with:
+2026-08-25T15:53:51.6737756Z env:
+2026-08-25T15:53:51.6737960Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:51.6738233Z ##[endgroup]
+2026-08-25T15:53:51.6742884Z ##[start-action display=Install cargo-binstall;id=__self.__self.__cargo-bins_cargo-binstall.__run]
+2026-08-25T15:53:51.6750813Z ##[end-action id=__self.__self.__cargo-bins_cargo-binstall.__run;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-08-25T15:53:51.6754290Z ##[start-action display=Install cargo-binstall;id=__self.__self.__cargo-bins_cargo-binstall.__run_2]
+2026-08-25T15:53:51.6889252Z ##[group]Run Set-ExecutionPolicy Unrestricted -Scope Process; iex "$Env:GITHUB_ACTION_PATH/install-from-binstall-release.ps1"
+2026-08-25T15:53:51.6890222Z [36;1mSet-ExecutionPolicy Unrestricted -Scope Process; iex "$Env:GITHUB_ACTION_PATH/install-from-binstall-release.ps1"[0m
+2026-08-25T15:53:51.7318557Z shell: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.EXE -command ". '{0}'"
+2026-08-25T15:53:51.7319951Z env:
+2026-08-25T15:53:51.7320246Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:51.7320596Z   BINSTALL_VERSION: 
+2026-08-25T15:53:51.7320823Z ##[endgroup]
+2026-08-25T15:53:55.9328119Z VERBOSE: Download: 1 seconds
+2026-08-25T15:53:57.1353804Z VERBOSE: Installation: 1 seconds
+2026-08-25T15:53:57.1418450Z VERBOSE: Path addition: 0 seconds
+2026-08-25T15:53:57.1970292Z ##[end-action id=__self.__self.__cargo-bins_cargo-binstall.__run_2;outcome=success;conclusion=success;duration_ms=5521]
+2026-08-25T15:53:57.1985831Z ##[end-action id=__self.__self.__cargo-bins_cargo-binstall;outcome=success;conclusion=success;duration_ms=5541]
+2026-08-25T15:53:57.1988485Z ##[start-action display=Install just;id=__self.__self.__run_5]
+2026-08-25T15:53:57.2123398Z ##[group]Run if ! command -v just >/dev/null 2>&1 ; then
+2026-08-25T15:53:57.2123776Z [36;1mif ! command -v just >/dev/null 2>&1 ; then[0m
+2026-08-25T15:53:57.2124196Z [36;1m  cargo binstall --no-confirm --locked just || cargo install --locked just[0m
+2026-08-25T15:53:57.2124578Z [36;1mfi[0m
+2026-08-25T15:53:57.2141292Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-08-25T15:53:57.2141908Z env:
+2026-08-25T15:53:57.2142196Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:53:57.2142479Z ##[endgroup]
+2026-08-25T15:53:58.8304811Z  INFO resolve: Resolving package: 'just'
+2026-08-25T15:54:03.3624084Z  WARN The package just v1.58.0 (x86_64-pc-windows-msvc) has been downloaded from github.com
+2026-08-25T15:54:03.3625239Z  INFO This will install the following binaries:
+2026-08-25T15:54:03.3626220Z  INFO   - just.exe => C:\Users\runneradmin\.cargo\bin\just.exe
+2026-08-25T15:54:03.3626984Z  INFO Installing binaries...
+2026-08-25T15:54:03.3664315Z  INFO Done in 4.544637s
+2026-08-25T15:54:03.3881295Z ##[end-action id=__self.__self.__run_5;outcome=success;conclusion=success;duration_ms=6189]
+2026-08-25T15:54:03.3884089Z ##[start-action display=Install anvil toolchains + tools;id=__self.__self.__run_6]
+2026-08-25T15:54:03.4024937Z ##[group]Run case "pr-mutants" in
+2026-08-25T15:54:03.4025215Z [36;1mcase "pr-mutants" in[0m
+2026-08-25T15:54:03.4025539Z [36;1m  none) echo "anvil-setup: group=none, skipping tool install" ;;[0m
+2026-08-25T15:54:03.4025916Z [36;1m  "")   just anvil-setup binstall ;;[0m
+2026-08-25T15:54:03.4026243Z [36;1m  *)    just "anvil-pr-mutants-setup" binstall ;;[0m
+2026-08-25T15:54:03.4026527Z [36;1mesac[0m
+2026-08-25T15:54:03.4042193Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-08-25T15:54:03.4042778Z env:
+2026-08-25T15:54:03.4043002Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:54:03.4043282Z ##[endgroup]
+2026-08-25T15:54:05.1564380Z Installing cargo-mutants =26.1.2 (installer: binstall)
+2026-08-25T15:54:05.2393087Z  INFO resolve: Resolving package: 'cargo-mutants@=26.1.2'
+2026-08-25T15:54:06.3937774Z  INFO resolve: Verified signature for package 'cargo-mutants-26.1.2-x86_64-pc-windows-msvc': timestamp:1768553015	file:cargo-mutants-26.1.2-x86_64-pc-windows-msvc.tar.gz	hashed
+2026-08-25T15:54:06.3938915Z  WARN The package cargo-mutants v26.1.2 (x86_64-pc-windows-msvc) has been downloaded from third-party source QuickInstall
+2026-08-25T15:54:06.3939494Z  INFO This will install the following binaries:
+2026-08-25T15:54:06.3939918Z  INFO   - cargo-mutants.exe => C:\Users\runneradmin\.cargo\bin\cargo-mutants.exe
+2026-08-25T15:54:06.3940308Z  INFO Installing binaries...
+2026-08-25T15:54:06.3981201Z  INFO Done in 1.1692507s
+2026-08-25T15:54:06.5257198Z ##[end-action id=__self.__self.__run_6;outcome=success;conclusion=success;duration_ms=3137]
+2026-08-25T15:54:06.5259746Z ##[start-action display=Save cargo cache;id=__self.__self.__actions_cache]
+2026-08-25T15:54:06.5428346Z ##[group]Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+2026-08-25T15:54:06.5428696Z with:
+2026-08-25T15:54:06.5429333Z   key: anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-pr-mutants
+2026-08-25T15:54:06.5430153Z   path: ~/.cargo/registry/cache/
+~/.cargo/registry/index/
+~/.cargo/bin/
+~/.cargo/.crates.toml
+~/.cargo/.crates2.json
+target/
+
+2026-08-25T15:54:06.5430679Z   enableCrossOsArchive: false
+2026-08-25T15:54:06.5430890Z env:
+2026-08-25T15:54:06.5431091Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:54:06.5431361Z ##[endgroup]
+2026-08-25T15:54:06.8265603Z [command]"C:\Program Files\Git\usr\bin\tar.exe" --posix -cf cache.tzst --exclude cache.tzst -P -C D:/a/oxidizer/oxidizer --files-from manifest.txt --force-local --use-compress-program "zstd -T0"
+2026-08-25T15:54:23.3922268Z ##[warning]You've hit a rate limit, your rate limit will reset in 37 seconds
+2026-08-25T15:54:23.3924682Z Failed to save: Unable to reserve cache with key anvil-v1-Windows-X64-rust1.97.1-211d310586cfef9912af4f7de5836837d91f2f8f2c6733a6ff2367b471811859-pr-mutants, another job may be creating this cache.
+2026-08-25T15:54:23.4094620Z ##[end-action id=__self.__self.__actions_cache;outcome=success;conclusion=success;duration_ms=16883]
+2026-08-25T15:54:23.4101174Z ##[end-action id=__self.__self;outcome=success;conclusion=success;duration_ms=37592]
+2026-08-25T15:54:23.4106001Z ##[start-action display=Run just anvil-pr-mutants;id=__self.__run]
+2026-08-25T15:54:23.4295311Z ##[group]Run just anvil-pr-mutants
+2026-08-25T15:54:23.4295636Z [36;1mjust anvil-pr-mutants[0m
+2026-08-25T15:54:23.4311925Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+2026-08-25T15:54:23.4312327Z env:
+2026-08-25T15:54:23.4312557Z   BASE_REF: 43e4e1c6aef13dd5ac6df37422c5a83a76d4fe15
+2026-08-25T15:54:23.4313142Z   ANVIL_INCLUDE_MODIFIED: --package bytesbuf_io@0.8.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0
+2026-08-25T15:54:23.4313912Z   ANVIL_INCLUDE_AFFECTED: --package bytesbuf_io@0.8.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0
+2026-08-25T15:54:23.4317988Z   ANVIL_INCLUDE_REQUIRED: --package anyspawn@0.7.0 --package benchmarking@0.1.0 --package bytesbuf@0.8.0 --package bytesbuf_io@0.8.0 --package data_privacy@0.12.4 --package data_privacy_core@0.1.2 --package data_privacy_macros@0.10.3 --package data_privacy_macros_impl@0.10.3 --package fetch@0.15.0 --package fetch_hyper@0.6.0 --package fetch_options@0.2.3 --package fetch_tls@0.3.0 --package fetch_winhttp@0.1.0 --package fetch_winhttp_impl@0.1.0 --package fundle@0.3.5 --package fundle_macros@0.3.5 --package fundle_macros_impl@0.3.5 --package http_extensions@0.9.0 --package layered@0.3.6 --package observed@0.24.0 --package observed_macros@0.24.0 --package observed_testing@0.0.0 --package observed_utils@0.1.0 --package ohno@0.4.0 --package ohno_macros@0.4.0 --package ohno_macros_impl@0.5.0 --package plurality@0.2.2 --package recoverable@0.2.0 --package seatbelt@0.7.0 --package seatbelt_http@0.7.0 --package templated_uri@0.4.0 --package templated_uri_macros@0.4.0 --package templated_uri_macros_impl@0.4.0 --package testing_aids@0.0.0 --package thread_aware@0.10.0 --package thread_aware_macros@0.7.5 --package thread_aware_macros_impl@0.7.4 --package tick@0.5.0
+2026-08-25T15:54:23.4325516Z   GITHUB_TOKEN: ***
+2026-08-25T15:54:23.4325734Z ##[endgroup]
+2026-08-25T15:54:27.0816535Z Found 500 mutants to test
+2026-08-25T15:57:58.6056243Z ok       Unmutated baseline in 194s build + 13s test
+2026-08-25T15:57:58.6057268Z  INFO Auto-set test timeout to 69s
+2026-08-25T16:01:16.8056289Z MISSED   crates/fetch_winhttp_impl/src/context.rs:175:9: replace OperationBuffer::into_completion -> Option<CompletionBuffer> with None in 4s build + 0s test
+2026-08-25T16:01:16.8063981Z ##[warning] replace OperationBuffer::into_completion -> Option<CompletionBuffer> with None
+2026-08-25T16:01:56.0321465Z MISSED   crates/fetch_winhttp_impl/src/context.rs:429:9: replace <impl Drop for CallbackOperationSlot>::drop with () in 4s build + 0s test
+2026-08-25T16:01:56.0326416Z ##[warning] replace <impl Drop for CallbackOperationSlot>::drop with ()
+2026-08-25T16:04:44.4820295Z MISSED   crates/fetch_winhttp_impl/src/convert.rs:79:43: delete - in 3s build + 0s test
+2026-08-25T16:04:44.4822258Z ##[warning] delete -
+2026-08-25T16:05:13.2142472Z MISSED   crates/fetch_winhttp_impl/src/convert.rs:183:5: replace http3_keep_alive_millis -> u32 with 1 in 4s build + 0s test
+2026-08-25T16:05:13.2146555Z ##[warning] replace http3_keep_alive_millis -> u32 with 1
+2026-08-25T16:10:11.8746498Z MISSED   crates/fetch_winhttp_impl/src/operation.rs:297:9: replace RequestGuard::close with () in 3s build + 0s test
+2026-08-25T16:10:11.8750617Z ##[warning] replace RequestGuard::close with ()
+2026-08-25T16:10:16.4211926Z MISSED   crates/fetch_winhttp_impl/src/operation.rs:313:9: replace <impl Drop for RequestGuard>::drop with () in 3s build + 0s test
+2026-08-25T16:10:16.4213996Z ##[warning] replace <impl Drop for RequestGuard>::drop with ()
+2026-08-25T16:10:30.5773666Z MISSED   crates/fetch_winhttp_impl/src/operation.rs:392:9: replace <impl Drop for OperationFuture<'_>>::drop with () in 4s build + 0s test
+2026-08-25T16:10:30.5775986Z ##[warning] replace <impl Drop for OperationFuture<'_>>::drop with ()
+2026-08-25T16:14:18.4928737Z MISSED   crates/fetch_winhttp_impl/src/query.rs:230:23: replace > with == in query_header_units in 3s build + 0s test
+2026-08-25T16:14:18.4933715Z ##[warning] replace > with == in query_header_units
+2026-08-25T16:14:27.3566723Z MISSED   crates/fetch_winhttp_impl/src/query.rs:230:23: replace > with >= in query_header_units in 3s build + 0s test
+2026-08-25T16:14:27.3570487Z ##[warning] replace > with >= in query_header_units
+2026-08-25T16:14:32.0159669Z MISSED   crates/fetch_winhttp_impl/src/query.rs:233:26: replace * with + in query_header_units in 4s build + 0s test
+2026-08-25T16:14:32.0162800Z ##[warning] replace * with + in query_header_units
+2026-08-25T16:14:36.3854669Z MISSED   crates/fetch_winhttp_impl/src/query.rs:233:26: replace * with / in query_header_units in 3s build + 0s test
+2026-08-25T16:14:36.3857322Z ##[warning] replace * with / in query_header_units
+2026-08-25T16:15:07.9671972Z MISSED   crates/fetch_winhttp_impl/src/request.rs:306:16: delete ! in send_request_headers in 6s build + 0s test
+2026-08-25T16:15:07.9675554Z ##[warning] delete ! in send_request_headers
+2026-08-25T16:18:46.8986516Z TIMEOUT  crates/fetch_winhttp_impl/src/response_headers.rs:134:13: replace += with *= in take_crlf_line in 3s build + 69s test
+2026-08-25T16:20:47.0178526Z TIMEOUT  crates/fetch_winhttp_impl/src/response_headers.rs:158:38: replace - with / in trim_optional_whitespace in 5s build + 69s test
+2026-08-25T16:22:10.5661309Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:85:8: delete ! in client_builder in 4s build + 0s test
+2026-08-25T16:22:10.5664615Z ##[warning] delete ! in client_builder
+2026-08-25T16:22:15.5847493Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![], None) in 4s build + 0s test
+2026-08-25T16:22:15.5851995Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![], None)
+2026-08-25T16:22:20.5855721Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![], Some(Default::default())) in 4s build + 0s test
+2026-08-25T16:22:20.5859357Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![], Some(Default::default()))
+2026-08-25T16:22:25.5680056Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![0], None) in 4s build + 0s test
+2026-08-25T16:22:25.5684394Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![0], None)
+2026-08-25T16:22:30.5002241Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![0], Some(Default::default())) in 4s build + 0s test
+2026-08-25T16:22:30.5007619Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![0], Some(Default::default()))
+2026-08-25T16:22:34.8708537Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![1], None) in 3s build + 0s test
+2026-08-25T16:22:34.8712418Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![1], None)
+2026-08-25T16:22:39.4754749Z MISSED   crates/fetch_winhttp_impl/src/testing/mod.rs:97:5: replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![1], Some(Default::default())) in 3s build + 0s test
+2026-08-25T16:22:39.4759150Z ##[warning] replace collect_frames -> (Vec<u8>, Option<HeaderMap>) with (vec![1], Some(Default::default()))
+2026-08-25T16:23:51.0722653Z MISSED   crates/fetch_winhttp_impl/src/bindings/real.rs:58:9: replace RealBindings::callback_result -> Result<()> with Ok(()) in 5s build + 0s test
+2026-08-25T16:23:51.0725550Z ##[warning] replace RealBindings::callback_result -> Result<()> with Ok(())
+2026-08-25T16:24:06.3613087Z MISSED   crates/fetch_winhttp_impl/src/body/read.rs:31:40: replace * with + in 4s build + 0s test
+2026-08-25T16:24:06.3615354Z ##[warning] replace * with +
+2026-08-25T16:25:39.3653277Z TIMEOUT  crates/fetch_winhttp_impl/src/body/read.rs:81:9: replace WinHttpBodyReader::read_into -> Result<(usize, BytesBuf), HttpError> with Ok((1, Default::default())) in 3s build + 69s test
+2026-08-25T16:27:08.5432785Z TIMEOUT  crates/fetch_winhttp_impl/src/body/read.rs:93:9: replace WinHttpBodyReader::read_once -> Result<(usize, BytesBuf), HttpError> with Ok((1, Default::default())) in 3s build + 69s test
+2026-08-25T16:28:14.2165673Z MISSED   crates/fetch_winhttp_impl/src/body/read.rs:339:9: replace <impl Body for WinHttpResponseBody>::size_hint -> SizeHint with Default::default() in 3s build + 0s test
+2026-08-25T16:28:14.2171183Z ##[warning] replace <impl Body for WinHttpResponseBody>::size_hint -> SizeHint with Default::default()
+2026-08-25T16:31:50.3917306Z TIMEOUT  crates/fetch_winhttp_impl/src/body/write.rs:195:73: replace match guard written != 0 with true in write_completion in 4s build + 69s test
+2026-08-25T16:33:07.0263264Z TIMEOUT  crates/fetch_winhttp_impl/src/body/write.rs:195:81: replace != with == in write_completion in 3s build + 69s test
+2026-08-25T16:35:51.7106969Z TIMEOUT  crates/fetch_winhttp_impl/src/body/write.rs:425:18: replace == with != in next_write_len in 3s build + 69s test
+2026-08-25T16:36:03.8901726Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:94:9: replace Http3Server::url -> String with String::new() in 4s build + 0s test
+2026-08-25T16:36:03.8921369Z ##[warning] replace Http3Server::url -> String with String::new()
+2026-08-25T16:36:08.1888988Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:94:9: replace Http3Server::url -> String with "xyzzy".into() in 3s build + 0s test
+2026-08-25T16:36:08.1894268Z ##[warning] replace Http3Server::url -> String with "xyzzy".into()
+2026-08-25T16:36:14.2574335Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:107:9: replace Http3Server::stop with () in 3s build + 0s test
+2026-08-25T16:36:14.2579978Z ##[warning] replace Http3Server::stop with ()
+2026-08-25T16:36:18.7568858Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:118:9: replace <impl Drop for Http3Server>::drop with () in 3s build + 0s test
+2026-08-25T16:36:18.7577695Z ##[warning] replace <impl Drop for Http3Server>::drop with ()
+2026-08-25T16:36:24.9837301Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:137:5: replace run_server with () in 3s build + 0s test
+2026-08-25T16:36:24.9846696Z ##[warning] replace run_server with ()
+2026-08-25T16:36:29.3235594Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:167:5: replace serve_connection with () in 3s build + 0s test
+2026-08-25T16:36:29.3240560Z ##[warning] replace serve_connection with ()
+2026-08-25T16:36:34.2405148Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:218:32: replace && with || in serve_connection in 4s build + 0s test
+2026-08-25T16:36:34.4054676Z ##[warning] replace && with || in serve_connection
+2026-08-25T16:36:38.5839655Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:218:12: delete ! in serve_connection in 3s build + 0s test
+2026-08-25T16:36:38.5848403Z ##[warning] delete ! in serve_connection
+2026-08-25T16:36:42.8238808Z MISSED   crates/fetch_winhttp_impl/src/testing/http3_server.rs:218:35: delete ! in serve_connection in 3s build + 0s test
+2026-08-25T16:36:42.8268494Z ##[warning] delete ! in serve_connection
+2026-08-25T16:36:57.7143632Z MISSED   crates/fetch_winhttp_impl/src/testing/recording.rs:108:9: replace ResponsePlan::body_length -> usize with 0 in 3s build + 0s test
+2026-08-25T16:36:57.7148724Z ##[warning] replace ResponsePlan::body_length -> usize with 0
+2026-08-25T16:37:01.9053002Z MISSED   crates/fetch_winhttp_impl/src/testing/recording.rs:108:9: replace ResponsePlan::body_length -> usize with 1 in 3s build + 0s test
+2026-08-25T16:37:01.9057655Z ##[warning] replace ResponsePlan::body_length -> usize with 1
+2026-08-25T16:37:07.9183249Z MISSED   crates/fetch_winhttp_impl/src/testing/recording.rs:144:9: replace ResponseScript::records -> bool with true in 3s build + 0s test
+2026-08-25T16:37:07.9191323Z ##[warning] replace ResponseScript::records -> bool with true
+2026-08-25T16:37:12.0117779Z MISSED   crates/fetch_winhttp_impl/src/testing/recording.rs:144:9: replace ResponseScript::records -> bool with false in 3s build + 0s test
+2026-08-25T16:37:12.0124798Z ##[warning] replace ResponseScript::records -> bool with false
+2026-08-25T16:37:20.4320369Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:35:5: replace into_response -> Response<ResponseBody> with Response::new(Default::default()) in 3s build + 0s test
+2026-08-25T16:37:20.4326203Z ##[warning] replace into_response -> Response<ResponseBody> with Response::new(Default::default())
+2026-08-25T16:37:24.5736524Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:35:5: replace into_response -> Response<ResponseBody> with Response::from(Default::default()) in 3s build + 0s test
+2026-08-25T16:37:24.5742385Z ##[warning] replace into_response -> Response<ResponseBody> with Response::from(Default::default())
+2026-08-25T16:37:30.8059323Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:41:19: delete ! in into_response in 3s build + 0s test
+2026-08-25T16:37:30.8065582Z ##[warning] delete ! in into_response
+2026-08-25T16:37:47.4458710Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:183:9: replace TestServer::url -> String with String::new() in 4s build + 0s test
+2026-08-25T16:37:47.4464569Z ##[warning] replace TestServer::url -> String with String::new()
+2026-08-25T16:37:51.8503427Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:183:9: replace TestServer::url -> String with "xyzzy".into() in 3s build + 0s test
+2026-08-25T16:37:51.8508835Z ##[warning] replace TestServer::url -> String with "xyzzy".into()
+2026-08-25T16:37:58.3302613Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:211:9: replace TestServer::stop with () in 3s build + 0s test
+2026-08-25T16:37:58.3307841Z ##[warning] replace TestServer::stop with ()
+2026-08-25T16:38:02.4720073Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:222:9: replace <impl Drop for TestServer>::drop with () in 3s build + 0s test
+2026-08-25T16:38:02.4725355Z ##[warning] replace <impl Drop for TestServer>::drop with ()
+2026-08-25T16:38:06.9133875Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:227:5: replace run_server with () in 3s build + 0s test
+2026-08-25T16:38:06.9138906Z ##[warning] replace run_server with ()
+2026-08-25T16:38:11.0833218Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:262:5: replace serve_connection with () in 3s build + 0s test
+2026-08-25T16:38:11.0837495Z ##[warning] replace serve_connection with ()
+2026-08-25T16:38:19.1535828Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:268:5: replace handle_request -> Result<Response<ResponseBody>, Infallible> with Ok(Response::new(Default::default())) in 4s build + 0s test
+2026-08-25T16:38:19.1543020Z ##[warning] replace handle_request -> Result<Response<ResponseBody>, Infallible> with Ok(Response::new(Default::default()))
+2026-08-25T16:38:23.6547325Z MISSED   crates/fetch_winhttp_impl/src/testing/server.rs:268:5: replace handle_request -> Result<Response<ResponseBody>, Infallible> with Ok(Response::from(Default::default())) in 3s build + 0s test
+2026-08-25T16:38:23.6554117Z ##[warning] replace handle_request -> Result<Response<ResponseBody>, Infallible> with Ok(Response::from(Default::default()))
+2026-08-25T16:39:35.6118798Z 500 mutants tested in 45m: 46 missed, 275 caught, 172 unviable, 7 timeouts
+2026-08-25T16:39:36.2809633Z error: recipe `anvil-mutants-diff` failed with exit code 3
+2026-08-25T16:39:36.5084828Z ##[error]Process completed with exit code 3.
+2026-08-25T16:39:36.5199007Z ##[end-action id=__self.__run;outcome=failure;conclusion=failure;duration_ms=2713104]
+2026-08-25T16:39:36.6587526Z Post job cleanup.
+2026-08-25T16:39:36.6977950Z Post job cleanup.
+2026-08-25T16:39:37.5004637Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-08-25T16:39:37.6080328Z git version 2.55.0.windows.4
+2026-08-25T16:39:37.6177670Z Temporarily overriding HOME='D:\a\_temp\8f8ba1ed-c40c-47c3-8e90-423af212266a' before making global git config changes
+2026-08-25T16:39:37.6182062Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-25T16:39:37.6190435Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\oxidizer\oxidizer
+2026-08-25T16:39:37.6589061Z Removing SSH command configuration
+2026-08-25T16:39:37.6596866Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-08-25T16:39:37.6913240Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-08-25T16:39:38.3142159Z Removing HTTP extra header
+2026-08-25T16:39:38.3149540Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-08-25T16:39:38.3462186Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-08-25T16:39:38.8833813Z Removing includeIf entries pointing to credentials config files
+2026-08-25T16:39:38.8841998Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-08-25T16:39:38.9105522Z includeif.gitdir:D:/a/oxidizer/oxidizer/.git.path
+2026-08-25T16:39:38.9106379Z includeif.gitdir:D:/a/oxidizer/oxidizer/.git/worktrees/*.path
+2026-08-25T16:39:38.9109927Z includeif.gitdir:/github/workspace/.git.path
+2026-08-25T16:39:38.9110581Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-08-25T16:39:38.9146106Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/oxidizer/oxidizer/.git.path
+2026-08-25T16:39:38.9408871Z D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T16:39:38.9449108Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/oxidizer/oxidizer/.git.path D\:\\a\\_temp\\git\-credentials\-2ba2ea1f\-2c4d\-4828\-8cee\-b786e05e4668\.config
+2026-08-25T16:39:38.9814066Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/oxidizer/oxidizer/.git/worktrees/*.path
+2026-08-25T16:39:39.0124273Z D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T16:39:39.0166367Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/oxidizer/oxidizer/.git/worktrees/*.path D\:\\a\\_temp\\git\-credentials\-2ba2ea1f\-2c4d\-4828\-8cee\-b786e05e4668\.config
+2026-08-25T16:39:39.0484285Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-08-25T16:39:39.0747214Z /github/runner_temp/git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T16:39:39.0789063Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-2ba2ea1f\-2c4d\-4828\-8cee\-b786e05e4668\.config
+2026-08-25T16:39:39.1088509Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-08-25T16:39:39.1344161Z /github/runner_temp/git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config
+2026-08-25T16:39:39.1389364Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-2ba2ea1f\-2c4d\-4828\-8cee\-b786e05e4668\.config
+2026-08-25T16:39:39.1706167Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-08-25T16:39:39.7018485Z Removing credentials config 'D:\a\_temp\git-credentials-2ba2ea1f-2c4d-4828-8cee-b786e05e4668.config'
+2026-08-25T16:39:39.7332421Z Cleaning up orphan processes
+2026-08-25T16:39:39.8995113Z Terminate orphan process: pid (8628) (vctip)

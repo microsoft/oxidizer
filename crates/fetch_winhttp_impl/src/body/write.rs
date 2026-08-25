@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::future::poll_fn;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::pin::Pin;
 use std::ptr::NonNull;
 
@@ -192,13 +193,16 @@ fn parse_content_length(value: &HeaderValue) -> Option<u64> {
 
 fn write_completion(completion: CompletionResult) -> Result<BytesView, HttpError> {
     match completion {
-        CompletionResult::WriteComplete { mut buffer, len: written } if written != 0 => {
-            buffer.advance(written as usize);
+        CompletionResult::WriteComplete { mut buffer, len: written } => {
+            // `NonZeroU32` rejects a no-progress completion without a bare
+            // `== 0` / `!= 0` comparison a mutant can invert into an infinite
+            // write loop (AGENTS.md, "Code must not hang even under mutation
+            // testing").
+            let written = NonZeroU32::new(written)
+                .ok_or_else(|| callback_protocol_error("WinHTTP completed a nonempty request write without writing any bytes"))?;
+            buffer.advance(usize::try_from(written.get()).expect("u32 fits usize"));
             Ok(buffer)
         }
-        CompletionResult::WriteComplete { .. } => Err(callback_protocol_error(
-            "WinHTTP completed a nonempty request write without writing any bytes",
-        )),
         CompletionResult::Error { error, .. } => Err(error.into_http_error()),
         CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
             "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
@@ -422,11 +426,12 @@ pub(crate) async fn send_body(body: &mut HttpBody, writer: &mut WinHttpBodyWrite
 }
 
 fn next_write_len(remaining: u64) -> Option<u32> {
-    if remaining == 0 {
-        return None;
-    }
-
-    Some(u32::try_from(remaining.min(u64::from(u32::MAX))).expect("the write length is bounded by u32::MAX"))
+    // `checked_sub`-style emptiness: a mutated `==`/`!=` on a bare comparison
+    // against zero must not report a positive write length when nothing remains,
+    // or the write loop submits empty buffers forever (AGENTS.md, "Code must not
+    // hang even under mutation testing").
+    let remaining = NonZeroU64::new(remaining)?;
+    Some(u32::try_from(remaining.get().min(u64::from(u32::MAX))).expect("the write length is bounded by u32::MAX"))
 }
 
 /// Identifies body frame shapes that `WinHTTP` cannot submit.

@@ -42,14 +42,14 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
     git diff "$base..HEAD" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # Platform-conditional exclusions, layered on top of the static
-    # `exclude_globs` in `.cargo/mutants.toml` (cargo-mutants merges the two
-    # rather than replacing the config). cargo-mutants selects mutants by
-    # parsing source text, so it does not honour `cfg` gating: code that the
-    # compiler strips on this platform still yields mutants, and every one of
-    # them is unbuildable and therefore reported as missed. Exclude such code
-    # explicitly. Keep this in sync with `scripts/mutants.rs`, which applies the
-    # same policy to the merge-group run.
+    # Platform-conditional exclusions. CLI `--exclude` replaces
+    # `.cargo/mutants.toml` `exclude_globs` rather than merging with them, so
+    # every static exclusion that must still apply has to be restated here.
+    # cargo-mutants selects mutants by parsing source text, so it does not
+    # honour `cfg` gating: code that the compiler strips on this platform still
+    # yields mutants, and every one of them is unbuildable and therefore
+    # reported as missed. Exclude such code explicitly. Keep this in sync with
+    # `scripts/mutants.rs`, which applies the same policy to the merge-group run.
     #
     # Each glob must be written as a literal, quoted argument of the invocation.
     # On Unix, PowerShell expands wildcards in native command arguments against
@@ -61,13 +61,39 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     # directory holding platform-gated code is excluded by naming it. The file
     # globs omit the separator before the platform name so that both `linux.rs`
     # and `socket_linux.rs` match.
+    #
+    # `fetch_winhttp_impl`'s integration tests live in the facade package, so
+    # when the diff touches either package the facade must be listed as a test
+    # package or every mutant is scored against unit tests alone.
+    $diff_text = [System.IO.File]::ReadAllText($diff_path)
+    $test_packages = @()
+    if ($diff_text -match 'crates[/\\]fetch_winhttp(_impl)?[/\\]') {
+        $test_packages = @('--test-package', 'fetch_winhttp', '--test-package', 'fetch_winhttp_impl')
+    }
     if ($IsWindows) {
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*linux.rs" --exclude "linux"
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 `
+            --exclude "**/*linux.rs" --exclude "linux" `
+            --exclude "crates/automation/**" `
+            --exclude "crates/fetch_winhttp_impl/src/testing/**" `
+            --exclude "crates/observed_testing/**" `
+            --exclude "crates/rest_over_grpc_examples/**" `
+            --exclude "crates/rest_over_grpc_tests/**" `
+            --exclude "crates/testing_aids/**" `
+            @test_packages
     } else {
         # `fetch_winhttp` implements nothing outside Windows, so the whole crate
         # goes rather than individual files, and so does the implementation crate
         # behind it.
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*windows.rs" --exclude "windows" --exclude "crates/fetch_winhttp/**" --exclude "crates/fetch_winhttp_impl/**"
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 `
+            --exclude "**/*windows.rs" --exclude "windows" `
+            --exclude "crates/fetch_winhttp/**" `
+            --exclude "crates/fetch_winhttp_impl/**" `
+            --exclude "crates/automation/**" `
+            --exclude "crates/observed_testing/**" `
+            --exclude "crates/rest_over_grpc_examples/**" `
+            --exclude "crates/rest_over_grpc_tests/**" `
+            --exclude "crates/testing_aids/**" `
+            @test_packages
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
