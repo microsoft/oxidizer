@@ -21,6 +21,12 @@ fn add_spectre_link_search() {
 
     use cc::windows_registry;
 
+    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo must set CARGO_CFG_TARGET_OS when executing a package build script");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").expect("Cargo must set CARGO_CFG_TARGET_ENV when executing a package build script");
+    if !architecture::is_windows_msvc_target(&target_os, &target_env) {
+        return;
+    }
+
     let target = env::var("TARGET").expect("Cargo must set TARGET when executing a package build script");
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo must set CARGO_CFG_TARGET_ARCH when executing a package build script");
     let arch = architecture::spectre_directory(&arch)
@@ -28,7 +34,8 @@ fn add_spectre_link_search() {
 
     let tool =
         windows_registry::find_tool(&target, "cl.exe").expect("the Windows MSVC target requires cl.exe from a Visual Studio installation");
-    let spectre_libs = tool.path().join(format!(r"..\..\..\..\lib\spectre\{arch}"));
+    let spectre_libs = architecture::spectre_libs_path(tool.path(), arch)
+        .expect("the cl.exe path must be inside a Visual Studio MSVC toolchain directory");
 
     if spectre_libs.exists() {
         println!("cargo:rustc-link-search=native={}", spectre_libs.display());

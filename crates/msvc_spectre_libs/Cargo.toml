@@ -28,10 +28,10 @@ error = []
 
 [dependencies]
 
-[dev-dependencies]
-
 [target.'cfg(all(target_os = "windows", target_env = "msvc"))'.build-dependencies]
 cc = { workspace = true }
+
+[dev-dependencies]
 
 [lints]
 workspace = true
