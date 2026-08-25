@@ -144,7 +144,7 @@ impl CapturedEvent {
 
             if let Some(metric) = desc.metric()
                 && let Some(instrument) = metric.instrument_description()
-                && let Some(number) = crate::metric_number_of(&value)
+                && let Some(number) = observed_utils::metric_number_of(&value)
             {
                 field_metrics.push(CapturedFieldMetric {
                     field_key: key.clone(),
