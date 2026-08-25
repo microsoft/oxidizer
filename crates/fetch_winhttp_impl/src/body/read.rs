@@ -367,24 +367,32 @@ impl WinHttpResponseBody {
         // Detaching the filled prefix leaves the buffer holding the rest of the
         // block the frame already pins, so the next read refills that capacity
         // instead of renting a second block.
-        let data = buffer.consume_all();
-        // A positive read count with no bytes cannot arise from a completion
-        // that passed `decode_read` (the length is bounded by the lent region).
-        // The check stops a mutant that fabricates a nonzero count without a
-        // buffer from spinning the body forever (AGENTS.md, "Code must not hang
-        // even under mutation testing").
-        if data.is_empty() {
-            #[cfg_attr(coverage_nightly, coverage(off))] // Mutant/hang guard; unreachable under decode_read.
-            {
-                return Poll::Ready(Some(Err(callback_protocol_error(
-                    "WinHTTP reported a nonempty read without returning any bytes",
-                ))));
-            }
-        }
+        let frame = match data_frame_from_buffer(&mut buffer) {
+            Ok(frame) => frame,
+            Err(error) => return Poll::Ready(Some(Err(error))),
+        };
         self.state = BodyState::Ready { reader, buffer };
 
-        Poll::Ready(Some(Ok(Frame::data(data))))
+        Poll::Ready(Some(Ok(frame)))
     }
+}
+
+/// Builds a data frame from the filled prefix of `buffer`.
+///
+/// A positive read count with no bytes cannot arise from a completion that
+/// passed `decode_read` (the length is bounded by the lent region). Rejecting
+/// that combination here also stops a mutant that fabricates a nonzero count
+/// without a buffer from spinning the body forever (AGENTS.md, "Code must not
+/// hang even under mutation testing").
+fn data_frame_from_buffer(buffer: &mut BytesBuf) -> Result<Frame<bytesbuf::BytesView>, HttpError> {
+    let data = buffer.consume_all();
+    if data.is_empty() {
+        return Err(callback_protocol_error(
+            "WinHTTP reported a nonempty read without returning any bytes",
+        ));
+    }
+
+    Ok(Frame::data(data))
 }
 
 fn data_available_completion(completion: CompletionResult) -> Result<u32, HttpError> {
@@ -445,7 +453,8 @@ mod tests {
     };
 
     use super::{
-        PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, data_available_completion, next_read_capacity, read_completion,
+        PREFERRED_READ_SIZE, WinHttpBodyReader, WinHttpResponseBody, data_available_completion, data_frame_from_buffer, next_read_capacity,
+        read_completion,
     };
     use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
     use crate::context::{CompletionResult, RequestContext};
@@ -471,6 +480,27 @@ mod tests {
         assert_eq!(next_read_capacity(10, 4), 4);
         assert_eq!(next_read_capacity(4, 10), 4);
         assert_eq!(next_read_capacity(usize::MAX, usize::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn a_positive_read_with_no_bytes_is_a_protocol_error() {
+        let error = data_frame_from_buffer(&mut BytesBuf::new()).unwrap_err();
+
+        assert_eq!(error.label(), "request_winhttp");
+        assert!(error.to_string().contains("without returning any bytes"), "{error}");
+    }
+
+    #[test]
+    fn a_filled_buffer_becomes_a_data_frame_and_leaves_spare_capacity() {
+        let pool = GlobalPool::new();
+        let mut buffer = BytesBuf::new();
+        buffer.reserve(64, &pool);
+        buffer.put_slice(*b"abc");
+
+        let frame = data_frame_from_buffer(&mut buffer).unwrap();
+
+        assert_eq!(frame.into_data().unwrap(), b"abc");
+        assert!(buffer.capacity() >= 64 - 3, "spare capacity stays on the buffer for the next read");
     }
 
     #[derive(Clone)]
