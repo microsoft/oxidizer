@@ -4,6 +4,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["crates/msvc_spectre_libs"]
 
 [workspace.package]
 edition = "2024"

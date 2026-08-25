@@ -4,3 +4,6 @@
 header = """
 Copyright (c) Microsoft Corporation.
 Licensed under the MIT License."""
+
+# Imported verbatim from microsoft/rust_msvc_spectre_libs.
+exclude = ["crates/msvc_spectre_libs"]

@@ -188,7 +188,8 @@ jobs:
           }
       - name: Cargo.toml Format
         if: success() || failure()
-        run: cargo sort --check --grouped --workspace
+        shell: pwsh
+        run: ./scripts/check-cargo-sort.ps1
       - name: Readmes
         if: success() || failure()
         run: cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
