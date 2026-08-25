@@ -21,6 +21,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 all-features = true
 
 [features]
+default = ["std"]
 std = []
 
 # >>> anvil-managed: anvil-lints

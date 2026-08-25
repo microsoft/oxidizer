@@ -54,6 +54,6 @@ with_hint(&heap, || {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/allocation_hints">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEG2C_WFmWgy9zG-_c-UfFYzL8G6H9eFT_P4j_G5hc5CpR6ounYWSBgnBhbGxvY2F0aW9uX2hpbnRzZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbYL9YWZaDL3Mb79z5R8VjMvwbof14VP8_iP8bmFzkKlHqi6dhZIGCcGFsbG9jYXRpb25faGludHNlMC4xLjA
  [__link0]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/fn.with_hint.html
  [__link1]: https://docs.rs/allocation_hints/0.1.0/allocation_hints/struct.Hint.html

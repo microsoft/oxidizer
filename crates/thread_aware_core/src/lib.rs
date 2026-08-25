@@ -3,25 +3,27 @@
 
 #![no_std]
 
-//! Lets values adapt when a runtime moves them to another CPU core.
+//! Lets values adapt when a runtime moves them to another thread.
 //!
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] tells a value that it has moved.
-//! - [`Location`] says where it now runs: which runtime, which core, and which region of
-//!   memory sits closest to that core.
+//! - [`Place`] says where it now runs: which runtime, which thread, and which memory is
+//!   closest to it.
 //!
-//! The crate has no dependencies and is always `no_std`. The companion `thread_aware` crate
-//! adds the conveniences: a `#[derive(ThreadAware)]` macro, wrappers for foreign types, and
-//! a per-core `Arc`. Depend on this crate directly if you only need to implement the trait.
+//! The crate has no dependencies. It also works without `std`: turn off default features,
+//! and [`Place`] loses its thread id, keeping [`Origin`] and [`Numa`]. The companion
+//! `thread_aware` crate adds the conveniences: a `#[derive(ThreadAware)]` macro, wrappers
+//! for foreign types, and a per-core `Arc`. Depend on this crate directly if you only need
+//! to implement the trait.
 //!
 //! # Why relocation exists
 //!
 //! Thread-per-core and NUMA-aware runtimes are fast because each worker keeps to itself: it
-//! uses memory close to its own core, talks to its own I/O driver, and does not synchronize
-//! with other workers. When a value moves to another worker, what used to be close by is now
-//! in the wrong place: a cache line shared between cores, memory in a distant region, a
-//! handle to another thread's driver.
+//! uses memory close to its own thread, talks to its own I/O driver, and does not
+//! synchronize with other workers. When a value moves to another worker, what used to be
+//! close by is now in the wrong place: a cache line shared between threads, memory in a
+//! distant region, a handle to another thread's driver.
 //!
 //! [`ThreadAware`] lets that state fix itself. The runtime moves the value, then calls
 //! [`relocate`](ThreadAware::relocate) to say where it now lives.
@@ -30,10 +32,10 @@
 //!
 //! **If you write a library or an application**, you implement [`ThreadAware`], usually with
 //! the `#[derive(ThreadAware)]` macro. You never call [`relocate`](ThreadAware::relocate)
-//! and never build a [`Location`]; the runtime does both, and calls your implementation
+//! and never build a [`Place`]; the runtime does both, and calls your implementation
 //! afterwards. It is a callback, like [`Drop::drop`].
 //!
-//! **If you write a runtime**, you build a [`Location`] per worker and call
+//! **If you write a runtime**, you build a [`Place`] per worker and call
 //! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
 //! where it now runs.
 //!
@@ -43,30 +45,35 @@
 //! The example below plays the part of the runtime so the order is visible.
 //!
 //! ```
-//! use thread_aware_core::{Core, Location, MemoryRegion, ThreadAware, Topology};
+//! use std::thread;
+//!
+//! use thread_aware_core::{Numa, Origin, Place, ThreadAware};
 //!
 //! // What a library author writes.
 //! struct Worker {
-//!     core: Option<Core>,
+//!     thread: Option<thread::ThreadId>,
 //! }
 //!
 //! impl ThreadAware for Worker {
-//!     fn relocate(&mut self, _source: Option<&Location>, destination: &Location) {
-//!         self.core = Some(destination.core());
+//!     fn relocate(&mut self, _source: Option<&Place>, destination: &Place) {
+//!         self.thread = Some(destination.thread());
 //!     }
 //! }
 //!
 //! // What the runtime does.
-//! let topology = Topology::from(1);
-//! let first = Location::new(topology, Core::from(0), MemoryRegion::from(0));
-//! let second = Location::new(topology, Core::from(3), MemoryRegion::from(1));
+//! let here = thread::current().id();
+//! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
-//! let mut worker = Worker { core: None };
+//! let origin = Origin::from(1);
+//! let first = Place::new(origin, here, Numa::from(0));
+//! let second = Place::new(origin, there, Numa::from(1));
 //!
-//! worker.relocate(None, &first); // first placement, no previous location
-//! worker.relocate(Some(&first), &second); // moved to another core
+//! let mut worker = Worker { thread: None };
 //!
-//! assert_eq!(worker.core, Some(Core::from(3)));
+//! worker.relocate(None, &first); // first placement, no previous place
+//! worker.relocate(Some(&first), &second); // moved to another thread
+//!
+//! assert_eq!(worker.thread, Some(there));
 //! ```
 //!
 //! # Performance, not correctness
@@ -83,26 +90,39 @@
 //!
 //! # What the ids mean
 //!
-//! [`Core`] and [`MemoryRegion`] name hardware, not slots in a worker list, so two runtimes
-//! on the same machine both report core 2 as the same [`Core`] and can share state keyed on
-//! it. That only holds while they derive the ids the same way, for example from the
-//! numbering the operating system reports. Nothing checks it, because [`Core::from`] accepts
-//! any `u16`, and if two runtimes number hardware differently then state shared between them
-//! is wrong, not just slow. Share across runtimes only when you control every one of them.
+//! The thread id is `std::thread::ThreadId`. It identifies one thread and nothing else, and
+//! is unique among the threads alive at the same time, so state keyed on it is never shared
+//! by accident, not even between two runtimes in the same process.
 //!
-//! [`Topology`] says which runtime produced the location. It does not change what the other
-//! two mean; it tells you whether you are still inside the runtime that gave you your
-//! resources. So use only the ids your state depends on:
+//! [`Numa`] identifies the memory closest to that thread. Unlike the thread id it is shared:
+//! every thread near the same memory reports the same [`Numa`]. That is what makes it useful
+//! for state you want to share within a region but not across the machine.
 //!
-//! - State tied to hardware, such as a per-core cache, can use [`Core`] or [`MemoryRegion`]
-//!   alone, and survives a move between runtimes as long as what backs it is not owned by
-//!   one of them.
-//! - State tied to a runtime, such as a scheduler, a driver handle, or memory it allocated,
-//!   has to check [`Topology`] too and let go when it changes. When in doubt, assume this.
+//! That sharing only works while every runtime in the process numbers the regions the same
+//! way, for example from the numbering the operating system reports. Nothing checks it, and
+//! if two runtimes number them differently then state shared between them is wrong, not just
+//! slow. Share across runtimes only when you control every one of them.
 //!
-//! The ids mean nothing beyond identity. They need not start at zero or run consecutively,
-//! there is no count, and you cannot list them. Keep per-location state in a map keyed by
-//! the id rather than an array you index into.
+//! [`Origin`] identifies the runtime that produced the place. Thread ids already tell
+//! threads apart, so this is about ownership: it lets a value notice that it has crossed
+//! into a different runtime and release anything the old one owned.
+//!
+//! So use only the ids your state depends on:
+//!
+//! - State that must not be shared at all, such as a per-thread cache or a handle to a
+//!   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
+//! - State that only cares about memory locality, such as a buffer pool, keys on [`Numa`]
+//!   and survives a move to another thread near the same memory.
+//! - State owned by the runtime, such as a scheduler handle, also checks [`Origin`] and lets
+//!   go when it changes.
+//!
+//! The ids mean nothing beyond identity. [`Origin`] and [`Numa`] need not start at zero or
+//! run consecutively, there is no count, and you cannot list the places in use. Keep
+//! per-place state in a map keyed by the id rather than an array you index into.
+//!
+//! Without `std` there is no thread id: `Place::new` and `Place::thread` are gone and only
+//! [`Origin`] and [`Numa`] remain. A `no_std` library can still implement [`ThreadAware`]
+//! and use whatever it is handed; the runtime that drives relocation needs `std` anyway.
 //!
 //! # Relation to `Send`
 //!
@@ -110,19 +130,11 @@
 //! first, then told where it landed. [`Send`] is what makes the move safe, and
 //! [`ThreadAware`] adds nothing to it.
 //!
-//! # Threads and cores
-//!
-//! This crate assumes one worker per core, so "moved to another thread" and "moved to
-//! another core" mean the same thing. A [`Location`] cannot describe two workers on one
-//! core: a runtime that puts several threads on a core, or leaves them unpinned, has to give
-//! each worker its own [`Core`] id, and those workers then no longer share per-core state.
-//! There is no way to say "not pinned".
-//!
 //! # Provided implementations
 //!
-//! Types with nothing tied to a location get an empty implementation: primitives, the
-//! location ids, `Duration`, strings, safe function pointers, and, with the `std` feature,
-//! paths.
+//! Types with nothing tied to a place get an empty implementation: primitives and their
+//! non-zero variants, the place ids, `Duration`, strings, safe function pointers of up to
+//! twelve parameters, and, with the `std` feature, paths.
 //!
 //! Containers pass the call through to what they hold: [`Option`], [`Result`], arrays,
 //! slices, `Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples of up to twelve elements, and map
@@ -132,30 +144,30 @@
 //! the map. Sets are not implemented at all for the same reason, so a `HashSet` or
 //! `BTreeSet` field is simply not [`ThreadAware`].
 //!
-//! `Arc` is left out too: whether a shared allocation should stay shared across cores or be
-//! split per core depends on what is inside it. Use the per-core `Arc` in `thread_aware`
-//! when splitting is the right answer.
+//! `Arc` is left out too: whether a shared allocation should stay shared across threads or
+//! be split per thread depends on what is inside it. Use the per-core `Arc` in
+//! `thread_aware` when splitting is the right answer.
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(off by default)* adds implementations for standard
-//!   library types such as `HashMap`, `Path` and `PathBuf`. Without it the crate needs only
-//!   `alloc`.
+//! * The **`std` Cargo feature** *(enabled by default)* provides the thread id half of
+//!   [`Place`] and implementations for standard library types such as `HashMap`, `Path` and
+//!   `PathBuf`. Turn it off for `no_std`; the crate then needs only `alloc`.
 
 extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
 mod impls;
-mod location;
+mod place;
 
 #[doc(inline)]
-pub use location::{Core, Location, MemoryRegion, Topology};
+pub use place::{Numa, Origin, Place};
 
-/// Tells a value that it has moved to a different [`Location`].
+/// Tells a value that it has moved to a different [`Place`].
 ///
-/// Implement this when part of your type depends on where it runs: memory in a particular
-/// region, a handle to a thread-local driver, a shard index, a cached core id.
+/// Implement this when part of your type depends on where it runs: memory near a particular
+/// node, a handle to a thread-local driver, a shard index, a cached thread id.
 /// [`relocate`](Self::relocate) is where you bring that back in line. You do not call it
 /// yourself; see [the two roles](crate#the-two-roles).
 ///
@@ -173,19 +185,20 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 ///    complete implementation, and it is what primitives do.
 ///
 ///    ```
-///    use thread_aware_core::{Location, ThreadAware};
+///    use thread_aware_core::{Place, ThreadAware};
 ///
 ///    struct RequestId(u64);
 ///
 ///    impl ThreadAware for RequestId {
-///        fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
+///        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
 ///    }
 ///    ```
-/// 2. **Remember where you are.** Store the new [`Core`] or [`MemoryRegion`] and use it
-///    later.
-/// 3. **Swap a resource.** Check the id it depends on: [`MemoryRegion`] for a pool,
-///    [`Topology`] for a driver handle. If it changed, let the old one go and get one for
-///    the new location, moving out any real data it holds first.
+/// 2. **Remember where you are.** Store the new thread id, [`Numa`] or [`Origin`] and use
+///    it later.
+/// 3. **Swap a resource.** Check the id it depends on: [`Numa`] for a buffer pool, the
+///    thread id for a driver handle, [`Origin`] for anything the runtime owns. If it
+///    changed, let the old one go and get one for the new place, moving out any real data it
+///    holds first.
 /// 4. **Pass it on.** A type made of other types calls `relocate` on each field. Use
 ///    `#[derive(ThreadAware)]` rather than writing this by hand.
 ///
@@ -204,7 +217,7 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 ///   rather than dropping it.
 /// * **Stay correct.** If you cannot do the ideal thing, be slower instead; keeping the old
 ///   resource is fine. What you hold must keep working even if this is never called, so a
-///   driver handle has to stay usable from the new core. Relocation makes it closer, not
+///   driver handle has to stay usable from the new thread. Relocation makes it closer, not
 ///   valid.
 /// * **Do not panic or block.** This runs while the runtime is placing work, so no network
 ///   or disk I/O, no waiting on another worker, no contended lock. If something would block,
@@ -213,44 +226,45 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 ///   `destination`, has to be harmless, and should be cheap: compare the ids you care about
 ///   and return early when nothing changed.
 /// * **Handle no call at all.** The value has to stay correct either way.
-/// * **Handle a move between runtimes.** A `destination` may come from a different runtime,
-///   and that must stay sound. State tied to a runtime should let go; state tied to hardware
-///   may still be fine, subject to the caveat in
-///   [what the ids mean](crate#what-the-ids-mean). Things may be slower afterwards, but not
-///   forever: back on a runtime it can serve, the value should pick up what it released.
+/// * **Handle a place you know nothing about.** A `destination` may name a thread the value
+///   has never seen, and carry an [`Origin`] belonging to another runtime. That must stay
+///   sound. Let go of anything the old runtime owned; state keyed on [`Numa`] may still be
+///   fine, subject to the caveat in [what the ids mean](crate#what-the-ids-mean). Things may
+///   be slower afterwards, but not forever: back on a place it can serve, the value should
+///   pick up what it released.
 ///
-/// You can clone a [`Location`] and keep it, but its ids only mean something while the
-/// runtime that made them is still running.
+/// You can clone a [`Place`] and keep it, but a thread id only means something while that
+/// thread is alive, and an [`Origin`] only while that runtime is.
 ///
 /// Runtimes have their own rules. Call [`relocate`](Self::relocate) only after really moving
-/// the value, pass `None` when the old location is unknown, give each running runtime its
-/// own [`Topology`], and never rely on the call for correctness. Nothing checks any of this.
+/// the value, pass `None` when the old place is unknown, give each running runtime its own
+/// [`Origin`], and never rely on the call for correctness. Nothing checks any of this.
 ///
 /// # Examples
 ///
-/// A type that rebuilds a scratch buffer when the memory region changes. The buffer holds
+/// A type that rebuilds a scratch buffer when the nearest memory changes. The buffer holds
 /// nothing between calls, so throwing it away is safe. The `name` field is real data and is
 /// left alone.
 ///
 /// ```
-/// use thread_aware_core::{Location, MemoryRegion, ThreadAware};
+/// use thread_aware_core::{Numa, Place, ThreadAware};
 ///
 /// struct Encoder {
 ///     name: String,
-///     region: Option<MemoryRegion>,
+///     numa: Option<Numa>,
 ///     /// Reused between calls purely to avoid re-allocating; empty outside a call.
 ///     scratch: Vec<u8>,
 /// }
 ///
 /// impl ThreadAware for Encoder {
-///     fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
-///         // Only pay for re-allocation when the memory region actually changed.
-///         if source.map(Location::memory_region) == Some(destination.memory_region()) {
+///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+///         // Only pay for re-allocation when the nearest memory actually changed.
+///         if source.map(Place::numa) == Some(destination.numa()) {
 ///             return;
 ///         }
 ///
-///         // Re-allocate so the scratch space is local to the destination region.
-///         self.region = Some(destination.memory_region());
+///         // Re-allocate so the scratch space is local to the destination.
+///         self.numa = Some(destination.numa());
 ///         self.scratch = Vec::with_capacity(self.scratch.capacity());
 ///     }
 /// }
@@ -259,11 +273,11 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 /// A type that passes the call on to its fields:
 ///
 /// ```
-/// use thread_aware_core::{Location, ThreadAware};
+/// use thread_aware_core::{Place, ThreadAware};
 ///
 /// # struct Encoder;
 /// # impl ThreadAware for Encoder {
-/// #     fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
+/// #     fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
 /// # }
 /// struct Session {
 ///     id: u64,
@@ -271,14 +285,14 @@ pub use location::{Core, Location, MemoryRegion, Topology};
 /// }
 ///
 /// impl ThreadAware for Session {
-///     fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
 ///         self.id.relocate(source, destination);
 ///         self.encoder.relocate(source, destination);
 ///     }
 /// }
 /// ```
 pub trait ThreadAware: Send {
-    /// Updates this value for the location it has moved to.
+    /// Updates this value for the place it has moved to.
     ///
     /// You write this method, but you do not normally call it. The runtime does, after
     /// moving the value.
@@ -290,5 +304,5 @@ pub trait ThreadAware: Send {
     /// This must not fail, must not panic, and must be safe to call more than once,
     /// including when `source` equals `destination`. See the [rules](Self#rules) for the
     /// rest.
-    fn relocate(&mut self, source: Option<&Location>, destination: &Location);
+    fn relocate(&mut self, source: Option<&Place>, destination: &Place);
 }
