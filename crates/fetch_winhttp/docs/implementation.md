@@ -907,12 +907,12 @@ The read side is a reader over WinHTTP exposing a single inherent read operation
 impl WinHttpBodyReader {
     async fn read_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), HttpError> {
         // 1. WinHttpQueryDataAvailable -> DATA_AVAILABLE(n)
-        // 2. choose n capped at 64 KiB, or a 64 KiB speculative read when
-        //    n == 0, then reserve that desired capacity
-        // 3. retain `into`, the exposed tail address, and its submitted
+        // 2. choose a desired size from n, or the speculative default when
+        //    n == 0, then reserve that much capacity (§6.2.1)
+        // 3. retain `into`, the exposed region address, and its submitted
         //    capacity in OperationBuffer::Read
-        // 4. WinHttpReadData reads min(desired, contiguous writable tail
-        //    length, u32::MAX) bytes
+        // 4. WinHttpReadData reads min(desired, first contiguous unfilled
+        //    region length, u32::MAX) bytes
         // 5. READ_COMPLETE validates the returned pointer/length against that
         //    address and capacity before returning (len, buffer), which
         //    transfers BytesBuf ownership back here; len == 0 means EOF
@@ -924,25 +924,8 @@ EOF is taken from a **zero-length `READ_COMPLETE`**, not from
 `WinHttpQueryDataAvailable` returning 0. Both usually coincide, but WinHTTP's
 documented completion signal is the zero-length read, and reading directly avoids
 depending on `QueryDataAvailable`'s value for correctness. `QueryDataAvailable` is
-used to size ordinary reads. A zero availability result instead uses a speculative
-64 KiB upper bound because WinHTTP can still complete a useful read. This matches
-`GlobalPool`'s largest pooled block; any existing contiguous
-writable tail may reduce the actual submitted span. The authoritative "body
-finished" decision is a `READ_COMPLETE` with `len == 0`.
-Each `WinHttpReadData` call exposes only one contiguous writable tail span from the
-possibly segmented `BytesBuf`, bounded by that span's length and `u32::MAX`.
-
-**Capacity is reserved only after the availability query.** The reader queries
-availability first and calls `BytesBuf::reserve` only once the reported figure is known,
-so `GlobalPool` picks a size class proportional to the bytes that are actually readable.
-The ordering matters because a rented pool block stays rented for as long as the consumer
-holds a view cut from it: reserving a fixed `PREFERRED_READ_SIZE` up front would pin a
-whole 64 KiB block for every emitted frame regardless of its payload, so a body delivered
-in small chunks would amplify retained memory by up to the ratio of block size to chunk
-size. Only the speculative zero-availability path reserves the full
-`PREFERRED_READ_SIZE` - 64 KiB, matching `GlobalPool`'s largest block - because a zero
-availability figure carries no size information. The adapter's first read starts from an
-empty `BytesBuf`, so it too reserves nothing until availability is known.
+used only to size ordinary reads. The authoritative "body finished" decision is a
+`READ_COMPLETE` with `len == 0`.
 
 After the zero-length EOF read, the reader calls `query_raw_trailers`, implemented as
 `WinHttpQueryHeaders(WINHTTP_QUERY_RAW_HEADERS_CRLF |
@@ -951,13 +934,8 @@ block becomes `None`; returned trailer bytes are parsed into a `HeaderMap`. The 
 response adapter is a custom
 `http_body::Body`, passed through `HttpBodyBuilder::body`, so it yields data frames and
 one final trailer frame instead of erasing trailers through a data-only stream conversion.
-It is also what lets the transport retain buffer capacity across frames: the adapter
-consumes only the filled prefix into the frame and keeps the buffer for the next read.
-Because the emitted frame already
-pins the block it was cut from, refilling the rest of that block costs nothing the
-consumer is not already holding. The
-adapter owns the reader between reads and lends it to the in-flight read, which keeps that
-boxed future free of borrows:
+The adapter owns the reader between reads and lends it to the in-flight read, which keeps
+that boxed future free of borrows:
 
 ```rust,ignore
 let body = WinHttpResponseBody::new(WinHttpBodyReader::new(/* .. */));
@@ -966,10 +944,7 @@ let body = builder.body(body, &body_options);
 
 The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
-there is no unbounded buffering; wherever availability is reported, retained pool memory
-additionally tracks the delivered payload, because each frame's block is sized from that
-figure rather than from a fixed maximum. The speculative zero-availability read is the
-exception described above. The request's body idle timeout
+there is no unbounded buffering. The request's body idle timeout
 (`http_extensions::BodyTimeout`) is copied into `body_options`.
 `HttpBodyBuilder::body` merges it with the client's response-body defaults and applies
 the Rust-side idle-timeout wrapper (§10.4). Native WinHTTP receive timers remain
@@ -978,6 +953,41 @@ unlimited.
 The `READ_COMPLETE` buffer WinHTTP fills is a slice reserved inside a pooled
 `BytesBuf`; it stays pinned until the callback fires (§4), then the filled prefix
 is yielded as a zero-copy `BytesView`.
+
+#### 6.2.1 Read buffer sizing
+
+Three constraints shape how much memory a read reserves and how much of it a single
+`WinHttpReadData` call receives.
+
+**WinHTTP writes into one contiguous region.** A `BytesBuf` reservation may be
+segmented across several pooled blocks, so each call is given
+`BytesBuf::first_unfilled_slice()` and a length bounded by that region and by
+`u32::MAX`. The reader never pairs a logical buffer length with a pointer into only
+its first block. Nothing here assumes a particular block size: the bound is read from
+the buffer at runtime, so `GlobalPool` remains free to change its size classes.
+
+**Large reads are preferred when no better figure is known.** `PREFERRED_READ_SIZE`
+is 256 KiB, matching the default I/O size used across related projects. It caps every
+reservation and supplies the size outright when `QueryDataAvailable` reports zero and
+the read is therefore speculative. Larger submissions amortize the cost of the WinHTTP
+call and its worker-thread handoff over more bytes.
+
+**Leftover capacity becomes a local reserve.** A reservation that exceeds the first
+contiguous region leaves the remaining blocks in the `BytesBuf`. `BytesBuf::reserve`
+is a no-op while the buffer already holds enough capacity, so subsequent reads take
+their region from that reserve and reach `GlobalPool` again only once it is spent.
+Blocks therefore are not returned to the pool and re-rented between consecutive reads
+of one body.
+
+**Retaining the buffer across frames is a security property, not only an
+efficiency one.** A pooled block stays rented for as long as any `BytesView` cut
+from it is alive, so handing each emitted frame the whole buffer it was read into
+would let a peer that trickles bytes rent one block per byte delivered - retained
+memory bounded by the attacker's frame count rather than by the payload. The adapter
+instead detaches only the filled prefix and keeps the buffer, so consecutive small
+reads refill capacity the outstanding frames already pin. Combined with sizing
+ordinary reservations from the queried availability rather than from
+`PREFERRED_READ_SIZE`, retained memory tracks bytes actually delivered.
 
 ### 6.3 End-to-end request lifecycle (`RequestDriver` in `request.rs`)
 

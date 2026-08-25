@@ -21,21 +21,24 @@ use crate::response_headers::parse_response_trailers;
 
 // Bounds every read: it caps the reservation when WinHTTP reports a large
 // availability, and supplies the size when WinHTTP reports zero available bytes
-// yet can still complete a useful read. GlobalPool's largest pooled block is
-// 64 KiB, so use that pool-aligned upper bound. Any existing writable tail can
-// reduce the span actually submitted. Revisit this value if the pool's size
-// classes or measured throughput-to-memory trade-off changes.
-const PREFERRED_READ_SIZE: usize = 64 * 1024;
+// yet can still complete a useful read. Large reads amortize the WinHTTP call
+// and its worker-thread handoff over more bytes, and this is the default I/O
+// size used across related projects when no better figure is known. It is an
+// upper bound on the reservation only; what a single call submits is separately
+// bounded by the buffer's first contiguous unfilled region, so this value takes
+// no dependency on how `GlobalPool` sizes the blocks it hands out. Revisit it if
+// the measured throughput-to-memory trade-off changes.
+const PREFERRED_READ_SIZE: usize = 256 * 1024;
 
 #[derive(Debug)]
 /// Pulls one response body lazily from an ongoing WinHTTP request.
 ///
 /// Each caller-driven read first queries available data and then lends one
-/// contiguous writable span from a pooled `BytesBuf` to WinHTTP. Capacity is
-/// reserved only after that query, so the rented pool block is sized from the
-/// bytes actually readable, capped at `PREFERRED_READ_SIZE`, instead of always
-/// taking that maximum. A zero availability figure carries no size information
-/// and is the exception: the read is then speculative and reserves
+/// contiguous writable region from a pooled `BytesBuf` to WinHTTP. Capacity is
+/// reserved only after that query and only when the buffer cannot already serve
+/// the read, so a peer that trickles bytes cannot make the transport rent pool
+/// memory per byte delivered. A zero availability figure carries no size
+/// information; the read is then speculative and reserves
 /// `PREFERRED_READ_SIZE`, however few bytes come back. The retained
 /// [`RequestGuard`] keeps callback state and handles alive, so dropping the
 /// reader cancels the request without reading ahead. A zero-length
@@ -121,13 +124,16 @@ impl WinHttpBodyReader {
             usize::try_from(available).expect("a u32 always fits usize on supported Windows targets")
         }
         .min(PREFERRED_READ_SIZE);
+        // A no-op whenever earlier reads left enough spare capacity behind, so
+        // consecutive small reads are served from the buffer rather than from
+        // the pool.
         into.reserve(desired, &self.memory);
 
         let (buffer, address, capacity) = {
-            let tail = into.first_unfilled_slice();
-            let capacity = next_read_capacity(tail.len(), desired);
-            debug_assert!(capacity != 0, "a positive reservation must expose a writable tail");
-            let buffer = NonNull::new(tail.as_mut_ptr().cast::<u8>()).expect("a positive writable tail has a non-null pointer");
+            let region = into.first_unfilled_slice();
+            let capacity = next_read_capacity(region.len(), desired);
+            debug_assert!(capacity != 0, "a positive reservation must expose a writable region");
+            let buffer = NonNull::new(region.as_mut_ptr().cast::<u8>()).expect("a positive writable region has a non-null pointer");
             (buffer, buffer.as_ptr().addr(), capacity)
         };
 
@@ -143,13 +149,14 @@ impl WinHttpBodyReader {
                 // future, so the handle stays open for this call, the armed kind
                 // matches it, and the emptied guard admits no second operation
                 // while this one is outstanding. `buffer` addresses the start of
-                // the writable tail obtained above, and `capacity` is bounded by
-                // that tail's length, so the span is writable for `capacity`
-                // bytes. The BytesBuf owning that tail moves into the operation
-                // buffer in this same call, so the request task can neither read
-                // nor free the span until a completion, a request error, or
-                // HANDLE_CLOSING hands the buffer back; moving the BytesBuf
-                // value does not move the pooled block the tail lives in. A
+                // the writable region obtained above, and `capacity` is bounded
+                // by that region's length, so the span is writable for
+                // `capacity` bytes. The BytesBuf owning that region moves into
+                // the operation buffer in this same call, so the request task
+                // can neither read nor free the span until a completion, a
+                // request error, or HANDLE_CLOSING hands the buffer back; moving
+                // the BytesBuf value does not move the pooled block the region
+                // lives in. A
                 // synchronous failure reclaims the buffer through submit()'s
                 // claim of the slot, which read_data's contract permits by
                 // starting no read and keeping no reference when it reports
@@ -206,13 +213,13 @@ impl WinHttpBodyReader {
 
 /// Preserves WinHTTP data and trailers as `http_body` frames.
 ///
-/// A dedicated adapter is required because the generic byte-stream bridge
-/// cannot emit response trailers, and because it hands each frame the whole
-/// `BytesBuf` that was read into, so the next read must rent another pooled
-/// block even when the previous one was barely touched. This adapter detaches
-/// only the filled prefix into the frame and keeps the buffer, so a peer that
-/// trickles data refills capacity the emitted frame already holds rather than
-/// accumulating a block per frame.
+/// The adapter detaches only the filled prefix of each read into the frame and
+/// keeps the buffer, so consecutive reads refill capacity that the emitted
+/// frames already hold. That is what bounds a peer that trickles bytes: the
+/// pooled block a frame was cut from stays rented for as long as the consumer
+/// holds the frame, so handing every frame its own buffer would let a slow
+/// drip of one-byte frames rent one block each. Retaining the buffer instead
+/// caps retained memory at the bytes actually delivered.
 ///
 /// It yields data lazily, emits at most one final trailer frame, and disposes
 /// of the reader after completion or error. The surrounding `HttpBodyBuilder`
@@ -395,8 +402,8 @@ fn read_completion(completion: CompletionResult) -> Result<(usize, BytesBuf), Ht
     }
 }
 
-fn next_read_capacity(tail_len: usize, desired: usize) -> u32 {
-    u32::try_from(tail_len.min(desired).min(u32::MAX as usize)).expect("the read capacity is bounded by u32::MAX")
+fn next_read_capacity(region_len: usize, desired: usize) -> u32 {
+    u32::try_from(region_len.min(desired).min(u32::MAX as usize)).expect("the read capacity is bounded by u32::MAX")
 }
 
 #[cfg(test)]
@@ -447,7 +454,7 @@ mod tests {
     assert_not_impl_any!(WinHttpResponseBody: UnwindSafe, RefUnwindSafe);
 
     #[test]
-    fn read_capacity_obeys_empty_caller_tail_and_dword_bounds() {
+    fn read_capacity_obeys_empty_caller_region_and_dword_bounds() {
         assert_eq!(next_read_capacity(0, usize::MAX), 0);
         assert_eq!(next_read_capacity(10, 4), 4);
         assert_eq!(next_read_capacity(4, 10), 4);
@@ -648,13 +655,34 @@ mod tests {
 
         assert_eq!(read, 1);
         assert_eq!(data.peek(), b"z");
-        // A zero availability result carries no size information, so the
-        // speculative read still reserves the full pool-aligned upper bound.
-        assert_eq!(
-            harness.record.requested.lock().unwrap()[0],
-            u32::try_from(PREFERRED_READ_SIZE).unwrap()
-        );
+        // A zero availability result carries no size information, so the read
+        // is speculative: it reserves the full upper bound and submits as much
+        // of that reserve as the first contiguous region exposes.
+        let mut probe = BytesBuf::new();
+        probe.reserve(PREFERRED_READ_SIZE, &harness.memory);
+        let contiguous = probe.first_unfilled_slice().len().min(PREFERRED_READ_SIZE);
+        assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(contiguous).unwrap());
         assert!(data.capacity() >= PREFERRED_READ_SIZE);
+        harness.finish();
+    }
+
+    #[test]
+    fn spare_capacity_serves_later_reads_without_renting_more_memory() {
+        let mut harness = reader(
+            [ReadStep::data(1, b"a".to_vec()), ReadStep::data(1, b"b".to_vec())],
+            TrailerBehavior::None,
+        );
+
+        let (_, into) = drive(harness.reader.read_into(BytesBuf::new())).unwrap();
+        let spare_after_first = into.remaining_capacity();
+
+        let (read, into) = drive(harness.reader.read_into(into)).unwrap();
+
+        assert_eq!(read, 1);
+        // The reserve left by the first read serves the second one, so a peer
+        // trickling one byte at a time cannot make the transport rent a pool
+        // block per byte.
+        assert_eq!(into.remaining_capacity(), spare_after_first - 1);
         harness.finish();
     }
 
@@ -668,8 +696,9 @@ mod tests {
         assert_eq!(data.peek(), b"abc");
         assert_eq!(harness.record.requested.lock().unwrap()[0], 3);
         // GlobalPool picks its block size class from the requested size, so a
-        // three-byte availability must not rent a 64 KiB block that stays
-        // rented for as long as the consumer holds the frame.
+        // three-byte availability must not rent a block sized for the
+        // speculative upper bound that stays rented for as long as the consumer
+        // holds the frame.
         assert!(
             data.capacity() < PREFERRED_READ_SIZE,
             "the reservation must follow the queried availability, not the speculative upper bound"
@@ -678,11 +707,11 @@ mod tests {
     }
 
     #[test]
-    fn reads_only_the_first_contiguous_tail_and_bounds_it_by_u32() {
+    fn reads_only_the_first_contiguous_region_and_bounds_it_by_u32() {
         let mut harness = reader([ReadStep::data(u32::MAX, b"x".to_vec())], TrailerBehavior::None);
         let mut into = harness.memory.reserve(8);
-        let first_tail = into.first_unfilled_slice().len();
-        assert!(first_tail < PREFERRED_READ_SIZE, "the test requires a small first allocation");
+        let first_region = into.first_unfilled_slice().len();
+        assert!(first_region < PREFERRED_READ_SIZE, "the test requires a small first allocation");
         into.reserve(PREFERRED_READ_SIZE, &harness.memory);
         assert!(into.remaining_capacity() >= PREFERRED_READ_SIZE);
 
@@ -690,7 +719,7 @@ mod tests {
 
         assert_eq!(read, 1);
         assert_eq!(into.consume_all(), b"x");
-        assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(first_tail).unwrap());
+        assert_eq!(harness.record.requested.lock().unwrap()[0], u32::try_from(first_region).unwrap());
         harness.finish();
     }
 
@@ -952,9 +981,9 @@ mod tests {
         assert_eq!(second.into_data().unwrap(), b"de");
         assert!(drive(next_frame(&mut body)).is_none());
 
-        // The second read must be lent the tail immediately following the bytes
-        // the first frame took, which only holds while the adapter keeps the
-        // buffer. Renting a fresh block per frame would place it elsewhere.
+        // The second read must be lent the region immediately following the
+        // bytes the first frame took, which only holds while the adapter keeps
+        // the buffer. Renting a fresh block per frame would place it elsewhere.
         let addresses = record.lent_addresses.lock().unwrap();
         assert_eq!(addresses.len(), 3);
         assert_eq!(addresses[1], addresses[0] + 3);
@@ -1096,12 +1125,12 @@ mod tests {
                 ReadBehavior::Data(data) => {
                     assert!(data.len() <= len as usize);
                     // SAFETY: the reader lent this pointer as the start of a
-                    // writable tail of `len` bytes that the active operation
+                    // writable region of `len` bytes that the active operation
                     // retains, so the destination is valid for the bytes copied
                     // here and no other reference to it exists while this mock
                     // stands in for WinHTTP. The source is a separate allocation,
                     // so the regions cannot overlap, and `u8` imposes no
-                    // alignment requirement. The tail is uninitialized memory,
+                    // alignment requirement. The region is uninitialized memory,
                     // which is why it is filled through the raw pointer instead
                     // of through a slice reference.
                     unsafe {
