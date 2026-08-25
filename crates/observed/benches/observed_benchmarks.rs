@@ -18,6 +18,7 @@ use std::hint::black_box;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{self, Poll};
+use std::time::Instant;
 
 use alloc_tracker::Allocator;
 use criterion::measurement::WallTime;
@@ -225,12 +226,23 @@ fn bench_with_tracking(
     allocs: &alloc_tracker::Session,
     time: &all_the_time::Session,
     name: &str,
-    body: impl Fn(),
+    mut body: impl FnMut(),
 ) {
+    let allocs_op = allocs.operation(name);
+    let time_op = time.operation(name);
     group.bench_function(name, |b| {
-        let _alloc = allocs.operation(name).measure_thread();
-        let _clock = time.operation(name).measure_thread();
-        b.iter(&body);
+        b.iter_custom(|iters| {
+            let _alloc = allocs_op.measure_thread().iterations(iters);
+            let _clock = time_op.measure_thread().iterations(iters);
+
+            let start = Instant::now();
+
+            for _ in 0..iters {
+                body();
+            }
+
+            start.elapsed()
+        });
     });
 }
 
@@ -284,11 +296,9 @@ fn entrypoint(c: &mut Criterion) {
         group.finish();
     }
 
-    // Both sessions are measured for every benchmark, so report both: the
-    // allocation table is the point of the `emit_alloc` group and of the
-    // enrichment benchmarks generally. The allocation session prints its own
-    // report when dropped.
-    time.print_to_stdout();
+    // Both sessions are measured for every benchmark, so report both when
+    // dropped: the allocation table is the point of the `emit_alloc` group and
+    // of the enrichment benchmarks generally.
 }
 
 // ---------------------------------------------------------------------------
