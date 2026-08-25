@@ -57,6 +57,10 @@ Doctests that reference items behind a Cargo feature must compile both with and 
 
 Feature-dependent code is gated behind `cfg(any(test, feature = "foo"))` so that a crate's test build compiles it without enumerating features. Features must therefore be additive. Because `cfg(test)` does not activate Cargo features, every optional dependency must also be declared as a non-optional dev-dependency, carrying whatever dependency features the feature activates. See [docs/optional-deps-in-test-builds.md](docs/optional-deps-in-test-builds.md).
 
+## Publishing Private Test, Bench and Example Utils
+
+Shared fixtures that a crate's own tests, benchmarks and examples need - mock servers, scripted backends - must not become public API, and must not be hosted in a package that depends on the crate under test, because that is a dependency cycle. Host them in the crate's implementation package behind a `private-test-util` feature that the public facade enables through a dev-dependency. See [docs/private-test-utils.md](docs/private-test-utils.md).
+
 ## `no_std` Support
 
 `no_std` support is optional when deciding whether to adopt or expand it. Support for constrained targets must not justify disproportionate implementation complexity, such as extensive `cfg` branching or specialized fallbacks for platforms without pointer-width atomics.

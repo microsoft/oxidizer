@@ -4,7 +4,8 @@
 examine_globs = ["crates/**"]
 exclude_globs = [
     "crates/automation/**",
-    "crates/fetch_winhttp_testing/**",
+    # Fixture scaffolding for the `fetch_winhttp` tests, benchmarks and examples.
+    "crates/fetch_winhttp_impl/src/testing/**",
     "crates/observed_testing/**",
     "crates/rest_over_grpc_examples/**",
     "crates/rest_over_grpc_tests/**",

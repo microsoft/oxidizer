@@ -73,10 +73,9 @@ API.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winhttp">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyfmNznPTP1QbQnRFLMyOxK0baKMAeblxeQsbrWmEPvMhHIthZIGCbWZldGNoX3dpbmh0dHBlMC4xLjA
  [__link0]: https://docs.rs/fetch
  [__link1]: https://docs.rs/fetch
- [__link2]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpDeps
- [__link3]: https://docs.rs/fetch_winhttp/0.1.0/fetch_winhttp/?search=WinHttpTlsConfig
+ [__link2]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpDeps.html
+ [__link3]: https://docs.rs/fetch_winhttp/latest/fetch_winhttp/struct.WinHttpTlsConfig.html
  [__link4]: https://github.com/microsoft/oxidizer/blob/main/crates/fetch_winhttp/docs/design.md
  [__link5]: https://learn.microsoft.com/en-us/windows/win32/winhttp/using-winhttp

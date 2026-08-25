@@ -1737,34 +1737,6 @@ dependencies = [
 name = "fetch_winhttp"
 version = "0.1.0"
 dependencies = [
- "bytesbuf",
- "bytesbuf_io",
- "events_once",
- "fetch",
- "futures",
- "http",
- "http-body",
- "http_extensions",
- "layered",
- "mockall",
- "mutants",
- "observed",
- "observed_testing",
- "ohno 0.4.0",
- "plurality",
- "recoverable",
- "static_assertions",
- "testing_aids",
- "thread_aware",
- "tick",
- "widestring",
- "windows",
-]
-
-[[package]]
-name = "fetch_winhttp_testing"
-version = "0.0.0"
-dependencies = [
  "all_the_time",
  "alloc_tracker",
  "benchmarking",
@@ -1773,7 +1745,26 @@ dependencies = [
  "criterion",
  "ctor",
  "fetch",
- "fetch_winhttp",
+ "fetch_winhttp_impl",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "http_extensions",
+ "observed",
+ "testing_aids",
+ "tick",
+]
+
+[[package]]
+name = "fetch_winhttp_impl"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "bytesbuf",
+ "bytesbuf_io",
+ "events_once",
+ "fetch",
  "futures",
  "h3",
  "h3-quinn",
@@ -1783,15 +1774,26 @@ dependencies = [
  "http_extensions",
  "hyper",
  "hyper-util",
+ "layered",
+ "mockall",
+ "mutants",
  "observed",
+ "observed_testing",
+ "ohno 0.4.0",
+ "plurality",
  "quinn",
  "rcgen",
+ "recoverable",
  "rustls",
  "rustls-pki-types",
+ "static_assertions",
  "testing_aids",
+ "thread_aware",
  "tick",
  "tokio",
  "tokio-rustls",
+ "widestring",
+ "windows",
 ]
 
 [[package]]

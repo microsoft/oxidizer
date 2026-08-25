@@ -174,36 +174,53 @@ returned by a successful query because callers map those categories to different
 
 ### 1.2 Development-code layout
 
-The transport package holds only the library and its unit tests. Everything that
-needs a live peer - the integration tests, the examples, and the benchmarks -
-lives in the unpublished `fetch_winhttp_testing` package alongside the fixtures
-they drive:
+The transport is split across two packages. `fetch_winhttp` is the published
+facade: it re-exports the supported API and hosts every consumer of it - the
+integration tests, the examples, and the benchmarks. `fetch_winhttp_impl` holds
+the implementation and, behind the `private-test-util` feature, the localhost
+fixtures those consumers drive:
 
 ```text
-crates/fetch_winhttp/tests/
-  non_windows.rs       // keeps package-scoped test runs nonempty off Windows
+crates/fetch_winhttp/src/
+  lib.rs               // crate docs and the re-exports that form the public API
+  windows.rs           // per-platform placeholder keeping the library instrumented
+  linux.rs             //   (see below)
 
-crates/fetch_winhttp_testing/src/
-  lib.rs               // shared client construction and frame-collection helpers
-  server.rs            // TestServer: localhost TCP fixture (HTTP/1.1 and HTTP/2, TLS)
-  http3_server.rs      // Http3Server: localhost QUIC fixture (HTTP/3)
-  recording.rs         // ResponsePlan/RecordedRequest scripting and observation vocabulary
+crates/fetch_winhttp_impl/src/
+  ...                  // the modules described in section 1.1
+  mocks.rs             // cfg(test) mock-backed request context for the unit tests
+  testing/
+    mod.rs             // shared client construction and frame-collection helpers
+    server.rs          // TestServer: localhost TCP fixture (HTTP/1.1 and HTTP/2, TLS)
+    http3_server.rs    // Http3Server: localhost QUIC fixture (HTTP/3)
+    recording.rs       // ResponsePlan/RecordedRequest scripting and observation vocabulary
 ```
 
-Two constraints put that code there rather than in the transport package. A
-dev-dependency from `fetch_winhttp` back onto a package that depends on it forms
-a dependency cycle, which the workspace forbids (root `Cargo.toml`,
+The split exists because the fixtures cannot live in a package of their own. A
+dev-dependency from `fetch_winhttp` onto a package that depends on it forms a
+dependency cycle, which the workspace forbids (root `Cargo.toml`,
 `[workspace.dependencies]` preamble) and CI rejects through
-`cargo ensure-no-cyclic-deps`. Hosting the consumers next to the fixtures also
-keeps the server ecosystem's dependencies - Tokio, hyper, quinn, rustls - out of
-the transport package entirely. This mirrors `observed_testing`, which owns the
-`observed` family's integration tests for the same reason.
+`cargo ensure-no-cyclic-deps`. Hosting them in `fetch_winhttp_impl` instead
+leaves both edges pointing the same way - the facade depends on the
+implementation, and dev-depends on it again with `private-test-util` enabled -
+so the consumers stay beside the API they exercise while the fixtures' server
+ecosystem (Tokio, hyper, quinn, rustls) never reaches a consumer's build. The
+pattern is documented in full in
+[`docs/private-test-utils.md`](../../../docs/private-test-utils.md).
+
+Neither package carries instrumented code on every platform: the facade is
+re-exports, and the implementation is configured out entirely off Windows. A
+library with no instrumented code is indistinguishable from a failed
+measurement to the coverage tooling, so each package keeps one trivially
+exercised placeholder per platform it would otherwise be empty on. The files
+are named for the platform they are gated to, which is also how the mutation
+tooling recognizes platform-gated code it cannot build.
 
 The integration tests are split by concern rather than by protocol version, so
 one binary owns one contract area:
 
 ```text
-crates/fetch_winhttp_testing/tests/
+crates/fetch_winhttp/tests/
   protocols.rs         // negotiated-version reporting and per-protocol round trips
                        //   (HTTP/1.1, HTTP/2, HTTP/3), including required-h3 failure
   tls.rs               // the certificate-validation relaxation matrix
@@ -211,6 +228,7 @@ crates/fetch_winhttp_testing/tests/
                        //   cookies, authentication challenges
   lifecycle.rs         // pool isolation and reuse, cancellation, body drop, leak soak,
                        //   full fetch pipeline construction
+  non_windows.rs       // keeps package-scoped test runs nonempty off Windows
 ```
 
 `lifecycle.rs` is the only binary that builds a client through `fetch`'s standard
@@ -222,12 +240,12 @@ crate-root initialization runs and that binary invokes
 
 ### 1.3 Examples
 
-`crates/fetch_winhttp_testing/examples/` holds one runnable example per feature
+`crates/fetch_winhttp/examples/` holds one runnable example per feature
 area, each serving a localhost fixture so no example depends on an external
 endpoint or on real-time waiting:
 
 ```text
-crates/fetch_winhttp_testing/examples/
+crates/fetch_winhttp/examples/
   quick_start.rs        // builder_winhttp and the mandatory WinHttpDeps environment
   streaming_upload.rs   // unknown-length uploads and request-trailer rejection
   streaming_download.rs // frame-by-frame bodies, response trailers, mid-stream drop
@@ -236,7 +254,7 @@ crates/fetch_winhttp_testing/examples/
   connection_pools.rs   // client clone, builder clone, and multiple_pools isolation
 ```
 
-Run one with `cargo run -p fetch_winhttp_testing --example quick_start`.
+Run one with `cargo run -p fetch_winhttp --example quick_start`.
 
 Each example is a `fn main` shim that delegates to a `#[cfg(windows)]` module and
 prints an explanatory line elsewhere, so `cargo check --all-targets` stays green on
@@ -246,12 +264,12 @@ demonstration that the transport is runtime-neutral.
 
 ### 1.4 Benchmarks
 
-`crates/fetch_winhttp_testing/benches/` holds two Criterion benchmark binaries,
+`crates/fetch_winhttp/benches/` holds two Criterion benchmark binaries,
 each also reporting allocation counts through `alloc_tracker` and processor time
 through `all_the_time` (../../../docs/benchmarks.md):
 
 ```text
-crates/fetch_winhttp_testing/benches/
+crates/fetch_winhttp/benches/
   fw_request.rs  // fw_request/roundtrip  - per-request cost by request and response shape
                  // fw_request/protocol   - the same round trip over h1, h1+TLS, h2, h3
   fw_client.rs   // fw_client/construction - client build, clone, and first (cold) request
@@ -1250,7 +1268,7 @@ after the table.
 ### 7.3 Integration tests (real WinHTTP, localhost)
 
 Gated behind `#[cfg(windows)]` and `#[cfg_attr(miri, ignore)]`, against the localhost
-fixtures in `fetch_winhttp_testing`. `TestServer` (`server.rs`) serves plaintext or TLS traffic
+fixtures in `fetch_winhttp_impl::testing`. `TestServer` (`server.rs`) serves plaintext or TLS traffic
 over an ephemeral TCP port on the loopback address using `hyper` plus `hyper-util`'s
 protocol-detecting connection builder, so one instance answers both HTTP/1.1 and HTTP/2;
 its TLS mode wraps that with `tokio-rustls` and an `rcgen` self-signed certificate whose

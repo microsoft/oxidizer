@@ -21,6 +21,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_winht
 allowed_external_types = [
     "bytesbuf::mem::global::GlobalPool",
     "fetch::client_builder::HttpClientBuilder",
+    # The transport itself lives in the implementation crate and is re-exported
+    # from here; this crate is the supported surface for all of it.
+    "fetch_winhttp_impl::*",
     "observed::*",
     "thread_aware::core::ThreadAware",
     "tick::clock::Clock",
@@ -30,40 +33,60 @@ allowed_external_types = [
 all-features = true
 default-target = "x86_64-pc-windows-msvc"
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
+# The benchmark bodies are Windows-only, so on other platforms these two are
+# reached from no surviving code path and `cargo-udeps` reports them as unused.
+# `alloc_tracker` and `criterion` are not listed because the benchmark harness
+# itself uses them on every platform.
+[package.metadata.cargo-udeps.ignore]
+development = ["all_the_time", "benchmarking"]
+
 [target.'cfg(windows)'.dependencies]
-bytesbuf = { workspace = true }
-bytesbuf_io = { workspace = true }
-events_once = { workspace = true }
-fetch = { workspace = true }
-http = { workspace = true }
-http-body = { workspace = true }
-http_extensions = { workspace = true }
-layered = { workspace = true }
-observed = { workspace = true }
-ohno = { workspace = true }
-plurality = { workspace = true }
-recoverable = { workspace = true }
-thread_aware = { workspace = true, features = ["derive"] }
-tick = { workspace = true }
-widestring = { workspace = true, features = ["alloc"] }
-windows = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_Networking_WinHttp",
-    "Win32_Networking_WinSock",
-] }
+fetch_winhttp_impl = { workspace = true }
+
+# The benchmark harness is not target-gated: `--all-targets` builds benchmark
+# targets on every platform, so these must resolve even where the benchmark body
+# itself compiles away.
+[dev-dependencies]
+all_the_time = { workspace = true }
+alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
+criterion = { workspace = true }
 
 [target.'cfg(windows)'.dev-dependencies]
-futures = { workspace = true, features = ["std"] }
-mockall = { workspace = true }
-mutants = { workspace = true }
-observed_testing = { path = "../observed_testing" }
-static_assertions = { workspace = true }
+bytes = { workspace = true }
+bytesbuf = { workspace = true }
+ctor = { workspace = true }
+fetch = { workspace = true }
+# The localhost fixtures the tests, benchmarks and examples below are written
+# against. See `docs/private-test-utils.md` for why they are reached through a
+# feature on the implementation crate rather than from a package of their own.
+fetch_winhttp_impl = { path = "../fetch_winhttp_impl", features = ["private-test-util"] }
+futures = { workspace = true, features = ["executor", "std"] }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+http_extensions = { workspace = true }
+observed = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util"] }
 
 [[test]]
 name = "non_windows"
 path = "tests/non_windows.rs"
+
+[[bench]]
+name = "fw_request"
+harness = false
+
+[[bench]]
+name = "fw_client"
+harness = false
 
 [lints]
 workspace = true

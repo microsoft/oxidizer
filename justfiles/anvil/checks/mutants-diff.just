@@ -65,8 +65,9 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
         cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*linux.rs" --exclude "linux"
     } else {
         # `fetch_winhttp` implements nothing outside Windows, so the whole crate
-        # goes rather than individual files.
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*windows.rs" --exclude "windows" --exclude "crates/fetch_winhttp/**"
+        # goes rather than individual files, and so does the implementation crate
+        # behind it.
+        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 --exclude "**/*windows.rs" --exclude "windows" --exclude "crates/fetch_winhttp/**" --exclude "crates/fetch_winhttp_impl/**"
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

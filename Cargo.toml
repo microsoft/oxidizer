@@ -109,6 +109,7 @@ fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version =
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.3.0" }
 fetch_winhttp = { path = "crates/fetch_winhttp", default-features = false, version = "0.1.0" }
+fetch_winhttp_impl = { path = "crates/fetch_winhttp_impl", default-features = false, version = "0.1.0" }
 foldhash = { version = "0.2.0", default-features = false }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.5" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.5" }

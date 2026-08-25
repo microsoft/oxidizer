@@ -33,7 +33,7 @@ const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 ///
 /// Mutating them anywhere else produces only unbuildable mutants, so the whole
 /// group is skipped rather than excluded by path.
-const WINDOWS_ONLY_PACKAGES: &[&str] = &["fetch_winhttp"];
+const WINDOWS_ONLY_PACKAGES: &[&str] = &["fetch_winhttp", "fetch_winhttp_impl"];
 
 /// Source files and directories that individual crates gate to a single platform.
 ///
@@ -64,6 +64,7 @@ struct Args {
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
+    &["fetch_winhttp", "fetch_winhttp_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["ohno", "ohno_macros", "ohno_macros_impl"],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],

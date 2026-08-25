@@ -4,17 +4,17 @@
 //! Placeholder contents for targets that do not support WinHTTP.
 //!
 //! The transport is implemented against WinHTTP and therefore exists only on
-//! Windows, so this crate re-exports nothing here. That leaves a library with
-//! no instrumented code at all, which the coverage tooling cannot distinguish
-//! from a failed measurement (tracked as AB#7790459). This module keeps a
-//! single trivially exercised item in the build so that the measurement remains
-//! meaningful, and carries no behavior of its own.
+//! Windows. Configuring the implementation out would otherwise leave a library
+//! with no instrumented code at all, which the coverage tooling cannot
+//! distinguish from a failed measurement. This module keeps a single trivially
+//! exercised item in the build so that the measurement remains meaningful, and
+//! carries no behavior of its own.
 //!
 //! The file is named for the platform the workspace supports besides Windows,
-//! which is the naming the mutation tooling matches on to skip platform-gated
-//! code that it cannot build. The module is gated on the absence of Windows
-//! rather than on Linux specifically, so that the library keeps its
-//! instrumented item on any other target as well.
+//! which is the naming the tooling matches on to skip platform-gated code that
+//! it cannot build. The module is gated on the absence of Windows rather than
+//! on Linux specifically, so that the library keeps its instrumented item on
+//! any other target as well.
 
 /// Reports whether the current target supports the WinHTTP transport.
 ///
