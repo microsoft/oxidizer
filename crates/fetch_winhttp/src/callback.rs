@@ -113,7 +113,7 @@ pub(crate) unsafe fn dispatch_completion(context: *mut RequestContext, status: u
     // Required co-edit: every status this match acts on must also appear in
     // `DISPATCHED_STATUSES` (session.rs) or, for awaited operation completions,
     // in `OperationKind::ALL` (context.rs). Those lists drive the test that
-    // proves `SESSION_NOTIFICATION_FLAGS` lets `WinHTTP` deliver the
+    // proves `session_notification_flags` lets `WinHTTP` deliver the
     // notification at all; a status dispatched here but absent from them is
     // untested, and if its flag is missing from the mask the affected request
     // waits forever rather than failing.

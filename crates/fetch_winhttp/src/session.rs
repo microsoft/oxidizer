@@ -40,7 +40,7 @@ const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 /// Every operand below is a distinct bit, so `|` and `^` compute the same
 /// value here and a mutation between them is equivalent rather than a defect.
 #[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
-const fn session_notification_flags() -> u32 {
+pub(crate) fn session_notification_flags() -> u32 {
     let dispatched_completions = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
         | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
         | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
@@ -52,8 +52,6 @@ const fn session_notification_flags() -> u32 {
 
     dispatched_completions | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | handles | connect_to_server
 }
-
-pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = session_notification_flags();
 
 /// Count of `set_option` calls one session performs with keep-alive disabled.
 ///
@@ -182,7 +180,7 @@ impl WinHttpSession {
         // plus the trait-level invariants. The local SessionHandle solely owns
         // a live session; status_callback is a static function item, so it
         // outlives the session; notification_mask_enables_every_dispatched_status
-        // proves SESSION_NOTIFICATION_FLAGS covers every consumed status; and
+        // proves session_notification_flags() covers every consumed status; and
         // the session is returned to the caller only after this call, so no
         // child request can exist yet. That same absence of children,
         // contexts, operations, and lent buffers discharges the trait-level
@@ -190,7 +188,7 @@ impl WinHttpSession {
         unsafe {
             handle
                 .bindings()
-                .set_status_callback(handle.raw(), Some(status_callback), SESSION_NOTIFICATION_FLAGS)
+                .set_status_callback(handle.raw(), Some(status_callback), session_notification_flags())
         }
         .map_err(|error| SessionInitializationFailure::new(SessionInitializationOperation::SetStatusCallback, error))?;
 
@@ -306,8 +304,8 @@ mod tests {
     };
 
     use super::{
-        SESSION_NOTIFICATION_FLAGS, SessionInitializationFailure, SessionInitializationOperation, TRUE_BYTES, UNLIMITED_TIMEOUT,
-        USER_AGENT, WinHttpSession,
+        SessionInitializationFailure, SessionInitializationOperation, TRUE_BYTES, UNLIMITED_TIMEOUT, USER_AGENT, WinHttpSession,
+        session_notification_flags,
     };
     use crate::bindings::{
         BindingsFacade, MockBindings, StatusCallback, WINHTTP_FLAG_ASYNC, WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT,
@@ -450,7 +448,7 @@ mod tests {
         ("HANDLE_CLOSING", WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING),
     ];
 
-    /// Asserts that `SESSION_NOTIFICATION_FLAGS` enables every notification the
+    /// Asserts that `session_notification_flags()` enables every notification the
     /// callback protocol consumes.
     ///
     /// Awaited operation completions come from `OperationKind::ALL`, so the
@@ -467,7 +465,7 @@ mod tests {
         }
     }
 
-    /// Asserts that `SESSION_NOTIFICATION_FLAGS` enables no notification the
+    /// Asserts that `session_notification_flags()` enables no notification the
     /// callback protocol cannot receive.
     ///
     /// The proxy-resolution completions are the ones a reader is most likely to
@@ -482,9 +480,9 @@ mod tests {
             ("GETPROXYSETTINGS_COMPLETE", WINHTTP_CALLBACK_FLAG_GETPROXYSETTINGS_COMPLETE),
         ] {
             assert_eq!(
-                SESSION_NOTIFICATION_FLAGS & flag,
+                session_notification_flags() & flag,
                 0,
-                "SESSION_NOTIFICATION_FLAGS enables {name}, but the transport never calls the API that raises it"
+                "session_notification_flags() enables {name}, but the transport never calls the API that raises it"
             );
         }
     }
@@ -497,9 +495,9 @@ mod tests {
     /// Ref: <https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpsetstatuscallback>
     fn assert_status_enabled(name: &str, status: u32) {
         assert_eq!(
-            SESSION_NOTIFICATION_FLAGS & status,
+            session_notification_flags() & status,
             status,
-            "SESSION_NOTIFICATION_FLAGS does not enable {name}, which the callback protocol consumes. \
+            "session_notification_flags() does not enable {name}, which the callback protocol consumes. \
              WinHTTP would never deliver that notification, and because nothing else wakes an operation \
              future and every native timeout is unlimited, the affected request would wait forever \
              instead of failing."
@@ -648,7 +646,7 @@ mod tests {
             bindings
                 .expect_set_status_callback()
                 .withf(move |handle, callback, flags| {
-                    *handle == raw && status_callback_matches(*callback, expected_callback) && *flags == SESSION_NOTIFICATION_FLAGS
+                    *handle == raw && status_callback_matches(*callback, expected_callback) && *flags == session_notification_flags()
                 })
                 .once()
                 .in_sequence(&mut sequence)
