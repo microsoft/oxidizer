@@ -6,9 +6,9 @@
 //! A [`Location`] locates an execution context by three independent coordinates, each
 //! its own domain type so they can evolve independently:
 //!
-//! - [`Provenance`] — the topology that produced the location. Values minted by
-//!   unrelated runtimes carry different provenance, so locations from different
-//!   topologies never compare equal and cross-topology relocation stays well defined.
+//! - [`Topology`] — identifies the topology that produced the location. Locations from
+//!   unrelated runtimes have different topologies, so they never compare equal and
+//!   cross-topology relocation stays well defined.
 //! - [`Core`] — the logical processor.
 //! - [`MemoryRegion`] — the memory region (for example, a NUMA node).
 //!
@@ -17,7 +17,7 @@
 
 /// Identity of the topology that produced a [`Location`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Provenance(u16);
+pub struct Topology(u16);
 
 /// A logical processor within a topology.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -27,7 +27,7 @@ pub struct Core(u16);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemoryRegion(u16);
 
-impl From<u16> for Provenance {
+impl From<u16> for Topology {
     fn from(value: u16) -> Self {
         Self(value)
     }
@@ -45,7 +45,7 @@ impl From<u16> for MemoryRegion {
     }
 }
 
-/// Identifies where an execution context runs: its provenance, core and memory region.
+/// Identifies where an execution context runs: its topology, core and memory region.
 ///
 /// `Location` is cheap to clone but deliberately not `Copy`, which leaves room to carry
 /// richer data (such as a runtime handle) in the future without a breaking change. It
@@ -53,26 +53,26 @@ impl From<u16> for MemoryRegion {
 /// so consumers rarely clone it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Location {
-    provenance: Provenance,
+    topology: Topology,
     core: Core,
     memory_region: MemoryRegion,
 }
 
 impl Location {
-    /// Creates a location from its provenance, core and memory region.
+    /// Creates a location from its topology, core and memory region.
     #[must_use]
-    pub const fn new(provenance: Provenance, core: Core, memory_region: MemoryRegion) -> Self {
+    pub const fn new(topology: Topology, core: Core, memory_region: MemoryRegion) -> Self {
         Self {
-            provenance,
+            topology,
             core,
             memory_region,
         }
     }
 
-    /// Returns the provenance of the topology that produced this location.
+    /// Returns the topology that produced this location.
     #[must_use]
-    pub const fn provenance(&self) -> Provenance {
-        self.provenance
+    pub const fn topology(&self) -> Topology {
+        self.topology
     }
 
     /// Returns the core.
@@ -90,28 +90,28 @@ impl Location {
 
 #[cfg(test)]
 mod tests {
-    use super::{Core, Location, MemoryRegion, Provenance};
+    use super::{Core, Location, MemoryRegion, Topology};
 
     #[test]
     fn exposes_components() {
-        let location = Location::new(Provenance::from(1), Core::from(3), MemoryRegion::from(2));
+        let location = Location::new(Topology::from(1), Core::from(3), MemoryRegion::from(2));
 
-        assert_eq!(location.provenance(), Provenance::from(1));
+        assert_eq!(location.topology(), Topology::from(1));
         assert_eq!(location.core(), Core::from(3));
         assert_eq!(location.memory_region(), MemoryRegion::from(2));
     }
 
     #[test]
-    fn different_provenance_compares_unequal() {
-        let first = Location::new(Provenance::from(0), Core::from(0), MemoryRegion::from(0));
-        let second = Location::new(Provenance::from(1), Core::from(0), MemoryRegion::from(0));
+    fn different_topology_compares_unequal() {
+        let first = Location::new(Topology::from(0), Core::from(0), MemoryRegion::from(0));
+        let second = Location::new(Topology::from(1), Core::from(0), MemoryRegion::from(0));
 
         assert_ne!(first, second);
     }
 
     #[test]
     fn clone_preserves_components() {
-        let location = Location::new(Provenance::from(5), Core::from(7), MemoryRegion::from(9));
+        let location = Location::new(Topology::from(5), Core::from(7), MemoryRegion::from(9));
         let cloned = location.clone();
 
         assert_eq!(cloned, location);

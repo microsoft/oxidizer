@@ -165,12 +165,12 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use crate::{Core, Location, MemoryRegion, Provenance, ThreadAware};
+    use crate::{Core, Location, MemoryRegion, ThreadAware, Topology};
 
     fn sample_locations() -> [Location; 2] {
         [
-            Location::new(Provenance::from(0), Core::from(0), MemoryRegion::from(0)),
-            Location::new(Provenance::from(0), Core::from(1), MemoryRegion::from(0)),
+            Location::new(Topology::from(0), Core::from(0), MemoryRegion::from(0)),
+            Location::new(Topology::from(0), Core::from(1), MemoryRegion::from(0)),
         ]
     }
 

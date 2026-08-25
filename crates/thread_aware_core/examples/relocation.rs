@@ -8,7 +8,7 @@
 #![allow(missing_docs, reason = "Example code")]
 #![allow(clippy::print_stdout, reason = "Example code")]
 
-use thread_aware_core::{Core, Location, MemoryRegion, Provenance, ThreadAware};
+use thread_aware_core::{Core, Location, MemoryRegion, ThreadAware, Topology};
 
 /// A sample value that remembers which core it currently runs on.
 struct Worker {
@@ -18,15 +18,15 @@ struct Worker {
 impl ThreadAware for Worker {
     fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         self.core = Some(destination.core());
-        println!("relocated from {:?} to core {:?}", source.map(Location::core), destination.core(),);
+        println!("relocated from {:?} to core {:?}", source.map(Location::core), destination.core());
     }
 }
 
 fn main() {
-    // Manually create two locations in the same topology (same provenance).
-    let provenance = Provenance::from(1);
-    let first = Location::new(provenance, Core::from(0), MemoryRegion::from(0));
-    let second = Location::new(provenance, Core::from(3), MemoryRegion::from(1));
+    // Manually create two locations in the same topology.
+    let topology = Topology::from(1);
+    let first = Location::new(topology, Core::from(0), MemoryRegion::from(0));
+    let second = Location::new(topology, Core::from(3), MemoryRegion::from(1));
 
     // Relocate a sample object between them.
     let mut worker = Worker { core: None };

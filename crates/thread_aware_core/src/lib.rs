@@ -8,7 +8,7 @@
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] notifies a value that it has moved to a different location.
-//! - [`Location`] identifies the execution context — provenance, core and memory
+//! - [`Location`] identifies the execution context — topology, core and memory
 //!   region — that a value has moved to.
 //!
 //! Relocation is a cooperative performance optimization rather than a correctness
@@ -26,7 +26,7 @@ extern crate std;
 mod impls;
 mod location;
 
-pub use location::{Core, Location, MemoryRegion, Provenance};
+pub use location::{Core, Location, MemoryRegion, Topology};
 
 /// Marks state that can adapt after being transferred between locations.
 ///
