@@ -74,7 +74,7 @@ warning. `CARGO_CFG_TARGET_OS` and `CARGO_CFG_TARGET_ENV` are read with
 and 2.5 promise.
 
 **Override.** `resolve::override_var_name(target)` produces
-`MSVC_SPECTRE_LIB_DIR_<target>` with the triple's hyphens and periods replaced by
+`MSVC_SPECTRE_LIB_DIR_<target>` with the triple's hyphens replaced by
 underscores, matching the convention Cargo and `cc` use for target-suffixed
 variables. If either it or the unsuffixed `MSVC_SPECTRE_LIB_DIR` is set, that
 value is used and the function returns -- either successfully, or with a

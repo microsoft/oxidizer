@@ -64,7 +64,7 @@ MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc = "/CETCOMPAT"
 ```
 
 ```rust
-// src/main.rs -- unchanged; the crate is a build-time dependency only.
+// src/main.rs -- unchanged; this crate needs no source-level use.
 fn main() {
     println!("linked against the Spectre-mitigated CRT");
 }
@@ -196,7 +196,7 @@ assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbX2HZIX02W2YbrJHS1Iop1u8b9R7A5DFDAJIbc-_L20PJHthhZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUn8nrcuk7cQbI0WHvGEUdjUbaKaMPOBXaY8b_WT7TyBwonRhZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
  [__link0]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::override_var_name
  [__link1]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::SpectreArch::from_target_arch
  [__link2]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::spectre_lib_dir

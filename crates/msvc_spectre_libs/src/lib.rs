@@ -57,7 +57,7 @@
 //! ```
 //!
 //! ```rust,ignore
-//! // src/main.rs -- unchanged; the crate is a build-time dependency only.
+//! // src/main.rs -- unchanged; this crate needs no source-level use.
 //! fn main() {
 //!     println!("linked against the Spectre-mitigated CRT");
 //! }

@@ -27,9 +27,13 @@ mod flags;
 
 use resolve::SpectreArch;
 
+/// The target-agnostic Spectre library directory override, applying to every
+/// target that does not have a target-specific override set.
+const GENERIC_OVERRIDE_VAR: &str = "MSVC_SPECTRE_LIB_DIR";
+
 fn main() {
     // Re-run when the target-agnostic override changes, regardless of target.
-    println!("cargo:rerun-if-env-changed=MSVC_SPECTRE_LIB_DIR");
+    println!("cargo:rerun-if-env-changed={GENERIC_OVERRIDE_VAR}");
 
     // A build script runs on the *host*, so a compile-time `cfg!(target_os)`
     // here would describe the host that compiles and runs this script -- not
@@ -80,7 +84,7 @@ fn main() {
 fn verify_required_link_args() -> Result<(), String> {
     let target = env::var("TARGET").expect("cargo always sets TARGET for build scripts");
 
-    let Some(configured) = required_link_args_value(&target)? else {
+    let Some((source_var, configured)) = required_link_args_value(&target)? else {
         return Ok(());
     };
 
@@ -103,12 +107,16 @@ fn verify_required_link_args() -> Result<(), String> {
         return Ok(());
     }
 
+    // Spell out the `-Clink-arg=` form: these are linker arguments, so the bare
+    // token is not something rustc accepts on its own.
+    let as_rustflags = missing.iter().map(|arg| format!("-Clink-arg={arg}")).collect::<Vec<_>>().join(" ");
+
     Err(format!(
-        "linker argument(s) `{}` required by `{}` did not reach rustc. Add them to `[target.<triple>] rustflags` in `.cargo/config.toml`. \
-         If a `RUSTFLAGS` environment variable is set, note that it REPLACES the config `rustflags` rather than merging with it, so the \
-         configured flags are dropped; append them to `RUSTFLAGS` as well or unset it.",
-        missing.join("`, `"),
-        flags::REQUIRED_LINK_ARGS_VAR
+        "linker argument(s) `{}` required by `{source_var}` did not reach rustc. Add them to `[target.<triple>] rustflags` in \
+         `.cargo/config.toml` as `{as_rustflags}`. If a `RUSTFLAGS` environment variable is set, note that it REPLACES the config \
+         `rustflags` rather than merging with it, so the configured flags are dropped; add `{as_rustflags}` to `RUSTFLAGS` as well, or \
+         unset it.",
+        missing.join("`, `")
     ))
 }
 
@@ -116,21 +124,22 @@ fn verify_required_link_args() -> Result<(), String> {
 ///
 /// The target-specific variable wins over the target-agnostic one, so a
 /// requirement that applies to a single architecture does not produce a false
-/// diagnostic on the others. Returns [`None`] when neither is set, which
-/// disables the check.
+/// diagnostic on the others. Returns the name of the variable that supplied the
+/// value alongside it, so a diagnostic can name the one the integrator actually
+/// set. Returns [`None`] when neither is set, which disables the check.
 ///
 /// # Errors
 ///
 /// Returns a human-readable message when a variable is set to a value that is
 /// not valid Unicode. Treating that as "unset" would silently skip a check the
 /// integrator explicitly opted into.
-fn required_link_args_value(target: &str) -> Result<Option<String>, String> {
+fn required_link_args_value(target: &str) -> Result<Option<(String, String)>, String> {
     let target_var = flags::required_link_args_var_name(target);
 
     for name in [target_var.as_str(), flags::REQUIRED_LINK_ARGS_VAR] {
         println!("cargo:rerun-if-env-changed={name}");
         match env::var(name) {
-            Ok(value) => return Ok(Some(value)),
+            Ok(value) => return Ok(Some((name.to_owned(), value))),
             Err(VarError::NotPresent) => {}
             Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(name)),
         }
@@ -159,14 +168,20 @@ fn add_spectre_link_search() -> Result<(), String> {
     let override_var = resolve::override_var_name(&target);
     println!("cargo:rerun-if-env-changed={override_var}");
 
-    // 1. An explicit build-system override wins over discovery.
-    if let Some(dir) = env::var_os(&override_var).or_else(|| env::var_os("MSVC_SPECTRE_LIB_DIR")) {
+    // 1. An explicit build-system override wins over discovery. Remember which
+    //    variable supplied the value so a diagnostic names the one that is
+    //    actually set rather than the one that merely takes precedence.
+    let configured_override = env::var_os(&override_var)
+        .map(|dir| (override_var.as_str(), dir))
+        .or_else(|| env::var_os(GENERIC_OVERRIDE_VAR).map(|dir| (GENERIC_OVERRIDE_VAR, dir)));
+
+    if let Some((source_var, dir)) = configured_override {
         let dir = PathBuf::from(dir);
         return if emit_link_search(&dir) {
             Ok(())
         } else {
             Err(format!(
-                "the Spectre library directory `{}` provided via `{override_var}` (or `MSVC_SPECTRE_LIB_DIR`) does not exist",
+                "the Spectre library directory `{}` provided via `{source_var}` does not exist",
                 dir.display()
             ))
         };
