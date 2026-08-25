@@ -5,25 +5,25 @@
 
 use crate::Place;
 
-/// Tells a value that it has moved to a different [`Place`].
+/// A type that adapts when it is moved to a different [`Place`].
 ///
-/// Implement this when part of your type depends on where it runs: memory near a particular
-/// node, a handle to a thread-local driver, a shard index, a cached thread id.
-/// [`relocate`](Self::relocate) is where you bring that back in line. You do not call it
-/// yourself; see [the two roles](crate#the-two-roles).
+/// Implement this trait when part of a type depends on where it runs: memory near a
+/// particular node, a handle to a thread-local driver, a shard index, a cached thread id.
+/// [`relocate`](Self::relocate) brings that state back into line. Implementors do not call
+/// it themselves; a runtime does, as described in [the two roles](crate#the-two-roles).
 ///
-/// Implement or derive it if your type might end up inside something a runtime relocates,
-/// including simple types that do nothing on relocation, since an empty implementation is
-/// what lets an enclosing type derive the trait. Do not implement it just because a type is
-/// [`Send`], and never put anything correctness depends on inside
-/// [`relocate`](Self::relocate). It may only affect performance.
+/// Implement or derive it for any type that may end up inside a value a runtime relocates,
+/// including types that do nothing on relocation, since an empty implementation is what lets
+/// an enclosing type derive the trait. Do not implement it merely because a type is
+/// [`Send`], and never place anything correctness depends on inside
+/// [`relocate`](Self::relocate); it may affect performance only.
 ///
-/// # Usage patterns
+/// # Implementing
 ///
-/// Implementations usually look like one of these:
+/// Implementations usually take one of four shapes.
 ///
 /// 1. **Do nothing.** Nothing in the type depends on where it runs. An empty body is a
-///    complete implementation, and it is what primitives do.
+///    complete implementation, and is what the primitive types do.
 ///
 ///    ```
 ///    use thread_aware_core::{Place, ThreadAware};
@@ -34,59 +34,65 @@ use crate::Place;
 ///        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
 ///    }
 ///    ```
-/// 2. **Remember where you are.** Store the new thread id,
-///    [`NumaNode`](crate::NumaNode) or [`Origin`](crate::Origin) and use it later.
-/// 3. **Swap a resource.** Check the id it depends on: [`NumaNode`](crate::NumaNode) for a
-///    buffer pool, the thread id for a driver handle, [`Origin`](crate::Origin) for anything
-///    the runtime owns. If it changed, let the old one go and get one for the new place,
-///    moving out any real data it holds first.
-/// 4. **Pass it on.** A type made of other types calls `relocate` on each field. Use
-///    `#[derive(ThreadAware)]` rather than writing this by hand.
+/// 2. **Record the destination.** Store the new thread id, [`NumaNode`](crate::NumaNode) or
+///    [`Origin`](crate::Origin) for later use.
+/// 3. **Replace a resource.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
+///    for a buffer pool, the thread id for a driver handle, [`Origin`](crate::Origin) for
+///    anything the runtime owns. If it changed, release the old resource and acquire one for
+///    the new place, moving out any real data it holds first.
+/// 4. **Forward to fields.** A type composed of other types calls `relocate` on each field.
+///    Prefer `#[derive(ThreadAware)]` to writing this by hand.
 ///
-/// **Detaching** means releasing a resource and leaving the field empty, so the value can
-/// pick up a new one later or run without it. Such a field needs a type that can be empty,
-/// like `Option<Handle>`.
+/// To *detach* is to release a resource and leave the field empty, so that the value can
+/// acquire a new one later or run without it. Such a field needs a type that can be empty,
+/// such as `Option<Handle>`.
 ///
-/// # Rules
+/// # Requirements
 ///
-/// [`relocate`](Self::relocate) cannot fail and has no way to report an error, so
-/// implementations must:
+/// [`relocate`](Self::relocate) cannot fail and has no way to report an error, so every
+/// implementation must:
 ///
-/// * **Keep real data.** You may rebuild anything that exists only for speed: caches, pools,
-///   scratch buffers, handles. You may not lose or change anything a user of the value can
-///   see. A cache still holding writes that have not been flushed is real data, so move it
-///   rather than dropping it.
-/// * **Stay correct.** If you cannot do the ideal thing, be slower instead; keeping the old
-///   resource is fine. What you hold must keep working even if this is never called, so a
-///   driver handle has to stay usable from the new thread. Relocation makes it closer, not
-///   valid.
-/// * **Do not panic or block.** This runs while the runtime is placing work, so no network
-///   or disk I/O, no waiting on another worker, no contended lock. If something would block,
-///   let go now and pick it up again on first use.
-/// * **Handle repeated calls.** Relocating to the same place, or with `source` equal to
-///   `destination`, has to be harmless, and should be cheap: compare the ids you care about
-///   and return early when nothing changed.
-/// * **Handle no call at all.** The value has to stay correct either way.
-/// * **Handle a place you know nothing about.** A `destination` may name a thread the value
-///   has never seen, and carry an [`Origin`](crate::Origin) belonging to another runtime.
-///   That must stay sound. Let go of anything the old runtime owned; state keyed on
-///   [`NumaNode`](crate::NumaNode) may still be fine, subject to the caveat in
-///   [what the ids mean](crate#what-the-ids-mean). Things may be slower afterwards, but not
-///   forever: back on a place it can serve, the value should pick up what it released.
+/// * **Preserve real data.** Anything that exists only for speed may be rebuilt: caches,
+///   pools, scratch buffers, handles. Nothing observable through the value may be lost or
+///   altered. A cache still holding writes that have not been flushed is real data, and must
+///   be moved rather than dropped.
 ///
-/// You can clone a [`Place`] and keep it, but a thread id only means something while that
+/// * **Remain correct.** When the ideal adaptation is unavailable, being slower is preferred
+///   to being wrong, and keeping the old resource is acceptable. Whatever the value holds
+///   must keep working even if this method is never called, so a driver handle must remain
+///   usable from the new thread. Relocation brings it closer; it does not make it valid.
+///
+/// * **Neither panic nor block.** This runs while the runtime is placing work, so it
+///   performs no network or disk I/O, no waiting on another worker, and takes no contended
+///   lock. Release anything that would block here and re-acquire it on first use.
+///
+/// * **Tolerate repeated calls.** Relocating to the same place, or with `source` equal to
+///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
+///   return early when nothing has changed.
+///
+/// * **Tolerate no call at all.** The value remains correct either way.
+///
+/// * **Tolerate an unfamiliar place.** A `destination` may name a thread the value has never
+///   seen and carry an [`Origin`](crate::Origin) belonging to another runtime, and this must
+///   remain sound. Release anything the previous runtime owned; state keyed on
+///   [`NumaNode`](crate::NumaNode) may remain valid, subject to the caveat in
+///   [what the ids mean](crate#what-the-ids-mean). Performance may suffer afterwards, though
+///   not permanently: once back on a place it can serve, the value re-acquires what it
+///   released.
+///
+/// A [`Place`] may be cloned and retained, but a thread id is meaningful only while that
 /// thread is alive, and an [`Origin`](crate::Origin) only while that runtime is.
 ///
-/// Runtimes have their own rules. Call [`relocate`](Self::relocate) only after really moving
-/// the value, pass `None` when the old place is unknown, give each running runtime its own
-/// [`Origin`](crate::Origin), and never rely on the call for correctness. Nothing checks any
-/// of this.
+/// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
+/// the value has actually moved, pass `None` when the previous place is unknown, give each
+/// running runtime its own [`Origin`](crate::Origin), and never rely on the call for
+/// correctness. Nothing enforces any of this.
 ///
 /// # Examples
 ///
 /// A type that rebuilds a scratch buffer when the nearest memory changes. The buffer holds
-/// nothing between calls, so throwing it away is safe. The `name` field is real data and is
-/// left alone.
+/// nothing between calls, so discarding it is safe, while the `name` field is real data and
+/// is left alone.
 ///
 /// ```
 /// use thread_aware_core::{NumaNode, Place, ThreadAware};
@@ -112,7 +118,7 @@ use crate::Place;
 /// }
 /// ```
 ///
-/// A type that passes the call on to its fields:
+/// A type that forwards the call to its fields:
 ///
 /// ```
 /// use thread_aware_core::{Place, ThreadAware};
@@ -134,17 +140,19 @@ use crate::Place;
 /// }
 /// ```
 pub trait ThreadAware: Send {
-    /// Updates this value for the place it has moved to.
+    /// Adapts this value to the place it now occupies.
     ///
-    /// You write this method, but you do not normally call it. The runtime does, after
-    /// moving the value.
+    /// Implementors provide this method but do not normally call it. A runtime calls it
+    /// after moving the value.
     ///
     /// `destination` is where the value runs from now on. `source` is where it ran before,
-    /// or `None` when that is unknown, which is normal for a first placement or a value
-    /// arriving from outside the runtime. `None` means "assume nothing", not "error".
+    /// or `None` when that is unknown, which is normal for a first placement or for a value
+    /// arriving from outside the runtime. `None` means the implementation can assume nothing
+    /// about the previous place; it does not indicate an error.
     ///
-    /// This must not fail, must not panic, and must be safe to call more than once,
-    /// including when `source` equals `destination`. See the [rules](Self#rules) for the
-    /// rest.
+    /// This method cannot fail, must not panic, and is safe to call more than once,
+    /// including with `source` equal to `destination`. See the
+    /// [requirements](Self#requirements) for the rest, and the trait-level
+    /// [examples](Self#examples) for implementations.
     fn relocate(&mut self, source: Option<&Place>, destination: &Place);
 }
