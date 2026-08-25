@@ -207,6 +207,32 @@ crate-root initialization runs and that binary invokes
 `testing_aids::init_tracing!()` at module scope itself
 (../../../docs/tracing-tests.md).
 
+### 1.3 Examples
+
+`crates/fetch_winhttp/examples/` holds one runnable example per feature area, each
+serving a localhost fixture from `fetch_winhttp_testing` so no example depends on an
+external endpoint or on real-time waiting:
+
+```text
+crates/fetch_winhttp/examples/
+  quick_start.rs        // builder_winhttp and the mandatory WinHttpDeps environment
+  streaming_upload.rs   // unknown-length uploads and request-trailer rejection
+  streaming_download.rs // frame-by-frame bodies, response trailers, mid-stream drop
+  tls_validation.rs     // the strict default and the two independent relaxations
+  http3.rs              // required HTTP/3 with no TCP fallback
+  connection_pools.rs   // client clone, builder clone, and multiple_pools isolation
+```
+
+Each example is a `fn main` shim that delegates to a `#[cfg(windows)]` module and
+prints an explanatory line elsewhere, so `cargo check --all-targets` stays green on
+non-Windows targets where the crate itself is empty. They drive futures with
+`futures::executor::block_on` rather than a runtime macro, which doubles as a
+demonstration that the transport is runtime-neutral.
+
+`fetch_winhttp_testing` is unpublished, so the examples ship in the package as
+readable documentation but are not built by `cargo package`'s verification step or
+by downstream consumers.
+
 ## 2. WinHTTP asynchronous model primer
 
 A single request drives this WinHTTP handle chain and callback sequence. `S` steps

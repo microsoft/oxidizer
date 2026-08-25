@@ -29,8 +29,8 @@ pub enum ResponseFrame {
 ///
 /// Tests describe what the peer should send - status, headers, body frames, trailers, and whether
 /// the response stalls once the scripted frames are exhausted - and the fixture translates that
-/// into whatever its protocol implementation requires. The fields are visible to the whole
-/// `common` module so that both fixtures can drive their own protocol stack from one plan.
+/// into whatever its protocol implementation requires. The fields are public so that both fixtures
+/// can drive their own protocol stack from one plan.
 #[derive(Clone, Debug)]
 pub struct ResponsePlan {
     /// Status the fixture responds with.

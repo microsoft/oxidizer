@@ -3,7 +3,8 @@
 This document describes the user-visible behavior and design tenets of the
 `fetch_winhttp` crate. The implementation strategy - threading, FFI ownership,
 pooling, body-streaming mechanics, and the testing strategy - is documented separately
-in [implementation.md](implementation.md).
+in [implementation.md](implementation.md). Runnable demonstrations of each feature
+area live in `crates/fetch_winhttp/examples/`.
 
 ## 1. Purpose and scope
 
