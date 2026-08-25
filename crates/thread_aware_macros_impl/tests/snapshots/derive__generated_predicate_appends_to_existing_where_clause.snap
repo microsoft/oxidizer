@@ -2,10 +2,12 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T: ::thread_aware::ThreadAware, U> ::thread_aware::ThreadAware for WithWhere<T, U>
+impl<
+    T: ::thread_aware::ThreadAware,
+    U: ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for WithWhere<T, U>
 where
     T: Clone,
-    core::marker::PhantomData<U>: ::thread_aware::ThreadAware,
 {
     fn relocate(
         &mut self,

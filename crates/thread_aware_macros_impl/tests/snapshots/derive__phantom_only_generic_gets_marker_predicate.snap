@@ -2,11 +2,10 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T: ::thread_aware::ThreadAware, U> ::thread_aware::ThreadAware
-for DirectPhantom<T, U>
-where
-    core::marker::PhantomData<U>: ::thread_aware::ThreadAware,
-{
+impl<
+    T: ::thread_aware::ThreadAware,
+    U: ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for DirectPhantom<T, U> {
     fn relocate(
         &mut self,
         __thread_aware_source: ::core::option::Option<

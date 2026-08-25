@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use syn::{Attribute, Expr, Type};
+use syn::{Attribute, Expr};
 
 /// Configuration for field attributes.
 #[derive(Default, Debug)]
@@ -40,36 +40,6 @@ pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
         }
     }
     Ok(cfg)
-}
-
-/// Checks whether the given type is the standard library's `PhantomData` marker.
-///
-/// Only the canonical spellings are accepted: a bare `PhantomData` from a `use`, or a path
-/// ending in `marker::PhantomData` rooted at `core`, `std` or nothing.
-///
-/// This decides bound selection only, never whether a field is relocated - every field
-/// without the skip attribute is relocated whatever its type is called.
-///
-/// A spelling that matches gets a predicate on the field's own type,
-/// `PhantomData<X>: ThreadAware`, rather than having the traversal descend into `X`. That
-/// stays correct even for a look-alike imported under the bare name, since the predicate
-/// names whatever type the spelling resolves to and that type's own impl decides what it
-/// reduces to. A spelling that does not match, such as `my_crate::PhantomData<T>`, is
-/// traversed normally: the derive descends into the arguments and binds the parameters it
-/// reaches, which is the more general treatment.
-#[must_use]
-pub fn is_phantom_data(ty: &Type) -> bool {
-    let Type::Path(tp) = ty else {
-        return false;
-    };
-
-    let idents: Vec<_> = tp.path.segments.iter().map(|s| s.ident.to_string()).collect();
-    let segments: Vec<&str> = idents.iter().map(String::as_str).collect();
-
-    matches!(
-        segments.as_slice(),
-        ["PhantomData"] | ["marker", "PhantomData"] | ["core" | "std", "marker", "PhantomData"]
-    )
 }
 
 #[cfg(test)]
@@ -147,98 +117,6 @@ mod tests {
         ];
         let result = parse_field_attrs(&attrs).unwrap();
         assert!(result.skip);
-    }
-
-    #[test]
-    fn test_is_phantom_data_simple() {
-        // Test with simple PhantomData type
-        let ty: Type = parse_quote! { PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_with_std() {
-        // Test with std::marker::PhantomData
-        let ty: Type = parse_quote! { std::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_with_core() {
-        // Test with core::marker::PhantomData
-        let ty: Type = parse_quote! { core::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_fully_qualified() {
-        // Test with fully qualified path
-        let ty: Type = parse_quote! { ::std::marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_multiple_generics() {
-        // Test with multiple generic parameters
-        let ty: Type = parse_quote! { PhantomData<(T, U, V)> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_marker_module_only() {
-        // `marker::PhantomData` after `use core::marker;`.
-        let ty: Type = parse_quote! { marker::PhantomData<T> };
-        assert!(is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_rejects_lookalike_paths() {
-        // A distinct type that merely shares the final segment must not be taken for the
-        // marker: it gets the more general treatment instead, with the traversal descending
-        // into its arguments rather than a predicate on the type as a whole.
-        let cases: Vec<Type> = vec![
-            parse_quote! { my_crate::PhantomData<T> },
-            parse_quote! { lookalike::inner::PhantomData<T> },
-            parse_quote! { core::other::PhantomData<T> },
-            parse_quote! { alloc::marker::PhantomData<T> },
-        ];
-        for ty in &cases {
-            assert!(!is_phantom_data(ty), "a qualified look-alike must not be treated as the marker");
-        }
-    }
-
-    #[test]
-    fn test_is_phantom_data_not_phantom() {
-        // Test with non-PhantomData types
-        let ty: Type = parse_quote! { String };
-        assert!(!is_phantom_data(&ty));
-
-        let ty: Type = parse_quote! { Vec<u8> };
-        assert!(!is_phantom_data(&ty));
-
-        let ty: Type = parse_quote! { Option<T> };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_reference() {
-        // Test with reference types (not a Type::Path)
-        let ty: Type = parse_quote! { &PhantomData<T> };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_tuple() {
-        // Test with tuple types (not a Type::Path)
-        let ty: Type = parse_quote! { (PhantomData<T>,) };
-        assert!(!is_phantom_data(&ty));
-    }
-
-    #[test]
-    fn test_is_phantom_data_array() {
-        // Test with array types (not a Type::Path)
-        let ty: Type = parse_quote! { [PhantomData<T>; 1] };
-        assert!(!is_phantom_data(&ty));
     }
 
     #[test]

@@ -52,7 +52,8 @@ fn affinity_pair() -> (Option<Affinity>, Affinity) {
 /// A generic named only inside `PhantomData` must still compile.
 ///
 /// Regression test: the derive used to drop the parameter entirely, so the
-/// generated impl could not satisfy the `ThreadAware: Send` supertrait.
+/// generated impl could not satisfy the `ThreadAware: Send` supertrait. It now takes the
+/// ordinary `ThreadAware` bound, like a parameter reached anywhere else.
 #[derive(ThreadAware)]
 struct DirectPhantom<T, U>(T, PhantomData<U>);
 
@@ -60,9 +61,7 @@ struct DirectPhantom<T, U>(T, PhantomData<U>);
 fn phantom_only_generic_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
-    // `Arc<i32>` is `Send` but deliberately not `ThreadAware`, so this only
-    // compiles if the phantom parameter is bound by `Send` rather than `ThreadAware`.
-    let mut value = DirectPhantom::<Tracker, Arc<i32>>(Tracker::default(), PhantomData);
+    let mut value = DirectPhantom::<Tracker, Tracker>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
 
     assert_eq!(value.0.relocations, 1, "the non-phantom field must be relocated exactly once");
@@ -77,7 +76,7 @@ struct NestedPhantom<T>((PhantomData<T>,));
 fn nested_phantom_data_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
-    let mut value = NestedPhantom::<Arc<i32>>((PhantomData,));
+    let mut value = NestedPhantom::<Tracker>((PhantomData,));
     value.relocate(source, destination);
 }
 
@@ -114,7 +113,7 @@ struct Mixed<T, U> {
 fn relocate_reaches_every_non_skipped_field_and_no_skipped_one() {
     let (source, destination) = affinity_pair();
 
-    let mut value = Mixed::<Tracker, Arc<i32>> {
+    let mut value = Mixed::<Tracker, Tracker> {
         tracked: Tracker::default(),
         skipped: Tracker::default(),
         marker: PhantomData,
@@ -136,25 +135,26 @@ enum PhantomEnum<T, U> {
 fn enum_with_phantom_only_generic_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
-    let mut tracked = PhantomEnum::<Tracker, Arc<i32>>::Tracked(Tracker::default());
+    let mut tracked = PhantomEnum::<Tracker, Tracker>::Tracked(Tracker::default());
     tracked.relocate(source, destination);
     match &tracked {
         PhantomEnum::Tracked(t) => assert_eq!(t.relocations, 1),
         PhantomEnum::Marked(_) => unreachable!("constructed as Tracked"),
     }
 
-    let mut marked = PhantomEnum::<Tracker, Arc<i32>>::Marked(PhantomData);
+    let mut marked = PhantomEnum::<Tracker, Tracker>::Marked(PhantomData);
     marked.relocate(source, destination);
 }
 
-// The cases below pin the `Send` obligation for phantom payloads whose `Send`-ness does
-// not follow from `T: Send`. Bounding the type parameters instead of the field type made
-// each of these fail to compile, and the snapshot tests could not catch it because they
-// never build the expansion.
+// The cases below pin what a marker payload costs now that the derive does no special
+// handling for `PhantomData`. The traversal binds the parameters it reaches by `ThreadAware`,
+// which gives `Send` but says nothing about `Sync`, about an associated type, or about a
+// payload the traversal cannot reach at all. Where the payload's `Send`-ness does not follow,
+// the author writes the bound - the derive does not infer it.
 
-/// `&'a T` is `Send` only when `T: Sync`, so a per-parameter `T: Send` bound is wrong here.
+/// `&'a T` is `Send` only when `T: Sync`, which `T: ThreadAware` does not give.
 #[derive(ThreadAware)]
-struct PhantomRef<'a, T: 'a>(Tracker, PhantomData<&'a T>);
+struct PhantomRef<'a, T: 'a + Sync>(Tracker, PhantomData<&'a T>);
 
 #[test]
 fn phantom_shared_reference_compiles_and_relocates() {
@@ -169,7 +169,7 @@ fn phantom_shared_reference_compiles_and_relocates() {
 
 /// `Arc<T>` is `Send` only when `T: Send + Sync`.
 #[derive(ThreadAware)]
-struct PhantomArc<T>(Tracker, PhantomData<Arc<T>>);
+struct PhantomArc<T: Sync>(Tracker, PhantomData<Arc<T>>);
 
 #[test]
 fn phantom_arc_compiles_and_relocates() {
@@ -181,9 +181,9 @@ fn phantom_arc_compiles_and_relocates() {
     assert_eq!(value.0.relocations, 1);
 }
 
-/// An unsized slice payload: reached through no `Type::Slice` arm, so it used to get no bound.
+/// An unsized slice payload, which the traversal does not enter, so nothing is bound for it.
 #[derive(ThreadAware)]
-struct PhantomSlice<T>(Tracker, PhantomData<[T]>);
+struct PhantomSlice<T: Send>(Tracker, PhantomData<[T]>);
 
 #[test]
 fn phantom_slice_compiles_and_relocates() {
@@ -195,9 +195,12 @@ fn phantom_slice_compiles_and_relocates() {
     assert_eq!(value.0.relocations, 1);
 }
 
-/// An associated-type projection: `T: Send` says nothing about `T::Item`.
+/// An associated-type projection: a bound on `T` says nothing about `T::Item`, and binding
+/// `T: ThreadAware` to reach it is both too strong and beside the point. Skip it.
 #[derive(ThreadAware)]
-struct PhantomProjection<T: Iterator>(Tracker, PhantomData<T::Item>);
+struct PhantomProjection<T: Iterator>(Tracker, #[thread_aware(skip)] PhantomData<T::Item>)
+where
+    T::Item: Send;
 
 #[test]
 fn phantom_projection_compiles_and_relocates() {
@@ -209,10 +212,10 @@ fn phantom_projection_compiles_and_relocates() {
     assert_eq!(value.0.relocations, 1);
 }
 
-/// A parameter that is both relocated and named inside `PhantomData` carries both
-/// obligations; classifying it as one or the other drops the second.
+/// A parameter used directly and inside a marker takes the `ThreadAware` bound from the first
+/// use; the marker's own requirement is the author's to state.
 #[derive(ThreadAware)]
-struct RelocatedAndPhantom<'a, T: 'a>(T, PhantomData<&'a T>);
+struct RelocatedAndPhantom<'a, T: 'a + Sync>(T, PhantomData<&'a T>);
 
 #[test]
 fn parameter_that_is_both_relocated_and_phantom_compiles() {
@@ -640,12 +643,19 @@ struct MaybeSend<const N: usize>(PhantomData<*const ()>);
 // `N == 0` is singled out purely to exercise `Send`-ness that depends on a const parameter.
 unsafe impl Send for MaybeSend<0> {}
 
-/// `Send`-ness depending on a const parameter, which a type-parameter scan never sees.
+/// A marker whose payload is `Send` only for some const arguments.
+///
+/// The derive binds nothing for a const parameter, so the marker must be skipped and the
+/// obligation discharged on `Self`.
 #[derive(ThreadAware)]
 struct ConstDependent<const N: usize> {
     tracked: Tracker,
+    #[thread_aware(skip)]
     marker: PhantomData<MaybeSend<N>>,
 }
+
+// SAFETY: test-only. `MaybeSend` holds no value, so neither does this.
+unsafe impl Send for ConstDependent<0> {}
 
 macro_rules! hidden_generic {
     () => {
@@ -654,9 +664,13 @@ macro_rules! hidden_generic {
 }
 
 /// A generic hidden behind a type macro, so no `T` token is visible before expansion.
+///
+/// No syntactic traversal can reach it, so the marker is skipped like any other payload the
+/// derive cannot reason about.
 #[derive(ThreadAware)]
-struct MacroHidden<T> {
+struct MacroHidden<T: Send> {
     tracked: Tracker,
+    #[thread_aware(skip)]
     marker: PhantomData<hidden_generic!()>,
 }
 

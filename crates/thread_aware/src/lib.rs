@@ -236,43 +236,38 @@ pub use core::ThreadAware;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Every field except a skipped one is relocated, and the bounds follow from that:
-/// * A generic type parameter reachable through a relocated field receives a
-///   `::thread_aware::ThreadAware` bound.
-/// * A `PhantomData<..>` marker - as a field, or reached through the type arguments of one -
-///   instead gets a `where PhantomData<..>: ThreadAware` predicate, which for the real marker
-///   the compiler reduces through its no-op impl to `Send` on the argument.
-/// * If any field carries `#[thread_aware(skip)]`, a single `where Self: Send` predicate is
+/// The derive does no special handling for any field type. Every field except a
+/// `#[thread_aware(skip)]` one is relocated, and the bounds follow from that:
+/// * a generic type parameter the traversal reaches through a relocated field receives a
+///   `::thread_aware::ThreadAware` bound;
+/// * if any field carries `#[thread_aware(skip)]`, a single `where Self: Send` predicate is
 ///   added, since the `ThreadAware: Send` supertrait still has to hold.
 ///
-/// A marker's obligation names the marker type rather than the parameters inside it, because
-/// binding those would be unsound: `PhantomData<&'a T>` is `Send` only when `T: Sync`. The
-/// obligation for a skipped field is stated on `Self` for the opposite reason - binding the
-/// field type would be too strong, rejecting types made `Send` by a manual `unsafe impl`.
+/// A `PhantomData<..>` field is relocated like any other, through the no-op
+/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`. The parameters named inside it are
+/// bound by `ThreadAware` exactly as they would be anywhere else.
 ///
-/// A marker whose argument can never be `Send`, such as `PhantomData<*const T>`, needs
-/// `#[thread_aware(skip)]`. That moves it under `where Self: Send`, which the manual
-/// `unsafe impl Send` that a raw-pointer or variance marker carries can discharge.
+/// The derive therefore infers only what the traversal can see, and states nothing on the
+/// author's behalf beyond that. Where a field's obligation does not follow from those bounds,
+/// the author writes it:
+/// * `PhantomData<&'a T>` is `Send` only when `T: Sync`, and `PhantomData<Arc<T>>` only when
+///   `T: Send + Sync`, neither of which follows from `T: ThreadAware`;
+/// * a payload the traversal does not enter - a slice, a type macro, a const parameter - gets
+///   no bound at all;
+/// * a payload that can never be `Send`, such as `*const T`, cannot be satisfied by any bound
+///   and needs `#[thread_aware(skip)]`, which moves the obligation to `where Self: Send` where
+///   the manual `unsafe impl Send` such a type carries discharges it.
 ///
-/// Two names are matched syntactically, because a macro cannot resolve a path to the item it
-/// refers to. Neither affects whether a field is relocated - every field without the skip
-/// attribute is - but both affect the bound it gets:
-/// * `PhantomData` counts as the marker only when spelled canonically: bare, as
-///   `marker::PhantomData`, or rooted at `core`/`std`. A qualified look-alike such as
-///   `my_crate::PhantomData` has the
-///   traversal descend into its arguments instead, which is the more general treatment; a
-///   look-alike imported under the bare name takes the predicate on itself, where its own
-///   impl decides what that reduces to. A marker spelled through a type alias or a type macro
-///   is likewise not recognized, and ends up with a bound stronger than it needs, or - for a
-///   type macro, which the traversal does not enter at all - with no generated bound, which
-///   surfaces as a compile error on the type's own definition. The same applies to an ordinary
-///   generic hidden behind a type macro.
-/// * A trait named `ThreadAware` and referred to by that bare name is assumed to be this
-///   crate's, and suppresses the generated bound.
+/// A type whose shape the derive cannot express is expected to implement `ThreadAware` by
+/// hand rather than to have the derive grow a special case for it.
 ///
-/// Qualifying either path selects the other behaviour.
-///
-/// # Example
+/// One name is matched syntactically, because a macro cannot resolve a path to the item it
+/// refers to: a trait referred to by the bare name `ThreadAware` is assumed to be this
+/// crate's, and suppresses the generated bound. Emitting a second bound unconditionally was
+/// tried and reverted, since real code writes the imported form and the duplicate trips
+/// `clippy::trait_duplication_in_bounds` at the author's own declaration. Qualify the path to
+/// disambiguate.
+////// # Example
 /// ```rust
 /// use thread_aware::ThreadAware;
 /// use thread_aware::affinity::Affinity;

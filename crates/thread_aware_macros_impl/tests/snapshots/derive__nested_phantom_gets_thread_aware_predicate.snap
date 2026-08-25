@@ -2,10 +2,7 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T> ::thread_aware::ThreadAware for NestedPhantom<T>
-where
-    core::marker::PhantomData<T>: ::thread_aware::ThreadAware,
-{
+impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for NestedPhantom<T> {
     fn relocate(
         &mut self,
         __thread_aware_source: ::core::option::Option<

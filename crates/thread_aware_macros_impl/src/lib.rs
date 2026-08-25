@@ -20,13 +20,12 @@
 use std::collections::HashSet;
 
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{ToTokens, quote};
+use quote::quote;
 use syn::{Data, DeriveInput, Fields, GenericParam, Path, PathArguments, Type, TypePath, parse_quote};
 
 mod enum_gen;
 
-/// Field attribute parsing, plus the syntactic `PhantomData` test the derive uses to select a
-/// field's bound.
+/// Field attribute parsing for the derive.
 ///
 /// Public because this is a shared implementation crate consumed by wrapper proc-macro
 /// crates; the module is part of its published surface even though nothing in this
@@ -36,7 +35,7 @@ pub mod field_attrs;
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::{is_phantom_data, parse_field_attrs};
+use field_attrs::parse_field_attrs;
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -138,9 +137,9 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
     // A `#[thread_aware(skip)]` field is never relocated, so it gains no `ThreadAware` bound -
     // but it still has to satisfy the `ThreadAware: Send` supertrait.
     //
-    // The obligation is stated once, on `Self`, rather than per field. Binding the field type
-    // itself would be strictly stronger than what is required: a type made `Send` by a manual
-    // `unsafe impl` - the standard idiom for raw-pointer and variance markers, and the reason
+    // The obligation is stated once, on `Self`. Binding the field type itself would be
+    // strictly stronger than what is required: a type made `Send` by a manual `unsafe impl` -
+    // the standard idiom for raw-pointer and variance markers, and the reason
     // `#[thread_aware(skip)]` exists - would carry a predicate such as `where *const T: Send`
     // that no instantiation can ever prove.
     //
@@ -154,25 +153,6 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
             .make_where_clause()
             .predicates
             .push(parse_quote!(#self_ty: ::core::marker::Send));
-    }
-
-    // A `PhantomData` marker is relocated like any other field, through its own no-op impl, so
-    // its obligation is stated on the marker type: `PhantomData<X>: ThreadAware`, which the
-    // compiler reduces through that impl to `X: ?Sized + Send`.
-    //
-    // Naming the marker type rather than descending into `X` is what keeps this correct.
-    // `PhantomData<&'a T>` is `Send` only when `T: Sync`, and `PhantomData<Arc<T>>` only when
-    // `T: Send + Sync`; neither follows from a bound on `T` alone.
-    //
-    // The reduction is always correct but not always satisfiable: for `X = *const T` it becomes
-    // `*const T: Send`, which no instantiation can prove. Such a field needs
-    // `#[thread_aware(skip)]`, which moves it under the `Self: Send` predicate above, where the
-    // manual `unsafe impl Send` such a type carries can discharge it.
-    if !usage.thread_aware_required.is_empty() {
-        let where_clause = generics.make_where_clause();
-        for ty in &usage.thread_aware_required {
-            where_clause.predicates.push(parse_quote!(#ty: #thread_aware_path));
-        }
     }
 
     Ok(generics)
@@ -204,21 +184,9 @@ fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
 /// How the fields of a type contribute to the bounds of the generated impl.
 #[derive(Default)]
 struct GenericUsage {
-    /// Type parameters the traversal reaches; each is bound by `ThreadAware`. The traversal
-    /// stops at a `PhantomData` marker, whose argument is covered by the marker's own
-    /// predicate instead - not binding it is the whole point.
+    /// Type parameters the traversal reaches through a relocated field; each is bound by
+    /// `ThreadAware`.
     relocated: HashSet<syn::Ident>,
-
-    /// `PhantomData` markers reached by a relocated field, in discovery order. Includes a
-    /// marker that is itself a field, since markers are relocated like anything else. The
-    /// traversal follows type arguments, tuples, references, arrays and groups; it does not
-    /// enter every type position, and a generic hidden from it - behind a type macro, say -
-    /// gets no bound, which is the limitation the derive documents for macro and alias
-    /// spellings.
-    thread_aware_required: Vec<Type>,
-
-    /// Rendered form of `thread_aware_required`, used to suppress duplicates.
-    seen: HashSet<String>,
 
     /// Whether any field carries `#[thread_aware(skip)]`, which is what makes the
     /// `Self: Send` predicate necessary.
@@ -226,18 +194,9 @@ struct GenericUsage {
 }
 
 impl GenericUsage {
-    fn require_thread_aware(&mut self, ty: &Type) {
-        if self.seen.insert(ty.to_token_stream().to_string()) {
-            self.thread_aware_required.push(ty.clone());
-        }
-    }
-
     fn merge(&mut self, other: Self) {
         self.relocated.extend(other.relocated);
         self.has_skipped_field |= other.has_skipped_field;
-        for ty in &other.thread_aware_required {
-            self.require_thread_aware(ty);
-        }
     }
 }
 
@@ -270,13 +229,6 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
 fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc: &mut GenericUsage) -> syn::Result<()> {
     match ty {
         Type::Path(TypePath { path, .. }) => {
-            if is_phantom_data(ty) {
-                // A marker, at any depth. State the obligation on the marker type itself and
-                // let the compiler reduce it through the marker's own impl; descending into
-                // the argument would put the bound on the wrong type.
-                acc.require_thread_aware(ty);
-                return Ok(());
-            }
             for segment in &path.segments {
                 if generic_idents.contains(&segment.ident) {
                     acc.relocated.insert(segment.ident.clone());
