@@ -75,13 +75,30 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
     affinity_path.segments.push(parse_quote!(affinity));
     affinity_path.segments.push(parse_quote!(Affinity));
 
+    let (source_ident, destination_ident) = param_idents();
+
     Ok(quote! {
         impl #impl_generics #thread_aware_path for #name #ty_generics #where_clause {
-            fn relocate(&mut self, source: Option<#affinity_path>, destination: #affinity_path) {
+            fn relocate(&mut self, #source_ident: ::core::option::Option<#affinity_path>, #destination_ident: #affinity_path) {
                 #body
             }
         }
     })
+}
+
+/// Names of the two parameters of the generated `relocate` method.
+///
+/// Deliberately obscure, for the same reason the field bindings are: a `const`, `static` or
+/// const parameter of the same name that is in scope at the use site is not shadowed by a
+/// function parameter. A `const` or const parameter is read as a pattern referring to that
+/// item, and a `static` may not be shadowed at all; a type declaring `const source: usize`
+/// would otherwise fail to derive. The trait's own declaration keeps the readable names; an
+/// impl need not repeat them.
+pub(crate) fn param_idents() -> (syn::Ident, syn::Ident) {
+    (
+        syn::Ident::new("__thread_aware_source", proc_macro2::Span::call_site()),
+        syn::Ident::new("__thread_aware_destination", proc_macro2::Span::call_site()),
+    )
 }
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {

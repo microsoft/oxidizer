@@ -9,17 +9,41 @@ where
 {
     fn relocate(
         &mut self,
-        source: Option<::thread_aware::affinity::Affinity>,
-        destination: ::thread_aware::affinity::Affinity,
+        __thread_aware_source: ::core::option::Option<
+            ::thread_aware::affinity::Affinity,
+        >,
+        __thread_aware_destination: ::thread_aware::affinity::Affinity,
     ) {
-        match self {
-            Self::Variant(_v0, _v1) => {
-                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
-                ::thread_aware::ThreadAware::relocate(_v1, source, destination);
+        match *self {
+            Self::Variant(
+                ref mut __thread_aware_field_0,
+                ref mut __thread_aware_field_1,
+            ) => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_1,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
-            Self::Other(_v0, _v1) => {
-                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
-                ::thread_aware::ThreadAware::relocate(_v1, source, destination);
+            Self::Other(
+                ref mut __thread_aware_field_0,
+                ref mut __thread_aware_field_1,
+            ) => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_1,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
         }
     }

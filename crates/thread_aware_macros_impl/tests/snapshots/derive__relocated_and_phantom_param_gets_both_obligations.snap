@@ -9,10 +9,20 @@ where
 {
     fn relocate(
         &mut self,
-        source: Option<::thread_aware::affinity::Affinity>,
-        destination: ::thread_aware::affinity::Affinity,
+        __thread_aware_source: ::core::option::Option<
+            ::thread_aware::affinity::Affinity,
+        >,
+        __thread_aware_destination: ::thread_aware::affinity::Affinity,
     ) {
-        ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
-        ::thread_aware::ThreadAware::relocate(&mut self.1, source, destination);
+        ::thread_aware::ThreadAware::relocate(
+            &mut self.0,
+            __thread_aware_source,
+            __thread_aware_destination,
+        );
+        ::thread_aware::ThreadAware::relocate(
+            &mut self.1,
+            __thread_aware_source,
+            __thread_aware_destination,
+        );
     }
 }

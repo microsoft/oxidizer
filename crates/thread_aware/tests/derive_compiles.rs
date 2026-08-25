@@ -393,10 +393,223 @@ fn skipped_non_send_field_with_manual_send_is_usable() {
     assert_eq!(value.tracked.relocations, 1, "the skipped field emits no relocation");
 }
 
-/// An enum with no variants is uninhabited, so there is nothing to relocate.
+/// A named enum variant whose fields are called `source` and `destination`, and one whose
+/// fields reuse the names the generated method's parameters actually have.
 ///
-/// `self` is a `&mut` reference, which rustc always treats as inhabited, so the `match self`
-/// the derive would otherwise emit is rejected as non-exhaustive.
+/// The generated arm binds every relocated field to a name of the derive's own choosing, so no
+/// field name can reach the relocation call. The `source`/`destination` variant is the shape
+/// that failed before the parameters were renamed; `Generated` is the shape that would fail
+/// today if the rebinding were removed.
+#[derive(ThreadAware)]
+enum ShadowingFieldNames<T> {
+    Both {
+        source: Tracker,
+        destination: Tracker,
+    },
+    Marker {
+        source: PhantomData<T>,
+    },
+    Generated {
+        __thread_aware_source: Tracker,
+        __thread_aware_destination: Tracker,
+    },
+}
+
+/// Constants named exactly like the bindings the derive used to generate.
+///
+/// A binding cannot shadow a constant in scope: the identifier is read as a pattern referring
+/// to the constant rather than as a binding, so a generated name that a caller might plausibly
+/// declare breaks the derive. The generated names are obscure for that reason; `_v0` was the
+/// old spelling and is exactly the kind of name a caller could reasonably use.
+#[expect(
+    non_upper_case_globals,
+    reason = "deliberately spelled like the binding the derive used to generate"
+)]
+const _v0: usize = 0;
+
+#[expect(
+    non_upper_case_globals,
+    reason = "deliberately spelled like the binding the derive used to generate"
+)]
+const _v1: usize = 1;
+
+#[derive(ThreadAware)]
+enum ConstCapture {
+    Tuple(Tracker, Tracker),
+    Named { first: Tracker, second: Tracker },
+}
+
+/// A caller type shadowing a name the generated signature uses.
+///
+/// The derive spells every path it emits in full, so a local `Option` cannot change what the
+/// generated `relocate` signature means.
+mod shadowed_prelude {
+    use thread_aware_macros::ThreadAware;
+
+    use super::Tracker;
+
+    pub(crate) enum Option<T> {
+        Only(T),
+    }
+
+    #[derive(ThreadAware)]
+    pub(crate) struct Holder {
+        pub(crate) tracked: Tracker,
+    }
+
+    #[derive(ThreadAware)]
+    pub(crate) enum Wrapped {
+        V(Tracker),
+    }
+
+    pub(crate) fn only(value: &Option<u8>) -> u8 {
+        match value {
+            Option::Only(v) => *v,
+        }
+    }
+}
+
+#[test]
+fn a_shadowed_prelude_name_does_not_break_the_derive() {
+    let (source, destination) = affinity_pair();
+
+    let mut holder = shadowed_prelude::Holder {
+        tracked: Tracker::default(),
+    };
+    holder.relocate(source, destination);
+    assert_eq!(holder.tracked.relocations, 1);
+
+    let mut wrapped = shadowed_prelude::Wrapped::V(Tracker::default());
+    wrapped.relocate(source, destination);
+    match &wrapped {
+        shadowed_prelude::Wrapped::V(t) => assert_eq!(t.relocations, 1),
+    }
+
+    assert_eq!(shadowed_prelude::only(&shadowed_prelude::Option::Only(7)), 7);
+}
+
+/// Constants and const parameters named exactly like parameters of the generated method.
+///
+/// A function parameter does not shadow either: a `const` or const parameter of the same name
+/// is read as a pattern referring to that item, and a `static` may not be shadowed at all.
+/// Both fail to compile, so the generated method names its parameters obscurely, as the field
+/// bindings do.
+///
+/// Scoped to its own module for two reasons: a `const destination` at file scope would be
+/// matched against by every `let (source, destination) = ...` in the tests below, and the
+/// lint exemption these deliberate spellings need should not apply to the whole file.
+mod colliding_parameter_names {
+    #![expect(non_upper_case_globals, reason = "deliberately spelled like the generated parameters")]
+
+    use thread_aware_macros::ThreadAware;
+
+    use super::Tracker;
+
+    pub(crate) const destination: usize = 0;
+
+    #[derive(ThreadAware)]
+    pub(crate) struct ConstParamNamedSource<const source: usize> {
+        pub(crate) tracked: Tracker,
+    }
+
+    #[derive(ThreadAware)]
+    pub(crate) struct NamedAfterConst {
+        pub(crate) tracked: Tracker,
+    }
+}
+
+#[test]
+fn caller_constants_do_not_collide_with_generated_parameters() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = colliding_parameter_names::ConstParamNamedSource::<3> {
+        tracked: Tracker::default(),
+    };
+    value.relocate(source, destination);
+    assert_eq!(value.tracked.relocations, 1);
+
+    let mut other = colliding_parameter_names::NamedAfterConst {
+        tracked: Tracker::default(),
+    };
+    other.relocate(source, destination);
+    assert_eq!(other.tracked.relocations, 1);
+
+    let colliding = colliding_parameter_names::destination;
+    assert_eq!(colliding, 0, "the colliding constant is untouched");
+}
+
+#[test]
+fn caller_constants_do_not_collide_with_generated_bindings() {
+    let (source, destination) = affinity_pair();
+
+    let mut tuple = ConstCapture::Tuple(Tracker::default(), Tracker::default());
+    tuple.relocate(source, destination);
+    match &tuple {
+        ConstCapture::Tuple(a, b) => {
+            assert_eq!(a.relocations, 1);
+            assert_eq!(b.relocations, 1);
+        }
+        ConstCapture::Named { .. } => unreachable!(),
+    }
+
+    let mut named = ConstCapture::Named {
+        first: Tracker::default(),
+        second: Tracker::default(),
+    };
+    named.relocate(source, destination);
+    match &named {
+        ConstCapture::Named { first, second } => {
+            assert_eq!(first.relocations, 1);
+            assert_eq!(second.relocations, 1);
+        }
+        ConstCapture::Tuple(..) => unreachable!(),
+    }
+
+    assert_eq!(_v0 + _v1, 1, "the colliding constants are untouched");
+}
+
+#[test]
+fn variant_fields_named_after_relocate_parameters_compile() {
+    let (source, destination) = affinity_pair();
+
+    let mut value = ShadowingFieldNames::<i32>::Both {
+        source: Tracker::default(),
+        destination: Tracker::default(),
+    };
+    value.relocate(source, destination);
+
+    match &value {
+        ShadowingFieldNames::Both { source: a, destination: b } => {
+            assert_eq!(a.relocations, 1, "a field named `source` is still relocated");
+            assert_eq!(b.relocations, 1, "a field named `destination` is still relocated");
+        }
+        ShadowingFieldNames::Marker { .. } | ShadowingFieldNames::Generated { .. } => unreachable!(),
+    }
+
+    let mut generated = ShadowingFieldNames::<i32>::Generated {
+        __thread_aware_source: Tracker::default(),
+        __thread_aware_destination: Tracker::default(),
+    };
+    generated.relocate(source, destination);
+    match &generated {
+        ShadowingFieldNames::Generated {
+            __thread_aware_source: a,
+            __thread_aware_destination: b,
+        } => {
+            assert_eq!(a.relocations, 1, "a field named like a generated parameter is relocated");
+            assert_eq!(b.relocations, 1, "a field named like a generated parameter is relocated");
+        }
+        _ => unreachable!(),
+    }
+
+    let mut marker = ShadowingFieldNames::<i32>::Marker { source: PhantomData };
+    marker.relocate(source, destination);
+}
+
+/// An enum with no variants has nothing to relocate.
+///
+/// The derive emits no body for it. `match self {}` would be rejected as non-exhaustive,
+/// because a `&mut` reference is inhabited however uninhabited its referent is.
 #[derive(ThreadAware)]
 enum Uninhabited {}
 
