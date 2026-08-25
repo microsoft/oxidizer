@@ -58,9 +58,7 @@ mod windows {
         construction(c, &allocs, &time);
         error_path(c, &allocs, &time);
 
-        // `alloc_tracker::Session` reports on drop; `all_the_time::Session` has to be asked.
-        time.print_to_stdout();
-        drop(allocs);
+        // Both sessions print their tables when dropped.
     }
 
     fn construction(c: &mut Criterion, allocs: &AllocSession, time: &TimeSession) {

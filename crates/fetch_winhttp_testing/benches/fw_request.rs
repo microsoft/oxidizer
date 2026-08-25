@@ -86,9 +86,7 @@ mod windows {
         roundtrip(c, &allocs, &time);
         protocol(c, &allocs, &time);
 
-        // `alloc_tracker::Session` reports on drop; `all_the_time::Session` has to be asked.
-        time.print_to_stdout();
-        drop(allocs);
+        // Both sessions print their tables when dropped.
     }
 
     fn roundtrip(c: &mut Criterion, allocs: &AllocSession, time: &TimeSession) {
