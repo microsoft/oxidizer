@@ -17,7 +17,7 @@ use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 
-use super::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
 
 #[derive(Debug)]
 struct State {
@@ -37,7 +37,8 @@ struct State {
 /// stalling plan parks that connection for the remainder of the fixture's life. A test that needs
 /// a stalled HTTP/3 response followed by a further request would hang rather than fail; giving
 /// each accepted stream its own task is a prerequisite for that scenario.
-pub(crate) struct Http3Server {
+#[derive(Debug)]
+pub struct Http3Server {
     address: SocketAddr,
     state: Arc<State>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -45,7 +46,9 @@ pub(crate) struct Http3Server {
 }
 
 impl Http3Server {
-    pub(crate) fn start(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
+    /// Starts the fixture on an ephemeral loopback UDP port with a self-signed
+    /// `localhost` certificate, serving `responses` in order.
+    pub fn start(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
         let state = Arc::new(State {
             responses: responses.into_iter().collect(),
             next_response: AtomicUsize::new(0),
@@ -77,11 +80,13 @@ impl Http3Server {
         }
     }
 
-    pub(crate) fn url(&self, path: &str) -> String {
+    /// The absolute URL that reaches `path` on this fixture.
+    pub fn url(&self, path: &str) -> String {
         format!("https://localhost:{}{path}", self.address.port())
     }
 
-    pub(crate) fn finish(mut self) -> ServerSnapshot {
+    /// Shuts the fixture down and returns what it observed.
+    pub fn finish(mut self) -> ServerSnapshot {
         self.stop();
         ServerSnapshot {
             requests: self.state.requests.lock().unwrap().clone(),

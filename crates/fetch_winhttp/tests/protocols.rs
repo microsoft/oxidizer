@@ -9,19 +9,13 @@
 //! HTTP/3 is required but QUIC is unreachable.
 
 #![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
-
-mod common;
 
 use std::error::Error;
 
 use bytes::Bytes;
 use bytesbuf::BytesView;
-use common::{Http3Server, ResponsePlan, TestServer, client, collect_frames};
 use fetch_winhttp::WinHttpTlsConfig;
+use fetch_winhttp_testing::{Http3Server, ResponsePlan, TestServer, client, collect_frames};
 use http::{HeaderMap, HeaderValue, Version};
 use http_extensions::HttpBodyOptions;
 

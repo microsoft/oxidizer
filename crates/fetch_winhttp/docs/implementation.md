@@ -187,12 +187,18 @@ crates/fetch_winhttp/tests/
   lifecycle.rs         // pool isolation and reuse, cancellation, body drop, leak soak,
                        //   full fetch pipeline construction
   non_windows.rs       // keeps package-scoped test runs nonempty off Windows
-  common/
-    mod.rs             // shared client construction and frame-collection helpers
-    server.rs          // TestServer: localhost TCP fixture (HTTP/1.1 and HTTP/2, TLS)
-    http3_server.rs    // Http3Server: localhost QUIC fixture (HTTP/3)
-    recording.rs       // ResponsePlan/RecordedRequest scripting and observation vocabulary
+
+crates/fetch_winhttp_testing/src/
+  lib.rs               // shared client construction and frame-collection helpers
+  server.rs            // TestServer: localhost TCP fixture (HTTP/1.1 and HTTP/2, TLS)
+  http3_server.rs      // Http3Server: localhost QUIC fixture (HTTP/3)
+  recording.rs         // ResponsePlan/RecordedRequest scripting and observation vocabulary
 ```
+
+`fetch_winhttp_testing` is an unpublished package rather than a `tests/common`
+module, so the integration tests, the examples, and the benchmarks all drive the
+same fixtures. It also keeps the server ecosystem's dependencies - Tokio, hyper,
+quinn, rustls - out of the transport package entirely.
 
 `lifecycle.rs` is the only binary that builds a client through `fetch`'s standard
 pipeline and therefore the only one whose requests pass through `fetch`'s logging
@@ -1144,7 +1150,7 @@ after the table.
 ### 7.3 Integration tests (real WinHTTP, localhost)
 
 Gated behind `#[cfg(windows)]` and `#[cfg_attr(miri, ignore)]`, against the localhost
-fixtures in `tests/common/`. `TestServer` (`server.rs`) serves plaintext or TLS traffic
+fixtures in `fetch_winhttp_testing`. `TestServer` (`server.rs`) serves plaintext or TLS traffic
 over an ephemeral TCP port on the loopback address using `hyper` plus `hyper-util`'s
 protocol-detecting connection builder, so one instance answers both HTTP/1.1 and HTTP/2;
 its TLS mode wraps that with `tokio-rustls` and an `rcgen` self-signed certificate whose

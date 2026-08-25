@@ -1,0 +1,67 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_winhttp_testing"
+description = "Localhost fixtures and client helpers for exercising fetch_winhttp (Windows only)."
+version = "0.0.0"
+publish = false
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Its
+# public surface intentionally re-exposes the fetch/http/bytes types the
+# fixtures are scripted and observed with.
+#
+# This is NOT redundant with INTERNAL_CRATES membership: that list is only read
+# by scripts/check-external-types.rs (the `external-type-exposure` job). The
+# `anvil-external-types` recipe behind `pr-fast` scopes itself from cargo
+# metadata and never consults it, so without this block that job fails.
+allowed_external_types = ["*"]
+
+# Fixture crate: it is exercised by other crates' tests, examples, and
+# benchmarks rather than by a suite of its own, so it may legitimately produce
+# no coverage data.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+[target.'cfg(windows)'.dependencies]
+bytes = { workspace = true }
+bytesbuf = { workspace = true }
+fetch = { workspace = true }
+fetch_winhttp = { path = "../fetch_winhttp" }
+futures = { workspace = true, features = ["std"] }
+h3 = { workspace = true }
+h3-quinn = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = [
+    "http1",
+    "http2",
+    "server-auto",
+    "tokio",
+] }
+observed = { workspace = true }
+quinn = { workspace = true, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true, features = ["aws-lc-rs", "std", "tls12"] }
+rustls-pki-types = { workspace = true, features = ["std"] }
+tick = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = [
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "sync",
+] }
+tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
+
+[lints]
+workspace = true

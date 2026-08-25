@@ -11,18 +11,12 @@
 //! to observe them through.
 
 #![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
-
-mod common;
 
 use bytes::Bytes;
 use bytesbuf::BytesView;
-use common::{ResponsePlan, TestServer, client};
 use fetch::HttpError;
 use fetch_winhttp::WinHttpTlsConfig;
+use fetch_winhttp_testing::{ResponsePlan, TestServer, client};
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, COOKIE, LOCATION, SET_COOKIE, TRANSFER_ENCODING, WWW_AUTHENTICATE};
 use http::{HeaderMap, HeaderValue, Method, StatusCode, Version};
 use http_body::Frame;

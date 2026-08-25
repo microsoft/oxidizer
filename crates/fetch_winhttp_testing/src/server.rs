@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
-use super::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
+use crate::recording::{RecordedRequest, ResponseFrame, ResponsePlan, ServerSnapshot};
 
 type ResponseBody = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -76,7 +76,13 @@ struct State {
     connections: AtomicUsize,
 }
 
-pub(crate) struct TestServer {
+/// A scripted HTTP/1.1 and HTTP/2 origin server on the loopback interface.
+///
+/// Serves the response plans it was started with, one per request, and records
+/// what arrived. `http` and `http_ipv6` serve plaintext; `https` negotiates TLS
+/// with a self-signed certificate and advertises both `h2` and `http/1.1`.
+#[derive(Debug)]
+pub struct TestServer {
     address: SocketAddr,
     transport: Transport,
     state: Arc<State>,
@@ -85,17 +91,23 @@ pub(crate) struct TestServer {
 }
 
 impl TestServer {
-    pub(crate) fn http(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
+    /// Serves plaintext HTTP over the IPv4 loopback.
+    pub fn http(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
         Self::start(responses, Transport::Http, None, IpAddr::V4(Ipv4Addr::LOCALHOST))
     }
 
     /// Serves plaintext HTTP over the IPv6 loopback, so a caller reaches it through a bracketed
     /// authority.
-    pub(crate) fn http_ipv6(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
+    pub fn http_ipv6(responses: impl IntoIterator<Item = ResponsePlan>) -> Self {
         Self::start(responses, Transport::Http, None, IpAddr::V6(Ipv6Addr::LOCALHOST))
     }
 
-    pub(crate) fn https(responses: impl IntoIterator<Item = ResponsePlan>, certificate_names: &[&str]) -> Self {
+    /// Serves TLS over the IPv4 loopback with a self-signed certificate issued
+    /// for `certificate_names`.
+    ///
+    /// Naming something other than `localhost` is how a test produces a
+    /// hostname mismatch, since callers reach the fixture through `localhost`.
+    pub fn https(responses: impl IntoIterator<Item = ResponsePlan>, certificate_names: &[&str]) -> Self {
         let certificate_names = certificate_names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
         let CertifiedKey { cert, signing_key } = generate_simple_self_signed(certificate_names).unwrap();
         let private_key = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(signing_key.serialize_der()));
@@ -147,7 +159,8 @@ impl TestServer {
         }
     }
 
-    pub(crate) fn url(&self, path: &str) -> String {
+    /// The absolute URL that reaches `path` on this fixture.
+    pub fn url(&self, path: &str) -> String {
         let scheme = match self.transport {
             Transport::Http => "http",
             Transport::Https => "https",
@@ -163,7 +176,8 @@ impl TestServer {
         format!("{scheme}://{host}:{}{path}", self.address.port())
     }
 
-    pub(crate) fn finish(mut self) -> ServerSnapshot {
+    /// Shuts the fixture down and returns what it observed.
+    pub fn finish(mut self) -> ServerSnapshot {
         self.stop();
         let mut requests = self.state.requests.lock().unwrap().clone();
         requests.sort_by_key(|(index, _)| *index);

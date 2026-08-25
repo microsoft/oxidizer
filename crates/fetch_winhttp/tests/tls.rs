@@ -7,15 +7,9 @@
 //! handshake.
 
 #![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
 
-mod common;
-
-use common::{ResponsePlan, TestServer, client};
 use fetch_winhttp::WinHttpTlsConfig;
+use fetch_winhttp_testing::{ResponsePlan, TestServer, client};
 use http::Version;
 
 #[cfg_attr(miri, ignore)]

@@ -61,32 +61,15 @@ windows = { workspace = true, features = [
 [target.'cfg(windows)'.dev-dependencies]
 bytes = { workspace = true }
 ctor = { workspace = true }
+fetch_winhttp_testing = { path = "../fetch_winhttp_testing" }
 futures = { workspace = true, features = ["executor", "std"] }
-h3 = { workspace = true }
-h3-quinn = { workspace = true }
 http-body-util = { workspace = true }
-hyper = { workspace = true, features = ["http1", "http2", "server"] }
-hyper-util = { workspace = true, features = [
-    "http1",
-    "http2",
-    "server-auto",
-    "tokio",
-] }
 mockall = { workspace = true }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
-quinn = { workspace = true, features = [
-    "runtime-tokio",
-    "rustls-aws-lc-rs",
-] }
-rcgen = { workspace = true, features = ["aws_lc_rs"] }
-rustls = { workspace = true, features = ["aws-lc-rs", "std", "tls12"] }
-rustls-pki-types = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
-tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
 
 [[test]]
 name = "non_windows"

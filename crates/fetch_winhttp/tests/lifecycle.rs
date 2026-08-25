@@ -8,17 +8,11 @@
 //! transport.
 
 #![cfg(windows)]
-#![expect(
-    clippy::unwrap_used,
-    reason = "integration tests use unwrap to surface failures through the test harness"
-)]
 
 // The standard pipeline exercised here emits `tracing` events through `fetch`'s logging
 // handler, and integration binaries link the library with `cfg(test)` false, so no crate-root
 // initialization runs. Install it directly. See docs/tracing-tests.md.
 testing_aids::init_tracing!();
-
-mod common;
 
 use std::future::Future as _;
 use std::task::{Context, Poll};
@@ -27,10 +21,10 @@ use std::time::Duration;
 use bytes::Bytes;
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use common::{ResponsePlan, TestServer, client, client_builder};
 use fetch::HttpClient;
 use fetch::options::{ConnectionPoolOptions, PoolSelection};
 use fetch_winhttp::{HttpClientWinHttpExt as _, WinHttpDeps, WinHttpTlsConfig};
+use fetch_winhttp_testing::{ResponsePlan, TestServer, client, client_builder};
 use futures::TryStreamExt as _;
 use http::Version;
 use observed::Sink;

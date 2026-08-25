@@ -18,8 +18,10 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, Version}
 /// script a multi-frame body and a trailer section without either fixture inventing its own
 /// representation.
 #[derive(Clone, Debug)]
-pub(crate) enum ResponseFrame {
+pub enum ResponseFrame {
+    /// A chunk of response body bytes.
     Data(Bytes),
+    /// The response's trailer section, which terminates the body.
     Trailers(HeaderMap),
 }
 
@@ -30,18 +32,23 @@ pub(crate) enum ResponseFrame {
 /// into whatever its protocol implementation requires. The fields are visible to the whole
 /// `common` module so that both fixtures can drive their own protocol stack from one plan.
 #[derive(Clone, Debug)]
-pub(crate) struct ResponsePlan {
-    pub(crate) status: StatusCode,
-    pub(crate) headers: HeaderMap,
-    pub(crate) frames: Vec<ResponseFrame>,
+pub struct ResponsePlan {
+    /// Status the fixture responds with.
+    pub status: StatusCode,
+    /// Headers the fixture sends, beyond whatever its protocol stack adds.
+    pub headers: HeaderMap,
+    /// Body frames the fixture emits, in order.
+    pub frames: Vec<ResponseFrame>,
     /// When set, the response never completes after the scripted frames are sent. This is how a
     /// test observes a download that is still in flight; the fixture aborts the stalled task on
     /// shutdown, so no timer and no wall-clock deadline is involved.
-    pub(crate) stall_after_frames: bool,
+    pub stall_after_frames: bool,
 }
 
 impl ResponsePlan {
-    pub(crate) fn ok(body: impl Into<Bytes>) -> Self {
+    /// A `200 OK` carrying `body` as a single data frame.
+    #[must_use]
+    pub fn ok(body: impl Into<Bytes>) -> Self {
         Self {
             status: StatusCode::OK,
             headers: HeaderMap::new(),
@@ -50,7 +57,9 @@ impl ResponsePlan {
         }
     }
 
-    pub(crate) fn status(status: StatusCode) -> Self {
+    /// A response carrying `status` and an empty body.
+    #[must_use]
+    pub fn status(status: StatusCode) -> Self {
         Self {
             status,
             headers: HeaderMap::new(),
@@ -59,12 +68,16 @@ impl ResponsePlan {
         }
     }
 
-    pub(crate) fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+    /// Appends a response header.
+    #[must_use]
+    pub fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.append(name, value);
         self
     }
 
-    pub(crate) fn chunks(chunks: impl IntoIterator<Item = Bytes>) -> Self {
+    /// A `200 OK` whose body arrives as several data frames.
+    #[must_use]
+    pub fn chunks(chunks: impl IntoIterator<Item = Bytes>) -> Self {
         Self {
             status: StatusCode::OK,
             headers: HeaderMap::new(),
@@ -73,12 +86,16 @@ impl ResponsePlan {
         }
     }
 
-    pub(crate) fn trailers(mut self, trailers: HeaderMap) -> Self {
+    /// Terminates the body with a trailer section.
+    #[must_use]
+    pub fn trailers(mut self, trailers: HeaderMap) -> Self {
         self.frames.push(ResponseFrame::Trailers(trailers));
         self
     }
 
-    pub(crate) fn stall_after_frames(mut self) -> Self {
+    /// Leaves the response in flight once the scripted frames are sent.
+    #[must_use]
+    pub fn stall_after_frames(mut self) -> Self {
         self.stall_after_frames = true;
         self
     }
@@ -87,7 +104,7 @@ impl ResponsePlan {
     ///
     /// A fixture whose protocol implementation does not derive `Content-Length` for it needs this
     /// to declare the body length the way a real origin server would.
-    pub(crate) fn body_length(&self) -> usize {
+    pub fn body_length(&self) -> usize {
         self.frames
             .iter()
             .map(|frame| match frame {
@@ -103,13 +120,19 @@ impl ResponsePlan {
 /// This is the only channel through which a test can assert on what the transport actually sent,
 /// as opposed to what it was asked to send.
 #[derive(Clone, Debug)]
-pub(crate) struct RecordedRequest {
-    pub(crate) method: Method,
-    pub(crate) uri: Uri,
-    pub(crate) version: Version,
-    pub(crate) headers: HeaderMap,
-    pub(crate) body: Bytes,
-    pub(crate) trailers: Option<HeaderMap>,
+pub struct RecordedRequest {
+    /// Method the transport sent.
+    pub method: Method,
+    /// Request target as it arrived on the wire.
+    pub uri: Uri,
+    /// Protocol version the connection negotiated.
+    pub version: Version,
+    /// Headers the transport sent, including any it added itself.
+    pub headers: HeaderMap,
+    /// Request body, collected in full.
+    pub body: Bytes,
+    /// Request trailer section, if the protocol carried one.
+    pub trailers: Option<HeaderMap>,
 }
 
 /// Everything a fixture observed over its lifetime, read once it has been shut down.
@@ -117,7 +140,9 @@ pub(crate) struct RecordedRequest {
 /// `connections` counts accepted transport connections rather than requests, which is how the
 /// connection-pooling and cancellation tests distinguish reuse from re-establishment.
 #[derive(Debug)]
-pub(crate) struct ServerSnapshot {
-    pub(crate) requests: Vec<RecordedRequest>,
-    pub(crate) connections: usize,
+pub struct ServerSnapshot {
+    /// Requests the fixture served, in the order it assigned response plans.
+    pub requests: Vec<RecordedRequest>,
+    /// Transport connections the fixture accepted.
+    pub connections: usize,
 }

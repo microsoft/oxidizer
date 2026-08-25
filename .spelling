@@ -838,3 +838,8 @@ reportable
 substrings
 unrepresentable
 unterminated
+plaintext
+loopback
+UDP
+IPv4
+IPv6
