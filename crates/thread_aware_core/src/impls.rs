@@ -10,13 +10,13 @@ use std::collections::HashMap;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use crate::{Affinity, ThreadAware};
+use crate::{Location, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
     ($t:ty) => {
         impl ThreadAware for $t {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
         }
     };
 }
@@ -53,7 +53,7 @@ macro_rules! impl_transfer_tuple {
                 $head: ThreadAware,
                 $($tail: ThreadAware),*
                 {
-                    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+                    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
                         #[expect(non_snake_case, reason = "Macro-generated code uses uppercase identifiers for tuple elements")]
                         let ($head, $($tail),*) = self;
                         $head.relocate(source, destination);
@@ -67,7 +67,7 @@ macro_rules! impl_transfer_tuple {
 
     () => {
         impl ThreadAware for () {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
         }
     };
 }
@@ -77,7 +77,7 @@ impl_transfer_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
 macro_rules! impl_transfer_fn {
     ($head:ident, $($tail:ident,)*) => {
         impl<R, $head, $($tail),*> ThreadAware for fn($head, $($tail),*) -> R {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
         }
 
         // Recursively call the macro for the rest of the function parameters
@@ -85,7 +85,7 @@ macro_rules! impl_transfer_fn {
     };
     () => {
         impl<R> ThreadAware for fn() -> R {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+            fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {}
         }
     }
 }
@@ -98,7 +98,7 @@ impl<T> ThreadAware for Option<T>
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         if let Some(value) = self {
             value.relocate(source, destination);
         }
@@ -110,7 +110,7 @@ where
     T: ThreadAware,
     E: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         match self {
             Ok(value) => value.relocate(source, destination),
             Err(err) => err.relocate(source, destination),
@@ -122,7 +122,7 @@ impl<T> ThreadAware for Vec<T>
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         for value in self.iter_mut() {
             value.relocate(source, destination);
         }
@@ -133,7 +133,7 @@ impl<T> ThreadAware for Box<T>
 where
     T: ThreadAware + ?Sized,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         (**self).relocate(source, destination);
     }
 }
@@ -148,7 +148,7 @@ where
     K: ThreadAware + Eq + core::hash::Hash,
     V: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
         let old = core::mem::take(self);
         for (mut key, mut value) in old {
             key.relocate(source, destination);
@@ -165,10 +165,13 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use crate::{Affinity, ThreadAware};
+    use crate::{Core, Location, MemoryRegion, Provenance, ThreadAware};
 
-    fn pinned_affinities() -> [Affinity; 2] {
-        [Affinity::new(0, 0, 2, 1), Affinity::new(1, 0, 2, 1)]
+    fn sample_locations() -> [Location; 2] {
+        [
+            Location::new(Provenance::from(0), Core::from(0), MemoryRegion::from(0)),
+            Location::new(Provenance::from(0), Core::from(1), MemoryRegion::from(0)),
+        ]
     }
 
     #[test]
@@ -176,9 +179,9 @@ mod tests {
     fn test_hashmap() {
         use std::collections::HashMap;
 
-        let affinities = pinned_affinities();
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let locations = sample_locations();
+        let source = Some(&locations[0]);
+        let destination = &locations[1];
 
         let mut value: HashMap<i32, String> = HashMap::new();
         value.insert(1, "one".to_string());
@@ -196,10 +199,9 @@ mod tests {
 
     #[test]
     fn test_tuples() {
-        use crate::ThreadAware;
-        let affinities = pinned_affinities();
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let locations = sample_locations();
+        let source = Some(&locations[0]);
+        let destination = &locations[1];
 
         // Test empty tuple
         let mut empty_tuple = ();
@@ -243,8 +245,6 @@ mod tests {
 
     #[test]
     fn test_function_pointers() {
-        use crate::ThreadAware;
-
         // Helper functions for testing
         fn no_args() -> i32 {
             42
@@ -275,16 +275,16 @@ mod tests {
             x > 0
         }
 
-        let affinities = pinned_affinities();
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let locations = sample_locations();
+        let source = Some(&locations[0]);
+        let destination = &locations[1];
 
-        // Test fn() -> R (line 90)
+        // Test fn() -> R
         let mut fn_ptr_no_args: fn() -> i32 = no_args;
         fn_ptr_no_args.relocate(source, destination);
         assert_eq!(fn_ptr_no_args(), 42);
 
-        // Test fn(A) -> R (line 80)
+        // Test fn(A) -> R
         let mut fn_ptr_one: fn(i32) -> i32 = one_arg;
         fn_ptr_one.relocate(source, destination);
         assert_eq!(fn_ptr_one(5), 10);
@@ -316,11 +316,9 @@ mod tests {
 
     #[test]
     fn test_result() {
-        use crate::ThreadAware;
-
-        let affinities = pinned_affinities();
-        let source = Some(affinities[0]);
-        let destination = affinities[1];
+        let locations = sample_locations();
+        let source = Some(&locations[0]);
+        let destination = &locations[1];
 
         // Test Ok variant
         let mut ok_value: Result<String, i32> = Ok("success".to_string());
@@ -348,61 +346,56 @@ mod tests {
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        fn relocate(&mut self, _source: Option<&Location>, _destination: &Location) {
             self.0 = true;
         }
     }
 
-    fn affinities() -> (Option<Affinity>, Affinity) {
-        let a = pinned_affinities();
-        (Some(a[0]), a[1])
-    }
-
     #[test]
     fn option_some_forwards_relocate() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val = Some(Tracker(false));
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert_eq!(val, Some(Tracker(true)));
     }
 
     #[test]
     fn option_none_is_noop() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val: Option<Tracker> = None;
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert_eq!(val, None);
     }
 
     #[test]
     fn result_ok_forwards_relocate() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val: Result<Tracker, Tracker> = Ok(Tracker(false));
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert_eq!(val, Ok(Tracker(true)));
     }
 
     #[test]
     fn result_err_forwards_relocate() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val: Result<Tracker, Tracker> = Err(Tracker(false));
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert_eq!(val, Err(Tracker(true)));
     }
 
     #[test]
     fn vec_forwards_relocate_to_elements() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val = vec![Tracker(false), Tracker(false)];
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert!(val.iter().all(|t| t.0), "all elements must be relocated");
     }
 
     #[test]
     fn box_forwards_relocate() {
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut val: Box<Tracker> = Box::new(Tracker(false));
-        val.relocate(src, dst);
+        val.relocate(Some(&locations[0]), &locations[1]);
         assert!(val.0, "Box must forward relocate to inner value");
     }
 
@@ -411,10 +404,10 @@ mod tests {
     fn hashmap_forwards_relocate_to_keys_and_values() {
         use std::collections::HashMap;
 
-        let (src, dst) = affinities();
+        let locations = sample_locations();
         let mut map = HashMap::new();
         map.insert(Tracker(false), Tracker(false));
-        map.relocate(src, dst);
+        map.relocate(Some(&locations[0]), &locations[1]);
         for (key, value) in &map {
             assert!(key.0, "key must be relocated");
             assert!(value.0, "value must be relocated");

@@ -17,10 +17,9 @@ Stable foundations for moving thread-isolated state between execution contexts.
 
 This crate contains the small API shared by thread-aware libraries:
 
-* [`ThreadAware`][__link0] notifies a value that it has moved to a different affinity.
-* [`Affinity`][__link1] identifies the processor and memory region associated with an
-  execution context.
-* [`pinned_affinities`][__link2] creates affinity identifiers for a known topology.
+* [`ThreadAware`][__link0] notifies a value that it has moved to a different location.
+* [`Location`][__link1] identifies the execution context — provenance, core and memory
+  region — that a value has moved to.
 
 Relocation is a cooperative performance optimization rather than a correctness
 boundary. Implementations must remain correct if a relocation notification is
@@ -36,7 +35,6 @@ and `Path`.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbmGboBPVPu90b3Wgg_7oIUr8bjuE3eObj9rAbn8voVsAhhq1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTEuMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbwoB4UlljPFobS2kTQLqadiobLsTInvY9y2UbdQM22DfpyrBhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTEuMC4w
  [__link0]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/trait.ThreadAware.html
- [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=Affinity
- [__link2]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=pinned_affinities
+ [__link1]: https://docs.rs/thread_aware_core/1.0.0/thread_aware_core/?search=Location
