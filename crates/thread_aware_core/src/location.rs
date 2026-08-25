@@ -3,27 +3,46 @@
 
 //! The [`Location`] identifier and its component id types.
 //!
-//! A [`Location`] locates an execution context by three independent coordinates, each
-//! its own domain type so they can evolve independently:
+//! A [`Location`] locates an execution context by three independent coordinates, each its
+//! own domain type so they can evolve independently:
 //!
-//! - [`Topology`] — identifies the topology that produced the location. Locations from
-//!   unrelated runtimes have different topologies, so they never compare equal and
-//!   cross-topology relocation stays well defined.
-//! - [`Core`] — the logical processor.
-//! - [`MemoryRegion`] — the memory region (for example, a NUMA node).
+//! - [`Topology`] — the runtime that produced the location.
+//! - [`Core`] — the logical processor on the physical machine.
+//! - [`MemoryRegion`] — the memory region on the physical machine, such as a NUMA node.
 //!
-//! The id types wrap a `u16` and are built with `From`. If that range is ever too
-//! small, a `From<u32>` (or wider) can be added later without a breaking change.
+//! [`Core`] and [`MemoryRegion`] describe hardware and are therefore shared by every
+//! topology on the machine; [`Topology`] distinguishes the runtimes that use that hardware.
+//! The guarantees these ids carry are documented in the crate-level
+//! [coordinate space](crate#coordinate-space) section.
+//!
+//! The id types wrap a `u16` and are built with `From`. If that range is ever too small, a
+//! `From<u32>` (or wider) can be added later without a breaking change.
 
-/// Identity of the topology that produced a [`Location`].
+/// Identifies the runtime that produced a [`Location`].
+///
+/// Runtimes must give each concurrently live instance a distinct topology, so that two
+/// runtimes in the same process are always distinguishable even when they run on the same
+/// hardware. A topology does not scope [`Core`] or [`MemoryRegion`]; it lets an
+/// implementation tell whether it is still inside the runtime whose resources it holds.
+///
+/// See the [coordinate space](crate#coordinate-space) notes for what the wrapped value does
+/// and does not promise.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Topology(u16);
 
-/// A logical processor within a topology.
+/// A logical processor on the physical machine.
+///
+/// Values are hardware coordinates rather than indices into a worker list, so the same core
+/// carries the same [`Core`] in every topology and state keyed by it alone can be shared
+/// across runtimes. See the [coordinate space](crate#coordinate-space) notes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Core(u16);
 
-/// A memory region (for example, a NUMA node) within a topology.
+/// A memory region on the physical machine, such as a NUMA node.
+///
+/// Like [`Core`], values are hardware coordinates shared by every topology on the machine,
+/// so region-keyed state can be shared across runtimes. See the
+/// [coordinate space](crate#coordinate-space) notes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MemoryRegion(u16);
 
@@ -47,10 +66,39 @@ impl From<u16> for MemoryRegion {
 
 /// Identifies where an execution context runs: its topology, core and memory region.
 ///
+/// A `Location` is produced by a runtime, typically once per worker at startup, and handed
+/// to [`ThreadAware::relocate`](crate::ThreadAware::relocate) to describe where a value came
+/// from and where it now lives. Implementations read the coordinates they care about — a
+/// per-core cache keys on [`core`](Self::core), a memory pool on
+/// [`memory_region`](Self::memory_region) — and ignore the rest.
+///
 /// `Location` is cheap to clone but deliberately not `Copy`, which leaves room to carry
-/// richer data (such as a runtime handle) in the future without a breaking change. It
-/// is passed by reference to [`ThreadAware::relocate`](crate::ThreadAware::relocate),
-/// so consumers rarely clone it.
+/// richer data (such as a runtime handle) in the future without a breaking change. It is
+/// passed by reference to [`relocate`](crate::ThreadAware::relocate), so consumers rarely
+/// clone it.
+///
+/// Equality covers all three coordinates, so locations from different runtimes never compare
+/// equal even when they describe the same physical core. Implementations that care only
+/// about hardware should therefore compare [`core`](Self::core) or
+/// [`memory_region`](Self::memory_region) directly rather than whole locations. See the
+/// [coordinate space](crate#coordinate-space) notes for the guarantees the ids carry.
+///
+/// # Examples
+///
+/// ```
+/// use thread_aware_core::{Core, Location, MemoryRegion, Topology};
+///
+/// let location = Location::new(Topology::from(1), Core::from(3), MemoryRegion::from(1));
+///
+/// assert_eq!(location.core(), Core::from(3));
+///
+/// // A second runtime on the same core produces a different location...
+/// let other = Location::new(Topology::from(2), Core::from(3), MemoryRegion::from(1));
+/// assert_ne!(location, other);
+///
+/// // ...but the hardware coordinate is shared, so per-core state can be too.
+/// assert_eq!(location.core(), other.core());
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Location {
     topology: Topology,
@@ -60,6 +108,9 @@ pub struct Location {
 
 impl Location {
     /// Creates a location from its topology, core and memory region.
+    ///
+    /// Runtimes call this when they enumerate their workers. Tests can call it directly to
+    /// synthesize locations without standing up a runtime.
     #[must_use]
     pub const fn new(topology: Topology, core: Core, memory_region: MemoryRegion) -> Self {
         Self {
@@ -70,18 +121,27 @@ impl Location {
     }
 
     /// Returns the topology that produced this location.
+    ///
+    /// Compare topologies to detect that a value has crossed between runtimes. Such a move
+    /// must stay sound, but runtime-bound resources generally cannot survive it.
     #[must_use]
     pub const fn topology(&self) -> Topology {
         self.topology
     }
 
     /// Returns the core.
+    ///
+    /// Use this to partition state per core so that cores do not contend for it. Because it
+    /// is a hardware coordinate, the partitioning holds across topologies.
     #[must_use]
     pub const fn core(&self) -> Core {
         self.core
     }
 
     /// Returns the memory region.
+    ///
+    /// Use this to partition state whose cost is dominated by memory locality rather than
+    /// by cross-core sharing; cores in the same region can share it cheaply.
     #[must_use]
     pub const fn memory_region(&self) -> MemoryRegion {
         self.memory_region

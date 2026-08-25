@@ -1,16 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use alloc::borrow::{Cow, ToOwned};
 use alloc::boxed::Box;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::{Cell, RefCell};
 use core::time::Duration;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(feature = "std")]
 use std::path::{Path, PathBuf};
 
-use crate::{Location, ThreadAware};
+use crate::{Core, Location, MemoryRegion, ThreadAware, Topology};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -26,10 +29,12 @@ impl_transfer!(u8);
 impl_transfer!(u16);
 impl_transfer!(u32);
 impl_transfer!(u64);
+impl_transfer!(u128);
 impl_transfer!(i8);
 impl_transfer!(i16);
 impl_transfer!(i32);
 impl_transfer!(i64);
+impl_transfer!(i128);
 impl_transfer!(usize);
 impl_transfer!(isize);
 impl_transfer!(f32);
@@ -41,9 +46,17 @@ impl_transfer!(String);
 impl_transfer!(PathBuf);
 impl_transfer!(Duration);
 #[cfg(feature = "std")]
+impl_transfer!(Path);
+#[cfg(feature = "std")]
 impl_transfer!(&Path);
 
-impl_transfer!(&'static str);
+impl_transfer!(str);
+impl_transfer!(&str);
+
+impl_transfer!(Topology);
+impl_transfer!(Core);
+impl_transfer!(MemoryRegion);
+impl_transfer!(Location);
 
 // We need to implement `ThreadAware` for tuples ranging from 0 to 12 elements
 macro_rules! impl_transfer_tuple {
@@ -92,7 +105,25 @@ macro_rules! impl_transfer_fn {
 
 impl_transfer_fn!(A, B, C, D, E, F, G, H, I, J, K, L,);
 
-//TODO impl_transfer_array! macro to implement ThreadAware for arrays
+impl<T, const N: usize> ThreadAware for [T; N]
+where
+    T: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        self.as_mut_slice().relocate(source, destination);
+    }
+}
+
+impl<T> ThreadAware for [T]
+where
+    T: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        for value in self.iter_mut() {
+            value.relocate(source, destination);
+        }
+    }
+}
 
 impl<T> ThreadAware for Option<T>
 where
@@ -129,6 +160,17 @@ where
     }
 }
 
+impl<T> ThreadAware for VecDeque<T>
+where
+    T: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        for value in self.iter_mut() {
+            value.relocate(source, destination);
+        }
+    }
+}
+
 impl<T> ThreadAware for Box<T>
 where
     T: ThreadAware + ?Sized,
@@ -138,32 +180,71 @@ where
     }
 }
 
-#[cfg(feature = "std")]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "This implementation preserves the existing API for the default hasher."
-)]
-impl<K, V> ThreadAware for HashMap<K, V>
+impl<K, V> ThreadAware for BTreeMap<K, V>
 where
-    K: ThreadAware + Eq + core::hash::Hash,
+    K: Send,
     V: ThreadAware,
 {
     fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
-        let old = core::mem::take(self);
-        for (mut key, mut value) in old {
-            key.relocate(source, destination);
+        for value in self.values_mut() {
             value.relocate(source, destination);
-            self.insert(key, value);
+        }
+    }
+}
+
+impl<T> ThreadAware for Cell<T>
+where
+    T: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        self.get_mut().relocate(source, destination);
+    }
+}
+
+impl<T> ThreadAware for RefCell<T>
+where
+    T: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        self.get_mut().relocate(source, destination);
+    }
+}
+
+impl<'a, B> ThreadAware for Cow<'a, B>
+where
+    B: ToOwned + Sync + ?Sized,
+    B::Owned: ThreadAware,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        if let Cow::Owned(value) = self {
+            value.relocate(source, destination);
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<K, V, S> ThreadAware for HashMap<K, V, S>
+where
+    K: Send,
+    V: ThreadAware,
+    S: Send,
+{
+    fn relocate(&mut self, source: Option<&Location>, destination: &Location) {
+        for value in self.values_mut() {
+            value.relocate(source, destination);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::Cow;
     use alloc::boxed::Box;
+    use alloc::collections::{BTreeMap, VecDeque};
     use alloc::string::{String, ToString};
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::cell::{Cell, RefCell};
 
     use crate::{Core, Location, MemoryRegion, ThreadAware, Topology};
 
@@ -342,7 +423,7 @@ mod tests {
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
     /// no-op replacements.
-    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
@@ -392,6 +473,67 @@ mod tests {
     }
 
     #[test]
+    fn array_and_slice_forward_relocate_to_elements() {
+        let locations = sample_locations();
+        let mut val = [Tracker(false), Tracker(false)];
+        val.relocate(Some(&locations[0]), &locations[1]);
+        assert!(val.iter().all(|t| t.0), "all array elements must be relocated");
+
+        let slice: &mut [Tracker] = &mut val;
+        for value in slice.iter_mut() {
+            value.0 = false;
+        }
+        slice.relocate(Some(&locations[0]), &locations[1]);
+        assert!(slice.iter().all(|t| t.0), "all slice elements must be relocated");
+    }
+
+    #[test]
+    fn vec_deque_forwards_relocate_to_elements() {
+        let locations = sample_locations();
+        let mut val = VecDeque::from([Tracker(false), Tracker(false)]);
+        val.relocate(Some(&locations[0]), &locations[1]);
+        assert!(val.iter().all(|t| t.0), "all elements must be relocated");
+    }
+
+    #[test]
+    fn btree_map_relocates_values_without_mutating_keys() {
+        let locations = sample_locations();
+        let mut map = BTreeMap::new();
+        map.insert(Tracker(false), Tracker(false));
+        map.relocate(Some(&locations[0]), &locations[1]);
+
+        let (key, value) = map.first_key_value().unwrap();
+        assert!(!key.0, "key identity must remain stable");
+        assert!(value.0, "value must be relocated");
+    }
+
+    #[test]
+    fn cells_forward_relocate_to_inner_value() {
+        let locations = sample_locations();
+
+        let mut cell = Cell::new(Tracker(false));
+        cell.relocate(Some(&locations[0]), &locations[1]);
+        assert!(cell.into_inner().0);
+
+        let mut ref_cell = RefCell::new(Tracker(false));
+        ref_cell.relocate(Some(&locations[0]), &locations[1]);
+        assert!(ref_cell.into_inner().0);
+    }
+
+    #[test]
+    fn cow_relocates_only_owned_value() {
+        let locations = sample_locations();
+        let borrowed = Tracker(false);
+        let mut borrowed_cow = Cow::Borrowed(&borrowed);
+        borrowed_cow.relocate(Some(&locations[0]), &locations[1]);
+        assert!(!borrowed_cow.as_ref().0);
+
+        let mut owned_cow: Cow<'_, Tracker> = Cow::Owned(Tracker(false));
+        owned_cow.relocate(Some(&locations[0]), &locations[1]);
+        assert!(owned_cow.as_ref().0);
+    }
+
+    #[test]
     fn box_forwards_relocate() {
         let locations = sample_locations();
         let mut val: Box<Tracker> = Box::new(Tracker(false));
@@ -401,16 +543,18 @@ mod tests {
 
     #[test]
     #[cfg(feature = "std")]
-    fn hashmap_forwards_relocate_to_keys_and_values() {
+    fn hashmap_relocates_values_without_mutating_keys() {
+        use core::hash::BuildHasherDefault;
         use std::collections::HashMap;
+        use std::hash::DefaultHasher;
 
         let locations = sample_locations();
-        let mut map = HashMap::new();
+        let mut map: HashMap<Tracker, Tracker, BuildHasherDefault<DefaultHasher>> = HashMap::default();
         map.insert(Tracker(false), Tracker(false));
         map.relocate(Some(&locations[0]), &locations[1]);
-        for (key, value) in &map {
-            assert!(key.0, "key must be relocated");
-            assert!(value.0, "value must be relocated");
-        }
+
+        let (key, value) = map.iter().next().unwrap();
+        assert!(!key.0, "key identity must remain stable");
+        assert!(value.0, "value must be relocated");
     }
 }
