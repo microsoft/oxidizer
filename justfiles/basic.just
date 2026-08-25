@@ -282,3 +282,4 @@ unused-dependencies-check: udeps
     # --with-metadata resolves the dependency graph via `cargo metadata`, which
     # makes machete more accurate (at the cost of a metadata query).
     cargo machete --with-metadata
+

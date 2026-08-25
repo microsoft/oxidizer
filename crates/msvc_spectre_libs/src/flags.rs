@@ -3,45 +3,75 @@
 
 //! Pure helpers for reasoning about the flags that reached `rustc`.
 //!
-//! The build script uses these to stay *idempotent* (never add a link-search
-//! path that is already in effect) and to *verify* that the constant security
-//! flags an integrator requires actually reached `rustc`. Both concerns are
-//! expressed as pure functions over already-captured environment strings so
-//! they can be unit tested without touching the environment.
+//! The build script uses these to verify that the required linker arguments an
+//! integrator configured actually reached `rustc`. Every helper is a pure
+//! function over an already-captured environment string, so it can be unit
+//! tested without touching the process environment.
 //!
 //! # Why verification is needed
 //!
-//! Cargo has four mutually exclusive sources of extra `rustc` flags. A
+//! Cargo has several mutually exclusive sources of extra `rustc` flags. A
 //! `RUSTFLAGS` environment variable **replaces** — it does not merge with —
 //! `target.<triple>.rustflags` from `.cargo/config.toml`. So an unrelated
-//! ambient `RUSTFLAGS` silently drops every security flag configured in
-//! `.cargo/config.toml`, producing a binary that quietly fails its security
-//! requirements. Checking [`CARGO_ENCODED_RUSTFLAGS_VAR`] from a build script
-//! turns that silent drop into a build diagnostic.
+//! ambient `RUSTFLAGS` silently drops every required linker argument
+//! configured in `.cargo/config.toml`, producing an artifact that quietly
+//! fails its compliance requirements. Checking
+//! [`CARGO_ENCODED_RUSTFLAGS_VAR`] from a build script turns that silent drop
+//! into a build diagnostic.
+//!
+//! # Assurance boundary
+//!
+//! These helpers inspect *configuration*: the flags Cargo reports it will pass
+//! to `rustc`. They do not observe the linker invocation and do not inspect
+//! the produced artifact, so a successful check establishes that the
+//! configured arguments were requested, not that the final binary carries the
+//! corresponding properties. Post-link inspection, for example
+//! `dumpbin /headers`, remains the only artifact-level evidence.
 
-use std::path::Path;
-
-/// Environment variable through which Cargo reports the final `rustc` flags to
-/// build scripts. Entries are separated by the ASCII unit separator (`0x1f`).
+/// Environment variable through which Cargo reports the final `rustc` flags.
+///
+/// Cargo sets it for every build script. Entries are separated by the ASCII
+/// unit separator control character, which cannot occur inside a flag, so the
+/// encoding is unambiguous; see [`codegen_values`] for the accepted spellings.
 pub const CARGO_ENCODED_RUSTFLAGS_VAR: &str = "CARGO_ENCODED_RUSTFLAGS";
 
 /// Separator Cargo uses inside [`CARGO_ENCODED_RUSTFLAGS_VAR`].
 const ENCODED_SEPARATOR: char = '\x1f';
 
-/// Environment variable listing the linker arguments that must reach every
-/// final Windows MSVC artifact, separated by `;`.
+/// Environment variable listing the required linker arguments.
 ///
-/// Empty or unset — the default — disables the check entirely, so the crate
-/// imposes no policy of its own. Which arguments are required depends on the
-/// toolchain in use and on the compliance bar that integrators must meet, so
-/// only the integrator can supply the list.
+/// The value is a `;`-separated list of arguments that must reach every final
+/// Windows MSVC artifact. Empty or unset — the default — disables the check
+/// entirely, so the crate imposes no policy of its own. Which arguments are
+/// required depends on the toolchain in use and on the compliance requirements
+/// that integrators must meet, so only the integrator can supply the list.
+///
+/// # Target scope
+///
+/// The `[env]` table of Cargo is visible for every selected target, but a
+/// linker argument is often architecture-specific: `/CETCOMPAT`, for example,
+/// is documented for `x64` only. Prefer the target-suffixed spelling returned
+/// by [`required_link_args_var_name`], which takes precedence over this
+/// target-agnostic name; use this one only for a requirement that genuinely
+/// applies to every Windows MSVC target.
+///
+/// # Encoding
+///
+/// Entries are separated by `;` with no escape mechanism, so an argument that
+/// itself contains a semicolon cannot be represented. That is deliberate: the
+/// contract covers switch-style hardening arguments such as `/CETCOMPAT` and
+/// `/guard:ehcont`, none of which contain a semicolon. An encoding with
+/// defined escaping would have to be introduced before the contract could be
+/// widened to arbitrary linker arguments.
+///
+/// # Usage
 ///
 /// Set it in `.cargo/config.toml` under `[env]` rather than in the ambient
 /// environment, so that every entry point into the build agrees on the value:
 ///
 /// ```toml
 /// [env]
-/// MSVC_SPECTRE_REQUIRED_LINK_ARGS = "/CETCOMPAT"
+/// MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc = "/CETCOMPAT"
 /// ```
 ///
 /// Listing an argument the toolchain already emits (commonly `/guard:cf`,
@@ -50,8 +80,32 @@ const ENCODED_SEPARATOR: char = '\x1f';
 /// `dumpbin /headers` before adding one.
 pub const REQUIRED_LINK_ARGS_VAR: &str = "MSVC_SPECTRE_REQUIRED_LINK_ARGS";
 
-/// Splits the `;`-separated value of [`REQUIRED_LINK_ARGS_VAR`] into
-/// individual linker arguments, ignoring empty and whitespace-only entries.
+/// Computes the target-specific name of [`REQUIRED_LINK_ARGS_VAR`].
+///
+/// The name is formed by appending the target triple, with every `-` replaced
+/// by `_`. The build script prefers this variable over the target-agnostic
+/// name, so a requirement that applies to one architecture does not produce a
+/// false diagnostic on another.
+///
+/// # Examples
+///
+/// ```
+/// use msvc_spectre_libs::flags::required_link_args_var_name;
+///
+/// assert_eq!(
+///     required_link_args_var_name("x86_64-pc-windows-msvc"),
+///     "MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc"
+/// );
+/// ```
+#[must_use]
+pub fn required_link_args_var_name(target: &str) -> String {
+    format!("{REQUIRED_LINK_ARGS_VAR}_{}", target.replace('-', "_"))
+}
+
+/// Splits a required-linker-argument list into individual arguments.
+///
+/// The value is the `;`-separated contents of [`REQUIRED_LINK_ARGS_VAR`].
+/// Empty and whitespace-only entries are ignored.
 ///
 /// # Examples
 ///
@@ -109,9 +163,13 @@ pub fn codegen_values(encoded: &str) -> Vec<String> {
     values
 }
 
-/// Returns the entries of `required` that are **not** present in `encoded`.
+/// Returns the entries of `required` that did not reach `rustc`.
 ///
-/// Linker option names are case-insensitive, so comparison ignores case.
+/// `encoded` is the value of [`CARGO_ENCODED_RUSTFLAGS_VAR`]. Both codegen
+/// options that append linker arguments are recognized: `link-arg`, which
+/// carries exactly one argument, and `link-args`, which carries several
+/// separated by whitespace. Linker option names are case-insensitive, so
+/// comparison ignores case.
 ///
 /// # Examples
 ///
@@ -119,6 +177,11 @@ pub fn codegen_values(encoded: &str) -> Vec<String> {
 /// use msvc_spectre_libs::flags::missing_required_link_args;
 ///
 /// assert!(missing_required_link_args("-Clink-arg=/cetcompat", &["/CETCOMPAT"]).is_empty());
+/// // `link-args` carries several whitespace-separated arguments.
+/// assert!(
+///     missing_required_link_args("-Clink-args=/CETCOMPAT /guard:ehcont", &["/guard:ehcont"])
+///         .is_empty()
+/// );
 /// assert_eq!(
 ///     missing_required_link_args("", &["/CETCOMPAT"]),
 ///     vec!["/CETCOMPAT"]
@@ -129,125 +192,36 @@ pub fn missing_required_link_args<'a>(encoded: &str, required: &[&'a str]) -> Ve
     let values = codegen_values(encoded);
     required
         .iter()
-        .filter(|required| {
-            !values.iter().any(|value| {
-                value
-                    .split_once('=')
-                    .is_some_and(|(key, argument)| key.eq_ignore_ascii_case("link-arg") && argument.eq_ignore_ascii_case(required))
-            })
-        })
+        .filter(|required| !values.iter().any(|value| supplies_link_arg(value, required)))
         .copied()
         .collect()
 }
 
-/// Returns whether `encoded` already adds `dir` as a native library search
-/// path.
+/// Returns whether one codegen value appends `required` to the linker command.
 ///
-/// Only the `native=` and `all=` kinds count, along with the bare
-/// `-L <dir>` form, which defaults to `all`. Kinds that do not feed the native
-/// search path, such as `dependency=`, are ignored.
-///
-/// Used to keep the build script idempotent when an integrator has already
-/// supplied the Spectre directory through `RUSTFLAGS`.
-///
-/// # Examples
-///
-/// ```
-/// use std::path::Path;
-///
-/// use msvc_spectre_libs::flags::adds_link_search;
-///
-/// let encoded = "-L\u{1f}native=C:\\VC\\lib\\spectre\\x64";
-/// assert!(adds_link_search(
-///     encoded,
-///     Path::new("C:/VC/lib/spectre/x64")
-/// ));
-/// assert!(!adds_link_search(
-///     encoded,
-///     Path::new("C:/VC/lib/spectre/arm64")
-/// ));
-///
-/// // A `dependency=` entry is not a native library search path.
-/// let encoded = "-L\u{1f}dependency=C:\\VC\\lib\\spectre\\x64";
-/// assert!(!adds_link_search(
-///     encoded,
-///     Path::new("C:/VC/lib/spectre/x64")
-/// ));
-/// ```
-#[must_use]
-pub fn adds_link_search(encoded: &str, dir: &Path) -> bool {
-    let mut args = encoded.split(ENCODED_SEPARATOR).filter(|arg| !arg.is_empty());
+/// `value` is a codegen option with its `-C` prefix already stripped, as
+/// produced by [`codegen_values`].
+fn supplies_link_arg(value: &str, required: &str) -> bool {
+    let Some((key, arguments)) = value.split_once('=') else {
+        return false;
+    };
 
-    while let Some(arg) = args.next() {
-        // `-L` takes its value either joined (`-Lnative=<dir>`) or split
-        // (`-L`, `native=<dir>`).
-        let value = if arg == "-L" { args.next() } else { arg.strip_prefix("-L") };
-
-        // Strip the optional `<kind>=` prefix. Only `native` and `all` -- the
-        // default when no kind is given -- place the directory on the *native*
-        // library search path; `dependency`, `crate`, and `framework` do not,
-        // so they must never suppress our own entry.
-        //
-        // A bare Windows path such as `C:\lib` contains no `=` and so parses
-        // as the kindless form. One that does contain `=` is read as an
-        // unrecognised kind and skipped, which errs toward emitting a possibly
-        // redundant search path rather than dropping a required one.
-        if let Some(value) = value {
-            let path = match value.split_once('=') {
-                Some((kind, rest)) if kind.eq_ignore_ascii_case("native") || kind.eq_ignore_ascii_case("all") => rest,
-                Some(_) => continue,
-                None => value,
-            };
-            if same_path(Path::new(path), dir) {
-                return true;
-            }
-        }
+    // `link-arg` takes the whole value as a single argument, so it is compared
+    // as-is; `link-args` takes several separated by whitespace, matching how
+    // rustc forwards them to the linker.
+    if key.eq_ignore_ascii_case("link-arg") {
+        arguments.eq_ignore_ascii_case(required)
+    } else if key.eq_ignore_ascii_case("link-args") {
+        arguments.split_whitespace().any(|argument| argument.eq_ignore_ascii_case(required))
+    } else {
+        false
     }
-    false
-}
-
-/// Returns whether the `LIB` environment variable (which `link.exe` reads
-/// directly) already contains `dir`.
-///
-/// # Examples
-///
-/// ```
-/// use std::path::Path;
-///
-/// use msvc_spectre_libs::flags::lib_var_contains;
-///
-/// let lib = "C:\\sdk\\um\\x64;C:\\VC\\lib\\spectre\\x64;";
-/// assert!(lib_var_contains(lib, Path::new("C:/VC/lib/spectre/x64")));
-/// assert!(!lib_var_contains(lib, Path::new("C:/VC/lib/spectre/arm64")));
-/// ```
-#[must_use]
-pub fn lib_var_contains(lib: &str, dir: &Path) -> bool {
-    lib.split(';')
-        .filter(|entry| !entry.trim().is_empty())
-        .any(|entry| same_path(Path::new(entry.trim()), dir))
-}
-
-/// Compares two Windows paths for equality, ignoring case, separator style,
-/// and a trailing separator.
-///
-/// Purely lexical: it performs no filesystem access, so it never resolves
-/// symlinks or junctions. That is sufficient here, because every path being
-/// compared is derived from the same toolchain root.
-fn same_path(left: &Path, right: &Path) -> bool {
-    fn normalize(path: &Path) -> String {
-        path.to_string_lossy()
-            .replace('/', "\\")
-            .trim_end_matches('\\')
-            .to_ascii_lowercase()
-    }
-    normalize(left) == normalize(right)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::path::Path;
-
-    use super::{adds_link_search, codegen_values, lib_var_contains, missing_required_link_args, required_link_args, same_path};
+    use super::{codegen_values, missing_required_link_args, required_link_args, required_link_args_var_name};
 
     #[test]
     fn splits_required_link_args_and_ignores_blank_entries() {
@@ -257,6 +231,18 @@ mod tests {
         );
         assert!(required_link_args("").is_empty());
         assert!(required_link_args("  ;; ").is_empty());
+    }
+
+    #[test]
+    fn builds_target_specific_required_link_args_name() {
+        assert_eq!(
+            required_link_args_var_name("x86_64-pc-windows-msvc"),
+            "MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc"
+        );
+        assert_eq!(
+            required_link_args_var_name("aarch64-pc-windows-msvc"),
+            "MSVC_SPECTRE_REQUIRED_LINK_ARGS_aarch64_pc_windows_msvc"
+        );
     }
 
     #[test]
@@ -286,16 +272,40 @@ mod tests {
     }
 
     #[test]
+    fn accepts_requirements_supplied_through_link_args() {
+        // `link-args` carries several whitespace-separated linker arguments,
+        // in both the joined and the split `-C` spelling.
+        let required = ["/CETCOMPAT", "/guard:ehcont"];
+        assert!(missing_required_link_args("-Clink-args=/CETCOMPAT /guard:ehcont", &required).is_empty());
+        assert!(missing_required_link_args("-C\u{1f}link-args=/cetcompat  /GUARD:EHCONT", &required).is_empty());
+        // A single-valued `link-args` is still a list of one.
+        assert!(missing_required_link_args("-Clink-args=/CETCOMPAT", &["/CETCOMPAT"]).is_empty());
+        // Only the arguments actually listed are satisfied.
+        assert_eq!(
+            missing_required_link_args("-Clink-args=/CETCOMPAT", &required),
+            vec!["/guard:ehcont"]
+        );
+    }
+
+    #[test]
     fn reports_missing_link_args() {
         assert_eq!(missing_required_link_args("", &["/CETCOMPAT"]), vec!["/CETCOMPAT"]);
-        // A different link-arg does not satisfy the requirement.
+        // A different linker argument does not satisfy the requirement.
         assert_eq!(
             missing_required_link_args("-Clink-arg=/DYNAMICBASE", &["/CETCOMPAT"]),
             vec!["/CETCOMPAT"]
         );
-        // `target-cpu` is a codegen option but not a link-arg.
+        // `target-cpu` is a codegen option but does not append linker arguments.
         assert_eq!(
             missing_required_link_args("-Ctarget-cpu=x86-64-v3", &["/CETCOMPAT"]),
+            vec!["/CETCOMPAT"]
+        );
+        // A codegen option without a value cannot supply anything.
+        assert_eq!(missing_required_link_args("-Cdebuginfo", &["/CETCOMPAT"]), vec!["/CETCOMPAT"]);
+        // `link-arg` takes exactly one argument, so a whitespace-separated
+        // list supplied through it does not satisfy either entry.
+        assert_eq!(
+            missing_required_link_args("-Clink-arg=/CETCOMPAT /guard:ehcont", &["/CETCOMPAT"]),
             vec!["/CETCOMPAT"]
         );
         // Only the unsatisfied entries are reported.
@@ -303,50 +313,5 @@ mod tests {
             missing_required_link_args("-Clink-arg=/CETCOMPAT", &["/CETCOMPAT", "/guard:ehcont"]),
             vec!["/guard:ehcont"]
         );
-    }
-
-    #[test]
-    fn detects_existing_link_search_in_both_spellings() {
-        let dir = Path::new("C:/VC/lib/spectre/x64");
-        assert!(adds_link_search("-L\u{1f}native=C:\\VC\\lib\\spectre\\x64", dir));
-        assert!(adds_link_search("-Lnative=C:\\VC\\lib\\spectre\\x64", dir));
-        // `all` is the default kind and covers the native search path.
-        assert!(adds_link_search("-L\u{1f}all=C:\\VC\\lib\\spectre\\x64", dir));
-        // Bare path with no `<kind>=` prefix.
-        assert!(adds_link_search("-L\u{1f}C:\\VC\\lib\\spectre\\x64", dir));
-        // A drive-letter path must not be mistaken for a `<kind>=` prefix.
-        assert!(adds_link_search("-L\u{1f}C:\\VC\\lib\\spectre\\x64\\", dir));
-    }
-
-    #[test]
-    fn does_not_detect_unrelated_link_search() {
-        let dir = Path::new("C:/VC/lib/spectre/x64");
-        assert!(!adds_link_search("", dir));
-        assert!(!adds_link_search("-L\u{1f}native=C:\\VC\\lib\\spectre\\arm64", dir));
-        // Kinds other than `native`/`all` do not place the directory on the
-        // native search path, so they must not suppress our own entry even
-        // when they name the very same directory.
-        assert!(!adds_link_search("-L\u{1f}dependency=C:\\VC\\lib\\spectre\\x64", dir));
-        assert!(!adds_link_search("-L\u{1f}crate=C:\\VC\\lib\\spectre\\x64", dir));
-        assert!(!adds_link_search("-L\u{1f}framework=C:\\VC\\lib\\spectre\\x64", dir));
-        // A `-C` option that merely mentions the path is not a search path.
-        assert!(!adds_link_search("-Clink-arg=C:\\VC\\lib\\spectre\\x64", dir));
-    }
-
-    #[test]
-    fn detects_directory_in_lib_variable() {
-        let lib = "C:\\sdk\\um\\x64;C:\\VC\\lib\\spectre\\x64;";
-        assert!(lib_var_contains(lib, Path::new("C:/VC/lib/spectre/x64")));
-        assert!(!lib_var_contains(lib, Path::new("C:/VC/lib/spectre/arm64")));
-        assert!(!lib_var_contains("", Path::new("C:/VC/lib/spectre/x64")));
-        // Empty and whitespace-only entries are ignored.
-        assert!(!lib_var_contains(";; ;", Path::new("C:/VC/lib/spectre/x64")));
-    }
-
-    #[test]
-    fn compares_paths_ignoring_case_separators_and_trailing_slash() {
-        assert!(same_path(Path::new("C:\\VC\\Lib"), Path::new("c:/vc/lib")));
-        assert!(same_path(Path::new("C:\\VC\\Lib\\"), Path::new("C:\\VC\\Lib")));
-        assert!(!same_path(Path::new("C:\\VC\\Lib"), Path::new("C:\\VC\\Lib2")));
     }
 }

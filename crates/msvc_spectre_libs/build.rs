@@ -7,8 +7,10 @@
 //! for Windows MSVC targets so that dependents link against the
 //! `/Qspectre`-hardened runtime. It is a no-op for every other target.
 
-use std::env;
+use std::env::{self, VarError};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "error")]
+use std::process::exit;
 
 use cc::windows_registry;
 
@@ -22,6 +24,8 @@ mod resolve;
 #[path = "src/flags.rs"]
 #[expect(unreachable_pub, reason = "shared source with the library; `pub` items are reachable there")]
 mod flags;
+
+use resolve::SpectreArch;
 
 fn main() {
     // Re-run when the target-agnostic override changes, regardless of target.
@@ -53,7 +57,7 @@ fn main() {
 
     #[cfg(feature = "error")]
     if search_failure.is_some() || flags_failure.is_some() {
-        std::process::exit(1);
+        exit(1);
     }
 }
 
@@ -61,19 +65,22 @@ fn main() {
 /// [`flags::REQUIRED_LINK_ARGS_VAR`], actually reached `rustc`.
 ///
 /// A build script's `cargo:rustc-link-arg` applies only to the emitting
-/// package's own artifacts, so these flags must come from `.cargo/config.toml`
-/// or `RUSTFLAGS`. Since a `RUSTFLAGS` environment variable *replaces* the
-/// `target.<triple>.rustflags` config table rather than merging with it, an
-/// ambient `RUSTFLAGS` silently drops them; this check makes that visible.
+/// package's own artifacts, so these arguments must come from
+/// `.cargo/config.toml` or `RUSTFLAGS`. Since a `RUSTFLAGS` environment
+/// variable *replaces* the `target.<triple>.rustflags` config table rather than
+/// merging with it, an ambient `RUSTFLAGS` silently drops them; this check
+/// makes that visible.
 ///
-/// Does nothing when the variable is unset or empty, which is the default.
+/// Does nothing when no requirement is configured, which is the default.
 ///
 /// # Errors
 ///
-/// Returns a human-readable message listing the arguments that are missing.
+/// Returns a human-readable message listing the arguments that are missing, or
+/// naming a configured variable whose value could not be read.
 fn verify_required_link_args() -> Result<(), String> {
-    println!("cargo:rerun-if-env-changed={}", flags::REQUIRED_LINK_ARGS_VAR);
-    let Ok(configured) = env::var(flags::REQUIRED_LINK_ARGS_VAR) else {
+    let target = env::var("TARGET").expect("cargo always sets TARGET for build scripts");
+
+    let Some(configured) = required_link_args_value(&target)? else {
         return Ok(());
     };
 
@@ -82,10 +89,13 @@ fn verify_required_link_args() -> Result<(), String> {
         return Ok(());
     }
 
-    // Absent (as opposed to empty) means this cargo does not report the final
-    // flags, so there is nothing to verify and no basis for a warning.
-    let Ok(encoded) = encoded_rustflags() else {
-        return Ok(());
+    println!("cargo:rerun-if-env-changed={}", flags::CARGO_ENCODED_RUSTFLAGS_VAR);
+    let encoded = match env::var(flags::CARGO_ENCODED_RUSTFLAGS_VAR) {
+        Ok(encoded) => encoded,
+        // Absent means this cargo does not report the final flags, so there is
+        // nothing to verify and no basis for a diagnostic.
+        Err(VarError::NotPresent) => return Ok(()),
+        Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(flags::CARGO_ENCODED_RUSTFLAGS_VAR)),
     };
 
     let missing = flags::missing_required_link_args(&encoded, &required);
@@ -102,12 +112,36 @@ fn verify_required_link_args() -> Result<(), String> {
     ))
 }
 
-/// Reads the final `rustc` flags Cargo reports to build scripts, declaring the
-/// re-run dependency on every call so that no caller has to rely on another
-/// having already declared it.
-fn encoded_rustflags() -> Result<String, env::VarError> {
-    println!("cargo:rerun-if-env-changed={}", flags::CARGO_ENCODED_RUSTFLAGS_VAR);
-    env::var(flags::CARGO_ENCODED_RUSTFLAGS_VAR)
+/// Reads the configured required-linker-argument list for `target`.
+///
+/// The target-specific variable wins over the target-agnostic one, so a
+/// requirement that applies to a single architecture does not produce a false
+/// diagnostic on the others. Returns [`None`] when neither is set, which
+/// disables the check.
+///
+/// # Errors
+///
+/// Returns a human-readable message when a variable is set to a value that is
+/// not valid Unicode. Treating that as "unset" would silently skip a check the
+/// integrator explicitly opted into.
+fn required_link_args_value(target: &str) -> Result<Option<String>, String> {
+    let target_var = flags::required_link_args_var_name(target);
+
+    for name in [target_var.as_str(), flags::REQUIRED_LINK_ARGS_VAR] {
+        println!("cargo:rerun-if-env-changed={name}");
+        match env::var(name) {
+            Ok(value) => return Ok(Some(value)),
+            Err(VarError::NotPresent) => {}
+            Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(name)),
+        }
+    }
+
+    Ok(None)
+}
+
+/// Builds the diagnostic for a configured variable that cannot be read.
+fn unreadable_var_message(name: &str) -> String {
+    format!("the environment variable `{name}` is set but its value is not valid Unicode, so it could not be checked")
 }
 
 /// Adds the Spectre-mitigated CRT library directory to the link search path,
@@ -138,16 +172,16 @@ fn add_spectre_link_search() -> Result<(), String> {
         };
     }
 
-    let Some(arch) = resolve::spectre_arch(&target_arch) else {
+    let Some(arch) = SpectreArch::from_target_arch(&target_arch) else {
         return Err(format!(
             "target architecture `{target_arch}` has no known Spectre-mitigated CRT; set `{override_var}` to override"
         ));
     };
 
-    // 2. Prefer the toolchain root exported by the enlistment / `vcvars`.
+    // 2. Prefer the toolchain root exported by the build environment.
     //    `VCToolsInstallDir` points straight at the MSVC build tools, so the
-    //    Spectre libraries are `lib\spectre\<arch>` directly beneath it --
-    //    no parent-directory climbing relative to `cl.exe`.
+    //    Spectre libraries sit directly beneath it -- no parent-directory
+    //    climbing relative to `cl.exe`.
     println!("cargo:rerun-if-env-changed=VCToolsInstallDir");
     if let Some(vctools) = env::var_os("VCToolsInstallDir") {
         let dir = resolve::spectre_lib_dir(Path::new(&vctools), arch);
@@ -165,9 +199,11 @@ fn add_spectre_link_search() -> Result<(), String> {
         ));
     };
 
-    // `cl.exe` lives at `<root>\bin\Host<arch>\<arch>\cl.exe`, so its fourth
-    // ancestor is the toolchain root (the same value as `VCToolsInstallDir`).
-    let Some(root) = tool.path().ancestors().nth(4) else {
+    // `cl.exe` lives under a host/target compiler directory pair inside the
+    // toolchain's `bin` directory, so climbing past the executable name, both
+    // of those directories, and `bin` yields the toolchain root -- the same
+    // value `VCToolsInstallDir` carries.
+    let Some(root) = toolchain_root(tool.path()) else {
         return Err(format!(
             "could not derive the toolchain root from `{}`; set `{override_var}` to point at the Spectre library directory",
             tool.path().display()
@@ -185,49 +221,26 @@ fn add_spectre_link_search() -> Result<(), String> {
     }
 }
 
-/// Emits a `rustc-link-search` directive when `dir` is an existing directory
-/// whose contents are not already on the link search path.
+/// Derives the MSVC toolchain root from the path of a compiler executable.
+fn toolchain_root(cl_exe: &Path) -> Option<&Path> {
+    // `<root>\bin\Host<arch>\<arch>\cl.exe`: drop the file name, the target
+    // and host compiler directories, and `bin`.
+    cl_exe.parent()?.parent()?.parent()?.parent()
+}
+
+/// Emits a `rustc-link-search` directive when `dir` is an existing directory.
 ///
-/// Returns whether `dir` is in effect afterwards -- either because the
-/// directive was emitted, or because the directory was already supplied by the
-/// surrounding build system. Skipping the duplicate keeps the crate resilient
-/// when an integrator supplies the same directory through `RUSTFLAGS` or `LIB`:
-/// a second copy would be harmless to the linker, but silently tolerating it
-/// would hide the redundant configuration.
+/// Returns whether the directive was emitted. The directive is emitted
+/// unconditionally for an existing directory: an explicit `-L` search path is
+/// consulted before the `LIB` environment variable and in the order given, so
+/// suppressing it because the same directory appears somewhere in `LIB` could
+/// leave an ordinary CRT directory ahead of the mitigated one. A duplicate
+/// search path is harmless to the linker.
 fn emit_link_search(dir: &Path) -> bool {
     if !dir.is_dir() {
         return false;
     }
 
-    if let Some(source) = already_on_search_path(dir) {
-        // Not a `cargo:warning=`: a correctly configured build system that
-        // deliberately supplies the directory itself should not produce a
-        // warning on every build. Visible via `cargo build -vv`.
-        println!(
-            "msvc_spectre_libs: `{}` is already on the link search path via {source}; not adding it again",
-            dir.display()
-        );
-        return true;
-    }
-
     println!("cargo:rustc-link-search=native={}", dir.display());
     true
-}
-
-/// Returns the name of the mechanism that already places `dir` on the link
-/// search path, or [`None`] when it is not there yet.
-fn already_on_search_path(dir: &Path) -> Option<&'static str> {
-    // `link.exe` reads `LIB` directly, so a directory listed there is already
-    // searched without any `rustc` flag.
-    println!("cargo:rerun-if-env-changed=LIB");
-    if env::var("LIB").is_ok_and(|lib| flags::lib_var_contains(&lib, dir)) {
-        return Some("the `LIB` environment variable");
-    }
-
-    // `rustc` search paths come from the flags Cargo reports back to us.
-    if encoded_rustflags().is_ok_and(|encoded| flags::adds_link_search(&encoded, dir)) {
-        return Some("`RUSTFLAGS`");
-    }
-
-    None
 }
