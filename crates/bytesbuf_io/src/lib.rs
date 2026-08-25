@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(
-    all(coverage_nightly, any(test, feature = "futures-stream", feature = "test-util")),
-    feature(coverage_attribute)
-)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Asynchronous I/O abstractions expressed via [`bytesbuf`] types.

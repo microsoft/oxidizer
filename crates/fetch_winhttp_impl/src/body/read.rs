@@ -368,14 +368,18 @@ impl WinHttpResponseBody {
         // block the frame already pins, so the next read refills that capacity
         // instead of renting a second block.
         let data = buffer.consume_all();
-        // A positive read count with no bytes is a protocol break. Rejecting it
-        // here also stops a mutant that fabricates a nonzero count without a
+        // A positive read count with no bytes cannot arise from a completion
+        // that passed `decode_read` (the length is bounded by the lent region).
+        // The check stops a mutant that fabricates a nonzero count without a
         // buffer from spinning the body forever (AGENTS.md, "Code must not hang
         // even under mutation testing").
         if data.is_empty() {
-            return Poll::Ready(Some(Err(callback_protocol_error(
-                "WinHTTP reported a nonempty read without returning any bytes",
-            ))));
+            #[cfg_attr(coverage_nightly, coverage(off))] // Mutant/hang guard; unreachable under decode_read.
+            {
+                return Poll::Ready(Some(Err(callback_protocol_error(
+                    "WinHTTP reported a nonempty read without returning any bytes",
+                ))));
+            }
         }
         self.state = BodyState::Ready { reader, buffer };
 

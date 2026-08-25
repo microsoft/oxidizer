@@ -40,7 +40,11 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     if (-not $tmp_dir) { $tmp_dir = $env:AGENT_TEMPDIRECTORY }
     if (-not $tmp_dir) { $tmp_dir = [System.IO.Path]::GetTempPath() }
     $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
-    git diff "$base..HEAD" --output=$diff_path
+    # Three-dot form: only changes reachable from HEAD since it diverged from
+    # `$base`. Two-dot `$base..HEAD` on GitHub's merge ref also includes every
+    # commit that landed on the base branch after the PR opened, which falsely
+    # mutates unrelated packages and fails the gate on their pre-existing gaps.
+    git diff "$base...HEAD" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     # Platform-conditional exclusions. CLI `--exclude` replaces
     # `.cargo/mutants.toml` `exclude_globs` rather than merging with them, so

@@ -131,10 +131,14 @@ fn take_crlf_line<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
     let remaining = raw.get(*cursor..)?;
     let end = remaining.windows(2).position(|pair| pair == b"\r\n")?;
     let start = *cursor;
-    // Advance by at least the CRLF so a mutated `+=` cannot leave the cursor
-    // stuck and hang the parser (AGENTS.md, "Code must not hang even under
-    // mutation testing").
-    let next = start.checked_add(end)?.checked_add(2)?;
+    // Assign through a fresh binding rather than `+=` so a mutant cannot leave
+    // the cursor stuck and hang the parser (AGENTS.md, "Code must not hang even
+    // under mutation testing"). The end index is taken from a slice of `raw`, so
+    // `start + end + 2` fits in `usize` whenever the CRLF itself was observed.
+    let next = start
+        .checked_add(end)
+        .and_then(|offset| offset.checked_add(2))
+        .expect("CRLF line end is bounded by the header block length");
     debug_assert!(next > start, "CRLF line consumption must advance the cursor");
     *cursor = next;
 
