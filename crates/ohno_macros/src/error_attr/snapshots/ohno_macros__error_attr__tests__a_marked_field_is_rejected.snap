@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/error_attr/mod.rs
-expression: "rendered(parse_quote!\n{ struct T { path: String, #[error] mine: ohno::OhnoCore } })"
----
-::core::compile_error! {
-    "`#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly"
-}

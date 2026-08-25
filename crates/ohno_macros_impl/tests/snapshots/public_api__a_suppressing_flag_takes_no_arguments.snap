@@ -1,0 +1,29 @@
+---
+source: crates/ohno_macros_impl/tests/public_api.rs
+expression: output
+---
+// ======== no_debug with a list ========
+
+#[derive(Error)]
+#[no_debug(yes)]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[no_debug]` takes no arguments"
+}
+
+// ======== no_constructors with a value ========
+
+#[derive(Error)]
+#[no_constructors = 1]
+struct T {
+    inner: ohno::OhnoCore,
+}
+// ---- expands to ----
+
+::core::compile_error! {
+    "`#[no_constructors]` takes no arguments"
+}

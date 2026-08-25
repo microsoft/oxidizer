@@ -1,0 +1,38 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "ohno_macros_impl"
+description = "Implementation of the macros for the ohno crate."
+version = "0.5.0"
+readme = "README.md"
+keywords = ["oxidizer", "error", "backtrace"]
+categories = ["data-structures"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/ohno_macros_impl"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["proc_macro2::*", "syn::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+
+[dev-dependencies]
+insta = { workspace = true }
+prettyplease = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -9,7 +9,7 @@
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
 //!   hosted-only type implementations.
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * **`threads`** enables the `registry` module and implies `std`.
@@ -101,7 +101,7 @@
 //!
 //! # Features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//! * The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
 //!   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
 //!   requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion

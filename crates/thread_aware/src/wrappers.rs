@@ -24,7 +24,7 @@ use crate::affinity::Affinity;
 /// In addition, if the wrapped value contains an [`alloc::sync::Arc`] with interior mutability
 /// somewhere inside, this wrapper should not be used. With the `std` feature, a thread-aware
 /// [`Arc`](crate::Arc) using [`PerCore`](crate::PerCore) or [`PerNuma`](crate::PerNuma) with
-/// independent initialization per affinity is a better option.
+/// independent initialization per strategy partition is a better option.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
 pub struct Unaware<T>(pub T);

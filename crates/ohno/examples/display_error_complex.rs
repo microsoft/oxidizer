@@ -3,8 +3,7 @@
 
 //! Prints:
 //! Operation 'update' failed with code 404
-//! Caused by:
-//!         Not found
+//! caused by: Not found
 
 #[derive(Debug)]
 struct ErrorCode(u32);

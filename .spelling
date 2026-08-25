@@ -621,6 +621,8 @@ versioning
 vtable
 w.r.t.
 waker
+waker's
+wakers
 wildcard
 wildcards
 winsock
@@ -807,6 +809,11 @@ snapshotted
 Sharding
 parallelizes
 prefetches
+dereferencing
+enqueue
+enqueued
+multithreaded
+waker
 enrichments
 fieldless
 idents
@@ -814,6 +821,8 @@ integrators
 outsized
 pluggable
 prefiltering
+recursing
+redactable
 sendable
 signedness
 snapshotting
@@ -830,3 +839,9 @@ reportable
 substrings
 unrepresentable
 unterminated
+underflow
+underflowing
+initializations
+poisonable
+affinitized
+unmaterialized

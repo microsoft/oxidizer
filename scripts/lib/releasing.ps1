@@ -958,6 +958,114 @@ function Test-PackageAllowlistNamesTarget {
     return $false
 }
 
+# Returns the Cargo variable that overrides the linker for the host target
+# (e.g. CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER), or $null when the
+# toolchain default should stand.
+#
+# MSVC link.exe is not long-path aware, so baseline builds under a deep target
+# directory fail with LNK1104; rust-lld handles those paths. Only *-msvc hosts
+# need this -- other targets already default to long-path-safe linkers, and on
+# *-windows-gnu rust-lld would stand in for the gcc driver and invoke lld
+# directly, a different link path this fix has no reason to disturb.
+function Get-SemverChecksLinkerEnvName {
+    [CmdletBinding()]
+    param()
+
+    if (-not $IsWindows) {
+        return $null
+    }
+
+    # A missing or failing rustc yields no usable output, which the match below
+    # already rejects; $LASTEXITCODE would be no help here anyway, since it is
+    # only updated for native executables and would hold a stale value whenever
+    # rustc resolves to a shim.
+    $version = try { & rustc -vV 2>$null | Out-String } catch { '' }
+
+    # Read the capture off the Match object rather than $Matches, which -match
+    # leaves untouched when it fails and so can hold a stale value.
+    $hostMatch = [regex]::Match($version, '(?m)^host:\s*(\S+)')
+    if (-not $hostMatch.Success) {
+        # Fail open -- a probe must never break a release. Say so, though:
+        # otherwise the LNK1104 this override exists to prevent comes back with
+        # nothing to suggest the remedy simply never ran.
+        Write-Warning 'Could not read the host triple from `rustc -vV`; leaving the toolchain default linker in place. Baseline builds under a long path may fail with LNK1104.'
+        return $null
+    }
+
+    $hostTriple = $hostMatch.Groups[1].Value
+    if ($hostTriple -notmatch '(?i)-msvc$') {
+        return $null
+    }
+
+    $triple = $hostTriple.ToUpperInvariant() -replace '[^A-Z0-9]', '_'
+    return "CARGO_TARGET_${triple}_LINKER"
+}
+
+# Runs cargo semver-checks, linking with rust-lld where link.exe would overflow
+# MAX_PATH.
+#
+# The setting travels by environment variable because that is the only channel
+# that reaches the cargo invocation which matters. cargo-semver-checks exposes
+# no flag to forward cargo configuration (checked against 0.47.0), and as an
+# external subcommand it receives `--config` itself rather than letting cargo
+# interpret it -- while the build that overflows MAX_PATH is the one the tool
+# spawns internally.
+#
+# Two details keep the rest short. The bare linker name is enough: rustc puts
+# its own linker directory on PATH when it invokes the linker, so rust-lld
+# resolves without locating the sysroot. And overriding only the linker leaves
+# the repository's rustflags (such as -C target-cpu) intact, which setting
+# RUSTFLAGS would not -- that replaces target.<triple>.rustflags wholesale.
+function Invoke-SemverChecksCli {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$BaselineSha,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    Push-Location $RepoRoot
+    try {
+        # Probe from inside the repository. rustup resolves toolchain overrides
+        # against the working directory, so a probe run elsewhere can name a
+        # variable for a different host triple -- one cargo then ignores,
+        # leaving the baseline to link with the default linker after all.
+        $linkerVar = Get-SemverChecksLinkerEnvName
+        $applied = $false
+
+        if ($linkerVar) {
+            $path = "Env:\$linkerVar"
+            if (Test-Path $path) {
+                # An explicit choice wins. The premise for overriding is that
+                # link.exe cannot handle long paths; whoever set this variable
+                # has already steered cargo away from link.exe.
+                Write-Verbose "$linkerVar is already set; leaving the configured linker in place."
+            } else {
+                Set-Item -Path $path -Value 'rust-lld.exe'
+                $applied = $true
+            }
+        }
+
+        try {
+            # A required version bump produces an expected non-zero exit code.
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & cargo semver-checks --package $PackageName --baseline-rev $BaselineSha --all-features --color never 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            if ($applied) {
+                Remove-Item -Path "Env:\$linkerVar" -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        Pop-Location
+    }
+
+    return [pscustomobject]@{
+        Output   = $output
+        ExitCode = $exitCode
+    }
+}
+
 # Runs `cargo semver-checks` for a single crate against its previous version-bump
 # commit in git history. The baseline commit is located with
 # Get-PreviousVersionBumpCommit and passed to cargo-semver-checks as
@@ -1006,22 +1114,15 @@ function Invoke-CrateSemverCheck {
         return 'none'
     }
 
-    Push-Location $RepoRoot
-    try {
-        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
-        # bump is required, which is expected and not an error for our purposes.
-        $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --baseline-rev $bump.Sha --all-features --color never 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
+    $result = Invoke-SemverChecksCli -PackageName $PackageName -BaselineSha $bump.Sha -RepoRoot $RepoRoot
 
-    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
+    return ConvertFrom-SemverChecksOutput -Output $result.Output -ExitCode $result.ExitCode -PackageName $PackageName
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
-# so it can be unit-tested against captured tool output. With the git-history
+# so it can be unit-tested against captured tool output, with one caveat: the
+# failure message carries a platform-conditional path-length hint, so it is a
+# function of the arguments *and* $IsWindows. With the git-history
 # baseline (`--baseline-rev`) cargo-semver-checks always builds the baseline from
 # source, so the only outcomes are a semver verdict or a genuine tool/build
 # failure. Mapping:
@@ -1050,7 +1151,12 @@ function ConvertFrom-SemverChecksOutput {
         return 'patch'
     }
 
-    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build. Output:`n$Output"
+    $pathHint = if ($IsWindows) {
+        ' If the output contains LNK1104 or a path-length error, a MAX_PATH-bound tool was reached; shorten the repository path.'
+    } else {
+        ''
+    }
+    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build.$pathHint Output:`n$Output"
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published

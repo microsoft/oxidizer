@@ -300,6 +300,24 @@ up the new dependency version even when their own public API is
 unchanged), then raised to the stronger of their own
 `cargo semver-checks` result and the exposed-dependency cascade.
 
+#### Windows (MSVC): baseline builds link with rust-lld
+
+The MSVC `link.exe` is not long-path aware, so a baseline build under a
+deep target directory fails with `LNK1104`. On an `*-msvc` host the
+release scripts therefore set `CARGO_TARGET_<HOST>_LINKER` to
+`rust-lld.exe` around the cargo-semver-checks call, pointing it at the
+`rust-lld` bundled with the active toolchain, which handles those paths.
+This is applied by these scripts, not by cargo-semver-checks itself, so
+running the tool directly keeps the default linker. Only the linker is
+overridden, so the repository's own rustflags still apply, and the
+override lasts only for the duration of that call.
+
+The override steps aside in two cases: if `CARGO_TARGET_<HOST>_LINKER` is
+already set, that explicit choice is kept, and if the host triple cannot
+be read from `rustc -vV` the default linker stands (with a warning).
+Other hosts are unaffected — `*-windows-gnu` and non-Windows targets
+already default to linkers that handle long paths.
+
 #### Proc-macro-only packages require manual SemVer review
 
 `cargo semver-checks` deliberately supports ordinary library targets,

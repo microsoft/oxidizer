@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/derive_error/mod.rs
-expression: "rendered(parse_quote!(enum T { A, }))"
----
-::core::compile_error! {
-    "`#[derive(ohno::Error)]` supports structs only. An enum has no single field to hold the OhnoCore"
-}

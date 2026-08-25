@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/derive_error/mod.rs
-expression: "rendered(parse_quote!\n{\n    #[display(\"bad path: {pth}\")] struct T\n    { path: String, inner: ohno::OhnoCore }\n})"
----
-::core::compile_error! {
-    "unknown field `pth` in `#[display(...)]`, available fields: `path`, `inner`"
-}

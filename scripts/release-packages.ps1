@@ -91,6 +91,13 @@
     (install the version pinned in constants.env). Missing external-type metadata
     is treated conservatively as possible exposure.
 
+    On an MSVC host, these scripts set CARGO_TARGET_<HOST>_LINKER to rust-lld.exe
+    for the duration of the cargo-semver-checks call, because MSVC link.exe is
+    not long-path aware and fails with LNK1104 under a deep target directory.
+    cargo-semver-checks does not do this on its own, so invoking it directly
+    keeps the default linker. An explicitly configured CARGO_TARGET_<HOST>_LINKER
+    is left alone, and other hosts keep their default linker.
+
     User-provided change types may be automatically upgraded by this analysis
     if the crate's real API diff requires a stronger change type (e.g. a
     dependent that re-exports a breaking change is upgraded from your requested

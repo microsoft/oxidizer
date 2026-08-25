@@ -1,7 +1,0 @@
----
-source: crates/ohno_macros/src/error_attr/mod.rs
-expression: "rendered(parse_quote!(enum T { A, }))"
----
-::core::compile_error! {
-    "`#[ohno::error]` supports structs only. A struct is what can hold the OhnoCore field it adds"
-}
