@@ -7,6 +7,13 @@ use syn::{DataEnum, Fields};
 use crate::field_attrs::{FieldAttrCfg, parse_field_attrs};
 
 pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
+    // An enum with no variants is uninhabited, but `self` is a `&mut` reference, which rustc
+    // always treats as inhabited - so `match self {}` is rejected as non-exhaustive. There is
+    // nothing to relocate either way, so emit no body at all.
+    if data.variants.is_empty() {
+        return Ok(proc_macro2::TokenStream::new());
+    }
+
     let mut arms = Vec::new();
     for variant in &data.variants {
         let v_ident = &variant.ident;

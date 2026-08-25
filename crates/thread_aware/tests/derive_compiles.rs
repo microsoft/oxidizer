@@ -393,6 +393,18 @@ fn skipped_non_send_field_with_manual_send_is_usable() {
     assert_eq!(value.tracked.relocations, 1, "the skipped field emits no relocation");
 }
 
+/// An enum with no variants is uninhabited, so there is nothing to relocate.
+///
+/// `self` is a `&mut` reference, which rustc always treats as inhabited, so the `match self`
+/// the derive would otherwise emit is rejected as non-exhaustive.
+#[derive(ThreadAware)]
+enum Uninhabited {}
+
+#[test]
+fn empty_enum_derives_a_usable_impl() {
+    assert_thread_aware::<Uninhabited>();
+}
+
 // `ManualSendMarker` below pins the one case that still needs `Self: Send`: a skipped field
 // whose type can never be `Send` structurally. The two after it pin the opposite - that a
 // marker's obligation must name the marker type rather than scan for generic-parameter
