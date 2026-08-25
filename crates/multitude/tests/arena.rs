@@ -3205,6 +3205,9 @@ mod drop_slice_over_u16_max_succeeds {
 
     const TOO_LONG: usize = (u16::MAX as usize) + 1;
 
+    // These tests verify a runtime length boundary rather than memory safety.
+    // Native CI retains the full boundary coverage without Miri's per-element cost.
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn try_alloc_slice_clone_drop_over_u16_succeeds() {
         let a = Arena::new();
@@ -3212,6 +3215,7 @@ mod drop_slice_over_u16_max_succeeds {
         assert_eq!(a.try_alloc_slice_clone(&v[..]).unwrap().len(), TOO_LONG);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn try_alloc_slice_fill_with_drop_over_u16_succeeds() {
         let a = Arena::new();
@@ -3221,6 +3225,7 @@ mod drop_slice_over_u16_max_succeeds {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn try_alloc_slice_fill_iter_drop_over_u16_succeeds() {
         let a = Arena::new();
@@ -3597,6 +3602,7 @@ mod alloc_slice_overflow_paths {
     // type lowers to a single capacity allocation plus a bulk
     // initializing loop — much cheaper than `(0..N).map(...).collect()`
     // which runs the closure N times.
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn alloc_slice_clone_drop_over_u16_succeeds() {
         let v: std::vec::Vec<D> = std::vec![D(0); u16::MAX as usize + 1];
@@ -3605,6 +3611,7 @@ mod alloc_slice_overflow_paths {
         assert_eq!(s.len(), u16::MAX as usize + 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn alloc_slice_fill_with_drop_over_u16_succeeds() {
         let arena = Arena::new();
@@ -3612,6 +3619,7 @@ mod alloc_slice_overflow_paths {
         assert_eq!(s.len(), u16::MAX as usize + 1);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn alloc_slice_fill_iter_drop_over_u16_succeeds() {
         let arena = Arena::new();
@@ -3694,6 +3702,22 @@ mod oversized_paths_coverage {
         fn drop(&mut self) {}
     }
 
+    #[cfg(miri)]
+    const OVERSIZED_DROP_LEN: usize = 513;
+    #[cfg(not(miri))]
+    const OVERSIZED_DROP_LEN: usize = 3000;
+
+    fn oversized_drop_arena() -> Arena {
+        #[cfg(miri)]
+        {
+            Arena::builder().max_normal_alloc(4 * 1024).build()
+        }
+        #[cfg(not(miri))]
+        {
+            Arena::new()
+        }
+    }
+
     // 24 KiB single value with Drop ⇒ oversized-local value arm
     // (`alloc_value.rs` 433-436).
     #[derive(Clone)]
@@ -3717,36 +3741,40 @@ mod oversized_paths_coverage {
         use core::sync::atomic::{AtomicUsize, Ordering};
         let counter = AtomicUsize::new(0);
         {
-            let arena = Arena::new();
-            let out = arena.alloc_slice_fill_with(3000, |_| CountedDrop(&counter));
-            assert_eq!(out.len(), 3000);
+            let arena = oversized_drop_arena();
+            let out = arena.alloc_slice_fill_with(OVERSIZED_DROP_LEN, |_| CountedDrop(&counter));
+            assert_eq!(out.len(), OVERSIZED_DROP_LEN);
             assert_eq!(counter.load(Ordering::SeqCst), 0, "no drops before teardown");
         }
-        assert_eq!(counter.load(Ordering::SeqCst), 3000, "every element dropped at arena teardown");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            OVERSIZED_DROP_LEN,
+            "every element dropped at arena teardown"
+        );
     }
 
     #[test]
     fn alloc_slice_clone_oversized_drop() {
-        let arena = Arena::new();
-        let src: Vec<DropU64> = (0..3000).map(DropU64).collect();
+        let arena = oversized_drop_arena();
+        let src: Vec<DropU64> = (0..OVERSIZED_DROP_LEN).map(|i| DropU64(i as u64)).collect();
         let out = arena.alloc_slice_clone(&src);
-        assert_eq!(out.len(), 3000);
-        assert_eq!(out[2999].0, 2999);
+        assert_eq!(out.len(), OVERSIZED_DROP_LEN);
+        assert_eq!(out[OVERSIZED_DROP_LEN - 1].0, (OVERSIZED_DROP_LEN - 1) as u64);
     }
 
     #[test]
     fn alloc_slice_fill_with_oversized_drop() {
-        let arena = Arena::new();
-        let out = arena.alloc_slice_fill_with(3000, |i| DropU64(i as u64));
-        assert_eq!(out.len(), 3000);
-        assert_eq!(out[2999].0, 2999);
+        let arena = oversized_drop_arena();
+        let out = arena.alloc_slice_fill_with(OVERSIZED_DROP_LEN, |i| DropU64(i as u64));
+        assert_eq!(out.len(), OVERSIZED_DROP_LEN);
+        assert_eq!(out[OVERSIZED_DROP_LEN - 1].0, (OVERSIZED_DROP_LEN - 1) as u64);
     }
 
     #[test]
     fn alloc_slice_fill_iter_oversized_drop() {
-        let arena = Arena::new();
-        let out = arena.alloc_slice_fill_iter((0_u32..3000).map(|i| DropU64(u64::from(i))));
-        assert_eq!(out.len(), 3000);
+        let arena = oversized_drop_arena();
+        let out = arena.alloc_slice_fill_iter((0..OVERSIZED_DROP_LEN).map(|i| DropU64(i as u64)));
+        assert_eq!(out.len(), OVERSIZED_DROP_LEN);
         assert_eq!(out[0].0, 0);
     }
 
@@ -3785,11 +3813,11 @@ mod oversized_paths_coverage {
         use core::mem::MaybeUninit;
 
         use multitude::Arc;
-        let arena = Arena::new();
+        let arena = oversized_drop_arena();
         // A Drop element type routes through `impl_alloc_uninit_slice_arc`;
-        // 3000 × 8 B = 24 KiB exceeds the fresh arena's current chunk, so
-        // the slice lands in a one-shot oversized chunk.
-        let len = 3000_usize;
+        // the configured element count exceeds the normal allocation threshold,
+        // so the slice lands in a one-shot oversized chunk.
+        let len = OVERSIZED_DROP_LEN;
         let s = arena.alloc_uninit_slice_arc::<DropU64>(len);
         // SAFETY: `s` is the unique handle, so we have exclusive write access.
         unsafe {
@@ -4242,6 +4270,7 @@ mod alloc_drop_behavior_2 {
         assert_eq!(&*s, &[1, 2, 3, 4, 5]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn slice_shared_long_no_drop_succeeds() {
         let arena = multitude::Arena::new();
@@ -4540,6 +4569,7 @@ mod alloc_hot_path_behavior {
         }
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn arena_2266_slice_len_boundary() {
         let arena = Arena::new();
@@ -4892,6 +4922,7 @@ mod alloc_hot_path_behavior {
         assert_eq!(drops, 0, "empty Drop slices should not produce drops");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn arena_2266_large_nondrop_slice() {
         let arena = Arena::new();
@@ -4918,6 +4949,7 @@ mod alloc_hot_path_behavior {
         assert_eq!(drops, 0, "empty Drop arc slices should not produce drops");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn large_nondrop_shared_slice() {
         // A non-Copy, non-Drop wrapper exercises initialized shared slices.
