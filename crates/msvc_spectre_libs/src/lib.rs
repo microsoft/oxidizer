@@ -53,11 +53,47 @@
 //! to the matching Spectre subdirectory, and [`resolve::spectre_lib_dir`] to
 //! build the `lib\spectre\<arch>` path beneath a toolchain root.
 //!
+//! # Idempotence
+//!
+//! The build script never adds a search path that is already in effect. Before
+//! emitting anything it checks whether the resolved directory is already
+//! supplied through `RUSTFLAGS` (as `-L native=<dir>`) or through the `LIB`
+//! environment variable that `link.exe` reads directly, and stays silent if so.
+//! Emitting the same directory twice would be harmless to the linker but hides
+//! a misconfigured build system, so it is reported as a skip instead.
+//!
+//! # Required-flag verification
+//!
+//! Some hardening flags cannot be delivered by this crate at all: the
+//! `cargo:rustc-link-arg` directive of a build script applies only to the
+//! artifacts of the package that emits it and does **not** propagate to
+//! dependents, unlike the `cargo:rustc-link-search` used above. Those flags
+//! must therefore come from `.cargo/config.toml` (or `RUSTFLAGS`) instead.
+//!
+//! Because a `RUSTFLAGS` environment variable *replaces* rather than merges
+//! with `target.<triple>.rustflags` from `.cargo/config.toml`, an unrelated
+//! ambient `RUSTFLAGS` silently drops those flags. To make that failure loud,
+//! list them in [`flags::REQUIRED_LINK_ARGS_VAR`] and the build script will
+//! inspect `CARGO_ENCODED_RUSTFLAGS` and report any that did not reach `rustc`:
+//!
+//! ```toml
+//! # .cargo/config.toml
+//! [env]
+//! MSVC_SPECTRE_REQUIRED_LINK_ARGS = "/CETCOMPAT"
+//!
+//! [target.x86_64-pc-windows-msvc]
+//! rustflags = ["-Clink-arg=/CETCOMPAT"]
+//! ```
+//!
+//! The check is off by default: which arguments are required depends on the
+//! toolchain and on the compliance bar that integrators must meet, so this
+//! crate imposes no policy of its own.
+//!
 //! # Features
 //!
-//! - `error`: turn the libraries-not-found build warning into a hard build
-//!   error, for builds that must not silently fall back to the unmitigated
-//!   runtime.
+//! - `error`: turn build warnings (Spectre libraries not found, or a required
+//!   hardening flag missing from `rustc`) into hard build errors, for builds
+//!   that must not silently ship an unmitigated binary.
 //!
 //! # Examples
 //!
@@ -73,4 +109,5 @@
 //! assert_eq!(spectre_arch("riscv64"), None);
 //! ```
 
+pub mod flags;
 pub mod resolve;

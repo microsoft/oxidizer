@@ -853,3 +853,6 @@ unmaterialized
 Spectre
 subdirectory
 hardcoding
+Idempotence
+symlinks
+junctions
