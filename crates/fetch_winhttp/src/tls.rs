@@ -100,11 +100,20 @@ impl WinHttpTlsConfigBuilder {
     }
 }
 
+/// Certificate checks WinHTTP skips when the caller accepts invalid certificates.
+///
+/// Every operand is a distinct bit, so `|` and `^` compute the same value and a
+/// mutation between them is equivalent rather than a defect.
+#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
+const fn ignored_certificate_checks() -> u32 {
+    SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+}
+
 pub(crate) fn security_flags(config: &WinHttpTlsConfig) -> u32 {
     let mut flags = 0;
 
     if config.accepts_invalid_certs() {
-        flags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID;
+        flags |= ignored_certificate_checks();
     }
     if config.accepts_invalid_hostnames() {
         flags |= SECURITY_FLAG_IGNORE_CERT_CN_INVALID;

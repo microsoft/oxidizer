@@ -26,26 +26,34 @@ use crate::handle::SessionHandle;
 const USER_AGENT: &str = "fetch_winhttp";
 const TRUE_BYTES: [u8; size_of::<i32>()] = 1_i32.to_ne_bytes();
 
-/// Completion notifications the callback protocol consumes.
+/// Notifications the session subscribes to.
 ///
-/// This is narrower than the native `WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS`,
-/// which also covers the proxy-resolution completions. The transport resolves
-/// proxies through automatic detection configured on the session rather than
-/// through `WinHttpGetProxyForUrlEx` or `WinHttpGetProxySettingsEx`, so those
+/// The completion set is narrower than the native
+/// `WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS`, which also covers the
+/// proxy-resolution completions. The transport resolves proxies through
+/// automatic detection configured on the session rather than through
+/// `WinHttpGetProxyForUrlEx` or `WinHttpGetProxySettingsEx`, so those
 /// notifications can never arrive and the callback has no handling for them.
 /// Subscribing to them would describe a protocol the transport does not
 /// implement.
-const DISPATCHED_COMPLETIONS: u32 = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
-    | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
-    | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
-    | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
-    | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
-    | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR;
-const HANDLES: u32 = WINHTTP_CALLBACK_STATUS_HANDLE_CREATED | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING;
-const CONNECT_TO_SERVER: u32 = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
+///
+/// Every operand below is a distinct bit, so `|` and `^` compute the same
+/// value here and a mutation between them is equivalent rather than a defect.
+#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
+const fn session_notification_flags() -> u32 {
+    let dispatched_completions = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE
+        | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE
+        | WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE
+        | WINHTTP_CALLBACK_FLAG_READ_COMPLETE
+        | WINHTTP_CALLBACK_FLAG_WRITE_COMPLETE
+        | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR;
+    let handles = WINHTTP_CALLBACK_STATUS_HANDLE_CREATED | WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING;
+    let connect_to_server = WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER | WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER;
 
-pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 =
-    DISPATCHED_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | HANDLES | CONNECT_TO_SERVER;
+    dispatched_completions | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE | handles | connect_to_server
+}
+
+pub(crate) const SESSION_NOTIFICATION_FLAGS: u32 = session_notification_flags();
 
 /// Count of `set_option` calls one session performs with keep-alive disabled.
 ///

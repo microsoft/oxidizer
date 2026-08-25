@@ -1751,6 +1751,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mockall",
+ "mutants",
  "observed",
  "observed_testing",
  "ohno 0.4.0",

@@ -28,6 +28,16 @@ const OPERATION_CLAIMED: u8 = 1;
 // "no callback observed" from a callback that reported a zero flag mask.
 const SECURE_FAILURE_PRESENT: u64 = 1 << u32::BITS;
 
+/// Packs the WinHTTP secure-failure flags together with the presence bit.
+///
+/// The flags occupy the low 32 bits and the presence bit sits above them, so
+/// `|` and `^` compute the same value and a mutation between them is equivalent
+/// rather than a defect.
+#[cfg_attr(test, mutants::skip)] // Disjoint-bit union: `|` and `^` are interchangeable, so operator mutants are equivalent.
+fn encode_secure_failure(flags: u32) -> u64 {
+    SECURE_FAILURE_PRESENT | u64::from(flags)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 /// Tags the callback payload stored for one asynchronous WinHTTP call.
@@ -593,8 +603,7 @@ impl RequestContext {
     }
 
     pub(crate) fn record_secure_failure(&self, flags: u32) {
-        self.secure_failure
-            .store(SECURE_FAILURE_PRESENT | u64::from(flags), Ordering::Release);
+        self.secure_failure.store(encode_secure_failure(flags), Ordering::Release);
     }
 
     pub(crate) fn secure_failure_flags(&self) -> Option<u32> {

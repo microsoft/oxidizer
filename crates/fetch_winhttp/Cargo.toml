@@ -73,6 +73,7 @@ hyper-util = { workspace = true, features = [
     "tokio",
 ] }
 mockall = { workspace = true }
+mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }
 quinn = { workspace = true, features = [
     "runtime-tokio",
