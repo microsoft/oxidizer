@@ -15,8 +15,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -36,12 +36,13 @@ mod example {
     use http::{HeaderMap, HeaderValue, Version};
     use tick::Clock;
 
-    pub(super) async fn run() {
-        read_frames_and_trailers().await;
-        abandon_a_download().await;
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
+        read_frames_and_trailers().await?;
+        abandon_a_download().await?;
+        Ok(())
     }
 
-    async fn read_frames_and_trailers() {
+    async fn read_frames_and_trailers() -> Result<(), ohno::AppError> {
         let trailers = HeaderMap::from_iter([(http::HeaderName::from_static("x-checksum"), HeaderValue::from_static("d41d8cd9"))]);
         let server = TestServer::https(
             [ResponsePlan::chunks([Bytes::from_static(b"first "), Bytes::from_static(b"second")]).trailers(trailers)],
@@ -54,20 +55,16 @@ mod example {
             Clock::new_tokio(),
         );
 
-        let response = test_client
-            .client
-            .get(server.url("/download"))
-            .fetch()
-            .await
-            .expect("the fixture answers the request");
+        let response = test_client.client.get(server.url("/download")).fetch().await?;
         let (body, trailers) = collect_frames(response.into_body()).await;
 
         println!("body: {}", String::from_utf8_lossy(&body));
         println!("trailers: {trailers:?}");
         drop(server.finish());
+        Ok(())
     }
 
-    async fn abandon_a_download() {
+    async fn abandon_a_download() -> Result<(), ohno::AppError> {
         // The fixture sends one chunk and then leaves the response in flight forever. Nothing
         // here waits for it: the consumer polls once, sees `Pending`, and drops the stream.
         let server = TestServer::http([
@@ -76,18 +73,11 @@ mod example {
         ]);
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
 
-        let response = test_client
-            .client
-            .get(server.url("/stall"))
-            .fetch()
-            .await
-            .expect("the fixture answers the request");
+        let response = test_client.client.get(server.url("/stall")).fetch().await?;
         let mut stream = response.into_body().into_stream();
-        let first = stream
-            .try_next()
-            .await
-            .expect("the first chunk arrives")
-            .expect("the stream is not yet finished");
+        let Some(first) = stream.try_next().await? else {
+            ohno::bail!("the stream ended before the first chunk");
+        };
         println!("first chunk: {} bytes", first.len());
 
         {
@@ -102,13 +92,9 @@ mod example {
         }
         drop(stream);
 
-        let after = test_client
-            .client
-            .get(server.url("/after"))
-            .fetch_text_body()
-            .await
-            .expect("cancellation does not poison the client");
+        let after = test_client.client.get(server.url("/after")).fetch_text_body().await?;
         println!("after cancellation: {after}");
         drop(server.finish());
+        Ok(())
     }
 }

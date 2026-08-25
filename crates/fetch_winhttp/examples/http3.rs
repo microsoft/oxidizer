@@ -13,8 +13,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -30,12 +30,13 @@ mod example {
     use http::{HeaderMap, HeaderName, HeaderValue, Version};
     use tick::Clock;
 
-    pub(super) async fn run() {
-        succeed_over_http3().await;
-        fail_without_http3().await;
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
+        succeed_over_http3().await?;
+        fail_without_http3().await?;
+        Ok(())
     }
 
-    async fn succeed_over_http3() {
+    async fn succeed_over_http3() -> Result<(), ohno::AppError> {
         let trailers = HeaderMap::from_iter([(HeaderName::from_static("x-served-by"), HeaderValue::from_static("http3"))]);
         let server = Http3Server::start([ResponsePlan::chunks([Bytes::from_static(b"http3 response")]).trailers(trailers)]);
         // The HTTP/3 fixture presents a self-signed certificate.
@@ -45,21 +46,17 @@ mod example {
             Clock::new_tokio(),
         );
 
-        let response = test_client
-            .client
-            .get(server.url("/h3"))
-            .fetch()
-            .await
-            .expect("the HTTP/3 fixture answers");
+        let response = test_client.client.get(server.url("/h3")).fetch().await?;
 
         println!("negotiated version: {:?}", response.version());
         let (body, trailers) = collect_frames(response.into_body()).await;
         println!("body: {}", String::from_utf8_lossy(&body));
         println!("trailers: {trailers:?}");
         drop(server.finish());
+        Ok(())
     }
 
-    async fn fail_without_http3() {
+    async fn fail_without_http3() -> Result<(), ohno::AppError> {
         let server = TestServer::https([ResponsePlan::ok("never reached")], &["localhost"]);
         let test_client = client(
             &[Version::HTTP_3],
@@ -67,14 +64,12 @@ mod example {
             Clock::new_tokio(),
         );
 
-        let error = test_client
-            .client
-            .get(server.url("/h3"))
-            .fetch()
-            .await
-            .expect_err("a peer without HTTP/3 cannot satisfy a required HTTP/3 request");
+        let Err(error) = test_client.client.get(server.url("/h3")).fetch().await else {
+            ohno::bail!("a peer without HTTP/3 should not satisfy a required HTTP/3 request");
+        };
 
         println!("required HTTP/3 does not fall back: {error}");
         drop(server.finish());
+        Ok(())
     }
 }

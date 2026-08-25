@@ -14,8 +14,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -36,12 +36,13 @@ mod example {
     use http_extensions::HttpBodyOptions;
     use tick::Clock;
 
-    pub(super) async fn run() {
-        stream_an_unknown_length_body().await;
-        reject_request_trailers().await;
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
+        stream_an_unknown_length_body().await?;
+        reject_request_trailers().await?;
+        Ok(())
     }
 
-    async fn stream_an_unknown_length_body() {
+    async fn stream_an_unknown_length_body() -> Result<(), ohno::AppError> {
         let server = TestServer::http([ResponsePlan::ok("upload received")]);
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
 
@@ -54,22 +55,17 @@ mod example {
             &HttpBodyOptions::default(),
         );
 
-        let response = test_client
-            .client
-            .post(server.url("/upload"))
-            .body(body)
-            .fetch_text_body()
-            .await
-            .expect("the fixture accepts the upload");
+        let response = test_client.client.post(server.url("/upload")).body(body).fetch_text_body().await?;
 
         println!("response: {response}");
         let snapshot = server.finish();
         // WinHTTP chunked the upload; the peer reassembled the whole body.
         println!("body observed on the wire: {:?}", snapshot.requests[0].body);
         println!("Content-Length sent: {:?}", snapshot.requests[0].headers.get(CONTENT_LENGTH));
+        Ok(())
     }
 
-    async fn reject_request_trailers() {
+    async fn reject_request_trailers() -> Result<(), ohno::AppError> {
         let server = TestServer::http([]);
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
         let body = StreamBody::new(futures::stream::iter([
@@ -81,15 +77,12 @@ mod example {
         ]));
         let body = test_client.body_builder.body(body, &HttpBodyOptions::default());
 
-        let error = test_client
-            .client
-            .post(server.url("/trailers"))
-            .body(body)
-            .fetch()
-            .await
-            .expect_err("WinHTTP cannot submit request trailers");
+        let Err(error) = test_client.client.post(server.url("/trailers")).body(body).fetch().await else {
+            ohno::bail!("request trailers should have been refused");
+        };
 
         println!("request trailers are refused: {error}");
         drop(server.finish());
+        Ok(())
     }
 }

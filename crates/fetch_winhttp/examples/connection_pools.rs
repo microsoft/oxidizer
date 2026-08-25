@@ -15,8 +15,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -32,39 +32,42 @@ mod example {
     use http::Version;
     use tick::Clock;
 
-    pub(super) async fn run() {
-        clones_share().await;
-        separate_builds_do_not().await;
-        multiple_pools_split_one_client().await;
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
+        clones_share().await?;
+        separate_builds_do_not().await?;
+        multiple_pools_split_one_client().await?;
+        Ok(())
     }
 
-    async fn clones_share() {
+    async fn clones_share() -> Result<(), ohno::AppError> {
         let server = TestServer::http([ResponsePlan::ok("one"), ResponsePlan::ok("two")]);
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
         let clone = test_client.client.clone();
 
-        get(&test_client.client, &server.url("/one")).await;
-        get(&clone, &server.url("/two")).await;
+        get(&test_client.client, &server.url("/one")).await?;
+        get(&clone, &server.url("/two")).await?;
 
         println!("a client and its clone used {} connection(s)", server.finish().connections);
+        Ok(())
     }
 
-    async fn separate_builds_do_not() {
+    async fn separate_builds_do_not() -> Result<(), ohno::AppError> {
         let server = TestServer::http([ResponsePlan::ok("one"), ResponsePlan::ok("two")]);
         let (builder, _body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
         let first = builder.clone().build();
         let second = builder.build();
 
-        get(&first, &server.url("/one")).await;
-        get(&second, &server.url("/two")).await;
+        get(&first, &server.url("/one")).await?;
+        get(&second, &server.url("/two")).await?;
 
         println!(
             "two clients built from one builder used {} connection(s)",
             server.finish().connections
         );
+        Ok(())
     }
 
-    async fn multiple_pools_split_one_client() {
+    async fn multiple_pools_split_one_client() -> Result<(), ohno::AppError> {
         let server = TestServer::http([ResponsePlan::ok("one"), ResponsePlan::ok("two"), ResponsePlan::ok("three")]);
         let (builder, _body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_tokio());
         let split = builder
@@ -72,17 +75,19 @@ mod example {
             .build();
 
         for path in ["/one", "/two", "/three"] {
-            get(&split, &server.url(path)).await;
+            get(&split, &server.url(path)).await?;
         }
 
         println!(
             "three requests round-robined across two pools used {} connection(s)",
             server.finish().connections
         );
+        Ok(())
     }
 
-    async fn get(client: &fetch::HttpClient, url: &str) {
-        let body = client.get(url).fetch_text_body().await.expect("the fixture answers every request");
+    async fn get(client: &fetch::HttpClient, url: &str) -> Result<(), ohno::AppError> {
+        let body = client.get(url).fetch_text_body().await?;
         debug_assert!(!body.is_empty());
+        Ok(())
     }
 }

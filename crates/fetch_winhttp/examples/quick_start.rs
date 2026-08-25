@@ -17,8 +17,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -36,7 +36,7 @@ mod example {
     use observed::Sink;
     use tick::Clock;
 
-    pub(super) async fn run() {
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
         let server = TestServer::http([ResponsePlan::ok("hello from the fixture")]);
 
         let deps = WinHttpDeps::builder(Clock::new_tokio(), GlobalPool::new(), Sink::noop()).build();
@@ -48,17 +48,14 @@ mod example {
             .minimal_pipeline()
             .build();
 
-        let response = client
-            .get(server.url("/hello"))
-            .fetch()
-            .await
-            .expect("the fixture answers every request");
+        let response = client.get(server.url("/hello")).fetch().await?;
 
         println!("negotiated version: {:?}", response.version());
-        let body = response.into_body().into_text().await.expect("the fixture sends a complete body");
+        let body = response.into_body().into_text().await?;
         println!("body: {body}");
 
         let snapshot = server.finish();
         println!("requests served: {}", snapshot.requests.len());
+        Ok(())
     }
 }

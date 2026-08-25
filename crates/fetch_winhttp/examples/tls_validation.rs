@@ -15,8 +15,8 @@
 
 #[cfg(windows)]
 #[tokio::main]
-async fn main() {
-    example::run().await;
+async fn main() -> Result<(), ohno::AppError> {
+    example::run().await
 }
 
 #[cfg(not(windows))]
@@ -31,20 +31,20 @@ mod example {
     use http::Version;
     use tick::Clock;
 
-    pub(super) async fn run() {
+    pub(super) async fn run() -> Result<(), ohno::AppError> {
         // A self-signed certificate for the right host: only the trust check needs relaxing.
         report(
             "strict validation, self-signed certificate",
             &["localhost"],
             WinHttpTlsConfig::default(),
         )
-        .await;
+        .await?;
         report(
             "untrusted certificates accepted",
             &["localhost"],
             WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
         )
-        .await;
+        .await?;
 
         // A certificate issued for another name: trust and hostname are distinct faults, so
         // relaxing only one of them still fails.
@@ -53,7 +53,7 @@ mod example {
             &["other.example"],
             WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
         )
-        .await;
+        .await?;
         report(
             "untrusted and hostname mismatch both accepted",
             &["other.example"],
@@ -62,10 +62,11 @@ mod example {
                 .accept_invalid_hostnames(true)
                 .build(),
         )
-        .await;
+        .await?;
+        Ok(())
     }
 
-    async fn report(label: &str, certificate_names: &[&str], tls: WinHttpTlsConfig) {
+    async fn report(label: &str, certificate_names: &[&str], tls: WinHttpTlsConfig) -> Result<(), ohno::AppError> {
         let server = TestServer::https([ResponsePlan::ok("secured")], certificate_names);
         let test_client = client(&[Version::HTTP_11], tls, Clock::new_tokio());
 
@@ -76,5 +77,6 @@ mod example {
 
         println!("{label}: {outcome}");
         drop(server.finish());
+        Ok(())
     }
 }

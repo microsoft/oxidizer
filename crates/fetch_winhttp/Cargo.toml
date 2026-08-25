@@ -73,6 +73,7 @@ http-body = { workspace = true }
 http-body-util = { workspace = true }
 http_extensions = { workspace = true }
 observed = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
 testing_aids = { path = "../testing_aids" }
 # `test-util` freezes time in tests and benches; `tokio` drives a real clock in
 # the standalone examples.
