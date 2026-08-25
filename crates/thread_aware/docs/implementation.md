@@ -86,7 +86,7 @@ The swap's remaining capability — replacing an already-published value — is 
 this design never uses. A slot is materialized once and never emptied or
 rewritten, so write-once is exactly the contract the slot needs. `OnceLock` encodes
 that contract directly: `get_or_init` publishes the first materialized value and
-hands every racer that one value, so the factory runs at most once per affinity
+hands every racer that one value, so the factory runs at most once per strategy partition
 without carrying the machinery for stores that never happen. Dereferencing an
 `Arc<T, S>` — the steady state — never touches a slot at all: the holder carries
 its current value in its own `value` field and derefs through that with no
@@ -133,7 +133,7 @@ source recording has no lock order that can deadlock.
 ```
 
 The probe carries the throughput. A slot is never emptied once populated, so a
-relocation into an already-populated affinity is a cheap lock-free read that clones
+relocation into an already-populated partition is a cheap lock-free read that clones
 a reference out of the cell. Because each slot is an independent cell, these reads
 scale with the number of slots: under `PerCore` a fanout that hands work to every
 core relocates into a different slot per core, and the cores share no lock word to
@@ -147,11 +147,11 @@ whose source and destination share a slot. Otherwise the destination value is
 published through `get_or_init`, which runs the caller's factory to materialize the
 value and serializes that materialization on the cell: the first racer to arrive
 runs the factory, every other racer blocks and then adopts the one published value.
-The factory therefore runs at most once per affinity, upholding the "once per
-affinity" contract even under a concurrent first relocation, and no racer's work is
-dropped. The destination cell remains in its initializing state while the factory
-runs. Caller code must not reenter that cell — directly or through another `Arc`
-backed by the same storage — or create a cycle among initializing cells, because
+The factory therefore runs at most once per strategy partition, upholding that
+contract even under a concurrent first relocation, and no racer's work is dropped.
+The destination cell remains in its initializing state while the factory runs.
+Caller code must not reenter that cell — directly or through another `Arc` backed
+by the same storage — or create a cycle among initializing cells, because
 write-once initialization is non-reentrant. A panic simply propagates and leaves
 the cell empty for the next relocation to retry: there is no poisonable lock and
 no partial published state to unwind.
@@ -185,10 +185,11 @@ predicate afterwards, so no caller code observes a slot mid-write.
 
 ## Benchmarks
 
+The unpublished `thread_aware_benchmarking` package owns
 `benches/thread_aware_relocate.rs` and its Callgrind counterpart
-`benches/thread_aware_relocate_cg.rs` measure relocation. The suite separates
-the two stages, because they have opposite cost profiles and only the first one
-is on the hot path.
+`benches/thread_aware_relocate_cg.rs`. The suite separates the two stages,
+because they have opposite cost profiles and only the first one is on the hot
+path.
 
 | Group        | What it measures                                                    |
 | ------------ | ------------------------------------------------------------------- |

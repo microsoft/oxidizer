@@ -17,7 +17,7 @@ Essential building blocks for thread-per-core libraries.
 
 ## Crate features
 
-* The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+* The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
   hosted-only type implementations.
 * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 * **`threads`** enables the `registry` module and implies `std`.
@@ -108,7 +108,7 @@ from types that implement [`ThreadAware`][__link24].
 
 ## Features
 
-* The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+* The **`std` Cargo feature** *(enabled by default)* enables the strategy-partitioned `Arc` and
   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
   requires `alloc` and pointer-width atomics.
 * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
@@ -195,7 +195,7 @@ impl Service {
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUpEHEN0wyqMbT69q7SZ3jhAb-itdqiIRp1EbkJGs8OCz_nBhZIKCbHRocmVhZF9hd2FyZWYwLjEwLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbUbHFZqBf9MsbIdlZrkyww6sbNpUTMOOpy3sbXQ2vhYWhjORhZIKCbHRocmVhZF9hd2FyZWYwLjEwLjCCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjU
  [__link0]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link1]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=core::ThreadAware
  [__link10]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html

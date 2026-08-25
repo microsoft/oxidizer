@@ -3,72 +3,73 @@
 This document describes the user-visible behavior and design tenets of
 `thread_aware::Arc` and its companion `storage::Storage` handle. The
 `ThreadAware` trait and the relocation model these build on are introduced in
-the crate root documentation; this document focuses on the affinity-partitioned
-`Arc`. The internal mechanism — the per-affinity write-once slots and the
+the crate root documentation; this document focuses on the strategy-partitioned
+`Arc`. The internal mechanism — the write-once partition slots and the
 relocation protocol built on them — is documented separately in
 [implementation.md](implementation.md).
 
 ## 1. Purpose
 
 `thread_aware::Arc<T, S>` is a shared pointer, like `std::sync::Arc`, that
-additionally keeps a distinct value per memory affinity. It lets a type that is
-not itself `ThreadAware` — a third-party client, a connection pool, any value
+additionally keeps a distinct value per strategy partition. It lets a type that
+is not itself `ThreadAware` — a third-party client, a connection pool, any value
 that benefits from being local to the core or NUMA node using it — be shared
-through a handle that reacts to relocation by adopting, or lazily creating, a
-value belonging to the destination affinity.
+through a handle that reacts to relocation by adopting, or lazily creating, the
+value belonging to the destination affinity's partition.
 
 Cloning an `Arc<T, S>` is cheap and shares state. Dereferencing it yields the
-value for the affinity its holder currently belongs to. The `Strategy` type
-parameter `S` decides what "affinity" means.
+value carried by that holder. The `Strategy` type parameter `S` decides how
+affinities map to partitions.
 
 ## 2. Affinities and strategies
 
 An affinity identifies the placement of the code that holds the `Arc`. The
-strategy maps that affinity to the value the holder sees:
+strategy maps that affinity to the partition whose value the holder sees:
 
-- `PerProcess` maps every affinity to one slot, so all clones share a single value
+- `PerProcess` maps every affinity to one partition, so all clones share a single value
   process-wide and relocation keeps that shared value: an `Arc<T, PerProcess>`
   behaves like a plain `sync::Arc<T>`.
-- `PerCore` keeps a value per processor. A holder that relocates to another
-  processor observes that processor's own value.
-- `PerNuma` keeps a value per memory region, so holders on cores of the same NUMA
-  node share a value and holders on different nodes do not.
+- `PerCore` defines one partition per processor. A holder that relocates to another
+  processor observes that processor partition's value.
+- `PerNuma` defines one partition per memory region, so holders on cores of the
+  same NUMA node share a value and holders on different nodes do not.
 
-Custom strategies are possible; they are expected to report a slot count — always
-at least one — that is consistent across the affinities that share one `Arc` (see
-[implementation.md](implementation.md)).
+Custom strategies are possible; they are expected to report a partition count —
+always at least one — that is consistent across the affinities that share one
+`Arc` (see [implementation.md](implementation.md)).
 
-## 3. Per-affinity values
+## 3. Strategy-partitioned values
 
 An `Arc<T, S>` always carries a current value in hand and derefs to it directly,
-without synchronization. It additionally keeps, per slot, the value materialized
-for that slot; a holder that relocates into a slot adopts the slot's value, and
-clones that have adopted the same slot share one underlying `sync::Arc<T>`.
+without synchronization. It additionally keeps the value materialized for each
+strategy partition; a holder that relocates into a partition adopts that
+partition's value, and clones in the same partition share one underlying
+`sync::Arc<T>`.
 
-Constructors create the initial carried value eagerly. The per-slot values are
-then produced lazily — a slot is materialized the first time a holder relocates
-into it across a slot boundary while it is still empty — and how a value is
-produced depends on the constructor used:
+Constructors create the initial carried value eagerly. Additional partition
+values are then produced lazily — a partition is materialized the first time a
+holder relocates into it across a partition boundary while it is still empty —
+and how a value is produced depends on the constructor used:
 
-- `new` / `new_boxed` run a constructor function once per slot, giving each slot a
-  freshly built, independent value. Neither requires `T: Clone` or
+- `new` / `new_boxed` run a constructor function once per partition, giving each
+  partition a freshly built, independent value. Neither requires `T: Clone` or
   `T: ThreadAware`.
 - `new_with` runs a closure that may capture other `ThreadAware` state, which is
   itself relocated for the destination before the value is built.
-- `from_unaware` takes one value and clones it for each slot.
+- `from_unaware` takes one value and clones it for each partition.
 - `with_clone_fn` takes a concrete value plus a clone function, so trait-object
-  values can be reproduced per slot without an object-safe `Clone`.
+  values can be reproduced per partition without an object-safe `Clone`.
 
-Materialization runs while the destination slot is being initialized. Constructor
-functions, clone functions, and captured `ThreadAware` state must not relocate an
-`Arc` backed by the same storage into that slot or form a cycle among slot
-initializations. Write-once initialization is non-reentrant, so such dependencies
-can deadlock.
+Materialization runs while the destination partition is being initialized.
+Constructor functions, clone functions, and captured `ThreadAware` state must not
+relocate an `Arc` backed by the same storage into that partition or form a cycle
+among partition initializations. Write-once initialization is non-reentrant, so
+such dependencies can deadlock.
 
-A relocation whose source and destination resolve to the same slot is not a
-cross-slot move: the holder keeps the value it is already carrying rather than
+A relocation whose source and destination resolve to the same partition is not a
+cross-partition move: the holder keeps the value it is already carrying rather than
 producing a new one. This is why every relocation under `PerProcess` — where all
-affinities share one slot — preserves the shared value.
+affinities share one partition — preserves the shared value.
 
 Relocation is a cooperative performance optimization, not a guarantee: consistent
 with the crate-wide contract for `ThreadAware`, a holder that reaches a new
@@ -77,7 +78,7 @@ already carries rather than switching. Dereferencing never blocks.
 
 `Arc::strong_count` estimates how many strong references to the holder's current
 value are held outside the shared storage: it is that value's raw `sync::Arc`
-strong count minus the references the storage's slots hold. It samples those two
+strong count minus the references the storage's partitions hold. It samples those two
 counts separately, so under concurrent relocation the result is approximate, and
 it saturates rather than underflowing.
 
@@ -93,27 +94,27 @@ representation.
 
 ## 5. Prepared storage
 
-`storage::Storage<T, S>` is the per-affinity table an `Arc` shares across its
-clones, exposed as a handle a caller can build directly. This serves the case
-where the per-affinity values are known in advance rather than materialized lazily
+`storage::Storage<T, S>` is the strategy-partitioned table an `Arc` shares across
+its clones, exposed as a handle a caller can build directly. This serves the case
+where the partition values are known in advance rather than materialized lazily
 on relocation:
 
 1. Build an empty table with `Storage::new`.
-2. Publish a `sync::Arc<T>` for each affinity that should carry one with
-   `Storage::insert`; read one back with `Storage::get`.
+2. Publish a `sync::Arc<T>` for each strategy partition by passing a representative
+   affinity to `Storage::insert`; read one back with `Storage::get`.
 3. Hand the table to `Arc::from_storage` together with the current affinity to
    obtain an `Arc` backed by those values.
 
 `from_storage` requires that the table already hold a value for the current
-affinity. An `Arc` built this way that later relocates into an affinity the table
-left empty behaves like a plain `sync::Arc`, keeping the value it carries. The
-handle exposes only the affinity-keyed insert/get surface; the slot layout behind
-it is not part of the contract.
+affinity's partition. An `Arc` built this way that later relocates into an
+affinity whose partition the table left empty behaves like a plain `sync::Arc`,
+keeping the value it carries. The handle exposes only the affinity-keyed
+insert/get surface; the partition layout behind it is not part of the contract.
 
 `Storage::insert` and `Storage::get` require an affinity that maps into the table's
-coordinate space — one within the slot count the strategy reports. A caller building
-storage by hand controls its own affinities, so these accessors reject an
-out-of-range affinity rather than tolerate it.
+coordinate space — one within the partition count the strategy reports. A caller
+building storage by hand controls its own affinities, so these accessors reject
+an out-of-range affinity rather than tolerate it.
 
 ## 6. Design tenets
 
@@ -122,10 +123,10 @@ out-of-range affinity rather than tolerate it.
   performance, never correctness.
 - **Cheap, lock-free reads.** Dereferencing yields the carried value directly and
   does not synchronize; synchronization is confined to relocation.
-- **Per-slot values, in-slot sharing.** Lazily materialized values are kept per
-  slot and are not shared across slots, while holders that have adopted one slot
-  share its value. Prepared storage is under the caller's control and can
-  deliberately place the same value in several slots.
+- **Per-partition values, in-partition sharing.** Lazily materialized values are
+  kept per partition and are not shared across partitions, while holders in one
+  partition share its value. Prepared storage is under the caller's control and
+  can deliberately place the same value in several partitions.
 - **Unsized support is a feature.** Trait-object and slice values are a retained
   capability, weighed against representations that would trade `?Sized` away.
 - **Storage is usable, its shape is not exposed.** Callers can construct and fill

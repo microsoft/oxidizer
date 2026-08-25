@@ -21,18 +21,18 @@ use crate::affinity::Affinity;
 ///   that may result in synchronization primitive contention, so it can be transferred as is. This
 ///   approach can be also be achieved by wrapping a value in the
 ///   [`Unaware`](`crate::Unaware`) type.
-/// * Construct a per-affinity value - with this approach, each affinity gets its own
-///   independently-initialized value. With the `std` feature, `Arc::new_with`
-///   facilitates this approach.
+/// * Construct destination-local state - relocation initializes state independently of the source.
+///   With the `std` feature, [`Arc::new_with`](crate::Arc::new_with) materializes one such value per
+///   strategy partition.
 /// * Utilize true sharing in a controlled manner - have some data that is actually shared
 ///   between the values on different affinities, but in a controlled manner that minimizes
 ///   the contention for the synchronization primitives necessary. This is a more advanced
 ///   technique allowing for designs that minimize contention while avoiding wasting resources
-///   by duplicating them for each affinity.
+///   by duplicating them for each destination.
 ///
-/// As an example, let's implement a counter that counts per-affinity. This counter will use
-/// interior mutability to to allow increments with just a shared reference, but we want to
-/// avoid contention on the internal state, so each affinity will get an independent counter.
+/// As an example, let's implement a counter whose relocated copies count independently. This
+/// counter uses interior mutability to allow increments with just a shared reference, but relocation
+/// replaces the internal state so related values do not contend on one counter.
 ///
 /// ```rust
 /// # use std::sync::atomic::{AtomicI32, Ordering};

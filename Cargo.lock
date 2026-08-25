@@ -4866,6 +4866,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_aware_benchmarking"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "gungraun",
+ "many_cpus",
+ "thread_aware",
+]
+
+[[package]]
 name = "thread_aware_macros"
 version = "0.7.5"
 dependencies = [

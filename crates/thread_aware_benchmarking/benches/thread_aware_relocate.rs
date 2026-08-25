@@ -30,7 +30,7 @@
 //! no Callgrind counterpart because it measures scaling across threads, which the
 //! single-threaded simulator cannot model.
 //!
-//! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate`
+//! Run with: `cargo bench -p thread_aware_benchmarking --bench thread_aware_relocate`
 
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 
@@ -45,11 +45,7 @@ use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_mai
 use many_cpus::SystemHardware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
 use thread_aware::{Arc, PerCore, ThreadAware};
-
-#[path = "support/mod.rs"]
-mod support;
-
-use support::{Payload, TREE_DEPTH, Tree};
+use thread_aware_benchmarking::{Payload, TREE_DEPTH, Tree};
 
 /// How far the oversubscribed case of the `concurrent` group exceeds the
 /// processor count.

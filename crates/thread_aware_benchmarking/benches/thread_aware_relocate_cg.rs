@@ -18,7 +18,7 @@
 //! writes — and any future growth of either branch. The slot table is sized
 //! before timing, so the one-time table allocation stays out of the counts.
 //!
-//! Run with: `cargo bench -p thread_aware --bench thread_aware_relocate_cg`
+//! Run with: `cargo bench -p thread_aware_benchmarking --bench thread_aware_relocate_cg`
 //! on a Linux host with Valgrind installed.
 
 #![allow(missing_docs, reason = "benchmark code")]
@@ -38,18 +38,13 @@
 fn main() {}
 
 #[cfg(target_os = "linux")]
-#[path = "support/mod.rs"]
-mod support;
-
-#[cfg(target_os = "linux")]
 mod linux {
     use std::hint::black_box;
 
     use gungraun::{library_benchmark, library_benchmark_group};
     use thread_aware::affinity::{Affinity, pinned_affinities};
     use thread_aware::{Arc, PerCore, ThreadAware};
-
-    use crate::support::{Payload, Tree};
+    use thread_aware_benchmarking::{Payload, Tree};
 
     fn affinities() -> Vec<Affinity> {
         pinned_affinities(&[2])

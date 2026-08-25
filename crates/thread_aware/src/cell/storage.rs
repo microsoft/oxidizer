@@ -15,19 +15,20 @@ use nm::Event;
 
 use crate::affinity::Affinity;
 
-/// A strategy for storing data in an affinity-aware manner.
+/// Maps affinities into strategy partitions for storage.
 ///
-/// A strategy assigns each affinity a slot index and reports how many slots the storage holds. The
+/// A strategy assigns each affinity a partition index and reports how many partitions the storage
+/// holds. The
 /// affinities whose values share one thread-aware [`Arc`](crate::Arc) are expected to map into a
-/// single fixed coordinate space: every such affinity reports the same slot count, and its index
-/// falls within that count. The built-in strategies satisfy this because the counts are machine
-/// properties — the processor and memory-region counts — that do not vary across the affinities of
-/// one machine.
+/// single fixed coordinate space: every such affinity reports the same partition count, and its
+/// index falls within that count. The built-in strategies satisfy this because the counts are
+/// machine properties — the processor and memory-region counts — that do not vary across the
+/// affinities of one machine.
 pub trait Strategy {
-    /// Returns the slot index for the given affinity.
+    /// Returns the strategy partition index for the given affinity.
     fn index(affinity: Affinity) -> usize;
 
-    /// Returns the number of slots the storage holds.
+    /// Returns the number of strategy partitions the storage holds.
     ///
     /// The count is at least one and is expected to be the same for every affinity whose value shares
     /// one thread-aware [`Arc`](crate::Arc), because the storage is sized to it exactly once.
@@ -37,63 +38,60 @@ pub trait Strategy {
 /// Rejects a direct [`Storage`] access whose affinity falls outside the storage's coordinate space.
 ///
 /// [`Storage::insert`] and [`Storage::get`] require an affinity the storage was sized for. An
-/// affinity indexing past the slot count is a caller error — the caller mixed coordinate spaces
+/// affinity indexing past the partition count is a caller error — the caller mixed coordinate spaces
 /// rather than relying on the degraded relocation path — so the access panics rather than silently
-/// discarding a value or returning a value from an unrelated slot. Split into its own `#[cold]`
+/// discarding a value or returning a value from an unrelated partition. Split into its own `#[cold]`
 /// function so the panic machinery stays off the inlined accessor bodies.
 #[cold]
 #[expect(
     clippy::panic,
     reason = "documented panic path: direct Storage access with a mismatched coordinate space is a caller error"
 )]
-fn out_of_coordinate_space(index: usize, slot_count: usize) -> ! {
+fn out_of_coordinate_space(index: usize, partition_count: usize) -> ! {
     panic!(
-        "Storage affinity index {index} is outside its coordinate space (slot count: {slot_count}); direct Storage access requires affinities that map into the slot count this storage was sized for"
+        "Storage affinity index {index} is outside its coordinate space (partition count: {partition_count}); direct Storage access requires affinities that map into the partition count this storage was sized for"
     );
 }
 
-/// Per-affinity storage shared by every clone of an `Arc`.
+/// Strategy-partitioned storage shared by every clone of an [`Arc`](crate::Arc).
 ///
-/// A relocation into an affinity publishes the value here; later relocations into
-/// the same affinity read it back. This can also be built directly and populated
-/// with [`insert`](Self::insert), then handed to [`Arc::from_storage`] to produce
-/// an `Arc` backed by it — the way to hand an `Arc` a set of per-affinity values
-/// prepared in advance.
-///
-/// This is the caller-facing handle. It fixes the stored type to `sync::Arc<T>` and wraps a private
-/// `SlotTable`, the value-agnostic partitioned table that owns the write-once slots.
-///
-/// [`Arc::from_storage`]: crate::Arc::from_storage
+/// A relocation into an affinity publishes a value for the affinity's strategy partition; later
+/// relocations into any affinity that maps to the same partition read it back. This can also be
+/// built directly and populated with [`insert`](Self::insert), then handed to
+/// [`Arc::from_storage`](crate::Arc::from_storage) to produce an `Arc` backed by values prepared for
+/// specific strategy partitions.
 #[derive(Debug)]
 pub struct Storage<T: ?Sized, S: Strategy> {
+    // Storage fixes the stored type to `sync::Arc<T>`; SlotTable remains value-agnostic so its
+    // write-once behavior can be tested with plain values.
     inner: SlotTable<sync::Arc<T>, S>,
 }
 
 impl<T: ?Sized, S: Strategy> Storage<T, S> {
-    /// Creates an empty storage, with no affinity populated.
+    /// Creates an empty storage, with no strategy partition populated.
     #[must_use]
     pub const fn new() -> Self {
         Self { inner: SlotTable::new() }
     }
 
-    /// Publishes the value for `affinity` if its slot is still empty.
+    /// Publishes the value for `affinity`'s strategy partition if it is still empty.
     ///
-    /// Each slot is written at most once, so a value is stored only when the slot was empty:
-    /// `Ok(())` is returned in that case. When the slot already holds a value, the affinity keeps it
-    /// and the passed-in `value` is handed back as `Err(value)`. This mirrors
+    /// Each strategy partition is written at most once, so a value is stored only when the
+    /// partition was empty: `Ok(())` is returned in that case. When the partition already holds a
+    /// value, the passed-in `value` is handed back as `Err(value)`. This mirrors
     /// [`OnceLock::set`](std::sync::OnceLock::set) rather than the previous-value semantics of
     /// [`HashMap::insert`](std::collections::HashMap::insert).
     ///
     /// # Errors
     ///
-    /// Returns `Err(value)`, handing the passed-in `value` back unchanged, when the affinity's slot
-    /// already holds a value.
+    /// Returns `Err(value)`, handing the passed-in `value` back unchanged, when the strategy
+    /// partition selected by `affinity` already holds a value.
     ///
     /// # Panics
     ///
     /// Panics if `affinity` falls outside the storage's coordinate space — an index at or beyond the
-    /// slot count the strategy reports. Direct callers are expected to use affinities the storage was
-    /// sized for.
+    /// partition count the strategy reports. Direct callers are expected to use affinities the
+    /// storage was sized for.
     #[inline]
     pub fn insert(&self, affinity: Affinity, value: sync::Arc<T>) -> Result<(), sync::Arc<T>> {
         let slot = self
@@ -103,13 +101,13 @@ impl<T: ?Sized, S: Strategy> Storage<T, S> {
         slot.set(value)
     }
 
-    /// Returns a clone of the value published for `affinity`, if any.
+    /// Returns a clone of the value published for `affinity`'s strategy partition, if any.
     ///
     /// # Panics
     ///
     /// Panics if `affinity` falls outside the storage's coordinate space — an index at or beyond the
-    /// slot count the strategy reports. Direct callers are expected to use affinities the storage was
-    /// sized for.
+    /// partition count the strategy reports. Direct callers are expected to use affinities the
+    /// storage was sized for.
     #[inline]
     #[must_use]
     pub fn get(&self, affinity: Affinity) -> Option<sync::Arc<T>> {
@@ -152,18 +150,18 @@ impl<T: ?Sized, S: Strategy> Default for Storage<T, S> {
     }
 }
 
-/// One slot: a write-once cell published on first materialization for its affinity.
+/// One slot: a write-once cell published on first materialization for its strategy partition.
 type Slot<T> = OnceLock<T>;
 
-/// Affinity-partitioned storage: one independently-published slot per affinity.
+/// Strategy-partitioned storage: one independently published slot per strategy partition.
 ///
 /// This is the raw slot table behind [`Storage`], which fixes its element type to `Arc<T>`; the two
 /// are separate so this can be unit-tested with a plain value type while the wrapper pins the stored
 /// type.
 ///
 /// Each slot is a [`OnceLock`], written at most once — on the first relocation
-/// that materializes its affinity — and read by every later relocation. The
-/// strategy decides how affinities map to slots: `PerCore` gives each processor
+/// that materializes its strategy partition — and read by every later relocation.
+/// The strategy decides how affinities map to slots: `PerCore` gives each processor
 /// its own slot, while `PerNuma` and `PerProcess` map several affinities onto one
 /// shared slot. A published read is a plain acquire load with no lock word to
 /// contend on, so concurrent readers of distinct slots never serialize and
@@ -196,7 +194,7 @@ impl<T, S: Strategy> SlotTable<T, S> {
             .get_or_init(|| (0..slot_count).map(|_| OnceLock::new()).collect::<Vec<_>>().into_boxed_slice())
     }
 
-    /// Returns the slot array, sizing it on first use to hold every affinity.
+    /// Returns the slot array, sizing it on first use to hold every strategy partition.
     fn slots(&self, affinity: Affinity) -> &[Slot<T>] {
         if let Some(slots) = self.slots.get() {
             return slots;
@@ -430,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index 1 is outside its coordinate space (slot count: 1)")]
+    #[should_panic(expected = "index 1 is outside its coordinate space (partition count: 1)")]
     fn insert_out_of_range_panics() {
         let affinity = pinned_affinities(&[1])[0];
         let storage = Storage::<i32, InconsistentStrategy>::new();
@@ -441,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "index 1 is outside its coordinate space (slot count: 1)")]
+    #[should_panic(expected = "index 1 is outside its coordinate space (partition count: 1)")]
     fn get_out_of_range_panics() {
         let affinity = pinned_affinities(&[1])[0];
         let storage = Storage::<i32, InconsistentStrategy>::new();

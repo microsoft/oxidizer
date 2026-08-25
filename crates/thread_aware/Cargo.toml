@@ -129,16 +129,6 @@ name = "gungraun_third_party"
 harness = false
 required-features = ["bytes", "http", "jiff02", "uuid"]
 
-[[bench]]
-name = "thread_aware_relocate"
-harness = false
-required-features = ["std", "derive"]
-
-[[bench]]
-name = "thread_aware_relocate_cg"
-harness = false
-required-features = ["std", "derive"]
-
 # These integration tests exercise `#[derive(ThreadAware)]`, so they compile only
 # when the `derive` feature is enabled. Gating them keeps every additive feature
 # combination (for example `--no-default-features --features std`) buildable.

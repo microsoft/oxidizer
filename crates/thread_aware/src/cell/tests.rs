@@ -840,10 +840,11 @@ fn factory_closure_debug() {
 #[test]
 fn concurrent_relocation_to_same_affinity_materializes_once() {
     // Races many threads into the same empty destination cell and asserts two things: the caller's
-    // factory runs exactly once for that affinity, and every racer ends on the one value published
-    // for it. Publication goes through `OnceLock::get_or_init`, which serializes materialization on
-    // the cell: the winner runs the factory and every other racer blocks, then adopts the winner's
-    // `sync::Arc`. This is the documented "once per affinity" contract holding under contention.
+    // factory runs exactly once for that strategy partition, and every racer ends on the one value
+    // published for it. Publication goes through `OnceLock::get_or_init`, which serializes
+    // materialization on the cell: the winner runs the factory and every other racer blocks, then
+    // adopts the winner's `sync::Arc`. This is the documented "once per strategy partition"
+    // contract holding under contention.
     // Ref: docs/implementation.md, "Relocation and publication".
 
     // A cloneable factory input that counts how many times the factory runs. Its `relocate` is a
@@ -904,14 +905,14 @@ fn concurrent_relocation_to_same_affinity_materializes_once() {
         for other in rest {
             assert!(
                 sync::Arc::ptr_eq(first, other),
-                "every racer must adopt the single value published for the destination affinity"
+                "every racer must adopt the single value published for the destination strategy partition"
             );
         }
 
         assert_eq!(
             materializations.load(Ordering::Acquire),
             1,
-            "the factory must run exactly once for the destination affinity, even under a race"
+            "the factory must run exactly once for the destination strategy partition, even under a race"
         );
         assert_eq!(first.value(), 0, "the destination value is freshly relocated, not the source value");
         assert_eq!(origin.value(), 7, "the source value is left intact");
