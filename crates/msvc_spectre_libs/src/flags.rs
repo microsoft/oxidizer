@@ -58,7 +58,10 @@ pub const REQUIRED_LINK_ARGS_VAR: &str = "MSVC_SPECTRE_REQUIRED_LINK_ARGS";
 /// ```
 /// use msvc_spectre_libs::flags::required_link_args;
 ///
-/// assert_eq!(required_link_args(" /CETCOMPAT ; ;/guard:ehcont"), vec!["/CETCOMPAT", "/guard:ehcont"]);
+/// assert_eq!(
+///     required_link_args(" /CETCOMPAT ; ;/guard:ehcont"),
+///     vec!["/CETCOMPAT", "/guard:ehcont"]
+/// );
 /// assert!(required_link_args("").is_empty());
 /// ```
 #[must_use]
@@ -81,29 +84,26 @@ pub fn required_link_args(value: &str) -> Vec<&str> {
 /// let encoded = "-C\u{1f}link-arg=/CETCOMPAT\u{1f}-Ctarget-cpu=x86-64-v3";
 /// assert_eq!(
 ///     codegen_values(encoded),
-///     vec!["link-arg=/CETCOMPAT".to_owned(), "target-cpu=x86-64-v3".to_owned()]
+///     vec![
+///         "link-arg=/CETCOMPAT".to_owned(),
+///         "target-cpu=x86-64-v3".to_owned()
+///     ]
 /// );
 /// ```
 #[must_use]
 pub fn codegen_values(encoded: &str) -> Vec<String> {
-    let args: Vec<&str> = encoded.split(ENCODED_SEPARATOR).filter(|arg| !arg.is_empty()).collect();
-
     let mut values = Vec::new();
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index];
+    let mut args = encoded.split(ENCODED_SEPARATOR).filter(|arg| !arg.is_empty());
+
+    while let Some(arg) = args.next() {
         if arg == "-C" {
             // Split spelling: the value is the next argument. A trailing `-C`
             // with no value is malformed; ignore it rather than panicking.
-            if let Some(value) = args.get(index + 1) {
-                values.push((*value).to_owned());
-            }
-            index += 2;
-        } else {
-            if let Some(value) = arg.strip_prefix("-C") {
+            if let Some(value) = args.next() {
                 values.push(value.to_owned());
             }
-            index += 1;
+        } else if let Some(value) = arg.strip_prefix("-C") {
+            values.push(value.to_owned());
         }
     }
     values
@@ -119,7 +119,10 @@ pub fn codegen_values(encoded: &str) -> Vec<String> {
 /// use msvc_spectre_libs::flags::missing_required_link_args;
 ///
 /// assert!(missing_required_link_args("-Clink-arg=/cetcompat", &["/CETCOMPAT"]).is_empty());
-/// assert_eq!(missing_required_link_args("", &["/CETCOMPAT"]), vec!["/CETCOMPAT"]);
+/// assert_eq!(
+///     missing_required_link_args("", &["/CETCOMPAT"]),
+///     vec!["/CETCOMPAT"]
+/// );
 /// ```
 #[must_use]
 pub fn missing_required_link_args<'a>(encoded: &str, required: &[&'a str]) -> Vec<&'a str> {
@@ -155,29 +158,30 @@ pub fn missing_required_link_args<'a>(encoded: &str, required: &[&'a str]) -> Ve
 /// use msvc_spectre_libs::flags::adds_link_search;
 ///
 /// let encoded = "-L\u{1f}native=C:\\VC\\lib\\spectre\\x64";
-/// assert!(adds_link_search(encoded, Path::new("C:/VC/lib/spectre/x64")));
-/// assert!(!adds_link_search(encoded, Path::new("C:/VC/lib/spectre/arm64")));
+/// assert!(adds_link_search(
+///     encoded,
+///     Path::new("C:/VC/lib/spectre/x64")
+/// ));
+/// assert!(!adds_link_search(
+///     encoded,
+///     Path::new("C:/VC/lib/spectre/arm64")
+/// ));
 ///
 /// // A `dependency=` entry is not a native library search path.
 /// let encoded = "-L\u{1f}dependency=C:\\VC\\lib\\spectre\\x64";
-/// assert!(!adds_link_search(encoded, Path::new("C:/VC/lib/spectre/x64")));
+/// assert!(!adds_link_search(
+///     encoded,
+///     Path::new("C:/VC/lib/spectre/x64")
+/// ));
 /// ```
 #[must_use]
 pub fn adds_link_search(encoded: &str, dir: &Path) -> bool {
-    let args: Vec<&str> = encoded.split(ENCODED_SEPARATOR).filter(|arg| !arg.is_empty()).collect();
+    let mut args = encoded.split(ENCODED_SEPARATOR).filter(|arg| !arg.is_empty());
 
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index];
+    while let Some(arg) = args.next() {
         // `-L` takes its value either joined (`-Lnative=<dir>`) or split
         // (`-L`, `native=<dir>`).
-        let value = if arg == "-L" {
-            index += 2;
-            args.get(index - 1).copied()
-        } else {
-            index += 1;
-            arg.strip_prefix("-L")
-        };
+        let value = if arg == "-L" { args.next() } else { arg.strip_prefix("-L") };
 
         // Strip the optional `<kind>=` prefix. Only `native` and `all` -- the
         // default when no kind is given -- place the directory on the *native*
