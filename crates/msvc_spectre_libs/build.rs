@@ -1,55 +1,41 @@
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
-//! Locates the Spectre-mitigated MSVC libraries and adds them to the linker search path.
-
-#[cfg(all(target_os = "windows", target_env = "msvc"))]
-#[path = "src/architecture.rs"]
-mod architecture;
-
 fn main() {
     #[cfg(all(target_os = "windows", target_env = "msvc"))]
     add_spectre_link_search();
 }
 
-/// Windows requires additional steps to find the Spectre-mitigated CRT libraries.
-///
-/// See <https://learn.microsoft.com/cpp/build/reference/qspectre>.
+/// Windows requires additional steps to find the spectre-mitigated CRT libs.
+/// More info: https://docs.microsoft.com/en-us/cpp/build/reference/qspectre
 #[cfg(all(target_os = "windows", target_env = "msvc"))]
 fn add_spectre_link_search() {
+    use cc::windows_registry;
     use std::env;
 
-    use cc::windows_registry;
+    let target = env::var("TARGET").expect("missing TARGET");
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("missing CARGO_CFG_TARGET_ARCH");
+    let arch = match arch.as_str() {
+        "x86_64" => "x64",
+        "x86" => "x86",
+        // The spectre\arm64ec directory doesn't have any libs in it, instead the spectre arm64 libs
+        // contain both arm64 and arm64ec objects.
+        "aarch64" | "arm64ec" => "arm64",
+        "arm" => "arm32",
+        _ => panic!("unsupported arch: {arch}"),
+    };
 
-    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo must set CARGO_CFG_TARGET_OS when executing a package build script");
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").expect("Cargo must set CARGO_CFG_TARGET_ENV when executing a package build script");
-    if !architecture::is_windows_msvc_target(&target_os, &target_env) {
-        return;
-    }
-
-    let target = env::var("TARGET").expect("Cargo must set TARGET when executing a package build script");
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("Cargo must set CARGO_CFG_TARGET_ARCH when executing a package build script");
-    let arch = architecture::spectre_directory(&arch)
-        .expect("Windows MSVC targets must use an architecture supported by Visual Studio Spectre libraries");
-
-    let tool =
-        windows_registry::find_tool(&target, "cl.exe").expect("the Windows MSVC target requires cl.exe from a Visual Studio installation");
-    let spectre_libs = architecture::spectre_libs_path(tool.path(), arch)
-        .expect("the cl.exe path must be inside a Visual Studio MSVC toolchain directory");
+    let tool = windows_registry::find_tool(&target, "cl.exe").expect("couldn't find cl.exe");
+    let spectre_libs = tool.path().join(format!(r"..\..\..\..\lib\spectre\{arch}"));
 
     if spectre_libs.exists() {
-        println!("cargo:rustc-link-search=native={}", spectre_libs.display());
-    } else {
         println!(
-            "cargo:warning=No Spectre-mitigated libraries were found. \
-             Use Visual Studio Installer to add them."
+            "cargo:rustc-link-search=native={}",
+            spectre_libs.into_os_string().into_string().unwrap()
         );
+    } else {
+        println!("cargo:warning=No spectre-mitigated libs were found. Please modify the VS Installation to add these.");
 
         #[cfg(feature = "error")]
-        assert!(
-            env::var_os("MSVC_SPECTRE_LIBS_ALLOW_MISSING").is_some(),
-            "No Spectre-mitigated libraries were found. \
-             Use Visual Studio Installer to add them."
-        );
+        {
+            panic!("No spectre-mitigated libs were found. Please modify the VS Installation to add these.");
+        }
     }
 }

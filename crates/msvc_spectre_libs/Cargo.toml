@@ -1,37 +1,19 @@
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
-
 [package]
 name = "msvc_spectre_libs"
 version = "0.1.3"
-description = "Links Spectre-mitigated libraries for Windows MSVC targets"
-readme = "README.md"
-keywords = ["spectre", "msvc", "mitigated", "crt", "windows"]
-categories = ["development-tools::build-utils"]
-
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
-include.workspace = true
-repository = "https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs"
-
-[package.metadata.docs.rs]
-all-features = true
-default-target = "x86_64-pc-windows-msvc"
-
-[features]
-default = []
-# Fail the build instead of warning when Spectre-mitigated libraries are unavailable.
-error = []
-
-[dependencies]
+edition = "2021"
+description = """
+Provides an easy way to link with the Spectre-mitigated libraries for Windows MSVC targets.
+Does nothing for other targets.
+"""
+build = "build.rs"
+keywords = ["spectre", "msvc", "mitigated", "crt"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/microsoft/rust_msvc_spectre_libs"
 
 [target.'cfg(all(target_os = "windows", target_env = "msvc"))'.build-dependencies]
-cc = { workspace = true }
+cc = "1.0"
 
-[dev-dependencies]
-
-[lints]
-workspace = true
+[features]
+# causes an error instead of a warning if the libs are not available
+error = []
