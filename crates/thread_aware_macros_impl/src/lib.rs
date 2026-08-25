@@ -299,6 +299,13 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
         Type::Array(a) => collect_generics_in_type(&a.elem, generic_idents, acc)?,
         Type::Group(g) => collect_generics_in_type(&g.elem, generic_idents, acc)?,
         Type::Paren(p) => collect_generics_in_type(&p.elem, generic_idents, acc)?,
+        // Deliberately not traversed: `Type::Slice`, `Type::Ptr`, `Type::BareFn`,
+        // `Type::TraitObject` and `Type::ImplTrait`. None of them has a `ThreadAware` impl, so
+        // an enclosing field cannot be relocated through one and no bound is owed. That is a
+        // property of `impls.rs`, not of this function - if an impl is added there, and
+        // `impls.rs` still carries a `//TODO impl_transfer_array!` suggesting one might be,
+        // the matching arm has to be added here or the header will silently under-constrain
+        // the body.
         _ => {}
     }
     Ok(())
