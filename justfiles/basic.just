@@ -26,7 +26,7 @@ check-changes:
     just format-check
 
     Write-Host "`n=== Checking Cargo.toml sorting ===" -ForegroundColor Cyan
-    ./scripts/check-cargo-sort.ps1
+    cargo sort --check --grouped --workspace
 
     Write-Host "`n=== Checking READMEs ===" -ForegroundColor Cyan
     just readme-check

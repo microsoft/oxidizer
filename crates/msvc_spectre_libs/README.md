@@ -1,34 +1,79 @@
-# msvc_spectre_libs
-Provides an easy way to link with the [Spectre-mitigated](https://docs.microsoft.com/en-us/cpp/build/reference/qspectre) libraries for `msvc` targets.
+<div align="center">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Msvc Spectre Libs Logo" width="96">
 
-To use, add this crate as a `dependency` in your `Cargo.toml`.
+# Msvc Spectre Libs
 
-The Spectre-mitigated libs can be installed using Visual Studio Installer. For example:
-`MSVC v143 - VS 2022 C++ x64/x86 Spectre-mitigated libs (Latest)`
+[![crate.io](https://img.shields.io/crates/v/msvc_spectre_libs.svg)](https://crates.io/crates/msvc_spectre_libs)
+[![docs.rs](https://docs.rs/msvc_spectre_libs/badge.svg)](https://docs.rs/msvc_spectre_libs)
+[![MSRV](https://img.shields.io/crates/msrv/msvc_spectre_libs)](https://crates.io/crates/msvc_spectre_libs)
+[![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
-## Error handling
-If the Spectre-mitigated libs are not available, the build will issue a warning and continue.
+</div>
 
-Alternatively, to make the build panic instead, activate the `error` feature of this crate.
+Link against the Spectre-mitigated MSVC CRT import libraries on Windows.
 
-## Contributing
+Adding this crate as a build dependency makes its build script add the
+Spectre-mitigated (`/Qspectre`) C runtime import libraries to the linker
+search path for Windows MSVC targets. Dependent crates then link against the
+hardened runtime automatically, because a `cargo:rustc-link-search`
+directive propagates from a dependency to every crate that depends on it. On
+every non-Windows-MSVC target the crate does nothing.
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
+## Usage
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+```toml
+[build-dependencies]
+msvc_spectre_libs = "0.2"
+```
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+No source changes are required: linking the Spectre libraries is a pure
+build-script side effect.
 
-## Trademarks
+## Locating the libraries
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+The build script resolves the Spectre library directory in two steps:
+
+1. **Build-system override (preferred).** If the environment variable
+   `MSVC_SPECTRE_LIB_DIR_<target>` (for example
+   `MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc`) or the target-agnostic
+   `MSVC_SPECTRE_LIB_DIR` points at an existing directory, that directory is
+   used verbatim. This lets an enlistment or CI system that already knows the
+   toolchain layout (for example one that provisions the MSVC libraries from
+   a package feed) supply the exact path without any registry probing.
+1. **Toolchain discovery (fallback).** Otherwise the script locates `cl.exe`
+   through the Windows registry and derives the `lib\spectre\<arch>`
+   directory that ships with the Visual Studio C++ build tools.
+
+Use [`resolve::override_var_name`][__link0] to compute the target-specific override
+variable name and [`resolve::spectre_arch`][__link1] to map a Rust target
+architecture to the toolchain’s Spectre subdirectory.
+
+## Features
+
+* `error`: turn the “libraries not found” build warning into a hard build
+  error, for builds that must not silently fall back to the unmitigated
+  runtime.
+
+## Examples
+
+```rust
+use msvc_spectre_libs::resolve::{override_var_name, spectre_arch};
+
+assert_eq!(override_var_name("x86_64-pc-windows-msvc"), "MSVC_SPECTRE_LIB_DIR_x86_64_pc_windows_msvc");
+assert_eq!(spectre_arch("x86_64"), Some("x64"));
+assert_eq!(spectre_arch("aarch64"), Some("arm64"));
+assert_eq!(spectre_arch("riscv64"), None);
+```
+
+
+<hr/>
+<sub>
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs">source code</a>.
+</sub>
+
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbjFOs0DqVlxAbT_w4_2ENvfwb02w1X_d2lz8bQiyrGUcXbq1hZIGCcW1zdmNfc3BlY3RyZV9saWJzZTAuMi4w
+ [__link0]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::override_var_name
+ [__link1]: https://docs.rs/msvc_spectre_libs/0.2.0/msvc_spectre_libs/?search=resolve::spectre_arch

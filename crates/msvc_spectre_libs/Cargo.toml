@@ -1,19 +1,41 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 [package]
 name = "msvc_spectre_libs"
-version = "0.1.3"
-edition = "2021"
-description = """
-Provides an easy way to link with the Spectre-mitigated libraries for Windows MSVC targets.
-Does nothing for other targets.
-"""
-build = "build.rs"
-keywords = ["spectre", "msvc", "mitigated", "crt"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/microsoft/rust_msvc_spectre_libs"
+description = "Link against the Spectre-mitigated CRT import libraries for Windows MSVC targets; a no-op on every other target."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["spectre", "msvc", "mitigated", "crt", "oxidizer"]
+categories = ["development-tools::build-utils"]
 
-[target.'cfg(all(target_os = "windows", target_env = "msvc"))'.build-dependencies]
-cc = "1.0"
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs"
+build = "build.rs"
+
+[package.metadata.docs.rs]
+all-features = true
+
+# `cc` is used only by `build.rs`, and only on Windows MSVC targets (see the
+# target-scoped `build-dependencies` table below). cargo-machete does not scan
+# build scripts, so it reports a false positive; ignore it here. cargo-udeps is
+# target-aware and needs no ignore because the dependency is already gated.
+[package.metadata.cargo-machete]
+ignored = ["cc"]
 
 [features]
-# causes an error instead of a warning if the libs are not available
+# Turn the "libraries not found" build warning into a hard build error.
 error = []
+
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))'.build-dependencies]
+cc = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

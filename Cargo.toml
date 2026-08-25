@@ -4,7 +4,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-exclude = ["crates/msvc_spectre_libs"]
 
 [workspace.package]
 edition = "2024"
@@ -85,6 +84,7 @@ cachet = { path = "crates/cachet", default-features = false, version = "0.13.0" 
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.7.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.5.0" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.5.0" }
+cc = { version = "1.2", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
