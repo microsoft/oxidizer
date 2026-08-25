@@ -36,7 +36,7 @@ allowed_external_types = [
     "opentelemetry::metrics::meter::MeterProvider",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::core::ThreadAware",
     "tick::clock::Clock",
     "tick::simple_clock::SimpleClock",
     "tower_layer::Layer",

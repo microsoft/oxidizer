@@ -24,7 +24,7 @@ allowed_external_types = [
     "observed_macros::Enrichment",
     "observed_macros::event",
     "ohno::*",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::core::ThreadAware",
     "tick::simple_clock::SimpleClock",
 ]
 

@@ -20,7 +20,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "tokio::runtime::handle::Handle",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::Affinity",
     "thread_aware::closure::ThreadAwareAsyncFnOnce",
 ]
 

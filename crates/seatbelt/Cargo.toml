@@ -30,7 +30,9 @@ allowed_external_types = [
     "tick::clock::Clock",
     "tower_layer::Layer",
     "tower_service::Service",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
 ]
 
 [package.metadata.docs.rs]

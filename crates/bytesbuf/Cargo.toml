@@ -23,7 +23,9 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::affinity::MemoryAffinity",
+    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::core::ThreadAware",
 ]
 
 [package.metadata.docs.rs]

@@ -24,7 +24,7 @@ all-features = true
 allowed_external_types = [
     "cachet_tier::tier::CacheTier",
     "foldhash::fast::RandomState",
-    "thread_aware_core::ThreadAware",
+    "thread_aware::core::ThreadAware",
 ]
 
 [dependencies]

@@ -11,7 +11,7 @@ use std::thread::ThreadId;
 
 use many_cpus::SystemHardware;
 
-use crate::affinity::{Affinity, pinned_affinities};
+use crate::affinity::Affinity;
 
 const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";
 
@@ -60,7 +60,7 @@ impl NumaNode {
 pub struct ThreadRegistry {
     threads: Mutex<HashMap<ThreadId, Affinity>>,
     processors: Vec<Processor>,
-    affinities: Vec<Affinity>,
+    numa_nodes: Vec<NumaNode>,
 }
 
 impl ThreadRegistry {
@@ -97,11 +97,10 @@ impl ThreadRegistry {
         }
         .expect("Not enough processors available");
 
-        let processors = Processor::unpack(&processors);
         let mut numa_nodes = Vec::new();
-        let mut processors_per_numa_node = Vec::new();
+        let mut dense_index = 0;
         for processor in &processors {
-            let index = processor.memory_region_id();
+            let index = processor.memory_region_id() as usize;
 
             // Resize if needed
             if index >= numa_nodes.len() {
@@ -109,26 +108,34 @@ impl ThreadRegistry {
             }
 
             if numa_nodes[index].is_invalid() {
-                numa_nodes[index] = NumaNode(processors_per_numa_node.len());
-                processors_per_numa_node.push(0);
+                numa_nodes[index] = NumaNode(dense_index);
+                dense_index += 1;
             }
-
-            processors_per_numa_node[numa_nodes[index].0] += 1;
         }
 
         assert!(processors.len() < u16::MAX as usize, "Too many processors");
-        assert!(processors_per_numa_node.len() < u16::MAX as usize, "Too many memory regions");
+        assert!(numa_nodes.len() < u16::MAX as usize, "Too many memory regions");
 
         Self {
-            affinities: pinned_affinities(&processors_per_numa_node),
-            processors,
+            processors: Processor::unpack(&processors),
+            numa_nodes,
             threads: Mutex::new(HashMap::new()),
         }
     }
 
     /// Get an iterator over all available memory affinities.
+    #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
     pub fn affinities(&self) -> impl Iterator<Item = Affinity> {
-        self.affinities.iter().copied()
+        self.processors.iter().enumerate().map(|(core_index, processor)| {
+            let dense_numa_index = self.numa_nodes[processor.memory_region_id()];
+
+            Affinity::new(
+                core_index as _,
+                dense_numa_index.0 as _,
+                self.processors.len() as _,
+                self.numa_nodes.len() as _,
+            )
+        })
     }
 
     /// The number of total available memory affinities.
@@ -188,7 +195,7 @@ impl Processor {
             .into_iter()
             .map(|set| Self { inner: set })
             .collect::<Vec<_>>();
-        this.sort_by_key(|p| (p.memory_region_id(), p.as_processor().id()));
+        this.sort_by_key(|p| p.as_processor().id());
         this
     }
 

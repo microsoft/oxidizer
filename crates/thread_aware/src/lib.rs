@@ -9,8 +9,8 @@
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables standard-library
-//!   implementations, the per-affinity `Arc`, and hosted-only closure support.
+//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//!   hosted-only type implementations.
 //! * **`derive`** *(default)* re-exports the `#[derive(ThreadAware)]` macro.
 //! * **`threads`** enables the `registry` module and implies `std`.
 //! * Disable default features for `#![no_std]` environments. The [`ThreadAware`] trait, affinity
@@ -101,15 +101,39 @@
 //!
 //! # Features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* enables standard-library
-//!   implementations, the per-affinity [`Arc`], and hosted-only closure support. Disable it
-//!   for `#![no_std]` environments; the crate then requires `alloc` and pointer-width atomics.
+//! * The **`std` Cargo feature** *(enabled by default)* enables the per-affinity `Arc` and
+//!   hosted-only type implementations. Disable it for `#![no_std]` environments; the crate then
+//!   requires `alloc` and pointer-width atomics.
 //! * **`derive`** *(default)*: Re-exports the `#[derive(ThreadAware)]` macro from the companion
 //!   `thread_aware_macros` crate. Disable to avoid pulling in proc-macro code in minimal
 //!   environments. For derive support without `std`, use
 //!   `default-features = false, features = ["derive"]`.
 //! * **`threads`**: Enables features mainly used by async runtimes for OS interactions and implies
 //!   `std`.
+//!
+//! ## 3rd-party crate impls
+//!
+//! The following opt-in features provide [`ThreadAware`] implementations for
+//! inert value types from popular 3rd-party crates. Enabling a feature pulls
+//! that crate in as a dependency. By default none are enabled and this crate
+//! brings in no extra dependencies.
+//!
+//! Feature names follow this convention so that future breaking versions of
+//! the wrapped crate can be supported additively:
+//!
+//! * Stable `1.x` (or any other stable major) → bare crate name
+//!   (e.g. `bytes`, `http`, `uuid`).
+//! * `N.x` for `N >= 2` → `<crate><N>` (e.g. `bytes2` if `bytes 2.x` ever lands).
+//! * `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
+//!
+//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+//! * **`http`**: Enables `std` and provides impls for `http::StatusCode`, `http::Method`, `http::Version`,
+//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
+//!   `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
+//!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
+//!   `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
+//! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+//! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
 //! # Examples
 //!
@@ -164,7 +188,7 @@
 //! # }
 //! ```
 //!
-//! [`ThreadAware`]: thread_aware_core::ThreadAware
+//! [`ThreadAware`]: crate::core::ThreadAware
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
@@ -176,6 +200,9 @@ extern crate std;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 mod cell;
+mod core;
+mod impls;
+mod third_party;
 mod wrappers;
 
 pub mod closure;
@@ -183,7 +210,12 @@ pub mod closure;
 #[cfg(feature = "threads")]
 pub mod registry;
 
+#[doc(hidden)]
+pub mod __private;
 pub mod affinity;
+
+#[doc(inline)]
+pub use core::ThreadAware;
 
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
@@ -236,6 +268,4 @@ pub use ::thread_aware_macros::ThreadAware;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
-#[doc(inline)]
-pub use thread_aware_core::ThreadAware;
 pub use wrappers::{Unaware, unaware};

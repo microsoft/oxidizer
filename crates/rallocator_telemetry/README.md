@@ -44,7 +44,7 @@ existing version.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/rallocator_telemetry">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbA9BBc3IJUEYbdz6zmazZCsMbR0-Fmqyx0SsbF2aVShPOGEdhZIGCdHJhbGxvY2F0b3JfdGVsZW1ldHJ5ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEG9dVcQv7gDzkG7VJ-FsdvgXwG4ndzbdWNuz6G6a5_GehYxcvYXKEGwPQQXNyCVBGG3c-s5ms2QrDG0dPhZqssdErGxdmlUoTzhhHYWSBgnRyYWxsb2NhdG9yX3RlbGVtZXRyeWUwLjEuMA
  [__link0]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/snapshot/index.html
  [__link1]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/topology/index.html
  [__link2]: https://docs.rs/rallocator_telemetry/0.1.0/rallocator_telemetry/callers/index.html
