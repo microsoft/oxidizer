@@ -867,8 +867,8 @@ branch remains non-blocking
 
 The total connect deadline design.md §6.2 requires is the transport's
 self-scheduled request-phase timer. Response timeout is already wrapped around the
-pipeline by `fetch`, body idle timeout is applied by `HttpBodyBuilder`, and only an
-explicit DNS-only timeout uses a native WinHTTP timer (§10.4). The
+pipeline by `fetch`, and body idle timeout is applied by `HttpBodyBuilder`. No native
+WinHTTP timer bounds any phase; all four are programmed unlimited (§10.4). The
 `RequestDriver` races the connect/send phase against a single
 `tick::Clock::delay(connect_timeout)`, using the clock already threaded in from
 `CustomContext` (no new dependency). Whichever finishes first wins. If the timer
