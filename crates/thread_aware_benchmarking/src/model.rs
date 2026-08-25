@@ -28,6 +28,7 @@ pub struct Payload {
     pub id: u64,
 }
 
+#[cfg_attr(test, mutants::skip)] // Benchmark support is exercised by its harnesses, not unit tests.
 impl Payload {
     /// Creates a payload with a distinct identity.
     #[must_use]
@@ -38,6 +39,7 @@ impl Payload {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Benchmark support is exercised by its harnesses, not unit tests.
 impl Default for Payload {
     fn default() -> Self {
         Self::new()
@@ -62,6 +64,7 @@ struct Leaf {
     id: u64,
 }
 
+#[cfg_attr(test, mutants::skip)] // Benchmark support is exercised by its harnesses, not unit tests.
 impl Leaf {
     fn new() -> Self {
         Self {
@@ -95,6 +98,7 @@ pub struct Tree {
     root: Box<Layer>,
 }
 
+#[cfg_attr(test, mutants::skip)] // Benchmark support is exercised by its harnesses, not unit tests.
 impl Tree {
     /// Creates the benchmark object tree.
     #[must_use]
@@ -148,6 +152,7 @@ impl Tree {
     }
 }
 
+#[cfg_attr(test, mutants::skip)] // Benchmark support is exercised by its harnesses, not unit tests.
 impl Default for Tree {
     fn default() -> Self {
         Self::new()

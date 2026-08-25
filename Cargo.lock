@@ -4872,6 +4872,7 @@ dependencies = [
  "criterion",
  "gungraun",
  "many_cpus",
+ "mutants",
  "thread_aware",
 ]
 

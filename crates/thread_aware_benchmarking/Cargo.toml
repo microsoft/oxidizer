@@ -29,6 +29,7 @@ thread_aware = { workspace = true, features = ["derive", "std"] }
 [dev-dependencies]
 criterion = { workspace = true }
 many_cpus = { workspace = true }
+mutants = { workspace = true }
 
 # Workspace dependency declarations disable default features. Re-enable the
 # benchmark macros only on Linux, where Gungraun can use Valgrind.
