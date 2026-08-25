@@ -59,11 +59,8 @@ windows = { workspace = true, features = [
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
-bytes = { workspace = true }
 ctor = { workspace = true }
-fetch_winhttp_testing = { path = "../fetch_winhttp_testing" }
-futures = { workspace = true, features = ["executor", "std"] }
-http-body-util = { workspace = true }
+futures = { workspace = true, features = ["std"] }
 mockall = { workspace = true }
 mutants = { workspace = true }
 observed_testing = { path = "../observed_testing" }

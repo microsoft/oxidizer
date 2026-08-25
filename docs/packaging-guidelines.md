@@ -15,9 +15,9 @@ Only these paths are packaged:
 ```toml
 include = [
     "/src/**",
-    "/examples/**",
-    "/benches/**",
+    "/build.rs",
     "/tests/**",
+    "!/tests/__fuzz__/**",
     "/docs/**/*.md",
     "/Cargo.toml",
     "/README.md",
@@ -25,30 +25,32 @@ include = [
 ]
 ```
 
-Anything not listed (for example `logo.png`, `favicon.ico`, `AGENTS.md`,
-`CHANGELOG.md`, `docs/diagrams/*`, editable `*.graphml` sources, internal design
-notes) is **not** shipped.
+Anything not listed (for example `examples/`, `benches/`, `logo.png`,
+`favicon.ico`, `AGENTS.md`, `CHANGELOG.md`, `docs/diagrams/*`, editable
+`*.graphml` sources, internal design notes) is **not** shipped.
 
 ## What belongs in the package
 
-The package should contain exactly two things: everything **declared in
-`Cargo.toml`** and everything **required to build** it.
+The package should contain what a **dependent** needs: everything required to
+build the library, plus the metadata crates.io renders.
 
-- **Declared targets ship in full.** If a crate declares (or autodiscovers) a
-  `[[example]]`, `[[test]]`, or `[[bench]]` target, the corresponding
-  `examples/`, `tests/`, or `benches/` source must be packaged. This keeps the
-  published manifest internally consistent: `cargo build --all-targets` and
-  `cargo test` succeed against the published tarball, with no declaration
-  pointing at a missing file. (Cargo *tolerates* such "dangling" declarations,
-  but no mainstream crate ships them, and they make the manifest lie about its
-  own contents.)
-- **Build-required inputs ship.** `src/**`, plus any file compiled in via
-  `include_str!`/`include_bytes!` (see `docs/**/*.md` below).
+- **Build-required inputs ship.** `src/**`, `build.rs`, plus any file compiled
+  in via `include_str!`/`include_bytes!` (see `docs/**/*.md` below).
 - **Key metadata ships.** `Cargo.toml`, `README.md` (rendered on crates.io),
   and `LICENSE*`.
+- **Tests ship.** They are cheap, and shipping them lets a consumer verify a
+  vendored copy of the crate behaves as published. Fuzz targets are excluded
+  because they need a separate toolchain to build at all.
+- **Examples and benchmarks do not ship.** They are development code. No
+  dependent builds them, they routinely depend on unpublished in-workspace
+  fixture crates, and shipping them enlarges the tarball and the LFS exposure
+  surface for no consumer benefit.
 - **Everything else is dropped.** `CHANGELOG.md` is intentionally excluded: it
-  is neither a declared target nor build-required, and crates.io does not render
-  it.
+  is neither build-required nor rendered by crates.io.
+
+A crate that declares an explicit `[[example]]` or `[[bench]]` target therefore
+publishes a manifest entry whose source is absent. Cargo does not build those
+targets for a dependent, so this is inert.
 
 ## Why an allowlist instead of `exclude`
 
@@ -79,9 +81,8 @@ until someone remembered to exclude it.
 
 1. **Never place a Git LFS-tracked file in a packaged path.** The LFS globs in
    `.gitattributes` (`*.png`, `*.ico`, `*.jpg`, `*.pdf`, `*.zip`, `*.dll`,
-   `*.exe`, ...) must not appear under `src/`, `examples/`, `tests/`,
-   `benches/`, or `docs/`. Reference such assets by **absolute URL** instead,
-   e.g.:
+   `*.exe`, ...) must not appear under `src/`, `tests/`, or `docs/`. Reference
+   such assets by **absolute URL** instead, e.g.:
 
    ```rust
    #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/<crate>/logo.png")]

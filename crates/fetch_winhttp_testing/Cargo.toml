@@ -3,7 +3,7 @@
 
 [package]
 name = "fetch_winhttp_testing"
-description = "Localhost fixtures and client helpers for exercising fetch_winhttp (Windows only)."
+description = "Localhost fixtures, integration tests, examples and benchmarks for fetch_winhttp (Windows only)."
 version = "0.0.0"
 publish = false
 
@@ -25,11 +25,17 @@ include = { workspace = true }
 # metadata and never consults it, so without this block that job fails.
 allowed_external_types = ["*"]
 
-# Fixture crate: it is exercised by other crates' tests, examples, and
-# benchmarks rather than by a suite of its own, so it may legitimately produce
-# no coverage data.
+# Fixture crate: its own library is scaffolding for the tests, examples and
+# benchmarks it hosts, and is marked `coverage(off)` throughout, so it
+# legitimately produces no coverage data.
 [package.metadata.coverage-gate]
 min-lines-percent = 0
+
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
 
 [target.'cfg(windows)'.dependencies]
 bytes = { workspace = true }
@@ -42,6 +48,7 @@ h3-quinn = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
+http_extensions = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = [
     "http1",
@@ -62,6 +69,11 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+ctor = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
+testing_aids = { path = "../testing_aids" }
 
 [lints]
 workspace = true

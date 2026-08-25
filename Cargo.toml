@@ -16,6 +16,10 @@ homepage = "https://github.com/microsoft/oxidizer"
 # We use an explicit include (allowlist), not exclude, so that non-source
 # artifacts can never leak into the published `.crate` by construction.
 #
+# We ship only what a dependent has to build: the library sources, its
+# compile-time inputs, and the crate metadata. Examples and benchmarks are
+# development code that no dependent ever builds, so they stay out.
+#
 # WARNING: never add a Git LFS-tracked file to a packaged path. `cargo` has no
 # LFS awareness: depending on whether the publishing runner smudged LFS, an
 # LFS-tracked binary is packaged either as its real bytes or as a ~130-byte
@@ -24,16 +28,14 @@ homepage = "https://github.com/microsoft/oxidizer"
 # stores - which breaks the dependent's build on docs.rs ("checksum changed
 # between lock files"). The `.gitattributes` LFS globs (*.png, *.ico, *.jpg,
 # *.pdf, *.zip, *.dll, *.exe, ...) therefore must stay OUT of every packaged
-# path (src, examples, tests, benches, docs). Reference such assets by absolute
-# URL instead, e.g. `#![doc(html_logo_url = "https://.../logo.png")]`.
+# path (src, tests, docs). Reference such assets by absolute URL instead, e.g.
+# `#![doc(html_logo_url = "https://.../logo.png")]`.
 #
 # The `docs/**/*.md` glob matches only Markdown, so compile-time `include_str!`
 # doc fragments are packaged while binary diagram assets beside them are not.
 include = [
     "/src/**",
     "/build.rs",
-    "/examples/**",
-    "/benches/**",
     "/tests/**",
     "!/tests/__fuzz__/**",
     "/docs/**/*.md",

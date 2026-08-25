@@ -1,11 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Localhost fixtures and client helpers for exercising `fetch_winhttp`.
+//! Localhost fixtures for exercising `fetch_winhttp`, plus the integration
+//! tests, examples and benchmarks that drive them.
 //!
-//! This crate is not published. It exists so the transport's integration tests,
-//! examples, and benchmarks drive the same scripted servers and build their
-//! clients the same way.
+//! This crate is not published. `fetch_winhttp` cannot dev-depend on a package
+//! that depends on it - that is a dependency cycle, which the workspace forbids
+//! - so the transport's out-of-process test code lives here, next to the
+//! fixtures it uses. That also keeps the server ecosystem's dependencies out of
+//! the transport package.
 //!
 //! [`TestServer`] serves plaintext or TLS traffic over TCP, negotiating HTTP/1.1
 //! or HTTP/2; [`Http3Server`] serves HTTP/3 over QUIC. Both are scripted with

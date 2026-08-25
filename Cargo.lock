@@ -1734,17 +1734,14 @@ dependencies = [
 name = "fetch_winhttp"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "bytesbuf",
  "bytesbuf_io",
  "ctor",
  "events_once",
  "fetch",
- "fetch_winhttp_testing",
  "futures",
  "http",
  "http-body",
- "http-body-util",
  "http_extensions",
  "layered",
  "mockall",
@@ -1768,6 +1765,7 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "bytesbuf",
+ "ctor",
  "fetch",
  "fetch_winhttp",
  "futures",
@@ -1776,6 +1774,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "http_extensions",
  "hyper",
  "hyper-util",
  "observed",
@@ -1783,6 +1782,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "rustls-pki-types",
+ "testing_aids",
  "tick",
  "tokio",
  "tokio-rustls",

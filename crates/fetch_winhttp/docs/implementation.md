@@ -172,20 +172,15 @@ the routing boundary between a WinHTTP operation failure and malformed data
 returned by a successful query because callers map those categories to different
 `HttpError` classifications.
 
-### 1.2 Integration-test layout
+### 1.2 Development-code layout
 
-The integration tests under `crates/fetch_winhttp/tests/` are split by concern
-rather than by protocol version, so one binary owns one contract area:
+The transport package holds only the library and its unit tests. Everything that
+needs a live peer - the integration tests, the examples, and the benchmarks -
+lives in the unpublished `fetch_winhttp_testing` package alongside the fixtures
+they drive:
 
 ```text
 crates/fetch_winhttp/tests/
-  protocols.rs         // negotiated-version reporting and per-protocol round trips
-                       //   (HTTP/1.1, HTTP/2, HTTP/3), including required-h3 failure
-  tls.rs               // the certificate-validation relaxation matrix
-  transport_policy.rs  // request framing, trailer rejection, decoding, redirects,
-                       //   cookies, authentication challenges
-  lifecycle.rs         // pool isolation and reuse, cancellation, body drop, leak soak,
-                       //   full fetch pipeline construction
   non_windows.rs       // keeps package-scoped test runs nonempty off Windows
 
 crates/fetch_winhttp_testing/src/
@@ -195,10 +190,28 @@ crates/fetch_winhttp_testing/src/
   recording.rs         // ResponsePlan/RecordedRequest scripting and observation vocabulary
 ```
 
-`fetch_winhttp_testing` is an unpublished package rather than a `tests/common`
-module, so the integration tests, the examples, and the benchmarks all drive the
-same fixtures. It also keeps the server ecosystem's dependencies - Tokio, hyper,
-quinn, rustls - out of the transport package entirely.
+Two constraints put that code there rather than in the transport package. A
+dev-dependency from `fetch_winhttp` back onto a package that depends on it forms
+a dependency cycle, which the workspace forbids (root `Cargo.toml`,
+`[workspace.dependencies]` preamble) and CI rejects through
+`cargo ensure-no-cyclic-deps`. Hosting the consumers next to the fixtures also
+keeps the server ecosystem's dependencies - Tokio, hyper, quinn, rustls - out of
+the transport package entirely. This mirrors `observed_testing`, which owns the
+`observed` family's integration tests for the same reason.
+
+The integration tests are split by concern rather than by protocol version, so
+one binary owns one contract area:
+
+```text
+crates/fetch_winhttp_testing/tests/
+  protocols.rs         // negotiated-version reporting and per-protocol round trips
+                       //   (HTTP/1.1, HTTP/2, HTTP/3), including required-h3 failure
+  tls.rs               // the certificate-validation relaxation matrix
+  transport_policy.rs  // request framing, trailer rejection, decoding, redirects,
+                       //   cookies, authentication challenges
+  lifecycle.rs         // pool isolation and reuse, cancellation, body drop, leak soak,
+                       //   full fetch pipeline construction
+```
 
 `lifecycle.rs` is the only binary that builds a client through `fetch`'s standard
 pipeline and therefore the only one whose requests pass through `fetch`'s logging
@@ -209,12 +222,12 @@ crate-root initialization runs and that binary invokes
 
 ### 1.3 Examples
 
-`crates/fetch_winhttp/examples/` holds one runnable example per feature area, each
-serving a localhost fixture from `fetch_winhttp_testing` so no example depends on an
-external endpoint or on real-time waiting:
+`crates/fetch_winhttp_testing/examples/` holds one runnable example per feature
+area, each serving a localhost fixture so no example depends on an external
+endpoint or on real-time waiting:
 
 ```text
-crates/fetch_winhttp/examples/
+crates/fetch_winhttp_testing/examples/
   quick_start.rs        // builder_winhttp and the mandatory WinHttpDeps environment
   streaming_upload.rs   // unknown-length uploads and request-trailer rejection
   streaming_download.rs // frame-by-frame bodies, response trailers, mid-stream drop
@@ -223,15 +236,13 @@ crates/fetch_winhttp/examples/
   connection_pools.rs   // client clone, builder clone, and multiple_pools isolation
 ```
 
+Run one with `cargo run -p fetch_winhttp_testing --example quick_start`.
+
 Each example is a `fn main` shim that delegates to a `#[cfg(windows)]` module and
 prints an explanatory line elsewhere, so `cargo check --all-targets` stays green on
 non-Windows targets where the crate itself is empty. They drive futures with
 `futures::executor::block_on` rather than a runtime macro, which doubles as a
 demonstration that the transport is runtime-neutral.
-
-`fetch_winhttp_testing` is unpublished, so the examples ship in the package as
-readable documentation but are not built by `cargo package`'s verification step or
-by downstream consumers.
 
 ## 2. WinHTTP asynchronous model primer
 
