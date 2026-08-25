@@ -46,6 +46,7 @@ These are the primary crates built out of this repo:
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar.
 - [`internity`](./crates/internity/README.md) - Blazingly fast string interning with compact handles, compact storage, and concurrent fill support.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
+- [`msvc_spectre_libs`](./crates/msvc_spectre_libs/README.md) - Links Spectre-mitigated libraries for Windows MSVC targets.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
