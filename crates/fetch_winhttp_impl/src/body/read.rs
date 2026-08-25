@@ -366,11 +366,13 @@ impl WinHttpResponseBody {
 
         // Detaching the filled prefix leaves the buffer holding the rest of the
         // block the frame already pins, so the next read refills that capacity
-        // instead of renting a second block.
-        let frame = match data_frame_from_buffer(&mut buffer) {
-            Ok(frame) => frame,
-            Err(error) => return Poll::Ready(Some(Err(error))),
-        };
+        // instead of renting a second block. `decode_read` only admits a
+        // positive length that describes bytes in the lent region, so an empty
+        // filled prefix here is a programming error (or a mutant fabricating a
+        // nonzero count without a buffer). Panicking is preferred to spinning
+        // the body forever (AGENTS.md, "Code must not hang even under mutation
+        // testing").
+        let frame = data_frame_from_buffer(&mut buffer).expect("positive READ_COMPLETE leaves a nonempty filled prefix after decode_read");
         self.state = BodyState::Ready { reader, buffer };
 
         Poll::Ready(Some(Ok(frame)))
