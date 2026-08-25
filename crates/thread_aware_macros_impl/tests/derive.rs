@@ -330,9 +330,9 @@ fn skipped_generic_field_gets_self_send_predicate() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn relocated_and_phantom_param_gets_both_obligations() {
-    // A parameter used directly and inside `PhantomData` carries both; treating the two as
-    // mutually exclusive dropped the phantom one.
+fn relocated_and_phantom_param_shares_one_bound() {
+    // A parameter reached both directly and through a marker's type argument takes a single
+    // `ThreadAware` bound - the two traversal paths converge on the same parameter.
     let input = quote! {
         #[derive(ThreadAware)]
         struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<&'a T>);
@@ -377,8 +377,9 @@ fn no_skipped_field_means_no_self_send_predicate() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn generated_predicate_appends_to_existing_where_clause() {
-    // The generated predicate must extend the user's `where` clause, not replace it.
+fn user_where_clause_is_preserved() {
+    // Generated bounds land inline on the impl generics, so the author's own `where` clause
+    // has to survive untouched beside them.
     let input = quote! {
         #[derive(ThreadAware)]
         struct WithWhere<T, U>
