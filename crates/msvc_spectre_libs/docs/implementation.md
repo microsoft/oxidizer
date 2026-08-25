@@ -81,8 +81,14 @@ value is used and the function returns -- either successfully, or with a
 diagnostic naming the directory that does not exist. It never falls through to
 discovery, per design.md section 2.4.
 
-Both are read with `env::var_os` rather than `env::var`, because a directory path
-need not be valid Unicode and there is no reason to reject one that is not.
+Both are read with `env::var` rather than `env::var_os`. A `cargo:` directive is
+a UTF-8 text line, so a path that is not valid Unicode could only be emitted
+lossily -- pointing the linker at a directory other than the one `is_dir`
+validated. Treating it as unset would be worse still: resolution would fall
+through to discovery and quietly link the unmitigated CRT. It is therefore a
+hard diagnostic, like an unreadable required-link-args variable.
+`emit_link_search` enforces the same rule for every source, rejecting any
+directory it cannot render as UTF-8.
 
 **`VCToolsInstallDir`.** A Visual Studio developer command prompt, and anything
 that has run `vcvars`, exports this variable pointing at the MSVC build tools

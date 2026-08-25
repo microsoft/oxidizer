@@ -99,7 +99,7 @@ fn verify_required_link_args() -> Result<(), String> {
         // Absent means this cargo does not report the final flags, so there is
         // nothing to verify and no basis for a diagnostic.
         Err(VarError::NotPresent) => return Ok(()),
-        Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(flags::CARGO_ENCODED_RUSTFLAGS_VAR)),
+        Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(flags::CARGO_ENCODED_RUSTFLAGS_VAR, "checked")),
     };
 
     let missing = flags::missing_required_link_args(&encoded, &required);
@@ -141,7 +141,7 @@ fn required_link_args_value(target: &str) -> Result<Option<(String, String)>, St
         match env::var(name) {
             Ok(value) => return Ok(Some((name.to_owned(), value))),
             Err(VarError::NotPresent) => {}
-            Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(name)),
+            Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(name, "checked")),
         }
     }
 
@@ -149,8 +149,10 @@ fn required_link_args_value(target: &str) -> Result<Option<(String, String)>, St
 }
 
 /// Builds the diagnostic for a configured variable that cannot be read.
-fn unreadable_var_message(name: &str) -> String {
-    format!("the environment variable `{name}` is set but its value is not valid Unicode, so it could not be checked")
+///
+/// `purpose` completes the sentence "so it could not be ...".
+fn unreadable_var_message(name: &str, purpose: &str) -> String {
+    format!("the environment variable `{name}` is set but its value is not valid Unicode, so it could not be {purpose}")
 }
 
 /// Adds the Spectre-mitigated CRT library directory to the link search path,
@@ -171,12 +173,7 @@ fn add_spectre_link_search() -> Result<(), String> {
     // 1. An explicit build-system override wins over discovery. Remember which
     //    variable supplied the value so a diagnostic names the one that is
     //    actually set rather than the one that merely takes precedence.
-    let configured_override = env::var_os(&override_var)
-        .map(|dir| (override_var.as_str(), dir))
-        .or_else(|| env::var_os(GENERIC_OVERRIDE_VAR).map(|dir| (GENERIC_OVERRIDE_VAR, dir)));
-
-    if let Some((source_var, dir)) = configured_override {
-        let dir = PathBuf::from(dir);
+    if let Some((source_var, dir)) = configured_override_dir(&override_var)? {
         return if emit_link_search(&dir) {
             Ok(())
         } else {
@@ -198,7 +195,11 @@ fn add_spectre_link_search() -> Result<(), String> {
     //    Spectre libraries sit directly beneath it -- no parent-directory
     //    climbing relative to `cl.exe`.
     println!("cargo:rerun-if-env-changed=VCToolsInstallDir");
-    if let Some(vctools) = env::var_os("VCToolsInstallDir") {
+    // Read as `String`: a directory that is not valid Unicode cannot be carried
+    // losslessly in a cargo directive, so treat it as no answer and let
+    // registry discovery run. Unlike the override variables this is not
+    // something the integrator pointed at this crate, so it is not an error.
+    if let Ok(vctools) = env::var("VCToolsInstallDir") {
         let dir = resolve::spectre_lib_dir(Path::new(&vctools), arch);
         if emit_link_search(&dir) {
             return Ok(());
@@ -236,6 +237,32 @@ fn add_spectre_link_search() -> Result<(), String> {
     }
 }
 
+/// Reads the configured Spectre library directory override for a target.
+///
+/// The target-specific variable wins over the target-agnostic one. Returns the
+/// name of the variable that supplied the value alongside it, so a diagnostic
+/// can name the one the integrator actually set. Returns [`None`] when neither
+/// is set, which hands the decision to toolchain discovery.
+///
+/// # Errors
+///
+/// Returns a human-readable message when a variable is set to a value that is
+/// not valid Unicode. A cargo directive is a UTF-8 text line, so such a path
+/// could only be emitted lossily -- pointing the linker at a directory that is
+/// not the one that was validated. Silently ignoring it would instead fall back
+/// to discovery and quietly link the unmitigated CRT.
+fn configured_override_dir(override_var: &str) -> Result<Option<(String, PathBuf)>, String> {
+    for name in [override_var, GENERIC_OVERRIDE_VAR] {
+        match env::var(name) {
+            Ok(value) => return Ok(Some((name.to_owned(), PathBuf::from(value)))),
+            Err(VarError::NotPresent) => {}
+            Err(VarError::NotUnicode(_)) => return Err(unreadable_var_message(name, "used as a library directory")),
+        }
+    }
+
+    Ok(None)
+}
+
 /// Derives the MSVC toolchain root from the path of a compiler executable.
 fn toolchain_root(cl_exe: &Path) -> Option<&Path> {
     // `<root>\bin\Host<arch>\<arch>\cl.exe`: drop the file name, the target
@@ -243,19 +270,28 @@ fn toolchain_root(cl_exe: &Path) -> Option<&Path> {
     cl_exe.parent()?.parent()?.parent()?.parent()
 }
 
-/// Emits a `rustc-link-search` directive when `dir` is an existing directory.
+/// Emits a `rustc-link-search` directive when `dir` is an existing directory
+/// whose path can be written to a cargo directive.
 ///
-/// Returns whether the directive was emitted. The directive is emitted
-/// unconditionally for an existing directory: an explicit `-L` search path is
-/// consulted before the `LIB` environment variable and in the order given, so
-/// suppressing it because the same directory appears somewhere in `LIB` could
-/// leave an ordinary CRT directory ahead of the mitigated one. A duplicate
-/// search path is harmless to the linker.
+/// Returns whether the directive was emitted. A cargo directive is a UTF-8 text
+/// line, so a path that is not valid Unicode is rejected rather than
+/// lossily converted, which would point the linker at a different directory
+/// than the one that was validated.
+///
+/// The directive is emitted unconditionally for an existing directory: an
+/// explicit `-L` search path is consulted before the `LIB` environment variable
+/// and in the order given, so suppressing it because the same directory appears
+/// somewhere in `LIB` could leave an ordinary CRT directory ahead of the
+/// mitigated one. A duplicate search path is harmless to the linker.
 fn emit_link_search(dir: &Path) -> bool {
+    let Some(text) = dir.to_str() else {
+        return false;
+    };
+
     if !dir.is_dir() {
         return false;
     }
 
-    println!("cargo:rustc-link-search=native={}", dir.display());
+    println!("cargo:rustc-link-search=native={text}");
     true
 }
