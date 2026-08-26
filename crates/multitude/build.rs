@@ -3,11 +3,17 @@
 
 //! Detects codegen backends that cap type alignment below what the tests need.
 //!
-//! Not every codegen backend accepts the maximum type alignment the reference
-//! implementation does. Several tests deliberately construct types aligned to
-//! half a chunk to exercise the arena's alignment handling, well above the cap
-//! such a backend imposes, so those tests cannot be compiled there at all. They
-//! are gated on `cfg(align_capped_backend)`.
+//! Some codegen backends cap the maximum type alignment they can lay out.
+//! Several tests deliberately construct types aligned to 32 KiB, 64 KiB and
+//! 128 KiB to exercise the arena's alignment guards, whose thresholds sit above
+//! any such cap, so on a capped backend those tests cannot be compiled at all.
+//! They are gated on `cfg(align_capped_backend)`.
+//!
+//! The gate is a single boolean driven by the largest of those alignments, so a
+//! backend that rejects it disables every gated test, including ones needing
+//! only 32 KiB. That is deliberate: the guards under test are unreachable
+//! without an over-aligned type in the first place, so partial coverage would
+//! not be meaningful.
 //!
 //! There is no built-in cfg identifying the codegen backend
 //! (<https://developercommunity.visualstudio.com/t/Conditional-compilation-lacks-built-in-c/11107823>),
@@ -42,9 +48,21 @@ const PROBE_ALIGN: u32 = 131_072;
 const CONTROL_ALIGN: u32 = 8;
 
 fn main() {
+    // Declaring the cfg here covers every unit it can reach, so the workspace
+    // `check-cfg` allowlist does not need a crate-local entry for it.
+    println!("cargo::rustc-check-cfg=cfg(align_capped_backend)");
+
     println!("cargo::rerun-if-changed=build.rs");
+    // `RUSTC` alone does not pin the compiler: a rustup proxy keeps the same
+    // command while `RUSTUP_TOOLCHAIN` selects a different toolchain behind it,
+    // and `RUSTFLAGS` / `CARGO_ENCODED_RUSTFLAGS` can swap the codegen backend
+    // outright via `-Zcodegen-backend`. Cargo caches this script's output, so
+    // without these triggers a stale capability result would survive a
+    // toolchain or backend switch and gate the tests against the wrong compiler.
     println!("cargo::rerun-if-env-changed=RUSTC");
     println!("cargo::rerun-if-env-changed=RUSTUP_TOOLCHAIN");
+    println!("cargo::rerun-if-env-changed=RUSTFLAGS");
+    println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
 
     if !supports_probe_alignment() {
         println!("cargo::rustc-cfg=align_capped_backend");
@@ -61,13 +79,39 @@ fn supports_probe_alignment() -> bool {
     };
     let out_dir = Path::new(&out_dir);
 
-    // Only a control that compiles makes a failure of the real probe
+    // Only a control that compiles makes a failure of the over-aligned probe
     // attributable to the alignment cap rather than to the environment.
     if compile_probe(out_dir, CONTROL_ALIGN) != Some(true) {
         return true;
     }
 
     compile_probe(out_dir, PROBE_ALIGN).unwrap_or(true)
+}
+
+/// Flags Cargo is passing to `rustc` for this build, if any.
+///
+/// The probe has to be compiled the same way the crate is, or it would answer
+/// for a different compiler configuration than the one the tests will use:
+/// `-Zcodegen-backend` in particular selects the very thing being detected.
+/// `CARGO_ENCODED_RUSTFLAGS` is authoritative and unambiguous when set, since
+/// it is `\x1f`-separated and so survives flags containing spaces.
+///
+/// Forwarding is safe in both directions. Flags that make compilation fail for
+/// unrelated reasons fail the control probe first, which leaves the tests
+/// enabled, and flags that break only the over-aligned probe are an alignment
+/// cap by definition.
+fn rustc_flags() -> Vec<String> {
+    if let Some(encoded) = env::var_os("CARGO_ENCODED_RUSTFLAGS") {
+        return encoded
+            .to_string_lossy()
+            .split('\x1f')
+            .filter(|f| !f.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
+    env::var_os("RUSTFLAGS")
+        .map(|flags| flags.to_string_lossy().split_whitespace().map(str::to_owned).collect())
+        .unwrap_or_default()
 }
 
 /// Compiles a crate containing a type aligned to `align`.
@@ -105,7 +149,14 @@ fn compile_probe(out_dir: &Path, align: u32) -> Option<bool> {
         .arg("--emit=obj")
         .arg("-o")
         .arg(&object_path)
+        .args(rustc_flags())
         .arg(&source_path)
+        // Both streams are discarded because a rejection here is an expected
+        // capability result, not a fault: surfacing it would print an alarming
+        // compiler error in the middle of an otherwise successful build. The
+        // control probe is what recovers the information this hides, by
+        // establishing that `rustc` works at all before any failure of the
+        // over-aligned probe is attributed to the alignment cap.
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
