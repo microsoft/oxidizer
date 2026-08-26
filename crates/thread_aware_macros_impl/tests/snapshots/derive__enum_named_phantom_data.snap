@@ -2,18 +2,47 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<T, U> ::thread_aware::ThreadAware for EnumNamedPhantom<T, U> {
+impl<
+    T: ::thread_aware::ThreadAware,
+    U: ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for EnumNamedPhantom<T, U> {
     fn relocate(
         &mut self,
-        source: Option<::thread_aware::affinity::Affinity>,
-        destination: ::thread_aware::affinity::Affinity,
+        __thread_aware_source: ::core::option::Option<
+            ::thread_aware::affinity::Affinity,
+        >,
+        __thread_aware_destination: ::thread_aware::affinity::Affinity,
     ) {
-        match self {
-            Self::Variant { data, marker } => {
-                ::thread_aware::ThreadAware::relocate(data, source, destination);
+        match *self {
+            Self::Variant {
+                data: ref mut __thread_aware_field_0,
+                marker: ref mut __thread_aware_field_1,
+            } => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_1,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
-            Self::Other { value, phantom } => {
-                ::thread_aware::ThreadAware::relocate(value, source, destination);
+            Self::Other {
+                value: ref mut __thread_aware_field_0,
+                phantom: ref mut __thread_aware_field_1,
+            } => {
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_0,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
+                ::thread_aware::ThreadAware::relocate(
+                    __thread_aware_field_1,
+                    __thread_aware_source,
+                    __thread_aware_destination,
+                );
             }
         }
     }

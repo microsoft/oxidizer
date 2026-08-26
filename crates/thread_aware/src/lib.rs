@@ -236,8 +236,31 @@ pub use core::ThreadAware;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// Generic type parameters appearing in non-skipped fields automatically receive a
-/// `::thread_aware::ThreadAware` bound (occurrences only inside `PhantomData<..>` are ignored).
+/// Every field except a `#[thread_aware(skip)]` one is relocated, and the bounds follow from
+/// that:
+/// * a generic type parameter the traversal reaches through a relocated field receives a
+///   `::thread_aware::ThreadAware` bound;
+/// * if any field carries `#[thread_aware(skip)]`, a `where Self: Send` predicate is added,
+///   since the `ThreadAware: Send` supertrait still has to hold.
+///
+/// A `PhantomData<..>` field is no exception: it relocates through the no-op
+/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`, and a parameter the traversal
+/// reaches inside it - the `U` of `PhantomData<U>` - is bound like any other. The traversal
+/// does not enter a function pointer, so writing the payload as one carries the parameter for
+/// variance, stays `Send` for every argument, and emits no bound at all:
+///
+/// ```rust
+/// # use core::marker::PhantomData;
+/// # use thread_aware::ThreadAware;
+/// #[derive(ThreadAware)]
+/// struct Marked<T> {
+///     // `PhantomData<*const T>` would make `Marked` `!Send`; this does not.
+///     marker: PhantomData<fn(*const T)>,
+/// }
+/// ```
+///
+/// A trait referred to by the bare name `ThreadAware` in your own bounds is assumed to be this
+/// crate's and suppresses the generated bound; qualify the path to disambiguate.
 ///
 /// # Example
 /// ```rust

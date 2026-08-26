@@ -1,8 +1,8 @@
 ---
 source: crates/thread_aware_macros_impl/tests/derive.rs
-expression: rendered
+expression: expand(input)
 ---
-impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for GroupUse<T> {
+impl<T> ::thread_aware::ThreadAware for RawMarker<T> {
     fn relocate(
         &mut self,
         __thread_aware_source: ::core::option::Option<
@@ -12,6 +12,11 @@ impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for GroupUse<T>
     ) {
         ::thread_aware::ThreadAware::relocate(
             &mut self.0,
+            __thread_aware_source,
+            __thread_aware_destination,
+        );
+        ::thread_aware::ThreadAware::relocate(
+            &mut self.1,
             __thread_aware_source,
             __thread_aware_destination,
         );

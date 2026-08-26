@@ -1,8 +1,14 @@
 ---
 source: crates/thread_aware_macros_impl/tests/derive.rs
-expression: rendered
+expression: expand(input)
 ---
-impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for GroupUse<T> {
+impl<
+    T: ::thread_aware::ThreadAware,
+    U: ::thread_aware::ThreadAware,
+> ::thread_aware::ThreadAware for WithWhere<T, U>
+where
+    T: Clone,
+{
     fn relocate(
         &mut self,
         __thread_aware_source: ::core::option::Option<
@@ -11,7 +17,12 @@ impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for GroupUse<T>
         __thread_aware_destination: ::thread_aware::affinity::Affinity,
     ) {
         ::thread_aware::ThreadAware::relocate(
-            &mut self.0,
+            &mut self.value,
+            __thread_aware_source,
+            __thread_aware_destination,
+        );
+        ::thread_aware::ThreadAware::relocate(
+            &mut self.marker,
             __thread_aware_source,
             __thread_aware_destination,
         );
