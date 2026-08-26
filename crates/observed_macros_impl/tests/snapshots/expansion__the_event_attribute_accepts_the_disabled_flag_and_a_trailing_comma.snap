@@ -1,0 +1,111 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("e",)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("e", disabled)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            true,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("e", disabled,)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            true,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

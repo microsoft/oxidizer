@@ -1,0 +1,80 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[gauge] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[gauge(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[gauge(duration_ms)]`
+
+---- input ----
+#[event("e")]
+#[histogram] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[histogram(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[histogram(duration_ms)]`
+
+---- input ----
+#[event("e")]
+#[updown_counter] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[updown_counter(...)]` requires a field naming the struct field that holds the metric value, e.g. `#[updown_counter(duration_ms)]`
+
+---- input ----
+#[event("e")]
+#[counter] #[counter] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+only one event-level metric (a fieldless `#[counter]`) is allowed
+
+---- input ----
+#[event("e")]
+#[counter(absent)] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[counter(absent)]` references field `absent`, which does not exist in the struct
+
+---- input ----
+#[event("e")]
+#[counter = "x"] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+a metric attribute takes an optional field and `name`/`desc`/`unit` options, not `= value`
+
+---- input ----
+#[event("e")]
+#[counter(v, bogus = "x")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+unknown metric option `bogus`; expected `name`, `desc`, or `unit`
+
+---- input ----
+#[event("e")]
+#[counter(v, name = "a", name = "b")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+duplicate `name` setting
+
+---- input ----
+#[event("e")]
+#[counter(v, desc = "a", desc = "b")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+duplicate `desc` setting
+
+---- input ----
+#[event("e")]
+#[counter(v, unit = "a", unit = "b")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+duplicate `unit` setting
+
+---- input ----
+#[event("e")]
+#[counter(v)] #[counter(v)] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+field `v` already has a metric instrument

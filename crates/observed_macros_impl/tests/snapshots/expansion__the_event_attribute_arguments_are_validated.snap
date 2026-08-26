@@ -1,0 +1,31 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event()]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+---- input ----
+#[event(bare_ident)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+---- input ----
+#[event(42)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[event(...)]` requires a string event name, e.g. `#[event("http.request")]`
+
+---- input ----
+#[event("e", bogus)]
+struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+unknown `#[event(...)]` flag `bogus`; expected `disabled`

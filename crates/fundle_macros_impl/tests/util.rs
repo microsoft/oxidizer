@@ -24,9 +24,7 @@ macro_rules! expand_fundle_bundle {
 
         let output = fundle_macros_impl::bundle(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
-        // Parse as File - the output should be a complete set of items
-        let file: syn::File = syn::parse2(output).unwrap();
-        prettyplease::unparse(&file)
+        testing_aids::render_expansion(&output)
     }};
 }
 
@@ -51,9 +49,7 @@ macro_rules! expand_fundle_deps {
 
         let output = fundle_macros_impl::deps(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
-        // Parse as File - the output should be a complete set of items
-        let file: syn::File = syn::parse2(output).unwrap();
-        prettyplease::unparse(&file)
+        testing_aids::render_expansion(&output)
     }};
 }
 
@@ -78,8 +74,6 @@ macro_rules! expand_fundle_newtype {
 
         let output = fundle_macros_impl::newtype(attr_args, item_tokens).unwrap_or_else(|e| e.to_compile_error());
 
-        // Parse as File - the output should be a complete set of items
-        let file: syn::File = syn::parse2(output).unwrap();
-        prettyplease::unparse(&file)
+        testing_aids::render_expansion(&output)
     }};
 }
