@@ -69,6 +69,7 @@ tokio = [
     "anyspawn/tokio",
     "dep:fetch_hyper",
     "dep:hyper-util",
+    "dep:tower-service",
     "hyper-util/tokio",
     "hyper-util/http1",
     "hyper-util/http2",
@@ -114,6 +115,8 @@ tracing = { workspace = true }
 # tokio runtime transport
 hyper-util = { workspace = true, optional = true, features = ["client-legacy"] }
 tokio = { workspace = true, features = ["rt", "net"], optional = true }
+# `hyper-util`'s `HttpConnector` is a `tower` service, so driving it needs the trait.
+tower-service = { workspace = true, optional = true }
 
 # TLS related crates
 native-tls = { workspace = true, features = ["alpn"], optional = true }

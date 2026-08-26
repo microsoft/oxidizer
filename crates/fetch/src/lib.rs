@@ -777,7 +777,9 @@
 //! ```
 //!
 //! - **`tokio`**: Enables integration with the Tokio runtime. This feature provides the `HttpClient::builder_tokio`
-//!   constructor and related APIs for using the HTTP client in a Tokio-based application.
+//!   constructor (and `HttpClient::builder_tokio_with_options`, which additionally accepts the
+//!   transport-specific `TokioTransportOptions`) and related APIs for using the HTTP client in a
+//!   Tokio-based application.
 //!
 //! - **`json`**: Adds support for JSON serialization and deserialization, enabling methods like
 //!   `HttpRequestBuilder::json` for sending JSON data and `HttpRequestBuilder::fetch_json` for receiving JSON responses.
