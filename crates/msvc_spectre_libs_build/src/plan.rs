@@ -476,6 +476,11 @@ mod tests {
             self.cl_exe = Some(PathBuf::from(cl_exe));
             self
         }
+
+        fn with_cl_exe_path(mut self, cl_exe: PathBuf) -> Self {
+            self.cl_exe = Some(cl_exe);
+            self
+        }
     }
 
     impl Toolchain for FakeToolchain {
@@ -682,6 +687,49 @@ mod tests {
             &plan,
             &format!("no Spectre-mitigated libraries were found at `{}`", spectre_dir(REGISTRY_ROOT)),
         );
+    }
+
+    /// A path whose text is not valid Unicode, so `Path::to_str` rejects it.
+    #[cfg(any(unix, windows))]
+    fn not_unicode_dir() -> PathBuf {
+        #[cfg(unix)]
+        {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::OsStringExt;
+
+            // A lone continuation byte is not a valid UTF-8 sequence.
+            PathBuf::from(OsString::from_vec(vec![b'/', 0x80]))
+        }
+
+        #[cfg(windows)]
+        {
+            use std::ffi::OsString;
+            use std::os::windows::ffi::OsStringExt;
+
+            // An unpaired surrogate has no UTF-8 encoding.
+            PathBuf::from(OsString::from_wide(&[0x0043, 0x003a, 0x005c, 0xD800]))
+        }
+    }
+
+    /// A directory that cannot be written into a `cargo:` line is not used, even
+    /// though it exists: the linker would otherwise be pointed at a directory
+    /// other than the one that was checked.
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn rejects_a_discovered_directory_that_is_not_valid_unicode() {
+        let root = not_unicode_dir();
+        let cl_exe = root.join("bin").join("Hostx64").join("x64").join("cl.exe");
+        let spectre_libs = spectre_lib_dir(&root, SpectreArch::X64);
+        let toolchain = FakeToolchain {
+            directories: BTreeSet::from([spectre_libs]),
+            cl_exe: None,
+        }
+        .with_cl_exe_path(cl_exe);
+
+        let plan = plan(&windows_env(), &toolchain);
+
+        assert!(plan.link_search.is_empty(), "expected no link search, got {:?}", plan.link_search);
+        assert_reports(&plan, "no Spectre-mitigated libraries were found at");
     }
 
     #[test]
