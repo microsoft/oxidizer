@@ -3,8 +3,8 @@
 
 //! The [`Thread`] identifier and its component id types.
 //!
-//! A [`Thread`] records where a value runs: which runtime owns it, which thread it is on,
-//! and which memory is closest to that thread. See
+//! A [`Thread`] records where a value runs: which runtime owns it, which OS thread it names,
+//! and which memory is closest to that OS thread. See
 //! [what the ids mean](crate#what-the-ids-mean) for the guarantees each id carries.
 
 #[cfg(any(test, feature = "std"))]
@@ -90,12 +90,42 @@ impl NumaNode {
     }
 }
 
-/// A record of where a value runs: its runtime, its thread, and its nearest memory.
+/// A record of where a value runs: its runtime, its OS thread, and its nearest memory.
 ///
 /// A runtime constructs these, usually once per worker at startup, and passes them to
 /// [`ThreadAware::relocate`](crate::ThreadAware::relocate). An implementation reads whichever
 /// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to
 /// choose.
+///
+/// # Relation to `std::thread::Thread`
+///
+/// This `Thread` is a coordinate, not a handle. It records an [`Owner`], a
+/// [`ThreadId`](std::thread::ThreadId) and a [`NumaNode`] so that a value can tell where it
+/// is running. It spawns nothing, joins nothing, parks nothing, and owns no operating-system
+/// resource; only the [`ThreadId`](std::thread::ThreadId) inside it names an OS thread.
+///
+/// [`std::thread::Thread`] is unrelated: a handle to a live OS thread, returned by
+/// [`thread::current`](std::thread::current), used to park that thread or read its name. The
+/// two share only a name, and both expose `id(&self) -> ThreadId`, so a call to `id()` does
+/// not reveal which of them the receiver is.
+///
+/// Naming both in one module is `error[E0252]`. Alias the standard handle, which leaves this
+/// crate's type at its natural name:
+///
+/// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
+/// use std::thread::{self, Thread as OsThread};
+///
+/// use thread_aware_core::{NumaNode, Owner, Thread};
+///
+/// let handle: OsThread = thread::current();
+/// let running_on = Thread::new(Owner::new(1), handle.id(), NumaNode::new(0));
+///
+/// assert_eq!(running_on.id(), handle.id());
+/// # }
+/// # }
+/// ```
 ///
 /// `Thread` is cheap to clone but deliberately not `Copy`, and is passed by reference to
 /// [`relocate`](crate::ThreadAware::relocate), so cloning is rarely necessary.
@@ -197,10 +227,12 @@ impl Thread {
         self.owner
     }
 
-    /// Returns the [`ThreadId`](std::thread::ThreadId) this value refers to.
+    /// Returns the [`ThreadId`](std::thread::ThreadId) of the OS thread this `Thread` names.
     ///
-    /// Distinct live threads have distinct ids, so this partitions state by thread without
-    /// keys colliding. Whether that state is contended depends on the storage around it.
+    /// Distinct live OS threads have distinct ids, so this partitions state by OS thread
+    /// without keys colliding. Whether that state is contended depends on the storage around
+    /// it. A [`ThreadId`](std::thread::ThreadId) has no defined relationship to whatever
+    /// identifier the platform assigns.
     ///
     /// Requires the `std` feature.
     ///

@@ -17,20 +17,24 @@
 //! - [`Thread`] records where it now runs: which runtime, which OS thread, and which memory is
 //!   closest to it.
 //!
-//! The crate adds nothing to a consumer's dependency graph. It also works without `std`:
-//! with default features turned off, [`Thread`] loses its thread id component and keeps
-//! [`Owner`] and [`NumaNode`]. The companion
-//! `thread_aware` crate provides the conveniences on top: a `#[derive(ThreadAware)]` macro,
-//! wrappers for foreign types, and a per-core `Arc`.
+//! [`Thread`] is a coordinate, not a handle: a runtime builds one to describe where a value
+//! is running, and it owns no operating-system resource. It is unrelated to
+//! [`std::thread::Thread`], which is a handle to a live OS thread. Naming both in one module
+//! requires aliasing one of them.
 //!
-//! # Why this crate is separate
+//! # The `thread_aware` family
 //!
-//! A crate that names a thread-aware type in its own public API inherits whatever that
-//! type's crate promises. Keeping the trait and [`Thread`] here, in something small,
-//! dependency-free and slow-moving, lets such crates expose them without taking on the
-//! larger surface. The containers, callbacks, registry and derive support in `thread_aware`
-//! stay free to evolve, and are not meant to appear in a public API. Depend on this crate
-//! directly when only the trait is needed.
+//! - **`thread_aware_core`** (this crate) — the vocabulary that two unrelated libraries must
+//!   agree on before either can relocate a value defined by the other. Deliberately small and
+//!   slow-moving, so naming [`ThreadAware`] or [`Thread`] in your own public API costs you
+//!   nothing later.
+//! - **`thread_aware`** — the utilities that make relocation convenient: a
+//!   `#[derive(ThreadAware)]` macro, wrappers for foreign types, a per-core `Arc`, containers
+//!   and registries. Free to evolve, and not meant to appear in a public API.
+//!
+//! Depend on this crate directly when all you need is the trait. It adds nothing to your
+//! dependency graph, and works without `std`: with default features turned off, [`Thread`]
+//! loses its thread id component and keeps [`Owner`] and [`NumaNode`].
 //!
 //! # Why relocation exists
 //!
@@ -141,10 +145,10 @@
 //! enumerated. State keyed on any of these ids belongs in a map rather than an array indexed
 //! by it.
 //!
-//! Without `std` there is no [`ThreadId`](std::thread::ThreadId): `Thread::new` and `Thread::id` are absent and only
-//! [`Owner`] and [`NumaNode`] remain. A `no_std` library can still implement
-//! [`ThreadAware`] and use whatever it is given; the runtime that drives relocation requires
-//! `std` regardless.
+//! Without `std` there is no [`ThreadId`](std::thread::ThreadId): `Thread::new` and
+//! `Thread::id` are absent and only [`Owner`] and [`NumaNode`] remain. A `no_std` library can
+//! still implement [`ThreadAware`] and use whatever it is given; the runtime that drives
+//! relocation requires `std` regardless.
 //!
 //! # Relation to `Send`
 //!
@@ -172,9 +176,9 @@
 //!
 //! # Crate features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* provides the thread id half of
-//!   [`Thread::new`]/[`Thread::id`] and implementations for standard library types such as `HashMap`, `Path` and
-//!   `PathBuf`. Turning it off yields a `no_std` build that requires only `alloc`.
+//! * The **`std` Cargo feature** *(enabled by default)* provides [`Thread::new`] and
+//!   [`Thread::id`], plus implementations for standard library types such as `HashMap`,
+//!   `Path` and `PathBuf`. Turning it off yields a `no_std` build that requires only `alloc`.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
