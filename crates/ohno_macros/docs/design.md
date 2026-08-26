@@ -1,12 +1,12 @@
 # Design
 
 How the `ohno` macros are built. `requirements.md` says what they have to
-deliver; this document says how they are arranged to deliver it. Every decision
-below is argued from a requirement, and the requirement is named.
+deliver; this document says how they are arranged to deliver it. A requirement is
+named wherever a rule below implements one.
 
 The implementation spans two packages — `ohno_macros`, the proc-macro crate the
 compiler sees, and `ohno_macros_impl`, the ordinary library behind it. The Two
-crates section explains the split; until then, read "the crate" as both.
+crates section describes the split; until then, read "the crate" as both.
 
 ## The pipeline
 
@@ -30,58 +30,33 @@ to `#[ohno::error]` and R3 to `#[enrich_err]`, so each is applied by its own
 entry point.
 
 **generate** turns `Model` into tokens. It returns `TokenStream`, not
-`Result<TokenStream>`. It cannot fail, because a `Model` that would make it fail
-cannot be built.
+`Result<TokenStream>`, and cannot fail: a `Model` that would make it fail cannot
+be built.
 
-That last line is the point of the split, and it is what R4 needs. R4 forbids a
-diagnostic that points into generated code. A generator that can fail has only
-two ways to report a fault: return `Result` and thread it up, or emit tokens
-that `rustc` rejects at a span the user never wrote. Removing the second option
-means removing the first, and removing the first means the fault has to be
-impossible by the time `generate` is reached. `generate` therefore has no access
-to `syn::Attribute`, no lookup that can miss, and no branch for a case
-`validate` already ruled out.
+R4 forbids a diagnostic that points into generated code, so no fault survives
+into `generate`. It has no access to `syn::Attribute`, no lookup that can miss,
+and no branch for a case `validate` already ruled out.
 
-## Is `Ast` worth its own type?
+`Ast` and `Model` carry different halves of the input. `Ast` holds decoded
+attribute payloads together with the spans they came from, which is what R4's
+diagnostics point at. `Model` holds resolved values and drops spans, so a
+`generate` that reads only `Model` cannot anchor anything. `Ast` re-houses
+neither `Generics` nor `Fields`: `Generics` passes through by value and the field
+list is reduced to what the rules need, so the decoded form of the five helper
+attributes is all `Ast` adds over `syn::DeriveInput`. It is consumed by exactly
+one function, `validate`, in exactly one module.
 
-The alternative is to drop `Ast` and let `validate` read `syn::DeriveInput`
-directly. That removes a layer, and `DeriveInput` is already a faithful record
-of the input, so the layer looks like a copy of one.
-
-`Ast` stays. Three reasons, in order of weight.
-
-**It is what keeps accumulated diagnostics from cascading.** R4 requires that
-every violation be reported at once. Accumulation is only useful if the reports
-are true. A `#[display("bad path: {path")]` cannot be decoded, so nothing is
-known about which fields it names; if the same function both decoded the
-attribute and checked its field references, it would have to either stop (losing
-accumulation) or guess at a repaired template and report field errors invented
-by the repair. Separating the two phases gives a third answer: the undecodable
-`#[display]` is reported by parse and is *absent from `Ast`*, so validate has
-nothing to check there and reports only faults it can actually see. The
-"skipped, not guessed" rule in the Diagnostics section below is expressible
-because there are two phases; with one, it is not.
-
-**It is where spans are kept, and `Model` deliberately drops them.** `Model`
-holds resolved values, so it cannot carry the attribute spans that R4's
-diagnostics point at. `DeriveInput` carries those spans, but only inside
-undecoded `Vec<Attribute>`, which is exactly what `generate` must not see. `Ast`
-is the one value that holds decoded payloads *and* the spans they came from.
-
-**It is not a mirror of `DeriveInput`.** `Ast` does not re-house `Generics` or
-`Fields`; `Generics` passes through by value and the field list is reduced to
-what the rules need. The only thing `Ast` adds over `DeriveInput` is the decoded
-form of the five helper attributes, which is the part `DeriveInput` does not
-have.
-
-The counter-argument — one more type to keep in step — is real, and is paid down
-by `Ast` being consumed by exactly one function (`validate`) in exactly one
-module.
+The two phases are also what make the "skipped, not guessed" rule in the
+Diagnostics section expressible. An attribute that fails to decode is reported by
+parse and is *absent from `Ast`*, so validate has nothing to check there and
+reports only faults it can see.
 
 ## Two crates
 
-The implementation is split across two packages, and the split is forced by what
-a proc-macro crate is allowed to be.
+A crate with `proc-macro = true` can export nothing but macros, and its own tests
+cannot call them: a `proc_macro::TokenStream` exists only inside a real
+expansion. The logic therefore lives in an ordinary library, and the proc-macro
+crate holds the entry points alone.
 
 ```text
 crates/
@@ -94,16 +69,9 @@ crates/
     tests/public_api.rs the expansion snapshots (see Testing)
 ```
 
-A crate with `proc-macro = true` can export nothing but macros, and its own tests
-cannot call them: a `proc_macro::TokenStream` only exists inside a real
-expansion, so the bridge a unit test would need is absent. Both consequences bite
-here. The logic cannot be reached from a test in the crate that holds it, and it
-cannot be reached from anywhere else either.
-
-Moving the logic into an ordinary library removes both. `ohno_macros_impl`
-exposes the three expansions as ordinary functions over
-`proc_macro2::TokenStream`, which any test can call, and `ohno_macros` shrinks to
-three shims that convert the token-stream type and delegate:
+`ohno_macros_impl` exposes the three expansions as ordinary functions over
+`proc_macro2::TokenStream`. Each entry point in `ohno_macros` converts the
+token-stream type, delegates, and converts back:
 
 ```rust
 #[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
@@ -112,16 +80,16 @@ pub fn derive_error(input: TokenStream) -> TokenStream {
 }
 ```
 
-Nothing else belongs in the shim. Each entry point converts, delegates, and
-converts back, so the compiler-facing crate holds no branch a test cannot reach.
+Nothing else lives in a shim, so the compiler-facing crate holds no branch a test
+cannot reach.
 
-`ohno_macros_impl` is not a public API despite being an ordinary library. Its
-rustdoc says so, and `ohno` depends on `ohno_macros` rather than on it. Only its
-three expansion functions are `pub`; every module below them is private.
+`ohno_macros_impl` is not a public API. Its rustdoc says so, and `ohno` depends
+on `ohno_macros` rather than on it. Only its three expansion functions are `pub`;
+every module below them is private.
 
-These documents stay under `ohno_macros/docs/` because they describe the macros
-`ohno` re-exports, which is the surface a reader arrives at. Read "the crate"
-below as "the two crates together" wherever the distinction does not matter.
+These documents sit under `ohno_macros/docs/` because they describe the macros
+`ohno` re-exports. Read "the crate" below as "the two crates together" wherever
+the distinction does not matter.
 
 ## Modules
 
@@ -161,17 +129,15 @@ enrich_err/
 into a `syn::DeriveInput` or `syn::Item` and reporting the parse failure as a
 compile error. Everything past that point is a module above.
 
-Only the derive carries the full pipeline, because only the derive has enough
-input to warrant it.
+Only the derive carries the full pipeline.
 
 `error_attr` keeps no `Model`. R2 gives it three rejections and one field
 injection, and it hands its output to the derive, which validates the result
-again. A second `Model` would restate what the derive already holds.
+again.
 
 `enrich_err` keeps no `Ast`. R3 gives it a message and a signature, and the
-signature is re-emitted rather than read, so decoding and checking fold into one
-step that yields a `Message`. Splitting it further would be symmetry for its own
-sake.
+signature is re-emitted rather than read, so decoding and checking are one step
+that yields a `Message`.
 
 `message.rs` sits at the crate root rather than under `derive_error` because
 both macros end at the same place — a `format!` string and a list of argument
@@ -299,21 +265,19 @@ struct ModelField {
 }
 ```
 
-Splitting around the core rather than carrying an index into one list is what
-removes a whole class of check. An index can dangle, so every generator that
-used it would have to handle a core that is not there; `before`/`core`/`after`
-cannot express that, and declaration order is still recoverable from it. The
-same split removes the "named struct with a positional core" case: `Style` and
-`member` are read from the same value, so they cannot disagree.
+Splitting around the core rather than carrying an index into one list removes a
+class of check. An index can dangle, so a generator using one would have to
+handle a core that is not there; `before`/`core`/`after` cannot express that, and
+declaration order is still recoverable from it. The split also removes the "named
+struct with a positional core" case: `Style` and `member` are read from the same
+value, so they cannot disagree.
 
-`Shape::new` is infallible, and an out-of-range `core` is a panic rather than a
-`None`. The index is not user input by the time it arrives: `validate` finds the
-core in `ast.fields` and then maps that same list, one for one, into the
-`ModelField`s it passes alongside the index. The two cannot disagree unless
-`validate` itself is wrong, which is a programming error and not a rejection the
-author can act on. Returning `Option` would oblige every caller to invent a
-diagnostic for an input no user can write, and an invented diagnostic pointing
-into generated code is exactly what R4 forbids. The panic is documented on the
+`Shape::new` is infallible, and an out-of-range `core` panics. The index is not
+user input by the time it arrives: `validate` finds the core in `ast.fields` and
+maps that same list, one for one, into the `ModelField`s it passes alongside the
+index. A disagreement between the two is a fault in `validate`, not an input the
+author can act on, so there is no diagnostic to report and none is invented — R4
+forbids one that points into generated code. The panic is documented on the
 constructor and named in the `expect` that raises it.
 
 `Member` also removes most of the named-versus-tuple branching from `generate`.
@@ -346,9 +310,9 @@ impl Message {
 }
 ```
 
-The two cases are not cosmetic. A message with no arguments is rendered as a
-literal rather than as a one-argument `format!`, so a static `#[display("...")]`
-costs no allocation at run time.
+A message with no arguments is rendered as a literal rather than as a
+one-argument `format!`, so a static `#[display("...")]` costs no allocation at
+run time.
 
 By the time a `Message` built by the derive reaches `generate`, every field it
 names exists and every argument is rooted in a field or a method of `self`
@@ -377,17 +341,16 @@ Two of the three invariants `generate` relies on are structural: `Shape` makes
 "exactly one core" unrepresentable, and `Message` names only fields that exist,
 because the only way to obtain either type is through validation.
 
-An argument that is not rooted in a field is the exception. Lowering records the
-fault and still returns the `Message`, so that a bad template and a bad argument
-are reported together rather than one at a time; the argument is kept out of
-generated code by `expand`, which emits the diagnostics alone whenever any fault
-was recorded. That one is a procedural invariant, not a structural one.
+An argument that is not rooted in a field is procedural rather than structural.
+Lowering records the fault and still returns the `Message`, so a bad template and
+a bad argument are reported together; the argument is kept out of generated code
+by `expand`, which emits the diagnostics alone whenever any fault was recorded.
 
-The third is not, and saying so is more useful than pretending otherwise.
-"`Conversion::initializers` is as long as `Shape::data()`" is a relation between
-two values, and Rust cannot express that in a struct shape without an encoding
-heavier than the check it replaces. It is held by a module boundary instead:
-`initializers` is private to `model.rs`, and the only constructor is
+The third is procedural too. "`Conversion::initializers` is as long as
+`Shape::data()`" is a relation between two values, which Rust cannot hold in a
+struct shape without an encoding heavier than the check it replaces. A module
+boundary holds it instead: `initializers` is private to `model.rs`, and the only
+constructor is
 
 ```rust
 impl Conversion {
@@ -398,7 +361,7 @@ impl Conversion {
 ```
 
 so the alignment is established once, where the field list is in hand, rather
-than being re-established at each use.
+than at each use.
 
 ## Generating the items in R1.3
 
@@ -487,7 +450,7 @@ pub(crate) fn caused_by(
 }
 ```
 
-`pub(crate)` is fixed by R1.4 and is not reopened here.
+`pub(crate)` is fixed by R1.4, settled by ADO 7675155.
 
 **`From<T>`** is emitted once per `Conversion`, zipping `shape.data()` with
 `conversion.initializers()`, and building the core with `OhnoCore::from(error)`.
@@ -507,13 +470,13 @@ impl #impl_generics ::core::convert::From<#source>
 }
 ```
 
-One tuple rather than one local per field. A generated name is not hygienic, so
-a local per field would be in scope while the next initializer is evaluated, and
-an initializer naming an outer item the derive happened to shadow would read the
+One tuple, not one local per field. A generated name is not hygienic, so a local
+per field would be in scope while the next initializer is evaluated, and an
+initializer naming an outer item the derive happened to shadow would read the
 generated local instead — silently, or as an error in generated code when the
-outer item is a `const`, which turns the `let` into a pattern. The tuple's
-elements are all evaluated before its binding exists, so only the one name is
-ever in scope, and never during an initializer.
+outer item is a `const`, which turns the `let` into a pattern. A tuple's elements
+are all evaluated before its binding exists, so only the one name is ever in
+scope, and never during an initializer.
 
 Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
 itself, which declares `extern crate self as ohno`.
@@ -589,29 +552,25 @@ exists.
 
 ## Limits
 
-Some inputs reach `rustc` as an error instead of being reported by a macro,
-which is where the R4 guarantee stops being structural. They are recorded rather
-than closed.
+Some inputs reach `rustc` as an error instead of being reported by a macro. This
+is where the R4 guarantee stops being structural.
 
 **A `const fn` under `#[enrich_err(...)]`.** The closure rewrite is not usable in
 a `const fn`, and `const` is re-emitted faithfully, so such a function is
-rejected by `rustc` rather than by the macro. No test exercises the combination;
-if one is added, the macro should reject `const` itself, with a message, rather
-than let the expansion fail.
+rejected by `rustc` rather than by the macro. No test exercises the combination.
 
 **A `#[display(...)]` format spec is not checked.** The text after the `:` is
 carried into the generated `format!` as written, so a spec that refers to another
 argument — a width or precision naming something the generated code does not
 have — is reported by `rustc` against the derive rather than by the macro against
-the template. Checking it would mean parsing the format grammar a second time,
-which is what lowering to `format!` exists to avoid.
+the template. Checking it would mean parsing the format grammar a second time.
 
 **A return type carrying no `map_err`.** `#[enrich_err(...)]` checks that a
 return type is present, not what it is, so a function returning a plain value is
-rejected by `rustc` against the generated `map_err` call. Deciding this
-syntactically is not possible: `Result` is reachable through an alias such as
-`io::Result<T>`, and the supported `Poll<Result<..>>` is not a `Result` at all,
-which is why the wrapper goes through `map_err` rather than naming the type.
+rejected by `rustc` against the generated `map_err` call. This cannot be decided
+syntactically: `Result` is reachable through an alias such as `io::Result<T>`,
+and the supported `Poll<Result<..>>` is not a `Result` at all, which is why the
+wrapper goes through `map_err` rather than naming the type.
 
 ## Diagnostics
 
@@ -718,25 +677,21 @@ fixture that breaks several rules in one struct will report all of them.
 
 ## Testing
 
-The regression boundary is the public API of `ohno_macros_impl`, not the phases
-behind it. `crates/ohno_macros_impl/tests/public_api.rs` calls `derive_error`,
-`enrich_err` and `error` — the same three functions the shim delegates to, taking
-the same arguments — and snapshots the pretty-printed expansion of each case with
-`insta`.
+The regression boundary is the public API of `ohno_macros_impl`.
+`crates/ohno_macros_impl/tests/public_api.rs` calls `derive_error`, `enrich_err`
+and `error` — the same three functions the shim delegates to, taking the same
+arguments — and snapshots the pretty-printed expansion of each case with `insta`.
 
-Testing at that boundary is what the two-crate split buys. Those three functions
-take `proc_macro2::TokenStream`, so a test can call them; the `#[proc_macro]`
-entry points above them cannot be called at all. Driving every case through them
-also makes coverage mean something: an input that cannot be provoked from there
-cannot be provoked by a user of `ohno` either, so an uncovered line below is
-evidence of dead code rather than of a missing test.
+Those three functions take `proc_macro2::TokenStream`, so a test can call them;
+the `#[proc_macro]` entry points above them cannot be called at all. An input
+that cannot be provoked from there cannot be provoked by a user of `ohno`, so an
+uncovered line below is dead code rather than a missing test.
 
-Cases are grouped by behavior rather than filed one per input. Related inputs
-share a snapshot, separated by `// === label ===` headers, so the number of
-snapshot files tracks the number of behaviors instead of the number of inputs and
-the variants of one behavior are read together. Each case records the source a
-user would write above the expansion it produces, so a snapshot is reviewable
-without the test file open beside it.
+Cases are grouped by behavior, not filed one per input. Related inputs share a
+snapshot, separated by `// === label ===` headers, so the number of snapshot
+files tracks the number of behaviors and the variants of one behavior are read
+together. Each case records the source a user would write above the expansion it
+produces, so a snapshot is reviewable without the test file open beside it.
 
 | Behavior | Case shape |
 | --- | --- |
@@ -745,51 +700,41 @@ without the test file open beside it.
 | `#[enrich_err(...)]` | arguments and function in, the rewritten body snapshotted |
 | any rejection | the offending input in, the emitted `compile_error!`s snapshotted |
 
-A rejection is snapshotted the same way as a success, in the same file as the
-behavior it belongs to. `expand` emits diagnostics *instead of* items whenever a
-fault was recorded, so "what the macro wrote" is the whole answer either way, and
-the two cases stay comparable.
+A rejection is snapshotted like a success, in the file of the behavior it belongs
+to. `expand` emits diagnostics *instead of* items whenever a fault was recorded,
+so "what the macro wrote" is the whole answer either way.
 
-This needs no new dependency: `insta` and `testing_aids` are already dev
-dependencies of `ohno_macros_impl`. `testing_aids::render_expansion` does the
-pretty-printing; the source side goes through `render_tokens_lossy`, because
-several cases deliberately feed a macro something that is not an item and that
-input is still worth showing.
+`insta` and `testing_aids` are dev dependencies of `ohno_macros_impl`.
+`testing_aids::render_expansion` does the pretty-printing; the source side goes
+through `render_tokens_lossy`, because several cases feed a macro something that
+is not an item at all.
 
 Everything that produces tokens is snapshotted whole rather than searched for
 substrings. What these macros have to get right is the *shape* of what they emit
 — which body runs where, which field lands in which position, what survives
-beside it — and a substring assertion cannot see shape. It confirms that one
-token appears somewhere and passes on an expansion that is wrong everywhere it
-did not look. Snapshotting the pretty-printed output also keeps the expected
-value readable as Rust, instead of as the space-separated token soup a
-`TokenStream` renders to.
+beside it — and a substring assertion cannot see shape. Snapshotting the
+pretty-printed output also keeps the expected value readable as Rust rather than
+as the space-separated token soup a `TokenStream` renders to.
 
-For the same reason a rejection snapshot carries every diagnostic the input
-produces, not the first. Asserting only the first would let accumulation regress
-silently, which is the one thing these assertions exist to hold.
+A rejection snapshot carries every diagnostic the input produces, not the first,
+so accumulation cannot regress silently.
 
-The cost of the choice is real and is worth naming. There are no phase-local
-tests: nothing feeds `Ast` to `validate` or a hand-built `Model` to `generate`.
-A `Model` that no real input produces therefore cannot be covered, so
-`generate`'s branches — `Style`, the presence of a message, an empty `data()` —
-are reachable only through an input that provokes them. Every one of them is
-reachable that way, which is why the trade was taken; a branch that stops being
-reachable from a real input is dead code and should be removed rather than kept
-alive by a hand-built value. A change to attribute syntax now moves expansion
-snapshots that a parse-only test would have left alone, which is the price paid
-for that.
+There are no phase-local tests. Nothing feeds `Ast` to `validate` or a
+hand-built `Model` to `generate`, so a `Model` that no real input produces cannot
+be covered, and `generate`'s branches — `Style`, the presence of a message, an
+empty `data()` — are reached only through an input that provokes them. A branch
+that no input reaches is dead code and is removed. Every case runs the whole
+pipeline, so a change to attribute syntax moves expansion snapshots.
 
 `cargo mutants` matters most on `validate.rs` and `display/`, where the rules
 live and where a surviving mutant means a rule is unenforced (R5).
 
-One class of mutant survives by construction, and it does not mean a rule is
+One class of mutant survives by construction without meaning a rule is
 unenforced. The three entry points in `ohno_macros/src/lib.rs` cannot be called
 from a unit test at all — a proc-macro crate's own tests do not get the bridge —
 so only `crates/ohno/tests/` kills them, and they carry
-`#[cfg_attr(test, mutants::skip)]`. That is the residue of the split: the
-delegating shims are the one part that stays untestable, which is why nothing but
-delegation is allowed to live there.
+`#[cfg_attr(test, mutants::skip)]`. They hold nothing but delegation, which is
+why that is the only untestable part.
 
 The template scanner is driven by an iterator rather than by an index it
 increments, so a mutant that corrupts its arithmetic produces a wrong segment a
@@ -797,8 +742,8 @@ test asserts on instead of a scan that never ends. A hanging mutant is reported
 as a timeout rather than as a failed assertion, which reads as an unenforced
 rule when it is not one.
 
-**The tests under `crates/ohno/tests/` remain the only proof that the generated
-code works.** Neither crate's own tree compiles an expansion. The snapshots in
+**The tests under `crates/ohno/tests/` are the only proof that the generated code
+works.** Neither crate's own tree compiles an expansion. The snapshots in
 `public_api.rs` assert the shape of tokens; only the integration tests and the
 `ui/*.rs` compile-fail pairs run `rustc` over what the macros produce, and only
 the `.stderr` snapshots pin where a diagnostic points. A change that keeps every
@@ -810,27 +755,3 @@ diagnostic, and `just trybuild-overwrite` rewrites the `.stderr` snapshots when 
 message or a span changes on purpose. Always read the resulting diff: a snapshot
 that changed for a reason you cannot name is a regression in a diagnostic, not a
 refresh.
-
-## Decided
-
-- **Three phases, and `generate` cannot fail.** It returns `TokenStream`, not
-  `Result`, because R4 forbids a diagnostic in generated code and that is only
-  structural if an invalid `Model` cannot be built.
-- **`Ast` earns its place.** It is what lets validate skip a check whose input
-  failed to decode instead of reporting cascading noise, and it is the only
-  value holding decoded payloads together with their spans.
-- **Diagnostics accumulate.** `validate` reports every rule violation it finds,
-  not the first.
-- **`enrich_err` stays simple.** One module, no `Ast`/`Model` pair, sharing
-  `Message` with the derive.
-- **The logic lives in an ordinary library.** `ohno_macros` is three delegating
-  shims; `ohno_macros_impl` holds everything else, because a proc-macro crate
-  can export nothing but macros and cannot call its own.
-- **The public expansion functions are the regression boundary.** Snapshots in
-  `ohno_macros_impl/tests/public_api.rs` drive the same three functions a user
-  reaches, instead of feeding hand-built values to individual phases.
-- **`Shape::new` panics rather than returning `Option`.** `validate` derives the
-  core index from the field list it maps, so a disagreement is a bug in this
-  crate, not an input a diagnostic could describe.
-- **`pub(crate)` constructors stay.** Settled by ADO 7675155 as designed; the
-  rewrite is not the place to reopen it.
