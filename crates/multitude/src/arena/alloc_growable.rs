@@ -427,8 +427,7 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(FromUtf16Error::new());
         }
         let mut out = self.alloc_string_with_capacity(bytes.len() / 2);
-        let units = bytes.chunks_exact(2).map(|pair| {
-            let raw = [pair[0], pair[1]];
+        let units = bytes.as_chunks::<2>().0.iter().map(|&raw| {
             if big_endian {
                 u16::from_be_bytes(raw)
             } else {
@@ -449,8 +448,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Fallible variant of [`Self::alloc_string_from_utf16_bytes_lossy`].
     fn try_alloc_string_from_utf16_bytes_lossy(&self, bytes: &[u8], big_endian: bool) -> Result<String<'_, A>, AllocError> {
         let mut out = self.try_alloc_string_with_capacity(bytes.len() / 2 + 1)?;
-        let units = bytes.chunks_exact(2).map(|pair| {
-            let raw = [pair[0], pair[1]];
+        let units = bytes.as_chunks::<2>().0.iter().map(|&raw| {
             if big_endian {
                 u16::from_be_bytes(raw)
             } else {
