@@ -5,7 +5,7 @@
 //!
 //! These go through the real `#[ohno::error]` and `#[derive(Error)]` entry points, so they cover
 //! the handoff between the two, and the `.stderr` snapshots pin *where* each diagnostic points —
-//! neither of which the unit tests in `ohno_macros` can observe.
+//! neither of which the expansion snapshots in `ohno_macros_impl` can observe.
 
 #[test]
 #[cfg_attr(miri, ignore)]
