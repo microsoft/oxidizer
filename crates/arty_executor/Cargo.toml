@@ -25,7 +25,9 @@ test-util = ["dep:scopeguard"]
 
 [dependencies]
 events_once = { workspace = true }
-foldhash = { workspace = true }
+# The workspace declares foldhash with `default-features = false`. `foldhash::HashMap`
+# and `HashMapExt`, used in `wake_diagnostic`, live behind the `std` feature.
+foldhash = { workspace = true, features = ["std"] }
 infinity_pool = { workspace = true }
 nm = { workspace = true }
 pin-project = { workspace = true }
