@@ -19,10 +19,12 @@ Configuration is classified by semantics and ownership:
    constraints, certificate authentication, and portable trust policy. Every transport must honor
    an explicit requirement or reject client construction.
 3. **Transport-specific configuration** controls mechanisms that have no portable contract.
-   Applications set these options on a concrete transport builder before passing it into `fetch`.
-   Examples include rustls verifier callbacks, WinHTTP proxy discovery, and SChannel-specific
-   options. A backend mechanism does not automatically deserve a public transport option; routine
-   flow-control, socket-buffer, and congestion tuning remains transport-owned.
+   Applications normally set these options on a concrete transport builder before passing it into
+   `fetch`. A library that deliberately supports a particular backend may inspect and modify its
+   registered typed transport extensions before construction. Examples include rustls verifier
+   callbacks, WinHTTP proxy discovery, and SChannel-specific options. A backend mechanism does not
+   automatically deserve a public transport option; routine flow-control, socket-buffer, and
+   congestion tuning remains transport-owned.
 
 The fact that a behavior is implemented by a transport does not make it transport-specific.
 Connection lifetime is implemented differently by Hyper and WinHTTP, but its useful contract can
@@ -35,9 +37,10 @@ public-surface conclusion are in the [capability matrix](capability-matrix.md).
 
 ## Composition across application and library boundaries
 
-`HttpClient` and `HttpClientBuilder` are concrete, transport-erased types. Every supported
-transport implements the complete library-facing baseline, so retaining the transport type in the
-builder would add generic complexity without preventing a demonstrated incompatibility.
+`HttpClient` and `HttpClientBuilder` are concrete, transport-erased types. There are no partial
+portable capability profiles: every supported transport, including external transports and test
+fakes, implements the complete library-facing baseline. Retaining the transport type in the builder
+would therefore add generic complexity without preventing a demonstrated incompatibility.
 
 The application configures transport-specific behavior before handing the transport to `fetch`:
 
@@ -50,8 +53,7 @@ let builder = fetch::HttpClient::builder(transport);
 let client = service_library::build_client(builder)?;
 ```
 
-The library accepts any builder whose transport implements the semantic capabilities it needs. It
-does not name Hyper, rustls, native TLS, or WinHTTP:
+The transport-independent path does not name Hyper, rustls, native TLS, or WinHTTP:
 
 ```rust,ignore
 pub fn build_client(
@@ -80,6 +82,31 @@ This preserves the important ownership split:
 A library that requires no configuration accepts a built `HttpClient`. A library that owns
 pipeline or portable transport policy accepts an `HttpClientBuilder` and builds the concrete
 client after applying its requirements.
+
+### Typed transport extensions
+
+Some libraries intentionally integrate with one or more specific transports. The erased builder
+therefore carries a type-indexed set of transport extension values until `build`. A transport
+registers its public extension types, and a library may query or mutate one by its Rust type:
+
+```rust,ignore
+let winhttp = builder
+    .transport_extension_mut::<fetch_winhttp::WinHttpOptions>()
+    .ok_or(BuildError::WinHttpRequired)?;
+
+winhttp.use_integrated_proxy_discovery(true);
+```
+
+The presence of an extension identifies support; transport names and string comparisons are not
+part of the contract. A library that supports several transports can branch over their extension
+types. If a transport-specific setting is required, absence is a construction error chosen by that
+library. Optional tuning may simply leave unmatched transports unchanged.
+
+Extensions are available only on the unbuilt builder. They are cloneable configuration values, not
+access to a live handler, socket, or connection pool. Each extension type defines its own mutation
+and validation rules, and the transport validates the final value during construction. Using one
+creates an intentional dependency on that transport crate and provides no guarantee for other
+transports; it does not enlarge the portable `fetch` contract.
 
 ## Transport contract
 
@@ -122,8 +149,8 @@ connections. WinHTTP can enforce it with `WINHTTP_OPTION_EXPIRE_CONNECTION`. The
 the guarantee does not.
 
 When no faithful common contract exists, the option remains transport-specific. Coarse or partial
-support is not silently treated as success. A weaker behavior requires a separately named portable
-contract or an explicit preference API with observable resolution results.
+support is not silently treated as success. A library that intentionally requires the mechanism
+uses a typed transport extension and reports an unsupported-transport error when it is absent.
 
 ## Transport-owned performance policy
 
@@ -131,10 +158,10 @@ The stable API exposes service requirements, not copies of socket and protocol-s
 Supported transports choose and validate defaults for HTTP flow control, kernel buffering, and
 congestion behavior.
 
-Small writes are the exception because avoiding Nagle/delayed-ACK stalls is a general HTTP client
-invariant rather than workload tuning. A transport that owns its sockets disables Nagle. An opaque
-platform transport must demonstrate equivalent small-write behavior in an integration benchmark;
-the WinHTTP probe does so for the tested HTTP/1.1 path.
+Avoiding Nagle/delayed-ACK stalls is a transport invariant, not a configurable tuning choice. A
+transport that owns TCP sockets disables Nagle. An opaque platform transport must demonstrate
+equivalent small-write behavior in an integration benchmark; the WinHTTP probe does so for the
+tested HTTP/1.1 path.
 
 HTTP/2 receive windows remain transport-owned. Their useful value depends on bandwidth-delay
 product, concurrent streams, response consumption, memory budget, and whether the implementation
@@ -147,11 +174,11 @@ through `HttpClientBuilder`.
 TLS backend selection and backend-native customization are transport-specific. Portable security
 requirements remain on `HttpClientBuilder` because libraries may own them.
 
-Client-certificate authentication uses a logical credential identifier. Libraries name the
-credential role they require; applications bind that name to transport-native certificate sources
-when constructing the transport. A Windows application may bind the name to a certificate-store
-selector, while a Linux application may bind it to provisioned key material. The library does not
-observe either modality.
+Client-certificate authentication uses a logical credential identifier. For example, a TVS
+library requests `ClientCredentialId::new("tvs-client")`. A Windows application may bind that name
+to a certificate-store selector, while a Linux application binds the same name to provisioned
+certificate and private-key material. The library selects the role but does not observe how the
+application provides it.
 
 A named binding may represent a set of rotating certificates. Rustls and WinHTTP can select a
 certificate using issuer hints received during the handshake. The current native-TLS adapter must
@@ -159,16 +186,18 @@ resolve the binding to one identity when constructing the connector and therefor
 rebuild to pick up rotation.
 
 Portable server validation is split into platform chain trust and endpoint identity. Platform
-trust, hostname validation, and revocation are baseline security behavior. A library may map a
-request origin to an exact TLS DNS name when the network endpoint and authenticated service name
-differ. The request URI and wire authority remain unchanged; only connection establishment uses
-the mapped TLS name. All supported transports can provide this contract without a custom
-certificate-validation callback.
+trust, hostname validation, and revocation are baseline security behavior. For example, a request
+may remain addressed to `https://localhost:50042`, so the server sees `localhost:50042`, while the
+builder maps that origin to the exact TLS name `tvs.prod.example`. The transport still connects to
+localhost but sends `tvs.prod.example` as SNI and validates that DNS name against the certificate.
+All supported transports can provide this contract without a custom validation callback.
 
-An exact TLS-name mapping does not express arbitrary SAN patterns, subject distinguished-name
-allowlists, or certificate/public-key pins. Those are separate policies and are not part of the
-initial portable baseline. They should become semantic capabilities only if a service demonstrates
-that a stable exact DNS identity cannot represent its requirement.
+Arbitrary SAN patterns, subject distinguished-name allowlists, certificate/public-key pins, and
+per-client custom trust roots are not portable capabilities and are explicit non-goals. WinHTTP
+and the supported native-TLS path cannot safely enforce them before request headers or credentials
+may be disclosed. A library that truly requires one must use a typed extension for a transport
+that supports it and reject other transports. If TVS cannot use a stable exact DNS identity present
+in its certificates, TVS cannot remain transport-independent under this design.
 
 A raw rustls verifier callback remains a rustls-specific mechanism.
 
