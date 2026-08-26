@@ -94,7 +94,12 @@ impl AllocError {
     /// Such a request can never
     /// succeed, regardless of how much memory is available.
     ///
-    /// ```
+    // The example needs a 32 KiB-aligned type, which a codegen backend that
+    // caps type alignment cannot lay out. `build.rs` detects those backends and
+    // the example is then rendered but not compiled, the same treatment the
+    // integration tests covering this path get.
+    #[cfg_attr(not(align_capped_backend), doc = "```")]
+    #[cfg_attr(align_capped_backend, doc = "```ignore")]
     /// #[repr(align(32768))]
     /// struct OverAligned;
     ///

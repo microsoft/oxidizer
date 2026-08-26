@@ -47,6 +47,11 @@ const PROBE_ALIGN: u32 = 131_072;
 /// not be compiled here for reasons unrelated to alignment.
 const CONTROL_ALIGN: u32 = 8;
 
+/// Largest alignment `#[repr(align(...))]` accepts, in bytes.
+///
+/// <https://doc.rust-lang.org/reference/type-layout.html#the-align-and-packed-modifiers>
+const MAX_REPR_ALIGN: u32 = 1 << 29;
+
 fn main() {
     // Declaring the cfg here covers every unit it can reach, so the workspace
     // `check-cfg` allowlist does not need a crate-local entry for it.
@@ -119,6 +124,15 @@ fn rustc_flags() -> Vec<String> {
 /// Returns `Some(true)` when codegen accepted it, `Some(false)` when `rustc`
 /// ran and rejected it, and `None` when the probe could not be run at all.
 fn compile_probe(out_dir: &Path, align: u32) -> Option<bool> {
+    // An alignment `repr(align(...))` cannot express is rejected by `rustc` for
+    // a source-language reason, which the caller would then misread as a
+    // backend cap and use to disable the tests everywhere. Fail at the bad
+    // constant instead of emitting a capability result that is not one.
+    assert!(
+        align.is_power_of_two() && align <= MAX_REPR_ALIGN,
+        "probe alignment {align} must be a power of two no greater than {MAX_REPR_ALIGN}"
+    );
+
     let source_path = out_dir.join(format!("align_probe_{align}.rs"));
     let object_path = out_dir.join(format!("align_probe_{align}.o"));
 
@@ -130,13 +144,14 @@ fn compile_probe(out_dir: &Path, align: u32) -> Option<bool> {
     // an over-aligned stack frame. An over-aligned `static` is deliberately not
     // used — that hits the COFF section-alignment limit and crashes stock
     // `rustc`, which would set the cfg on every Windows host.
-    // No attributes beyond `repr`/`inline` are used, so the source stays valid
-    // regardless of which edition `rustc` defaults to.
+    // `probe` is public because public reachability is what keeps it alive: a
+    // private, uncalled function can be discarded before codegen, and then
+    // nothing would exercise the layout. No attributes beyond `repr` are used,
+    // so the source stays valid regardless of which edition `rustc` defaults to.
     let source = format!(
         "#![no_std]\n\
          #[repr(align({align}))]\n\
          pub struct Probe;\n\
-         #[inline(never)]\n\
          pub fn probe() -> Probe {{ Probe }}\n"
     );
 
