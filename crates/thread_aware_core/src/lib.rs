@@ -28,9 +28,14 @@
 //!   agree on before either can relocate a value defined by the other. Deliberately small and
 //!   slow-moving, so naming [`ThreadAware`] or [`Thread`] in your own public API costs you
 //!   nothing later.
-//! - **`thread_aware`** — the utilities that make relocation convenient: a
-//!   `#[derive(ThreadAware)]` macro, wrappers for foreign types, a per-core `Arc`, containers
-//!   and registries. Free to evolve, and not meant to appear in a public API.
+//! - **[`thread_aware`]** — the utilities that make relocation convenient: a
+//!   [`#[derive(ThreadAware)]`][derive] macro, wrappers for foreign types, a per-core
+//!   [`Arc`][arc], containers and registries. Free to evolve, and not meant to appear in a
+//!   public API.
+//!
+//! [`thread_aware`]: https://docs.rs/thread_aware
+//! [derive]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html
+//! [arc]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
 //!
 //! Depend on this crate directly when all you need is the trait. It adds nothing to your
 //! dependency graph, and works without `std`: with default features turned off, [`Thread`]
@@ -50,11 +55,11 @@
 //! # The two roles
 //!
 //! **Library and application authors** implement [`ThreadAware`], usually through the
-//! `#[derive(ThreadAware)]` macro. They never call [`relocate`](ThreadAware::relocate) and
-//! never construct a [`Thread`]; the runtime does both and then invokes the implementation.
-//! It is a callback, like [`Drop::drop`].
+//! [`#[derive(ThreadAware)]`][derive] macro. They never call
+//! [`relocate`](ThreadAware::relocate) and never construct a [`Thread`]; the runtime does
+//! both and then invokes the implementation. It is a callback, like [`Drop::drop`].
 //!
-//! The derive lives in `thread_aware`, so a library that wants it depends on that crate.
+//! The derive lives in [`thread_aware`], so a library that wants it depends on that crate.
 //! Only the trait and [`Thread`] cross the public boundary, and both come from here, so the
 //! dependency stays an implementation detail:
 //!
@@ -71,14 +76,14 @@
 //! ```
 //!
 //! The derive writes the forwarding implementation, calling `relocate` on `scratch` and
-//! `dictionary` in turn. Callers of `Encoder` never name `thread_aware`.
+//! `dictionary` in turn. Callers of `Encoder` never name [`thread_aware`].
 //!
 //! **Runtime authors** construct a [`Thread`] per worker and call
 //! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
 //! where it now runs.
 //!
 //! A type composed of other types forwards the call to its fields, so one call at the top
-//! reaches everything below it. The derive macro and containers in `thread_aware` do this
+//! reaches everything below it. The derive macro and containers in [`thread_aware`] do this
 //! automatically.
 //!
 //! The example below plays the part of the runtime so the order is visible.
@@ -190,14 +195,23 @@
 //! `BTreeSet` field is not [`ThreadAware`].
 //!
 //! `Arc` is also omitted: whether a shared allocation should stay shared across threads or
-//! be split per thread depends on what it holds. The per-core `Arc` in `thread_aware` covers
-//! the case where splitting is correct.
+//! be split per thread depends on what it holds. The per-core [`Arc`][arc] in
+//! [`thread_aware`] covers the case where splitting is correct.
 //!
-//! # Crate features
+//! # Features
 //!
-//! * The **`std` Cargo feature** *(enabled by default)* provides [`Thread::new`] and
-//!   [`Thread::id`], plus implementations for standard library types such as `HashMap`,
-//!   `Path` and `PathBuf`. Turning it off yields a `no_std` build that requires only `alloc`.
+//! This crate provides one optional feature that can be enabled in your `Cargo.toml`:
+//!
+//! - **`std`** *(default)* - Provides [`Thread::new`] and [`Thread::id`], which need
+//!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
+//!   types such as `HashMap`, `Path` and `PathBuf`.
+//!
+//! Disable default features for `#![no_std]` environments. [`ThreadAware`], [`Owner`],
+//! [`NumaNode`] and the implementations for `core` and `alloc` types remain available. A
+//! [`Thread`] cannot be constructed without `std`, so a `no_std` library implements the trait
+//! and reads whatever the runtime hands it.
+//!
+//! `no_std` environments require `alloc`.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]
