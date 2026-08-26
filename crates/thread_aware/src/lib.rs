@@ -236,22 +236,17 @@ pub use core::ThreadAware;
 /// * `#[thread_aware(skip)]`: Prevents a field from being recursively transferred.
 ///
 /// # Generic Bounds
-/// The derive does no special handling for any field type. Every field except a
-/// `#[thread_aware(skip)]` one is relocated, and the bounds follow from that:
+/// Every field except a `#[thread_aware(skip)]` one is relocated, and the bounds follow from
+/// that:
 /// * a generic type parameter the traversal reaches through a relocated field receives a
 ///   `::thread_aware::ThreadAware` bound;
-/// * if any field carries `#[thread_aware(skip)]`, a single `where Self: Send` predicate is
-///   added, since the `ThreadAware: Send` supertrait still has to hold.
+/// * if any field carries `#[thread_aware(skip)]`, a `where Self: Send` predicate is added,
+///   since the `ThreadAware: Send` supertrait still has to hold.
 ///
-/// A `PhantomData<..>` field is relocated like any other, through the no-op
-/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`. The parameters named inside it are
-/// bound by `ThreadAware` exactly as they would be anywhere else.
-///
-/// The derive therefore infers only what the traversal can see, and states nothing on the
-/// author's behalf beyond that. A marker payload whose `Send`-ness does not follow from those
-/// bounds should be written in a form that is `Send` regardless of its parameter - a function
-/// pointer carries the parameter for variance and drop-check purposes while remaining `Send`
-/// for every argument:
+/// A `PhantomData<..>` field is no exception: it relocates through the no-op
+/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`, and the parameters named inside it
+/// are bound like any others. Write a marker payload that is `Send` for every argument - a
+/// function pointer keeps the variance without the `!Send`:
 ///
 /// ```rust
 /// # use core::marker::PhantomData;
@@ -263,17 +258,9 @@ pub use core::ThreadAware;
 /// }
 /// ```
 ///
-/// That is the general answer, not a workaround: a type that must not be `Send` cannot
-/// implement `ThreadAware` at all, because the trait requires it. `#[thread_aware(skip)]`
-/// remains for a different case - a real field, holding real data, that the author does not
-/// want relocated.
+/// A trait referred to by the bare name `ThreadAware` in your own bounds is assumed to be this
+/// crate's and suppresses the generated bound; qualify the path to disambiguate.
 ///
-/// One name is matched syntactically, because a macro cannot resolve a path to the item it
-/// refers to: a trait referred to by the bare name `ThreadAware` is assumed to be this
-/// crate's, and suppresses the generated bound. Emitting a second bound unconditionally was
-/// tried and reverted, since real code writes the imported form and the duplicate trips
-/// `clippy::trait_duplication_in_bounds` at the author's own declaration. Qualify the path to
-/// disambiguate.
 /// # Example
 /// ```rust
 /// use thread_aware::ThreadAware;

@@ -254,6 +254,3 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
     }
     Ok(())
 }
-
-// `FieldAttrCfg` is intentionally not re-exported at the crate root; consumers reach it
-// through the `field_attrs` module path.

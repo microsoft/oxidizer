@@ -371,8 +371,10 @@ mod tests {
     // nothing to contend over.
     static_assertions::assert_impl_all!(core::marker::PhantomData<std::sync::Arc<i32>>: ThreadAware);
 
-    // And the limit of that: an argument that can never be `Send` leaves the marker without an
-    // impl, which is why a field of this type needs `#[thread_aware(skip)]`.
+    // And the limit of that: a raw pointer is `!Send` whatever it points at, so the marker has
+    // no impl. A field of this type makes its owner `!Send` and therefore not `ThreadAware`
+    // either; write the payload as `PhantomData<fn(*const ())>` to keep the variance without
+    // the `!Send`.
     static_assertions::assert_not_impl_any!(core::marker::PhantomData<*const ()>: ThreadAware);
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
