@@ -55,37 +55,19 @@ reports only faults it can see.
 
 A crate with `proc-macro = true` can export nothing but macros, and its own tests
 cannot call them: a `proc_macro::TokenStream` exists only inside a real
-expansion. The logic therefore lives in an ordinary library, and the proc-macro
-crate holds the entry points alone.
-
-```text
-crates/
-  ohno_macros/          the proc-macro crate; `proc-macro = true`
-    src/lib.rs          the three entry points, and nothing else
-    docs/               this document and `requirements.md`
-
-  ohno_macros_impl/     an ordinary library; everything below lives here
-    src/...             the modules listed in the next section
-    tests/public_api.rs the expansion snapshots (see Testing)
-```
+expansion. The logic therefore lives in an ordinary library, `ohno_macros_impl`,
+and the proc-macro crate `ohno_macros` holds the entry points alone.
 
 `ohno_macros_impl` exposes the three expansions as ordinary functions over
 `proc_macro2::TokenStream`. Each entry point in `ohno_macros` converts the
-token-stream type, delegates, and converts back:
-
-```rust
-#[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
-pub fn derive_error(input: TokenStream) -> TokenStream {
-    ohno_macros_impl::derive_error(input.into()).into()
-}
-```
-
-Nothing else lives in a shim, so the compiler-facing crate holds no branch a test
-cannot reach.
+token-stream type, delegates to its counterpart, and converts back. Nothing else
+lives in a shim, so the compiler-facing crate holds no branch a test cannot
+reach.
 
 `ohno_macros_impl` is not a public API. Its rustdoc says so, and `ohno` depends
 on `ohno_macros` rather than on it. Only its three expansion functions are `pub`;
-every module below them is private.
+every module below them is private. Its expansion snapshots are described under
+Testing.
 
 These documents sit under `ohno_macros/docs/` because they describe the macros
 `ohno` re-exports. Read "the crate" below as "the two crates together" wherever
@@ -151,189 +133,93 @@ the function's own scope (R3).
 
 ### `Ast`
 
-```rust
-/// What the struct says, with the crate's own attributes decoded
-struct Ast {
-    ident: Ident,
-    generics: Generics,
-    style: Style,
-    fields: Vec<AstField>,
-    /// `None` when absent or when it failed to decode
-    display: Option<DisplayAttr>,
-    /// One per `#[from(...)]`; several accumulate (R1.6)
-    conversions: Vec<FromAttr>,
-    /// Whether `#[no_debug]` was written
-    no_debug: bool,
-    /// Whether `#[no_constructors]` was written
-    no_constructors: bool,
-}
+`Ast` records what the struct says, with the crate's own attributes decoded: the
+identifier, the generics, the field style, the fields, and one slot per helper
+attribute — the `#[display]` payload, the `#[from(...)]` entries, and the two
+suppressing flags. The `#[display]` slot is absent both when the attribute was
+not written and when it failed to decode, which is what lets validate skip a
+check whose input it does not have. The `#[from(...)]` entries accumulate, since
+R1.6 allows several.
 
-/// Whether fields are named or positional. A unit struct never reaches `Ast`:
-/// R1.1 rejects it in parse, because it has no room for a core.
-enum Style {
-    Named,
-    Tuple,
-}
+Style is named or tuple only. A unit struct never reaches `Ast`: R1.1 rejects it
+in parse, because it has no room for a core.
 
-struct AstField {
-    /// `Named(Ident)` or `Unnamed(Index)`, ready to quote as `self.#member`
-    member: Member,
-    ty: Type,
-    /// Every hand-written `#[error]` on this field, in order. A `Vec` rather
-    /// than an `Option`, so "marked twice" is representable and therefore
-    /// reportable (R1.2). The attribute is kept whole, so a diagnostic points
-    /// at the marker the user wrote.
-    marks: Vec<Attribute>,
-    /// Whether the field carries the reserved doc marker `#[ohno::error]`
-    /// writes. Separate from `marks`, because a generated marker and a
-    /// hand-written one are different inputs and R1.2 treats them differently.
-    generated: bool,
-}
+A field records its member, its type, the hand-written `#[error]` markers on it,
+and whether it carries the reserved doc marker `#[ohno::error]` writes. Two
+choices there are load-bearing. The markers are a **list**, not an optional
+single value, so "marked twice" is representable and therefore reportable
+(R1.2), and each is kept as a whole attribute so a diagnostic can point at the
+marker the user wrote. The generated marker is tracked **separately** from
+hand-written ones, because R1.2 treats the two as different inputs.
 
-struct DisplayAttr {
-    /// The template literal, kept whole so diagnostics can point at it
-    template: LitStr,
-    arguments: Vec<Expr>,
-}
-
-struct FromAttr {
-    source: Type,
-    /// The field expressions, keyed as the user wrote them. Whether a key names
-    /// a field is a rule, so it is checked in validate, not here.
-    overrides: Vec<FromOverride>,
-}
-```
+The `#[display]` payload keeps its template as a whole string literal so
+diagnostics can anchor at it. The `#[from(...)]` payload keeps its field
+expressions keyed as the user wrote them; whether a key names a field is a rule,
+so it is checked in validate rather than at decode time.
 
 ### `Model`
 
-```rust
-/// A validated error type, ready to generate from
-struct Model {
-    ident: Ident,
-    generics: Generics,
-    shape: Shape,
-    /// The `#[display(...)]` message, already lowered (R1.5)
-    message: Option<Message>,
-    conversions: Vec<Conversion>,
-    /// R1.7
-    debug: bool,
-    /// R1.4, R1.7
-    constructors: bool,
-}
-```
+`Model` is a validated error type, ready to generate from: the identifier, the
+generics, the `Shape`, the lowered message if there is one (R1.5), the
+conversions, and the two flags governing whether `Debug` and the constructors are
+emitted (R1.4, R1.7).
 
-`Shape` is the value that makes "exactly one core" structural rather than
-checked:
-
-```rust
-/// The fields in declaration order, split around the one holding the core
-struct Shape {
-    style: Style,
-    /// Fields declared before the core
-    before: Vec<ModelField>,
-    /// The field holding the `OhnoCore`. Exactly one, always present
-    core: ModelField,
-    /// Fields declared after the core
-    after: Vec<ModelField>,
-}
-
-impl Shape {
-    /// Splits `fields` around `core`.
-    ///
-    /// # Panics
-    ///
-    /// Panics when `core` does not index `fields`. `validate` derives the index
-    /// from the very field list it then maps into `fields`, so the two cannot
-    /// disagree
-    fn new(fields: Vec<ModelField>, core: usize, style: Style) -> Self;
-    /// The field holding the core
-    fn core(&self) -> &ModelField;
-    /// Every field, in declaration order. What `Debug` prints (R1.3)
-    fn all(&self) -> impl Iterator<Item = &ModelField>;
-    /// Every field but the core, in declaration order. What constructors take
-    /// and what a conversion initializes (R1.4, R1.6)
-    fn data(&self) -> impl Iterator<Item = &ModelField>;
-}
-
-struct ModelField {
-    /// How the field is written in an expression: `path`, or `0`
-    member: Member,
-    /// How the field is bound as a constructor parameter: `path`, or `param_0`
-    /// for a tuple field, by index and skipping the core (R1.4)
-    binding: Ident,
-    ty: Type,
-}
-```
+`Shape` makes "exactly one core" structural rather than checked. It holds the
+style and the fields in declaration order, **split around** the one holding the
+core: those before it, the core itself, those after. It offers the core, every
+field in declaration order (what `Debug` prints, R1.3), and every field but the
+core (what constructors take and what a conversion initializes, R1.4 and R1.6).
 
 Splitting around the core rather than carrying an index into one list removes a
 class of check. An index can dangle, so a generator using one would have to
-handle a core that is not there; `before`/`core`/`after` cannot express that, and
-declaration order is still recoverable from it. The split also removes the "named
-struct with a positional core" case: `Style` and `member` are read from the same
-value, so they cannot disagree.
+handle a core that is not there; a before/core/after split cannot express that,
+and declaration order is still recoverable from it. The split also removes the
+"named struct with a positional core" case: the style and the members are read
+from the same value, so they cannot disagree.
 
-`Shape::new` is infallible, and an out-of-range `core` panics. The index is not
-user input by the time it arrives: `validate` finds the core in `ast.fields` and
-maps that same list, one for one, into the `ModelField`s it passes alongside the
-index. A disagreement between the two is a fault in `validate`, not an input the
-author can act on, so there is no diagnostic to report and none is invented — R4
-forbids one that points into generated code. The panic is documented on the
-constructor and named in the `expect` that raises it.
+The constructor is infallible, and an out-of-range core index panics. The index
+is not user input by the time it arrives: `validate` finds the core in the `Ast`
+fields and maps that same list, one for one, into the model fields it passes
+alongside the index. A disagreement between the two is a fault in `validate`, not
+an input the author can act on, so there is no diagnostic to report and none is
+invented — R4 forbids one that points into generated code. The panic is
+documented on the constructor and named in the `expect` that raises it.
 
-`Member` also removes most of the named-versus-tuple branching from `generate`.
-`self.#member` is `self.path` or `self.0`, so every read of a field takes one
-form. `Style` is consulted by exactly two items: `Debug`, which needs
-`debug_struct` for a named struct and `debug_tuple` for a tuple one (R1.3), and
-`construct`, which emits `Self { .. }` or `Self(..)`.
+A model field carries how it is written in an expression — `path` or `0` — and
+how it is bound as a constructor parameter, which is its own name for a named
+struct and `param_0`, `param_1`, … by index for a tuple one (R1.4). The first of
+those removes most of the named-versus-tuple branching from `generate`: a field
+read is one form either way. Style is consulted by exactly two items — `Debug`,
+which needs `debug_struct` for a named struct and `debug_tuple` for a tuple one
+(R1.3), and the constructor body, which emits `Self { .. }` or `Self(..)`.
 
 ### `Message`
 
-```rust
-/// A lowered `format!` call
-enum Message {
-    /// Rendered as a string literal, with `{{` and `}}` escapes already resolved
-    Literal(String),
-    /// Rendered as `format!(template, arguments...)`
-    Formatted {
-        /// A `format!` string. Every placeholder that named a field has become
-        /// positional; a format spec is kept, so `{name:?}` becomes `{:?}`
-        template: String,
-        /// One expression per placeholder that consumes an argument, in order
-        arguments: Vec<TokenStream>,
-    },
-}
+`Message` is a lowered `format!` call, in one of two forms. A message with no
+arguments is a plain string, with `{{` and `}}` escapes already resolved, and
+renders as a string literal — so a static `#[display("...")]` costs no allocation
+at run time. A message with arguments carries a `format!` string and one
+expression per placeholder that consumes an argument, in order, and renders as a
+`format!` call. In the template every placeholder that named a field has become
+positional, and a format spec is preserved, so `{name:?}` becomes `{:?}`.
 
-impl Message {
-    /// A `&'static str` or a `String`; both satisfy the `Into<Cow<_, str>>`
-    /// bound the runtime asks for
-    fn render(&self) -> TokenStream;
-}
-```
-
-A message with no arguments is rendered as a literal rather than as a
-one-argument `format!`, so a static `#[display("...")]` costs no allocation at
-run time.
+Rendering yields either a `&'static str` or a `String`, and both satisfy the
+`Into<Cow<_, str>>` bound the runtime asks for, so nothing downstream branches on
+which form it is.
 
 By the time a `Message` built by the derive reaches `generate`, every field it
 names exists and every argument is rooted in a field or a method of `self`
-(R1.5) — the latter because
-`expand` emits nothing but diagnostics once a fault was recorded, not because
-`Message` could not hold such an argument. Each argument is already wrapped as
-`&(self.<arg>)` — the parentheses being load-bearing, so `count as u64` casts
-the field rather than a reference to it. Rendering it is one `quote!`.
+(R1.5) — the latter because `expand` emits nothing but diagnostics once a fault
+was recorded, not because `Message` could not hold such an argument. Each
+argument is already wrapped as a reference to a parenthesized field access, the
+parentheses being load-bearing: without them `count as u64` would cast the
+reference rather than the field.
 
 ### `Conversion`
 
-```rust
-/// One `From<T>` from a `#[from(...)]` entry (R1.6)
-struct Conversion {
-    source: Type,
-    /// One initializer per non-core field, aligned with `Shape::data()`.
-    /// Built by `Conversion::new`, which fills a field the user did not name
-    /// with `Default::default()`
-    initializers: Vec<Expr>,
-}
-```
+One `From<T>` from a `#[from(...)]` entry (R1.6): the source type, and one
+initializer per non-core field, aligned with the model's non-core field list. A
+field the user did not name is initialized with `Default::default()`.
 
 ### Where the invariants live
 
@@ -346,137 +232,81 @@ Lowering records the fault and still returns the `Message`, so a bad template an
 a bad argument are reported together; the argument is kept out of generated code
 by `expand`, which emits the diagnostics alone whenever any fault was recorded.
 
-The third is procedural too. "`Conversion::initializers` is as long as
-`Shape::data()`" is a relation between two values, which Rust cannot hold in a
-struct shape without an encoding heavier than the check it replaces. A module
-boundary holds it instead: `initializers` is private to `model.rs`, and the only
-constructor is
-
-```rust
-impl Conversion {
-    /// Distributes `overrides` over `shape.data()`, defaulting the rest.
-    /// Reports an override whose key names no non-core field
-    fn new(shape: &Shape, source: Type, overrides: &[(Member, Expr)], errors: &mut Errors) -> Option<Self>;
-}
-```
-
-so the alignment is established once, where the field list is in hand, rather
+The third is procedural too. "the initializer list is as long as the non-core
+field list" is a relation between two values, which Rust cannot hold in a struct
+shape without an encoding heavier than the check it replaces. A module boundary
+holds it instead: the initializers are private to `model.rs`, and the only
+constructor distributes the user's overrides over the non-core fields, defaults
+the rest, and reports an override whose key names no non-core field. The
+alignment is therefore established once, where the field list is in hand, rather
 than at each use.
 
 ## Generating the items in R1.3
 
-`generate::mod` calls one function per row of the R1.3 table and concatenates
-the results. Generics thread through identically everywhere:
+`generate::mod` calls one function per row of the R1.3 table and concatenates the
+results. Generics thread through identically everywhere: the model's generics are
+split once into their impl, type and where-clause forms, and every generated
+trait `impl` carries all three, as does the single inherent `impl` holding the
+constructors. That covers lifetimes, type parameters and where clauses in one
+rule, which is what R1.3's "all of them carry the input's generics" asks for.
 
-```rust
-let (impl_generics, ty_generics, where_clause) = model.generics.split_for_impl();
-```
-
-Every generated `impl` is then
-`impl #impl_generics Trait for #ident #ty_generics #where_clause`, and the
-constructors go in one inherent
-`impl #impl_generics #ident #ty_generics #where_clause`. This covers lifetimes,
-type parameters and where clauses in one rule, which is what R1.3's "all of them
-carry the input's generics" asks for.
-
-Below, `#core` is `model.shape.core.member` and `#name` is the type's name as a
-string literal — the default message the runtime falls back to when nothing else
+Two values recur below: the core field's member, and the type's name as a string
+literal — the default message the runtime falls back to when nothing else
 renders.
 
 **`Display`** delegates to the core, passing the lowered message as an override
-when there is one. `OhnoCore::format_error` is what appends `caused by:`, the
-enrichment lines, and the backtrace, so the generated code decides only the
-message:
+when there is one. `OhnoCore::format_error` appends `caused by:`, the enrichment
+lines and the backtrace, so the generated code decides only the message. The
+override is `None` when the model has no message, and otherwise a `Cow` built
+from the rendered one. `Cow::from` accepts both a `&'static str` and a `String`,
+so a static `#[display("...")]` allocates nothing and a formatted one becomes a
+`format!` call, without the generator branching on which it is.
 
-```rust
-impl #impl_generics ::core::fmt::Display for #ident #ty_generics #where_clause {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        self.#core.format_error(f, #name, #override_message)
-    }
-}
-```
+**`std::error::Error`** delegates `source` to the core.
 
-`#override_message` is `::core::option::Option::None` when `model.message` is
-`None`, and `::core::option::Option::Some(::std::borrow::Cow::from(..))`
-otherwise. `Cow::from` takes both a `&'static str` and a `String`, so a static
-`#[display("...")]` renders as a string literal and allocates nothing, while a
-formatted one renders as a `format!` call — without the generator branching on
-which it is.
-
-**`std::error::Error`** delegates `source`:
-
-```rust
-fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
-    self.#core.source()
-}
-```
-
-**`ohno::Enrichable`** delegates `add_enrichment` to the core, which is the
-trait `OhnoCore` itself implements. **`ohno::ErrorExt`** delegates `backtrace`
-to `self.#core.backtrace()` and `message` to
-`self.#core.format_message(#name, #override_message)` — the same override the
-`Display` impl builds, which is why the two agree by construction rather than by
+**`ohno::Enrichable`** delegates `add_enrichment` to the core, which is the trait
+`OhnoCore` itself implements. **`ohno::ErrorExt`** delegates `backtrace` to the
+core, and `message` to the core's `format_message` with the same override the
+`Display` impl builds — which is why the two agree by construction rather than by
 being written twice.
 
-**`From<Infallible>`** is emitted unconditionally with an `unreachable!` body,
-so a fallible conversion in user code can be written once and stay correct when
-the error type becomes infallible.
+**`From<Infallible>`** is emitted unconditionally with an `unreachable!` body, so
+a fallible conversion in user code can be written once and stay correct when the
+error type becomes infallible.
 
-**`Debug`** is emitted unless `model.debug` is false. It prints every field
-including the core, so it iterates `shape.all()` and branches once on
-`shape.style`: `f.debug_struct(#name).field("path", &self.path)…` or
-`f.debug_tuple(#name).field(&self.0)…`.
+**`Debug`** is emitted unless the model suppresses it. It prints every field
+including the core, so it iterates the full field list and branches once on
+style, into `debug_struct` for a named struct or `debug_tuple` for a tuple one.
 
 It is the one generated item that is **not** `#[automatically_derived]`.
 Dead-code analysis ignores field reads inside a derived `Debug`, so marking this
 one would make every field that only `Debug` reads look unused in the user's own
 crate.
 
-**Constructors** are emitted unless `model.constructors` is false. Both iterate
-`shape.data()`, so the core is skipped and declaration order is kept:
+**Constructors** are emitted unless the model suppresses them. `new` takes one
+parameter per non-core field and defaults the core; `caused_by` takes the same
+parameters plus a source error and builds the core from it. Both iterate the
+non-core fields, so the core is skipped and declaration order is kept, and both
+take each parameter as `impl Into<_>` of the field's type. `pub(crate)` is fixed
+by R1.4, settled by ADO 7675155.
 
-```rust
-pub(crate) fn new(#(#binding: impl ::core::convert::Into<#ty>),*) -> Self {
-    Self { #(#member: #binding.into(),)* #core: ::ohno::OhnoCore::default() }
-}
+**`From<T>`** is emitted once per conversion, zipping the non-core fields with
+that conversion's initializers and building the core from the source error. The
+source binding is named `error`, which is the name a field expression refers to.
 
-pub(crate) fn caused_by(
-    #(#binding: impl ::core::convert::Into<#ty>,)*
-    error: impl ::core::convert::Into<
-        ::std::boxed::Box<dyn ::std::error::Error + Send + Sync>,
-    >,
-) -> Self {
-    Self { #(#member: #binding.into(),)* #core: ::ohno::OhnoCore::from(error) }
-}
-```
-
-`pub(crate)` is fixed by R1.4, settled by ADO 7675155.
-
-**`From<T>`** is emitted once per `Conversion`, zipping `shape.data()` with
-`conversion.initializers()`, and building the core with `OhnoCore::from(error)`.
-The binding is named `error`, which is the name a field expression refers to.
-The data initializers are evaluated into one tuple first, because they may
-borrow `error` while the core consumes it, and a struct literal evaluates its
-fields in the order they are written:
-
-```rust
-impl #impl_generics ::core::convert::From<#source>
-    for #ident #ty_generics #where_clause
-{
-    fn from(error: #source) -> Self {
-        let __ohno_fields = (#(#initializer,)*);
-        Self { #(#member: __ohno_fields.#index,)* #core: ::ohno::OhnoCore::from(error) }
-    }
-}
-```
-
-One tuple, not one local per field. A generated name is not hygienic, so a local
-per field would be in scope while the next initializer is evaluated, and an
+The data initializers are evaluated into one tuple before the struct literal is
+built. They may borrow `error` while the core consumes it, and a struct literal
+evaluates its fields in the order they are written, so the core has to be built
+last. One tuple, not one local per field: a generated name is not hygienic, so a
+local per field would be in scope while the next initializer is evaluated, and an
 initializer naming an outer item the derive happened to shadow would read the
 generated local instead — silently, or as an error in generated code when the
 outer item is a `const`, which turns the `let` into a pattern. A tuple's elements
 are all evaluated before its binding exists, so only the one name is ever in
 scope, and never during an initializer.
+
+Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
+itself, which declares `extern crate self as ohno`.
 
 Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
 itself, which declares `extern crate self as ohno`.
@@ -508,27 +338,15 @@ R3 is one module. The arguments are decoded into a `Message` — the default
 `"error in function <name>"` when there are none, and otherwise the literal and
 whatever follows it, passed through unchanged. The function is parsed as
 `syn::ItemFn`, a missing return type is rejected, and the body is re-emitted
-inside an immediately-invoked closure so that `?` still returns from the wrapped
-body:
-
-```rust
-{
-    let __ohno_result = (|| #block)();                  // sync
-    let __ohno_result = async #block.await;             // async
-    __ohno_result.map_err(|mut error| {
-        ::ohno::Enrichable::add_enrichment(
-            &mut error,
-            ::ohno::EnrichmentEntry::new(#message, file!(), line!()),
-        );
-        error
-    })
-}
-```
+inside an immediately-invoked closure — an `async` block for an `async` function
+— so that `?` still returns from the wrapped body. Its result then goes through
+`map_err`, which adds one enrichment entry carrying the message, the file and the
+line.
 
 The message is applied through `map_err` rather than through `Enrichable` on the
-result directly, because the return type is not always a `Result`: an
-implemented `Future::poll` returns `Poll<Result<..>>`, which carries `map_err`
-but is not itself `Enrichable`.
+result directly, because the return type is not always a `Result`: an implemented
+`Future::poll` returns `Poll<Result<..>>`, which carries `map_err` but is not
+itself `Enrichable`.
 
 Neither arm names the declared return type. The wrapper's tail is the function's
 return expression, so inference reaches it from the signature, and naming the
@@ -574,28 +392,17 @@ wrapper goes through `map_err` rather than naming the type.
 
 ## Diagnostics
 
-`diagnostics.rs` holds one type:
+`diagnostics.rs` holds one type, an accumulator of zero or more faults reported
+together. It wraps an optional `syn::Error`, and offers recording a fault,
+merging a `syn::Error` from elsewhere, asking whether anything was recorded, and
+rendering everything into `compile_error!` invocations — one per fault, and no
+tokens at all when nothing was recorded.
 
-```rust
-/// Zero or more faults, reported together
-#[derive(Default)]
-struct Errors(Option<syn::Error>);
-
-impl Errors {
-    /// Anchors at `tokens`, which is always `syn::Error::new_spanned`
-    fn add(&mut self, tokens: impl ToTokens, message: impl Display);
-    fn combine(&mut self, error: syn::Error);
-    fn is_empty(&self) -> bool;
-    /// One `compile_error!` per fault; empty when nothing was recorded
-    fn into_compile_error(self) -> TokenStream;
-}
-```
-
-`add` is the only way to record a fault, and it takes tokens rather than a
+Recording is the only way to add a fault, and it takes **tokens** rather than a
 `Span`, so R4's "wherever a diagnostic covers more than one token it is spanned
-with `syn::Error::new_spanned`" is enforced by the accumulator's signature
-rather than by remembering. `syn::Error` renders a combined error as one
-`compile_error!` per fault, so the accumulation costs nothing at the boundary.
+with `syn::Error::new_spanned`" is enforced by the signature rather than by
+remembering. `syn::Error` renders a combined error as one `compile_error!` per
+fault, so the accumulation costs nothing at the boundary.
 
 ### Accumulating without cascading
 
