@@ -43,8 +43,8 @@ diagnostics point at. `Model` holds resolved values and drops spans, so a
 `generate` that reads only `Model` cannot anchor anything. `Ast` re-houses
 neither `Generics` nor `Fields`: `Generics` passes through by value and the field
 list is reduced to what the rules need, so the decoded form of the five helper
-attributes is all `Ast` adds over `syn::DeriveInput`. It is consumed by exactly
-one function, `validate`, in exactly one module.
+attributes is all `Ast` adds over `syn::DeriveInput`. It is consumed by the
+validation phase alone, in exactly one module.
 
 The two phases are also what make the "skipped, not guessed" rule in the
 Diagnostics section expressible. An attribute that fails to decode is reported by
@@ -69,48 +69,37 @@ on `ohno_macros` rather than on it. Only its three expansion functions are `pub`
 every module below them is private. Its expansion snapshots are described under
 Testing.
 
-These documents sit under `ohno_macros/docs/` because they describe the macros
-`ohno` re-exports. Read "the crate" below as "the two crates together" wherever
-the distinction does not matter.
+These documents sit under `crates/ohno_macros/docs/` because they describe the
+macros `ohno` re-exports. Read "the crate" below as "the two crates together"
+wherever the distinction does not matter.
+
+Where they name a path, they name it from the workspace root, and a test in this
+crate asserts that every such path exists. Anything that cannot be written that
+way is prose naming a role instead of a file, which is also why the module map
+below stops at directories: which file holds which function is not a decision
+this document owns, and it is the part that rots when the code moves.
 
 ## Modules
 
-Everything in this section lives in `ohno_macros_impl/src/`.
+The implementation crate is organised by *what a module decides*, not by which
+type it holds. Everything below sits under its source root.
 
 ```text
-lib.rs              `derive_error`, `enrich_err`, `error`: parse the input item
-                    and dispatch; the crate's whole public surface
-diagnostics.rs      the `Errors` accumulator and its `syn::Error` combining
-message.rs          `Message`: a lowered `format!` call, built by two macros
-paths.rs            the `::ohno::` paths generated code refers to
-marker.rs           the reserved doc marker, its nonce, and its recognizer
-
-derive_error/
-  mod.rs            parse -> validate -> generate, and nothing more
-  ast.rs            `Ast`: the input with the crate's attributes decoded
-  parse.rs          `DeriveInput` -> `Ast`
-  model.rs          `Model`, `Shape`, `Conversion`, and their constructors
-  validate.rs       `Ast` -> `Model`; every rule in R1
-  display/
-    mod.rs          `#[display(...)]` -> `Message`
-    template.rs     splitting a template into literal and placeholder segments
-    argument.rs     rooting a positional argument in a field of `self`
-  generate/
-    mod.rs          `Model` -> `TokenStream`, one call per item in R1.3
-    traits.rs       `Display`, `Error`, `Enrichable`, `ErrorExt`, `Debug`
-    constructors.rs `new` and `caused_by`
-    conversions.rs  `From<T>` and `From<Infallible>`
-
-error_attr/
-  mod.rs            reject, inject the core, re-emit under the derive
-enrich_err/
-  mod.rs            message, signature, and the body rewrite
+one module per macro     derive_error, error_attr, enrich_err
+shared by all three      diagnostics, message, paths, marker
+inside derive_error      one module per phase: parse, validate, generate,
+                         with the phase's own types beside it
+inside display           the template scanner and the argument rooting that
+                         `#[display(...)]` lowering needs
+inside generate          one module per family of generated item: the trait
+                         impls, the constructors, the conversions
 ```
 
-`lib.rs` owns the two steps the shim cannot do for it: turning the incoming
-tokens into a `syn::DeriveInput` or `syn::Item` and reporting the parse failure
-as a compile error, and rejecting arguments given to `#[ohno::error]`, which
-takes none. Everything past that point is a module above.
+The crate root holds the three expansion functions and the two steps the shim
+cannot do for them: turning the incoming tokens into a `syn::DeriveInput` or
+`syn::Item` and reporting the parse failure as a compile error, and rejecting
+arguments given to `#[ohno::error]`, which takes none. Everything past that point
+is a module above.
 
 Only the derive carries the full pipeline.
 
@@ -122,13 +111,13 @@ again.
 signature is re-emitted rather than read, so decoding and checking are one step
 that yields a `Message`.
 
-`message.rs` sits at the crate root rather than under `derive_error` because
-both macros end at the same place — a `format!` string and a list of argument
-expressions — even though they reach it differently. The derive lowers field
-names into `self`-scoped accesses (R1.5); `enrich_err` passes the literal and
-the arguments through unchanged, because its placeholders name function
-parameters that `rustc` resolves and its arguments are ordinary expressions in
-the function's own scope (R3).
+`Message` is shared rather than owned by the derive, because both macros end at
+the same place — a `format!` string and a list of argument expressions — even
+though they reach it differently. The derive lowers field names into
+`self`-scoped accesses (R1.5); `enrich_err` passes the literal and the arguments
+through unchanged, because its placeholders name function parameters that `rustc`
+resolves and its arguments are ordinary expressions in the function's own scope
+(R3).
 
 ## The types
 
@@ -217,8 +206,9 @@ on which form it is.
 
 By the time a `Message` built by the derive reaches `generate`, every field it
 names exists and every argument is rooted in a field or a method of `self`
-(R1.5) — the latter because `expand` emits nothing but diagnostics once a fault
-was recorded, not because `Message` could not hold such an argument. A named
+(R1.5) — the latter because the derive's entry point emits nothing but
+diagnostics once a fault was recorded, not because `Message` could not hold such
+an argument. A named
 placeholder lowers to a reference to the field it resolved. A positional argument
 is wrapped as a reference to a *parenthesized* access, the parentheses being
 load-bearing: a bare `&self.<argument>` would bind the reference to the leftmost
@@ -239,12 +229,13 @@ because the only way to obtain either type is through validation.
 An argument that is not rooted in a field is procedural rather than structural.
 Lowering records the fault and still returns the `Message`, so a bad template and
 a bad argument are reported together; the argument is kept out of generated code
-by `expand`, which emits the diagnostics alone whenever any fault was recorded.
+by the derive's entry point, which emits the diagnostics alone whenever any fault
+was recorded.
 
 The third is procedural too. "the initializer list is as long as the non-core
 field list" is a relation between two values, which Rust cannot hold in a struct
 shape without an encoding heavier than the check it replaces. A module boundary
-holds it instead: the initializers are private to `model.rs`, and the only
+holds it instead: the initializers are private to the model module, and the only
 constructor distributes the user's overrides over the non-core fields, defaults
 the rest, and reports an override whose key names no non-core field. The
 alignment is therefore established once, where the field list is in hand, rather
@@ -252,7 +243,7 @@ than at each use.
 
 ## Generating the items in R1.3
 
-`generate::mod` calls one function per row of the R1.3 table and concatenates the
+Generation calls one function per row of the R1.3 table and concatenates the
 results. Generics thread through identically everywhere: the model's generics are
 split once into their impl, type and where-clause forms, and every generated
 trait `impl` carries all three, as does the single inherent `impl` holding the
@@ -401,8 +392,8 @@ wrapper goes through `map_err` rather than naming the type.
 
 ## Diagnostics
 
-`diagnostics.rs` holds one type, an accumulator of zero or more faults reported
-together. It wraps an optional `syn::Error`, and offers recording a fault,
+One shared module holds the diagnostics accumulator, a value carrying zero or
+more faults reported together. It wraps an optional `syn::Error`, and offers recording a fault,
 merging a `syn::Error` from elsewhere, asking whether anything was recorded, and
 rendering everything into `compile_error!` invocations — one per fault, and no
 tokens at all when nothing was recorded.
@@ -447,50 +438,51 @@ Five anchors, applied in this order:
 A fault about the type as a whole, with no attribute or field to point at, is
 anchored at the struct's `ident`.
 
-### Every rejection, its message and its anchor
+### Every rejection and its anchor
 
-Messages already pinned by a `.stderr` snapshot are quoted exactly and must not
-drift. The rest are quoted as implemented; they have no snapshot, so a `.stderr`
-fixture may be added for any of them without changing the text.
+The wording of each message lives in the source. Those with a fixture under
+`crates/ohno/tests/ui/` are pinned there by a `.stderr` snapshot that CI compares
+on every run. This table records what is rejected and where the diagnostic
+points, which is the part R4 constrains; it does not restate the text, which
+would be a second copy that nothing checks.
 
-| Req | Rejection | Message | Anchor |
-| --- | --- | --- | --- |
-| R1.1 | derive on an enum | ``` `#[derive(ohno::Error)]` supports structs only. An enum has no single field to hold the OhnoCore ``` | `ident` |
-| R1.1 | derive on a union | ``` `#[derive(ohno::Error)]` supports structs only ``` | `ident` |
-| R1.1 | derive on a unit struct | ``` `#[derive(ohno::Error)]` needs a field to hold the OhnoCore, and a unit struct has none. Declare one, or use `#[ohno::error]`, which adds it ``` | `ident` |
-| R1.2 | `#[error]` with an argument | `` `#[error]` takes no arguments `` | attribute `Meta` || R1.2 | two fields marked | ``Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore`` | the second marking `Attribute` |
-| R1.2 | one field marked twice | ``Duplicate `#[error]` on the same field. Mark it once`` | the second `Attribute` |
-| R1.2 | `#[error]` beside the generated marker | as the two-marked-fields message | the marking `Attribute` |
-| R1.2 | no marker, no `OhnoCore` field | ``No field holds the OhnoCore. Declare one, mark it with `#[error]` if its type is spelled through an alias, or use `#[ohno::error]`, which adds the field itself`` | `ident` |
-| R1.2 | no marker, several `OhnoCore` fields | ``Several fields hold an OhnoCore and none is marked. Mark the one holding the error representation with `#[error]``` | `ident` |
-| R1.5 | placeholder names no field | ``unknown field `pth` in `#[display(...)]`, available fields: `path`, `code``` | template literal |
-| R1.5 | the same, on a type with nothing referenceable | ``unknown field `pth` in `#[display(...)]`, the error type has no fields that can be referenced`` | template literal |
-| R1.5 | argument root names no field | the same message | the root term |
-| R1.5 | `{}` with no argument left | ``` `#[display(...)]` template has more `{}` placeholders than arguments ``` | template literal |
-| R1.5 | an argument no `{}` consumes | ``` `#[display(...)]` argument is not consumed by any `{}` placeholder ``` | the argument |
-| R1.5 | argument written `self.x` | `` `#[display(...)]` positional arguments are implicitly scoped to `self`, so a field is referenced by its bare name, without a `self.` prefix `` | the `self` token |
-| R1.5 | argument rooted elsewhere | `` `#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self` `` | the whole argument |
-| R1.5 | `{` with no `}` | `` `#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace `` | template literal |
-| R1.5 | `}` with no `{` | `` `#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace `` | template literal |
-| R1.5 | a second `#[display(...)]` | ``only one `#[display(...)]` may be given, and this is the second`` | attribute `Meta` |
-| R1.6 | `#[from]`, `#[from = "…"]` | ``` `#[from(...)]` takes a parenthesized list of types, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
-| R1.6 | `#[from()]` | ``` `#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
-| R1.6 | a key naming no non-core field | ``unknown field `missing` in `#[from(...)]`, available fields: `kind`` | the key |
-| R1.6 | a key naming the core | ``` `#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error ``` | the key |
-| R1.6 | a non-integer key on a tuple struct | ``` `#[from(...)]` field keys for a tuple struct are field indexes, not names, so `kind:` names no field ``` | the key |
-| R1.7 | a suppressing flag with an argument | ``` `#[no_debug]` takes no arguments ```, and the same for `#[no_constructors]` | attribute `Meta` |
-| R1.7 | `#[no_constructors]` under `#[ohno::error]` | `` `#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` is an implementation detail with no stable name or position, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly `` | the whole `Attribute` |
-| R2 | `#[ohno::error(...)]` with arguments | ``` `#[ohno::error]` takes no arguments ``` | the arguments |
-| R2 | `#[ohno::error]` on a non-struct | ``` `#[ohno::error]` supports structs only. A struct is what can hold the OhnoCore field it adds ``` | the item |
-| R2 | `#[error]` under `#[ohno::error]` | `` `#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly `` | the whole `Attribute` |
-| R2 | a hand-written reserved marker | `` This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]` `` | the whole `Field` |
-| R3 | first token is not a string literal | `syn`'s own `expected string literal` | the offending token |
-| R3 | function with no return type | ``` `#[enrich_err(...)]` needs a return type to enrich. A function returning `()` has no error to carry the message ``` | the signature |
-| R3 | input is not a function | ``` `#[enrich_err(...)]` applies to functions only ``` | the item |
+| Req | Rejection | Anchor |
+| --- | --- | --- |
+| R1.1 | derive on an enum | `ident` |
+| R1.1 | derive on a union | `ident` |
+| R1.1 | derive on a unit struct | `ident` |
+| R1.2 | `#[error]` with an argument | attribute `Meta` |
+| R1.2 | two fields marked | the second marking `Attribute` |
+| R1.2 | one field marked twice | the second `Attribute` |
+| R1.2 | `#[error]` beside the generated marker | the marking `Attribute` |
+| R1.2 | no marker, no `OhnoCore` field | `ident` |
+| R1.2 | no marker, several `OhnoCore` fields | `ident` |
+| R1.5 | placeholder names no field | template literal |
+| R1.5 | argument root names no field | the root term |
+| R1.5 | `{}` with no argument left | template literal |
+| R1.5 | an argument no `{}` consumes | the argument |
+| R1.5 | argument written `self.x` | the `self` token |
+| R1.5 | argument rooted elsewhere | the whole argument |
+| R1.5 | `{` with no `}`, or `}` with no `{` | template literal |
+| R1.5 | a second `#[display(...)]` | attribute `Meta` |
+| R1.6 | `#[from]`, `#[from = "…"]`, `#[from()]` | attribute `Meta` |
+| R1.6 | a key naming no non-core field | the key |
+| R1.6 | a key naming the core | the key |
+| R1.6 | a non-integer key on a tuple struct | the key |
+| R1.7 | a suppressing flag with an argument | attribute `Meta` |
+| R1.7 | `#[no_constructors]` under `#[ohno::error]` | the whole `Attribute` |
+| R2 | `#[ohno::error(...)]` with arguments | the arguments |
+| R2 | `#[ohno::error]` on a non-struct | the item |
+| R2 | `#[error]` under `#[ohno::error]` | the whole `Attribute` |
+| R2 | a hand-written reserved marker | the whole `Field` |
+| R3 | first token is not a string literal | the offending token |
+| R3 | function with no return type | the signature |
+| R3 | input is not a function | the item |
 
-The three "takes no arguments" messages for `#[error]`, `#[no_debug]` and
-`#[no_constructors]` come from one check over a bare marker attribute, so they
-cannot drift apart.
+Wherever a name was not found, the message lists the fields that could have been
+named, so a rejection under R1.5 or R1.6 offers them. The "takes no arguments"
+rejections for `#[error]`, `#[no_debug]` and `#[no_constructors]` come from one
+check over a bare marker attribute, so they cannot drift apart.
 
 Accumulation does not change the snapshots under `crates/ohno/tests/ui/`. Each
 fixture struct there breaks exactly one rule, and separate structs are separate
@@ -523,7 +515,7 @@ produces, so a snapshot is reviewable without the test file open beside it.
 | any rejection | the offending input in, the emitted `compile_error!`s snapshotted |
 
 A rejection is snapshotted like a success, in the file of the behavior it belongs
-to. `expand` emits diagnostics *instead of* items whenever a fault was recorded,
+to. A macro emits diagnostics *instead of* items whenever a fault was recorded,
 so "what the macro wrote" is the whole answer either way.
 
 `insta` and `testing_aids` are dev dependencies of `ohno_macros_impl`.
@@ -541,18 +533,21 @@ as the space-separated token soup a `TokenStream` renders to.
 A rejection snapshot carries every diagnostic the input produces, not the first,
 so accumulation cannot regress silently.
 
-There are no phase-local tests. Nothing feeds `Ast` to `validate` or a
-hand-built `Model` to `generate`, so a `Model` that no real input produces cannot
-be covered, and `generate`'s branches — `Style`, the presence of a message, an
-empty `data()` — are reached only through an input that provokes them. A branch
-that no input reaches is dead code and is removed. Every case runs the whole
-pipeline, so a change to attribute syntax moves expansion snapshots.
+There are no phase-local tests. Nothing feeds an `Ast` to validation or a
+hand-built `Model` to generation, so a `Model` that no real input produces cannot
+be covered, and generation's branches — the field style, the presence of a
+message, an empty non-core field list — are reached only through an input that
+provokes them. A branch that no input reaches is dead code and is removed. Every
+case runs the whole pipeline, so a change to attribute syntax moves expansion
+snapshots.
 
-`cargo mutants` matters most on `validate.rs` and `display/`, where the rules
-live and where a surviving mutant means a rule is unenforced (R5).
+`cargo mutants` matters most on validation and on `#[display(...)]` lowering,
+where the rules live and where a surviving mutant means a rule is unenforced
+(R5).
 
 One class of mutant survives by construction without meaning a rule is
-unenforced. The three entry points in `ohno_macros/src/lib.rs` cannot be called
+unenforced. The three entry points in `crates/ohno_macros/src/lib.rs` cannot be
+called
 from a unit test at all — a proc-macro crate's own tests do not get the bridge —
 so only `crates/ohno/tests/` kills them, and they carry
 `#[cfg_attr(test, mutants::skip)]`. They hold nothing but delegation, which is
@@ -565,12 +560,12 @@ as a timeout rather than as a failed assertion, which reads as an unenforced
 rule when it is not one.
 
 **The tests under `crates/ohno/tests/` are the only proof that the generated code
-works.** Neither crate's own tree compiles an expansion. The snapshots in
-`public_api.rs` assert the shape of tokens; only the integration tests and the
-`ui/*.rs` compile-fail pairs run `rustc` over what the macros produce, and only
-the `.stderr` snapshots pin where a diagnostic points. A change that keeps every
-snapshot green and breaks the tests under `crates/ohno/tests/` is a broken
-change.
+works.** Neither macro crate's own tree compiles an expansion. The expansion
+snapshots assert the shape of tokens; only the integration tests and the
+compile-fail pairs under `crates/ohno/tests/ui/` run `rustc` over what the macros
+produce, and only the `.stderr` snapshots pin where a diagnostic points. A change
+that keeps every snapshot green and breaks the tests under `crates/ohno/tests/`
+is a broken change.
 
 The compile-fail tests are ordinary integration tests, so `just test` runs them
 too. `just trybuild` narrows to them while iterating on a diagnostic — pass the
