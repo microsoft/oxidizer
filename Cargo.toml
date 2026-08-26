@@ -291,7 +291,7 @@ rust.unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(miri_race_coverage)',
     'cfg(miri_strict_provenance)',
     'cfg(miri_tree_borrows)',
-    'cfg(utc_backend)',
+    'cfg(align_capped_backend)',
 ] }
 # <<< anvil-managed: anvil-workspace-lints
 

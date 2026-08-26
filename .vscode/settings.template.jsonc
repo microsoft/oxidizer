@@ -58,12 +58,12 @@
     "rust-analyzer.cargo.allTargets": true,
     "rust-analyzer.check.allTargets": true,
 
-    // The (ms-)nightly toolchain has additional code formatting capabilities that are disabled
+    // The nightly toolchain has additional code formatting capabilities that are disabled
     // with the regular toolchain. This enables those capabilities.
     //
-    // Requires the ms-nightly toolchain to be installed. You may need to install it manually, as
-    // it may not be installed by default (`msrustup toolchain install ms-nightly`).
-    "rust-analyzer.rustfmt.extraArgs": ["+ms-nightly", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
+    // Requires the nightly toolchain to be installed. You may need to install it manually, as
+    // it may not be installed by default (`rustup toolchain install nightly`).
+    "rust-analyzer.rustfmt.extraArgs": ["+nightly", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 
     // Clippy is extremely slow when used on our large workspace, so you may want to use
     // `check` instead to run regular `cargo check`. To run Clippy, invoke it manually from the
