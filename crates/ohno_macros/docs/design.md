@@ -107,9 +107,10 @@ enrich_err/
   mod.rs            message, signature, and the body rewrite
 ```
 
-`lib.rs` owns the one step the shim cannot do for it: turning the incoming tokens
-into a `syn::DeriveInput` or `syn::Item` and reporting the parse failure as a
-compile error. Everything past that point is a module above.
+`lib.rs` owns the two steps the shim cannot do for it: turning the incoming
+tokens into a `syn::DeriveInput` or `syn::Item` and reporting the parse failure
+as a compile error, and rejecting arguments given to `#[ohno::error]`, which
+takes none. Everything past that point is a module above.
 
 Only the derive carries the full pipeline.
 
@@ -138,8 +139,8 @@ identifier, the generics, the field style, the fields, and one slot per helper
 attribute — the `#[display]` payload, the `#[from(...)]` entries, and the two
 suppressing flags. The `#[display]` slot is absent both when the attribute was
 not written and when it failed to decode, which is what lets validate skip a
-check whose input it does not have. The `#[from(...)]` entries accumulate, since
-R1.6 allows several.
+check whose input it does not have. There is one conversion entry per type
+listed, across every `#[from(...)]` written, since R1.6 allows several of each.
 
 Style is named or tuple only. A unit struct never reaches `Ast`: R1.1 rejects it
 in parse, because it has no room for a core.
@@ -189,31 +190,39 @@ A model field carries how it is written in an expression — `path` or `0` — a
 how it is bound as a constructor parameter, which is its own name for a named
 struct and `param_0`, `param_1`, … by index for a tuple one (R1.4). The first of
 those removes most of the named-versus-tuple branching from `generate`: a field
-read is one form either way. Style is consulted by exactly two items — `Debug`,
+read is one form either way. Style is consulted by exactly two things — `Debug`,
 which needs `debug_struct` for a named struct and `debug_tuple` for a tuple one
-(R1.3), and the constructor body, which emits `Self { .. }` or `Self(..)`.
+(R1.3), and the shared builder that emits `Self { .. }` or `Self(..)`, which the
+constructors and every generated `From` go through.
 
 ### `Message`
 
 `Message` is a lowered `format!` call, in one of two forms. A message with no
-arguments is a plain string, with `{{` and `}}` escapes already resolved, and
-renders as a string literal — so a static `#[display("...")]` costs no allocation
-at run time. A message with arguments carries a `format!` string and one
-expression per placeholder that consumes an argument, in order, and renders as a
-`format!` call. In the template every placeholder that named a field has become
-positional, and a format spec is preserved, so `{name:?}` becomes `{:?}`.
+arguments is a plain string and renders as a string literal, so a static
+`#[display("...")]` costs no allocation at run time. A message with arguments
+carries a `format!` string and one expression per placeholder that consumes an
+argument, in order, and renders as a `format!` call. In the template every
+placeholder that named a field has become positional, and a format spec is
+preserved, so `{name:?}` becomes `{:?}`.
+
+The derive resolves `{{` and `}}` escapes when it builds a literal, since that
+text no longer passes through `format!`. `enrich_err` cannot: it does not
+interpret its template, so it keeps a message literal only when there are no
+arguments *and* no braces at all — a brace may open a placeholder `format!` still
+has to resolve.
 
 Rendering yields either a `&'static str` or a `String`, and both satisfy the
-`Into<Cow<_, str>>` bound the runtime asks for, so nothing downstream branches on
-which form it is.
+`Into<Cow<_, str>>` bounds the runtime asks for, so nothing downstream branches
+on which form it is.
 
 By the time a `Message` built by the derive reaches `generate`, every field it
 names exists and every argument is rooted in a field or a method of `self`
 (R1.5) — the latter because `expand` emits nothing but diagnostics once a fault
-was recorded, not because `Message` could not hold such an argument. Each
-argument is already wrapped as a reference to a parenthesized field access, the
-parentheses being load-bearing: without them `count as u64` would cast the
-reference rather than the field.
+was recorded, not because `Message` could not hold such an argument. A named
+placeholder lowers to a reference to the field it resolved. A positional argument
+is wrapped as a reference to a *parenthesized* access, the parentheses being
+load-bearing: a bare `&self.<argument>` would bind the reference to the leftmost
+term alone, so `count as u64` would cast the reference rather than the field.
 
 ### `Conversion`
 
@@ -449,8 +458,7 @@ fixture may be added for any of them without changing the text.
 | R1.1 | derive on an enum | ``` `#[derive(ohno::Error)]` supports structs only. An enum has no single field to hold the OhnoCore ``` | `ident` |
 | R1.1 | derive on a union | ``` `#[derive(ohno::Error)]` supports structs only ``` | `ident` |
 | R1.1 | derive on a unit struct | ``` `#[derive(ohno::Error)]` needs a field to hold the OhnoCore, and a unit struct has none. Declare one, or use `#[ohno::error]`, which adds it ``` | `ident` |
-| R1.2 | `#[error]` with an argument | `` `#[error]` takes no arguments `` | attribute `Meta` |
-| R1.2 | two fields marked | ``Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore`` | the second marking `Attribute` |
+| R1.2 | `#[error]` with an argument | `` `#[error]` takes no arguments `` | attribute `Meta` || R1.2 | two fields marked | ``Multiple fields marked with `#[error]`. Mark only the field holding the OhnoCore`` | the second marking `Attribute` |
 | R1.2 | one field marked twice | ``Duplicate `#[error]` on the same field. Mark it once`` | the second `Attribute` |
 | R1.2 | `#[error]` beside the generated marker | as the two-marked-fields message | the marking `Attribute` |
 | R1.2 | no marker, no `OhnoCore` field | ``No field holds the OhnoCore. Declare one, mark it with `#[error]` if its type is spelled through an alias, or use `#[ohno::error]`, which adds the field itself`` | `ident` |
@@ -464,18 +472,25 @@ fixture may be added for any of them without changing the text.
 | R1.5 | argument rooted elsewhere | `` `#[display(...)]` positional arguments are implicitly scoped to `self`, so each argument must be rooted in a field or method of `self` `` | the whole argument |
 | R1.5 | `{` with no `}` | `` `#[display(...)]` template has a `{` with no matching `}`. Close the placeholder, or write `{{` for a literal brace `` | template literal |
 | R1.5 | `}` with no `{` | `` `#[display(...)]` template has a `}` with no matching `{`. Open the placeholder, or write `}}` for a literal brace `` | template literal |
+| R1.5 | a second `#[display(...)]` | ``only one `#[display(...)]` may be given, and this is the second`` | attribute `Meta` |
 | R1.6 | `#[from]`, `#[from = "…"]` | ``` `#[from(...)]` takes a parenthesized list of types, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
 | R1.6 | `#[from()]` | ``` `#[from(...)]` needs at least one type, such as `#[from(std::io::Error)]` ``` | attribute `Meta` |
 | R1.6 | a key naming no non-core field | ``unknown field `missing` in `#[from(...)]`, available fields: `kind`` | the key |
 | R1.6 | a key naming the core | ``` `#[from(...)]` cannot initialize `inner`, which holds the OhnoCore and is built from the source error ``` | the key |
 | R1.6 | a non-integer key on a tuple struct | ``` `#[from(...)]` field keys for a tuple struct are field indexes, not names, so `kind:` names no field ``` | the key |
+| R1.7 | a suppressing flag with an argument | ``` `#[no_debug]` takes no arguments ```, and the same for `#[no_constructors]` | attribute `Meta` |
 | R1.7 | `#[no_constructors]` under `#[ohno::error]` | `` `#[no_constructors]` is not supported under `#[ohno::error]`. A constructor has to initialize the OhnoCore field, and the field inserted by `#[ohno::error]` is an implementation detail with no stable name or position, so it must not be referred to in code. Use `#[derive(ohno::Error)]` and declare the OhnoCore field explicitly `` | the whole `Attribute` |
+| R2 | `#[ohno::error(...)]` with arguments | ``` `#[ohno::error]` takes no arguments ``` | the arguments |
 | R2 | `#[ohno::error]` on a non-struct | ``` `#[ohno::error]` supports structs only. A struct is what can hold the OhnoCore field it adds ``` | the item |
 | R2 | `#[error]` under `#[ohno::error]` | `` `#[ohno::error]` adds the OhnoCore field itself and generates the error representation from it, so no field may be marked with `#[error]`. Remove the marker to keep the field as data, or use `#[derive(ohno::Error)]` to place the core explicitly `` | the whole `Attribute` |
 | R2 | a hand-written reserved marker | `` This doc comment is reserved for `#[ohno::error]`, which puts it on the OhnoCore field it adds. Remove it; if this is the field holding the OhnoCore, use `#[derive(ohno::Error)]` and mark it with `#[error]` `` | the whole `Field` |
 | R3 | first token is not a string literal | `syn`'s own `expected string literal` | the offending token |
 | R3 | function with no return type | ``` `#[enrich_err(...)]` needs a return type to enrich. A function returning `()` has no error to carry the message ``` | the signature |
 | R3 | input is not a function | ``` `#[enrich_err(...)]` applies to functions only ``` | the item |
+
+The three "takes no arguments" messages for `#[error]`, `#[no_debug]` and
+`#[no_constructors]` come from one check over a bare marker attribute, so they
+cannot drift apart.
 
 Accumulation does not change the snapshots under `crates/ohno/tests/ui/`. Each
 fixture struct there breaks exactly one rule, and separate structs are separate
