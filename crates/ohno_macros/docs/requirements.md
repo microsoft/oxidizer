@@ -1,13 +1,17 @@
 # Requirements
 
 What `ohno_macros` has to deliver. Written before the rewrite, from the previous
-implementation, the crate docs, and the tests in `crates/ohno`.
+implementation, the crate docs, and the tests in `crates/ohno`. It covers both
+packages: `ohno_macros`, the proc-macro crate the compiler sees, and
+`ohno_macros_impl`, the ordinary library holding the logic behind it. See the
+"Two crates" section of `design.md` for why the split exists.
 
 The authority for behavior is `crates/ohno/tests/**` (integration tests) and
 `crates/ohno/tests/ui/**` (compile-fail snapshots): they are the only tests that
-compile what the macros produce. The crate's own unit tests and expansion
-snapshots pin the shape of the tokens each phase emits, which is a regression
-net rather than a statement of what the crate owes.
+compile what the macros produce. The expansion snapshots in
+`crates/ohno_macros_impl/tests/public_api.rs` pin the shape of the tokens the
+three public expansion functions emit, which is a regression net rather than a
+statement of what the crate owes.
 
 ## Public surface
 
