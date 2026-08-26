@@ -131,7 +131,10 @@ and leave the remainder to be read as another directive -- a
 that reaches a directive is therefore checked or rendered first.
 `push_link_search` refuses a directory that spans more than one line, and the
 planner refuses a target triple that does, since the suffixed variable names are
-built from it. Diagnostics are handled the other way round: they stay
+built from it. A refusal says which of the three reasons applies -- the
+directory is absent, its path is not valid Unicode, or it spans more than one
+line -- rather than reporting every one of them as a missing directory.
+Diagnostics are handled the other way round: they stay
 `AppError`s in the plan, because how one displays is decided when it is
 displayed -- with `RUST_BACKTRACE` set it carries a backtrace over several lines
 -- so `Plan::warnings` is what flattens them, and `build.rs` prints that rather

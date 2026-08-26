@@ -292,14 +292,13 @@ fn plan_link_search(environment: &BuildEnvironment, toolchain: &dyn Toolchain, p
             EnvValue::NotUnicode => return Err(not_unicode(source_var, "used as a library directory")),
             EnvValue::Present(dir) => {
                 let dir = PathBuf::from(dir);
-                return if push_link_search(plan, toolchain, &dir) {
-                    Ok(())
-                } else {
-                    Err(app_err!(
-                        "the Spectre library directory `{}` provided via `{source_var}` does not exist",
-                        dir.display()
-                    ))
-                };
+                return push_link_search(plan, toolchain, &dir).map_err(|rejected| {
+                    app_err!(
+                        "the Spectre library directory `{}` provided via `{source_var}` {}",
+                        dir.display(),
+                        rejected.reason()
+                    )
+                });
             }
         }
     }
@@ -319,7 +318,7 @@ fn plan_link_search(environment: &BuildEnvironment, toolchain: &dyn Toolchain, p
     plan.rerun_if_env_changed.push(VC_TOOLS_INSTALL_DIR_VAR.to_owned());
     if let EnvValue::Present(vc_tools) = &environment.vc_tools_install_dir {
         let dir = resolve::spectre_lib_dir(Path::new(vc_tools), arch);
-        if push_link_search(plan, toolchain, &dir) {
+        if push_link_search(plan, toolchain, &dir).is_ok() {
             return Ok(());
         }
     }
@@ -340,15 +339,21 @@ fn plan_link_search(environment: &BuildEnvironment, toolchain: &dyn Toolchain, p
     };
 
     let spectre_libs = resolve::spectre_lib_dir(root, arch);
-    if push_link_search(plan, toolchain, &spectre_libs) {
-        Ok(())
-    } else {
-        Err(app_err!(
+    push_link_search(plan, toolchain, &spectre_libs).map_err(|rejected| match rejected {
+        Rejected::Missing => app_err!(
             "no Spectre-mitigated libraries were found at `{}`; modify the Visual Studio installation to add them, or set \
              `{override_var}`",
             spectre_libs.display()
-        ))
-    }
+        ),
+        // The libraries may well be there; they just cannot be named in a
+        // directive, so an override is the only way to reach them.
+        rejected => app_err!(
+            "the Spectre library directory `{}` beneath the discovered toolchain {}; set `{override_var}` to point at a directory \
+             that can be given to the linker",
+            spectre_libs.display(),
+            rejected.reason()
+        ),
+    })
 }
 
 /// Verifies that the linker arguments this crate cannot propagate reached `rustc`.
@@ -425,34 +430,62 @@ fn plan_required_link_args(environment: &BuildEnvironment, plan: &mut Plan) -> R
     ))
 }
 
+/// Why a directory could not be recorded as a link-search path.
+#[derive(Debug, Clone, Copy)]
+enum Rejected {
+    /// The directory did not exist when the plan was made.
+    Missing,
+
+    /// The path has no UTF-8 spelling, so it has no place in a directive.
+    NotUnicode,
+
+    /// The path spans more than one line, so it has no place in a directive.
+    NotSingleLine,
+}
+
+impl Rejected {
+    /// Completes the sentence "the directory `<path>` ...".
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Missing => "does not exist",
+            Self::NotUnicode => "is not valid Unicode, so it could not be given to the linker",
+            Self::NotSingleLine => "contains a line break, so it could not be given to the linker",
+        }
+    }
+}
+
 /// Records a link-search directory when it exists and can be written out.
 ///
-/// Returns whether it was recorded. A `cargo:` directive is a single line of
-/// UTF-8 text, so a path that is not valid Unicode is rejected rather than
-/// converted with replacement characters, which would point the linker at a
-/// directory other than the one that was checked, and a path carrying a line
-/// break is rejected rather than truncated.
+/// A `cargo:` directive is a single line of UTF-8 text, so a path that is not
+/// valid Unicode is rejected rather than converted with replacement characters,
+/// which would point the linker at a directory other than the one that was
+/// checked, and a path carrying a line break is rejected rather than truncated.
 ///
 /// An existing directory is always recorded, even if the same directory is
 /// already reachable through `LIB`: an explicit `-L` search path is consulted
 /// before `LIB` and in the order given, so suppressing it could leave an
 /// ordinary CRT directory ahead of the mitigated one. A duplicate search path
 /// is harmless to the linker.
-fn push_link_search(plan: &mut Plan, toolchain: &dyn Toolchain, dir: &Path) -> bool {
+///
+/// # Errors
+///
+/// Returns why the directory was refused, so the caller can say which of the
+/// three reasons applies rather than assuming the directory is simply absent.
+fn push_link_search(plan: &mut Plan, toolchain: &dyn Toolchain, dir: &Path) -> Result<(), Rejected> {
     let Some(text) = dir.to_str() else {
-        return false;
+        return Err(Rejected::NotUnicode);
     };
 
     if !is_single_line(text) {
-        return false;
+        return Err(Rejected::NotSingleLine);
     }
 
     if !toolchain.is_dir(dir) {
-        return false;
+        return Err(Rejected::Missing);
     }
 
     plan.link_search.push(text.to_owned());
-    true
+    Ok(())
 }
 
 /// Returns whether `text` fits in one `cargo:` directive.
@@ -793,7 +826,10 @@ mod tests {
         let plan = plan(&windows_env(), &toolchain);
 
         assert!(plan.link_search.is_empty(), "expected no link search, got {:?}", plan.link_search);
-        assert_reports(&plan, "no Spectre-mitigated libraries were found at");
+        assert_reports(
+            &plan,
+            "beneath the discovered toolchain is not valid Unicode, so it could not be given to the linker",
+        );
     }
 
     /// The override directory exists, so only the line break can account for it
@@ -811,7 +847,13 @@ mod tests {
         let plan = plan(&environment, &toolchain);
 
         assert!(plan.link_search.is_empty(), "expected no link search, got {:?}", plan.link_search);
-        assert_reports(&plan, "does not exist");
+        assert_reports(
+            &plan,
+            &format!(
+                "`{}` provided via `{TARGET_LIB_DIR_VAR}` contains a line break, so it could not be given to the linker",
+                injected.replace('\n', " ")
+            ),
+        );
         assert_single_line(&plan);
     }
 
