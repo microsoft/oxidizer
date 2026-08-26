@@ -93,13 +93,16 @@ impl AllocError {
     ///
     /// Such a request can never
     /// succeed, regardless of how much memory is available.
-    ///
     // The example needs a 32 KiB-aligned type, which a codegen backend that
-    // caps type alignment cannot lay out. `build.rs` detects those backends and
-    // the example is then rendered but not compiled, the same treatment the
-    // integration tests covering this path get.
-    #[cfg_attr(not(align_capped_backend), doc = "```")]
-    #[cfg_attr(align_capped_backend, doc = "```ignore")]
+    // caps type alignment cannot lay out. The hidden `cfg` lines compile the
+    // body away on those backends, the same way `build.rs` gates the
+    // integration tests covering this path.
+    ///
+    /// ```
+    /// # #[cfg(align_capped_backend)]
+    /// # fn main() {}
+    /// # #[cfg(not(align_capped_backend))]
+    /// # fn main() {
     /// #[repr(align(32768))]
     /// struct OverAligned;
     ///
@@ -108,6 +111,7 @@ impl AllocError {
     ///     panic!("over-aligned values must be rejected");
     /// };
     /// assert!(error.is_alignment_too_large());
+    /// # }
     /// ```
     #[must_use]
     pub fn is_alignment_too_large(self) -> bool {
