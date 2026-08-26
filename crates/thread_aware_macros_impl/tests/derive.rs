@@ -276,14 +276,13 @@ fn phantom_only_generic_gets_thread_aware_bound() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn skipped_raw_pointer_marker_gets_only_self_send() {
-    // A raw-pointer marker can never satisfy `PhantomData<*const T>: ThreadAware`, since that
-    // reduces to `*const T: Send`, which no instantiation can prove. Skipping it moves the
-    // obligation to `Self: Send`, which the manual `unsafe impl Send` such types carry
-    // discharges.
+fn raw_pointer_variance_marker_binds_nothing() {
+    // The recommended form for a raw-pointer variance marker. A function-pointer payload is
+    // `Send` for every `T`, and the traversal does not enter it, so no bound is emitted and
+    // the impl is usable for any argument.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct RawMarker<T>(usize, #[thread_aware(skip)] core::marker::PhantomData<*const T>);
+        struct RawMarker<T>(usize, core::marker::PhantomData<fn(*const T)>);
     };
     assert_snapshot!(expand(input));
 }
@@ -310,7 +309,7 @@ fn relocated_and_phantom_param_shares_one_bound() {
     // `ThreadAware` bound - the two traversal paths converge on the same parameter.
     let input = quote! {
         #[derive(ThreadAware)]
-        struct RelocatedAndPhantom<'a, T: 'a + Sync>(T, core::marker::PhantomData<&'a T>);
+        struct RelocatedAndPhantom<'a, T: 'a>(T, core::marker::PhantomData<fn(&'a T)>);
     };
     assert_snapshot!(expand(input));
 }

@@ -2,7 +2,7 @@
 source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
-impl<'a, T: 'a + Sync + ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
+impl<'a, T: 'a + ::thread_aware::ThreadAware> ::thread_aware::ThreadAware
 for RelocatedAndPhantom<'a, T> {
     fn relocate(
         &mut self,
