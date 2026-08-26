@@ -6065,8 +6065,8 @@ mod public_surface_behavior {
     //
     // Skipped on codegen backends that cap type alignment below the value this
     // test requires. The gate is set automatically by `build.rs`, which probes
-    // whether the active backend accepts a 128 KiB-aligned type; it is never
-    // passed on the command line.
+    // whether the active backend accepts a 128 KiB-aligned type; it is not
+    // meant to be passed on the command line.
     #[cfg(not(align_capped_backend))]
     #[repr(align(131072))]
     struct HugeAlign(#[expect(dead_code, reason = "field present to give the type a non-zero size")] u8);
