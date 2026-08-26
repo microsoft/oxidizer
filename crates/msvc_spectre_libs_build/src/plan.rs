@@ -175,7 +175,9 @@ pub struct Plan {
 
     /// Problems to report, as `cargo:warning=` or as a hard failure.
     ///
-    /// Guaranteed to render on a single line, so each fits in one directive.
+    /// Kept as errors rather than as text so nothing is lost -- a backtrace,
+    /// for instance, when `Display` is asked for one. Use [`Plan::warnings`] to
+    /// render them for a directive.
     pub diagnostics: Vec<AppError>,
 }
 
@@ -185,11 +187,26 @@ impl Plan {
     /// Used when the environment could not even be captured, so no decision
     /// was reachable.
     #[must_use]
-    pub fn reporting(error: &AppError) -> Self {
+    pub fn reporting(error: AppError) -> Self {
         Self {
-            diagnostics: vec![single_line(error)],
+            diagnostics: vec![error],
             ..Self::default()
         }
+    }
+
+    /// Renders the diagnostics for `cargo:warning=`, one line each.
+    ///
+    /// Rendering is deliberately not done when a diagnostic is recorded: how an
+    /// [`AppError`] displays is decided at that moment, not at planning time --
+    /// with `RUST_BACKTRACE` set it carries a backtrace over several lines --
+    /// so the only place the single-line rule can be enforced is the one that
+    /// produces the text.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        self.diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.to_string().replace(['\n', '\r'], " "))
+            .collect()
     }
 
     /// Returns whether anything went wrong.
@@ -230,19 +247,19 @@ pub fn plan(environment: &BuildEnvironment, toolchain: &dyn Toolchain) -> Plan {
     // it, so one that could not be written out is refused before any name is
     // built from it.
     if !is_single_line(&environment.target) {
-        plan.diagnostics.push(single_line(&app_err!(
+        plan.diagnostics.push(app_err!(
             "the target triple `{}` reported by Cargo contains a line break, so it cannot be used to build environment variable names",
             environment.target
-        )));
+        ));
         return plan;
     }
 
     if let Err(error) = plan_link_search(environment, toolchain, &mut plan) {
-        plan.diagnostics.push(single_line(&error));
+        plan.diagnostics.push(error);
     }
 
     if let Err(error) = plan_required_link_args(environment, &mut plan) {
-        plan.diagnostics.push(single_line(&error));
+        plan.diagnostics.push(error);
     }
 
     plan
@@ -448,11 +465,6 @@ fn is_single_line(text: &str) -> bool {
     !text.contains(['\n', '\r'])
 }
 
-/// Renders `error` so that it fits in one `cargo:warning=` directive.
-fn single_line(error: &AppError) -> AppError {
-    app_err!("{}", error.to_string().replace(['\n', '\r'], " "))
-}
-
 /// Derives the MSVC toolchain root from the path of a compiler executable.
 fn toolchain_root(cl_exe: &Path) -> Option<&Path> {
     // `<root>\bin\Host<arch>\<arch>\cl.exe`: drop the file name, the target and
@@ -541,7 +553,7 @@ mod tests {
     }
 
     fn diagnostics(plan: &Plan) -> Vec<String> {
-        plan.diagnostics.iter().map(ToString::to_string).collect()
+        plan.warnings()
     }
 
     fn assert_reports(plan: &Plan, expected: &str) {
@@ -552,8 +564,8 @@ mod tests {
         );
     }
 
-    /// Asserts the invariant every field of [`Plan`] documents: nothing in it
-    /// can terminate the `cargo:` directive that carries it.
+    /// Asserts the invariant [`Plan`] documents: nothing it hands to the build
+    /// script can terminate the `cargo:` directive that carries it.
     fn assert_single_line(plan: &Plan) {
         for name in &plan.rerun_if_env_changed {
             assert!(is_single_line(name), "rerun registration {name:?} spans more than one line");
@@ -563,8 +575,8 @@ mod tests {
             assert!(is_single_line(dir), "link search {dir:?} spans more than one line");
         }
 
-        for message in diagnostics(plan) {
-            assert!(is_single_line(&message), "diagnostic {message:?} spans more than one line");
+        for message in plan.warnings() {
+            assert!(is_single_line(&message), "warning {message:?} spans more than one line");
         }
     }
 
@@ -960,7 +972,7 @@ mod tests {
 
     #[test]
     fn reports_an_environment_that_could_not_be_captured() {
-        let plan = Plan::reporting(&app_err!("TARGET is not set"));
+        let plan = Plan::reporting(app_err!("TARGET is not set"));
 
         assert!(plan.failed());
         assert!(plan.link_search.is_empty());

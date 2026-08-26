@@ -47,10 +47,8 @@
 //! use msvc_spectre_libs_build::toolchain::SystemToolchain;
 //!
 //! fn main() {
-//!     let plan = BuildEnvironment::from_env().map_or_else(
-//!         |error| Plan::reporting(&error),
-//!         |environment| plan(&environment, &SystemToolchain),
-//!     );
+//!     let plan = BuildEnvironment::from_env()
+//!         .map_or_else(Plan::reporting, |environment| plan(&environment, &SystemToolchain));
 //!
 //!     for name in &plan.rerun_if_env_changed {
 //!         println!("cargo:rerun-if-env-changed={name}");
@@ -58,8 +56,8 @@
 //!     for dir in &plan.link_search {
 //!         println!("cargo:rustc-link-search=native={dir}");
 //!     }
-//!     for diagnostic in &plan.diagnostics {
-//!         println!("cargo:warning={diagnostic}");
+//!     for warning in plan.warnings() {
+//!         println!("cargo:warning={warning}");
 //!     }
 //! }
 //! ```

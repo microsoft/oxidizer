@@ -128,12 +128,15 @@ A `cargo:` directive is also a *single* line, and Cargo reads a build script's
 output line by line: a value carrying a line break would end its directive early
 and leave the remainder to be read as another directive -- a
 `cargo:rustc-link-arg` smuggled in through a directory name, say. Every string
-the plan carries is therefore checked before it is written out.
-`push_link_search` refuses a directory that spans more than one line, the
-planner refuses a target triple that does (the triple is what the suffixed
-variable names are built from), and each diagnostic is flattened to one line as
-it is recorded. The `Plan` fields document these guarantees, and a test asserts
-them over a whole plan rather than one value at a time.
+that reaches a directive is therefore checked or rendered first.
+`push_link_search` refuses a directory that spans more than one line, and the
+planner refuses a target triple that does, since the suffixed variable names are
+built from it. Diagnostics are handled the other way round: they stay
+`AppError`s in the plan, because how one displays is decided when it is
+displayed -- with `RUST_BACKTRACE` set it carries a backtrace over several lines
+-- so `Plan::warnings` is what flattens them, and `build.rs` prints that rather
+than the errors. A test asserts the rule over a whole plan rather than one value
+at a time.
 
 **`VCToolsInstallDir`.** A Visual Studio developer command prompt, and anything
 that has run `vcvars`, exports this variable pointing at the MSVC build tools
