@@ -152,16 +152,15 @@ fn enum_with_phantom_only_generic_compiles_and_relocates() {
 // payload the traversal cannot reach at all. Where the payload's `Send`-ness does not follow,
 // the author writes the bound - the derive does not infer it.
 
-/// `&'a T` is `Send` only when `T: Sync`, which `T: ThreadAware` does not give.
+/// A shared-reference payload, carried through a fn pointer so it is `Send` for every `T`.
 #[derive(ThreadAware)]
-struct PhantomRef<'a, T: 'a + Sync>(Tracker, PhantomData<&'a T>);
+struct PhantomRef<'a, T: 'a>(Tracker, PhantomData<fn(&'a T)>);
 
 #[test]
 fn phantom_shared_reference_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
-    // `i32` is `Sync`, which is what `&'a i32: Send` actually requires.
-    let mut value = PhantomRef::<'_, i32>(Tracker::default(), PhantomData);
+    let mut value = PhantomRef::<'_, Rc<()>>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
 
     assert_eq!(value.0.relocations, 1);
@@ -169,13 +168,13 @@ fn phantom_shared_reference_compiles_and_relocates() {
 
 /// An unsized slice payload, which the traversal does not enter, so nothing is bound for it.
 #[derive(ThreadAware)]
-struct PhantomSlice<T: Send>(Tracker, PhantomData<[T]>);
+struct PhantomSlice<T>(Tracker, PhantomData<fn(&[T])>);
 
 #[test]
 fn phantom_slice_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
-    let mut value = PhantomSlice::<i32>(Tracker::default(), PhantomData);
+    let mut value = PhantomSlice::<Rc<()>>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
 
     assert_eq!(value.0.relocations, 1);
@@ -184,9 +183,7 @@ fn phantom_slice_compiles_and_relocates() {
 /// An associated-type projection: a bound on `T` says nothing about `T::Item`, and binding
 /// `T: ThreadAware` to reach it is both too strong and beside the point. Skip it.
 #[derive(ThreadAware)]
-struct PhantomProjection<T: Iterator>(Tracker, #[thread_aware(skip)] PhantomData<T::Item>)
-where
-    T::Item: Send;
+struct PhantomProjection<T: Iterator>(Tracker, PhantomData<fn(T::Item)>);
 
 #[test]
 fn phantom_projection_compiles_and_relocates() {
@@ -295,28 +292,28 @@ fn bare_type_named_phantom_data_is_relocated() {
     );
 }
 
-// The two cases below pin the `Send` obligation for types made `Send` by a manual
-// `unsafe impl` rather than structurally. A marker whose argument can never be `Send` is
-// relocated like any other field, so its own `PhantomData<X>: ThreadAware` predicate would
-// reduce to `*const T: Send` or `Rc<()>: Send` - unprovable. `#[thread_aware(skip)]` moves it
-// under `where Self: Send`, which the manual impl discharges.
+// A marker only needs a `Send` payload, and one can always be written: a function-pointer
+// payload carries the parameter for variance while staying `Send` whatever the parameter is.
+// A type that genuinely must not be `Send` cannot implement `ThreadAware` at all, since the
+// trait requires it - so no marker shape needs `#[thread_aware(skip)]` or a manual
+// `unsafe impl Send` to get through the derive.
 
 fn assert_thread_aware<X: thread_aware::ThreadAware>() {}
 
-/// The standard raw-pointer variance marker.
+/// The standard raw-pointer variance marker, written in its `Send` form.
+///
+/// `PhantomData<*const T>` would make the whole struct `!Send`; `PhantomData<fn(*const T)>`
+/// carries the same parameter, keeps the variance intent, and is `Send` for every `T`.
 #[derive(ThreadAware)]
 struct RawMarker<T> {
     len: usize,
-    #[thread_aware(skip)]
-    marker: PhantomData<*const T>,
+    marker: PhantomData<fn(*const T)>,
 }
 
-// SAFETY: test-only. The marker carries no value and `RawMarker` owns nothing but a `usize`.
-unsafe impl<T> Send for RawMarker<T> {}
-
 #[test]
-fn phantom_raw_pointer_with_manual_send_is_usable() {
-    assert_thread_aware::<RawMarker<i32>>();
+fn raw_pointer_variance_marker_needs_no_escape_hatch() {
+    // No `skip`, no `unsafe impl`, and the payload is not `Send` on its own.
+    assert_thread_aware::<RawMarker<*const u8>>();
 
     let (source, destination) = affinity_pair();
     let mut value = RawMarker::<i32> {
@@ -328,39 +325,25 @@ fn phantom_raw_pointer_with_manual_send_is_usable() {
     assert_eq!(value.len, 3);
 }
 
-/// Exactly what `#[thread_aware(skip)]` exists for: a field whose type is not `Send`.
-///
-/// The field is a capability-free marker rather than a live `Rc`, so the manual `Send`
-/// implementation below promises nothing about data the type does not own. An unconditional
-/// `unsafe impl Send` over a real `Rc<T>` would be unsound: `skip` only controls whether the
-/// generated body calls `relocate`, it does not stop safe code from cloning the `Rc` and then
-/// moving the outer value across a thread boundary.
-struct NotSendMarker<T>(PhantomData<Rc<T>>);
-
+/// A payload that is neither `Send` nor `ThreadAware`, carried the same way.
 #[derive(ThreadAware)]
-struct SkippedNotSend<T> {
+struct HoldsNonSendPayload<T> {
     tracked: Tracker,
-    #[thread_aware(skip)]
-    cache: NotSendMarker<T>,
+    marker: PhantomData<fn(Rc<T>)>,
 }
 
-// SAFETY: test-only. `NotSendMarker` owns no value and exposes no destructor, dereference or
-// safe accessor, so `SkippedNotSend` carries no thread-affine capability to transfer.
-#[expect(clippy::non_send_fields_in_send_ty, reason = "deliberate: this is the shape `skip` exists for")]
-unsafe impl<T> Send for SkippedNotSend<T> {}
-
 #[test]
-fn skipped_non_send_field_with_manual_send_is_usable() {
-    assert_thread_aware::<SkippedNotSend<i32>>();
+fn a_non_send_payload_still_derives_through_a_fn_marker() {
+    assert_thread_aware::<HoldsNonSendPayload<Rc<()>>>();
 
     let (source, destination) = affinity_pair();
-    let mut value = SkippedNotSend {
+    let mut value = HoldsNonSendPayload::<i32> {
         tracked: Tracker::default(),
-        cache: NotSendMarker::<i32>(PhantomData),
+        marker: PhantomData,
     };
     value.relocate(source, destination);
 
-    assert_eq!(value.tracked.relocations, 1, "the skipped field emits no relocation");
+    assert_eq!(value.tracked.relocations, 1);
 }
 
 /// A named enum variant whose fields are called `source` and `destination`, and one whose
@@ -589,39 +572,19 @@ fn empty_enum_derives_a_usable_impl() {
     assert_thread_aware::<Uninhabited>();
 }
 
-// The three below are what `#[thread_aware(skip)]` is for: a field whose obligation the
-// derive cannot state, because no bound it could generate would satisfy it. Each one moves
-// the obligation to `Self: Send`, where a manual `unsafe impl Send` discharges it.
+// The two below carry payloads the traversal cannot reason about - one behind a const
+// parameter, one behind a type macro. Written in the `Send` marker form, neither needs
+// `#[thread_aware(skip)]` or a manual `unsafe impl Send`.
 
-/// A marker-only type whose argument is not `Send`, made `Send` by hand.
-#[derive(ThreadAware)]
-struct ManualSendMarker(#[thread_aware(skip)] PhantomData<Rc<()>>);
+/// A payload whose `Send`-ness would depend on a const argument.
+struct ConstPayload<const N: usize>(PhantomData<*const ()>);
 
-// SAFETY: test-only. The marker holds no value.
-unsafe impl Send for ManualSendMarker {}
-
-/// A const-parameterised type that owns no data: no pointee, no destructor, no dereference and
-/// no safe accessor. The raw pointer inside the marker exists only to stop the compiler from
-/// deriving `Send` automatically.
-struct MaybeSend<const N: usize>(PhantomData<*const ()>);
-
-// SAFETY: test-only. The type holds no value, so moving one transfers no capability at all.
-// `N == 0` is singled out purely to exercise `Send`-ness that depends on a const parameter.
-unsafe impl Send for MaybeSend<0> {}
-
-/// A marker whose payload is `Send` only for some const arguments.
-///
-/// The derive binds nothing for a const parameter, so the marker must be skipped and the
-/// obligation discharged on `Self`.
+/// The derive binds nothing for a const parameter; the fn-pointer marker means it need not.
 #[derive(ThreadAware)]
 struct ConstDependent<const N: usize> {
     tracked: Tracker,
-    #[thread_aware(skip)]
-    marker: PhantomData<MaybeSend<N>>,
+    marker: PhantomData<fn(ConstPayload<N>)>,
 }
-
-// SAFETY: test-only. `MaybeSend` holds no value, so neither does this.
-unsafe impl Send for ConstDependent<0> {}
 
 macro_rules! hidden_generic {
     () => {
@@ -631,22 +594,20 @@ macro_rules! hidden_generic {
 
 /// A generic hidden behind a type macro, so no `T` token is visible before expansion.
 ///
-/// No syntactic traversal can reach it, so the marker is skipped like any other payload the
-/// derive cannot reason about.
+/// No syntactic traversal can reach it, and none needs to.
 #[derive(ThreadAware)]
-struct MacroHidden<T: Send> {
+struct MacroHidden<T> {
     tracked: Tracker,
-    #[thread_aware(skip)]
-    marker: PhantomData<hidden_generic!()>,
+    marker: PhantomData<fn(hidden_generic!())>,
 }
 
 #[test]
-fn send_ness_invisible_to_a_syntactic_scan_still_compiles() {
+fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
     let (source, destination) = affinity_pair();
 
-    assert_thread_aware::<ManualSendMarker>();
-    assert_thread_aware::<ConstDependent<0>>();
-    assert_thread_aware::<MacroHidden<i32>>();
+    // Both instantiated with arguments that are neither `Send` nor `ThreadAware`.
+    assert_thread_aware::<ConstDependent<7>>();
+    assert_thread_aware::<MacroHidden<Rc<()>>>();
 
     let mut value = ConstDependent::<0> {
         tracked: Tracker::default(),

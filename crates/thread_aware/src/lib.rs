@@ -248,18 +248,25 @@ pub use core::ThreadAware;
 /// bound by `ThreadAware` exactly as they would be anywhere else.
 ///
 /// The derive therefore infers only what the traversal can see, and states nothing on the
-/// author's behalf beyond that. Where a field's obligation does not follow from those bounds,
-/// the author writes it:
-/// * `PhantomData<&'a T>` is `Send` only when `T: Sync`, and `PhantomData<Arc<T>>` only when
-///   `T: Send + Sync`, neither of which follows from `T: ThreadAware`;
-/// * a payload the traversal does not enter - a slice, a type macro, a const parameter - gets
-///   no bound at all;
-/// * a payload that can never be `Send`, such as `*const T`, cannot be satisfied by any bound
-///   and needs `#[thread_aware(skip)]`, which moves the obligation to `where Self: Send` where
-///   the manual `unsafe impl Send` such a type carries discharges it.
+/// author's behalf beyond that. A marker payload whose `Send`-ness does not follow from those
+/// bounds should be written in a form that is `Send` regardless of its parameter - a function
+/// pointer carries the parameter for variance and drop-check purposes while remaining `Send`
+/// for every argument:
 ///
-/// A type whose shape the derive cannot express is expected to implement `ThreadAware` by
-/// hand rather than to have the derive grow a special case for it.
+/// ```rust
+/// # use core::marker::PhantomData;
+/// # use thread_aware::ThreadAware;
+/// #[derive(ThreadAware)]
+/// struct Marked<T> {
+///     // `PhantomData<*const T>` would make `Marked` `!Send`; this does not.
+///     marker: PhantomData<fn(*const T)>,
+/// }
+/// ```
+///
+/// That is the general answer, not a workaround: a type that must not be `Send` cannot
+/// implement `ThreadAware` at all, because the trait requires it. `#[thread_aware(skip)]`
+/// remains for a different case - a real field, holding real data, that the author does not
+/// want relocated.
 ///
 /// One name is matched syntactically, because a macro cannot resolve a path to the item it
 /// refers to: a trait referred to by the bare name `ThreadAware` is assumed to be this
