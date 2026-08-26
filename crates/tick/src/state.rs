@@ -145,4 +145,16 @@ mod tests {
     fn clock_state_send_and_sync() {
         static_assertions::assert_impl_all!(ClockState: Send, Sync);
     }
+
+    #[test]
+    fn shared_timer_uniqueness_tracks_clones() {
+        let timers = SynchronizedTimers::new_shared();
+        assert!(timers.is_unique());
+
+        let clone = timers.clone();
+        assert!(!timers.is_unique());
+
+        drop(clone);
+        assert!(timers.is_unique());
+    }
 }

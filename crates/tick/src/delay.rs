@@ -212,6 +212,20 @@ mod tests {
     }
 
     #[test]
+    fn overflowing_reregistration_clears_existing_timer() {
+        let clock = Clock::new_system_frozen();
+        let mut delay = Delay::new(&clock, Duration::from_millis(1));
+        let waker = Waker::noop();
+        assert_eq!(delay.register_timer(waker), Poll::Pending);
+        assert!(delay.current_timer.is_some());
+
+        delay.duration = Duration::MAX;
+        assert_eq!(delay.register_timer(waker), Poll::Pending);
+
+        assert_eq!(delay.current_timer, None);
+    }
+
+    #[test]
     fn ready_without_advancing_timers_ensure_timer_unregistered() {
         let clock = Clock::new_system_frozen();
         let period = Duration::from_millis(1);

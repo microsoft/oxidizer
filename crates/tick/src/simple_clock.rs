@@ -101,6 +101,11 @@ impl SimpleClock {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) const fn uses_fast_instant(&self) -> bool {
+        matches!(self.0, TimeKind::SystemFast)
+    }
+
     /// Creates a new frozen `SimpleClock`.
     ///
     /// This is a convenience method equivalent to calling `ClockControl::new().to_simple_clock()`.
