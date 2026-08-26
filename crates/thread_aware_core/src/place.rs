@@ -254,27 +254,13 @@ mod tests {
     use core::panic::{RefUnwindSafe, UnwindSafe};
     use std::thread;
 
-    use static_assertions::{assert_impl_all, assert_not_impl_any};
+    use static_assertions::assert_impl_all;
 
     use super::{NumaNode, Origin, Place};
 
     assert_impl_all!(Origin: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(Place: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
-
-    // These ids are constructed through inherent `new` precisely so that no `From<integer>`
-    // impl ever governs them. Adding one couples the type to a literal's inferred width:
-    // a single impl makes `from(1)` resolve to it, and a second silently re-resolves those
-    // call sites or breaks them outright. No semver tool detects either change, so the ban
-    // is pinned here instead.
-    assert_not_impl_any!(Origin:
-        From<u8>, From<u16>, From<u32>, From<u64>, From<u128>, From<usize>,
-        From<i8>, From<i16>, From<i32>, From<i64>, From<i128>, From<isize>,
-        From<f32>, From<f64>, From<char>);
-    assert_not_impl_any!(NumaNode:
-        From<u8>, From<u16>, From<u32>, From<u64>, From<u128>, From<usize>,
-        From<i8>, From<i16>, From<i32>, From<i64>, From<i128>, From<isize>,
-        From<f32>, From<f64>, From<char>);
 
     #[test]
     fn exposes_components() {

@@ -105,8 +105,8 @@ infers; adding a second either breaks those call sites — `from(1)` falls back 
 `i32` and stops compiling — or, when the added impl happens to be `From<i32>`,
 *silently re-resolves them to the new impl* with no error at all. Replacing the
 impl instead breaks every caller passing a typed variable. None of these are
-reported by `cargo semver-checks`, which is why static assertions in the tests
-pin the absence of every integer conversion.
+reported by `cargo semver-checks`, so adding one would reach a release
+unchallenged.
 
 An inherent constructor avoids the trap entirely: `u32` already exceeds any node
 count real hardware reaches, and if a wider or fallible form is ever needed it
