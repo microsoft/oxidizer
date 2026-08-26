@@ -2,6 +2,12 @@
 // Licensed under the MIT License.
 
 #![no_std]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/logo.png")]
+#![doc(
+    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
+)]
 
 //! Support for values that adapt when a runtime moves them to another thread.
 //!
@@ -14,8 +20,16 @@
 //! The crate has no dependencies. It also works without `std`: with default features turned
 //! off, [`Place`] loses its thread id and keeps [`Origin`] and [`NumaNode`]. The companion
 //! `thread_aware` crate provides the conveniences on top: a `#[derive(ThreadAware)]` macro,
-//! wrappers for foreign types, and a per-core `Arc`. Depend on this crate directly when only
-//! the trait is needed.
+//! wrappers for foreign types, and a per-core `Arc`.
+//!
+//! # Why this crate is separate
+//!
+//! A crate that names a thread-aware type in its own public API inherits whatever that
+//! type's crate promises. Keeping the trait and [`Place`] here, in something small,
+//! dependency-free and slow-moving, lets such crates expose them without taking on the
+//! larger surface. The containers, callbacks, registry and derive support in `thread_aware`
+//! stay free to evolve, and are not meant to appear in a public API. Depend on this crate
+//! directly when only the trait is needed.
 //!
 //! # Why relocation exists
 //!
@@ -141,7 +155,7 @@
 //!
 //! Containers forward the call to what they hold: [`Option`], [`Result`], arrays, slices,
 //! `Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples of up to twelve elements, and map values.
-//! A `Cow` forwards only when it owns its data.
+//! A borrowed `Cow` is taken to owned so that it can be relocated as well.
 //!
 //! Map keys are left alone, since altering one could change its hash or ordering and corrupt
 //! the map. Sets are not implemented at all for the same reason, so a `HashSet` or

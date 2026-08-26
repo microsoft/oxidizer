@@ -23,6 +23,7 @@ use crate::{NumaNode, Origin, Place, ThreadAware};
 macro_rules! impl_transfer {
     ($t:ty) => {
         impl ThreadAware for $t {
+            #[inline]
             fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
         }
     };
@@ -127,6 +128,7 @@ impl<T, const N: usize> ThreadAware for [T; N]
 where
     T: ThreadAware,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
         self.as_mut_slice().relocate(source, destination);
     }
@@ -193,6 +195,7 @@ impl<T> ThreadAware for Box<T>
 where
     T: ThreadAware + ?Sized,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
         (**self).relocate(source, destination);
     }
@@ -214,6 +217,7 @@ impl<T> ThreadAware for Cell<T>
 where
     T: ThreadAware,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
         self.get_mut().relocate(source, destination);
     }
@@ -223,6 +227,7 @@ impl<T> ThreadAware for RefCell<T>
 where
     T: ThreadAware,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
         self.get_mut().relocate(source, destination);
     }
@@ -233,10 +238,9 @@ where
     B: ToOwned + Sync + ?Sized,
     B::Owned: ThreadAware,
 {
+    #[inline]
     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
-        if let Cow::Owned(value) = self {
-            value.relocate(source, destination);
-        }
+        self.to_mut().relocate(source, destination);
     }
 }
 
@@ -254,6 +258,7 @@ where
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
     use alloc::borrow::Cow;
@@ -267,8 +272,20 @@ mod tests {
         NonZero, NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize, NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64,
         NonZeroU128, NonZeroUsize,
     };
+    use std::collections::HashMap;
 
     use crate::{NumaNode, Origin, Place, ThreadAware};
+
+    /// A type whose `relocate` visibly mutates state, so mutation tests catch
+    /// no-op replacements.
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct Tracker(bool);
+
+    impl ThreadAware for Tracker {
+        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {
+            self.0 = true;
+        }
+    }
 
     fn sample_places() -> [Place; 2] {
         let origin = Origin::from(0);
@@ -302,8 +319,6 @@ mod tests {
     #[test]
     #[cfg(feature = "std")]
     fn test_hashmap() {
-        use std::collections::HashMap;
-
         let places = sample_places();
         let source = Some(&places[0]);
         let destination = &places[1];
@@ -465,17 +480,6 @@ mod tests {
         assert_eq!(err_string, Err("error".to_string()));
     }
 
-    /// A type whose `relocate` visibly mutates state, so mutation tests catch
-    /// no-op replacements.
-    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    struct Tracker(bool);
-
-    impl ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {
-            self.0 = true;
-        }
-    }
-
     #[test]
     fn option_some_forwards_relocate() {
         let places = sample_places();
@@ -565,12 +569,16 @@ mod tests {
     }
 
     #[test]
-    fn cow_relocates_only_owned_value() {
+    fn cow_relocates_both_borrowed_and_owned_values() {
         let places = sample_places();
+
+        // A borrowed `Cow` is taken to owned so that it can be relocated too, leaving the
+        // borrowed original untouched.
         let borrowed = Tracker(false);
         let mut borrowed_cow = Cow::Borrowed(&borrowed);
         borrowed_cow.relocate(Some(&places[0]), &places[1]);
-        assert!(!borrowed_cow.as_ref().0);
+        assert!(borrowed_cow.as_ref().0, "must relocate after taking ownership");
+        assert!(!borrowed.0, "the borrowed original must be left alone");
 
         let mut owned_cow: Cow<'_, Tracker> = Cow::Owned(Tracker(false));
         owned_cow.relocate(Some(&places[0]), &places[1]);
@@ -582,14 +590,13 @@ mod tests {
         let places = sample_places();
         let mut val: Box<Tracker> = Box::new(Tracker(false));
         val.relocate(Some(&places[0]), &places[1]);
-        assert!(val.0, "Box must forward relocate to inner value");
+        assert!(val.0, "must forward relocate to the inner value");
     }
 
     #[test]
     #[cfg(feature = "std")]
     fn hashmap_relocates_values_without_mutating_keys() {
         use core::hash::BuildHasherDefault;
-        use std::collections::HashMap;
         use std::hash::DefaultHasher;
 
         let places = sample_places();

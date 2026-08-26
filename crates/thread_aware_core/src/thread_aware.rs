@@ -90,9 +90,9 @@ use crate::Place;
 ///
 /// # Examples
 ///
-/// A type that rebuilds a scratch buffer when the nearest memory changes. The buffer holds
-/// nothing between calls, so discarding it is safe, while the `name` field is real data and
-/// is left alone.
+/// A type that releases a scratch buffer when the nearest memory changes, so that the next
+/// use allocates near the new node. The buffer holds nothing between calls, so discarding it
+/// is safe, while the `name` field is real data and is left alone.
 ///
 /// ```
 /// use thread_aware_core::{NumaNode, Place, ThreadAware};
@@ -106,14 +106,17 @@ use crate::Place;
 ///
 /// impl ThreadAware for Encoder {
 ///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
-///         // Only pay for re-allocation when the nearest memory actually changed.
+///         // Only pay for this when the nearest memory actually changed.
 ///         if source.map(Place::numa_node) == Some(destination.numa_node()) {
 ///             return;
 ///         }
 ///
-///         // Re-allocate so the scratch space is local to the destination.
+///         // Record the node and drop the buffer allocated near the old one. `Vec` cannot
+///         // choose a node itself, so placement comes from the allocator the application
+///         // installs; releasing here is what gives it the chance to allocate near
+///         // `numa_node` on the next use.
 ///         self.numa_node = Some(destination.numa_node());
-///         self.scratch = Vec::with_capacity(self.scratch.capacity());
+///         self.scratch = Vec::new();
 ///     }
 /// }
 /// ```

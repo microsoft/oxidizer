@@ -18,13 +18,10 @@ struct Worker {
 }
 
 impl ThreadAware for Worker {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    // `relocate` is limited to bounded local work, so this only records the destination.
+    // Reporting happens in `main`, outside the callback.
+    fn relocate(&mut self, _source: Option<&Place>, destination: &Place) {
         self.thread = Some(destination.thread());
-        println!(
-            "relocated from {:?} to thread {:?}",
-            source.map(Place::thread),
-            destination.thread()
-        );
     }
 }
 
@@ -41,8 +38,10 @@ fn main() {
 
     // Relocate a sample object between them.
     let mut worker = Worker { thread: None };
-    worker.relocate(None, &first); // initial placement; the previous place is unknown
-    worker.relocate(Some(&first), &second); // migrate from the first place to the second
 
-    println!("worker now on thread {:?}", worker.thread);
+    worker.relocate(None, &first); // initial placement; the previous place is unknown
+    println!("placed on thread {:?}", worker.thread);
+
+    worker.relocate(Some(&first), &second); // migrate from the first place to the second
+    println!("relocated to thread {:?}", worker.thread);
 }
