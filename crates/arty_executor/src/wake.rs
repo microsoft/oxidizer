@@ -105,7 +105,7 @@ impl WakeSignal {
         let fake_task_ref = unsafe { TaskRef::fake() };
 
         Self::new(
-            Arc::new(Mutex::new(VecDeque::with_capacity(0))),
+            Arc::new(Mutex::new(VecDeque::new())),
             Arc::new(AtomicBool::new(false)),
             Waker::noop().clone(),
             fake_task_ref,
@@ -367,7 +367,7 @@ mod tests {
         let fake_task_ref = unsafe { TaskRef::fake() };
 
         // Capacity is 0 so the queue is not allowed to allocate (== is never used).
-        let awakened_queue = Arc::new(Mutex::new(VecDeque::with_capacity(0)));
+        let awakened_queue = Arc::new(Mutex::new(VecDeque::new()));
         let probe_embedded_wake_signals = Arc::new(AtomicBool::new(false));
         let parent_waker = Arc::new(TestWaker::new());
 
