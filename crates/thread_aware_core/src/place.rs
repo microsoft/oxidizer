@@ -23,16 +23,28 @@ use std::thread::ThreadId;
 /// ```
 /// use thread_aware_core::Origin;
 ///
-/// let origin = Origin::from(1);
+/// let origin = Origin::new(1);
 ///
-/// assert_eq!(origin, Origin::from(1));
-/// assert_ne!(origin, Origin::from(2));
+/// assert_eq!(origin, Origin::new(1));
+/// assert_ne!(origin, Origin::new(2));
 /// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Origin(u16);
+pub struct Origin(u32);
 
-impl From<u16> for Origin {
-    fn from(value: u16) -> Self {
+impl Origin {
+    /// Creates an origin from a runtime-assigned number.
+    ///
+    /// The number carries no meaning beyond telling one runtime apart from another.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thread_aware_core::Origin;
+    ///
+    /// assert_ne!(Origin::new(0), Origin::new(1));
+    /// ```
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
         Self(value)
     }
 }
@@ -46,21 +58,34 @@ impl From<u16> for Origin {
 /// while they all number the regions identically; see
 /// [what the ids mean](crate#what-the-ids-mean).
 ///
+/// Nodes carry no meaning beyond identity, and the width is wide enough that no real
+/// machine can exhaust it.
+///
 /// # Examples
 ///
 /// ```
 /// use thread_aware_core::NumaNode;
 ///
-/// let node = NumaNode::from(0);
+/// let node = NumaNode::new(0);
 ///
-/// assert_eq!(node, NumaNode::from(0));
-/// assert_ne!(node, NumaNode::from(1));
+/// assert_eq!(node, NumaNode::new(0));
+/// assert_ne!(node, NumaNode::new(1));
 /// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NumaNode(u16);
+pub struct NumaNode(u32);
 
-impl From<u16> for NumaNode {
-    fn from(value: u16) -> Self {
+impl NumaNode {
+    /// Creates a node identifier from the number the platform reports.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use thread_aware_core::NumaNode;
+    ///
+    /// assert_ne!(NumaNode::new(0), NumaNode::new(1));
+    /// ```
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
         Self(value)
     }
 }
@@ -98,13 +123,13 @@ impl From<u16> for NumaNode {
 /// use thread_aware_core::{NumaNode, Origin, Place};
 ///
 /// let here = thread::current().id();
-/// let place = Place::new(Origin::from(1), here, NumaNode::from(1));
+/// let place = Place::new(Origin::new(1), here, NumaNode::new(1));
 ///
-/// assert_eq!(place.origin(), Origin::from(1));
+/// assert_eq!(place.origin(), Origin::new(1));
 /// assert_eq!(place.thread(), here);
 ///
 /// // The same thread under a different runtime is a different place...
-/// let elsewhere = Place::new(Origin::from(2), here, NumaNode::from(1));
+/// let elsewhere = Place::new(Origin::new(2), here, NumaNode::new(1));
 /// assert_ne!(place, elsewhere);
 ///
 /// // ...but the thread and its nearest memory are unchanged.
@@ -136,9 +161,9 @@ impl Place {
     ///
     /// use thread_aware_core::{NumaNode, Origin, Place};
     ///
-    /// let place = Place::new(Origin::from(1), thread::current().id(), NumaNode::from(0));
+    /// let place = Place::new(Origin::new(1), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.origin(), Origin::from(1));
+    /// assert_eq!(place.origin(), Origin::new(1));
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[must_use]
@@ -161,9 +186,9 @@ impl Place {
     ///
     /// use thread_aware_core::{NumaNode, Origin, Place};
     ///
-    /// let place = Place::new(Origin::from(7), thread::current().id(), NumaNode::from(0));
+    /// let place = Place::new(Origin::new(7), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.origin(), Origin::from(7));
+    /// assert_eq!(place.origin(), Origin::new(7));
     /// # }
     /// # }
     /// ```
@@ -187,7 +212,7 @@ impl Place {
     /// use thread_aware_core::{NumaNode, Origin, Place};
     ///
     /// let here = thread::current().id();
-    /// let place = Place::new(Origin::from(1), here, NumaNode::from(0));
+    /// let place = Place::new(Origin::new(1), here, NumaNode::new(0));
     ///
     /// assert_eq!(place.thread(), here);
     /// ```
@@ -211,9 +236,9 @@ impl Place {
     ///
     /// use thread_aware_core::{NumaNode, Origin, Place};
     ///
-    /// let place = Place::new(Origin::from(1), thread::current().id(), NumaNode::from(3));
+    /// let place = Place::new(Origin::new(1), thread::current().id(), NumaNode::new(3));
     ///
-    /// assert_eq!(place.numa_node(), NumaNode::from(3));
+    /// assert_eq!(place.numa_node(), NumaNode::new(3));
     /// # }
     /// # }
     /// ```
@@ -229,7 +254,7 @@ mod tests {
     use core::panic::{RefUnwindSafe, UnwindSafe};
     use std::thread;
 
-    use static_assertions::assert_impl_all;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
 
     use super::{NumaNode, Origin, Place};
 
@@ -237,21 +262,35 @@ mod tests {
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(Place: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
+    // These ids are constructed through inherent `new` precisely so that no `From<integer>`
+    // impl ever governs them. Adding one couples the type to a literal's inferred width:
+    // a single impl makes `from(1)` resolve to it, and a second silently re-resolves those
+    // call sites or breaks them outright. No semver tool detects either change, so the ban
+    // is pinned here instead.
+    assert_not_impl_any!(Origin:
+        From<u8>, From<u16>, From<u32>, From<u64>, From<u128>, From<usize>,
+        From<i8>, From<i16>, From<i32>, From<i64>, From<i128>, From<isize>,
+        From<f32>, From<f64>, From<char>);
+    assert_not_impl_any!(NumaNode:
+        From<u8>, From<u16>, From<u32>, From<u64>, From<u128>, From<usize>,
+        From<i8>, From<i16>, From<i32>, From<i64>, From<i128>, From<isize>,
+        From<f32>, From<f64>, From<char>);
+
     #[test]
     fn exposes_components() {
         let id = thread::current().id();
-        let place = Place::new(Origin::from(1), id, NumaNode::from(2));
+        let place = Place::new(Origin::new(1), id, NumaNode::new(2));
 
-        assert_eq!(place.origin(), Origin::from(1));
+        assert_eq!(place.origin(), Origin::new(1));
         assert_eq!(place.thread(), id);
-        assert_eq!(place.numa_node(), NumaNode::from(2));
+        assert_eq!(place.numa_node(), NumaNode::new(2));
     }
 
     #[test]
     fn different_origin_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Origin::from(0), id, NumaNode::from(0));
-        let second = Place::new(Origin::from(1), id, NumaNode::from(0));
+        let first = Place::new(Origin::new(0), id, NumaNode::new(0));
+        let second = Place::new(Origin::new(1), id, NumaNode::new(0));
 
         assert_ne!(first, second);
     }
@@ -259,16 +298,16 @@ mod tests {
     #[test]
     fn different_numa_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Origin::from(0), id, NumaNode::from(0));
-        let second = Place::new(Origin::from(0), id, NumaNode::from(1));
+        let first = Place::new(Origin::new(0), id, NumaNode::new(0));
+        let second = Place::new(Origin::new(0), id, NumaNode::new(1));
 
         assert_ne!(first, second);
     }
 
     #[test]
     fn different_thread_compares_unequal() {
-        let origin = Origin::from(0);
-        let numa_node = NumaNode::from(0);
+        let origin = Origin::new(0);
+        let numa_node = NumaNode::new(0);
         let here = Place::new(origin, thread::current().id(), numa_node);
         let there = thread::spawn(move || Place::new(origin, thread::current().id(), numa_node))
             .join()
@@ -279,7 +318,7 @@ mod tests {
 
     #[test]
     fn clone_preserves_components() {
-        let place = Place::new(Origin::from(4), thread::current().id(), NumaNode::from(9));
+        let place = Place::new(Origin::new(4), thread::current().id(), NumaNode::new(9));
         let cloned = place.clone();
 
         assert_eq!(cloned, place);

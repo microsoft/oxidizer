@@ -288,11 +288,11 @@ mod tests {
     }
 
     fn sample_places() -> [Place; 2] {
-        let origin = Origin::from(0);
+        let origin = Origin::new(0);
         let thread = std::thread::current().id();
         [
-            Place::new(origin, thread, NumaNode::from(0)),
-            Place::new(origin, thread, NumaNode::from(1)),
+            Place::new(origin, thread, NumaNode::new(0)),
+            Place::new(origin, thread, NumaNode::new(1)),
         ]
     }
 

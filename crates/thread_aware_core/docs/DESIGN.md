@@ -96,14 +96,24 @@ already subdivide a NUMA node into cache domains, and a `Place` may one day need
 to say that a thread is pinned to memory but not to a processor. Both mean
 adding a coordinate, and the design makes that additive.
 
-**Ids are opaque.** `Origin` and `NumaNode` expose no accessor returning their
-integer; they are constructed with `From<u16>` and otherwise only compared and
-copied. The *stored* width is private and may grow silently, which is what makes
-it possible to reserve values no existing constructor can reach. Widening the
-*accepted* width is a different matter and is breaking: replacing `From<u16>`
-with `From<u32>` stops `Origin::from(id)` compiling wherever `id` is a `u16`,
-and offering both makes `Origin::from(1)` fail to infer. A wider input therefore
-arrives as an additional named constructor, never as a changed `From`.
+**Ids are opaque, and take no `From<integer>`.** `Origin` and `NumaNode` expose
+no accessor returning their integer, and are built through an inherent
+`new(u32)` rather than a `From` impl. That is a deliberate refusal, because a
+`From<integer>` on a permanent vocabulary type is a one-shot commitment. While
+one such impl exists it silently governs the width every unsuffixed literal
+infers; adding a second either breaks those call sites — `from(1)` falls back to
+`i32` and stops compiling — or, when the added impl happens to be `From<i32>`,
+*silently re-resolves them to the new impl* with no error at all. Replacing the
+impl instead breaks every caller passing a typed variable. None of these are
+reported by `cargo semver-checks`, which is why static assertions in the tests
+pin the absence of every integer conversion.
+
+An inherent constructor avoids the trap entirely: `u32` already exceeds any node
+count real hardware reaches, and if a wider or fallible form is ever needed it
+arrives as a second, differently named constructor, which is purely additive.
+The *stored* width remains private and may grow silently — it is not part of the
+promise, and growing it is what would reserve values no existing constructor can
+reach.
 
 **`Place` fields are private.** Coordinates are read through accessors, so the
 struct can gain a field without touching any existing reader, and the derived
@@ -123,10 +133,10 @@ produce. Existing constructors keep their exact signatures and fill the new
 coordinate with that default; callers that care about it opt in through a new
 constructor.
 
-Reserving such a value is where the opaque representation earns its keep. The
-current conversion maps every `u16` to a distinct node, so preserving all of
-those identities while adding a sentinel needs one extra representation state —
-available precisely because the stored width is private. A coordinate type
+Reserving such a value costs one representation state that no constructor hands
+out. Since `new` accepts the full `u32` range, a sentinel would come either from
+widening the private storage past it or from making the reserving constructor
+fallible, so that the reserved value can never be minted. A coordinate type
 introduced later can simply reserve one from the start.
 
 Behaviour is preserved as well as compilation. Every pre-existing construction
@@ -149,11 +159,11 @@ assertion pins dyn-compatibility for the same reason the auto traits are pinned.
 
 ### What this does not permit
 
-The escape hatch is one-directional. Removing a coordinate, widening an id's
-accepted type, changing what an existing id *means*, or adding a method that
-breaks dyn-compatibility are all breaking, and no sentinel value makes them
-otherwise. Reserving the additive path for genuinely new information is what
-keeps it available.
+The escape hatch is one-directional. Removing a coordinate, changing the
+signature of an existing constructor, adding a `From<integer>` impl, changing
+what an existing id *means*, or adding a method that breaks dyn-compatibility
+are all breaking, and no sentinel value makes them otherwise. Reserving the
+additive path for genuinely new information is what keeps it available.
 
 ## Related documents
 

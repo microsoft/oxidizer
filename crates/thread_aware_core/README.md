@@ -83,9 +83,9 @@ impl ThreadAware for Worker {
 let here = thread::current().id();
 let there = thread::spawn(|| thread::current().id()).join().unwrap();
 
-let origin = Origin::from(1);
-let first = Place::new(origin, here, NumaNode::from(0));
-let second = Place::new(origin, there, NumaNode::from(1));
+let origin = Origin::new(1);
+let first = Place::new(origin, here, NumaNode::new(0));
+let second = Place::new(origin, there, NumaNode::new(1));
 
 let mut worker = Worker { thread: None };
 
@@ -181,7 +181,7 @@ the case where splitting is correct.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbP3kvqcvz6BwbJGNPrggzfEkbWewSJrZuBLMb4smVzzn-vkxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbFnNJ9iJOcHAbeCXtexP3N-gbIm-PyKkJYsEbF01BL-9BWJ1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place

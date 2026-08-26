@@ -32,9 +32,9 @@ fn main() {
         .join()
         .expect("the spawned thread cannot panic");
 
-    let origin = Origin::from(1);
-    let first = Place::new(origin, here, NumaNode::from(0));
-    let second = Place::new(origin, there, NumaNode::from(0));
+    let origin = Origin::new(1);
+    let first = Place::new(origin, here, NumaNode::new(0));
+    let second = Place::new(origin, there, NumaNode::new(0));
 
     // Relocate a sample object between them.
     let mut worker = Worker { thread: None };

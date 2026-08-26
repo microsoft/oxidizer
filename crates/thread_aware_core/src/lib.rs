@@ -81,9 +81,9 @@
 //! let here = thread::current().id();
 //! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
-//! let origin = Origin::from(1);
-//! let first = Place::new(origin, here, NumaNode::from(0));
-//! let second = Place::new(origin, there, NumaNode::from(1));
+//! let origin = Origin::new(1);
+//! let first = Place::new(origin, here, NumaNode::new(0));
+//! let second = Place::new(origin, there, NumaNode::new(1));
 //!
 //! let mut worker = Worker { thread: None };
 //!
