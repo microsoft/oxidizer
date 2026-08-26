@@ -308,9 +308,6 @@ scope, and never during an initializer.
 Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
 itself, which declares `extern crate self as ohno`.
 
-Generated code names the crate `::ohno`. The leading `::` is safe inside `ohno`
-itself, which declares `extern crate self as ohno`.
-
 ## `#[ohno::error]`
 
 R2 is a rewrite, so `error_attr` is one pass over a `syn::ItemStruct`:
