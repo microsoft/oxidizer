@@ -54,6 +54,32 @@
 //! never construct a [`Thread`]; the runtime does both and then invokes the implementation.
 //! It is a callback, like [`Drop::drop`].
 //!
+//! The derive lives in `thread_aware`, so a library that wants it depends on that crate.
+//! Only the trait and [`Thread`] cross the public boundary, and both come from here, so the
+//! dependency stays an implementation detail:
+//!
+//! ```ignore
+//! // A build dependency, not part of what this library promises.
+//! use thread_aware::ThreadAware;
+//!
+//! /// A codec whose scratch buffer should follow the memory it is used from.
+//! #[derive(ThreadAware)]
+//! pub struct Encoder {
+//!     scratch: Scratch,
+//!     dictionary: Dictionary,
+//! }
+//!
+//! impl Encoder {
+//!     /// Public API: names only `thread_aware_core` types.
+//!     pub fn describe(&self, running_on: &thread_aware_core::Thread) -> String {
+//!         format!("encoding near {:?}", running_on.numa_node())
+//!     }
+//! }
+//! ```
+//!
+//! The derive writes the forwarding implementation, calling `relocate` on `scratch` and
+//! `dictionary` in turn. Callers of `Encoder` never name `thread_aware`.
+//!
 //! **Runtime authors** construct a [`Thread`] per worker and call
 //! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
 //! where it now runs.
