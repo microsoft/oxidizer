@@ -3,9 +3,9 @@
 
 //! The [`ThreadAware`] trait.
 
-use crate::Place;
+use crate::Thread;
 
-/// A type that adapts when it is moved to a different [`Place`].
+/// A type that adapts when it is moved to a different [`Thread`].
 ///
 /// Implement this trait when part of a type depends on where it runs: memory near a
 /// particular node, a handle to a thread-local driver, a shard index, a cached thread id.
@@ -15,7 +15,7 @@ use crate::Place;
 /// Implement or derive it for any type that may end up inside a value a runtime relocates,
 /// including types that do nothing on relocation, since an empty implementation is what lets
 /// an enclosing type derive the trait. Do not implement it merely because a type is
-/// [`Send`], and never place anything correctness depends on inside
+/// [`Send`], and never put anything correctness depends on inside
 /// [`relocate`](Self::relocate); it may affect performance only.
 ///
 /// # Implementing
@@ -26,12 +26,12 @@ use crate::Place;
 ///    complete implementation, and is what the primitive types do.
 ///
 ///    ```
-///    use thread_aware_core::{Place, ThreadAware};
+///    use thread_aware_core::{Thread, ThreadAware};
 ///
 ///    struct RequestId(u64);
 ///
 ///    impl ThreadAware for RequestId {
-///        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+///        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 ///    }
 ///    ```
 /// 2. **Record the destination.** Store the new thread id, [`NumaNode`](crate::NumaNode) or
@@ -39,7 +39,7 @@ use crate::Place;
 /// 3. **Replace a resource.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
 ///    for a buffer pool, the thread id for a driver handle, [`Owner`](crate::Owner) for
 ///    anything the runtime owns. If it changed, release the old resource and acquire one for
-///    the new place, moving out any real data it holds first.
+///    the new [`Thread`], moving out any real data it holds first.
 /// 4. **Forward to fields.** A type composed of other types calls `relocate` on each field.
 ///    Prefer `#[derive(ThreadAware)]` to writing this by hand.
 ///
@@ -66,25 +66,25 @@ use crate::Place;
 ///   performs no network or disk I/O, no waiting on another worker, and takes no contended
 ///   lock. Release anything that would block here and re-acquire it on first use.
 ///
-/// * **Tolerate repeated calls.** Relocating to the same place, or with `source` equal to
+/// * **Tolerate repeated calls.** Relocating to the same [`Thread`], or with `source` equal to
 ///   `destination`, is harmless, and should also be cheap: compare the relevant ids and
 ///   return early when nothing has changed.
 ///
 /// * **Tolerate no call at all.** The value remains correct either way.
 ///
-/// * **Tolerate an unfamiliar place.** A `destination` may name a thread the value has never
+/// * **Tolerate an unfamiliar [`Thread`].** A `destination` may name an OS thread the value has never
 ///   seen and carry an [`Owner`](crate::Owner) belonging to another runtime, and this must
 ///   remain sound. Release anything the previous runtime owned; state keyed on
 ///   [`NumaNode`](crate::NumaNode) may remain valid, subject to the caveat in
 ///   [what the ids mean](crate#what-the-ids-mean). Performance may suffer afterwards, though
-///   not permanently: once back on a place it can serve, the value re-acquires what it
+///   not permanently: once back on a [`Thread`] it can serve, the value re-acquires what it
 ///   released.
 ///
-/// A [`Place`] may be cloned and retained, but a thread id is meaningful only while that
-/// thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
+/// A [`Thread`] may be cloned and retained, but the thread id it holds is meaningful only
+/// while that thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
 ///
 /// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
-/// the value has actually moved, pass `None` when the previous place is unknown, give each
+/// the value has actually moved, pass `None` when no previous [`Thread`] is known, give each
 /// running runtime its own [`Owner`](crate::Owner), and never rely on the call for
 /// correctness. Nothing enforces any of this.
 ///
@@ -95,7 +95,7 @@ use crate::Place;
 /// is safe, while the `name` field is real data and is left alone.
 ///
 /// ```
-/// use thread_aware_core::{NumaNode, Place, ThreadAware};
+/// use thread_aware_core::{NumaNode, Thread, ThreadAware};
 ///
 /// struct Encoder {
 ///     name: String,
@@ -105,9 +105,9 @@ use crate::Place;
 /// }
 ///
 /// impl ThreadAware for Encoder {
-///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+///     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
 ///         // Only pay for this when the nearest memory actually changed.
-///         if source.map(Place::numa_node) == Some(destination.numa_node()) {
+///         if source.map(Thread::numa_node) == Some(destination.numa_node()) {
 ///             return;
 ///         }
 ///
@@ -124,11 +124,11 @@ use crate::Place;
 /// A type that forwards the call to its fields:
 ///
 /// ```
-/// use thread_aware_core::{Place, ThreadAware};
+/// use thread_aware_core::{Thread, ThreadAware};
 ///
 /// # struct Encoder;
 /// # impl ThreadAware for Encoder {
-/// #     fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+/// #     fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
 /// # }
 /// struct Session {
 ///     id: u64,
@@ -136,14 +136,14 @@ use crate::Place;
 /// }
 ///
 /// impl ThreadAware for Session {
-///     fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+///     fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
 ///         self.id.relocate(source, destination);
 ///         self.encoder.relocate(source, destination);
 ///     }
 /// }
 /// ```
 pub trait ThreadAware: Send {
-    /// Adapts this value to the place it now occupies.
+    /// Adapts this value to the [`Thread`] it now occupies.
     ///
     /// Implementors provide this method but do not normally call it. A runtime calls it
     /// after moving the value.
@@ -151,13 +151,13 @@ pub trait ThreadAware: Send {
     /// `destination` is where the value runs from now on. `source` is where it ran before,
     /// or `None` when that is unknown, which is normal for a first placement or for a value
     /// arriving from outside the runtime. `None` means the implementation can assume nothing
-    /// about the previous place; it does not indicate an error.
+    /// about the previous [`Thread`]; it does not indicate an error.
     ///
     /// This method cannot fail, must not panic, and is safe to call more than once,
     /// including with `source` equal to `destination`. See the
     /// [requirements](Self#requirements) for the rest, and the trait-level
     /// [examples](Self#examples) for implementations.
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place);
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread);
 }
 
 #[cfg(test)]

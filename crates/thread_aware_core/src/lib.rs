@@ -14,18 +14,19 @@
 //! This crate contains the small API shared by thread-aware libraries:
 //!
 //! - [`ThreadAware`] notifies a value that it has moved.
-//! - [`Place`] records where it now runs: which runtime, which thread, and which memory is
+//! - [`Thread`] records where it now runs: which runtime, which OS thread, and which memory is
 //!   closest to it.
 //!
-//! The crate has no dependencies. It also works without `std`: with default features turned
-//! off, [`Place`] loses its thread id and keeps [`Owner`] and [`NumaNode`]. The companion
+//! The crate adds nothing to a consumer's dependency graph. It also works without `std`:
+//! with default features turned off, [`Thread`] loses its thread id component and keeps
+//! [`Owner`] and [`NumaNode`]. The companion
 //! `thread_aware` crate provides the conveniences on top: a `#[derive(ThreadAware)]` macro,
 //! wrappers for foreign types, and a per-core `Arc`.
 //!
 //! # Why this crate is separate
 //!
 //! A crate that names a thread-aware type in its own public API inherits whatever that
-//! type's crate promises. Keeping the trait and [`Place`] here, in something small,
+//! type's crate promises. Keeping the trait and [`Thread`] here, in something small,
 //! dependency-free and slow-moving, lets such crates expose them without taking on the
 //! larger surface. The containers, callbacks, registry and derive support in `thread_aware`
 //! stay free to evolve, and are not meant to appear in a public API. Depend on this crate
@@ -46,10 +47,10 @@
 //!
 //! **Library and application authors** implement [`ThreadAware`], usually through the
 //! `#[derive(ThreadAware)]` macro. They never call [`relocate`](ThreadAware::relocate) and
-//! never construct a [`Place`]; the runtime does both and then invokes the implementation.
+//! never construct a [`Thread`]; the runtime does both and then invokes the implementation.
 //! It is a callback, like [`Drop::drop`].
 //!
-//! **Runtime authors** construct a [`Place`] per worker and call
+//! **Runtime authors** construct a [`Thread`] per worker and call
 //! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
 //! where it now runs.
 //!
@@ -64,7 +65,7 @@
 //! # #[cfg(feature = "std")] {
 //! use std::thread;
 //!
-//! use thread_aware_core::{NumaNode, Owner, Place, ThreadAware};
+//! use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 //!
 //! // What a library author writes.
 //! struct Worker {
@@ -72,8 +73,8 @@
 //! }
 //!
 //! impl ThreadAware for Worker {
-//!     fn relocate(&mut self, _source: Option<&Place>, destination: &Place) {
-//!         self.thread = Some(destination.thread());
+//!     fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+//!         self.thread = Some(destination.id());
 //!     }
 //! }
 //!
@@ -82,12 +83,12 @@
 //! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
 //! let owner = Owner::new(1);
-//! let first = Place::new(owner, here, NumaNode::new(0));
-//! let second = Place::new(owner, there, NumaNode::new(1));
+//! let first = Thread::new(owner, here, NumaNode::new(0));
+//! let second = Thread::new(owner, there, NumaNode::new(1));
 //!
 //! let mut worker = Worker { thread: None };
 //!
-//! worker.relocate(None, &first); // first placement, no previous place
+//! worker.relocate(None, &first); // first placement, no previous `Thread`
 //! worker.relocate(Some(&first), &second); // moved to another thread
 //!
 //! assert_eq!(worker.thread, Some(there));
@@ -122,7 +123,7 @@
 //! it, and if two runtimes number them differently then state shared between them is wrong,
 //! not merely slow. Share across runtimes only when all of them are under common control.
 //!
-//! [`Owner`] identifies the runtime a place belongs to. Thread ids already distinguish
+//! [`Owner`] identifies the runtime that constructed a [`Thread`]. Thread ids already distinguish
 //! threads, so this id answers a different question: it lets a value detect that it has
 //! crossed into a different runtime and release anything the previous one owned.
 //!
@@ -136,11 +137,11 @@
 //!   released when it changes.
 //!
 //! The ids carry no meaning beyond identity. [`Owner`] and [`NumaNode`] need not start at
-//! zero or run consecutively, no count is exposed, and the places in use cannot be
-//! enumerated. Per-place state belongs in a map keyed by the id rather than an array indexed
+//! zero or run consecutively, no count is exposed, and the [`Thread`]s in use cannot be
+//! enumerated. State keyed on any of these ids belongs in a map rather than an array indexed
 //! by it.
 //!
-//! Without `std` there is no thread id: `Place::new` and `Place::thread` are absent and only
+//! Without `std` there is no [`ThreadId`](std::thread::ThreadId): `Thread::new` and `Thread::id` are absent and only
 //! [`Owner`] and [`NumaNode`] remain. A `no_std` library can still implement
 //! [`ThreadAware`] and use whatever it is given; the runtime that drives relocation requires
 //! `std` regardless.
@@ -153,8 +154,8 @@
 //!
 //! # Provided implementations
 //!
-//! Types with nothing tied to a place receive an empty implementation: primitives and their
-//! non-zero variants, the place ids, `Duration`, strings, safe function pointers of up to
+//! Types with nothing tied to a thread receive an empty implementation: primitives and their
+//! non-zero variants, the thread ids, `Duration`, strings, safe function pointers of up to
 //! twelve parameters, and, with the `std` feature, paths.
 //!
 //! Containers forward the call to what they hold: [`Option`], [`Result`], arrays, slices,
@@ -172,7 +173,7 @@
 //! # Crate features
 //!
 //! * The **`std` Cargo feature** *(enabled by default)* provides the thread id half of
-//!   [`Place`] and implementations for standard library types such as `HashMap`, `Path` and
+//!   [`Thread::new`]/[`Thread::id`] and implementations for standard library types such as `HashMap`, `Path` and
 //!   `PathBuf`. Turning it off yields a `no_std` build that requires only `alloc`.
 
 extern crate alloc;
@@ -180,10 +181,10 @@ extern crate alloc;
 extern crate std;
 
 mod impls;
-mod place;
+mod thread;
 mod thread_aware;
 
 #[doc(inline)]
-pub use place::{NumaNode, Owner, Place};
+pub use thread::{NumaNode, Owner, Thread};
 #[doc(inline)]
 pub use thread_aware::ThreadAware;

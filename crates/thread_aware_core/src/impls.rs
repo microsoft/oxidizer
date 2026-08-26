@@ -17,14 +17,14 @@ use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
 
-use crate::{NumaNode, Owner, Place, ThreadAware};
+use crate::{NumaNode, Owner, Thread, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
     ($t:ty) => {
         impl ThreadAware for $t {
             #[inline]
-            fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
     };
 }
@@ -75,7 +75,7 @@ impl_transfer!(Owner);
 impl_transfer!(NumaNode);
 #[cfg(any(test, feature = "std"))]
 impl_transfer!(std::thread::ThreadId);
-impl_transfer!(Place);
+impl_transfer!(Thread);
 
 // We need to implement `ThreadAware` for tuples ranging from 0 to 12 elements
 macro_rules! impl_transfer_tuple {
@@ -85,7 +85,7 @@ macro_rules! impl_transfer_tuple {
                 $head: ThreadAware,
                 $($tail: ThreadAware),*
                 {
-                    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+                    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
                         #[expect(non_snake_case, reason = "Macro-generated code uses uppercase identifiers for tuple elements")]
                         let ($head, $($tail),*) = self;
                         $head.relocate(source, destination);
@@ -99,7 +99,7 @@ macro_rules! impl_transfer_tuple {
 
     () => {
         impl ThreadAware for () {
-            fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
     };
 }
@@ -109,7 +109,7 @@ impl_transfer_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
 macro_rules! impl_transfer_fn {
     ($head:ident, $($tail:ident,)*) => {
         impl<R, $head, $($tail),*> ThreadAware for fn($head, $($tail),*) -> R {
-            fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
 
         // Recursively call the macro for the rest of the function parameters
@@ -117,7 +117,7 @@ macro_rules! impl_transfer_fn {
     };
     () => {
         impl<R> ThreadAware for fn() -> R {
-            fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {}
+            fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {}
         }
     }
 }
@@ -129,7 +129,7 @@ where
     T: ThreadAware,
 {
     #[inline]
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.as_mut_slice().relocate(source, destination);
     }
 }
@@ -138,7 +138,7 @@ impl<T> ThreadAware for [T]
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for value in self.iter_mut() {
             value.relocate(source, destination);
         }
@@ -149,7 +149,7 @@ impl<T> ThreadAware for Option<T>
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         if let Some(value) = self {
             value.relocate(source, destination);
         }
@@ -161,7 +161,7 @@ where
     T: ThreadAware,
     E: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         match self {
             Ok(value) => value.relocate(source, destination),
             Err(err) => err.relocate(source, destination),
@@ -173,7 +173,7 @@ impl<T> ThreadAware for Vec<T>
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for value in self.iter_mut() {
             value.relocate(source, destination);
         }
@@ -184,7 +184,7 @@ impl<T> ThreadAware for VecDeque<T>
 where
     T: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for value in self.iter_mut() {
             value.relocate(source, destination);
         }
@@ -196,7 +196,7 @@ where
     T: ThreadAware + ?Sized,
 {
     #[inline]
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         (**self).relocate(source, destination);
     }
 }
@@ -206,7 +206,7 @@ where
     K: Send,
     V: ThreadAware,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for value in self.values_mut() {
             value.relocate(source, destination);
         }
@@ -218,7 +218,7 @@ where
     T: ThreadAware,
 {
     #[inline]
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.get_mut().relocate(source, destination);
     }
 }
@@ -228,7 +228,7 @@ where
     T: ThreadAware,
 {
     #[inline]
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.get_mut().relocate(source, destination);
     }
 }
@@ -239,7 +239,7 @@ where
     B::Owned: ThreadAware,
 {
     #[inline]
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         self.to_mut().relocate(source, destination);
     }
 }
@@ -251,7 +251,7 @@ where
     V: ThreadAware,
     S: Send,
 {
-    fn relocate(&mut self, source: Option<&Place>, destination: &Place) {
+    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
         for value in self.values_mut() {
             value.relocate(source, destination);
         }
@@ -274,7 +274,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
-    use crate::{NumaNode, Owner, Place, ThreadAware};
+    use crate::{NumaNode, Owner, Thread, ThreadAware};
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
     /// no-op replacements.
@@ -282,17 +282,17 @@ mod tests {
     struct Tracker(bool);
 
     impl ThreadAware for Tracker {
-        fn relocate(&mut self, _source: Option<&Place>, _destination: &Place) {
+        fn relocate(&mut self, _source: Option<&Thread>, _destination: &Thread) {
             self.0 = true;
         }
     }
 
-    fn sample_places() -> [Place; 2] {
+    fn sample_threads() -> [Thread; 2] {
         let owner = Owner::new(0);
         let thread = std::thread::current().id();
         [
-            Place::new(owner, thread, NumaNode::new(0)),
-            Place::new(owner, thread, NumaNode::new(1)),
+            Thread::new(owner, thread, NumaNode::new(0)),
+            Thread::new(owner, thread, NumaNode::new(1)),
         ]
     }
 
@@ -318,9 +318,9 @@ mod tests {
 
     #[test]
     fn test_hashmap() {
-        let places = sample_places();
-        let source = Some(&places[0]);
-        let destination = &places[1];
+        let threads = sample_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
 
         let mut value: HashMap<i32, String> = HashMap::new();
         value.insert(1, "one".to_string());
@@ -338,9 +338,9 @@ mod tests {
 
     #[test]
     fn test_tuples() {
-        let places = sample_places();
-        let source = Some(&places[0]);
-        let destination = &places[1];
+        let threads = sample_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
 
         // Test empty tuple
         let mut empty_tuple = ();
@@ -414,9 +414,9 @@ mod tests {
             x > 0
         }
 
-        let places = sample_places();
-        let source = Some(&places[0]);
-        let destination = &places[1];
+        let threads = sample_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
 
         // Test fn() -> R
         let mut fn_ptr_no_args: fn() -> i32 = no_args;
@@ -455,9 +455,9 @@ mod tests {
 
     #[test]
     fn test_result() {
-        let places = sample_places();
-        let source = Some(&places[0]);
-        let destination = &places[1];
+        let threads = sample_threads();
+        let source = Some(&threads[0]);
+        let destination = &threads[1];
 
         // Test Ok variant
         let mut ok_value: Result<String, i32> = Ok("success".to_string());
@@ -481,73 +481,73 @@ mod tests {
 
     #[test]
     fn option_some_forwards_relocate() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val = Some(Tracker(false));
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert_eq!(val, Some(Tracker(true)));
     }
 
     #[test]
     fn option_none_is_noop() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val: Option<Tracker> = None;
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert_eq!(val, None);
     }
 
     #[test]
     fn result_ok_forwards_relocate() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val: Result<Tracker, Tracker> = Ok(Tracker(false));
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert_eq!(val, Ok(Tracker(true)));
     }
 
     #[test]
     fn result_err_forwards_relocate() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val: Result<Tracker, Tracker> = Err(Tracker(false));
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert_eq!(val, Err(Tracker(true)));
     }
 
     #[test]
     fn vec_forwards_relocate_to_elements() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val = vec![Tracker(false), Tracker(false)];
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert!(val.iter().all(|t| t.0), "all elements must be relocated");
     }
 
     #[test]
     fn array_and_slice_forward_relocate_to_elements() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val = [Tracker(false), Tracker(false)];
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert!(val.iter().all(|t| t.0), "all array elements must be relocated");
 
         let slice: &mut [Tracker] = &mut val;
         for value in slice.iter_mut() {
             value.0 = false;
         }
-        slice.relocate(Some(&places[0]), &places[1]);
+        slice.relocate(Some(&threads[0]), &threads[1]);
         assert!(slice.iter().all(|t| t.0), "all slice elements must be relocated");
     }
 
     #[test]
     fn vec_deque_forwards_relocate_to_elements() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val = VecDeque::from([Tracker(false), Tracker(false)]);
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert!(val.iter().all(|t| t.0), "all elements must be relocated");
     }
 
     #[test]
     fn btree_map_relocates_values_without_mutating_keys() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut map = BTreeMap::new();
         map.insert(Tracker(false), Tracker(false));
-        map.relocate(Some(&places[0]), &places[1]);
+        map.relocate(Some(&threads[0]), &threads[1]);
 
         let (key, value) = map.first_key_value().unwrap();
         assert!(!key.0, "key identity must remain stable");
@@ -556,39 +556,39 @@ mod tests {
 
     #[test]
     fn cells_forward_relocate_to_inner_value() {
-        let places = sample_places();
+        let threads = sample_threads();
 
         let mut cell = Cell::new(Tracker(false));
-        cell.relocate(Some(&places[0]), &places[1]);
+        cell.relocate(Some(&threads[0]), &threads[1]);
         assert!(cell.into_inner().0);
 
         let mut ref_cell = RefCell::new(Tracker(false));
-        ref_cell.relocate(Some(&places[0]), &places[1]);
+        ref_cell.relocate(Some(&threads[0]), &threads[1]);
         assert!(ref_cell.into_inner().0);
     }
 
     #[test]
     fn cow_relocates_both_borrowed_and_owned_values() {
-        let places = sample_places();
+        let threads = sample_threads();
 
         // A borrowed `Cow` is taken to owned so that it can be relocated too, leaving the
         // borrowed original untouched.
         let borrowed = Tracker(false);
         let mut borrowed_cow = Cow::Borrowed(&borrowed);
-        borrowed_cow.relocate(Some(&places[0]), &places[1]);
+        borrowed_cow.relocate(Some(&threads[0]), &threads[1]);
         assert!(borrowed_cow.as_ref().0, "must relocate after taking ownership");
         assert!(!borrowed.0, "the borrowed original must be left alone");
 
         let mut owned_cow: Cow<'_, Tracker> = Cow::Owned(Tracker(false));
-        owned_cow.relocate(Some(&places[0]), &places[1]);
+        owned_cow.relocate(Some(&threads[0]), &threads[1]);
         assert!(owned_cow.as_ref().0);
     }
 
     #[test]
     fn box_forwards_relocate() {
-        let places = sample_places();
+        let threads = sample_threads();
         let mut val: Box<Tracker> = Box::new(Tracker(false));
-        val.relocate(Some(&places[0]), &places[1]);
+        val.relocate(Some(&threads[0]), &threads[1]);
         assert!(val.0, "must forward relocate to the inner value");
     }
 
@@ -597,10 +597,10 @@ mod tests {
         use core::hash::BuildHasherDefault;
         use std::hash::DefaultHasher;
 
-        let places = sample_places();
+        let threads = sample_threads();
         let mut map: HashMap<Tracker, Tracker, BuildHasherDefault<DefaultHasher>> = HashMap::default();
         map.insert(Tracker(false), Tracker(false));
-        map.relocate(Some(&places[0]), &places[1]);
+        map.relocate(Some(&threads[0]), &threads[1]);
 
         let (key, value) = map.iter().next().unwrap();
         assert!(!key.0, "key identity must remain stable");

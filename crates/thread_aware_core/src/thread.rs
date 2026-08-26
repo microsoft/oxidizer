@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The [`Place`] identifier and its component id types.
+//! The [`Thread`] identifier and its component id types.
 //!
-//! A [`Place`] records where something runs: the runtime, the thread, and the memory closest
-//! to that thread. See [what the ids mean](crate#what-the-ids-mean) for the guarantees each
-//! id carries.
+//! A [`Thread`] records where a value runs: which runtime owns it, which thread it is on,
+//! and which memory is closest to that thread. See
+//! [what the ids mean](crate#what-the-ids-mean) for the guarantees each id carries.
 
 #[cfg(any(test, feature = "std"))]
 use std::thread::ThreadId;
 
-/// An identifier for the runtime that owns a [`Place`].
+/// An identifier for the runtime that owns a [`Thread`].
 ///
 /// Runtimes that run at the same time are expected to take distinct owner ids, so that a
 /// value can detect that it has crossed from one into another and release anything the
@@ -97,17 +97,17 @@ impl NumaNode {
 /// part it depends on; [what the ids mean](crate#what-the-ids-mean) describes which to
 /// choose.
 ///
-/// `Place` is cheap to clone but deliberately not `Copy`, and is passed by reference to
+/// `Thread` is cheap to clone but deliberately not `Copy`, and is passed by reference to
 /// [`relocate`](crate::ThreadAware::relocate), so cloning is rarely necessary.
 ///
-/// Two places are equal only if all their ids match. Code concerned only with memory
-/// locality compares [`numa_node`](Self::numa_node) rather than whole places, since threads
-/// that share a NUMA node still have different thread ids.
+/// Two values are equal only if all their ids match. Code concerned only with memory
+/// locality compares [`numa_node`](Self::numa_node) rather than whole `Thread`s, since
+/// threads sharing a NUMA node still have different thread ids.
 ///
 /// # Without `std`
 ///
-/// The thread id is `std::thread::ThreadId`, so `new` and `thread` require the `std`
-/// feature. Without it a `Place` cannot be constructed at all, and only
+/// The thread id is `std::thread::ThreadId`, so `new` and [`id`](Self::id) require the `std`
+/// feature. Without it a `Thread` cannot be constructed at all, and only
 /// [`owner`](Self::owner) and [`numa_node`](Self::numa_node) can be read. That is the
 /// intended split: a `no_std` library implements [`ThreadAware`](crate::ThreadAware) and
 /// reads whatever it is given, while the runtime that drives relocation requires `std`
@@ -120,36 +120,36 @@ impl NumaNode {
 /// # #[cfg(feature = "std")] {
 /// use std::thread;
 ///
-/// use thread_aware_core::{NumaNode, Owner, Place};
+/// use thread_aware_core::{NumaNode, Owner, Thread};
 ///
 /// let here = thread::current().id();
-/// let place = Place::new(Owner::new(1), here, NumaNode::new(1));
+/// let mine = Thread::new(Owner::new(1), here, NumaNode::new(1));
 ///
-/// assert_eq!(place.owner(), Owner::new(1));
-/// assert_eq!(place.thread(), here);
+/// assert_eq!(mine.owner(), Owner::new(1));
+/// assert_eq!(mine.id(), here);
 ///
-/// // The same thread under a different runtime is a different place...
-/// let elsewhere = Place::new(Owner::new(2), here, NumaNode::new(1));
-/// assert_ne!(place, elsewhere);
+/// // The same OS thread under a different runtime is a different `Thread`...
+/// let elsewhere = Thread::new(Owner::new(2), here, NumaNode::new(1));
+/// assert_ne!(mine, elsewhere);
 ///
-/// // ...but the thread and its nearest memory are unchanged.
-/// assert_eq!(place.numa_node(), elsewhere.numa_node());
+/// // ...but the thread id and its nearest memory are unchanged.
+/// assert_eq!(mine.numa_node(), elsewhere.numa_node());
 /// # }
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Place {
+pub struct Thread {
     owner: Owner,
     #[cfg(any(test, feature = "std"))]
-    thread: ThreadId,
+    id: ThreadId,
     numa_node: NumaNode,
 }
 
-impl Place {
-    /// Creates a place from its owner, thread, and NUMA ids.
+impl Thread {
+    /// Creates a `Thread` from an owner, a thread id, and a NUMA node.
     ///
     /// Runtimes call this as they set up their workers. Tests may call it directly to
-    /// construct places without starting a runtime. A thread id is obtained from
+    /// construct values without starting a runtime. A thread id is obtained from
     /// [`thread::current`](std::thread::current).
     ///
     /// Requires the `std` feature.
@@ -159,19 +159,19 @@ impl Place {
     /// ```
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
-    /// let place = Place::new(Owner::new(1), thread::current().id(), NumaNode::new(0));
+    /// let mine = Thread::new(Owner::new(1), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.owner(), Owner::new(1));
+    /// assert_eq!(mine.owner(), Owner::new(1));
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[must_use]
-    pub const fn new(owner: Owner, thread: ThreadId, numa_node: NumaNode) -> Self {
-        Self { owner, thread, numa_node }
+    pub const fn new(owner: Owner, id: ThreadId, numa_node: NumaNode) -> Self {
+        Self { owner, id, numa_node }
     }
 
-    /// Returns the identifier of the runtime that owns this place.
+    /// Returns the identifier of the runtime that owns this [`Thread`].
     ///
     /// Comparing owners detects that a value has moved between runtimes, provided the
     /// runtimes involved took distinct owner ids. Such a move remains sound, but resources
@@ -184,11 +184,11 @@ impl Place {
     /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
-    /// let place = Place::new(Owner::new(7), thread::current().id(), NumaNode::new(0));
+    /// let mine = Thread::new(Owner::new(7), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.owner(), Owner::new(7));
+    /// assert_eq!(mine.owner(), Owner::new(7));
     /// # }
     /// # }
     /// ```
@@ -197,7 +197,7 @@ impl Place {
         self.owner
     }
 
-    /// Returns the identifier of the thread this place refers to.
+    /// Returns the [`ThreadId`](std::thread::ThreadId) this value refers to.
     ///
     /// Distinct live threads have distinct ids, so this partitions state by thread without
     /// keys colliding. Whether that state is contended depends on the storage around it.
@@ -209,20 +209,20 @@ impl Place {
     /// ```
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
     /// let here = thread::current().id();
-    /// let place = Place::new(Owner::new(1), here, NumaNode::new(0));
+    /// let mine = Thread::new(Owner::new(1), here, NumaNode::new(0));
     ///
-    /// assert_eq!(place.thread(), here);
+    /// assert_eq!(mine.id(), here);
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[must_use]
-    pub const fn thread(&self) -> ThreadId {
-        self.thread
+    pub const fn id(&self) -> ThreadId {
+        self.id
     }
 
-    /// Returns the identifier of the memory nearest to this place.
+    /// Returns the identifier of the memory nearest to this [`Thread`].
     ///
     /// This is the id to use when what matters is which memory is nearby rather than which
     /// thread is running, since threads on the same node share that memory cheaply.
@@ -234,11 +234,11 @@ impl Place {
     /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Owner, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Thread};
     ///
-    /// let place = Place::new(Owner::new(1), thread::current().id(), NumaNode::new(3));
+    /// let mine = Thread::new(Owner::new(1), thread::current().id(), NumaNode::new(3));
     ///
-    /// assert_eq!(place.numa_node(), NumaNode::new(3));
+    /// assert_eq!(mine.numa_node(), NumaNode::new(3));
     /// # }
     /// # }
     /// ```
@@ -256,27 +256,27 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    use super::{NumaNode, Owner, Place};
+    use super::{NumaNode, Owner, Thread};
 
     assert_impl_all!(Owner: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(Place: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(Thread: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn exposes_components() {
         let id = thread::current().id();
-        let place = Place::new(Owner::new(1), id, NumaNode::new(2));
+        let mine = Thread::new(Owner::new(1), id, NumaNode::new(2));
 
-        assert_eq!(place.owner(), Owner::new(1));
-        assert_eq!(place.thread(), id);
-        assert_eq!(place.numa_node(), NumaNode::new(2));
+        assert_eq!(mine.owner(), Owner::new(1));
+        assert_eq!(mine.id(), id);
+        assert_eq!(mine.numa_node(), NumaNode::new(2));
     }
 
     #[test]
     fn different_owner_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Owner::new(0), id, NumaNode::new(0));
-        let second = Place::new(Owner::new(1), id, NumaNode::new(0));
+        let first = Thread::new(Owner::new(0), id, NumaNode::new(0));
+        let second = Thread::new(Owner::new(1), id, NumaNode::new(0));
 
         assert_ne!(first, second);
     }
@@ -284,8 +284,8 @@ mod tests {
     #[test]
     fn different_numa_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Owner::new(0), id, NumaNode::new(0));
-        let second = Place::new(Owner::new(0), id, NumaNode::new(1));
+        let first = Thread::new(Owner::new(0), id, NumaNode::new(0));
+        let second = Thread::new(Owner::new(0), id, NumaNode::new(1));
 
         assert_ne!(first, second);
     }
@@ -294,8 +294,8 @@ mod tests {
     fn different_thread_compares_unequal() {
         let owner = Owner::new(0);
         let numa_node = NumaNode::new(0);
-        let here = Place::new(owner, thread::current().id(), numa_node);
-        let there = thread::spawn(move || Place::new(owner, thread::current().id(), numa_node))
+        let here = Thread::new(owner, thread::current().id(), numa_node);
+        let there = thread::spawn(move || Thread::new(owner, thread::current().id(), numa_node))
             .join()
             .unwrap();
 
@@ -304,9 +304,9 @@ mod tests {
 
     #[test]
     fn clone_preserves_components() {
-        let place = Place::new(Owner::new(4), thread::current().id(), NumaNode::new(9));
-        let cloned = place.clone();
+        let mine = Thread::new(Owner::new(4), thread::current().id(), NumaNode::new(9));
+        let cloned = mine.clone();
 
-        assert_eq!(cloned, place);
+        assert_eq!(cloned, mine);
     }
 }

@@ -4,13 +4,14 @@
 
 `thread_aware_core` is the **stable vocabulary** for values that adapt when a
 runtime moves them between threads. It exists to be depended on permanently:
-crates are meant to name `ThreadAware` and `Place` in their own public
+crates are meant to name `ThreadAware` and `Thread` in their own public
 signatures, and this crate's job is to make sure that never becomes a liability.
 
-It exposes one trait, one identifier, and nothing else:
+It exposes one trait, one identifier and its two component ids, and nothing
+else:
 
 - `ThreadAware` — the callback a value implements to be told it has moved.
-- `Place` — where a value runs, built from `Owner`, a `std::thread::ThreadId`,
+- `Thread` — where a value runs, built from `Owner`, a `std::thread::ThreadId`,
   and `NumaNode`.
 
 Everything that makes relocation *convenient* — registries, containers,
@@ -60,7 +61,7 @@ participate at all, even with an empty `relocate`.
 ## Principles
 
 **Performance, not correctness.** `relocate` is advisory. A value must be fully
-correct if it is never called, called twice, or called with a `Place` it has
+correct if it is never called, called twice, or called with a `Thread` it has
 never seen. This is the most important property in the design: it is what lets a
 runtime call `relocate` opportunistically, lets an implementation give up and
 stay slow rather than fail, and lets the method be infallible. A trait whose
@@ -75,9 +76,9 @@ qualify; it belongs in `thread_aware`, where it can still change.
 **Borrow from `std` rather than invent.** The thread coordinate is
 `std::thread::ThreadId`, not an id of our own: a bespoke type would be one more
 thing to convert to and from, and one more thing to keep stable forever. The
-cost is that `Place::new` and `Place::thread` need the `std` feature. With
+cost is that `Thread::new` and `Thread::id` need the `std` feature. With
 default features off, a `no_std` crate can still implement `ThreadAware` and
-read `Owner` and `NumaNode` from the places it is handed; it just cannot
+read `Owner` and `NumaNode` from the `Thread` values it is handed; it just cannot
 construct one, which only runtimes need to do.
 
 **No dependencies reach a consumer.** The manifest's only entry is a test-only
@@ -92,8 +93,8 @@ and this crate has neither.
 ## Evolving without breaking changes
 
 The crate has to be able to describe hardware it does not model yet. Machines
-already subdivide a NUMA node into cache domains, and a `Place` may one day need
-to say that a thread is pinned to memory but not to a processor. Both mean
+already subdivide a NUMA node into cache domains, and a `Thread` may one day need
+to describe a value pinned to memory but not to a processor. Both mean
 adding a coordinate, and the design makes that additive.
 
 **Ids are opaque, and take no `From<integer>`.** `Owner` and `NumaNode` expose
@@ -115,14 +116,14 @@ The *stored* width remains private and may grow silently — it is not part of t
 promise, and growing it is what would reserve values no existing constructor can
 reach.
 
-**`Place` fields are private.** Coordinates are read through accessors, so the
+**`Thread` fields are private.** Coordinates are read through accessors, so the
 struct can gain a field without touching any existing reader, and the derived
 `Clone`, `Debug`, `PartialEq`, `Eq` and `Hash` pick it up automatically. No
 `#[non_exhaustive]` is needed: with no public fields there is nothing to
 destructure or update.
 
 What a new field *can* silently remove is an auto trait — a coordinate that is
-not `Send`, `Sync` or unwind-safe strips that property from `Place` without any
+not `Send`, `Sync` or unwind-safe strips that property from `Thread` without any
 signature changing. Static assertions pin the auto traits the public types are
 expected to have, so this fails the build rather than reaching a release.
 
@@ -140,9 +141,9 @@ fallible, so that the reserved value can never be minted. A coordinate type
 introduced later can simply reserve one from the start.
 
 Behaviour is preserved as well as compilation. Every pre-existing construction
-path fills the new coordinate identically, so places built the old way remain
-equal to exactly the places they were equal to before; the new coordinate can
-only tell places apart once someone deliberately sets it.
+path fills the new coordinate identically, so values built the old way remain
+equal to exactly the values they were equal to before; the new coordinate can
+only tell them apart once someone deliberately sets it.
 
 Adding a coordinate is therefore three additive steps:
 

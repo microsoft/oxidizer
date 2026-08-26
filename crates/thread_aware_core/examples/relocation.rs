@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Creating places and relocating a value between them.
+//! Creating `Thread` values and relocating a value between them.
 //!
 //! Run with `cargo run -p thread_aware_core --example relocation`.
 
@@ -10,7 +10,7 @@
 
 use std::thread;
 
-use thread_aware_core::{NumaNode, Owner, Place, ThreadAware};
+use thread_aware_core::{NumaNode, Owner, Thread, ThreadAware};
 
 /// A sample value that remembers which thread it currently runs on.
 struct Worker {
@@ -20,28 +20,28 @@ struct Worker {
 impl ThreadAware for Worker {
     // `relocate` is limited to bounded local work, so this only records the destination.
     // Reporting happens in `main`, outside the callback.
-    fn relocate(&mut self, _source: Option<&Place>, destination: &Place) {
-        self.thread = Some(destination.thread());
+    fn relocate(&mut self, _source: Option<&Thread>, destination: &Thread) {
+        self.thread = Some(destination.id());
     }
 }
 
 fn main() {
-    // Manually create two places, one per thread, on the same NUMA node.
+    // Manually build two `Thread` values, one per OS thread, on the same NUMA node.
     let here = thread::current().id();
     let there = thread::spawn(|| thread::current().id())
         .join()
         .expect("the spawned thread cannot panic");
 
     let owner = Owner::new(1);
-    let first = Place::new(owner, here, NumaNode::new(0));
-    let second = Place::new(owner, there, NumaNode::new(0));
+    let first = Thread::new(owner, here, NumaNode::new(0));
+    let second = Thread::new(owner, there, NumaNode::new(0));
 
     // Relocate a sample object between them.
     let mut worker = Worker { thread: None };
 
-    worker.relocate(None, &first); // initial placement; the previous place is unknown
+    worker.relocate(None, &first); // initial placement; no previous `Thread`
     println!("placed on thread {:?}", worker.thread);
 
-    worker.relocate(Some(&first), &second); // migrate from the first place to the second
+    worker.relocate(Some(&first), &second); // migrate from the first `Thread` to the second
     println!("relocated to thread {:?}", worker.thread);
 }

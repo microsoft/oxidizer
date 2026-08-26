@@ -13,17 +13,18 @@ plan is to adopt the core crate later; until then the two evolve separately.
 `thread_aware_core` 1.0 contains the API that downstream crates may expose:
 
 - `ThreadAware`
-- `Place`, and its component ids `Owner` and `NumaNode`
+- `Thread`, and its component ids `Owner` and `NumaNode`
 
-A `Place` says where a value runs: which runtime owns it (`Owner`), which
-thread it is on, and which memory is closest to that thread (`NumaNode`). The
+A `Thread` says where a value runs: which runtime owns it (`Owner`), which
+OS thread it is on, and which memory is closest to that thread (`NumaNode`). The
 thread component is `std::thread::ThreadId` rather than an id of our own, so it
 is not re-exported; callers take it from `std`.
 
-The crate has no dependencies. Its `std` feature is enabled by default and adds
+Nothing the crate depends on reaches a consumer build; its only manifest entry
+is a test-only dev-dependency. The `std` feature is enabled by default and adds
 implementations for standard-library types such as `HashMap`, `Path` and
 `PathBuf`. Turn it off for `no_std`, where the crate needs only `alloc`; a
-`Place` then loses its thread id and cannot be constructed, leaving `Owner` and
+`Thread` then loses its thread id component and cannot be constructed, leaving `Owner` and
 `NumaNode` readable so that a `no_std` library can still implement
 `ThreadAware`. Implementations for types from external crates are intentionally
 outside the stable boundary.
@@ -34,5 +35,5 @@ Implementation helpers, containers, callbacks, registry APIs, derive support,
 and integration helpers remain in the pre-1.0 `thread_aware` crate. Stable
 downstream crates should not expose those types in their public APIs.
 
-This split allows the trait contract and its required place identifier to remain
+This split allows the trait contract and its required `Thread` type to remain
 stable without prematurely stabilizing the larger utility surface.
