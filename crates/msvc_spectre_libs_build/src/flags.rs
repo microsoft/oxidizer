@@ -30,9 +30,12 @@
 
 /// Environment variable through which Cargo reports the final `rustc` flags.
 ///
-/// Cargo sets it for every build script. Entries are separated by the ASCII
-/// unit separator control character, which cannot occur inside a flag, so the
-/// encoding is unambiguous; see [`codegen_values`] for the accepted spellings.
+/// Present for a build script run by any Cargo that reports the flags at all;
+/// a version that does not set it leaves nothing to verify, which the policy
+/// treats as "no requirement to check" rather than as a failure. Entries are
+/// separated by the ASCII unit separator control character, which cannot occur
+/// inside a flag, so the encoding is unambiguous; see [`codegen_values`] for
+/// the accepted spellings.
 pub const CARGO_ENCODED_RUSTFLAGS_VAR: &str = "CARGO_ENCODED_RUSTFLAGS";
 
 /// Separator Cargo uses inside [`CARGO_ENCODED_RUSTFLAGS_VAR`].

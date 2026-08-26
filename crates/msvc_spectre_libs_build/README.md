@@ -54,8 +54,10 @@ use msvc_spectre_libs_build::plan::{BuildEnvironment, Plan, plan};
 use msvc_spectre_libs_build::toolchain::SystemToolchain;
 
 fn main() {
-    let plan = BuildEnvironment::from_env()
-        .map_or_else(Plan::reporting, |environment| plan(&environment, &SystemToolchain));
+    let plan = BuildEnvironment::from_env().map_or_else(
+        |error| Plan::reporting(&error),
+        |environment| plan(&environment, &SystemToolchain),
+    );
 
     for name in &plan.rerun_if_env_changed {
         println!("cargo:rerun-if-env-changed={name}");
@@ -113,7 +115,7 @@ assert_eq!(SpectreArch::from_target_arch("riscv64"), None);
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/msvc_spectre_libs_build">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbueL9_R8nz0QbuFXNjxTKbEAby7NqMk6evg8bYbhIYWHxetBhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQboOwqm034UP8bovynaKly4t4ba3_wsbB1zsAbKL0idw07fdZhZIGCd21zdmNfc3BlY3RyZV9saWJzX2J1aWxkZTAuMS4w
  [__link0]: https://docs.rs/msvc_spectre_libs
  [__link1]: https://docs.rs/msvc_spectre_libs
  [__link10]: https://docs.rs/msvc_spectre_libs_build/0.1.0/msvc_spectre_libs_build/flags/index.html

@@ -163,14 +163,19 @@ fn required_cargo_var(name: &str) -> Result<String, AppError> {
 #[non_exhaustive]
 pub struct Plan {
     /// Variable names to emit as `cargo:rerun-if-env-changed=`.
+    ///
+    /// Guaranteed to fit in one directive each.
     pub rerun_if_env_changed: Vec<String>,
 
     /// Directories to emit as `cargo:rustc-link-search=native=`.
     ///
-    /// Guaranteed to be valid UTF-8 and to have existed at planning time.
+    /// Guaranteed to be valid UTF-8, to fit in one directive each, and to have
+    /// existed at planning time.
     pub link_search: Vec<String>,
 
     /// Problems to report, as `cargo:warning=` or as a hard failure.
+    ///
+    /// Guaranteed to render on a single line, so each fits in one directive.
     pub diagnostics: Vec<AppError>,
 }
 
@@ -180,9 +185,9 @@ impl Plan {
     /// Used when the environment could not even be captured, so no decision
     /// was reachable.
     #[must_use]
-    pub fn reporting(error: AppError) -> Self {
+    pub fn reporting(error: &AppError) -> Self {
         Self {
-            diagnostics: vec![error],
+            diagnostics: vec![single_line(error)],
             ..Self::default()
         }
     }
@@ -221,12 +226,23 @@ pub fn plan(environment: &BuildEnvironment, toolchain: &dyn Toolchain) -> Plan {
         return plan;
     }
 
+    // The triple reaches directive text through the variable names derived from
+    // it, so one that could not be written out is refused before any name is
+    // built from it.
+    if !is_single_line(&environment.target) {
+        plan.diagnostics.push(single_line(&app_err!(
+            "the target triple `{}` reported by Cargo contains a line break, so it cannot be used to build environment variable names",
+            environment.target
+        )));
+        return plan;
+    }
+
     if let Err(error) = plan_link_search(environment, toolchain, &mut plan) {
-        plan.diagnostics.push(error);
+        plan.diagnostics.push(single_line(&error));
     }
 
     if let Err(error) = plan_required_link_args(environment, &mut plan) {
-        plan.diagnostics.push(error);
+        plan.diagnostics.push(single_line(&error));
     }
 
     plan
@@ -394,10 +410,11 @@ fn plan_required_link_args(environment: &BuildEnvironment, plan: &mut Plan) -> R
 
 /// Records a link-search directory when it exists and can be written out.
 ///
-/// Returns whether it was recorded. A `cargo:` directive is a UTF-8 text line,
-/// so a path that is not valid Unicode is rejected rather than converted with
-/// replacement characters, which would point the linker at a directory other
-/// than the one that was checked.
+/// Returns whether it was recorded. A `cargo:` directive is a single line of
+/// UTF-8 text, so a path that is not valid Unicode is rejected rather than
+/// converted with replacement characters, which would point the linker at a
+/// directory other than the one that was checked, and a path carrying a line
+/// break is rejected rather than truncated.
 ///
 /// An existing directory is always recorded, even if the same directory is
 /// already reachable through `LIB`: an explicit `-L` search path is consulted
@@ -409,12 +426,31 @@ fn push_link_search(plan: &mut Plan, toolchain: &dyn Toolchain, dir: &Path) -> b
         return false;
     };
 
+    if !is_single_line(text) {
+        return false;
+    }
+
     if !toolchain.is_dir(dir) {
         return false;
     }
 
     plan.link_search.push(text.to_owned());
     true
+}
+
+/// Returns whether `text` fits in one `cargo:` directive.
+///
+/// Cargo reads a build script's output line by line, so a value carrying a
+/// line break ends its directive early and leaves the remainder to be read as
+/// another directive. Environment variables and filesystem paths can both
+/// carry one, so no value derived from them is written out unchecked.
+fn is_single_line(text: &str) -> bool {
+    !text.contains(['\n', '\r'])
+}
+
+/// Renders `error` so that it fits in one `cargo:warning=` directive.
+fn single_line(error: &AppError) -> AppError {
+    app_err!("{}", error.to_string().replace(['\n', '\r'], " "))
 }
 
 /// Derives the MSVC toolchain root from the path of a compiler executable.
@@ -437,7 +473,7 @@ mod tests {
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
 
-    use super::{BuildEnvironment, EnvValue, GENERIC_LIB_DIR_VAR, Plan, VC_TOOLS_INSTALL_DIR_VAR, app_err, plan};
+    use super::{BuildEnvironment, EnvValue, GENERIC_LIB_DIR_VAR, Plan, VC_TOOLS_INSTALL_DIR_VAR, app_err, is_single_line, plan};
     use crate::resolve::{SpectreArch, spectre_lib_dir};
     use crate::toolchain::Toolchain;
 
@@ -514,6 +550,22 @@ mod tests {
             reported.iter().any(|message| message.contains(expected)),
             "expected a diagnostic containing {expected:?}, got {reported:?}"
         );
+    }
+
+    /// Asserts the invariant every field of [`Plan`] documents: nothing in it
+    /// can terminate the `cargo:` directive that carries it.
+    fn assert_single_line(plan: &Plan) {
+        for name in &plan.rerun_if_env_changed {
+            assert!(is_single_line(name), "rerun registration {name:?} spans more than one line");
+        }
+
+        for dir in &plan.link_search {
+            assert!(is_single_line(dir), "link search {dir:?} spans more than one line");
+        }
+
+        for message in diagnostics(plan) {
+            assert!(is_single_line(&message), "diagnostic {message:?} spans more than one line");
+        }
     }
 
     #[test]
@@ -732,6 +784,43 @@ mod tests {
         assert_reports(&plan, "no Spectre-mitigated libraries were found at");
     }
 
+    /// The override directory exists, so only the line break can account for it
+    /// being refused; the resulting diagnostic quotes it and still has to fit in
+    /// one directive.
+    #[test]
+    fn rejects_a_directory_whose_path_contains_a_line_break() {
+        let injected = "C:/spectre\ncargo:rustc-link-arg=/DEBUG";
+        let environment = BuildEnvironment {
+            target_lib_dir: EnvValue::Present(injected.to_owned()),
+            ..windows_env()
+        };
+        let toolchain = FakeToolchain::with_dirs(&[injected.to_owned()]);
+
+        let plan = plan(&environment, &toolchain);
+
+        assert!(plan.link_search.is_empty(), "expected no link search, got {:?}", plan.link_search);
+        assert_reports(&plan, "does not exist");
+        assert_single_line(&plan);
+    }
+
+    /// The triple is only ever used to build variable names, so a break in it
+    /// would reach a directive through those names rather than through a path.
+    #[test]
+    fn refuses_a_target_triple_that_contains_a_line_break() {
+        let environment = BuildEnvironment {
+            target: "x86_64-pc-windows-msvc\ncargo:rustc-link-arg=/DEBUG".to_owned(),
+            vc_tools_install_dir: EnvValue::Present(VC_TOOLS.to_owned()),
+            ..windows_env()
+        };
+        let toolchain = FakeToolchain::with_dirs(&[spectre_dir(VC_TOOLS)]);
+
+        let plan = plan(&environment, &toolchain);
+
+        assert!(plan.link_search.is_empty(), "expected no link search, got {:?}", plan.link_search);
+        assert_reports(&plan, "contains a line break");
+        assert_single_line(&plan);
+    }
+
     #[test]
     fn verifies_nothing_when_no_requirement_is_configured() {
         let environment = BuildEnvironment {
@@ -871,7 +960,7 @@ mod tests {
 
     #[test]
     fn reports_an_environment_that_could_not_be_captured() {
-        let plan = Plan::reporting(app_err!("TARGET is not set"));
+        let plan = Plan::reporting(&app_err!("TARGET is not set"));
 
         assert!(plan.failed());
         assert!(plan.link_search.is_empty());

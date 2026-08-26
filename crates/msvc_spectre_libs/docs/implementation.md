@@ -124,6 +124,17 @@ source, rejecting any directory it cannot render as UTF-8. Keeping the third
 state in the captured data, rather than resolving it during the read, is what
 lets the planner decide it and the tests exercise it.
 
+A `cargo:` directive is also a *single* line, and Cargo reads a build script's
+output line by line: a value carrying a line break would end its directive early
+and leave the remainder to be read as another directive -- a
+`cargo:rustc-link-arg` smuggled in through a directory name, say. Every string
+the plan carries is therefore checked before it is written out.
+`push_link_search` refuses a directory that spans more than one line, the
+planner refuses a target triple that does (the triple is what the suffixed
+variable names are built from), and each diagnostic is flattened to one line as
+it is recorded. The `Plan` fields document these guarantees, and a test asserts
+them over a whole plan rather than one value at a time.
+
 **`VCToolsInstallDir`.** A Visual Studio developer command prompt, and anything
 that has run `vcvars`, exports this variable pointing at the MSVC build tools
 root -- exactly the directory the Spectre libraries sit beneath. Using it avoids
