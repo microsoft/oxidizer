@@ -4,6 +4,7 @@
 //! Stampede protection prevents multiple concurrent requests for the same key
 //! from all hitting the backend. Only one request fetches; others wait and share the result.
 
+use std::future::ready;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -23,16 +24,16 @@ impl CacheTier<String, String> for SlowBackend {
         Ok(Some(CacheEntry::new(format!("value_for_{key}"))))
     }
 
-    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<InsertOutcome, Error> {
-        Ok(InsertOutcome::Accepted)
+    fn insert(&self, _: String, _: CacheEntry<String>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
+        ready(Ok(InsertOutcome::Accepted))
     }
 
-    async fn invalidate(&self, _: &String) -> Result<(), Error> {
-        Ok(())
+    fn invalidate(&self, _: &String) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 
-    async fn clear(&self) -> Result<(), Error> {
-        Ok(())
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 }
 

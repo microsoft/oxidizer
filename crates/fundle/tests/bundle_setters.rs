@@ -7,6 +7,7 @@
     clippy::redundant_type_annotations,
     clippy::items_after_statements,
     clippy::unused_async,
+    clippy::unused_async_trait_impl,
     clippy::unnecessary_wraps,
     missing_docs,
     reason = "Unit tests"

@@ -8,6 +8,7 @@
 //! - Attach recovery information with `with_recovery()`
 //! - Extract and handle typed errors from cache operations
 
+use std::future::ready;
 use std::io::{self, ErrorKind};
 
 use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};
@@ -19,21 +20,23 @@ use tick::Clock;
 struct FailingCache;
 
 impl CacheTier<String, i32> for FailingCache {
-    async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+    fn get(&self, _key: &String) -> impl Future<Output = Result<Option<CacheEntry<i32>>, Error>> + Send {
         // Wrap the IO error and attach recovery information
-        Err(Error::from_source(io::Error::new(ErrorKind::TimedOut, "connection timed out")).with_recovery(RecoveryInfo::retry()))
+        ready(Err(
+            Error::from_source(io::Error::new(ErrorKind::TimedOut, "connection timed out")).with_recovery(RecoveryInfo::retry())
+        ))
     }
 
-    async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
-        Ok(InsertOutcome::Accepted)
+    fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
+        ready(Ok(InsertOutcome::Accepted))
     }
 
-    async fn invalidate(&self, _key: &String) -> Result<(), Error> {
-        Ok(())
+    fn invalidate(&self, _key: &String) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 
-    async fn clear(&self) -> Result<(), Error> {
-        Ok(())
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 }
 

@@ -209,8 +209,11 @@ fn make_log_processor_with(redaction_engine: data_privacy::RedactionEngine) -> (
 struct NoOpLogExporter;
 
 impl opentelemetry_sdk::logs::LogExporter for NoOpLogExporter {
-    async fn export(&self, _batch: opentelemetry_sdk::logs::LogBatch<'_>) -> opentelemetry_sdk::error::OTelSdkResult {
-        Ok(())
+    fn export(
+        &self,
+        _batch: opentelemetry_sdk::logs::LogBatch<'_>,
+    ) -> impl Future<Output = opentelemetry_sdk::error::OTelSdkResult> + Send {
+        std::future::ready(Ok(()))
     }
 
     fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> opentelemetry_sdk::error::OTelSdkResult {

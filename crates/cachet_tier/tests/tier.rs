@@ -4,6 +4,7 @@
 //! Integration tests for `CacheTier` trait default implementations.
 
 use std::collections::HashMap;
+use std::future::ready;
 use std::sync::Mutex;
 
 #[cfg(feature = "test-util")]
@@ -28,23 +29,23 @@ where
     K: Clone + Eq + std::hash::Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        Ok(self.data.lock().expect("lock poisoned").get(key).cloned())
+    fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send {
+        ready(Ok(self.data.lock().expect("lock poisoned").get(key).cloned()))
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
         self.data.lock().expect("lock poisoned").insert(key, entry);
-        Ok(InsertOutcome::Accepted)
+        ready(Ok(InsertOutcome::Accepted))
     }
 
-    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+    fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send {
         self.data.lock().expect("lock poisoned").remove(key);
-        Ok(())
+        ready(Ok(()))
     }
 
-    async fn clear(&self) -> Result<(), Error> {
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
         self.data.lock().expect("lock poisoned").clear();
-        Ok(())
+        ready(Ok(()))
     }
 }
 

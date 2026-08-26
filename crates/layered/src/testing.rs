@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::future::ready;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -42,7 +43,7 @@ impl TowerService<String> for MockService {
 impl Service<String> for MockService {
     type Out = Result<String, String>;
 
-    async fn execute(&self, _input: String) -> Self::Out {
-        self.call_response.clone()
+    fn execute(&self, _input: String) -> impl Future<Output = Self::Out> + Send {
+        ready(self.call_response.clone())
     }
 }

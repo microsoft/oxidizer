@@ -7,6 +7,7 @@
 //! you want to add middleware (retry, timeout) to the underlying service.
 
 use std::collections::HashMap;
+use std::future::ready;
 
 use cachet::{Cache, CacheEntry, CacheOperation, CacheResponse, GetRequest, InsertOutcome, InsertRequest, InvalidateRequest};
 use layered::Service;
@@ -21,8 +22,8 @@ struct RemoteCache {
 impl Service<CacheOperation<String, String>> for RemoteCache {
     type Out = Result<CacheResponse<String>, cachet::Error>;
 
-    async fn execute(&self, input: CacheOperation<String, String>) -> Self::Out {
-        match input {
+    fn execute(&self, input: CacheOperation<String, String>) -> impl Future<Output = Self::Out> + Send {
+        ready(match input {
             CacheOperation::Get(GetRequest { key }) => Ok(CacheResponse::Get(self.data.get(&key).cloned())),
             CacheOperation::Insert(InsertRequest { key, entry }) => {
                 // Note: simplified - real impl would mutate
@@ -34,7 +35,7 @@ impl Service<CacheOperation<String, String>> for RemoteCache {
                 Ok(CacheResponse::Invalidate)
             }
             CacheOperation::Clear => Ok(CacheResponse::Clear),
-        }
+        })
     }
 }
 

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::convert::Infallible;
+use std::future::ready;
 
 use bytesbuf::mem::testing::TransparentMemory;
 use bytesbuf::mem::{HasMemory, Memory, MemoryShared, OpaqueMemory};
@@ -42,6 +43,7 @@ impl Null {
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn read_at_most_into(&mut self, _len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
@@ -57,6 +59,7 @@ impl Null {
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
@@ -72,6 +75,7 @@ impl Null {
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn read_any(&mut self) -> Result<BytesBuf, Infallible> {
@@ -87,6 +91,7 @@ impl Null {
     #[expect(
         clippy::needless_pass_by_ref_mut,
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "API compatibility between trait and inherent fn"
     )]
     pub async fn write(&mut self, _sequence: BytesView) -> Result<(), Infallible> {
@@ -153,8 +158,8 @@ impl Write for Null {
     type Error = Infallible;
 
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    async fn write(&mut self, _sequence: BytesView) -> Result<(), Infallible> {
-        Ok(())
+    fn write(&mut self, _sequence: BytesView) -> impl Future<Output = Result<(), Infallible>> {
+        ready(Ok(()))
     }
 }
 

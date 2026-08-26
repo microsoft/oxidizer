@@ -5,6 +5,7 @@
 //! Example: only promote "not found" results to avoid repeated backend queries.
 
 use std::fmt;
+use std::future::ready;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,25 +32,25 @@ impl fmt::Display for UserData {
 struct Database(Mutex<u32>);
 
 impl CacheTier<String, UserData> for Arc<Database> {
-    async fn get(&self, key: &String) -> Result<Option<CacheEntry<UserData>>, Error> {
+    fn get(&self, key: &String) -> impl Future<Output = Result<Option<CacheEntry<UserData>>, Error>> + Send {
         *self.0.lock() += 1;
         let data = match key.as_str() {
             "user:1" => UserData::Found("Alice".to_string()),
             _ => UserData::NotFound,
         };
-        Ok(Some(CacheEntry::new(data)))
+        ready(Ok(Some(CacheEntry::new(data))))
     }
 
-    async fn insert(&self, _: String, _: CacheEntry<UserData>) -> Result<InsertOutcome, Error> {
-        Ok(InsertOutcome::Accepted)
+    fn insert(&self, _: String, _: CacheEntry<UserData>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
+        ready(Ok(InsertOutcome::Accepted))
     }
 
-    async fn invalidate(&self, _: &String) -> Result<(), Error> {
-        Ok(())
+    fn invalidate(&self, _: &String) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 
-    async fn clear(&self) -> Result<(), Error> {
-        Ok(())
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
+        ready(Ok(()))
     }
 }
 
