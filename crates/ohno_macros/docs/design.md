@@ -1,8 +1,12 @@
 # Design
 
-How `ohno_macros` is built. `requirements.md` says what the crate has to
-deliver; this document says how the crate is arranged to deliver it. Every
-decision below is argued from a requirement, and the requirement is named.
+How the `ohno` macros are built. `requirements.md` says what they have to
+deliver; this document says how they are arranged to deliver it. Every decision
+below is argued from a requirement, and the requirement is named.
+
+The implementation spans two packages — `ohno_macros`, the proc-macro crate the
+compiler sees, and `ohno_macros_impl`, the ordinary library behind it. The Two
+crates section explains the split; until then, read "the crate" as both.
 
 ## The pipeline
 
@@ -74,37 +78,88 @@ The counter-argument — one more type to keep in step — is real, and is paid 
 by `Ast` being consumed by exactly one function (`validate`) in exactly one
 module.
 
-## Modules
+## Two crates
+
+The implementation is split across two packages, and the split is forced by what
+a proc-macro crate is allowed to be.
 
 ```text
-src/
-  lib.rs              the three proc-macro entry points, nothing else
-  diagnostics.rs      the `Errors` accumulator and its `syn::Error` combining
-  message.rs          `Message`: a lowered `format!` call, built by two macros
-  paths.rs            the `::ohno::` paths generated code refers to
-  marker.rs           the reserved doc marker, its nonce, and its recognizer
+crates/
+  ohno_macros/          the proc-macro crate; `proc-macro = true`
+    src/lib.rs          the three entry points, and nothing else
+    docs/               this document and `requirements.md`
 
-  derive_error/
-    mod.rs            parse -> validate -> generate, and nothing more
-    ast.rs            `Ast`: the input with the crate's attributes decoded
-    parse.rs          `DeriveInput` -> `Ast`
-    model.rs          `Model`, `Shape`, `Conversion`, and their constructors
-    validate.rs       `Ast` -> `Model`; every rule in R1
-    display/
-      mod.rs          `#[display(...)]` -> `Message`
-      template.rs     splitting a template into literal and placeholder segments
-      argument.rs     rooting a positional argument in a field of `self`
-    generate/
-      mod.rs          `Model` -> `TokenStream`, one call per item in R1.3
-      traits.rs       `Display`, `Error`, `Enrichable`, `ErrorExt`, `Debug`
-      constructors.rs `new` and `caused_by`
-      conversions.rs  `From<T>` and `From<Infallible>`
-
-  error_attr/
-    mod.rs            reject, inject the core, re-emit under the derive
-  enrich_err/
-    mod.rs            message, signature, and the body rewrite
+  ohno_macros_impl/     an ordinary library; everything below lives here
+    src/...             the modules listed in the next section
+    tests/public_api.rs the expansion snapshots (see Testing)
 ```
+
+A crate with `proc-macro = true` can export nothing but macros, and its own tests
+cannot call them: a `proc_macro::TokenStream` only exists inside a real
+expansion, so the bridge a unit test would need is absent. Both consequences bite
+here. The logic cannot be reached from a test in the crate that holds it, and it
+cannot be reached from anywhere else either.
+
+Moving the logic into an ordinary library removes both. `ohno_macros_impl`
+exposes the three expansions as ordinary functions over
+`proc_macro2::TokenStream`, which any test can call, and `ohno_macros` shrinks to
+three shims that convert the token-stream type and delegate:
+
+```rust
+#[proc_macro_derive(Error, attributes(error, display, no_constructors, no_debug, from))]
+pub fn derive_error(input: TokenStream) -> TokenStream {
+    ohno_macros_impl::derive_error(input.into()).into()
+}
+```
+
+Nothing else belongs in the shim. Each entry point converts, delegates, and
+converts back, so the compiler-facing crate holds no branch a test cannot reach.
+
+`ohno_macros_impl` is not a public API despite being an ordinary library. Its
+rustdoc says so, and `ohno` depends on `ohno_macros` rather than on it. Only its
+three expansion functions are `pub`; every module below them is private.
+
+These documents stay under `ohno_macros/docs/` because they describe the macros
+`ohno` re-exports, which is the surface a reader arrives at. Read "the crate"
+below as "the two crates together" wherever the distinction does not matter.
+
+## Modules
+
+Everything in this section lives in `ohno_macros_impl/src/`.
+
+```text
+lib.rs              `derive_error`, `enrich_err`, `error`: parse the input item
+                    and dispatch; the crate's whole public surface
+diagnostics.rs      the `Errors` accumulator and its `syn::Error` combining
+message.rs          `Message`: a lowered `format!` call, built by two macros
+paths.rs            the `::ohno::` paths generated code refers to
+marker.rs           the reserved doc marker, its nonce, and its recognizer
+
+derive_error/
+  mod.rs            parse -> validate -> generate, and nothing more
+  ast.rs            `Ast`: the input with the crate's attributes decoded
+  parse.rs          `DeriveInput` -> `Ast`
+  model.rs          `Model`, `Shape`, `Conversion`, and their constructors
+  validate.rs       `Ast` -> `Model`; every rule in R1
+  display/
+    mod.rs          `#[display(...)]` -> `Message`
+    template.rs     splitting a template into literal and placeholder segments
+    argument.rs     rooting a positional argument in a field of `self`
+  generate/
+    mod.rs          `Model` -> `TokenStream`, one call per item in R1.3
+    traits.rs       `Display`, `Error`, `Enrichable`, `ErrorExt`, `Debug`
+    constructors.rs `new` and `caused_by`
+    conversions.rs  `From<T>` and `From<Infallible>`
+
+error_attr/
+  mod.rs            reject, inject the core, re-emit under the derive
+enrich_err/
+  mod.rs            message, signature, and the body rewrite
+```
+
+`lib.rs` owns the one step the shim cannot do for it: turning the incoming tokens
+into a `syn::DeriveInput` or `syn::Item` and reporting the parse failure as a
+compile error. Everything past that point is a module above.
 
 Only the derive carries the full pipeline, because only the derive has enough
 input to warrant it.
@@ -217,9 +272,14 @@ struct Shape {
 }
 
 impl Shape {
-    /// Refuses a core index that is out of range, which is the last point at
-    /// which that is representable
-    fn new(fields: Vec<ModelField>, core: usize, style: Style) -> Option<Self>;
+    /// Splits `fields` around `core`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `core` does not index `fields`. `validate` derives the index
+    /// from the very field list it then maps into `fields`, so the two cannot
+    /// disagree
+    fn new(fields: Vec<ModelField>, core: usize, style: Style) -> Self;
     /// The field holding the core
     fn core(&self) -> &ModelField;
     /// Every field, in declaration order. What `Debug` prints (R1.3)
@@ -245,6 +305,16 @@ used it would have to handle a core that is not there; `before`/`core`/`after`
 cannot express that, and declaration order is still recoverable from it. The
 same split removes the "named struct with a positional core" case: `Style` and
 `member` are read from the same value, so they cannot disagree.
+
+`Shape::new` is infallible, and an out-of-range `core` is a panic rather than a
+`None`. The index is not user input by the time it arrives: `validate` finds the
+core in `ast.fields` and then maps that same list, one for one, into the
+`ModelField`s it passes alongside the index. The two cannot disagree unless
+`validate` itself is wrong, which is a programming error and not a rejection the
+author can act on. Returning `Option` would oblige every caller to invent a
+diagnostic for an input no user can write, and an invented diagnostic pointing
+into generated code is exactly what R4 forbids. The panic is documented on the
+constructor and named in the `expect` that raises it.
 
 `Member` also removes most of the named-versus-tuple branching from `generate`.
 `self.#member` is `self.path` or `self.0`, so every read of a field takes one
@@ -648,20 +718,43 @@ fixture that breaks several rules in one struct will report all of them.
 
 ## Testing
 
-Each phase gets the test style that fits it, and none of them needs the
-proc-macro bridge:
+The regression boundary is the public API of `ohno_macros_impl`, not the phases
+behind it. `crates/ohno_macros_impl/tests/public_api.rs` calls `derive_error`,
+`enrich_err` and `error` — the same three functions the shim delegates to, taking
+the same arguments — and snapshots the pretty-printed expansion of each case with
+`insta`.
 
-| Phase | Test |
+Testing at that boundary is what the two-crate split buys. Those three functions
+take `proc_macro2::TokenStream`, so a test can call them; the `#[proc_macro]`
+entry points above them cannot be called at all. Driving every case through them
+also makes coverage mean something: an input that cannot be provoked from there
+cannot be provoked by a user of `ohno` either, so an uncovered line below is
+evidence of dead code rather than of a missing test.
+
+Cases are grouped by behavior rather than filed one per input. Related inputs
+share a snapshot, separated by `// === label ===` headers, so the number of
+snapshot files tracks the number of behaviors instead of the number of inputs and
+the variants of one behavior are read together. Each case records the source a
+user would write above the expansion it produces, so a snapshot is reviewable
+without the test file open beside it.
+
+| Behavior | Case shape |
 | --- | --- |
-| parse | `parse_quote!` in, `Ast` asserted, or the decoding fault asserted |
-| validate | `Ast` in, `Model` asserted, or the exact set of diagnostics asserted |
-| generate | a hand-built `Model` in, an `insta` snapshot of the `prettyplease` output |
-| `display` | `parse_quote!` in, an `insta` snapshot of the message and its diagnostics |
-| `error_attr` | `parse_quote!` in, an `insta` snapshot of the rewritten struct |
-| `enrich_err` | `parse_quote!` in, an `insta` snapshot of the rewritten function |
+| `#[derive(Error)]` | the item in, the generated impls snapshotted |
+| `#[ohno::error]` | the item in, the rewritten struct snapshotted |
+| `#[enrich_err(...)]` | arguments and function in, the rewritten body snapshotted |
+| any rejection | the offending input in, the emitted `compile_error!`s snapshotted |
 
-This needs no new dependency: `insta` and `prettyplease` are already dev
-dependencies of the crate.
+A rejection is snapshotted the same way as a success, in the same file as the
+behavior it belongs to. `expand` emits diagnostics *instead of* items whenever a
+fault was recorded, so "what the macro wrote" is the whole answer either way, and
+the two cases stay comparable.
+
+This needs no new dependency: `insta` and `testing_aids` are already dev
+dependencies of `ohno_macros_impl`. `testing_aids::render_expansion` does the
+pretty-printing; the source side goes through `render_tokens_lossy`, because
+several cases deliberately feed a macro something that is not an item and that
+input is still worth showing.
 
 Everything that produces tokens is snapshotted whole rather than searched for
 substrings. What these macros have to get right is the *shape* of what they emit
@@ -672,29 +765,31 @@ did not look. Snapshotting the pretty-printed output also keeps the expected
 value readable as Rust, instead of as the space-separated token soup a
 `TokenStream` renders to.
 
-For the same reason the `display` snapshots carry the message and its
-diagnostics together: a template either lowers to a message or reports why it
-cannot, and showing one half alone cannot tell "lowered cleanly" apart from
-"lowered and also complained".
+For the same reason a rejection snapshot carries every diagnostic the input
+produces, not the first. Asserting only the first would let accumulation regress
+silently, which is the one thing these assertions exist to hold.
 
-Two properties come out of the split. Generator snapshots do not depend on the
-parser, so a change to attribute syntax moves parse tests and leaves expansion
-snapshots alone. And a `Model` that no real input produces can still be covered,
-which is what makes `generate`'s remaining branches — `Style`, the presence of a
-message, an empty `data()` — reachable by test rather than only by argument.
+The cost of the choice is real and is worth naming. There are no phase-local
+tests: nothing feeds `Ast` to `validate` or a hand-built `Model` to `generate`.
+A `Model` that no real input produces therefore cannot be covered, so
+`generate`'s branches — `Style`, the presence of a message, an empty `data()` —
+are reachable only through an input that provokes them. Every one of them is
+reachable that way, which is why the trade was taken; a branch that stops being
+reachable from a real input is dead code and should be removed rather than kept
+alive by a hand-built value. A change to attribute syntax now moves expansion
+snapshots that a parse-only test would have left alone, which is the price paid
+for that.
 
-Validation tests assert the whole set of diagnostics an input produces, not the
-first. Asserting only the first would let accumulation regress silently, which
-is the one thing these tests exist to hold.
+`cargo mutants` matters most on `validate.rs` and `display/`, where the rules
+live and where a surviving mutant means a rule is unenforced (R5).
 
-`cargo mutants` runs on `validate.rs` and `display/`, where the rules live and
-where a surviving mutant means a rule is unenforced (R5).
-
-One class of mutant survives there by construction, and it does not mean a rule
-is unenforced. The three `#[proc_macro]` entry points in `lib.rs` cannot be
-called from a unit test at all — a proc-macro crate's own tests do not get the
-bridge — so only `crates/ohno/tests/` kills them, and they carry
-`#[cfg_attr(test, mutants::skip)]`.
+One class of mutant survives by construction, and it does not mean a rule is
+unenforced. The three entry points in `ohno_macros/src/lib.rs` cannot be called
+from a unit test at all — a proc-macro crate's own tests do not get the bridge —
+so only `crates/ohno/tests/` kills them, and they carry
+`#[cfg_attr(test, mutants::skip)]`. That is the residue of the split: the
+delegating shims are the one part that stays untestable, which is why nothing but
+delegation is allowed to live there.
 
 The template scanner is driven by an iterator rather than by an index it
 increments, so a mutant that corrupts its arithmetic produces a wrong segment a
@@ -703,11 +798,12 @@ as a timeout rather than as a failed assertion, which reads as an unenforced
 rule when it is not one.
 
 **The tests under `crates/ohno/tests/` remain the only proof that the generated
-code works.** Nothing in this crate's own tree compiles an expansion. Unit tests
-assert the shape of tokens; only the integration tests and the `ui/*.rs`
-compile-fail pairs run `rustc` over what the macros produce, and only the
-`.stderr` snapshots pin where a diagnostic points. A change that keeps every unit
-test green and breaks the tests under `crates/ohno/tests/` is a broken change.
+code works.** Neither crate's own tree compiles an expansion. The snapshots in
+`public_api.rs` assert the shape of tokens; only the integration tests and the
+`ui/*.rs` compile-fail pairs run `rustc` over what the macros produce, and only
+the `.stderr` snapshots pin where a diagnostic points. A change that keeps every
+snapshot green and breaks the tests under `crates/ohno/tests/` is a broken
+change.
 
 `just trybuild` runs those compile-fail tests alone while iterating on a
 diagnostic, and `just trybuild-overwrite` rewrites the `.stderr` snapshots when a
@@ -727,5 +823,14 @@ refresh.
   not the first.
 - **`enrich_err` stays simple.** One module, no `Ast`/`Model` pair, sharing
   `Message` with the derive.
+- **The logic lives in an ordinary library.** `ohno_macros` is three delegating
+  shims; `ohno_macros_impl` holds everything else, because a proc-macro crate
+  can export nothing but macros and cannot call its own.
+- **The public expansion functions are the regression boundary.** Snapshots in
+  `ohno_macros_impl/tests/public_api.rs` drive the same three functions a user
+  reaches, instead of feeding hand-built values to individual phases.
+- **`Shape::new` panics rather than returning `Option`.** `validate` derives the
+  core index from the field list it maps, so a disagreement is a bug in this
+  crate, not an input a diagnostic could describe.
 - **`pub(crate)` constructors stay.** Settled by ADO 7675155 as designed; the
   rewrite is not the place to reopen it.
