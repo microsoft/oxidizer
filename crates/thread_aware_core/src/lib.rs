@@ -18,7 +18,7 @@
 //!   closest to it.
 //!
 //! The crate has no dependencies. It also works without `std`: with default features turned
-//! off, [`Place`] loses its thread id and keeps [`Origin`] and [`NumaNode`]. The companion
+//! off, [`Place`] loses its thread id and keeps [`Owner`] and [`NumaNode`]. The companion
 //! `thread_aware` crate provides the conveniences on top: a `#[derive(ThreadAware)]` macro,
 //! wrappers for foreign types, and a per-core `Arc`.
 //!
@@ -64,7 +64,7 @@
 //! # #[cfg(feature = "std")] {
 //! use std::thread;
 //!
-//! use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
+//! use thread_aware_core::{NumaNode, Owner, Place, ThreadAware};
 //!
 //! // What a library author writes.
 //! struct Worker {
@@ -81,9 +81,9 @@
 //! let here = thread::current().id();
 //! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
-//! let origin = Origin::new(1);
-//! let first = Place::new(origin, here, NumaNode::new(0));
-//! let second = Place::new(origin, there, NumaNode::new(1));
+//! let owner = Owner::new(1);
+//! let first = Place::new(owner, here, NumaNode::new(0));
+//! let second = Place::new(owner, there, NumaNode::new(1));
 //!
 //! let mut worker = Worker { thread: None };
 //!
@@ -122,9 +122,9 @@
 //! it, and if two runtimes number them differently then state shared between them is wrong,
 //! not merely slow. Share across runtimes only when all of them are under common control.
 //!
-//! [`Origin`] identifies the runtime that produced the place. Thread ids already distinguish
-//! threads, so this is a matter of ownership: it lets a value detect that it has crossed into
-//! a different runtime and release anything the previous one owned.
+//! [`Owner`] identifies the runtime a place belongs to. Thread ids already distinguish
+//! threads, so this id answers a different question: it lets a value detect that it has
+//! crossed into a different runtime and release anything the previous one owned.
 //!
 //! An implementation therefore reads only the ids its state depends on:
 //!
@@ -132,16 +132,16 @@
 //!   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
 //! - State concerned only with memory locality, such as a buffer pool, keys on [`NumaNode`]
 //!   and survives a move to another thread near the same memory.
-//! - State owned by the runtime, such as a scheduler handle, also compares [`Origin`] and is
+//! - State owned by the runtime, such as a scheduler handle, also compares [`Owner`] and is
 //!   released when it changes.
 //!
-//! The ids carry no meaning beyond identity. [`Origin`] and [`NumaNode`] need not start at
+//! The ids carry no meaning beyond identity. [`Owner`] and [`NumaNode`] need not start at
 //! zero or run consecutively, no count is exposed, and the places in use cannot be
 //! enumerated. Per-place state belongs in a map keyed by the id rather than an array indexed
 //! by it.
 //!
 //! Without `std` there is no thread id: `Place::new` and `Place::thread` are absent and only
-//! [`Origin`] and [`NumaNode`] remain. A `no_std` library can still implement
+//! [`Owner`] and [`NumaNode`] remain. A `no_std` library can still implement
 //! [`ThreadAware`] and use whatever it is given; the runtime that drives relocation requires
 //! `std` regardless.
 //!
@@ -184,6 +184,6 @@ mod place;
 mod thread_aware;
 
 #[doc(inline)]
-pub use place::{NumaNode, Origin, Place};
+pub use place::{NumaNode, Owner, Place};
 #[doc(inline)]
 pub use thread_aware::ThreadAware;

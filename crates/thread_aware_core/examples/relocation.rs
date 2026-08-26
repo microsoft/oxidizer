@@ -10,7 +10,7 @@
 
 use std::thread;
 
-use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
+use thread_aware_core::{NumaNode, Owner, Place, ThreadAware};
 
 /// A sample value that remembers which thread it currently runs on.
 struct Worker {
@@ -32,9 +32,9 @@ fn main() {
         .join()
         .expect("the spawned thread cannot panic");
 
-    let origin = Origin::new(1);
-    let first = Place::new(origin, here, NumaNode::new(0));
-    let second = Place::new(origin, there, NumaNode::new(0));
+    let owner = Owner::new(1);
+    let first = Place::new(owner, here, NumaNode::new(0));
+    let second = Place::new(owner, there, NumaNode::new(0));
 
     // Relocate a sample object between them.
     let mut worker = Worker { thread: None };

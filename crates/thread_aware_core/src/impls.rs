@@ -17,7 +17,7 @@ use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
 
-use crate::{NumaNode, Origin, Place, ThreadAware};
+use crate::{NumaNode, Owner, Place, ThreadAware};
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
@@ -71,7 +71,7 @@ impl_transfer!(&Path);
 impl_transfer!(str);
 impl_transfer!(&str);
 
-impl_transfer!(Origin);
+impl_transfer!(Owner);
 impl_transfer!(NumaNode);
 #[cfg(any(test, feature = "std"))]
 impl_transfer!(std::thread::ThreadId);
@@ -274,7 +274,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
-    use crate::{NumaNode, Origin, Place, ThreadAware};
+    use crate::{NumaNode, Owner, Place, ThreadAware};
 
     /// A type whose `relocate` visibly mutates state, so mutation tests catch
     /// no-op replacements.
@@ -288,11 +288,11 @@ mod tests {
     }
 
     fn sample_places() -> [Place; 2] {
-        let origin = Origin::new(0);
+        let owner = Owner::new(0);
         let thread = std::thread::current().id();
         [
-            Place::new(origin, thread, NumaNode::new(0)),
-            Place::new(origin, thread, NumaNode::new(1)),
+            Place::new(owner, thread, NumaNode::new(0)),
+            Place::new(owner, thread, NumaNode::new(1)),
         ]
     }
 

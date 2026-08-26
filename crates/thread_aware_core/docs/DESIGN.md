@@ -10,7 +10,7 @@ signatures, and this crate's job is to make sure that never becomes a liability.
 It exposes one trait, one identifier, and nothing else:
 
 - `ThreadAware` — the callback a value implements to be told it has moved.
-- `Place` — where a value runs, built from `Origin`, a `std::thread::ThreadId`,
+- `Place` — where a value runs, built from `Owner`, a `std::thread::ThreadId`,
   and `NumaNode`.
 
 Everything that makes relocation *convenient* — registries, containers,
@@ -41,16 +41,16 @@ ahead of them.
 
 ## Scope
 
-`Origin` describes a runtime; `NumaNode` describes hardware. Neither is
+`Owner` describes a runtime; `NumaNode` describes hardware. Neither is
 validated, and their guarantees differ in ways implementations depend on. A
-thread id is meaningful only while that thread lives, an `Origin` only while its
+thread id is meaningful only while that thread lives, an `Owner` only while its
 runtime does, and a `NumaNode` is shared by every thread near the same memory —
 including threads of a different runtime, but only while all of them number the
 nodes identically.
 
-`Origin` values are issued by runtime and integration code, never by ordinary
+`Owner` values are issued by runtime and integration code, never by ordinary
 data-structure authors. When one process hosts two runtimes, keeping their
-origins distinct is the embedding application's responsibility; this crate has
+owner ids distinct is the embedding application's responsibility; this crate has
 no registry and no way to detect a collision.
 
 Implementing `ThreadAware` also commits a type to `Send`, since that is a
@@ -77,15 +77,15 @@ qualify; it belongs in `thread_aware`, where it can still change.
 thing to convert to and from, and one more thing to keep stable forever. The
 cost is that `Place::new` and `Place::thread` need the `std` feature. With
 default features off, a `no_std` crate can still implement `ThreadAware` and
-read `Origin` and `NumaNode` from the places it is handed; it just cannot
+read `Owner` and `NumaNode` from the places it is handed; it just cannot
 construct one, which only runtimes need to do.
 
 **No dependencies reach a consumer.** The manifest's only entry is a test-only
 dev-dependency, so adopting this crate cannot introduce a version conflict or
 pull anything unexpected into a build.
 
-**Describe, do not enforce.** Nothing checks that runtimes issue distinct
-origins or that implementations avoid blocking. These are documented
+**Describe, do not enforce.** Nothing checks that runtimes take distinct owner
+ids or that implementations avoid blocking. These are documented
 obligations; enforcing them would need runtime state and a coordination point,
 and this crate has neither.
 
@@ -96,7 +96,7 @@ already subdivide a NUMA node into cache domains, and a `Place` may one day need
 to say that a thread is pinned to memory but not to a processor. Both mean
 adding a coordinate, and the design makes that additive.
 
-**Ids are opaque, and take no `From<integer>`.** `Origin` and `NumaNode` expose
+**Ids are opaque, and take no `From<integer>`.** `Owner` and `NumaNode` expose
 no accessor returning their integer, and are built through an inherent
 `new(u32)` rather than a `From` impl. That is a deliberate refusal, because a
 `From<integer>` on a permanent vocabulary type is a one-shot commitment. While

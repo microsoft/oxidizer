@@ -10,38 +10,38 @@
 #[cfg(any(test, feature = "std"))]
 use std::thread::ThreadId;
 
-/// An identifier for the runtime that produced a [`Place`].
+/// An identifier for the runtime that owns a [`Place`].
 ///
-/// Runtimes that run at the same time are expected to use distinct origins, so that a value
-/// can detect that it has crossed from one into another and release anything the previous
-/// one owned. Nothing enforces this, and a collision is worse than a slowdown: a value
-/// moving into a second runtime that chose the same origin concludes that it is still at
-/// home and continues to use resources owned by the first.
+/// Runtimes that run at the same time are expected to take distinct owner ids, so that a
+/// value can detect that it has crossed from one into another and release anything the
+/// previous one owned. Nothing enforces this, and a collision is worse than a slowdown: a
+/// value moving into a second runtime that took the same owner id concludes that it is
+/// still at home and continues to use resources owned by the first.
 ///
 /// # Examples
 ///
 /// ```
-/// use thread_aware_core::Origin;
+/// use thread_aware_core::Owner;
 ///
-/// let origin = Origin::new(1);
+/// let owner = Owner::new(1);
 ///
-/// assert_eq!(origin, Origin::new(1));
-/// assert_ne!(origin, Origin::new(2));
+/// assert_eq!(owner, Owner::new(1));
+/// assert_ne!(owner, Owner::new(2));
 /// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Origin(u32);
+pub struct Owner(u32);
 
-impl Origin {
-    /// Creates an origin from a runtime-assigned number.
+impl Owner {
+    /// Creates an owner from a runtime-assigned number.
     ///
     /// The number carries no meaning beyond telling one runtime apart from another.
     ///
     /// # Examples
     ///
     /// ```
-    /// use thread_aware_core::Origin;
+    /// use thread_aware_core::Owner;
     ///
-    /// assert_ne!(Origin::new(0), Origin::new(1));
+    /// assert_ne!(Owner::new(0), Owner::new(1));
     /// ```
     #[must_use]
     pub const fn new(value: u32) -> Self {
@@ -108,7 +108,7 @@ impl NumaNode {
 ///
 /// The thread id is `std::thread::ThreadId`, so `new` and `thread` require the `std`
 /// feature. Without it a `Place` cannot be constructed at all, and only
-/// [`origin`](Self::origin) and [`numa_node`](Self::numa_node) can be read. That is the
+/// [`owner`](Self::owner) and [`numa_node`](Self::numa_node) can be read. That is the
 /// intended split: a `no_std` library implements [`ThreadAware`](crate::ThreadAware) and
 /// reads whatever it is given, while the runtime that drives relocation requires `std`
 /// regardless.
@@ -120,16 +120,16 @@ impl NumaNode {
 /// # #[cfg(feature = "std")] {
 /// use std::thread;
 ///
-/// use thread_aware_core::{NumaNode, Origin, Place};
+/// use thread_aware_core::{NumaNode, Owner, Place};
 ///
 /// let here = thread::current().id();
-/// let place = Place::new(Origin::new(1), here, NumaNode::new(1));
+/// let place = Place::new(Owner::new(1), here, NumaNode::new(1));
 ///
-/// assert_eq!(place.origin(), Origin::new(1));
+/// assert_eq!(place.owner(), Owner::new(1));
 /// assert_eq!(place.thread(), here);
 ///
 /// // The same thread under a different runtime is a different place...
-/// let elsewhere = Place::new(Origin::new(2), here, NumaNode::new(1));
+/// let elsewhere = Place::new(Owner::new(2), here, NumaNode::new(1));
 /// assert_ne!(place, elsewhere);
 ///
 /// // ...but the thread and its nearest memory are unchanged.
@@ -139,14 +139,14 @@ impl NumaNode {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Place {
-    origin: Origin,
+    owner: Owner,
     #[cfg(any(test, feature = "std"))]
     thread: ThreadId,
     numa_node: NumaNode,
 }
 
 impl Place {
-    /// Creates a place from its origin, thread, and NUMA ids.
+    /// Creates a place from its owner, thread, and NUMA ids.
     ///
     /// Runtimes call this as they set up their workers. Tests may call it directly to
     /// construct places without starting a runtime. A thread id is obtained from
@@ -159,22 +159,22 @@ impl Place {
     /// ```
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Origin, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Place};
     ///
-    /// let place = Place::new(Origin::new(1), thread::current().id(), NumaNode::new(0));
+    /// let place = Place::new(Owner::new(1), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.origin(), Origin::new(1));
+    /// assert_eq!(place.owner(), Owner::new(1));
     /// ```
     #[cfg(any(test, feature = "std"))]
     #[must_use]
-    pub const fn new(origin: Origin, thread: ThreadId, numa_node: NumaNode) -> Self {
-        Self { origin, thread, numa_node }
+    pub const fn new(owner: Owner, thread: ThreadId, numa_node: NumaNode) -> Self {
+        Self { owner, thread, numa_node }
     }
 
-    /// Returns the identifier of the runtime that produced this place.
+    /// Returns the identifier of the runtime that owns this place.
     ///
-    /// Comparing origins detects that a value has moved between runtimes, provided the
-    /// runtimes involved chose distinct origins. Such a move remains sound, but resources
+    /// Comparing owners detects that a value has moved between runtimes, provided the
+    /// runtimes involved took distinct owner ids. Such a move remains sound, but resources
     /// owned by the previous runtime usually cannot follow.
     ///
     /// # Examples
@@ -184,17 +184,17 @@ impl Place {
     /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Origin, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Place};
     ///
-    /// let place = Place::new(Origin::new(7), thread::current().id(), NumaNode::new(0));
+    /// let place = Place::new(Owner::new(7), thread::current().id(), NumaNode::new(0));
     ///
-    /// assert_eq!(place.origin(), Origin::new(7));
+    /// assert_eq!(place.owner(), Owner::new(7));
     /// # }
     /// # }
     /// ```
     #[must_use]
-    pub const fn origin(&self) -> Origin {
-        self.origin
+    pub const fn owner(&self) -> Owner {
+        self.owner
     }
 
     /// Returns the identifier of the thread this place refers to.
@@ -209,10 +209,10 @@ impl Place {
     /// ```
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Origin, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Place};
     ///
     /// let here = thread::current().id();
-    /// let place = Place::new(Origin::new(1), here, NumaNode::new(0));
+    /// let place = Place::new(Owner::new(1), here, NumaNode::new(0));
     ///
     /// assert_eq!(place.thread(), here);
     /// ```
@@ -234,9 +234,9 @@ impl Place {
     /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
-    /// use thread_aware_core::{NumaNode, Origin, Place};
+    /// use thread_aware_core::{NumaNode, Owner, Place};
     ///
-    /// let place = Place::new(Origin::new(1), thread::current().id(), NumaNode::new(3));
+    /// let place = Place::new(Owner::new(1), thread::current().id(), NumaNode::new(3));
     ///
     /// assert_eq!(place.numa_node(), NumaNode::new(3));
     /// # }
@@ -256,27 +256,27 @@ mod tests {
 
     use static_assertions::assert_impl_all;
 
-    use super::{NumaNode, Origin, Place};
+    use super::{NumaNode, Owner, Place};
 
-    assert_impl_all!(Origin: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(Owner: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
     assert_impl_all!(Place: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn exposes_components() {
         let id = thread::current().id();
-        let place = Place::new(Origin::new(1), id, NumaNode::new(2));
+        let place = Place::new(Owner::new(1), id, NumaNode::new(2));
 
-        assert_eq!(place.origin(), Origin::new(1));
+        assert_eq!(place.owner(), Owner::new(1));
         assert_eq!(place.thread(), id);
         assert_eq!(place.numa_node(), NumaNode::new(2));
     }
 
     #[test]
-    fn different_origin_compares_unequal() {
+    fn different_owner_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Origin::new(0), id, NumaNode::new(0));
-        let second = Place::new(Origin::new(1), id, NumaNode::new(0));
+        let first = Place::new(Owner::new(0), id, NumaNode::new(0));
+        let second = Place::new(Owner::new(1), id, NumaNode::new(0));
 
         assert_ne!(first, second);
     }
@@ -284,18 +284,18 @@ mod tests {
     #[test]
     fn different_numa_compares_unequal() {
         let id = thread::current().id();
-        let first = Place::new(Origin::new(0), id, NumaNode::new(0));
-        let second = Place::new(Origin::new(0), id, NumaNode::new(1));
+        let first = Place::new(Owner::new(0), id, NumaNode::new(0));
+        let second = Place::new(Owner::new(0), id, NumaNode::new(1));
 
         assert_ne!(first, second);
     }
 
     #[test]
     fn different_thread_compares_unequal() {
-        let origin = Origin::new(0);
+        let owner = Owner::new(0);
         let numa_node = NumaNode::new(0);
-        let here = Place::new(origin, thread::current().id(), numa_node);
-        let there = thread::spawn(move || Place::new(origin, thread::current().id(), numa_node))
+        let here = Place::new(owner, thread::current().id(), numa_node);
+        let there = thread::spawn(move || Place::new(owner, thread::current().id(), numa_node))
             .join()
             .unwrap();
 
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn clone_preserves_components() {
-        let place = Place::new(Origin::new(4), thread::current().id(), NumaNode::new(9));
+        let place = Place::new(Owner::new(4), thread::current().id(), NumaNode::new(9));
         let cloned = place.clone();
 
         assert_eq!(cloned, place);

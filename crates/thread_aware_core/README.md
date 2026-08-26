@@ -22,7 +22,7 @@ This crate contains the small API shared by thread-aware libraries:
   closest to it.
 
 The crate has no dependencies. It also works without `std`: with default features turned
-off, [`Place`][__link2] loses its thread id and keeps [`Origin`][__link3] and [`NumaNode`][__link4]. The companion
+off, [`Place`][__link2] loses its thread id and keeps [`Owner`][__link3] and [`NumaNode`][__link4]. The companion
 `thread_aware` crate provides the conveniences on top: a `#[derive(ThreadAware)]` macro,
 wrappers for foreign types, and a per-core `Arc`.
 
@@ -66,7 +66,7 @@ The example below plays the part of the runtime so the order is visible.
 ```rust
 use std::thread;
 
-use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
+use thread_aware_core::{NumaNode, Owner, Place, ThreadAware};
 
 // What a library author writes.
 struct Worker {
@@ -83,9 +83,9 @@ impl ThreadAware for Worker {
 let here = thread::current().id();
 let there = thread::spawn(|| thread::current().id()).join().unwrap();
 
-let origin = Origin::new(1);
-let first = Place::new(origin, here, NumaNode::new(0));
-let second = Place::new(origin, there, NumaNode::new(1));
+let owner = Owner::new(1);
+let first = Place::new(owner, here, NumaNode::new(0));
+let second = Place::new(owner, there, NumaNode::new(1));
 
 let mut worker = Worker { thread: None };
 
@@ -122,9 +122,9 @@ identically, for example from the numbering the operating system reports. Nothin
 it, and if two runtimes number them differently then state shared between them is wrong,
 not merely slow. Share across runtimes only when all of them are under common control.
 
-[`Origin`][__link16] identifies the runtime that produced the place. Thread ids already distinguish
-threads, so this is a matter of ownership: it lets a value detect that it has crossed into
-a different runtime and release anything the previous one owned.
+[`Owner`][__link16] identifies the runtime a place belongs to. Thread ids already distinguish
+threads, so this id answers a different question: it lets a value detect that it has
+crossed into a different runtime and release anything the previous one owned.
 
 An implementation therefore reads only the ids its state depends on:
 
@@ -132,16 +132,16 @@ An implementation therefore reads only the ids its state depends on:
   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
 * State concerned only with memory locality, such as a buffer pool, keys on [`NumaNode`][__link17]
   and survives a move to another thread near the same memory.
-* State owned by the runtime, such as a scheduler handle, also compares [`Origin`][__link18] and is
+* State owned by the runtime, such as a scheduler handle, also compares [`Owner`][__link18] and is
   released when it changes.
 
-The ids carry no meaning beyond identity. [`Origin`][__link19] and [`NumaNode`][__link20] need not start at
+The ids carry no meaning beyond identity. [`Owner`][__link19] and [`NumaNode`][__link20] need not start at
 zero or run consecutively, no count is exposed, and the places in use cannot be
 enumerated. Per-place state belongs in a map keyed by the id rather than an array indexed
 by it.
 
 Without `std` there is no thread id: `Place::new` and `Place::thread` are absent and only
-[`Origin`][__link21] and [`NumaNode`][__link22] remain. A `no_std` library can still implement
+[`Owner`][__link21] and [`NumaNode`][__link22] remain. A `no_std` library can still implement
 [`ThreadAware`][__link23] and use whatever it is given; the runtime that drives relocation requires
 `std` regardless.
 
@@ -181,7 +181,7 @@ the case where splitting is correct.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbFnNJ9iJOcHAbeCXtexP3N-gbIm-PyKkJYsEbF01BL-9BWJ1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbtnma_MpRRxcbwz5m2G5tKWkbqvbyJnq8I7cbvrOBm74YZX1hZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
@@ -190,13 +190,13 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link13]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link14]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link15]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
+ [__link16]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
  [__link17]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link18]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
- [__link19]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
+ [__link18]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
+ [__link19]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
  [__link2]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link20]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
+ [__link21]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
  [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
  [__link23]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link24]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
@@ -205,7 +205,7 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link27]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link28]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
  [__link29]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
- [__link3]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Origin
+ [__link3]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
  [__link30]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link31]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode

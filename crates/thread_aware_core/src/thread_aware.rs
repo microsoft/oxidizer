@@ -35,9 +35,9 @@ use crate::Place;
 ///    }
 ///    ```
 /// 2. **Record the destination.** Store the new thread id, [`NumaNode`](crate::NumaNode) or
-///    [`Origin`](crate::Origin) for later use.
+///    [`Owner`](crate::Owner) for later use.
 /// 3. **Replace a resource.** Compare the id it depends on: [`NumaNode`](crate::NumaNode)
-///    for a buffer pool, the thread id for a driver handle, [`Origin`](crate::Origin) for
+///    for a buffer pool, the thread id for a driver handle, [`Owner`](crate::Owner) for
 ///    anything the runtime owns. If it changed, release the old resource and acquire one for
 ///    the new place, moving out any real data it holds first.
 /// 4. **Forward to fields.** A type composed of other types calls `relocate` on each field.
@@ -73,7 +73,7 @@ use crate::Place;
 /// * **Tolerate no call at all.** The value remains correct either way.
 ///
 /// * **Tolerate an unfamiliar place.** A `destination` may name a thread the value has never
-///   seen and carry an [`Origin`](crate::Origin) belonging to another runtime, and this must
+///   seen and carry an [`Owner`](crate::Owner) belonging to another runtime, and this must
 ///   remain sound. Release anything the previous runtime owned; state keyed on
 ///   [`NumaNode`](crate::NumaNode) may remain valid, subject to the caveat in
 ///   [what the ids mean](crate#what-the-ids-mean). Performance may suffer afterwards, though
@@ -81,11 +81,11 @@ use crate::Place;
 ///   released.
 ///
 /// A [`Place`] may be cloned and retained, but a thread id is meaningful only while that
-/// thread is alive, and an [`Origin`](crate::Origin) only while that runtime is.
+/// thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
 ///
 /// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
 /// the value has actually moved, pass `None` when the previous place is unknown, give each
-/// running runtime its own [`Origin`](crate::Origin), and never rely on the call for
+/// running runtime its own [`Owner`](crate::Owner), and never rely on the call for
 /// correctness. Nothing enforces any of this.
 ///
 /// # Examples
