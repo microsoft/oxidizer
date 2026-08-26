@@ -54,7 +54,7 @@
 //! where it now runs.
 //!
 //! A type composed of other types forwards the call to its fields, so one call at the top
-//! reaches everything below it. The derive macro and the containers here do this
+//! reaches everything below it. The derive macro and containers in `thread_aware` do this
 //! automatically.
 //!
 //! The example below plays the part of the runtime so the order is visible.

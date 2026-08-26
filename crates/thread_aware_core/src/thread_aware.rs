@@ -159,3 +159,14 @@ pub trait ThreadAware: Send {
     /// [examples](Self#examples) for implementations.
     fn relocate(&mut self, source: Option<&Place>, destination: &Place);
 }
+
+#[cfg(test)]
+mod tests {
+    use static_assertions::assert_obj_safe;
+
+    use super::ThreadAware;
+
+    // `dyn ThreadAware` is part of the stable surface, so anything added to the trait later
+    // has to keep it dyn-compatible.
+    assert_obj_safe!(ThreadAware);
+}

@@ -58,7 +58,7 @@ It is a callback, like [`Drop::drop`][__link11].
 where it now runs.
 
 A type composed of other types forwards the call to its fields, so one call at the top
-reaches everything below it. The derive macro and the containers here do this
+reaches everything below it. The derive macro and containers in `thread_aware` do this
 automatically.
 
 The example below plays the part of the runtime so the order is visible.
@@ -181,7 +181,7 @@ the case where splitting is correct.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbCE2KWc404_sb_am0KMp4IL4bj5F3GZXB2H4bZaDQPLzlnOthZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbP3kvqcvz6BwbJGNPrggzfEkbWewSJrZuBLMb4smVzzn-vkxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Place

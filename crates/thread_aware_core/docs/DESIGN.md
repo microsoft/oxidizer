@@ -1,0 +1,161 @@
+# Thread Aware Core — Design
+
+## What this crate is
+
+`thread_aware_core` is the **stable vocabulary** for values that adapt when a
+runtime moves them between threads. It exists to be depended on permanently:
+crates are meant to name `ThreadAware` and `Place` in their own public
+signatures, and this crate's job is to make sure that never becomes a liability.
+
+It exposes one trait, one identifier, and nothing else:
+
+- `ThreadAware` — the callback a value implements to be told it has moved.
+- `Place` — where a value runs, built from `Origin`, a `std::thread::ThreadId`,
+  and `NumaNode`.
+
+Everything that makes relocation *convenient* — registries, containers,
+callbacks, derive macros, runtime integration — lives in the pre-1.0
+`thread_aware` crate. This crate carries only what two unrelated libraries must
+agree on in order to interoperate. Implementations of `ThreadAware` for
+`core`, `alloc` and `std` types ship here because they are part of that shared
+vocabulary; implementations for third-party types deliberately do not.
+
+## Why a separate crate
+
+A vocabulary trait is only useful if everyone names the same one. If a
+connection pool and a codec each define their own `ThreadAware`, a runtime that
+relocates a value containing both has two unrelated traits to satisfy and no way
+to treat them uniformly. The trait must come from a single crate they share.
+
+That makes this crate's compatibility a shared constraint rather than a private
+matter. Two libraries interoperate only when their public APIs resolve to the
+same `thread_aware_core` instance, so an incompatible release does not
+inconvenience one crate — it splits the ecosystem until every participant has
+upgraded. A crate in that position has to be *boring*: small, dependency-free,
+and stable far longer than the code around it. The MSRV is part of the same
+bargain, and is raised deliberately rather than incidentally.
+
+Splitting it out is what buys that. The volatile parts of `thread_aware` keep
+iterating pre-1.0 while the few items that appear in public signatures stabilise
+ahead of them.
+
+## Scope
+
+`Origin` describes a runtime; `NumaNode` describes hardware. Neither is
+validated, and their guarantees differ in ways implementations depend on. A
+thread id is meaningful only while that thread lives, an `Origin` only while its
+runtime does, and a `NumaNode` is shared by every thread near the same memory —
+including threads of a different runtime, but only while all of them number the
+nodes identically.
+
+`Origin` values are issued by runtime and integration code, never by ordinary
+data-structure authors. When one process hosts two runtimes, keeping their
+origins distinct is the embedding application's responsibility; this crate has
+no registry and no way to detect a collision.
+
+Implementing `ThreadAware` also commits a type to `Send`, since that is a
+supertrait. A type holding an `Rc` or another thread-bound handle cannot
+participate at all, even with an empty `relocate`.
+
+## Principles
+
+**Performance, not correctness.** `relocate` is advisory. A value must be fully
+correct if it is never called, called twice, or called with a `Place` it has
+never seen. This is the most important property in the design: it is what lets a
+runtime call `relocate` opportunistically, lets an implementation give up and
+stay slow rather than fail, and lets the method be infallible. A trait whose
+correctness depended on being called would need error reporting, ordering
+guarantees, and a way to refuse a move — none of which this crate has.
+
+**Say only what interoperability requires.** Every item here is a permanent
+commitment, so the bar for adding one is whether two independent crates must
+agree on it. A helper that merely makes implementation pleasant does not
+qualify; it belongs in `thread_aware`, where it can still change.
+
+**Borrow from `std` rather than invent.** The thread coordinate is
+`std::thread::ThreadId`, not an id of our own: a bespoke type would be one more
+thing to convert to and from, and one more thing to keep stable forever. The
+cost is that `Place::new` and `Place::thread` need the `std` feature. With
+default features off, a `no_std` crate can still implement `ThreadAware` and
+read `Origin` and `NumaNode` from the places it is handed; it just cannot
+construct one, which only runtimes need to do.
+
+**No dependencies reach a consumer.** The manifest's only entry is a test-only
+dev-dependency, so adopting this crate cannot introduce a version conflict or
+pull anything unexpected into a build.
+
+**Describe, do not enforce.** Nothing checks that runtimes issue distinct
+origins or that implementations avoid blocking. These are documented
+obligations; enforcing them would need runtime state and a coordination point,
+and this crate has neither.
+
+## Evolving without breaking changes
+
+The crate has to be able to describe hardware it does not model yet. Machines
+already subdivide a NUMA node into cache domains, and a `Place` may one day need
+to say that a thread is pinned to memory but not to a processor. Both mean
+adding a coordinate, and the design makes that additive.
+
+**Ids are opaque.** `Origin` and `NumaNode` expose no accessor returning their
+integer; they are constructed with `From<u16>` and otherwise only compared and
+copied. The *stored* width is private and may grow silently, which is what makes
+it possible to reserve values no existing constructor can reach. Widening the
+*accepted* width is a different matter and is breaking: replacing `From<u16>`
+with `From<u32>` stops `Origin::from(id)` compiling wherever `id` is a `u16`,
+and offering both makes `Origin::from(1)` fail to infer. A wider input therefore
+arrives as an additional named constructor, never as a changed `From`.
+
+**`Place` fields are private.** Coordinates are read through accessors, so the
+struct can gain a field without touching any existing reader, and the derived
+`Clone`, `Debug`, `PartialEq`, `Eq` and `Hash` pick it up automatically. No
+`#[non_exhaustive]` is needed: with no public fields there is nothing to
+destructure or update.
+
+What a new field *can* silently remove is an auto trait — a coordinate that is
+not `Send`, `Sync` or unwind-safe strips that property from `Place` without any
+signature changing. Static assertions pin the auto traits the public types are
+expected to have, so this fails the build rather than reaching a release.
+
+**Every coordinate has a default variant.** This is the rule that makes the rest
+work: a new coordinate must have a value meaning *unknown, or not pinned* —
+something like a `NumaNode::UNPINNED` constant that no ordinary construction can
+produce. Existing constructors keep their exact signatures and fill the new
+coordinate with that default; callers that care about it opt in through a new
+constructor.
+
+Reserving such a value is where the opaque representation earns its keep. The
+current conversion maps every `u16` to a distinct node, so preserving all of
+those identities while adding a sentinel needs one extra representation state —
+available precisely because the stored width is private. A coordinate type
+introduced later can simply reserve one from the start.
+
+Behaviour is preserved as well as compilation. Every pre-existing construction
+path fills the new coordinate identically, so places built the old way remain
+equal to exactly the places they were equal to before; the new coordinate can
+only tell places apart once someone deliberately sets it.
+
+Adding a coordinate is therefore three additive steps:
+
+1. Add the private field and its accessor.
+2. Add the sentinel constant to the coordinate's type.
+3. Add a constructor that accepts it, leaving the existing one alone.
+
+**Trait additions stay defaulted and dyn-compatible.** `dyn ThreadAware` is part
+of the stable surface, so a default body alone is not enough. Any method added
+to `ThreadAware` must also avoid generic parameters, `impl Trait`, and `Self` by
+value, or carry `where Self: Sized` so the vtable ignores it. Otherwise every
+existing `impl` still compiles while every `Box<dyn ThreadAware>` stops. An
+assertion pins dyn-compatibility for the same reason the auto traits are pinned.
+
+### What this does not permit
+
+The escape hatch is one-directional. Removing a coordinate, widening an id's
+accepted type, changing what an existing id *means*, or adding a method that
+breaks dyn-compatibility are all breaking, and no sentinel value makes them
+otherwise. Reserving the additive path for genuinely new information is what
+keeps it available.
+
+## Related documents
+
+For the exact list of items inside the stable boundary, see
+[STABILIZATION.md](./STABILIZATION.md).

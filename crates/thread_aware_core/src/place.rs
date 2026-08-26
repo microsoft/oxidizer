@@ -233,9 +233,9 @@ mod tests {
 
     use super::{NumaNode, Origin, Place};
 
-    assert_impl_all!(Origin: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(NumaNode: UnwindSafe, RefUnwindSafe);
-    assert_impl_all!(Place: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(Origin: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(NumaNode: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(Place: Send, Sync, Unpin, UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn exposes_components() {
