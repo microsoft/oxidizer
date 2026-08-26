@@ -821,6 +821,8 @@ integrators
 outsized
 pluggable
 prefiltering
+recursing
+redactable
 sendable
 signedness
 snapshotting
@@ -837,3 +839,9 @@ reportable
 substrings
 unrepresentable
 unterminated
+underflow
+underflowing
+initializations
+poisonable
+affinitized
+unmaterialized

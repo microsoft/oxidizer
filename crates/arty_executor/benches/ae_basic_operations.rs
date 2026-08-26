@@ -39,8 +39,6 @@ fn entrypoint(c: &mut Criterion) {
     bench_yield_10k(&mut group, &allocs, &time);
 
     group.finish();
-
-    time.print_to_stdout();
 }
 
 fn bench_spawn_and_complete_one(group: &mut BenchmarkGroup<'_, WallTime>, allocs: &alloc_tracker::Session, time: &all_the_time::Session) {

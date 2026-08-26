@@ -387,14 +387,14 @@ fn value_conversions_and_accessors() {
     assert_eq!(Value::from("hello"), Value::String("hello".into()));
 
     let numeric = Value::from(3_i64);
-    assert_eq!(observed_testing::metric_number_of(&numeric), Some(3.0));
+    assert_eq!(observed_utils::metric_number_of(&numeric), Some(3.0));
 
     let float = Value::from(1.5_f64);
-    assert_eq!(observed_testing::metric_number_of(&float), Some(1.5));
+    assert_eq!(observed_utils::metric_number_of(&float), Some(1.5));
 
     // Non-numeric values yield no metric number.
     let boolean = Value::from(true);
-    assert_eq!(observed_testing::metric_number_of(&boolean), None);
+    assert_eq!(observed_utils::metric_number_of(&boolean), None);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::{self};
 
 use crate::affinity::{Affinity, pinned_affinities};
@@ -32,6 +32,16 @@ impl Counter {
 impl ThreadAware for Counter {
     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
         self.value = sync::Arc::new(AtomicI32::new(0));
+    }
+}
+
+/// Records the source affinity used to relocate constructor state.
+#[derive(Clone)]
+struct SourceRecorder(sync::Arc<sync::Mutex<Option<Affinity>>>);
+
+impl ThreadAware for SourceRecorder {
+    fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
+        *self.0.lock().unwrap() = source;
     }
 }
 
@@ -103,6 +113,97 @@ fn test_from_unaware() {
     let affinities = pinned_affinities(&[2]);
     per_core.relocate(Some(affinities[0]), affinities[1]);
     assert_eq!(*per_core, 42);
+}
+
+#[test]
+fn out_of_range_relocation_is_a_no_op() {
+    use crate::storage::Strategy;
+
+    // Two in-range slots so an out-of-range destination coexists with a populated in-range slot
+    // that a stray fallback would disturb.
+    struct TwoSlots;
+
+    impl Strategy for TwoSlots {
+        fn index(affinity: Affinity) -> usize {
+            affinity.processor_index()
+        }
+
+        fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
+            std::num::NonZero::new(2).unwrap()
+        }
+    }
+
+    let affinities = pinned_affinities(&[3]);
+    let in_range = affinities[0]; // slot 0
+    let out_of_range = affinities[2]; // index 2, past the two-slot table
+
+    let mut arc = crate::Arc::<i32, TwoSlots>::from_unaware(42);
+    let carried = sync::Arc::clone(&arc.value);
+
+    // Seed an in-range slot with a distinct value, so a stray fallback into it would be observable
+    // as the holder adopting the value or as the seed being overwritten.
+    let seed = sync::Arc::new(99);
+    let _ = arc.storage.insert(in_range, sync::Arc::clone(&seed));
+
+    // The destination affinity's slot index is out of range, so the relocation is a no-op: the `Arc`
+    // keeps the value it already carries rather than reaching into an unrelated slot.
+    arc.relocate(Some(in_range), out_of_range);
+
+    assert!(
+        sync::Arc::ptr_eq(&arc.value, &carried),
+        "an out-of-range destination must keep the carried allocation, not adopt another slot"
+    );
+    assert_eq!(*arc, 42);
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(in_range).unwrap(), &seed),
+        "an out-of-range destination must leave in-range slots untouched"
+    );
+}
+
+#[test]
+fn out_of_range_source_is_not_recorded() {
+    use crate::storage::Strategy;
+
+    // Two in-range slots so the destination can be a non-zero slot, leaving slot 0 free to detect a
+    // stray fallback for the out-of-range source.
+    struct TwoSlots;
+
+    impl Strategy for TwoSlots {
+        fn index(affinity: Affinity) -> usize {
+            affinity.processor_index()
+        }
+
+        fn count(_affinity: Affinity) -> std::num::NonZero<usize> {
+            std::num::NonZero::new(2).unwrap()
+        }
+    }
+
+    let affinities = pinned_affinities(&[3]);
+    let seeded = affinities[0]; // slot 0, the slot a stray source fallback would target
+    let destination = affinities[1]; // slot 1, distinct in-range destination
+    let out_of_range = affinities[2]; // index 2, past the two-slot table
+
+    let mut arc = crate::Arc::<i32, TwoSlots>::from_unaware(42);
+
+    // Seed slot 0 with a distinct value. An out-of-range source has no slot; were it to fall back to
+    // slot 0, this seed would be overwritten.
+    let seed = sync::Arc::new(99);
+    let _ = arc.storage.insert(seeded, sync::Arc::clone(&seed));
+
+    // The destination is in range, so the value materializes in slot 1; the source is out of range
+    // and has no slot to record the carried value into, so that recording is skipped without
+    // reaching into slot 0.
+    arc.relocate(Some(out_of_range), destination);
+
+    assert_eq!(*arc, 42);
+    assert!(
+        arc.storage.get(destination).is_some(),
+        "the in-range destination must be materialized"
+    );
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(seeded).unwrap(), &seed),
+        "an out-of-range source must record nothing, leaving slot 0 untouched"
+    );
 }
 
 #[test]
@@ -238,17 +339,17 @@ fn test_trc_relocated_reuses_existing_value() {
 
 #[test]
 fn test_from_storage() {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from the storage at affinity1
     // This should call line 400 (from_storage method)
@@ -259,6 +360,42 @@ fn test_from_storage() {
 
     // Verify it points to the same Arc we put in storage
     assert!(Arc::ptr_eq(&trc.into_arc(), &value));
+}
+
+#[test]
+fn storage_default_is_empty_then_fillable() {
+    let affinity = pinned_affinities(&[2])[0];
+
+    let storage = super::storage::Storage::<i32, crate::PerCore>::default();
+    assert!(storage.get(affinity).is_none());
+
+    let value = sync::Arc::new(7);
+    storage.insert(affinity, sync::Arc::clone(&value)).unwrap();
+    assert!(sync::Arc::ptr_eq(&storage.get(affinity).unwrap(), &value));
+}
+
+#[test]
+fn storage_insert_is_write_once() {
+    // The public `Storage::insert` is write-once: the first insert into an empty affinity stores the
+    // value and returns `Ok(())`; a second insert leaves the stored value in place and hands the
+    // rejected value back as `Err`, mirroring `OnceLock::set`.
+    let affinity = pinned_affinities(&[2])[0];
+
+    let storage = super::storage::Storage::<i32, crate::PerCore>::default();
+
+    let first = sync::Arc::new(1);
+    assert_eq!(storage.insert(affinity, sync::Arc::clone(&first)), Ok(()));
+
+    let second = sync::Arc::new(2);
+    let rejected = storage.insert(affinity, sync::Arc::clone(&second)).unwrap_err();
+    assert!(
+        sync::Arc::ptr_eq(&rejected, &second),
+        "a rejected insert must hand back the exact value that was passed in"
+    );
+    assert!(
+        sync::Arc::ptr_eq(&storage.get(affinity).unwrap(), &first),
+        "the write-once slot must keep the value from the first insert"
+    );
 }
 
 #[test]
@@ -324,17 +461,17 @@ fn test_factory_clone_with_closure_boxed() {
 fn test_factory_clone_with_manual() {
     // This test covers line 143: Self::Manual => Self::Manual
     // We create a Trc from storage (Factory::Manual), clone it, and verify the factory is properly cloned
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
 
     // Create a storage and populate it with a value for affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(200);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
     let trc1 = PerCore::from_storage(Arc::clone(&storage_arc), affinity1);
@@ -355,18 +492,18 @@ fn test_factory_manual_relocated() {
     // This test covers line 453: Factory::Manual branch in relocated()
     // When a Trc is created from storage (Factory::Manual) and relocated to a new affinity,
     // it should behave like sync::Arc<T> and just clone the value without creating new data
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     let affinities = pinned_affinities(&[2]);
     let affinity1 = affinities[0];
     let affinity2 = affinities[1];
 
     // Create a storage with a value at affinity1
-    let mut storage = super::storage::Storage::new();
+    let storage = super::storage::Storage::new();
     let value = Arc::new(100);
-    storage.replace(affinity1, Arc::clone(&value));
+    storage.insert(affinity1, Arc::clone(&value)).unwrap();
 
-    let storage_arc = Arc::new(RwLock::new(storage));
+    let storage_arc = Arc::new(storage);
 
     // Create a Trc from storage - this uses Factory::Manual
     let trc = PerCore::from_storage(Arc::clone(&storage_arc), affinity1);
@@ -473,7 +610,7 @@ fn test_strong_count_with_deduplication() {
     // The strong count includes:
     // - arc1_relocated (1)
     // - arc2_relocated (1)
-    // Storage reference at affinity2 is excluded by strong_count
+    // SlotTable reference at affinity2 is excluded by strong_count
     assert_eq!(PerCore::strong_count(&arc1_relocated), 2);
     assert_eq!(PerCore::strong_count(&arc2_relocated), 2);
 }
@@ -498,7 +635,7 @@ fn test_strong_count_independent_across_affinities() {
     // arc_a is now referenced by:
     // - arc_a itself
     // - arc_a2
-    // Storage at affinity1 also holds a reference, but strong_count excludes internal refs
+    // SlotTable at affinity1 also holds a reference, but strong_count excludes internal refs
     assert_eq!(PerCore::strong_count(&arc_a), 2);
     assert_eq!(PerCore::strong_count(&arc_a2), 2);
     // arc_b on affinity2 is unaffected by the clone on affinity1
@@ -506,33 +643,27 @@ fn test_strong_count_independent_across_affinities() {
 }
 
 #[test]
-fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
-    // Regression test: when source == destination, Arc::relocated() must NOT overwrite the
-    // newly-created value in storage with the stale pre-relocation value.
+fn self_relocation_keeps_the_value_and_storage_consistent() {
+    // Source and destination in the same slot (here the same affinity) are not a cross-slot move,
+    // so relocation keeps the carried value and seeds the slot with it. The Arc and its slot then
+    // agree, and a later relocation finds that same value on the shared-probe fast path rather than
+    // a stale or freshly materialized one.
     let affinities = pinned_affinities(&[2]);
     let affinity = affinities[0];
 
-    // Create an Arc whose Counter starts at zero, then advance it.
     let arc = PerCore::new(Counter::new);
     arc.increment_by(42);
     assert_eq!(arc.value(), 42);
 
-    // Relocate with source == destination.  The ThreadAware impl always creates a *new*
-    // Counter (value resets to 0), so `relocate` must result in 0 and must also leave
-    // storage holding 0 (not the stale 42).
     let mut arc = arc;
     arc.relocate(Some(affinity), affinity);
-    assert_eq!(arc.value(), 0, "relocated value should come from factory");
+    assert_eq!(arc.value(), 42, "a same-slot relocation keeps the carried value");
 
-    // A second relocation from the same slot must find the factory-created value (0) in
-    // storage, not the stale pre-relocation value (42).  Before the bug fix, the first
-    // relocated() call wrote the stale Arc<Counter(42)> back into the storage slot,
-    // so the second call's `get_clone` fast-path would return 42 instead of 0.
     arc.relocate(Some(affinity), affinity);
     assert_eq!(
         arc.value(),
-        0,
-        "subsequent relocation must not see stale pre-relocation value from storage"
+        42,
+        "the slot holds the carried value, so a later relocation finds it unchanged"
     );
 }
 
@@ -688,14 +819,11 @@ fn factory_data_debug() {
 #[test]
 fn factory_manual_debug() {
     // Exercises Factory::Manual debug branch (from_storage)
-    use std::sync::{self, RwLock};
+    use std::sync::{self};
 
     let affinities = pinned_affinities(&[1]);
-    let storage = sync::Arc::new(RwLock::new(super::storage::Storage::new()));
-    storage
-        .write()
-        .expect("lock should not be poisoned")
-        .replace(affinities[0], sync::Arc::new(42));
+    let storage = sync::Arc::new(super::storage::Storage::new());
+    storage.insert(affinities[0], sync::Arc::new(42)).unwrap();
     let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
     let dbg = format!("{arc:?}");
     assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
@@ -710,10 +838,587 @@ fn factory_closure_debug() {
 }
 
 #[test]
+fn concurrent_relocation_to_same_affinity_materializes_once() {
+    // Races many threads into the same empty destination cell and asserts two things: the caller's
+    // factory runs exactly once for that strategy partition, and every racer ends on the one value
+    // published for it. Publication goes through `OnceLock::get_or_init`, which serializes
+    // materialization on the cell: the winner runs the factory and every other racer blocks, then
+    // adopts the winner's `sync::Arc`. This is the documented "once per strategy partition"
+    // contract holding under contention.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    // A cloneable factory input that counts how many times the factory runs. Its `relocate` is a
+    // no-op, so relocations do not disturb the count.
+    #[derive(Clone)]
+    struct Materializations(sync::Arc<AtomicUsize>);
+
+    impl ThreadAware for Materializations {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+
+    // Enough racers to make a publish/adopt race likely on a machine that can run several threads,
+    // while staying cheap enough for a unit test.
+    const RACERS: usize = 8;
+
+    // A few rounds sample scheduler variation without turning the unit test into a stress test.
+    const ROUNDS: usize = 4;
+
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    for _ in 0..ROUNDS {
+        let materializations = sync::Arc::new(AtomicUsize::new(0));
+
+        let origin = PerCore::new_with(
+            Materializations(sync::Arc::clone(&materializations)),
+            |counter: Materializations| {
+                counter.0.fetch_add(1, Ordering::AcqRel);
+                Counter::new()
+            },
+        );
+        origin.increment_by(7);
+
+        // Construction materialized the origin's own value once; only destination materializations
+        // should be counted, so start the race from zero.
+        materializations.store(0, Ordering::Release);
+
+        let barrier = sync::Arc::new(sync::Barrier::new(RACERS));
+
+        let mut racers = Vec::with_capacity(RACERS);
+
+        for _ in 0..RACERS {
+            let mut racer = origin.clone();
+            let barrier = sync::Arc::clone(&barrier);
+
+            racers.push(std::thread::spawn(move || {
+                // Release all racers together so they contend for the same empty destination cell.
+                barrier.wait();
+                racer.relocate(Some(source), destination);
+                racer.into_arc()
+            }));
+        }
+
+        let values = racers.into_iter().map(|racer| racer.join().unwrap()).collect::<Vec<_>>();
+        let (first, rest) = values.split_first().unwrap();
+
+        for other in rest {
+            assert!(
+                sync::Arc::ptr_eq(first, other),
+                "every racer must adopt the single value published for the destination strategy partition"
+            );
+        }
+
+        assert_eq!(
+            materializations.load(Ordering::Acquire),
+            1,
+            "the factory must run exactly once for the destination strategy partition, even under a race"
+        );
+        assert_eq!(first.value(), 0, "the destination value is freshly relocated, not the source value");
+        assert_eq!(origin.value(), 7, "the source value is left intact");
+    }
+}
+
+#[test]
+fn later_relocations_reproduce_the_original_source_affinity() {
+    // The closure factory records the affinity it first relocated from, so every later relocation
+    // reproduces that original transfer instead of taking the `Arc`'s current affinity as the
+    // source. This pins the sequential propagation of that recorded source; the concurrent adopting
+    // path is covered separately below.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let mut arc = PerCore::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+
+    // First relocation A -> B: nothing is recorded yet, so the given source A is used and stored.
+    arc.relocate(Some(a), b);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "the first relocation materializes with the source it was given"
+    );
+
+    // Relocate onward B -> C. The factory must reproduce the original source A, not the current
+    // affinity B.
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a later relocation reproduces the original source affinity, not the current one"
+    );
+}
+
+#[test]
+fn hit_path_records_the_original_source_affinity() {
+    // Pre-materialize B with one clone, then let another clone first relocate A -> B through the hit
+    // path. Its later B -> C miss must still relocate constructor state from the original source A.
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let origin = PerCore::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+
+    let mut publisher = origin.clone();
+    publisher.relocate(Some(a), b);
+
+    *recorded.lock().unwrap() = None;
+    let mut arc = origin;
+    arc.relocate(Some(a), b);
+    assert_eq!(*recorded.lock().unwrap(), None, "a populated destination must not run the factory");
+
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a clone whose first relocation was a hit must retain its original source"
+    );
+}
+
+#[test]
+fn same_partition_path_records_the_original_source_affinity() {
+    // A and B share one NUMA partition, while C belongs to another. The same-partition A -> B fast
+    // path must record A so the later cross-partition B -> C materialization still relocates
+    // constructor state from the original source.
+    let affinities = pinned_affinities(&[2, 1]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let mut arc = crate::Arc::<_, crate::PerNuma>::new_with(SourceRecorder(sync::Arc::clone(&recorded)), |_recorder: SourceRecorder| 0_i32);
+
+    arc.relocate(Some(a), b);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        None,
+        "a same-partition relocation must keep the carried value without running the factory"
+    );
+
+    arc.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "a same-partition first relocation must retain the original source"
+    );
+}
+
+#[test]
+fn adopting_racer_keeps_the_original_factory_source() {
+    // Hold the publishing racer's factory inside destination B. The adopting racer then updates its
+    // own factory state, releases the publisher through a test-only checkpoint, and reaches B only
+    // after publication has finished. Its onward relocation to C must still reproduce the original
+    // source A. Moving the factory update into the publishing closure would leave this adopter stale.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    /// Reports whether the publisher entered its factory before relocation completed.
+    enum PublisherProgress {
+        FactoryStarted,
+        RelocationFinished,
+    }
+
+    /// Coordinates the publisher's first materialization and records factory sources.
+    #[derive(Clone)]
+    struct ControlledRecorder {
+        recorded: sync::Arc<sync::Mutex<Option<Affinity>>>,
+        relocations: sync::Arc<AtomicUsize>,
+        publisher_progress: sync::mpsc::Sender<PublisherProgress>,
+        release_publisher: sync::Arc<sync::Barrier>,
+    }
+
+    impl ThreadAware for ControlledRecorder {
+        fn relocate(&mut self, source: Option<Affinity>, _destination: Affinity) {
+            *self.recorded.lock().unwrap() = source;
+
+            let relocation_index = self.relocations.fetch_add(1, Ordering::AcqRel);
+            if relocation_index == 0 {
+                // Only the publisher's first factory relocation is held. The later relocation to C
+                // must run normally so its recorded source can be asserted.
+                self.publisher_progress.send(PublisherProgress::FactoryStarted).unwrap();
+                self.release_publisher.wait();
+            }
+        }
+    }
+
+    let affinities = pinned_affinities(&[3]);
+    let a = affinities[0];
+    let b = affinities[1];
+    let c = affinities[2];
+
+    let recorded = sync::Arc::new(sync::Mutex::new(None));
+    let relocations = sync::Arc::new(AtomicUsize::new(0));
+    let (publisher_progress, progress) = sync::mpsc::channel();
+    // After the channel confirms factory entry, these barriers release the publisher and confirm
+    // that its relocation completed.
+    let release_publisher = sync::Arc::new(sync::Barrier::new(2));
+    let publisher_done = sync::Arc::new(sync::Barrier::new(2));
+
+    let origin = PerCore::new_with(
+        ControlledRecorder {
+            recorded: sync::Arc::clone(&recorded),
+            relocations: sync::Arc::clone(&relocations),
+            publisher_progress: publisher_progress.clone(),
+            release_publisher: sync::Arc::clone(&release_publisher),
+        },
+        |_recorder: ControlledRecorder| 0_i32,
+    );
+
+    let mut publisher = origin.clone();
+    let publisher = std::thread::spawn({
+        let publisher_done = sync::Arc::clone(&publisher_done);
+        let relocations = sync::Arc::clone(&relocations);
+        move || {
+            publisher.relocate(Some(a), b);
+
+            if relocations.load(Ordering::Acquire) == 0 {
+                publisher_progress.send(PublisherProgress::RelocationFinished).unwrap();
+                return publisher.into_arc();
+            }
+
+            publisher_done.wait();
+            publisher.into_arc()
+        }
+    });
+
+    // The publisher must be inside B's factory, leaving B empty while the adopter starts. Reporting
+    // an early return makes mutations that bypass materialization fail instead of hanging the test.
+    match progress.recv().unwrap() {
+        PublisherProgress::FactoryStarted => {}
+        PublisherProgress::RelocationFinished => {
+            panic!("the publisher must enter the destination factory before relocation completes");
+        }
+    }
+
+    let mut adopter = origin;
+    {
+        let _hook_guard = super::arc::set_after_factory_update_hook({
+            let release_publisher = sync::Arc::clone(&release_publisher);
+            let publisher_done = sync::Arc::clone(&publisher_done);
+            move || {
+                release_publisher.wait();
+                publisher_done.wait();
+            }
+        });
+        adopter.relocate(Some(a), b);
+    }
+
+    let publisher_value = publisher.join().unwrap();
+    assert!(
+        sync::Arc::ptr_eq(&adopter.clone().into_arc(), &publisher_value),
+        "the second racer must adopt the value the publisher installed for B"
+    );
+
+    *recorded.lock().unwrap() = None;
+    adopter.relocate(Some(b), c);
+    assert_eq!(
+        *recorded.lock().unwrap(),
+        Some(a),
+        "an adopting racer must carry the original source into its next materialization"
+    );
+}
+
+#[test]
+fn dropping_factory_update_hook_guard_clears_the_hook() {
+    let calls = sync::Arc::new(AtomicUsize::new(0));
+
+    {
+        let _hook_guard = super::arc::set_after_factory_update_hook({
+            let calls = sync::Arc::clone(&calls);
+            move || {
+                calls.fetch_add(1, Ordering::AcqRel);
+            }
+        });
+    }
+
+    super::arc::run_after_factory_update_hook();
+    assert_eq!(
+        calls.load(Ordering::Acquire),
+        0,
+        "dropping the guard must clear a hook that relocation did not consume"
+    );
+}
+
+#[test]
+fn stale_factory_update_hook_guard_preserves_a_new_registration() {
+    let calls = sync::Arc::new(AtomicUsize::new(0));
+
+    let first_guard = super::arc::set_after_factory_update_hook({
+        let calls = sync::Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::AcqRel);
+        }
+    });
+    super::arc::run_after_factory_update_hook();
+
+    let second_guard = super::arc::set_after_factory_update_hook({
+        let calls = sync::Arc::clone(&calls);
+        move || {
+            calls.fetch_add(1, Ordering::AcqRel);
+        }
+    });
+
+    // Consuming the first hook releases its thread-local slot before its guard is dropped. The
+    // stale guard must recognize that the newly registered hook has a different owner.
+    drop(first_guard);
+    super::arc::run_after_factory_update_hook();
+    drop(second_guard);
+
+    assert_eq!(
+        calls.load(Ordering::Acquire),
+        2,
+        "a stale guard must not clear a newer hook registration"
+    );
+}
+
+#[test]
 fn new_boxed_relocate() {
     // Exercises Ctor<T>::relocate (the no-op ThreadAware impl inside new_boxed)
     let affinities = pinned_affinities(&[2]);
     let mut arc = super::Arc::<Counter, crate::PerCore>::new_boxed(|| Box::new(Counter::new()));
     arc.relocate(Some(affinities[0]), affinities[1]);
     assert_eq!(arc.value(), 0, "new_boxed relocate should create a fresh counter");
+}
+
+#[test]
+fn factory_panic_leaves_the_cell_empty() {
+    // A relocation that misses runs the factory with no cell locked, then publishes the result into
+    // the write-once destination cell. The factory is caller code and may panic; because nothing is
+    // locked, the panic simply propagates and the cell is left empty for a later relocation to fill.
+
+    // A value whose clone panics. `with_value` clones it only when materializing a new affinity,
+    // so construction succeeds and the first relocation into an empty affinity panics.
+    struct Bomb;
+
+    impl Clone for Bomb {
+        fn clone(&self) -> Self {
+            panic!("materialization bomb");
+        }
+    }
+
+    impl ThreadAware for Bomb {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let arc = super::Arc::<Bomb, crate::PerCore>::with_value(Bomb);
+    let mut relocated = arc.clone();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| relocated.relocate(Some(source), destination)));
+    assert!(result.is_err(), "the factory panic must propagate to the caller");
+
+    // The factory panicked before it could publish anything, so the write-once cell stays empty and
+    // a later relocation is free to materialize into it.
+    assert!(
+        arc.storage.get(destination).is_none(),
+        "a panicking factory must leave the cell empty"
+    );
+}
+
+#[test]
+fn relocation_preserves_the_source_affinity_value() {
+    // A miss records the value the Arc moved away from into the source affinity's slot, so a later
+    // relocation back into that affinity finds the original value instead of re-materializing a
+    // fresh one. This guards the `source != destination` branch that performs that write.
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let mut arc = PerCore::new(Counter::new);
+
+    // The value the Arc currently holds belongs to the source affinity.
+    let source_value = sync::Arc::clone(&arc.value);
+
+    // Relocate away from the source affinity: this materializes the destination and must record
+    // `source_value` in the source slot.
+    arc.relocate(Some(source), destination);
+    assert!(
+        !sync::Arc::ptr_eq(&arc.value, &source_value),
+        "relocating away must adopt the destination value"
+    );
+
+    // Relocate a clone back into the source affinity. It must find the recorded original value, not
+    // a freshly materialized one.
+    let mut back = arc.clone();
+    back.relocate(Some(destination), source);
+    assert!(
+        sync::Arc::ptr_eq(&back.value, &source_value),
+        "relocating back into the source affinity must find the preserved original value"
+    );
+}
+
+#[test]
+fn relocation_leaves_a_populated_source_slot_untouched() {
+    // Recording the moved-from value into the source slot uses a write-once `set`, so an
+    // already-populated source slot is left as-is. Another thread may have recorded the same slot
+    // first; keeping the existing value is correct and must not overwrite it.
+    let affinities = pinned_affinities(&[2]);
+    let source = affinities[0];
+    let destination = affinities[1];
+
+    let mut arc = PerCore::new(Counter::new);
+    arc.increment_by(11);
+
+    // Pre-populate the source slot with a distinct value, standing in for a value another thread
+    // already recorded there.
+    let seeded = sync::Arc::new(Counter::new());
+    seeded.increment_by(555);
+    let _ = arc.storage.insert(source, sync::Arc::clone(&seeded));
+
+    // Relocate away from the source affinity. The miss records the carried value into the source
+    // slot, but the slot is already populated, so the pre-existing value must survive.
+    arc.relocate(Some(source), destination);
+    assert!(
+        sync::Arc::ptr_eq(&arc.storage.get(source).unwrap(), &seeded),
+        "a populated source slot must keep its existing value"
+    );
+
+    // A relocation back into the source affinity must find the pre-existing value, confirming the
+    // carried value never displaced it.
+    let mut back = arc.clone();
+    back.relocate(Some(destination), source);
+    assert_eq!(back.value(), 555, "relocating back must find the pre-existing source value");
+}
+
+#[test]
+fn opposite_direction_relocations_converge_without_deadlock() {
+    // Two threads relocate in opposite directions across the same pair of affinities. These
+    // factories do not reenter another initializing cell, and source recording holds no cell across
+    // another access, so each thread completes and ends on its destination's published value.
+    // Ref: docs/implementation.md, "Relocation and publication".
+
+    // A small bounded repetition samples both writes without turning this into a stress test.
+    const ROUNDS: usize = 8;
+
+    let affinities = pinned_affinities(&[2]);
+    let x = affinities[0];
+    let y = affinities[1];
+
+    for _ in 0..ROUNDS {
+        let shared = PerCore::new(Counter::new);
+        let mut to_y = shared.clone();
+        let mut to_x = shared.clone();
+
+        let barrier = sync::Arc::new(sync::Barrier::new(2));
+        let barrier_xy = sync::Arc::clone(&barrier);
+        let barrier_yx = sync::Arc::clone(&barrier);
+
+        let xy = std::thread::spawn(move || {
+            barrier_xy.wait();
+            to_y.relocate(Some(x), y);
+            to_y.into_arc()
+        });
+        let yx = std::thread::spawn(move || {
+            barrier_yx.wait();
+            to_x.relocate(Some(y), x);
+            to_x.into_arc()
+        });
+
+        // The joins return only once both threads finish; a deadlock would hang here instead.
+        let landed_on_y = xy.join().unwrap();
+        let landed_on_x = yx.join().unwrap();
+
+        assert!(
+            sync::Arc::ptr_eq(&landed_on_y, &shared.storage.get(y).unwrap()),
+            "the X->Y thread must end on the value published for Y"
+        );
+        assert!(
+            sync::Arc::ptr_eq(&landed_on_x, &shared.storage.get(x).unwrap()),
+            "the Y->X thread must end on the value published for X"
+        );
+    }
+}
+
+#[test]
+fn same_slot_relocation_keeps_the_carried_value() {
+    // Source and destination that resolve to the same slot are not a cross-slot move: the carried
+    // value already belongs to that slot, so relocation must keep it rather than materialize a
+    // fresh one. `PerProcess` maps every affinity to slot 0, so any relocation exercises this.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = crate::Arc::<Counter, crate::PerProcess>::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(Some(affinities[0]), affinities[1]);
+
+    assert!(
+        sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a same-slot relocation must keep the carried value, not materialize a fresh one"
+    );
+    assert_eq!(moved.value(), 5, "the shared value must be preserved across a same-slot relocation");
+}
+
+#[test]
+fn none_source_single_slot_relocation_keeps_the_carried_value() {
+    // A relocation with no source into a single-slot table is still a same-slot case: with one
+    // slot the carried value provably belongs to it, so `PerProcess` must keep it rather than run
+    // the factory. This pins the `None`-source arm of the same-slot test, the whole of relocation
+    // under `PerProcess` for sourceless moves. Ref: docs/design.md, `PerProcess`.
+    let affinities = pinned_affinities(&[1]);
+
+    let arc = crate::Arc::<Counter, crate::PerProcess>::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(None, affinities[0]);
+
+    assert!(
+        sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a sourceless single-slot relocation must keep the carried value, not materialize a fresh one"
+    );
+    assert_eq!(
+        moved.value(),
+        5,
+        "the shared value must be preserved across a sourceless single-slot relocation"
+    );
+}
+
+#[test]
+fn none_source_multi_slot_relocation_materializes_a_fresh_value() {
+    // With more than one slot a sourceless relocation is not provably same-slot: the destination is
+    // a distinct slot, so relocation must materialize a fresh value rather than keep the carried
+    // one. This pins the `count == 1` boundary of the sourceless same-slot arm against widening to
+    // cover multi-slot tables.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = PerCore::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(None, affinities[1]);
+
+    assert!(
+        !sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a sourceless multi-slot relocation must materialize a fresh value, not keep the carried one"
+    );
+    assert_eq!(moved.value(), 0, "a fresh PerCore value starts independent of the source");
+}
+
+#[test]
+fn cross_slot_relocation_materializes_a_fresh_value() {
+    // The counterpart to the same-slot cases: a relocation between distinct slots must still
+    // materialize an independent value for the destination. This guards against the same-slot
+    // short-circuit widening to cover genuine cross-slot moves.
+    let affinities = pinned_affinities(&[2]);
+
+    let arc = PerCore::new(Counter::new);
+    arc.increment_by(5);
+
+    let mut moved = arc.clone();
+    moved.relocate(Some(affinities[0]), affinities[1]);
+
+    assert!(
+        !sync::Arc::ptr_eq(&moved.value, &arc.value),
+        "a cross-slot relocation must materialize a fresh value, not keep the carried one"
+    );
+    assert_eq!(moved.value(), 0, "a fresh PerCore value starts independent of the source");
 }

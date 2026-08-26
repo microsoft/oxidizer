@@ -351,7 +351,7 @@ fn entry_order_is_preserved_and_duplicate_keys_are_kept() {
         .dimensions()
         .into_iter()
         .filter(|(key, _)| key == "tenant")
-        .map(|(_, value)| observed_testing::metric_number_of(&value))
+        .map(|(_, value)| observed_utils::metric_number_of(&value))
         .collect();
     assert_eq!(tenants, [Some(1.0), Some(2.0)]);
 }
