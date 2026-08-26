@@ -38,11 +38,13 @@ pub struct SystemToolchain;
 
 impl Toolchain for SystemToolchain {
     #[cfg_attr(test, mutants::skip)] // Delegates straight to the filesystem; the policy that consults it is tested with a fake.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the policy that consults it is covered through `plan`.
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
 
     #[cfg_attr(test, mutants::skip)] // Delegates straight to the registry; the policy that consults it is tested with a fake.
+    #[cfg_attr(coverage_nightly, coverage(off))] // Pure I/O; the policy that consults it is covered through `plan`.
     fn find_cl_exe(&self, target: &str) -> Option<PathBuf> {
         cc::windows_registry::find_tool(target, "cl.exe").map(|tool| tool.path().to_path_buf())
     }

@@ -26,6 +26,12 @@ all-features = true
 [package.metadata.cargo-machete]
 ignored = ["msvc_spectre_libs_build"]
 
+# The library target is documentation only -- every executable body lives in the
+# build script, which coverage instrumentation never observes -- so this package
+# legitimately produces no coverage data. Opt out of the gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [features]
 # Turn the "libraries not found" build warning into a hard build error.
 error = []
