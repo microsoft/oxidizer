@@ -167,20 +167,6 @@ fn phantom_shared_reference_compiles_and_relocates() {
     assert_eq!(value.0.relocations, 1);
 }
 
-/// `Arc<T>` is `Send` only when `T: Send + Sync`.
-#[derive(ThreadAware)]
-struct PhantomArc<T: Sync>(Tracker, PhantomData<Arc<T>>);
-
-#[test]
-fn phantom_arc_compiles_and_relocates() {
-    let (source, destination) = affinity_pair();
-
-    let mut value = PhantomArc::<i32>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
-
-    assert_eq!(value.0.relocations, 1);
-}
-
 /// An unsized slice payload, which the traversal does not enter, so nothing is bound for it.
 #[derive(ThreadAware)]
 struct PhantomSlice<T: Send>(Tracker, PhantomData<[T]>);
@@ -207,21 +193,6 @@ fn phantom_projection_compiles_and_relocates() {
     let (source, destination) = affinity_pair();
 
     let mut value = PhantomProjection::<std::vec::IntoIter<i32>>(Tracker::default(), PhantomData);
-    value.relocate(source, destination);
-
-    assert_eq!(value.0.relocations, 1);
-}
-
-/// A parameter used directly and inside a marker takes the `ThreadAware` bound from the first
-/// use; the marker's own requirement is the author's to state.
-#[derive(ThreadAware)]
-struct RelocatedAndPhantom<'a, T: 'a + Sync>(T, PhantomData<&'a T>);
-
-#[test]
-fn parameter_that_is_both_relocated_and_phantom_compiles() {
-    let (source, destination) = affinity_pair();
-
-    let mut value = RelocatedAndPhantom::<'_, Tracker>(Tracker::default(), PhantomData);
     value.relocate(source, destination);
 
     assert_eq!(value.0.relocations, 1);

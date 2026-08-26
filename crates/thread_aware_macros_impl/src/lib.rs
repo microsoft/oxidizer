@@ -102,18 +102,16 @@ pub(crate) fn param_idents() -> (syn::Ident, syn::Ident) {
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {
     let mut generics = input.generics.clone();
-    let usage = match &input.data {
-        Data::Struct(s) => collect_generics_in_fields(&s.fields, &generics)?,
+    let mut usage = GenericUsage::default();
+    match &input.data {
+        Data::Struct(s) => collect_generics_in_fields(&s.fields, &generics, &mut usage)?,
         Data::Enum(e) => {
-            let mut usage = GenericUsage::default();
             for v in &e.variants {
-                let local = collect_generics_in_fields(&v.fields, &generics)?;
-                usage.merge(local);
+                collect_generics_in_fields(&v.fields, &generics, &mut usage)?;
             }
-            usage
         }
-        Data::Union(_) => GenericUsage::default(),
-    };
+        Data::Union(_) => {}
+    }
 
     let mut thread_aware_path = root_path.clone();
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
@@ -161,20 +159,16 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 /// Reports whether `candidate` names the same trait the derive would emit.
 ///
 /// Compares every segment ident rather than only the last, so an unrelated
-/// `some_crate::ThreadAware` is no longer mistaken for the real trait - which dropped the
-/// bound the generated body needs and left the impl unable to compile.
+/// `some_crate::ThreadAware` is not mistaken for the real trait.
 ///
-/// A bare single-segment `ThreadAware` is accepted as the real trait. That is a deliberate
-/// compromise, not an oversight: the name alone cannot distinguish the real trait imported by
-/// `use` from one of the user's own, and the two failure modes are not equal. Real code writes
-/// the imported form - `CallbackMemory<D: ThreadAware + Clone>` in `bytesbuf`, for one - and
-/// emitting a second bound there produces a duplicate that `clippy::trait_duplication_in_bounds`
-/// rejects at the user's own declaration. A user-defined trait sharing the name is the rarer
-/// case, and it has a workaround: qualify it, or qualify the real one.
+/// A bare single-segment `ThreadAware` is accepted as the real trait, deliberately: the name
+/// alone cannot distinguish the imported trait from one of the author's own, and real code
+/// writes the imported form - `CallbackMemory<D: ThreadAware + Clone>` in `bytesbuf` - where
+/// a second bound would trip `clippy::trait_duplication_in_bounds` at their own declaration.
+/// Qualifying either path resolves the rarer case.
 ///
-/// This is now the only place the derive decides anything from how a name is spelled. The
-/// `PhantomData` test that used to sit beside it is gone, so the exception is deliberate and
-/// singular rather than one of a family, and the derive documents it as such.
+/// This is the only place the derive decides anything from how a name is spelled; the
+/// `PhantomData` test that used to sit beside it is gone.
 fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
     let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
     let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();
@@ -194,16 +188,8 @@ struct GenericUsage {
     has_skipped_field: bool,
 }
 
-impl GenericUsage {
-    fn merge(&mut self, other: Self) {
-        self.relocated.extend(other.relocated);
-        self.has_skipped_field |= other.has_skipped_field;
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
-fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn::Result<GenericUsage> {
-    let mut usage = GenericUsage::default();
+fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics, usage: &mut GenericUsage) -> syn::Result<()> {
     let generic_idents: HashSet<_> = generics
         .params
         .iter()
@@ -221,9 +207,9 @@ fn collect_generics_in_fields(fields: &Fields, generics: &syn::Generics) -> syn:
             usage.has_skipped_field = true;
             continue;
         }
-        collect_generics_in_type(&field.ty, &generic_idents, &mut usage)?;
+        collect_generics_in_type(&field.ty, &generic_idents, usage)?;
     }
-    Ok(usage)
+    Ok(())
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // can't figure out how to get to 100% coverage of this function
