@@ -2958,6 +2958,7 @@ name = "msvc_spectre_libs_build"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "mutants",
  "ohno 0.4.0",
 ]
 

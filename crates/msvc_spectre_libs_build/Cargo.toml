@@ -27,6 +27,9 @@ all-features = true
 cc = { workspace = true }
 ohno = { workspace = true, features = ["app-err"] }
 
+[dev-dependencies]
+mutants = { workspace = true }
+
 # >>> anvil-managed: anvil-lints
 [lints]
 workspace = true

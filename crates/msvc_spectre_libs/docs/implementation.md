@@ -95,11 +95,10 @@ The script therefore reads the target from the environment Cargo provides:
 - `TARGET` supplies the full triple used to build target-suffixed environment
   variable names and to look up a toolchain through `cc::windows_registry`.
 
-`TARGET` and `CARGO_CFG_TARGET_ARCH` are required: Cargo always sets them for a
-build script, so their absence indicates a broken invocation rather than a user
-error, and `BuildEnvironment::from_env` fails outright instead of guessing.
-`CARGO_CFG_TARGET_OS` and `CARGO_CFG_TARGET_ENV` are treated as empty when
-absent, since an empty string simply fails the gate.
+`TARGET`, `CARGO_CFG_TARGET_OS`, `CARGO_CFG_TARGET_ENV` and
+`CARGO_CFG_TARGET_ARCH` are all required: Cargo sets every one of them for a
+build script, so an absence means this is not running as one, and
+`BuildEnvironment::from_env` fails outright rather than guessing.
 
 ## 3. Resolution flow
 
