@@ -93,6 +93,29 @@ implement a library-facing baseline requirement is not a `fetch` transport. Diff
 supported values or operating-system availability remain construction-time validation because
 Rust types cannot prove those environmental facts.
 
+### Typed transport extensions
+
+Erasure hides the transport from the portable API but does not make intentional backend integration
+impossible. Until `build`, the builder retains cloneable, type-indexed extension values registered
+by the selected transport:
+
+```rust,ignore
+if let Some(options) = builder.transport_extension_mut::<WinHttpOptions>() {
+    options.use_integrated_proxy_discovery(true);
+}
+```
+
+Querying an extension is the supported way to identify a transport capability outside the portable
+baseline. A required extension is checked at runtime because the builder is concrete and the
+application may select its transport dynamically. Libraries using this path depend on the concrete
+transport crate and must define what absence means.
+
+Extensions contain unbuilt configuration only. They cannot expose live sockets or handlers, and
+they disappear when the builder is consumed. The type's own API defines whether contributions
+merge, replace, or conflict; transport construction validates the result. This keeps unchecked
+`Any` downcasts and string transport identifiers out of library code while preserving the simple
+non-generic builder.
+
 ## Library-facing surface
 
 The demonstrated library requirements fit one coherent builder:
@@ -340,9 +363,10 @@ otherwise consider their default authority equal.
 
 This exact-name contract intentionally does not preserve the current TVS validator's open-ended
 SAN regular expressions or subject-name allowlists. Those rules can be replaced only when the
-service supplies a concrete DNS identity present in its certificates. If flexible certificate
-matching remains a real deployment requirement, it is a separately named custom-server-identity
-capability rather than an expansion of this baseline API.
+service supplies a concrete DNS identity present in its certificates. Flexible matching, pinning,
+and custom roots cannot be portable requirements because not every supported transport can enforce
+them before disclosing a request. A transport-bound library may configure such a policy through a
+typed extension and must reject transports that do not expose it.
 
 ## Growing the portable surface
 
@@ -351,7 +375,7 @@ maintained in the [capability matrix](capability-matrix.md).
 
 The initial surface has no capability traits. A new library-facing requirement is added to the
 portable contract only when it has precise observable semantics and every supported transport can
-implement it. Otherwise it remains application-owned transport configuration. If a future
-requirement is both essential to libraries and fundamentally unavailable on a supported transport,
-that concrete need—not the backend's native option shape—would justify revisiting typed capability
-profiles.
+implement it. Otherwise it remains transport-specific configuration, reachable by libraries only
+through typed extensions. If a future requirement is essential to transport-independent libraries
+but fundamentally unavailable on a supported transport, the supported transport set or this design
+must change; a marker trait cannot manufacture the missing behavior.

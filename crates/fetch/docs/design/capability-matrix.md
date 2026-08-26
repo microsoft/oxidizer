@@ -18,9 +18,9 @@ the stated guarantees.
 | Arbitrary external signing service | Supported through rustls signing traits | Unsupported | Unsupported unless it provides a compatible Windows key handle | Keep rustls-specific until a non-Windows library use exists |
 | Custom verifier callback | Supported | No equivalent current `fetch_tls` API | No userspace callback | Transport-specific |
 | Exact TLS server-name override while preserving request authority | Connector dials the request endpoint and supplies the override to rustls | Connector dials the request endpoint and supplies the override to native TLS | `WinHttpConnect` uses the TLS name, resolution override uses the endpoint, and replaced `Host` preserves authority | Baseline |
-| Custom SAN/subject server-identity policy | Enforced before application data by a verifier | No equivalent current adapter | Server certificate is queryable only after TLS negotiation; equivalent pre-disclosure enforcement is unproven | Add a semantic capability only if exact-name mapping cannot replace the TVS rules |
-| Certificate or public-key pins | Implementable in a verifier | No equivalent current adapter | Certificate context is queryable after negotiation | Separate transport-specific feature until a safe portable contract exists |
-| Custom trust roots | Expressible through custom rustls configuration | Not exposed by the current adapter | Uses OS trust unless additional validation is implemented | Transport-specific until a portable requirement is demonstrated |
+| Custom SAN/subject server-identity policy | Enforced before application data by a verifier | No equivalent current adapter | Cannot be safely enforced before request disclosure | Explicit portable non-goal; rustls extension only |
+| Certificate or public-key pins | Implementable in a verifier | No equivalent current adapter | Cannot be safely enforced before request disclosure | Explicit portable non-goal; transport extension only |
+| Per-client custom trust roots | Expressible through custom rustls configuration | Not exposed by the current adapter | Uses Windows trust stores | Explicit portable non-goal; transport extension only |
 | TLS backend and crypto-provider selection | rustls-specific | native-TLS-specific | SChannel is fixed | Transport-specific |
 | Revocation | Required by the platform-verifier policy | Platform behavior | Must be enabled explicitly | Invariant, not a capability |
 
@@ -35,14 +35,15 @@ modality a transport-construction concern rather than a library-facing capabilit
 | HTTP/1.1 and HTTP/2 preference | Supported | Supported | Baseline |
 | Strictly require HTTP/2 | Supported by Hyper's HTTP/2-only mode | Supported by enabling HTTP/2 and setting `WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED` | Baseline; gRPC is a demonstrated consumer |
 | Initial HTTP/2 stream receive window | Fixed or adaptive policy | OS default; a fixed window option exists | Transport-owned default, not public configuration |
-| HTTP/3 | Unsupported | Supported on recent Windows | Transport-specific until a library requires HTTP/3 |
+| HTTP/3 | Unsupported | Supported on recent Windows | Transport-specific until Hyper and every supported transport implement it and a library requires it |
 | Fine-grained HTTP/2 flow control | Supported | Different partial native controls | Internal transport policy |
 
 An ordered version preference and a protocol requirement are different APIs. A transport may honor
 an HTTP/2 preference by falling back to HTTP/1.1, but that is not sufficient for a gRPC library
 that requires HTTP/2. WinHTTP can prevent fallback by combining its HTTP/2 enable flag with
-`WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; no user-space emulation is needed. On systems that lack
-the option, transport construction fails.
+`WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED`; no user-space emulation is needed. The option requires
+Windows 10 version 1903 or later. On an older supported host, transport construction for a strict
+HTTP/2 requirement fails.
 
 The receive window is not a protocol requirement. Its optimum depends on path bandwidth and RTT,
 active stream count, response consumption, memory budget, and adaptive-window behavior. A numeric
@@ -58,7 +59,7 @@ own defaults.
 | Maximum idle age | Arbitrary duration or unlimited | Shortening is supported; longer retention depends on protocol and native scavenging | Baseline with value/protocol validation |
 | Total connections per origin | Not provided by the current Hyper option | Native per-server cap | Baseline requirement, but Hyper needs a real total-concurrency implementation |
 | Maximum idle connections per host | Current Hyper `max_connections` behavior | No equivalent meaning; WinHTTP's cap is total connections | Rename and keep transport-specific |
-| Coarse idle HTTP/2 health check | Supported | Supported with a native minimum interval | Avoid a trait unless a library requires this outcome independently of idle-age policy |
+| Coarse idle HTTP/2 health check | Supported | Supported with a native minimum interval | Transport-owned policy; no public option |
 | Keep-alive interval, acknowledgement timeout, and active-only mode | Supported by Hyper | Not available at the same granularity | Transport-specific |
 | Multiple dispatch pools | Implemented above the transport | Can use multiple transport instances | Pipeline policy, not a transport capability |
 | Avoid Nagle/delayed-ACK stalls | Set `TCP_NODELAY` on owned sockets | No setter, but calibrated HTTP/1.1 measurements match `TCP_NODELAY` behavior | Transport invariant with backend regression coverage |
@@ -130,9 +131,9 @@ all supported transports.
 
 Custom server identity remains outside the proposed surface. It would cover service-defined SAN
 patterns or known subject names only if TVS cannot migrate to an exact DNS identity. Hyper/rustls
-supports that richer mechanism; the current native-TLS adapter does not, and WinHTTP has not
-demonstrated equivalent enforcement before request secrets or body data may be sent. That
-hypothetical need should not complicate the builder until it is demonstrated.
+supports that richer mechanism; the current native-TLS adapter and WinHTTP do not. It therefore
+cannot become a portable capability. A TVS library that retains it must select a supporting
+transport through a typed extension and reject the others.
 
 Named client credentials, exact TLS server-name mapping, strict HTTP/2, fixed connection lifetime,
 connect deadline, connection limits, streaming, cancellation, and ordinary HTTP/1.1/HTTP/2
