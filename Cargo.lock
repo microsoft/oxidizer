@@ -4920,6 +4920,9 @@ dependencies = [
 [[package]]
 name = "thread_aware_core"
 version = "0.1.0"
+dependencies = [
+ "static_assertions",
+]
 
 [[package]]
 name = "thread_aware_macros"

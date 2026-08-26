@@ -3,7 +3,7 @@
 
 #![no_std]
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/logo.png")]
 #![doc(
     html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware_core/favicon.ico"
@@ -60,6 +60,8 @@
 //! The example below plays the part of the runtime so the order is visible.
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "std")] {
 //! use std::thread;
 //!
 //! use thread_aware_core::{NumaNode, Origin, Place, ThreadAware};
@@ -89,6 +91,8 @@
 //! worker.relocate(Some(&first), &second); // moved to another thread
 //!
 //! assert_eq!(worker.thread, Some(there));
+//! # }
+//! # }
 //! ```
 //!
 //! # Performance, not correctness
@@ -172,7 +176,7 @@
 //!   `PathBuf`. Turning it off yields a `no_std` build that requires only `alloc`.
 
 extern crate alloc;
-#[cfg(any(feature = "std", test))]
+#[cfg(any(test, feature = "std"))]
 extern crate std;
 
 mod impls;

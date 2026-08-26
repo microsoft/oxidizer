@@ -7,7 +7,7 @@
 //! to that thread. See [what the ids mean](crate#what-the-ids-mean) for the guarantees each
 //! id carries.
 
-#[cfg(any(feature = "std", test))]
+#[cfg(any(test, feature = "std"))]
 use std::thread::ThreadId;
 
 /// An identifier for the runtime that produced a [`Place`].
@@ -91,6 +91,8 @@ impl From<u16> for NumaNode {
 /// # Examples
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "std")] {
 /// use std::thread;
 ///
 /// use thread_aware_core::{NumaNode, Origin, Place};
@@ -107,11 +109,13 @@ impl From<u16> for NumaNode {
 ///
 /// // ...but the thread and its nearest memory are unchanged.
 /// assert_eq!(place.numa_node(), elsewhere.numa_node());
+/// # }
+/// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Place {
     origin: Origin,
-    #[cfg(any(feature = "std", test))]
+    #[cfg(any(test, feature = "std"))]
     thread: ThreadId,
     numa_node: NumaNode,
 }
@@ -136,7 +140,7 @@ impl Place {
     ///
     /// assert_eq!(place.origin(), Origin::from(1));
     /// ```
-    #[cfg(any(feature = "std", test))]
+    #[cfg(any(test, feature = "std"))]
     #[must_use]
     pub const fn new(origin: Origin, thread: ThreadId, numa_node: NumaNode) -> Self {
         Self { origin, thread, numa_node }
@@ -151,6 +155,8 @@ impl Place {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
     /// use thread_aware_core::{NumaNode, Origin, Place};
@@ -158,6 +164,8 @@ impl Place {
     /// let place = Place::new(Origin::from(7), thread::current().id(), NumaNode::from(0));
     ///
     /// assert_eq!(place.origin(), Origin::from(7));
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub const fn origin(&self) -> Origin {
@@ -183,7 +191,7 @@ impl Place {
     ///
     /// assert_eq!(place.thread(), here);
     /// ```
-    #[cfg(any(feature = "std", test))]
+    #[cfg(any(test, feature = "std"))]
     #[must_use]
     pub const fn thread(&self) -> ThreadId {
         self.thread
@@ -197,6 +205,8 @@ impl Place {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "std")] {
     /// use std::thread;
     ///
     /// use thread_aware_core::{NumaNode, Origin, Place};
@@ -204,6 +214,8 @@ impl Place {
     /// let place = Place::new(Origin::from(1), thread::current().id(), NumaNode::from(3));
     ///
     /// assert_eq!(place.numa_node(), NumaNode::from(3));
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub const fn numa_node(&self) -> NumaNode {
@@ -214,9 +226,16 @@ impl Place {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use core::panic::{RefUnwindSafe, UnwindSafe};
     use std::thread;
 
+    use static_assertions::assert_impl_all;
+
     use super::{NumaNode, Origin, Place};
+
+    assert_impl_all!(Origin: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(NumaNode: UnwindSafe, RefUnwindSafe);
+    assert_impl_all!(Place: UnwindSafe, RefUnwindSafe);
 
     #[test]
     fn exposes_components() {

@@ -12,9 +12,9 @@ use core::num::{
     NonZeroUsize,
 };
 use core::time::Duration;
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 use std::collections::HashMap;
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
 
 use crate::{NumaNode, Origin, Place, ThreadAware};
@@ -60,12 +60,12 @@ impl_transfer!(NonZeroI128);
 impl_transfer!(NonZeroIsize);
 
 impl_transfer!(String);
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl_transfer!(PathBuf);
 impl_transfer!(Duration);
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl_transfer!(Path);
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl_transfer!(&Path);
 
 impl_transfer!(str);
@@ -73,7 +73,7 @@ impl_transfer!(&str);
 
 impl_transfer!(Origin);
 impl_transfer!(NumaNode);
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl_transfer!(std::thread::ThreadId);
 impl_transfer!(Place);
 
@@ -244,7 +244,7 @@ where
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl<K, V, S> ThreadAware for HashMap<K, V, S>
 where
     K: Send,
@@ -317,7 +317,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "std")]
     fn test_hashmap() {
         let places = sample_places();
         let source = Some(&places[0]);
@@ -594,7 +593,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "std")]
     fn hashmap_relocates_values_without_mutating_keys() {
         use core::hash::BuildHasherDefault;
         use std::hash::DefaultHasher;
