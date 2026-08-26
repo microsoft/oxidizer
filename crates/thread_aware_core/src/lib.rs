@@ -68,13 +68,6 @@
 //!     scratch: Scratch,
 //!     dictionary: Dictionary,
 //! }
-//!
-//! impl Encoder {
-//!     /// Public API: names only `thread_aware_core` types.
-//!     pub fn describe(&self, running_on: &thread_aware_core::Thread) -> String {
-//!         format!("encoding near {:?}", running_on.numa_node())
-//!     }
-//! }
 //! ```
 //!
 //! The derive writes the forwarding implementation, calling `relocate` on `scratch` and

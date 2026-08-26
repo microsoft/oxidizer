@@ -72,13 +72,6 @@ pub struct Encoder {
     scratch: Scratch,
     dictionary: Dictionary,
 }
-
-impl Encoder {
-    /// Public API: names only `thread_aware_core` types.
-    pub fn describe(&self, running_on: &thread_aware_core::Thread) -> String {
-        format!("encoding near {:?}", running_on.numa_node())
-    }
-}
 ```
 
 The derive writes the forwarding implementation, calling `relocate` on `scratch` and
@@ -212,7 +205,7 @@ the case where splitting is correct.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbhOM5nLeOt3IbGr-sjORd7K0bQ0CetWuEZ24bsXsOQ7J7Z8hhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbPQGl7fdCLn0bknUBcsuM1mcbgGV3Ve7CQ7cb3KzHBP06MKxhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
