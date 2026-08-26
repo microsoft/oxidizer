@@ -244,9 +244,10 @@ pub use core::ThreadAware;
 ///   since the `ThreadAware: Send` supertrait still has to hold.
 ///
 /// A `PhantomData<..>` field is no exception: it relocates through the no-op
-/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`, and the parameters named inside it
-/// are bound like any others. Write a marker payload that is `Send` for every argument - a
-/// function pointer keeps the variance without the `!Send`:
+/// `impl<T: ?Sized + Send> ThreadAware for PhantomData<T>`, and a parameter the traversal
+/// reaches inside it - the `U` of `PhantomData<U>` - is bound like any other. The traversal
+/// does not enter a function pointer, so writing the payload as one carries the parameter for
+/// variance, stays `Send` for every argument, and emits no bound at all:
 ///
 /// ```rust
 /// # use core::marker::PhantomData;
