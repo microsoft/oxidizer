@@ -5,14 +5,13 @@
 
 use insta::assert_snapshot;
 use quote::quote;
+use testing_aids::render_expansion;
 use thread_aware_macros_impl::derive_thread_aware;
 
 fn expand(input: proc_macro2::TokenStream) -> String {
     // Use the canonical ::thread_aware root in test snapshots.
     let root: syn::Path = syn::parse_quote!(::thread_aware);
-    let ts = derive_thread_aware(input, &root);
-    // Pretty print if it parses as a file; fall back to raw tokens.
-    syn::parse_file(&ts.to_string()).map_or_else(|_| ts.to_string(), |f| prettyplease::unparse(&f))
+    render_expansion(&derive_thread_aware(input, &root))
 }
 
 #[test]
@@ -194,8 +193,7 @@ fn generics_group_usage_adds_bound() {
     }
 
     let root: syn::Path = syn::parse_quote!(::thread_aware);
-    let ts = derive_thread_aware(quote! {#input}, &root);
-    let rendered = syn::parse_file(&ts.to_string()).map_or_else(|_| ts.to_string(), |f| prettyplease::unparse(&f));
+    let rendered = render_expansion(&derive_thread_aware(quote! {#input}, &root));
     assert_snapshot!(rendered);
 }
 

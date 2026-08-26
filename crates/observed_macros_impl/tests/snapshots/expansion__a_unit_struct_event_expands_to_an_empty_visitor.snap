@@ -1,0 +1,29 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"no.fields\"\"#, \"#[info] struct NoFields;\")"
+---
+struct NoFields;
+const _: () = {
+    impl ::observed::Event for NoFields {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "no.fields",
+            ::core::option::Option::Some(::core::any::TypeId::of::<NoFields>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "no.fields",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

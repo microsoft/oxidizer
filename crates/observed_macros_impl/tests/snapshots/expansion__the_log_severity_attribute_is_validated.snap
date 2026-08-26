@@ -1,0 +1,31 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[info] #[warning] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+only one log-severity attribute (`#[trace]`, `#[debug]`, `#[info]`, `#[warning]`, `#[error]`, `#[fatal]`) is allowed
+
+---- input ----
+#[event("e")]
+#[info(bogus = "x")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+unknown log option `bogus`; expected `name`
+
+---- input ----
+#[event("e")]
+#[info = "x"] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+a log-severity attribute takes an optional message string and `name = "..."`, not `= value`
+
+---- input ----
+#[event("e")]
+#[info(name = "a", name = "b")] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+duplicate `name` setting

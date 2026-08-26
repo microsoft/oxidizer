@@ -1,0 +1,31 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[derive(Enrichment)]
+enum Bad { A }
+
+---- yields ----
+Enrichment can only be derived for structs, not enums
+
+---- input ----
+#[derive(Enrichment)]
+union Bad { a: i64 }
+
+---- yields ----
+Enrichment can only be derived for structs, not unions
+
+---- input ----
+#[derive(Enrichment)]
+struct Bad;
+
+---- yields ----
+Enrichment can only be derived for structs with named fields
+
+---- input ----
+#[derive(Enrichment)]
+struct Bad(i64);
+
+---- yields ----
+Enrichment can only be derived for structs with named fields

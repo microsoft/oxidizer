@@ -1,0 +1,44 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"audit.write\", disabled\"#,\nr\"\n            #[warning]\n            struct AuditWrite {\n                #[unredacted]\n                attempts: i64,\n            }\n            \",)"
+---
+struct AuditWrite {
+    attempts: i64,
+}
+const _: () = {
+    impl ::observed::Event for AuditWrite {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "audit.write",
+            ::core::option::Option::Some(::core::any::TypeId::of::<AuditWrite>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "audit.write",
+                    ::observed::Severity::Warn,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            true,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "attempts",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("attempts"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|_| ::observed::Value::from(self.attempts.clone()),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

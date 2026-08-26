@@ -1,0 +1,261 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("severity")]
+#[trace] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Trace,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[debug] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Debug,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[info] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[warning] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Warn,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[error] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Error,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("severity")]
+#[fatal] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+struct Subject {
+    v: u64,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "severity",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "severity",
+                    ::observed::Severity::Fatal,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("v"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
