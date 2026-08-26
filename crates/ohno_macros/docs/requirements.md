@@ -207,11 +207,3 @@ than one per compile cycle.
 
 Wherever a diagnostic covers more than one token it is spanned with
 `syn::Error::new_spanned`.
-
-## R5 — Quality gates
-
-The crate has to keep passing what the workspace already runs against it:
-`cargo check`, `clippy` at workspace lint level, `cargo doc`, `cargo fmt
---check`, `cargo machete`, license boilerplate, and `cargo mutants` on validation
-and on `#[display(...)]` lowering, where the rules live. The `ohno` crate's doc
-tests and examples exercise the macros and have to keep compiling.

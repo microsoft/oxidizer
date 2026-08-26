@@ -542,14 +542,12 @@ case runs the whole pipeline, so a change to attribute syntax moves expansion
 snapshots.
 
 `cargo mutants` matters most on validation and on `#[display(...)]` lowering,
-where the rules live and where a surviving mutant means a rule is unenforced
-(R5).
+where the rules live and where a surviving mutant means a rule is unenforced.
 
 One class of mutant survives by construction without meaning a rule is
 unenforced. The three entry points in `crates/ohno_macros/src/lib.rs` cannot be
-called
-from a unit test at all — a proc-macro crate's own tests do not get the bridge —
-so only `crates/ohno/tests/` kills them, and they carry
+called from a unit test at all — a proc-macro crate's own tests do not get the
+bridge — so only `crates/ohno/tests/` kills them, and they carry
 `#[cfg_attr(test, mutants::skip)]`. They hold nothing but delegation, which is
 why that is the only untestable part.
 
