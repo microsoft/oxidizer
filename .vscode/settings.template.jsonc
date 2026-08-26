@@ -61,9 +61,11 @@
     // The nightly toolchain has additional code formatting capabilities that are disabled
     // with the regular toolchain. This enables those capabilities.
     //
-    // Requires the nightly toolchain to be installed. You may need to install it manually, as
-    // it may not be installed by default (`rustup toolchain install nightly`).
-    "rust-analyzer.rustfmt.extraArgs": ["+nightly", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
+    // The pinned nightly must match `RUST_NIGHTLY` in `constants.env`, which is what CI's
+    // format check runs; a different nightly can format the same file differently. Update
+    // both together. Install it with
+    // `rustup toolchain install nightly-2026-05-30 --component rustfmt`, or run `just install-tools`.
+    "rust-analyzer.rustfmt.extraArgs": ["+nightly-2026-05-30", "--config-path", "${workspaceFolder}/unstable-rustfmt.toml"],
 
     // Clippy is extremely slow when used on our large workspace, so you may want to use
     // `check` instead to run regular `cargo check`. To run Clippy, invoke it manually from the
