@@ -65,6 +65,7 @@ allocation_hints = { path = "crates/allocation_hints", default-features = false,
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.7.0" }
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.2.0" }
 argh = { version = "0.1.13", default-features = false }
+arrayvec = { version = "0.7.6", default-features = false }
 async-once-cell = { version = "0.5.0", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
 axum = { version = "0.8.9", default-features = false }
@@ -87,6 +88,7 @@ chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 clap = { version = "4.6.4", default-features = false }
+const-hex = { version = "1.14.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
 darling = { version = "0.24.0", default-features = false }
@@ -154,6 +156,7 @@ object-pool = { version = "0.6.0", default-features = false }
 observed = { path = "crates/observed", default-features = false, version = "0.24.0" }
 observed_macros = { path = "crates/observed_macros", default-features = false, version = "0.24.0" }
 observed_testing = { path = "crates/observed_testing", default-features = false }
+observed_utils = { path = "crates/observed_utils", default-features = false, version = "0.1.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.4.0" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.4.0" }
 ohno_macros_impl = { path = "crates/ohno_macros_impl", default-features = false, version = "0.5.0" }

@@ -1,0 +1,48 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_utils"
+description = "Helper types and utilities shared by observed telemetry framework crates."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "helpers", "logging"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_utils"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "data_privacy_core::redacted::RedactedDisplay",
+    "data_privacy_core::redactor::Redactor",
+    "observed::severity::Severity",
+    "observed::value::Value",
+    "opentelemetry::common::Value",
+    "opentelemetry::logs::record::AnyValue",
+    "opentelemetry::logs::record::Severity",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# oxidizer
+data_privacy = { workspace = true }
+observed = { workspace = true }
+
+# 3rd-party
+arrayvec = { workspace = true }
+const-hex = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs"] }
+
+[dev-dependencies]
+tick = { workspace = true }
+
+[lints]
+workspace = true
