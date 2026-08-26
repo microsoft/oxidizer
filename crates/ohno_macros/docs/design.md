@@ -73,11 +73,11 @@ These documents sit under `crates/ohno_macros/docs/` because they describe the
 macros `ohno` re-exports. Read "the crate" below as "the two crates together"
 wherever the distinction does not matter.
 
-Where they name a path, they name it from the workspace root, and a test in this
-crate asserts that every such path exists. Anything that cannot be written that
-way is prose naming a role instead of a file, which is also why the module map
-below stops at directories: which file holds which function is not a decision
-this document owns, and it is the part that rots when the code moves.
+Where they name a path, they name it from the workspace root. Anything that
+cannot be written that way is prose naming a role instead of a file, which is
+also why the module map below stops at directories: which file holds which
+function is not a decision this document owns, and it is the part that rots when
+the code moves.
 
 ## Modules
 
