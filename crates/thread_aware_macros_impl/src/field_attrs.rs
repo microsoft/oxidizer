@@ -5,14 +5,13 @@ use syn::{Attribute, Expr};
 
 /// Configuration for field attributes.
 #[derive(Default, Debug)]
-pub struct FieldAttrCfg {
+pub(crate) struct FieldAttrCfg {
     /// Whether to skip this field in thread-aware processing.
-    pub skip: bool,
+    pub(crate) skip: bool,
 }
 
 /// Parses the `thread_aware` attributes on a field.
-#[expect(clippy::missing_errors_doc, reason = "syn::internal API, no need for docs")]
-pub fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
+pub(crate) fn parse_field_attrs(attrs: &[Attribute]) -> syn::Result<FieldAttrCfg> {
     let mut cfg = FieldAttrCfg::default();
     for attr in attrs.iter().filter(|a| a.path().is_ident("thread_aware")) {
         let parsed = attr.parse_args_with(|input: syn::parse::ParseStream| {

@@ -27,10 +27,10 @@ mod enum_gen;
 
 /// Field attribute parsing for the derive.
 ///
-/// Public because this is a shared implementation crate consumed by wrapper proc-macro
-/// crates; the module is part of its published surface even though nothing in this
-/// workspace reaches for it today.
-pub mod field_attrs;
+/// Private: the only consumer of this crate, `thread_aware_macros`, calls
+/// `derive_thread_aware` and nothing else, so exporting the parser would pin implementation
+/// detail as semver-stable API for no one's benefit.
+mod field_attrs;
 
 mod struct_gen;
 
