@@ -12,10 +12,10 @@ use crate::param_idents;
 /// The name is deliberately obscure. A binding cannot shadow a `const`, `static` or const
 /// parameter of the same name that is in scope at the use site: a `const` or const parameter
 /// is read as a pattern referring to that item rather than as a new binding, and a `static`
-/// may not be shadowed at all. Either way the generated arm fails to compile. No name is
-/// immune, and macro hygiene does not help - `Span::mixed_site()` was tried and the capture
-/// still occurred - so the only guard available is a name no caller would plausibly declare.
-/// This is the same reason `serde` generates `__field0` rather than `field0`.
+/// may not be shadowed at all. Either way the generated arm fails to compile, and macro
+/// hygiene does not prevent it: under `Span::mixed_site()` the pattern still resolves against
+/// the item. A name no caller would plausibly declare is the only guard available, which is
+/// why `serde` generates `__field0` rather than `field0`.
 fn field_binding(index: usize) -> syn::Ident {
     syn::Ident::new(&format!("__thread_aware_field_{index}"), proc_macro2::Span::call_site())
 }

@@ -262,9 +262,8 @@ fn generics_paren_adds_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn phantom_only_generic_gets_thread_aware_bound() {
-    // The original defect: a parameter named only inside `PhantomData` used to gain no bound
-    // at all, so the impl could not satisfy the `ThreadAware: Send` supertrait. It now takes
-    // the ordinary bound, like a parameter reached anywhere else.
+    // A parameter named only inside `PhantomData` takes the ordinary bound, like one reached
+    // anywhere else. Without it the impl cannot satisfy the `ThreadAware: Send` supertrait.
     let input = quote! {
         #[derive(ThreadAware)]
         struct DirectPhantom<T, U>(T, core::marker::PhantomData<U>);
@@ -315,8 +314,8 @@ fn relocated_and_phantom_param_shares_one_bound() {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn unrelated_trait_named_thread_aware_does_not_suppress_the_bound() {
-    // Matching only the final path segment treated `local::ThreadAware` as the real trait and
-    // dropped the bound the generated body needs.
+    // Comparing only the final path segment would treat `local::ThreadAware` as the real trait
+    // and drop the bound the generated body needs.
     let input = quote! {
         #[derive(ThreadAware)]
         struct CustomTa<T: local::ThreadAware>(T);
@@ -369,8 +368,8 @@ fn user_where_clause_is_preserved() {
 #[cfg_attr(miri, ignore)]
 fn generics_lifetime_and_const_params_untouched() {
     // Only type parameters can carry bounds; lifetimes and const generics are skipped.
-    // The field shape must be one the crate can actually relocate; pinning an expansion
-    // that cannot compile is the blind spot this PR exists to close.
+    // The field shape is one the crate can actually relocate, so the pinned expansion is one
+    // that compiles - a snapshot of an uncompilable expansion proves nothing.
     let input = quote! {
         #[derive(ThreadAware)]
         struct Mixed<'a, const N: usize, T: Sync>(Tracker, core::marker::PhantomData<(&'a T, [u8; N])>);

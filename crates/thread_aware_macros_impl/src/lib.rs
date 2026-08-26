@@ -27,9 +27,8 @@ mod enum_gen;
 
 /// Field attribute parsing for the derive.
 ///
-/// Private: the only consumer of this crate, `thread_aware_macros`, calls
-/// `derive_thread_aware` and nothing else, so exporting the parser would pin implementation
-/// detail as semver-stable API for no one's benefit.
+/// Private: `derive_thread_aware` is this crate's entire public surface, so the parser stays
+/// an implementation detail rather than semver-stable API.
 mod field_attrs;
 
 mod struct_gen;
@@ -132,17 +131,14 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
         }
     }
 
-    // A `#[thread_aware(skip)]` field is never relocated, so it gains no `ThreadAware` bound -
-    // but it still has to satisfy the `ThreadAware: Send` supertrait.
+    // A `#[thread_aware(skip)]` field is never relocated, so it gains no `ThreadAware` bound,
+    // but the `ThreadAware: Send` supertrait still has to hold.
     //
-    // The obligation is stated once, on `Self`. Binding the field type itself would be
-    // strictly stronger than what is required: a type made `Send` by a manual `unsafe impl` -
-    // the standard idiom for raw-pointer and variance markers, and the reason
-    // `#[thread_aware(skip)]` exists - would carry a predicate such as `where *const T: Send`
-    // that no instantiation can ever prove.
-    //
-    // `Self: Send` is exactly the obligation, and it is discharged either structurally or
-    // by that manual `unsafe impl`.
+    // The obligation is stated once, on `Self`, which is exactly what the supertrait requires
+    // and is discharged either structurally or by a manual `unsafe impl Send`. A predicate on
+    // the field type would be strictly stronger: a type that is `Send` only through such an
+    // `unsafe impl` would carry something like `where *const T: Send`, which no instantiation
+    // can prove.
     if usage.has_skipped_field {
         let name = &input.ident;
         let (_, ty_generics, _) = input.generics.split_for_impl();
@@ -162,13 +158,10 @@ fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generic
 /// `some_crate::ThreadAware` is not mistaken for the real trait.
 ///
 /// A bare single-segment `ThreadAware` is accepted as the real trait, deliberately: the name
-/// alone cannot distinguish the imported trait from one of the author's own, and real code
-/// writes the imported form - `CallbackMemory<D: ThreadAware + Clone>` in `bytesbuf` - where
-/// a second bound would trip `clippy::trait_duplication_in_bounds` at their own declaration.
-/// Qualifying either path resolves the rarer case.
-///
-/// This is the only place the derive decides anything from how a name is spelled; the
-/// `PhantomData` test that used to sit beside it is gone.
+/// alone cannot distinguish the imported trait from one of the author's own, and the imported
+/// form is what real code writes. Rejecting it would emit a second bound beside the author's
+/// own `T: ThreadAware`, tripping `clippy::trait_duplication_in_bounds` at their declaration.
+/// Qualify either path to disambiguate the rarer case.
 fn is_same_trait(candidate: &Path, emitted: &Path) -> bool {
     let candidate_idents: Vec<_> = candidate.segments.iter().map(|s| s.ident.to_string()).collect();
     let emitted_idents: Vec<_> = emitted.segments.iter().map(|s| s.ident.to_string()).collect();
@@ -239,17 +232,16 @@ fn collect_generics_in_type(ty: &Type, generic_idents: &HashSet<syn::Ident>, acc
         Type::Group(g) => collect_generics_in_type(&g.elem, generic_idents, acc)?,
         Type::Paren(p) => collect_generics_in_type(&p.elem, generic_idents, acc)?,
         // Not traversed: `Type::Slice`, `Type::Ptr`, `Type::BareFn`, `Type::TraitObject` and
-        // `Type::ImplTrait`. A bare `fn` pointer does have `ThreadAware` impls
-        // (`impls.rs:82`), but they are unconditional - no bound on the argument or return
-        // types - so descending would emit a bound nothing requires. The rest have no impl, so
-        // an enclosing field cannot be relocated through one and no bound is owed.
+        // `Type::ImplTrait`. A bare `fn` pointer has `ThreadAware` impls in `impls.rs`, but
+        // they are unconditional - no bound on the argument or return types - so descending
+        // would emit a bound nothing requires. The rest have no impl, so an enclosing field
+        // cannot be relocated through one and no bound is owed.
         //
-        // The split is not a mirror of `impls.rs`, and should not be read as one: `Array` and
-        // `Reference` are traversed here while `impls.rs` implements neither, so those emit a
-        // bound for a field that cannot be relocated at all. That is pre-existing. What does
-        // follow is the maintenance rule - adding a *conditional* impl in `impls.rs` for any
-        // shape listed above means adding the matching arm here, or the header will
-        // under-constrain the body.
+        // This list is not a mirror of `impls.rs` and should not be read as one: `Array` and
+        // `Reference` are traversed here although `impls.rs` implements neither, so those emit
+        // a bound for a field that cannot be relocated at all. The maintenance rule runs one
+        // way only - adding a *conditional* impl in `impls.rs` for any shape listed above
+        // means adding the matching arm here, or the header will under-constrain the body.
         _ => {}
     }
     Ok(())

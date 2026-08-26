@@ -51,9 +51,8 @@ fn affinity_pair() -> (Option<Affinity>, Affinity) {
 
 /// A generic named only inside `PhantomData` must still compile.
 ///
-/// Regression test: the derive used to drop the parameter entirely, so the
-/// generated impl could not satisfy the `ThreadAware: Send` supertrait. It now takes the
-/// ordinary `ThreadAware` bound, like a parameter reached anywhere else.
+/// The parameter takes the ordinary `ThreadAware` bound, like one reached anywhere else.
+/// Without that bound the generated impl cannot satisfy the `ThreadAware: Send` supertrait.
 #[derive(ThreadAware)]
 struct DirectPhantom<T, U>(T, PhantomData<U>);
 
@@ -146,11 +145,10 @@ fn enum_with_phantom_only_generic_compiles_and_relocates() {
     marked.relocate(source, destination);
 }
 
-// The cases below pin what a marker payload costs now that the derive does no special
-// handling for `PhantomData`. The traversal binds the parameters it reaches by `ThreadAware`,
-// which gives `Send` but says nothing about `Sync`, about an associated type, or about a
-// payload the traversal cannot reach at all. Where the payload's `Send`-ness does not follow,
-// the author writes the bound - the derive does not infer it.
+// The cases below pin what a marker payload costs. The traversal binds the parameters it
+// reaches by `ThreadAware`, which gives `Send` but says nothing about `Sync`, about an
+// associated type, or about a payload the traversal cannot reach at all. Where the payload's
+// `Send`-ness does not follow, the author writes the bound - the derive does not infer it.
 
 /// A shared-reference payload, carried through a fn pointer so it is `Send` for every `T`.
 #[derive(ThreadAware)]
@@ -254,11 +252,11 @@ fn qualified_type_named_phantom_data_is_relocated() {
     );
 }
 
-/// The same look-alike, imported under the bare name that used to be read as the real marker.
+/// The same look-alike, imported under the bare name.
 ///
-/// This is the case a syntactic classifier could never get right, and the reason the derive no
-/// longer has one. The field is relocated and traversed like any other, and the look-alike's
-/// own impl decides what its bound reduces to.
+/// The derive matches no name on a field type, so this is an ordinary field: relocated and
+/// traversed like any other, with the look-alike's own impl deciding what its bound reduces
+/// to. A syntactic classifier could not tell this shape apart from the real marker.
 mod bare_lookalike {
     use thread_aware::affinity::Affinity;
     use thread_aware_macros::ThreadAware;
@@ -350,9 +348,8 @@ fn a_non_send_payload_still_derives_through_a_fn_marker() {
 /// fields reuse the names the generated method's parameters actually have.
 ///
 /// The generated arm binds every relocated field to a name of the derive's own choosing, so no
-/// field name can reach the relocation call. The `source`/`destination` variant is the shape
-/// that failed before the parameters were renamed; `Generated` is the shape that would fail
-/// today if the rebinding were removed.
+/// field name can reach the relocation call. Without that rebinding either variant shadows a
+/// parameter of the generated `relocate` and passes a field where an `Affinity` is expected.
 #[derive(ThreadAware)]
 enum ShadowingFieldNames<T> {
     Both {
@@ -368,21 +365,21 @@ enum ShadowingFieldNames<T> {
     },
 }
 
-/// Constants named exactly like the bindings the derive used to generate.
+/// Constants spelled like a binding a derive might plausibly generate.
 ///
 /// A binding cannot shadow a constant in scope: the identifier is read as a pattern referring
-/// to the constant rather than as a binding, so a generated name that a caller might plausibly
-/// declare breaks the derive. The generated names are obscure for that reason; `_v0` was the
-/// old spelling and is exactly the kind of name a caller could reasonably use.
+/// to the constant rather than as a new binding, so any generated name a caller might also
+/// declare breaks the derive. `_v0` is exactly such a name, which is why fields bind to
+/// `__thread_aware_field_{i}` instead.
 #[expect(
     non_upper_case_globals,
-    reason = "deliberately spelled like the binding the derive used to generate"
+    reason = "deliberately spelled like a binding a derive might plausibly generate"
 )]
 const _v0: usize = 0;
 
 #[expect(
     non_upper_case_globals,
-    reason = "deliberately spelled like the binding the derive used to generate"
+    reason = "deliberately spelled like a binding a derive might plausibly generate"
 )]
 const _v1: usize = 1;
 
@@ -627,9 +624,9 @@ fn payloads_invisible_to_a_syntactic_scan_need_no_escape_hatch() {
 /// A trait of the user's own that happens to be called `ThreadAware`, named by a qualified
 /// path.
 ///
-/// Matching only the final path segment treated this as the real trait and dropped the bound
-/// the generated body needs, so the impl could not compile. A bare `ThreadAware` stays
-/// ambiguous and is still assumed to be the real trait - see `is_same_trait`.
+/// Comparing only the final path segment would treat this as the real trait and drop the bound
+/// the generated body needs, leaving an impl that cannot compile. A bare `ThreadAware` is
+/// inherently ambiguous and is assumed to be the real trait - see `is_same_trait`.
 mod own_thread_aware {
     use thread_aware::affinity::Affinity;
     use thread_aware_macros::ThreadAware as DeriveThreadAware;
@@ -660,10 +657,10 @@ fn user_trait_named_thread_aware_does_not_suppress_the_real_bound() {
 
 /// A named enum variant carrying a skipped field.
 ///
-/// The generated match arm emits no statement for a skipped field, so binding it by name left
-/// an unused variable; the `Skipped` variant is what pins the `field: _` binding. The `Marked`
-/// variant is bound and relocated like any other. `deny(warnings)` is deliberate: it is what a
-/// downstream crate would hit, and it is what this shape used to fail.
+/// The generated match arm emits no statement for a skipped field, so binding it by name would
+/// leave an unused variable; the `Skipped` variant pins the `field: _` binding. The `Marked`
+/// variant is bound and relocated like any other. `deny(warnings)` is deliberate: it is the
+/// gate a downstream crate applies to the generated code.
 mod enum_named_bindings {
     #![deny(warnings)]
 

@@ -363,12 +363,11 @@ mod tests {
     // behavior (shared synchronization primitives etc).
     static_assertions::assert_not_impl_any!(std::sync::Arc<i32>: ThreadAware);
 
-    // The two boundaries of the `PhantomData` impl, pinned here rather than only through the
-    // derive's integration tests in another crate.
+    // The two boundaries of the `PhantomData` impl.
     //
-    // The bound is `Send` and not `ThreadAware` precisely so that a marker naming a type this
-    // crate deliberately refuses can still relocate: the marker holds no value, so there is
-    // nothing to contend over.
+    // The bound is `Send` and not `ThreadAware` so that a marker naming a type this crate
+    // deliberately refuses can still relocate: the marker holds no value, so there is nothing
+    // to contend over.
     static_assertions::assert_impl_all!(core::marker::PhantomData<std::sync::Arc<i32>>: ThreadAware);
 
     // And the limit of that: a raw pointer is `!Send` whatever it points at, so the marker has
