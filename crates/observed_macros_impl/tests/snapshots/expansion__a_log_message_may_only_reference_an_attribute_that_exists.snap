@@ -1,0 +1,182 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[info("{absent}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
+log message references `{absent}` but no log attribute with that name exists; available attributes: [status, renamed]
+
+---- input ----
+#[event("e")]
+#[info("{original}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
+log message references `{original}` but no log attribute with that name exists; available attributes: [status, renamed]
+
+---- input ----
+#[event("e")]
+#[info("{request_id}")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
+log message references `{request_id}` but no log attribute with that name exists; available attributes: [status, renamed]
+
+---- input ----
+#[event("e")]
+#[info("nothing to interpolate")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
+struct Subject {
+    status: i64,
+    original: ClassifiedString,
+    request_id: ClassifiedString,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("nothing to interpolate"),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "original",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.original, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
+
+---- input ----
+#[event("e")]
+#[info("{{literal}} {status} {} and a dangling {")]
+struct Subject {
+    #[unredacted]
+    status: i64,
+    #[dimension(log = "renamed")]
+    original: ClassifiedString,
+    #[dimension(log = exclude)]
+    request_id: ClassifiedString,
+}
+
+---- yields ----
+struct Subject {
+    status: i64,
+    original: ClassifiedString,
+    request_id: ClassifiedString,
+}
+const _: () = {
+    impl ::observed::Event for Subject {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "e",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Subject>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "e",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some(
+                        "{{literal}} {status} {} and a dangling {",
+                    ),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "original",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("renamed"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.original, engine),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

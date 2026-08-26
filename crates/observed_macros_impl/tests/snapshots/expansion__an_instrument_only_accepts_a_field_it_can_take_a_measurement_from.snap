@@ -1,0 +1,66 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[unredacted] v: i64 }
+
+---- yields ----
+`#[counter(...)]` requires field `v` to be a unsigned integer type (u8, u16, u32, u64, usize)
+
+---- input ----
+#[event("e")]
+#[updown_counter(v)] struct Subject { #[unredacted] v: u64 }
+
+---- yields ----
+`#[updown_counter(...)]` requires field `v` to be a signed integer type (i8, i16, i32, i64, isize)
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[unredacted] v: String }
+
+---- yields ----
+`#[counter(v)]` requires field `v` to be a numeric type that `observed::Value` can carry (i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64)
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[unredacted] v: (u8, u8) }
+
+---- yields ----
+`#[counter(v)]` requires field `v` to be a numeric type that `observed::Value` can carry (i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64)
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[unredacted] v: u128 }
+
+---- yields ----
+`#[counter(v)]` does not support 128-bit integers; no telemetry backend represents them, so `observed::Value` has no conversion. Use a 64-bit width instead
+
+---- input ----
+#[event("e")]
+#[updown_counter(v)] struct Subject { #[unredacted] v: i128 }
+
+---- yields ----
+`#[updown_counter(v)]` does not support 128-bit integers; no telemetry backend represents them, so `observed::Value` has no conversion. Use a 64-bit width instead
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { v: u64 }
+
+---- yields ----
+`#[counter(v)]` requires field `v` to be `#[unredacted]`; a classified value is rendered through the redaction engine as a string, which carries no measurement for the instrument to record
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[unredacted] v: Option<u64> }
+
+---- yields ----
+`#[counter(v)]` requires field `v` to hold a value on every emission, but it is an `Option<T>`; a metric value cannot be optional. Use a non-optional field, or record it as a metric dimension instead (`#[dimension(metric = ...)]`)
+
+---- input ----
+#[event("e")]
+#[counter(v)] struct Subject { #[dimension(metric)] #[unredacted] v: u64 }
+
+---- yields ----
+field `v` cannot be both a metric value and a metric dimension (`#[dimension(metric = ...)]`)
