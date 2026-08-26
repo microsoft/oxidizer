@@ -7,11 +7,12 @@ packages: `ohno_macros`, the proc-macro crate the compiler sees, and
 "Two crates" section of `design.md` for why the split exists.
 
 The authority for behavior is `crates/ohno/tests/**` (integration tests) and
-`crates/ohno/tests/ui/**` (compile-fail snapshots): they are the only tests that
-compile what the macros produce. The expansion snapshots in
-`crates/ohno_macros_impl/tests/public_api.rs` pin the shape of the tokens the
-three public expansion functions emit, which is a regression net rather than a
-statement of what the crate owes.
+`crates/ohno/tests/ui/**` (compile-fail snapshots): they are what states, and
+pins, what the macros owe. The crate's own rustdoc examples compile expansions
+too, but they illustrate the surface rather than constrain it. The expansion
+snapshots in `crates/ohno_macros_impl/tests/public_api.rs` pin the shape of the
+tokens the three public expansion functions emit, which is a regression net
+rather than a statement of what the crate owes.
 
 ## Public surface
 

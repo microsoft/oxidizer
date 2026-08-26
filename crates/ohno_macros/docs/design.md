@@ -554,13 +554,13 @@ test asserts on instead of a scan that never ends. A hanging mutant is reported
 as a timeout rather than as a failed assertion, which reads as an unenforced
 rule when it is not one.
 
-**The tests under `crates/ohno/tests/` are the only proof that the generated code
-works.** Neither macro crate's own tree compiles an expansion. The expansion
-snapshots assert the shape of tokens; only the integration tests and the
-compile-fail pairs under `crates/ohno/tests/ui/` run `rustc` over what the macros
-produce, and only the `.stderr` snapshots pin where a diagnostic points. A change
-that keeps every snapshot green and breaks the tests under `crates/ohno/tests/`
-is a broken change.
+**The generated code is only ever compiled from `crates/ohno`.** Neither macro
+crate's own tree compiles an expansion. The expansion snapshots assert the shape
+of tokens; the integration tests, the compile-fail pairs under
+`crates/ohno/tests/ui/` and the crate's own rustdoc examples run `rustc` over
+what the macros produce, and only the `.stderr` snapshots pin where a diagnostic
+points. A change that keeps every snapshot green and breaks the tests under
+`crates/ohno/tests/` is a broken change.
 
 The compile-fail tests are ordinary integration tests, so `just test` runs them
 too. `just trybuild` narrows to them while iterating on a diagnostic — pass the
