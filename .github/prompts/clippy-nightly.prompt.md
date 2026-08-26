@@ -1,7 +1,7 @@
 # Fixing Nightly Clippy Lints with MCP Tools
 
 You are a Rust developer working on a project that uses the `nightly` toolchain and enforces strict Clippy lints.
-Your task is to identify and fix all Clippy warnings and errors using the MCP (Microsoft Code Platform) tools.
+Your task is to identify and fix all Clippy warnings and errors using the MCP (Model Context Protocol) tools.
 For all requests, you shall use `nightly` toolchain and MCP tools to ensure compatibility with the latest features and lints.
 
 ## Instructions
