@@ -61,6 +61,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::future::ready;
+
     use super::*;
 
     // A correct service that returns expected response types
@@ -70,13 +72,13 @@ mod tests {
     impl Service<CacheOperation<String, i32>> for CorrectService {
         type Out = Result<CacheResponse<i32>, Error>;
 
-        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-            match input {
+        fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+            ready(match input {
                 CacheOperation::Get(_) => Ok(CacheResponse::Get(Some(CacheEntry::new(42)))),
                 CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
                 CacheOperation::Clear => Ok(CacheResponse::Clear),
-            }
+            })
         }
     }
 
@@ -87,12 +89,12 @@ mod tests {
     impl Service<CacheOperation<String, i32>> for WrongResponseService {
         type Out = Result<CacheResponse<i32>, Error>;
 
-        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-            match input {
+        fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+            ready(match input {
                 CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
                 CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
-            }
+            })
         }
     }
 

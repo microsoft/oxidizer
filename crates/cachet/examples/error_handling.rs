@@ -8,6 +8,12 @@
 //! - Attach recovery information with `with_recovery()`
 //! - Extract and handle typed errors from cache operations
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::io::{self, ErrorKind};
 
 use cachet::{Cache, CacheEntry, CacheTier, Error, InsertOutcome};

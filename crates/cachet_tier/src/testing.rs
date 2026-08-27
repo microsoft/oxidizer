@@ -7,6 +7,7 @@
 //! records all operations and supports failure injection for testing error paths.
 
 use std::collections::HashMap;
+use std::future::ready;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -226,54 +227,54 @@ where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
 {
-    async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
+    fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send {
         let op = CacheOp::Get(key.clone());
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::from_message("mock: get failed"));
+            return ready(Err(Error::from_message("mock: get failed")));
         }
         self.record(op);
-        Ok(self.data.lock().get(key).cloned())
+        ready(Ok(self.data.lock().get(key).cloned()))
     }
 
-    async fn insert(&self, key: K, entry: CacheEntry<V>) -> Result<InsertOutcome, Error> {
+    fn insert(&self, key: K, entry: CacheEntry<V>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
         let op = CacheOp::Insert {
             key: key.clone(),
             entry: entry.clone(),
         };
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::from_message("mock: insert failed"));
+            return ready(Err(Error::from_message("mock: insert failed")));
         }
         self.record(op);
         self.data.lock().insert(key, entry);
-        Ok(InsertOutcome::Accepted)
+        ready(Ok(InsertOutcome::Accepted))
     }
 
-    async fn invalidate(&self, key: &K) -> Result<(), Error> {
+    fn invalidate(&self, key: &K) -> impl Future<Output = Result<(), Error>> + Send {
         let op = CacheOp::Invalidate(key.clone());
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::from_message("mock: invalidate failed"));
+            return ready(Err(Error::from_message("mock: invalidate failed")));
         }
         self.record(op);
         self.data.lock().remove(key);
-        Ok(())
+        ready(Ok(()))
     }
 
-    async fn clear(&self) -> Result<(), Error> {
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
         let op = CacheOp::Clear;
         if self.should_fail(&op) {
             self.record(op);
-            return Err(Error::from_message("mock: clear failed"));
+            return ready(Err(Error::from_message("mock: clear failed")));
         }
         self.record(op);
         self.data.lock().clear();
-        Ok(())
+        ready(Ok(()))
     }
 
-    async fn len(&self) -> Result<u64, SizeError> {
-        Ok(self.data.lock().len() as u64)
+    fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
+        ready(Ok(self.data.lock().len() as u64))
     }
 }
 

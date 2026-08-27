@@ -239,7 +239,7 @@ struct OkHandler {
 impl Service<HttpRequest> for OkHandler {
     type Out = fetch::Result<HttpResponse>;
 
-    async fn execute(&self, _request: HttpRequest) -> Self::Out {
-        HttpResponseBuilder::new(&self.body_builder).status(StatusCode::OK).build()
+    fn execute(&self, _request: HttpRequest) -> impl Future<Output = Self::Out> + Send {
+        std::future::ready(HttpResponseBuilder::new(&self.body_builder).status(StatusCode::OK).build())
     }
 }
