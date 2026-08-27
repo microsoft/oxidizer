@@ -1185,7 +1185,7 @@ function Invoke-SemverChecksCli {
                 } catch {
                     # Fail open -- a probe must never break a release. Name the
                     # symptom, though, so a later C1083 is not a mystery.
-                    Write-Warning "Could not create '$targetDir'; building under the default target directory. If the repository path is long, the baseline build may fail with C1083. ($($_.Exception.Message))"
+                    Write-Warning "Could not create '$targetDir'; building under the default target directory, which was projected to be too long for MSVC and so may fail with C1083. ($($_.Exception.Message))"
                 }
             }
         }
@@ -1299,7 +1299,7 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     $pathHint = if ($IsWindows) {
-        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, and these scripts relocate the build to a short path only when the repository path and the package name together project past that limit. Set CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName) to force the relocation, or move the repository closer to the volume root."
+        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory. These scripts relocate the build to a short path when they judge the default one too long, but that judgement is a projection and can fall short. Set CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName) to force the relocation, or move the repository closer to the volume root."
     } else {
         ''
     }
