@@ -157,7 +157,6 @@ function Update-RustToolchain {
         [string]$Version
     )
     $content = Get-Content $FilePath -Raw
-    $content = Get-Content $FilePath -Raw
     $replacement = '${1}"' + $Version + '"'
 
     return $content -replace $ToolchainChannelPattern, $replacement
