@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
 #![allow(
     unused_attributes,
     clippy::empty_structs_with_brackets,
