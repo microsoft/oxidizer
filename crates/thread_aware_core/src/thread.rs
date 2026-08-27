@@ -408,6 +408,17 @@ mod tests {
     }
 
     #[test]
+    fn owner_hashes_by_identity() {
+        let one = Owner::new(4);
+        let other = Owner::new(4);
+
+        // Equal counts, so only the identity tells these apart. Hashing has to carry it, or
+        // every owner would land in one bucket.
+        assert_ne!(one, other);
+        assert_ne!(hash_of(one), hash_of(other), "distinct owners must hash apart");
+    }
+
+    #[test]
     fn owner_reports_its_minimum() {
         assert_eq!(Owner::new(8).min_threads(), 8);
         assert_eq!(Owner::new(0).min_threads(), 0, "zero means the runtime promises none");
