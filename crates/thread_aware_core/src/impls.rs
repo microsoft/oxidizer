@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use alloc::borrow::{Cow, ToOwned};
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
@@ -65,11 +64,8 @@ impl_transfer!(PathBuf);
 impl_transfer!(Duration);
 #[cfg(any(test, feature = "std"))]
 impl_transfer!(Path);
-#[cfg(any(test, feature = "std"))]
-impl_transfer!(&Path);
 
 impl_transfer!(str);
-impl_transfer!(&str);
 
 impl_transfer!(Owner);
 impl_transfer!(NumaNode);
@@ -233,17 +229,6 @@ where
     }
 }
 
-impl<B> ThreadAware for Cow<'_, B>
-where
-    B: ToOwned + Sync + ?Sized,
-    B::Owned: ThreadAware,
-{
-    #[inline]
-    fn relocate(&mut self, source: Option<&Thread>, destination: &Thread) {
-        self.to_mut().relocate(source, destination);
-    }
-}
-
 #[cfg(any(test, feature = "std"))]
 impl<K, V, S> ThreadAware for HashMap<K, V, S>
 where
@@ -261,7 +246,6 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use alloc::borrow::Cow;
     use alloc::boxed::Box;
     use alloc::collections::{BTreeMap, VecDeque};
     use alloc::string::{String, ToString};
@@ -288,7 +272,7 @@ mod tests {
     }
 
     fn sample_threads() -> [Thread; 2] {
-        let owner = Owner::new(0);
+        let owner = Owner::new(2);
         let thread = std::thread::current().id();
         [
             Thread::new(owner, thread, NumaNode::new(0)),
@@ -565,23 +549,6 @@ mod tests {
         let mut ref_cell = RefCell::new(Tracker(false));
         ref_cell.relocate(Some(&threads[0]), &threads[1]);
         assert!(ref_cell.into_inner().0);
-    }
-
-    #[test]
-    fn cow_relocates_both_borrowed_and_owned_values() {
-        let threads = sample_threads();
-
-        // A borrowed `Cow` is taken to owned so that it can be relocated too, leaving the
-        // borrowed original untouched.
-        let borrowed = Tracker(false);
-        let mut borrowed_cow = Cow::Borrowed(&borrowed);
-        borrowed_cow.relocate(Some(&threads[0]), &threads[1]);
-        assert!(borrowed_cow.as_ref().0, "must relocate after taking ownership");
-        assert!(!borrowed.0, "the borrowed original must be left alone");
-
-        let mut owned_cow: Cow<'_, Tracker> = Cow::Owned(Tracker(false));
-        owned_cow.relocate(Some(&threads[0]), &threads[1]);
-        assert!(owned_cow.as_ref().0);
     }
 
     #[test]

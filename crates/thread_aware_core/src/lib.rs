@@ -109,7 +109,7 @@
 //! let here = thread::current().id();
 //! let there = thread::spawn(|| thread::current().id()).join().unwrap();
 //!
-//! let owner = Owner::new(1);
+//! let owner = Owner::new(2);
 //! let first = Thread::new(owner, here, NumaNode::new(0));
 //! let second = Thread::new(owner, there, NumaNode::new(1));
 //!
@@ -137,36 +137,27 @@
 //!
 //! # What the ids mean
 //!
-//! The thread id is `std::thread::ThreadId`. It identifies one thread and nothing else, and
-//! is unique among the threads alive at the same time, so state keyed on it is never shared
-//! by accident, not even between two runtimes in the same process.
+//! - **Thread id** — a `std::thread::ThreadId`, unique among the threads alive at once, so
+//!   state keyed on it is never shared by accident, not even between two runtimes in one
+//!   process.
+//! - **[`NumaNode`]** — the memory closest to that thread. Unlike the thread id it is
+//!   *shared*: every thread near the same memory reports the same node, which is what suits
+//!   it to state shared within a region but not across the machine. That holds only while
+//!   every runtime numbers the regions identically. Nothing checks it, and runtimes that
+//!   disagree make shared state wrong rather than merely slow.
+//! - **[`Owner`]** — the runtime a [`Thread`] belongs to. Every new owner is unique, so two
+//!   live runtimes never share one. It lets a value detect that it has crossed into a
+//!   different runtime and release anything the previous one owned.
 //!
-//! [`NumaNode`] identifies the memory closest to that thread. Unlike the thread id it is
-//! shared: every thread near the same memory reports the same [`NumaNode`], which is what
-//! makes it suitable for state shared within a region but not across the machine.
+//! An implementation reads only the ids its state depends on. A per-thread cache or a handle
+//! to a thread-local driver keys on the thread id; a buffer pool keys on [`NumaNode`] and
+//! survives a move to another thread near the same memory; anything the runtime owns compares
+//! [`Owner`].
 //!
-//! That sharing holds only while every runtime in the process numbers the regions
-//! identically, for example from the numbering the operating system reports. Nothing checks
-//! it, and if two runtimes number them differently then state shared between them is wrong,
-//! not merely slow. Share across runtimes only when all of them are under common control.
-//!
-//! [`Owner`] identifies the runtime that constructed a [`Thread`]. Thread ids already distinguish
-//! threads, so this id answers a different question: it lets a value detect that it has
-//! crossed into a different runtime and release anything the previous one owned.
-//!
-//! An implementation therefore reads only the ids its state depends on:
-//!
-//! - State that must not be shared at all, such as a per-thread cache or a handle to a
-//!   thread-local driver, keys on the thread id and is replaced whenever the thread changes.
-//! - State concerned only with memory locality, such as a buffer pool, keys on [`NumaNode`]
-//!   and survives a move to another thread near the same memory.
-//! - State owned by the runtime, such as a scheduler handle, also compares [`Owner`] and is
-//!   released when it changes.
-//!
-//! The ids carry no meaning beyond identity. [`Owner`] and [`NumaNode`] need not start at
-//! zero or run consecutively, no count is exposed, and the [`Thread`]s in use cannot be
-//! enumerated. State keyed on any of these ids belongs in a map rather than an array indexed
-//! by it.
+//! The ids carry no meaning beyond identity: they need not start at zero or run
+//! consecutively, and the [`Thread`]s in use cannot be enumerated. State keyed on any of them
+//! belongs in a map rather than an array indexed by it. [`Owner::min_threads`] is the one
+//! number on offer, and it is a floor to pre-size against, not a bound to index against.
 //!
 //! Without `std` there is no [`ThreadId`](std::thread::ThreadId): `Thread::new` and
 //! `Thread::id` are absent and only [`Owner`] and [`NumaNode`] remain. A `no_std` library can
@@ -186,12 +177,17 @@
 //! twelve parameters, and, with the `std` feature, paths.
 //!
 //! Containers forward the call to what they hold: [`Option`], [`Result`], arrays, slices,
-//! `Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples of up to twelve elements, and map values.
-//! A borrowed `Cow` is taken to owned so that it can be relocated as well.
+//! `Vec`, `VecDeque`, `Box`, cells, tuples of up to twelve elements, and map values.
+//!
+//! References are not [`ThreadAware`]. Relocating through one would adapt something the value
+//! only borrows, and whoever owns it is relocated on its own account.
 //!
 //! Map keys are left alone, since altering one could change its hash or ordering and corrupt
 //! the map. Sets are not implemented at all for the same reason, so a `HashSet` or
 //! `BTreeSet` field is not [`ThreadAware`].
+//!
+//! `Cow` is omitted for now: relocating a borrowed one has to clone it into owned storage
+//! first, which is a surprising amount of work to hide behind a hint.
 //!
 //! `Arc` is also omitted: whether a shared allocation should stay shared across threads or
 //! be split per thread depends on what it holds. The per-core [`Arc`][arc] in
@@ -202,7 +198,7 @@
 //! - **`std`** *(default)* - Adds [`Thread::new`] and [`Thread::id`], which need
 //!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
 //!   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs
-//!   only `alloc`.
+//!   only `alloc` and pointer-width atomics.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]

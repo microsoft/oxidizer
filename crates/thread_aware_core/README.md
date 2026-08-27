@@ -107,7 +107,7 @@ impl ThreadAware for Worker {
 let here = thread::current().id();
 let there = thread::spawn(|| thread::current().id()).join().unwrap();
 
-let owner = Owner::new(1);
+let owner = Owner::new(2);
 let first = Thread::new(owner, here, NumaNode::new(0));
 let second = Thread::new(owner, there, NumaNode::new(1));
 
@@ -133,47 +133,38 @@ few cycles.
 
 ## What the ids mean
 
-The thread id is `std::thread::ThreadId`. It identifies one thread and nothing else, and
-is unique among the threads alive at the same time, so state keyed on it is never shared
-by accident, not even between two runtimes in the same process.
+* **Thread id** — a `std::thread::ThreadId`, unique among the threads alive at once, so
+  state keyed on it is never shared by accident, not even between two runtimes in one
+  process.
+* **[`NumaNode`][__link24]** — the memory closest to that thread. Unlike the thread id it is
+  *shared*: every thread near the same memory reports the same node, which is what suits
+  it to state shared within a region but not across the machine. That holds only while
+  every runtime numbers the regions identically. Nothing checks it, and runtimes that
+  disagree make shared state wrong rather than merely slow.
+* **[`Owner`][__link25]** — the runtime a [`Thread`][__link26] belongs to. Every new owner is unique, so two
+  live runtimes never share one. It lets a value detect that it has crossed into a
+  different runtime and release anything the previous one owned.
 
-[`NumaNode`][__link24] identifies the memory closest to that thread. Unlike the thread id it is
-shared: every thread near the same memory reports the same [`NumaNode`][__link25], which is what
-makes it suitable for state shared within a region but not across the machine.
+An implementation reads only the ids its state depends on. A per-thread cache or a handle
+to a thread-local driver keys on the thread id; a buffer pool keys on [`NumaNode`][__link27] and
+survives a move to another thread near the same memory; anything the runtime owns compares
+[`Owner`][__link28].
 
-That sharing holds only while every runtime in the process numbers the regions
-identically, for example from the numbering the operating system reports. Nothing checks
-it, and if two runtimes number them differently then state shared between them is wrong,
-not merely slow. Share across runtimes only when all of them are under common control.
+The ids carry no meaning beyond identity: they need not start at zero or run
+consecutively, and the [`Thread`][__link29]s in use cannot be enumerated. State keyed on any of them
+belongs in a map rather than an array indexed by it. [`Owner::min_threads`][__link30] is the one
+number on offer, and it is a floor to pre-size against, not a bound to index against.
 
-[`Owner`][__link26] identifies the runtime that constructed a [`Thread`][__link27]. Thread ids already distinguish
-threads, so this id answers a different question: it lets a value detect that it has
-crossed into a different runtime and release anything the previous one owned.
-
-An implementation therefore reads only the ids its state depends on:
-
-* State that must not be shared at all, such as a per-thread cache or a handle to a
-  thread-local driver, keys on the thread id and is replaced whenever the thread changes.
-* State concerned only with memory locality, such as a buffer pool, keys on [`NumaNode`][__link28]
-  and survives a move to another thread near the same memory.
-* State owned by the runtime, such as a scheduler handle, also compares [`Owner`][__link29] and is
-  released when it changes.
-
-The ids carry no meaning beyond identity. [`Owner`][__link30] and [`NumaNode`][__link31] need not start at
-zero or run consecutively, no count is exposed, and the [`Thread`][__link32]s in use cannot be
-enumerated. State keyed on any of these ids belongs in a map rather than an array indexed
-by it.
-
-Without `std` there is no [`ThreadId`][__link33]: `Thread::new` and
-`Thread::id` are absent and only [`Owner`][__link34] and [`NumaNode`][__link35] remain. A `no_std` library can
-still implement [`ThreadAware`][__link36] and use whatever it is given; the runtime that drives
+Without `std` there is no [`ThreadId`][__link31]: `Thread::new` and
+`Thread::id` are absent and only [`Owner`][__link32] and [`NumaNode`][__link33] remain. A `no_std` library can
+still implement [`ThreadAware`][__link34] and use whatever it is given; the runtime that drives
 relocation requires `std` regardless.
 
 ## Relation to `Send`
 
-[`ThreadAware`][__link37] requires [`Send`][__link38], and in that order: a value is sent to another thread
-first, then told where it landed. [`Send`][__link39] is what makes the move safe, and
-[`ThreadAware`][__link40] adds nothing to it.
+[`ThreadAware`][__link35] requires [`Send`][__link36], and in that order: a value is sent to another thread
+first, then told where it landed. [`Send`][__link37] is what makes the move safe, and
+[`ThreadAware`][__link38] adds nothing to it.
 
 ## Provided implementations
 
@@ -181,24 +172,29 @@ Types with nothing tied to a thread receive an empty implementation: primitives 
 non-zero variants, the thread ids, `Duration`, strings, safe function pointers of up to
 twelve parameters, and, with the `std` feature, paths.
 
-Containers forward the call to what they hold: [`Option`][__link41], [`Result`][__link42], arrays, slices,
-`Vec`, `VecDeque`, `Box`, `Cow`, cells, tuples of up to twelve elements, and map values.
-A borrowed `Cow` is taken to owned so that it can be relocated as well.
+Containers forward the call to what they hold: [`Option`][__link39], [`Result`][__link40], arrays, slices,
+`Vec`, `VecDeque`, `Box`, cells, tuples of up to twelve elements, and map values.
+
+References are not [`ThreadAware`][__link41]. Relocating through one would adapt something the value
+only borrows, and whoever owns it is relocated on its own account.
 
 Map keys are left alone, since altering one could change its hash or ordering and corrupt
 the map. Sets are not implemented at all for the same reason, so a `HashSet` or
-`BTreeSet` field is not [`ThreadAware`][__link43].
+`BTreeSet` field is not [`ThreadAware`][__link42].
+
+`Cow` is omitted for now: relocating a borrowed one has to clone it into owned storage
+first, which is a surprising amount of work to hide behind a hint.
 
 `Arc` is also omitted: whether a shared allocation should stay shared across threads or
-be split per thread depends on what it holds. The per-core [`Arc`][__link44] in
-[`thread_aware`][__link45] covers the case where splitting is correct.
+be split per thread depends on what it holds. The per-core [`Arc`][__link43] in
+[`thread_aware`][__link44] covers the case where splitting is correct.
 
 ## Features
 
-* **`std`** *(default)* - Adds [`Thread::new`][__link46] and [`Thread::id`][__link47], which need
-  [`ThreadId`][__link48], and implements [`ThreadAware`][__link49] for standard library
+* **`std`** *(default)* - Adds [`Thread::new`][__link45] and [`Thread::id`][__link46], which need
+  [`ThreadId`][__link47], and implements [`ThreadAware`][__link48] for standard library
   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs
-  only `alloc`.
+  only `alloc` and pointer-width atomics.
 
 
 <hr/>
@@ -206,7 +202,7 @@ be split per thread depends on what it holds. The per-core [`Arc`][__link44] in
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQb7MWmxYn7oPYbIEET5jImEucbgquuSdxDxSEbXzWlz2OBmAJhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbwWQI47ZIOnYb_X5SIRoaYBkb3kaQqZrTGssbXSoz6MMTTcdhZIGCcXRocmVhZF9hd2FyZV9jb3JlZTAuMS4w
  [__link0]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link1]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
  [__link10]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
@@ -225,33 +221,32 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link22]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
  [__link23]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware::relocate
  [__link24]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link25]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link26]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
- [__link27]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
- [__link28]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link29]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
+ [__link25]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
+ [__link26]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
+ [__link27]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
+ [__link28]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
+ [__link29]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
  [__link3]: https://doc.rust-lang.org/stable/std/?search=thread::Thread
- [__link30]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
- [__link31]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link32]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
- [__link33]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
- [__link34]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
- [__link35]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
- [__link36]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
- [__link37]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
- [__link38]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link39]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link30]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner::min_threads
+ [__link31]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
+ [__link32]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Owner
+ [__link33]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=NumaNode
+ [__link34]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link35]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link36]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link37]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
+ [__link38]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link39]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
  [__link4]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
- [__link40]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
- [__link41]: https://doc.rust-lang.org/stable/std/option/enum.Option.html
- [__link42]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
- [__link43]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
- [__link44]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
- [__link45]: https://docs.rs/thread_aware
- [__link46]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread::new
- [__link47]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread::id
- [__link48]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
- [__link49]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link40]: https://doc.rust-lang.org/stable/std/result/struct.Result.html
+ [__link41]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link42]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
+ [__link43]: https://docs.rs/thread_aware/latest/thread_aware/struct.Arc.html
+ [__link44]: https://docs.rs/thread_aware
+ [__link45]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread::new
+ [__link46]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread::id
+ [__link47]: https://doc.rust-lang.org/stable/std/?search=thread::ThreadId
+ [__link48]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=ThreadAware
  [__link5]: https://docs.rs/thread_aware_core/0.1.0/thread_aware_core/?search=Thread
  [__link6]: https://docs.rs/thread_aware
  [__link7]: https://docs.rs/thread_aware/latest/thread_aware/derive.ThreadAware.html

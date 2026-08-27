@@ -32,7 +32,7 @@ fn main() {
         .join()
         .expect("the spawned thread cannot panic");
 
-    let owner = Owner::new(1);
+    let owner = Owner::new(2);
     let first = Thread::new(owner, here, NumaNode::new(0));
     let second = Thread::new(owner, there, NumaNode::new(0));
 

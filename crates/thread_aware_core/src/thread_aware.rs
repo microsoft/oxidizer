@@ -85,9 +85,9 @@ use crate::Thread;
 /// while that thread is alive, and an [`Owner`](crate::Owner) only while that runtime is.
 ///
 /// Runtimes carry their own requirements. They call [`relocate`](Self::relocate) only after
-/// the value has actually moved, pass `None` when no previous [`Thread`] is known, give each
-/// running runtime its own [`Owner`](crate::Owner), and never rely on the call for
-/// correctness. Nothing enforces any of this.
+/// the value has actually moved, pass `None` when no previous [`Thread`] is known, build one
+/// [`Owner`](crate::Owner) per runtime, and never rely on the call for correctness. Nothing
+/// enforces any of this.
 ///
 /// # Examples
 ///

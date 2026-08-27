@@ -50,9 +50,10 @@ including threads of a different runtime, but only while all of them number the
 nodes identically.
 
 `Owner` values are issued by runtime and integration code, never by ordinary
-data-structure authors. When one process hosts two runtimes, keeping their
-owner ids distinct is the embedding application's responsibility; this crate has
-no registry and no way to detect a collision.
+data-structure authors. Every new owner is unique, so two runtimes alive at once
+cannot collide however carelessly they are set up. An owner also reports the
+smallest number of threads its runtime runs: a floor to pre-size against, which
+the runtime may exceed, and which is zero for one that spawns on demand.
 
 Implementing `ThreadAware` also commits a type to `Send`, since that is a
 supertrait. A type holding an `Rc` or another thread-bound handle cannot
@@ -79,14 +80,16 @@ thing to convert to and from, and one more thing to keep stable forever. The
 cost is that `Thread::new` and `Thread::id` need the `std` feature. With
 default features off, a `no_std` crate can still implement `ThreadAware` and
 read `Owner` and `NumaNode` from the `Thread` values it is handed; it just cannot
-construct one, which only runtimes need to do.
+construct one, which only runtimes need to do. Such a build needs `alloc` and
+pointer-width atomics, the latter because `Owner` identities come from a
+process-wide counter.
 
 **No dependencies reach a consumer.** The manifest's only entry is a test-only
 dev-dependency, so adopting this crate cannot introduce a version conflict or
 pull anything unexpected into a build.
 
-**Describe, do not enforce.** Nothing checks that runtimes take distinct owner
-ids or that implementations avoid blocking. These are documented
+**Describe, do not enforce.** Nothing checks that runtimes number NUMA nodes
+alike or that implementations avoid blocking. These are documented
 obligations; enforcing them would need runtime state and a coordination point,
 and this crate has neither.
 
@@ -97,9 +100,9 @@ already subdivide a NUMA node into cache domains, and a `Thread` may one day nee
 to describe a value pinned to memory but not to a processor. Both mean
 adding a coordinate, and the design makes that additive.
 
-**Ids are opaque, and take no `From<integer>`.** `Owner` and `NumaNode` expose
-no accessor returning their integer, and are built through an inherent
-`new(u32)` rather than a `From` impl. That is a deliberate refusal, because a
+**Ids are opaque, and take no `From<integer>`.** `NumaNode` exposes no accessor
+returning its integer, and both ids are built through inherent constructors
+rather than a `From` impl. That is a deliberate refusal, because a
 `From<integer>` on a permanent vocabulary type is a one-shot commitment. While
 one such impl exists it silently governs the width every unsuffixed literal
 infers; adding a second either breaks those call sites — `from(1)` falls back to
