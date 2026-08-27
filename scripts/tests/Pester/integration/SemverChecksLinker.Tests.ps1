@@ -156,7 +156,17 @@ Describe 'relocated target directory' {
             $shortRoot = Get-SemverChecksTargetDirPath -RepoRoot $root -PackageName 'fetch'
             $shortRoot | Should -Not -BeNullOrEmpty -Because 'the temp root is long enough to call for relocation'
             $shortDir = Join-Path $shortRoot 'probe'
-            $null = New-Item -ItemType Directory -Path $shortDir -Force
+
+            # Creating a directory at the volume root can be denied by policy on
+            # a locked-down machine. Production warns and builds in place when
+            # that happens, so the test skips rather than reporting a failure it
+            # is not evidence of.
+            try {
+                $null = New-Item -ItemType Directory -Path $shortDir -Force -ErrorAction Stop
+            } catch {
+                Set-ItResult -Skipped -Because "the volume root is not writable here: $($_.Exception.Message)"
+                return
+            }
             try {
                 $shortResult = & $compile (Join-Path $shortDir $leaf)
 

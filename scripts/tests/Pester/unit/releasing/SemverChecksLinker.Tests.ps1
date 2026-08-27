@@ -91,9 +91,10 @@ Describe 'Get-SemverChecksTargetDirPath' {
     }
 
     It 'stays short enough to leave the MAX_PATH budget to the build itself' -Skip:(-not $IsWindows) {
-        # The observed worst case nests ~209 characters of cargo-semver-checks
-        # and aws-lc-sys build output beneath the target directory, so the root
-        # has to stay well clear of 260.
+        # The observed worst case nests 216 characters below the repository
+        # root, 209 of them below the target directory -- the difference is the
+        # repository's own '\target', which this path replaces rather than adds
+        # to. So the root has to stay well clear of 260.
         $path = Get-SemverChecksTargetDirPath -RepoRoot $script:deepRoot -PackageName 'fetch'
 
         $path.Length | Should -BeLessOrEqual 20
@@ -164,6 +165,22 @@ Describe 'Get-SemverChecksTargetDirPath' {
         $path = Get-SemverChecksTargetDirPath -RepoRoot '\\server\share\oxidizer' -PackageName 'fetch'
 
         $path | Should -BeLike "$env:SystemDrive\oxi-sc\*"
+    }
+
+    It 'keeps a drive root anchored to the drive rather than the current directory' -Skip:(-not $IsWindows) {
+        # Trimming the separator off 'C:\' would leave 'C:', which names the
+        # current directory on that drive, not its root.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\' -PackageName 'http_client_api_with_templated_uri'
+
+        $path | Should -BeLike 'C:\oxi-sc\*'
+    }
+
+    It 'relocates rather than aborting when the root cannot be normalised' -Skip:(-not $IsWindows) {
+        # A path this function cannot parse is not a reason to fail a release,
+        # and it is not evidence the path is short either, so it still relocates.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot "C:\repo`0broken" -PackageName 'fetch' -WarningAction SilentlyContinue
+
+        $path | Should -BeLike '?:\oxi-sc\*'
     }
 
     It 'leaves the default target directory in place off Windows' -Skip:$IsWindows {

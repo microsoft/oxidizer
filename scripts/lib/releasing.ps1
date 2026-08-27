@@ -1067,20 +1067,41 @@ function Get-SemverChecksTargetDirPath {
 
     # Normalise first: the digest has to be stable across callers that spell the
     # same repository root differently (trailing separator, relative segments,
-    # or casing, none of which Windows treats as distinct).
-    $full = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd('\')
+    # or casing, none of which Windows treats as distinct). GetFullPath also
+    # rewrites forward slashes, so only backslashes remain to trim.
+    #
+    # A malformed or over-long root makes GetFullPath throw. Rather than abort
+    # -- which would strand exactly the long paths this exists for -- fall back
+    # to the raw string and let the relocation proceed unprojected.
+    $normalised = $true
+    try {
+        $full = [System.IO.Path]::GetFullPath($RepoRoot)
+    } catch {
+        Write-Warning "Could not normalise '$RepoRoot' ($($_.Exception.Message)); relocating the baseline build on the strength of the path as given."
+        $full = $RepoRoot
+        $normalised = $false
+    }
+
+    # Trimming the separator keeps 'C:\repo\' and 'C:\repo' on one digest, but a
+    # drive root is all separator: trimming it would leave 'C:', which names the
+    # current directory on that drive rather than its root.
+    $trimmed = $full.TrimEnd('\')
+    if ($trimmed -notmatch '^[A-Za-z]:$') {
+        $full = $trimmed
+    }
 
     # A UNC root has no drive letter to anchor to and would keep the very
     # length this function exists to shed, so fall back to the system drive.
-    $volume = [System.IO.Path]::GetPathRoot($full)
+    $volume = try { [System.IO.Path]::GetPathRoot($full) } catch { '' }
     $isUnc = $volume.StartsWith('\\')
     if ([string]::IsNullOrWhiteSpace($volume) -or $isUnc) {
         $volume = "$env:SystemDrive\"
     }
 
     # UNC has already lost the argument -- its own prefix is long enough that
-    # the projection below is not worth consulting.
-    if (-not $isUnc) {
+    # the projection below is not worth consulting -- and an unnormalised path
+    # is not a length worth trusting.
+    if (-not $isUnc -and $normalised) {
         $nameShift = $PackageName.Length - $script:SemverChecksNestingPackage.Length
         $projected = $full.Length + $script:SemverChecksNestingLength + $nameShift
         if (($projected + $script:SemverChecksNestingSlack) -le $script:MaxPathLength) {
@@ -1274,7 +1295,7 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     $pathHint = if ($IsWindows) {
-        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, and these scripts relocate the build to a short path only when the repository path looks long enough to need it. Set CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName) to force that, or move the repository closer to the volume root."
+        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, and these scripts relocate the build to a short path only when the repository path and the package name together project past that limit. Set CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName) to force the relocation, or move the repository closer to the volume root."
     } else {
         ''
     }
