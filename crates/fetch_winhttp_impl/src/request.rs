@@ -473,13 +473,7 @@ fn expect_completion(completion: CompletionResult, expected: OperationKind) -> f
     match (expected, completion) {
         (OperationKind::SendRequest, CompletionResult::SendRequestComplete)
         | (OperationKind::HeadersAvailable, CompletionResult::HeadersAvailable) => Ok(()),
-        (_, CompletionResult::Error { error, .. }) => Err(error.into_http_error()),
-        (_, CompletionResult::InvalidStatusInfo { status, len, .. }) => Err(callback_protocol_error(format!(
-            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
-        ))),
-        (_, unexpected) => Err(callback_protocol_error(format!(
-            "WinHTTP returned an unexpected completion for {expected:?}: {unexpected:?}"
-        ))),
+        (_, other) => Err(other.into_failure(&format!("{expected:?}"))),
     }
 }
 

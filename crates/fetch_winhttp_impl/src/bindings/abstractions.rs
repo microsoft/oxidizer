@@ -45,6 +45,8 @@ pub(crate) type StatusCallback = Option<unsafe extern "system" fn(*mut c_void, u
 /// these same ordering and lifetime rules for deterministic tests to be sound.
 #[cfg_attr(test, mockall::automock)]
 pub(crate) unsafe trait Bindings: Send + Sync + 'static {
+    /// Opens an asynchronous WinHTTP session.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `flags`
@@ -52,12 +54,16 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// acquire one owner that closes it exactly once.
     unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
 
+    /// Applies the four native resolve/connect/send/receive timeouts.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `handle`
     /// must identify a live session that cannot close during this call.
     unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
 
+    /// Registers the session status callback and its notification mask.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `handle`
@@ -68,6 +74,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// child request that relies on that protocol.
     unsafe fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()>;
 
+    /// Opens a connect handle for one host and port under a live session.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `session`
@@ -75,6 +83,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// handle must immediately acquire one owner that closes it exactly once.
     unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
 
+    /// Opens a request handle under a live connect handle.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `connect`
@@ -82,6 +92,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// returned handle must immediately acquire one exactly-once owner.
     unsafe fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
 
+    /// Writes one WinHTTP option onto a live handle.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `handle`
@@ -89,6 +101,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// `option`, and the option must be applied at a valid lifecycle stage.
     unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()>;
 
+    /// Submits request headers and begins the asynchronous send operation.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
@@ -98,6 +112,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// request handle's final `HANDLE_CLOSING` callback.
     unsafe fn send_request(&self, request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()>;
 
+    /// Writes one contiguous request-body span, or the terminal zero-length write.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
@@ -117,6 +133,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// [`WinHttpWriteData`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpwritedata
     unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()>;
 
+    /// Starts receiving response headers after the request body is complete.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
@@ -124,6 +142,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// operation slot must be armed for response headers.
     unsafe fn receive_response(&self, request: RawHandle) -> Result<()>;
 
+    /// Queries response headers or related status metadata from a live request.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
@@ -131,6 +151,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// `buffer` must be writable for `*buffer_len` bytes when present.
     unsafe fn query_headers(&self, request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
 
+    /// Queries one WinHTTP option from a live handle.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `handle`
@@ -138,12 +160,16 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// `buffer` must be writable for `*buffer_len` bytes when present.
     unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
 
+    /// Asks how many response-body bytes are ready to read.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
     /// must be live with its operation slot armed for data availability.
     unsafe fn query_data_available(&self, request: RawHandle) -> Result<()>;
 
+    /// Reads response-body bytes into a caller-owned buffer.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements. `request`
@@ -162,6 +188,8 @@ pub(crate) unsafe trait Bindings: Send + Sync + 'static {
     /// [`WinHttpReadData`]: https://learn.microsoft.com/windows/win32/api/winhttp/nf-winhttp-winhttpreaddata
     unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
 
+    /// Closes a handle owned by the caller.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy all trait-level safety requirements and own the

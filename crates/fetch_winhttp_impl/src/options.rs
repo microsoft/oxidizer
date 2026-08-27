@@ -25,14 +25,12 @@ pub(crate) struct ProtocolOptions {
 }
 
 impl ProtocolOptions {
-    /// Creates the option pair from an already validated version set.
+    /// Builds the option pair after the version set has been validated.
     ///
-    /// This is a plain field initializer; it does not itself check the pairing.
-    /// The invariant - `required` is set exactly when the requested versions
-    /// omit HTTP/1.1 - is established by the sole construction site,
-    /// [`crate::convert::protocol_options`], which is where the version set is
-    /// validated and where the rest of the native value encoding lives.
-    pub(crate) const fn new(advanced_mask: u32, required: bool) -> Self {
+    /// Only [`crate::convert::protocol_options`] constructs this type: that is
+    /// where unsupported versions are rejected and where `required` is set
+    /// exactly when the requested versions omit HTTP/1.1.
+    pub(crate) const fn from_validated(advanced_mask: u32, required: bool) -> Self {
         Self { advanced_mask, required }
     }
 
@@ -59,7 +57,7 @@ mod tests {
 
     #[test]
     fn protocol_options_expose_the_constructed_pair() {
-        let options = ProtocolOptions::new(3, true);
+        let options = ProtocolOptions::from_validated(3, true);
 
         assert_eq!(options.advanced_mask(), 3);
         assert!(options.required());

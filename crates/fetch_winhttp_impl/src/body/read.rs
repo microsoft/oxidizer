@@ -400,13 +400,7 @@ fn data_frame_from_buffer(buffer: &mut BytesBuf) -> Result<Frame<bytesbuf::Bytes
 fn data_available_completion(completion: CompletionResult) -> Result<u32, HttpError> {
     match completion {
         CompletionResult::DataAvailable(available) => Ok(available),
-        CompletionResult::Error { error, .. } => Err(error.into_http_error()),
-        CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
-            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
-        ))),
-        unexpected => Err(callback_protocol_error(format!(
-            "WinHTTP returned an unexpected completion for QueryDataAvailable: {unexpected:?}"
-        ))),
+        other => Err(other.into_failure("QueryDataAvailable")),
     }
 }
 
@@ -416,13 +410,7 @@ fn read_completion(completion: CompletionResult) -> Result<(usize, BytesBuf), Ht
             usize::try_from(len).expect("a u32 always fits usize on supported Windows targets"),
             buffer,
         )),
-        CompletionResult::Error { error, .. } => Err(error.into_http_error()),
-        CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
-            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
-        ))),
-        unexpected => Err(callback_protocol_error(format!(
-            "WinHTTP returned an unexpected completion for ReadData: {unexpected:?}"
-        ))),
+        other => Err(other.into_failure("ReadData")),
     }
 }
 

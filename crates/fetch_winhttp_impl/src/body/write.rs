@@ -203,13 +203,7 @@ fn write_completion(completion: CompletionResult) -> Result<BytesView, HttpError
             buffer.advance(usize::try_from(written.get()).expect("u32 fits usize"));
             Ok(buffer)
         }
-        CompletionResult::Error { error, .. } => Err(error.into_http_error()),
-        CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
-            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
-        ))),
-        unexpected => Err(callback_protocol_error(format!(
-            "WinHTTP returned an unexpected completion for Write: {unexpected:?}"
-        ))),
+        other => Err(other.into_failure("Write")),
     }
 }
 
@@ -219,13 +213,7 @@ fn end_chunked_completion(completion: CompletionResult) -> Result<(), HttpError>
         CompletionResult::WriteComplete { len, .. } => Err(callback_protocol_error(format!(
             "WinHTTP reported {len} bytes for the final zero-length request write"
         ))),
-        CompletionResult::Error { error, .. } => Err(error.into_http_error()),
-        CompletionResult::InvalidStatusInfo { status, len, .. } => Err(callback_protocol_error(format!(
-            "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
-        ))),
-        unexpected => Err(callback_protocol_error(format!(
-            "WinHTTP returned an unexpected completion for the final request write: {unexpected:?}"
-        ))),
+        other => Err(other.into_failure("the final request write")),
     }
 }
 

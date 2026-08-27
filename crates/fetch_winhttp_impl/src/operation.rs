@@ -359,7 +359,10 @@ impl Future for OperationFuture<'_> {
             this.receiver_live = false;
 
             let request = this.request.take().expect("a completed OperationFuture retains its request handle");
-            debug_assert!(this.request_slot.is_none());
+            debug_assert!(
+                this.request_slot.is_none(),
+                "request_slot is empty while OperationFuture holds the handle, and nothing else may refill it before completion restores the handle"
+            );
             *this.request_slot = Some(request);
         }
 

@@ -16,7 +16,7 @@
 //! exercise. See
 //! [`docs/private-test-utils.md`](https://github.com/microsoft/oxidizer/blob/main/docs/private-test-utils.md).
 
-#![allow(
+#![expect(
     clippy::missing_panics_doc,
     clippy::must_use_candidate,
     clippy::unwrap_used,

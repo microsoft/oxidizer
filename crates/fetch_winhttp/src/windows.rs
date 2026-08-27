@@ -1,18 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Placeholder contents for the platform that supports WinHTTP.
+//! Windows coverage anchor for the re-export-only facade.
 //!
-//! Every item this crate exposes on Windows is defined in `fetch_winhttp_impl`
-//! and merely re-exported here, and a re-export carries no code. That leaves a
-//! library with no instrumented code at all, which the coverage tooling cannot
-//! distinguish from a failed measurement (tracked as AB#7790459). This module
-//! keeps a single trivially exercised item in the build so that the measurement
-//! remains meaningful, and carries no behavior of its own.
-//!
-//! The file is named for the platform it is gated to, which is the naming the
-//! mutation tooling matches on to skip platform-gated code that it cannot
-//! build.
+//! Public items live in `fetch_winhttp_impl` and are re-exported here, so the
+//! facade would otherwise have no instrumented code. This module keeps one
+//! exercised item so coverage measurement is not empty (AB#7790459). The
+//! `windows` file name matches workspace tooling that skips platform-gated
+//! sources it cannot build.
 
 /// Reports whether the current target supports the WinHTTP transport.
 ///

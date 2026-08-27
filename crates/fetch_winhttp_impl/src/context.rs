@@ -16,7 +16,9 @@ use windows::Win32::Networking::WinHttp::{
     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
 
-use crate::error::{WinHttpError, WinHttpOperation};
+use http_extensions::HttpError;
+
+use crate::error::{WinHttpError, WinHttpOperation, callback_protocol_error};
 use crate::handle::ConnectHandle;
 use crate::session::WinHttpSession;
 
@@ -241,6 +243,23 @@ impl CompletionResult {
             status,
             len,
             _buffer: buffer.into_completion(),
+        }
+    }
+
+    /// Turns a non-success completion into the transport's public error.
+    ///
+    /// Callers match the success variant for their operation first. Everything
+    /// else is either a native failure, malformed callback metadata, or a
+    /// status that does not belong to `operation`.
+    pub(crate) fn into_failure(self, operation: &str) -> HttpError {
+        match self {
+            Self::Error { error, .. } => error.into_http_error(),
+            Self::InvalidStatusInfo { status, len, .. } => callback_protocol_error(format!(
+                "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
+            )),
+            unexpected => callback_protocol_error(format!(
+                "WinHTTP returned an unexpected completion for {operation}: {unexpected:?}"
+            )),
         }
     }
 }

@@ -47,26 +47,17 @@ use crate::options::ProtocolOptions;
 const HTTP2_KEEP_ALIVE_MINIMUM_MS: u32 = 5_000;
 /// Smallest HTTP/3 keep-alive interval this transport forwards to WinHTTP.
 ///
-/// This floor is chosen by the transport, not imposed by the operating system:
-/// the `WINHTTP_OPTION_HTTP3_KEEPALIVE` entry documents no minimum. Its purpose
-/// is to keep a zero out of the option value. `dword_millis` maps
-/// `Duration::ZERO` to `0`, and WinHTTP does not define what a zero timeout
-/// means for this option; "keep-alive disabled" is a plausible reading, which
-/// would invert a caller that explicitly asked for keep-alive probes. One
-/// millisecond is the smallest value whose meaning is unambiguous, and every
-/// nonzero caller interval already rounds up to at least that.
+/// WinHTTP documents no minimum for `WINHTTP_OPTION_HTTP3_KEEPALIVE`. A zero
+/// option value is undefined (it may disable probes), so this transport floors
+/// at one millisecond - the smallest unambiguous positive duration.
 /// Ref: <https://learn.microsoft.com/windows/win32/winhttp/option-flags>
 const HTTP3_KEEP_ALIVE_MINIMUM_MS: u32 = 1;
 /// Smallest idle-reuse window WinHTTP accepts.
 ///
-/// WinHTTP rejects a shorter window outright rather than clamping it, so a
-/// caller asking for one would otherwise fail session construction. Raising
-/// instead of rejecting matches how [`http2_keep_alive_millis`] treats an
-/// interval WinHTTP cannot represent, and keeps an aggressive idle policy from
-/// turning into a transport that cannot be built at all. The floor is not
-/// published alongside the option; it is one of the bounds recorded on
-/// [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`], which stands in
-/// for that option's missing documentation.
+/// WinHTTP rejects a shorter window rather than clamping it. Flooring matches
+/// [`http2_keep_alive_millis`] and keeps an aggressive idle policy from failing
+/// session construction. The bound is documented with
+/// [`crate::bindings::WINHTTP_OPTION_CONNECTION_IDLE_TIMEOUT`].
 const CONNECTION_IDLE_TIMEOUT_MINIMUM_MS: u32 = 5_000;
 /// Native sentinel that disables one `WinHttpSetTimeouts` deadline.
 ///
@@ -220,6 +211,8 @@ pub(crate) fn host_to_utf16(host: &str) -> Result<U16CString, ConversionError> {
 
 pub(crate) fn path_to_utf16(path: &str) -> Result<U16CString, ConversionError> {
     if path.starts_with('?') {
+        // WinHTTP's open-request path must be absolute; a query-only URI has no
+        // path component, so supply the root "/" before the query string.
         let mut units = Vec::with_capacity(path.len().saturating_add(1));
         units.push(u16::from(b'/'));
         units.extend(path.encode_utf16());
@@ -234,6 +227,7 @@ pub(crate) fn headers_to_utf16(headers: &HeaderMap) -> Result<U16CString, Conver
         unit_count
             .checked_add(name.as_str().len())
             .and_then(|unit_count| unit_count.checked_add(value.as_bytes().len()))
+            // ": " and "\r\n" are appended per field below.
             .and_then(|unit_count| unit_count.checked_add(4))
     });
     let unit_count = unit_count.ok_or_else(|| ConversionError::from(RequestHeadersTooLargeError::new()))?;
@@ -318,7 +312,7 @@ pub(crate) fn protocol_options(versions: &[Version]) -> Result<ProtocolOptions, 
         }
     }
 
-    Ok(ProtocolOptions::new(advanced_mask, !allows_http11))
+    Ok(ProtocolOptions::from_validated(advanced_mask, !allows_http11))
 }
 
 pub(crate) fn parse_protocol_used(protocol_mask: u32, legacy_version: Option<&str>) -> Result<Version, ConversionError> {

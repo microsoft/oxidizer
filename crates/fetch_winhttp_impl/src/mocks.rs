@@ -40,7 +40,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use plurality::Pool;
 use testing_aids::FutureTestExt;
 use windows::Win32::Networking::WinHttp::{
-    WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING, WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
+    ERROR_WINHTTP_INCORRECT_HANDLE_STATE, WINHTTP_ASYNC_RESULT, WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING,
+    WINHTTP_CALLBACK_STATUS_REQUEST_ERROR,
 };
 
 use crate::bindings::{BindingsFacade, MockBindings, WINHTTP_OPTION_CONTEXT_VALUE};
@@ -395,7 +396,9 @@ pub(crate) fn bindings(fail_context_option: bool) -> (BindingsFacade, Arc<CloseC
                 .context
                 .store(usize::from_ne_bytes(value.try_into().unwrap()), Ordering::SeqCst);
             if fail_context_option {
-                Err(WinHttpError::new(12019, WinHttpOperation::SetOption))
+                // Models a SetOption call rejected because the handle is not in
+                // a state that accepts it.
+                Err(WinHttpError::new(ERROR_WINHTTP_INCORRECT_HANDLE_STATE, WinHttpOperation::SetOption))
             } else {
                 Ok(())
             }

@@ -62,204 +62,50 @@ impl fmt::Debug for BindingsFacade {
     }
 }
 
+/// Forwards one `Bindings` method to the installed variant without changing
+/// arguments or lifecycle semantics.
+///
+/// Generated once per method so a transposed argument is a type error at the
+/// call site rather than a silent mismatch buried in a hand-written match arm.
+macro_rules! forward_bindings {
+    ($(unsafe fn $name:ident($($arg:ident: $ty:ty),* $(,)?) -> $ret:ty;)*) => {
+        $(
+            unsafe fn $name(&self, $($arg: $ty),*) -> $ret {
+                match self {
+                    Self::Real => {
+                        // SAFETY: the caller contract is forwarded unchanged.
+                        unsafe { RealBindings.$name($($arg),*) }
+                    }
+                    #[cfg(test)]
+                    Self::Mock(bindings) => {
+                        // SAFETY: the caller contract is forwarded unchanged.
+                        unsafe { bindings.$name($($arg),*) }
+                    }
+                }
+            }
+        )*
+    };
+}
+
 // SAFETY: Each branch forwards every operation without changing its arguments,
 // callback behavior, or lifecycle semantics. Real bindings preserve WinHTTP
 // behavior, while mock bindings are configured by tests to model the same
 // handle and completion protocol.
 unsafe impl Bindings for BindingsFacade {
-    unsafe fn open(&self, user_agent: &U16CStr, flags: u32) -> Result<RawHandle> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.open(user_agent, flags) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.open(user_agent, flags) }
-            }
-        }
-    }
-
-    unsafe fn set_timeouts(&self, handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.set_timeouts(handle, resolve, connect, send, receive) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.set_timeouts(handle, resolve, connect, send, receive) }
-            }
-        }
-    }
-
-    unsafe fn set_status_callback(&self, handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.set_status_callback(handle, callback, notification_flags) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.set_status_callback(handle, callback, notification_flags) }
-            }
-        }
-    }
-
-    unsafe fn connect(&self, session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.connect(session, host, port) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.connect(session, host, port) }
-            }
-        }
-    }
-
-    unsafe fn open_request(&self, connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.open_request(connect, method, path, flags) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.open_request(connect, method, path, flags) }
-            }
-        }
-    }
-
-    unsafe fn set_option(&self, handle: RawHandle, option: u32, value: &[u8]) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.set_option(handle, option, value) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.set_option(handle, option, value) }
-            }
-        }
-    }
-
-    unsafe fn send_request(&self, request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.send_request(request, headers, total_len, context) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.send_request(request, headers, total_len, context) }
-            }
-        }
-    }
-
-    unsafe fn write_data(&self, request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.write_data(request, buffer, len) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.write_data(request, buffer, len) }
-            }
-        }
-    }
-
-    unsafe fn receive_response(&self, request: RawHandle) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.receive_response(request) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.receive_response(request) }
-            }
-        }
-    }
-
-    unsafe fn query_headers(&self, request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.query_headers(request, info_level, buffer, buffer_len) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.query_headers(request, info_level, buffer, buffer_len) }
-            }
-        }
-    }
-
-    unsafe fn query_option(&self, handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.query_option(handle, option, buffer, buffer_len) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.query_option(handle, option, buffer, buffer_len) }
-            }
-        }
-    }
-
-    unsafe fn query_data_available(&self, request: RawHandle) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.query_data_available(request) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.query_data_available(request) }
-            }
-        }
-    }
-
-    unsafe fn read_data(&self, request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.read_data(request, buffer, len) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.read_data(request, buffer, len) }
-            }
-        }
-    }
-
-    unsafe fn close_handle(&self, handle: RawHandle) -> Result<()> {
-        match self {
-            Self::Real => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { RealBindings.close_handle(handle) }
-            }
-            #[cfg(test)]
-            Self::Mock(bindings) => {
-                // SAFETY: the caller contract is forwarded unchanged.
-                unsafe { bindings.close_handle(handle) }
-            }
-        }
+    forward_bindings! {
+        unsafe fn open(user_agent: &U16CStr, flags: u32) -> Result<RawHandle>;
+        unsafe fn set_timeouts(handle: RawHandle, resolve: i32, connect: i32, send: i32, receive: i32) -> Result<()>;
+        unsafe fn set_status_callback(handle: RawHandle, callback: StatusCallback, notification_flags: u32) -> Result<()>;
+        unsafe fn connect(session: RawHandle, host: &U16CStr, port: u16) -> Result<RawHandle>;
+        unsafe fn open_request(connect: RawHandle, method: &U16CStr, path: &U16CStr, flags: u32) -> Result<RawHandle>;
+        unsafe fn set_option(handle: RawHandle, option: u32, value: &[u8]) -> Result<()>;
+        unsafe fn send_request(request: RawHandle, headers: &U16CStr, total_len: u32, context: usize) -> Result<()>;
+        unsafe fn write_data(request: RawHandle, buffer: Option<NonNull<u8>>, len: u32) -> Result<()>;
+        unsafe fn receive_response(request: RawHandle) -> Result<()>;
+        unsafe fn query_headers(request: RawHandle, info_level: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
+        unsafe fn query_option(handle: RawHandle, option: u32, buffer: Option<NonNull<u8>>, buffer_len: &mut u32) -> Result<()>;
+        unsafe fn query_data_available(request: RawHandle) -> Result<()>;
+        unsafe fn read_data(request: RawHandle, buffer: NonNull<u8>, len: u32) -> Result<()>;
+        unsafe fn close_handle(handle: RawHandle) -> Result<()>;
     }
 }
