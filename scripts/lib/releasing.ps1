@@ -1001,8 +1001,66 @@ function Get-SemverChecksLinkerEnvName {
     return "CARGO_TARGET_${triple}_LINKER"
 }
 
-# Runs cargo semver-checks, linking with rust-lld where link.exe would overflow
-# MAX_PATH.
+# Directory name for relocated semver-checks builds, placed at a volume root.
+# Kept terse on purpose: every character here is one the MAX_PATH budget loses.
+$script:SemverChecksTargetDirName = 'oxi-sc'
+
+# Returns a short, per-clone target directory for baseline builds on Windows,
+# or $null where the default target directory should stand.
+#
+# The linker override above keeps link.exe out of the way, but it cannot help
+# the C compilers that -sys crates drive through the cc crate. MSVC cl.exe
+# resolves its -Fo argument against MAX_PATH and fails with C1083 ("Cannot open
+# compiler generated file"), and unlike the linker there is no long-path-aware
+# drop-in to switch to: clang-cl is not guaranteed to be installed. The
+# remaining lever is the length of the path itself.
+#
+# cargo-semver-checks nests baseline builds under the workspace target
+# directory and offers no flag to move them, but it derives that location from
+# cargo metadata, so CARGO_TARGET_DIR does reach it. Rooting the build at the
+# repository's own volume keeps it on the filesystem the developer chose, and
+# the digest of the repository root keeps sibling clones from sharing one
+# directory. The result is a fixed 18 characters, in place of a repository path
+# that is unbounded.
+#
+# The path is deterministic rather than unique so that consecutive runs reuse
+# the baseline rustdoc they just built; concurrent runs are safe because cargo
+# locks the target directory exactly as it does for target/.
+function Get-SemverChecksTargetDirPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    if (-not $IsWindows) {
+        return $null
+    }
+
+    # Normalise first: the digest has to be stable across callers that spell the
+    # same repository root differently (trailing separator, relative segments,
+    # or casing, none of which Windows treats as distinct).
+    $full = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd('\')
+
+    # A UNC root has no drive letter to anchor to and would keep the very
+    # length this function exists to shed, so fall back to the system drive.
+    $volume = [System.IO.Path]::GetPathRoot($full)
+    if ([string]::IsNullOrWhiteSpace($volume) -or $volume.StartsWith('\\')) {
+        $volume = "$env:SystemDrive\"
+    }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($full.ToLowerInvariant()))
+    } finally {
+        $sha.Dispose()
+    }
+    $token = [System.BitConverter]::ToString($digest[0..3]).Replace('-', '').ToLowerInvariant()
+
+    return (Join-Path $volume (Join-Path $script:SemverChecksTargetDirName $token))
+}
+
+# Runs cargo semver-checks, linking with rust-lld and building under a short
+# target directory where MSVC tooling would otherwise overflow MAX_PATH.
 #
 # The setting travels by environment variable because that is the only channel
 # that reaches the cargo invocation which matters. cargo-semver-checks exposes
@@ -1046,6 +1104,26 @@ function Invoke-SemverChecksCli {
             }
         }
 
+        $targetDirApplied = $false
+        $targetDir = Get-SemverChecksTargetDirPath -RepoRoot $RepoRoot
+        if ($targetDir) {
+            if (Test-Path 'Env:\CARGO_TARGET_DIR') {
+                # As with the linker, an explicit choice wins: whoever set this
+                # has already decided where the build should land.
+                Write-Verbose 'CARGO_TARGET_DIR is already set; building where it points.'
+            } else {
+                try {
+                    $null = New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction Stop
+                    $env:CARGO_TARGET_DIR = $targetDir
+                    $targetDirApplied = $true
+                } catch {
+                    # Fail open -- a probe must never break a release. Name the
+                    # symptom, though, so a later C1083 is not a mystery.
+                    Write-Warning "Could not create '$targetDir'; building under the default target directory. If the repository path is long, the baseline build may fail with C1083. ($($_.Exception.Message))"
+                }
+            }
+        }
+
         try {
             # A required version bump produces an expected non-zero exit code.
             $PSNativeCommandUseErrorActionPreference = $false
@@ -1054,6 +1132,9 @@ function Invoke-SemverChecksCli {
         } finally {
             if ($applied) {
                 Remove-Item -Path "Env:\$linkerVar" -ErrorAction SilentlyContinue
+            }
+            if ($targetDirApplied) {
+                Remove-Item -Path 'Env:\CARGO_TARGET_DIR' -ErrorAction SilentlyContinue
             }
         }
     } finally {
@@ -1152,7 +1233,7 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     $pathHint = if ($IsWindows) {
-        ' If the output contains LNK1104 or a path-length error, a MAX_PATH-bound tool was reached; shorten the repository path.'
+        ' If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached despite the short build directory these scripts select; setting CARGO_TARGET_DIR to a shorter path, or moving the repository closer to the volume root, buys back the remaining characters.'
     } else {
         ''
     }

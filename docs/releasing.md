@@ -318,6 +318,41 @@ be read from `rustc -vV` the default linker stands (with a warning).
 Other hosts are unaffected — `*-windows-gnu` and non-Windows targets
 already default to linkers that handle long paths.
 
+#### Windows: baseline builds run under a short target directory
+
+Redirecting the linker clears `LNK1104`, but it does not help the C
+compilers that `-sys` crates drive through the `cc` crate. MSVC `cl.exe`
+resolves its `-Fo` argument against `MAX_PATH` and fails with `C1083`
+("Cannot open compiler generated file"), and unlike the linker there is
+no long-path-aware drop-in guaranteed to be installed — `clang-cl` is
+not part of a default Rust or Visual Studio install. So the remaining
+lever is the length of the path itself.
+
+`cargo semver-checks` nests baseline builds under the workspace target
+directory and offers no flag to move them, but it derives that location
+from cargo metadata, so `CARGO_TARGET_DIR` does reach it. On Windows the
+release scripts therefore point it at
+`<volume>\oxi-sc\<digest-of-repository-root>` for the duration of the
+call — a fixed 18 characters in place of a repository path that is
+unbounded. The volume is the repository's own, so the build stays on the
+filesystem you chose, and the digest keeps sibling clones apart. The
+path is deterministic rather than unique so that consecutive runs reuse
+the baseline rustdoc they just built; concurrent runs are safe because
+cargo locks that directory exactly as it does `target/`.
+
+The observed worst case nests roughly 216 characters of
+cargo-semver-checks and `aws-lc-sys` build output beneath the target
+directory, which is why the repository path itself cannot be relied on
+to leave enough room.
+
+As with the linker, an explicit `CARGO_TARGET_DIR` is respected rather
+than overridden. If the directory cannot be created the build proceeds
+in place with a warning, since a probe must never abort a release.
+
+Note that these artifacts live outside the repository, so `cargo clean`
+and `git clean` do not remove them; delete `<volume>\oxi-sc` to reclaim
+the space.
+
 #### Proc-macro-only packages require manual SemVer review
 
 `cargo semver-checks` deliberately supports ordinary library targets,

@@ -84,3 +84,85 @@ edition = "2021"
         }
     }
 }
+
+Describe 'relocated target directory' {
+    # The linker override cannot help the C compilers that -sys crates drive
+    # through the cc crate: MSVC cl.exe resolves its -Fo argument against
+    # MAX_PATH, and there is no long-path-aware drop-in guaranteed to be
+    # installed. The unit tests pin the environment-variable lifecycle; this
+    # exercises the claim underneath it, that the ceiling is real and that
+    # shortening the root is what clears it.
+    It 'compiles at a depth that defeats cl.exe once the root is shortened' -Skip:(-not $IsWindows) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (-not (Test-Path -LiteralPath $vswhere)) {
+            Set-ItResult -Skipped -Because 'vswhere is absent, so no MSVC toolchain can be located'
+            return
+        }
+
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath |
+            Select-Object -First 1
+        $vcvars = if ($vsPath) { Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat' } else { $null }
+        if (-not $vcvars -or -not (Test-Path -LiteralPath $vcvars)) {
+            Set-ItResult -Skipped -Because 'no MSVC C toolchain is installed'
+            return
+        }
+
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ('oxi-cl-' + [guid]::NewGuid().ToString('n').Substring(0, 8))
+        $null = New-Item -ItemType Directory -Path $root -Force
+
+        try {
+            # No #include, so the compile needs nothing from INCLUDE and the only
+            # variable under test is the length of the output path.
+            $source = Join-Path $root 'probe.c'
+            Set-Content -LiteralPath $source -Value 'int probe(void){return 42;}' -Encoding ascii
+
+            $deep = $root
+            while ($deep.Length -lt 240) {
+                $deep = Join-Path $deep 'nested-directory-segment'
+            }
+            $null = New-Item -ItemType Directory -Path "\\?\$deep" -Force
+
+            # Named after the object that failed in the field, so the reproduction
+            # keeps the same shape as the report.
+            $leaf = 'a9466447ad5a187b-jitterentropy-health.o'
+            $deepObj = Join-Path $deep $leaf
+            $deepObj.Length | Should -BeGreaterThan 260 -Because 'the premise is a path MSVC cannot open'
+
+            $compile = {
+                param($outPath)
+                # A failing compile is the premise of the first half of this
+                # test, not an error: the suite runner turns non-zero native
+                # exits into terminating errors, so opt out for these calls.
+                $PSNativeCommandUseErrorActionPreference = $false
+                $line = "call `"$vcvars`" >nul && cl.exe -nologo -c `"$source`" `"-Fo$outPath`""
+                $text = & $env:ComSpec /c $line 2>&1 | Out-String
+                [pscustomobject]@{ Output = $text; ExitCode = $LASTEXITCODE }
+            }
+
+            $deepResult = & $compile $deepObj
+            if ($deepResult.ExitCode -eq 0) {
+                Set-ItResult -Skipped -Because 'this toolchain opens long output paths, so the relocation has nothing to prove here'
+                return
+            }
+
+            # C1083 specifically: a laxer pattern would let an unrelated failure
+            # satisfy the premise and make the assertion below vacuous.
+            $deepResult.Output | Should -Match 'C1083'
+
+            # Now the same compile beneath the directory the release scripts pick.
+            $shortRoot = Get-SemverChecksTargetDirPath -RepoRoot $root
+            $shortDir = Join-Path $shortRoot 'probe'
+            $null = New-Item -ItemType Directory -Path $shortDir -Force
+            try {
+                $shortResult = & $compile (Join-Path $shortDir $leaf)
+
+                $shortResult.ExitCode | Should -Be 0 -Because "cl.exe should compile under the short root, but said: $($shortResult.Output)"
+                $shortResult.Output | Should -Not -Match 'C1083'
+            } finally {
+                Remove-Item -LiteralPath $shortRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } finally {
+            Remove-Item -LiteralPath "\\?\$root" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

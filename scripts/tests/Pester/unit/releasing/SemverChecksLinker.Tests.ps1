@@ -77,11 +77,82 @@ LLVM version: 20.1.0
     }
 }
 
+Describe 'Get-SemverChecksTargetDirPath' {
+    It 'roots the build at the volume of the repository on Windows' -Skip:(-not $IsWindows) {
+        $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer.worktrees\some-long-branch-name'
+
+        $path | Should -BeLike 'C:\oxi-sc\*'
+    }
+
+    It 'stays short enough to leave the MAX_PATH budget to the build itself' -Skip:(-not $IsWindows) {
+        # The observed worst case nests ~216 characters of cargo-semver-checks
+        # and aws-lc-sys build output beneath the target directory, so the root
+        # has to stay well clear of 260.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+
+        $path.Length | Should -BeLessOrEqual 20
+    }
+
+    It 'keeps separate clones in separate directories' -Skip:(-not $IsWindows) {
+        $first = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+        $second = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer-two'
+
+        $first | Should -Not -Be $second
+    }
+
+    It 'returns the same directory for the same clone across runs' -Skip:(-not $IsWindows) {
+        # Determinism is what lets a rerun reuse the baseline rustdoc it just built.
+        $first = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+        $second = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+
+        $first | Should -Be $second
+    }
+
+    It 'treats equivalent spellings of one root as the same clone' -Skip:(-not $IsWindows) {
+        # Windows does not distinguish these, so the digest must not either.
+        $plain = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
+        $trailing = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer\'
+        $cased = Get-SemverChecksTargetDirPath -RepoRoot 'C:\SOURCE\Oxidizer'
+        $relative = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\other\..\oxidizer'
+
+        $trailing | Should -Be $plain
+        $cased    | Should -Be $plain
+        $relative | Should -Be $plain
+    }
+
+    It 'follows the repository to another volume' -Skip:(-not $IsWindows) {
+        # Staying on the developer's chosen filesystem avoids a cross-volume copy.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot 'D:\oxidizer'
+
+        $path | Should -BeLike 'D:\oxi-sc\*'
+    }
+
+    It 'falls back to the system drive for a UNC root' -Skip:(-not $IsWindows) {
+        # A UNC root has no drive letter to shorten to and would keep the very
+        # length the relocation exists to shed.
+        $path = Get-SemverChecksTargetDirPath -RepoRoot '\\server\share\oxidizer'
+
+        $path | Should -BeLike "$env:SystemDrive\oxi-sc\*"
+    }
+
+    It 'leaves the default target directory in place off Windows' -Skip:$IsWindows {
+        Get-SemverChecksTargetDirPath -RepoRoot '/home/user/oxidizer' | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Invoke-SemverChecksCli' {
     BeforeEach {
         $script:envName = 'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER'
         $script:savedLinker = if (Test-Path "Env:\$script:envName") { (Get-Item "Env:\$script:envName").Value } else { $null }
         Remove-Item "Env:\$script:envName" -ErrorAction SilentlyContinue
+
+        $script:savedTargetDir = if (Test-Path 'Env:\CARGO_TARGET_DIR') { $env:CARGO_TARGET_DIR } else { $null }
+        Remove-Item 'Env:\CARGO_TARGET_DIR' -ErrorAction SilentlyContinue
+
+        # Default the relocation off. These cases exercise the linker override,
+        # and the real path resolves to a volume root that unit tests must not
+        # create directories in; the relocation cases below opt back in.
+        Mock Get-SemverChecksTargetDirPath { $null }
     }
 
     AfterEach {
@@ -89,6 +160,12 @@ Describe 'Invoke-SemverChecksCli' {
             Set-Item "Env:\$script:envName" -Value $script:savedLinker
         } else {
             Remove-Item "Env:\$script:envName" -ErrorAction SilentlyContinue
+        }
+
+        if ($null -ne $script:savedTargetDir) {
+            $env:CARGO_TARGET_DIR = $script:savedTargetDir
+        } else {
+            Remove-Item 'Env:\CARGO_TARGET_DIR' -ErrorAction SilentlyContinue
         }
     }
 
@@ -158,5 +235,89 @@ Describe 'Invoke-SemverChecksCli' {
         $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive
 
         Test-Path "Env:\$script:envName" | Should -BeFalse
+    }
+
+    It 'builds under the relocated target directory while cargo runs' {
+        $target = Join-Path $TestDrive 'sc'
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { $target }
+        Mock cargo {
+            $script:observedTarget = $env:CARGO_TARGET_DIR
+            'no semver update required'
+        }
+
+        $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive
+
+        $script:observedTarget | Should -Be $target
+    }
+
+    It 'creates the relocated target directory' {
+        # cargo would create it too, but only after the probe; creating it here
+        # is what turns an unwritable location into a warning rather than a
+        # mid-build failure.
+        $target = Join-Path $TestDrive 'made-on-demand'
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { $target }
+        Mock cargo { 'no semver update required' }
+
+        $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive
+
+        Test-Path -LiteralPath $target | Should -BeTrue
+    }
+
+    It 'removes CARGO_TARGET_DIR afterwards when it was not set before' {
+        $target = Join-Path $TestDrive 'sc'
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { $target }
+        Mock cargo { 'no semver update required' }
+
+        $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive
+
+        Test-Path 'Env:\CARGO_TARGET_DIR' | Should -BeFalse
+    }
+
+    It 'removes CARGO_TARGET_DIR when the cargo invocation throws' {
+        $target = Join-Path $TestDrive 'sc'
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { $target }
+        Mock cargo { throw 'cargo exploded' }
+
+        { Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive } |
+            Should -Throw '*cargo exploded*'
+
+        Test-Path 'Env:\CARGO_TARGET_DIR' | Should -BeFalse
+    }
+
+    It 'keeps an explicitly configured CARGO_TARGET_DIR instead of relocating' {
+        $env:CARGO_TARGET_DIR = 'original-target'
+        $target = Join-Path $TestDrive 'sc'
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { $target }
+        Mock cargo {
+            $script:observedTarget = $env:CARGO_TARGET_DIR
+            'no semver update required'
+        }
+
+        $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive
+
+        $script:observedTarget | Should -Be 'original-target'
+        $env:CARGO_TARGET_DIR | Should -Be 'original-target'
+    }
+
+    It 'warns and builds in place when the target directory cannot be created' {
+        # Fail open: an unwritable volume root must not abort a release.
+        Mock Get-SemverChecksLinkerEnvName { $null }
+        Mock Get-SemverChecksTargetDirPath { Join-Path $TestDrive 'unwritable' }
+        Mock New-Item { throw 'access denied' } -ParameterFilter { $ItemType -eq 'Directory' }
+        Mock cargo {
+            $script:observedTarget = $env:CARGO_TARGET_DIR
+            'no semver update required'
+        }
+
+        $null = Invoke-SemverChecksCli -PackageName 'sample' -BaselineSha 'abc' -RepoRoot $TestDrive `
+            -WarningVariable warnings -WarningAction SilentlyContinue
+
+        $script:observedTarget | Should -BeNullOrEmpty
+        "$warnings" | Should -BeLike '*C1083*'
     }
 }
