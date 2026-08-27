@@ -1078,7 +1078,11 @@ function Get-SemverChecksTargetDirPath {
         $full = [System.IO.Path]::GetFullPath($RepoRoot)
     } catch {
         Write-Warning "Could not normalise '$RepoRoot' ($($_.Exception.Message)); relocating the baseline build on the strength of the path as given."
-        $full = $RepoRoot
+        # Everything downstream assumes the backslashes GetFullPath would have
+        # produced, so stand in for the one part of it that still applies.
+        # Without this, 'C:/repo' and 'C:\repo' would digest differently and
+        # break the same-clone-same-directory guarantee on this path alone.
+        $full = $RepoRoot -replace '/', '\'
         $normalised = $false
     }
 

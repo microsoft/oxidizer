@@ -183,6 +183,15 @@ Describe 'Get-SemverChecksTargetDirPath' {
         $path | Should -BeLike '?:\oxi-sc\*'
     }
 
+    It 'still gives one directory per clone when the root cannot be normalised' -Skip:(-not $IsWindows) {
+        # The fallback path skips GetFullPath, so it has to stand in for the
+        # separator rewriting itself or equivalent spellings would diverge.
+        $back = Get-SemverChecksTargetDirPath -RepoRoot "C:\repo`0broken" -PackageName 'fetch' -WarningAction SilentlyContinue
+        $forward = Get-SemverChecksTargetDirPath -RepoRoot "C:/repo`0broken" -PackageName 'fetch' -WarningAction SilentlyContinue
+
+        $forward | Should -Be $back
+    }
+
     It 'leaves the default target directory in place off Windows' -Skip:$IsWindows {
         Get-SemverChecksTargetDirPath -RepoRoot '/home/user/oxidizer' -PackageName 'fetch' |
             Should -BeNullOrEmpty
