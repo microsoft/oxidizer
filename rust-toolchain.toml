@@ -1,0 +1,3 @@
+[toolchain]
+# Keep workspace builds and diagnostics reproducible across users.
+channel = "1.95.0"
