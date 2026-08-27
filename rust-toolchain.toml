@@ -1,0 +1,7 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[toolchain]
+# Must match RUST_LATEST in constants.env. Its major/minor must match MSRUSTUP_TOOLCHAIN in:
+# https://o365exchange.visualstudio.com/O365%20Core/_git/ox-sdk?path=/.pipelines/variables/publish.yml
+channel = "1.95.0"
