@@ -421,8 +421,13 @@ fn plan_required_link_args(environment: &BuildEnvironment, plan: &mut Plan) -> R
     // token is not something rustc accepts on its own.
     let as_rustflags = missing.iter().map(|arg| format!("-Clink-arg={arg}")).collect::<Vec<_>>().join(" ");
 
+    // Name the concrete table header rather than a `<triple>` placeholder: the
+    // triple is known here, and `plan` has already refused one that would not
+    // survive being written into a message.
+    let target = &environment.target;
+
     Err(app_err!(
-        "linker argument(s) `{}` required by `{source_var}` did not reach rustc. Add them to `[target.<triple>] rustflags` in \
+        "linker argument(s) `{}` required by `{source_var}` did not reach rustc. Add them to `[target.{target}] rustflags` in \
          `.cargo/config.toml` as `{as_rustflags}`. If a `RUSTFLAGS` environment variable is set, note that it REPLACES the config \
          `rustflags` rather than merging with it, so the configured flags are dropped; add `{as_rustflags}` to `RUSTFLAGS` as well, or \
          unset it.",
@@ -920,6 +925,8 @@ mod tests {
             "linker argument(s) `/guard:ehcont` required by `MSVC_SPECTRE_REQUIRED_LINK_ARGS_x86_64_pc_windows_msvc`",
         );
         assert_reports(&plan, "-Clink-arg=/guard:ehcont");
+        // The header names the real triple, so it can be pasted as-is.
+        assert_reports(&plan, "`[target.x86_64-pc-windows-msvc] rustflags`");
         // The search path was still resolved: one build reports every problem.
         assert_eq!(plan.link_search, vec![spectre_dir(VC_TOOLS)]);
     }
