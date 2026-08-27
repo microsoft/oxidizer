@@ -50,9 +50,10 @@
 //! distant region, a handle to another thread's driver.
 //!
 //! [`ThreadAware`] lets that state repair itself. The runtime moves the value, then calls
-//! [`relocate`](ThreadAware::relocate) to report where it now lives.
+//! [`relocate`](ThreadAware::relocate) to report where it now lives. Relocation has two
+//! sides, and most code sits on only one of them.
 //!
-//! # The two roles
+//! # Library authors: implementing the trait
 //!
 //! **Library and application authors** implement [`ThreadAware`], usually through the
 //! [`#[derive(ThreadAware)]`][derive] macro. They never call
@@ -76,17 +77,15 @@
 //! ```
 //!
 //! The derive writes the forwarding implementation, calling `relocate` on `scratch` and
-//! `dictionary` in turn. Callers of `Encoder` never name [`thread_aware`].
+//! `dictionary` in turn. Because a composed type forwards to its fields, one call at the top
+//! reaches everything below it. Callers of `Encoder` never name [`thread_aware`].
+//!
+//! # Runtime authors: driving relocation
 //!
 //! **Runtime authors** construct a [`Thread`] per worker and call
 //! [`relocate`](ThreadAware::relocate) after moving a value, passing where it came from and
-//! where it now runs.
-//!
-//! A type composed of other types forwards the call to its fields, so one call at the top
-//! reaches everything below it. The derive macro and containers in [`thread_aware`] do this
-//! automatically.
-//!
-//! The example below plays the part of the runtime so the order is visible.
+//! where it now runs. The example below plays the part of the runtime so the order is
+//! visible.
 //!
 //! ```
 //! # fn main() {
@@ -200,18 +199,10 @@
 //!
 //! # Features
 //!
-//! This crate provides one optional feature that can be enabled in your `Cargo.toml`:
-//!
-//! - **`std`** *(default)* - Provides [`Thread::new`] and [`Thread::id`], which need
+//! - **`std`** *(default)* - Adds [`Thread::new`] and [`Thread::id`], which need
 //!   [`ThreadId`](std::thread::ThreadId), and implements [`ThreadAware`] for standard library
-//!   types such as `HashMap`, `Path` and `PathBuf`.
-//!
-//! Disable default features for `#![no_std]` environments. [`ThreadAware`], [`Owner`],
-//! [`NumaNode`] and the implementations for `core` and `alloc` types remain available. A
-//! [`Thread`] cannot be constructed without `std`, so a `no_std` library implements the trait
-//! and reads whatever the runtime hands it.
-//!
-//! `no_std` environments require `alloc`.
+//!   types such as `HashMap`, `Path` and `PathBuf`. Turn it off for `no_std`, which needs
+//!   only `alloc`.
 
 extern crate alloc;
 #[cfg(any(test, feature = "std"))]

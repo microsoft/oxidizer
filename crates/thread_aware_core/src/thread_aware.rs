@@ -10,7 +10,8 @@ use crate::Thread;
 /// Implement this trait when part of a type depends on where it runs: memory near a
 /// particular node, a handle to a thread-local driver, a shard index, a cached thread id.
 /// [`relocate`](Self::relocate) brings that state back into line. Implementors do not call
-/// it themselves; a runtime does, as described in [the two roles](crate#the-two-roles).
+/// it themselves; a runtime does, as described in
+/// [driving relocation](crate#runtime-authors-driving-relocation).
 ///
 /// Implement or derive it for any type that may end up inside a value a runtime relocates,
 /// including types that do nothing on relocation, since an empty implementation is what lets
