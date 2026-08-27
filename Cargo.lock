@@ -4939,7 +4939,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "insta",
  "proc-macro2",

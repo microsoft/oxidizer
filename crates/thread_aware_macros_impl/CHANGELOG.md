@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.7.5] - 2026-08-27
+## [0.8.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - remove implementation-only field attribute APIs from the public surface ([#678](https://github.com/microsoft/oxidizer/pull/678))
 
 - 🐛 Bug Fixes
 
