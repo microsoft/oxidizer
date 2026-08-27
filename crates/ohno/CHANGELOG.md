@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0] - 2026-08-27
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.0` of `ohno_macros`
+
+- ⚠️ Breaking
+
+  - document pub(crate) constructors, reject #[no_constructors] under #[ohno::error] ([#653](https://github.com/microsoft/oxidizer/pull/653))
+
+- ✨ Features
+
+  - rewrite the crate from requirements and design ([#656](https://github.com/microsoft/oxidizer/pull/656))
+
+- 📚 Documentation
+
+  - add an example replacing a thiserror error enum ([#691](https://github.com/microsoft/oxidizer/pull/691))
+  - document how error text is rendered ([#685](https://github.com/microsoft/oxidizer/pull/685))
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance
