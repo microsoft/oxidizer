@@ -203,3 +203,14 @@ the pipeline side of the transport/pipeline split: connection lifetime, for inst
 matters deeply to ECS yet is a transport concern. Early analysis suggests the knobs
 libraries most commonly want can be honored by both the Hyper and WinHTTP transports, but
 only if the transport abstraction is richer than a plain layered/Tower service.
+
+## 8. Transport-specific protocol and pool tuning still on the shared surface
+
+`ConnectionPoolOptions`, `Http2Options`, and `ConnectionKeepAlive` remain on
+`TransportOptions`, although their current behavior is implemented by `fetch_hyper` and
+cannot be guaranteed by every transport.
+
+`SocketOptions` belongs to `TokioTransportOptions`, where only the bundled socket-owning
+transport accepts it.
+
+No bundled transport currently reads `TransportOptions::extra`.

@@ -34,6 +34,7 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 mod linux {
+    use std::future::ready;
     use std::hint::black_box;
     use std::time::Duration;
 
@@ -63,8 +64,8 @@ mod linux {
     struct EmptyExporter;
 
     impl PushMetricExporter for EmptyExporter {
-        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
-            Ok(())
+        fn export(&self, _metrics: &ResourceMetrics) -> impl Future<Output = OTelSdkResult> + Send {
+            ready(Ok(()))
         }
 
         fn force_flush(&self) -> OTelSdkResult {

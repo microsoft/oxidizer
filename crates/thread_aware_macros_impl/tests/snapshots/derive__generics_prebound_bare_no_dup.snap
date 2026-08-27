@@ -1,0 +1,19 @@
+---
+source: crates/thread_aware_macros_impl/tests/derive.rs
+expression: expand(input)
+---
+impl<T: ThreadAware> ::thread_aware::ThreadAware for PreBound<T> {
+    fn relocate(
+        &mut self,
+        __thread_aware_source: ::core::option::Option<
+            ::thread_aware::affinity::Affinity,
+        >,
+        __thread_aware_destination: ::thread_aware::affinity::Affinity,
+    ) {
+        ::thread_aware::ThreadAware::relocate(
+            &mut self.0,
+            __thread_aware_source,
+            __thread_aware_destination,
+        );
+    }
+}

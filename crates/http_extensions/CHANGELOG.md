@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.0` of `bytesbuf`
+  - Now requires `0.5.0` of `ohno`
+  - Now requires `0.5.0` of `templated_uri`
+  - Now requires `0.11.0` of `thread_aware`
+  - Now requires `0.6.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
 ## [0.9.0] - 2026-08-09
 
 - 🔧 Maintenance

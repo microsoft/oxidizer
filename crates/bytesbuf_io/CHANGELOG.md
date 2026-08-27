@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.0` of `bytesbuf`
+  - Now requires `0.5.0` of `ohno`
+
+- ✨ Features
+
+  - add manual future-polling test helpers ([#655](https://github.com/microsoft/oxidizer/pull/655))
+
+- 🐛 Bug Fixes
+
+  - declare optional dependencies as dev-dependencies ([#658](https://github.com/microsoft/oxidizer/pull/658))
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
 ## [0.8.0] - 2026-08-09
 
 - 🔧 Maintenance

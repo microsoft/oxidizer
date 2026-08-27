@@ -1,0 +1,255 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: output
+---
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension("positional")] f: T }
+
+---- yields ----
+a positional string name is not supported; use `#[dimension(log = "...")]` to rename the log key
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension("positional")] f: T }
+
+---- yields ----
+a positional string name is not supported; use `#[dimension(log = "...")]` to rename the log key
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension = "x"] f: T }
+
+---- yields ----
+`#[dimension]` does not take a `= value`; use `#[dimension]` or `#[dimension(log = ..., metric = ...)]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension = "x"] f: T }
+
+---- yields ----
+`#[dimension]` does not take a `= value`; use `#[dimension]` or `#[dimension(log = ..., metric = ...)]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension()] f: T }
+
+---- yields ----
+`#[dimension(...)]` requires at least one of `log` or `metric`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension()] f: T }
+
+---- yields ----
+`#[dimension(...)]` requires at least one of `log` or `metric`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(bogus)] f: T }
+
+---- yields ----
+expected `log = "..."`, `log = exclude`, `metric`, or `metric = "..."`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(bogus)] f: T }
+
+---- yields ----
+expected `log = "..."`, `log = exclude`, `metric`, or `metric = "..."`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(log = bogus)] f: T }
+
+---- yields ----
+`log` expects a string key or the `exclude` keyword
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(log = bogus)] f: T }
+
+---- yields ----
+`log` expects a string key or the `exclude` keyword
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(log = "a", log = "b")] f: T }
+
+---- yields ----
+duplicate `log` setting in `#[dimension(...)]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(log = "a", log = "b")] f: T }
+
+---- yields ----
+duplicate `log` setting in `#[dimension(...)]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(log = exclude, log = exclude)] f: T }
+
+---- yields ----
+duplicate `log` setting in `#[dimension(...)]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(log = exclude, log = exclude)] f: T }
+
+---- yields ----
+duplicate `log` setting in `#[dimension(...)]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(metric = "a", metric = "b")] f: T }
+
+---- yields ----
+duplicate `metric` setting in `#[dimension(...)]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(metric = "a", metric = "b")] f: T }
+
+---- yields ----
+duplicate `metric` setting in `#[dimension(...)]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension(metric, metric)] f: T }
+
+---- yields ----
+duplicate `metric` setting in `#[dimension(...)]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension(metric, metric)] f: T }
+
+---- yields ----
+duplicate `metric` setting in `#[dimension(...)]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[dimension] #[dimension] f: T }
+
+---- yields ----
+duplicate `#[dimension(...)]` attribute
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[dimension] #[dimension] f: T }
+
+---- yields ----
+duplicate `#[dimension(...)]` attribute
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[unredacted(foo)] f: T }
+
+---- yields ----
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[unredacted(foo)] f: T }
+
+---- yields ----
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[unredacted = "no"] f: T }
+
+---- yields ----
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[unredacted = "no"] f: T }
+
+---- yields ----
+`#[unredacted]` is a marker and does not accept arguments or a value
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[unredacted] #[data_class(Euii)] f: T }
+
+---- yields ----
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[unredacted] #[data_class(Euii)] f: T }
+
+---- yields ----
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[data_class(Euii)] #[unredacted] f: T }
+
+---- yields ----
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[data_class(Euii)] #[unredacted] f: T }
+
+---- yields ----
+`#[unredacted]` and `#[data_class(...)]` are mutually exclusive
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[if_none] f: Option<T> }
+
+---- yields ----
+`#[if_none(...)]` requires an argument: `drop` or a string literal placeholder
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[if_none] f: Option<T> }
+
+---- yields ----
+`#[if_none(...)]` requires an argument: `drop` or a string literal placeholder
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[if_none(bogus)] f: Option<T> }
+
+---- yields ----
+expected `drop` or a string literal placeholder, e.g. `#[if_none("n/a")]`
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[if_none(bogus)] f: Option<T> }
+
+---- yields ----
+expected `drop` or a string literal placeholder, e.g. `#[if_none("n/a")]`
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[if_none(drop)] #[if_none(drop)] f: Option<T> }
+
+---- yields ----
+duplicate `#[if_none(...)]` attribute
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[if_none(drop)] #[if_none(drop)] f: Option<T> }
+
+---- yields ----
+duplicate `#[if_none(...)]` attribute
+
+---- input ----
+#[event("e")]
+#[info] struct Subject { #[if_none(drop)] f: T }
+
+---- yields ----
+`#[if_none(...)]` is only valid on `Option<T>` fields
+
+---- input ----
+#[derive(Enrichment)]
+struct Subject { #[if_none(drop)] f: T }
+
+---- yields ----
+`#[if_none(...)]` is only valid on `Option<T>` fields

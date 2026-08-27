@@ -2241,7 +2241,7 @@ mod coverage_arena_gaps {
     /// Used to drive over-alignment rejection in `_with` family functions
     /// without ever instantiating the value on the test stack frame
     /// (the over-alignment guard fires before the closure is invoked).
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct HalfChunkAlign;
@@ -2250,7 +2250,7 @@ mod coverage_arena_gaps {
     /// `layout.align() >= CHUNK_ALIGN` guard in the slice-copy family.
     /// Same Windows-stack caveat as [`HalfChunkAlign`]: never lives on
     /// the test stack.
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[repr(align(65536))]
     #[derive(Clone, Copy)]
     struct ChunkAlign;
@@ -2304,7 +2304,7 @@ mod coverage_arena_gaps {
         assert_eq!(arc[69_999], 7);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_arc_with_over_aligned_panics() {
@@ -2320,7 +2320,7 @@ mod coverage_arena_gaps {
         assert_eq!(r[69_999], 3);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_with_over_aligned_panics() {
@@ -2328,7 +2328,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_with(|| HalfChunkAlign);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_box_with_over_aligned_panics() {
@@ -2338,7 +2338,7 @@ mod coverage_arena_gaps {
 
     // Over-alignment is rejected before initialization.
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_uninit_box_over_aligned_panics() {
@@ -2346,7 +2346,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_uninit_box::<HalfChunkAlign>();
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_uninit_arc_over_aligned_panics() {
@@ -2354,7 +2354,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_uninit_arc::<HalfChunkAlign>();
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_slice_copy_over_aligned_panics() {
@@ -2366,7 +2366,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_slice_copy(src);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_slice_no_drop_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2379,7 +2379,7 @@ mod coverage_arena_gaps {
         assert!(res.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_slice_copy_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2388,7 +2388,7 @@ mod coverage_arena_gaps {
         assert!(res.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_slice_copy_arc_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2456,7 +2456,7 @@ mod coverage_arena_gaps {
         assert_eq!(arc[2047], 2047);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_arc_with_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -6063,13 +6063,13 @@ mod public_surface_behavior {
     // including Windows, whose default 1 MiB stack can't accommodate the
     // 128 KiB-aligned frame the guarded body would otherwise require.
     //
-    // Skipped under the UTC codegen backend (`--cfg utc_backend`): UTC caps
-    // type alignment at 8192 bytes, well below the 128 KiB this test needs.
-    #[cfg(not(utc_backend))]
+    // Skipped on codegen backends that cap type alignment below the 128 KiB
+    // this test needs (`--cfg align_capped_backend`).
+    #[cfg(not(align_capped_backend))]
     #[repr(align(131072))]
     struct HugeAlign(#[expect(dead_code, reason = "field present to give the type a non-zero size")] u8);
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_with_rejects_excessive_alignment() {
         // try_alloc_with is the Alloc<T> entry point. CHUNK_ALIGN is 64 KiB;
@@ -6319,11 +6319,11 @@ mod public_surface_behavior {
     // `try_alloc_with_rejects_excessive_alignment`. The `MaybeUninit<T>` returned
     // by the uninit-family entry points never materializes a real `T` on the
     // stack, so the test compiles and runs safely on every platform.
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[repr(align(131072))]
     struct HugeAlignBox(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_uninit_box_rejects_excessive_alignment() {
         let arena: Arena = Arena::new();
@@ -6768,7 +6768,7 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_copy_rejects_overaligned() {
@@ -6791,7 +6791,7 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_fill_with_rejects_overaligned() {
@@ -6898,23 +6898,23 @@ mod public_surface_behavior {
     // before the guard runs. The MaybeUninit/uninit-family tests only hold
     // the type *inside* `MaybeUninit`, so they're safe everywhere.
 
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct HalfChunkAlignNoDrop(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[repr(align(32768))]
     struct HalfChunkAlignDrop(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[expect(clippy::empty_drop, reason = "Drop impl makes needs_drop::<T>() true for the test")]
     impl Drop for HalfChunkAlignDrop {
         fn drop(&mut self) {}
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     fn try_alloc_arc_with_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r: Result<multitude::Arc<HalfChunkAlignDrop>, _> = arena.try_alloc_arc_with(|| HalfChunkAlignDrop(0));
@@ -6922,14 +6922,14 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     fn try_alloc_box_with_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r: Result<multitude::Box<HalfChunkAlignDrop>, _> = arena.try_alloc_box_with(|| HalfChunkAlignDrop(0));
         assert!(r.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_uninit_box_rejects_half_chunk_alignment() {
         // Holding T inside MaybeUninit means no stack frame needs T's
@@ -6939,7 +6939,7 @@ mod public_surface_behavior {
         assert!(r.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_uninit_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -6948,7 +6948,7 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     fn try_alloc_slice_fill_with_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r = arena.try_alloc_slice_fill_with_arc::<HalfChunkAlignDrop, _>(1, |_| HalfChunkAlignDrop(0));
@@ -6956,14 +6956,14 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     fn try_alloc_slice_fill_with_box_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r = arena.try_alloc_slice_fill_with_box::<HalfChunkAlignDrop, _>(1, |_| HalfChunkAlignDrop(0));
         assert!(r.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_uninit_slice_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -6971,7 +6971,7 @@ mod public_surface_behavior {
         assert!(r.is_err());
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_uninit_slice_box_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -6980,7 +6980,7 @@ mod public_surface_behavior {
     }
 
     #[test]
-    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
+    #[cfg(all(not(target_os = "windows"), not(align_capped_backend)))]
     fn try_alloc_slice_copy_arc_allows_half_chunk_align_for_copy_t() {
         let arena: Arena = Arena::new();
         let data = [HalfChunkAlignNoDrop(0), HalfChunkAlignNoDrop(1)];
@@ -7583,19 +7583,19 @@ mod public_surface_behavior_3 {
         assert_eq!(DROPPED.load(Ordering::Relaxed), 4);
     }
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct OverAligned32K;
 
     // SAFETY: zero-sized POD; no drop.
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     unsafe impl Send for OverAligned32K {}
     // SAFETY: zero-sized POD; no drop.
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     unsafe impl Sync for OverAligned32K {}
 
-    #[cfg(not(utc_backend))]
+    #[cfg(not(align_capped_backend))]
     #[test]
     fn try_alloc_slice_fill_with_arc_rejects_over_aligned() {
         let arena = Arena::new();

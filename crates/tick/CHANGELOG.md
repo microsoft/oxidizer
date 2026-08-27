@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - partition relocation storage per affinity ([#681](https://github.com/microsoft/oxidizer/pull/681))
+  - Now requires `0.11.0` of `thread_aware`
+
+- ✨ Features
+
+  - add configurable fast instant retrieval ([#648](https://github.com/microsoft/oxidizer/pull/648))
+
+- 🐛 Bug Fixes
+
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
+- ⚡ Performance
+
+  - avoid allocations when deserializing timestamps ([#654](https://github.com/microsoft/oxidizer/pull/654))
+
 ## [0.5.0] - 2026-08-09
 
 - 🔧 Maintenance

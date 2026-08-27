@@ -7,11 +7,15 @@
 //! and re-exported here. `ClientOptions` bundles those transport options
 //! together with the response-body, routing, redaction, and TLS configuration
 //! owned by the `fetch` request pipeline.
+//!
+//! [`SocketOptions`] is re-exported for transport-specific builders. It is not part of
+//! [`TransportOptions`] because only socket-owning transports can honor it.
 
 use data_privacy::RedactionEngine;
+#[doc(inline)]
 pub use fetch_options::{
     ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionLifetime, ConnectionPoolOptions, Http2Options, PoolIndex, PoolSelection,
-    RequestFilter, TransportOptions,
+    RequestFilter, SocketOptions, TransportOptions,
 };
 pub use http_extensions::HttpBodyOptions;
 use http_extensions::routing::Router;

@@ -53,7 +53,11 @@ impl FakeWrite {
     /// # Errors
     ///
     /// This call never fails.
-    #[expect(clippy::unused_async, reason = "API compatibility between trait and inherent fn")]
+    #[expect(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "API compatibility between trait and inherent fn"
+    )]
     pub async fn write(&mut self, data: BytesView) -> Result<(), Infallible> {
         self.contents.put_bytes(data);
         Ok(())

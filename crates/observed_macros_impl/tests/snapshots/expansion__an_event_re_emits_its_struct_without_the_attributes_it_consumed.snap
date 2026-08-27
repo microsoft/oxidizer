@@ -1,0 +1,78 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"http.request\"\"#,\nr#\"\n            #[derive(Debug)]\n            #[info(\"{method} handled as {status}\", name = \"http.request.log\")]\n            struct HttpRequest {\n                #[dimension(log = \"method\")]\n                method: ClassifiedString,\n                #[allow(dead_code)]\n                #[unredacted]\n                status: i64,\n                #[data_class(DataTaxonomy::Euii)]\n                user: String,\n                #[dimension(log = exclude)]\n                request_id: ClassifiedString,\n            }\n            \"#,)"
+---
+#[derive(Debug)]
+struct HttpRequest {
+    method: ClassifiedString,
+    #[allow(dead_code)]
+    status: i64,
+    user: String,
+    request_id: ClassifiedString,
+}
+const _: () = {
+    impl ::observed::Event for HttpRequest {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "http.request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<HttpRequest>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "http.request.log",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::Some("{method} handled as {status}"),
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "method",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("method"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(&self.method, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "status",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("status"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.status.clone()))?;
+            }
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "user",
+                    ::core::option::Option::Some(
+                        ::observed::metadata::LogFieldEntry::new("user"),
+                    ),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| ::observed::Value::from_redacted(
+                        &::observed::__private::Sensitive::new(
+                            &self.user,
+                            DataTaxonomy::Euii,
+                        ),
+                        engine,
+                    ),
+                )?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

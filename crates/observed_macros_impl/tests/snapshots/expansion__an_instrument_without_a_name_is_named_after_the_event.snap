@@ -1,0 +1,50 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"heartbeat\"\"#,\n\"#[counter] #[gauge(level)] struct Heartbeat { #[unredacted] level: f64 }\",)"
+---
+struct Heartbeat {
+    level: f64,
+}
+const _: () = {
+    impl ::observed::Event for Heartbeat {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "heartbeat",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Heartbeat>()),
+            ::core::option::Option::None,
+            ::core::option::Option::Some(
+                ::observed::metadata::MetricDescription::new(
+                    "heartbeat",
+                    ::observed::metadata::InstrumentKind::Counter,
+                    "",
+                    "",
+                ),
+            ),
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "level",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "level",
+                            ::observed::metadata::MetricDescription::new(
+                                "heartbeat",
+                                ::observed::metadata::InstrumentKind::Gauge,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.level.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

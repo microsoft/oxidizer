@@ -1,0 +1,43 @@
+---
+source: crates/observed_macros_impl/tests/expansion.rs
+expression: "expand_event(r#\"\"wrapped\"\"#,\n\"#[counter(v)] struct Wrapped { #[unredacted] v: (u64) }\",)"
+---
+struct Wrapped {
+    v: (u64),
+}
+const _: () = {
+    impl ::observed::Event for Wrapped {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "wrapped",
+            ::core::option::Option::Some(::core::any::TypeId::of::<Wrapped>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            {
+                const FIELD_DESC: ::observed::metadata::FieldDescriptor = ::observed::metadata::FieldDescriptor::new(
+                    "v",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        ::observed::metadata::MetricFieldEntry::instrument(
+                            "v",
+                            ::observed::metadata::MetricDescription::new(
+                                "wrapped",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| ::observed::Value::from(self.v.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

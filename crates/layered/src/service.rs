@@ -60,6 +60,8 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::future::ready;
+
     use futures::executor::block_on;
 
     use super::*;
@@ -70,8 +72,8 @@ mod tests {
     impl Service<String> for EchoService {
         type Out = String;
 
-        async fn execute(&self, input: String) -> Self::Out {
-            input
+        fn execute(&self, input: String) -> impl Future<Output = Self::Out> + Send {
+            ready(input)
         }
     }
 

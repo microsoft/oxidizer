@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
 #![allow(
     unused_attributes,
     clippy::empty_structs_with_brackets,
     clippy::redundant_type_annotations,
     clippy::items_after_statements,
     clippy::unused_async,
+    clippy::unused_async_trait_impl,
     clippy::unnecessary_wraps,
     missing_docs,
     reason = "Unit tests"

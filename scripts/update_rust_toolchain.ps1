@@ -15,6 +15,10 @@
 .PARAMETER ConstantsFile
     Path to the constants.env file. Defaults to ../constants.env relative to script location.
 
+.PARAMETER VsCodeSettingsTemplate
+    Path to .vscode/settings.template.jsonc, whose rustfmt toolchain is pinned to RUST_NIGHTLY.
+    Defaults to ../.vscode/settings.template.jsonc relative to script location.
+
 .PARAMETER DryRun
     If specified, shows what would be updated without actually modifying the files.
 
@@ -27,6 +31,7 @@
 
 param(
     [string]$ConstantsFile = (Join-Path $PSScriptRoot ".." "constants.env"),
+    [string]$VsCodeSettingsTemplate = (Join-Path $PSScriptRoot ".." ".vscode" "settings.template.jsonc"),
     [switch]$DryRun
 )
 
@@ -146,6 +151,24 @@ function Update-ConstantsEnv {
     return $content
 }
 
+function Update-PinnedNightly {
+    <#
+    .SYNOPSIS
+        Rewrites every `nightly-YYYY-MM-DD` literal in the given content to $NewNightly.
+
+    .DESCRIPTION
+        `.vscode/settings.template.jsonc` pins rustfmt to the same nightly as RUST_NIGHTLY so
+        the editor formats the way CI's format check does. That pin is a hand-copied literal,
+        so a RUST_NIGHTLY bump has to carry it along or the two silently diverge.
+    #>
+    param(
+        [string]$Content,
+        [string]$NewNightly
+    )
+
+    return $Content -replace 'nightly-\d{4}-\d{2}-\d{2}', $NewNightly
+}
+
 # Main script execution
 Write-Host "Fetching latest Rust versions..."
 Write-Host ""
@@ -222,4 +245,20 @@ if ($DryRun) {
 if ($constantsUpdates.Count -gt 0) {
     $newConstantsContent = Update-ConstantsEnv -FilePath $ConstantsFile -Updates $constantsUpdates
     Set-Content -Path $ConstantsFile -Value $newConstantsContent -NoNewline
+
+    if ($constantsUpdates.ContainsKey("RUST_NIGHTLY")) {
+        if (Test-Path $VsCodeSettingsTemplate) {
+            $templateContent = Get-Content $VsCodeSettingsTemplate -Raw
+            $newTemplateContent = Update-PinnedNightly -Content $templateContent -NewNightly $constantsUpdates["RUST_NIGHTLY"]
+
+            if ($newTemplateContent -ne $templateContent) {
+                Set-Content -Path $VsCodeSettingsTemplate -Value $newTemplateContent -NoNewline
+                Write-Host "Updated pinned nightly in '$VsCodeSettingsTemplate'."
+                Write-Host "Contributors must re-copy that line into their own .vscode/settings.json."
+            }
+        }
+        else {
+            Write-Host "Warning: '$VsCodeSettingsTemplate' not found; its pinned nightly was not updated."
+        }
+    }
 }

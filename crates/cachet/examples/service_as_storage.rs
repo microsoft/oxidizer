@@ -6,6 +6,12 @@
 //! This pattern is useful for remote caches (Redis, Memcached) where
 //! you want to add middleware (retry, timeout) to the underlying service.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a service impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::collections::HashMap;
 
 use cachet::{Cache, CacheEntry, CacheOperation, CacheResponse, GetRequest, InsertOutcome, InsertRequest, InvalidateRequest};

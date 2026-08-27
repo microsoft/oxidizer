@@ -7,6 +7,7 @@
 //! and `CacheTier`, enabling remote cache services (Redis, Memcached) to be used
 //! as cache storage backends.
 
+use std::future::ready;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
@@ -95,9 +96,9 @@ where
         }
     }
 
-    async fn len(&self) -> Result<u64, SizeError> {
+    fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
         // Service-based tiers typically don't expose length information
-        Err(SizeError::unsupported())
+        ready(Err(SizeError::unsupported()))
     }
 }
 
@@ -112,8 +113,8 @@ mod tests {
     impl Service<CacheOperation<String, i32>> for MockService {
         type Out = Result<CacheResponse<i32>, Error>;
 
-        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-            match input {
+        fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+            ready(match input {
                 CacheOperation::Get(req) => {
                     if req.key == "existing" {
                         Ok(CacheResponse::Get(Some(CacheEntry::new(42))))
@@ -124,7 +125,7 @@ mod tests {
                 CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
                 CacheOperation::Clear => Ok(CacheResponse::Clear),
-            }
+            })
         }
     }
 
@@ -164,13 +165,13 @@ mod tests {
         impl Service<CacheOperation<String, i32>> for RejectingService {
             type Out = Result<CacheResponse<i32>, Error>;
 
-            async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-                match input {
+            fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+                ready(match input {
                     CacheOperation::Insert(_) => Ok(CacheResponse::Insert(InsertOutcome::Rejected)),
                     CacheOperation::Get(_) => Ok(CacheResponse::Get(None)),
                     CacheOperation::Invalidate(_) => Ok(CacheResponse::Invalidate),
                     CacheOperation::Clear => Ok(CacheResponse::Clear),
-                }
+                })
             }
         }
 
@@ -224,15 +225,15 @@ mod tests {
     impl Service<CacheOperation<String, i32>> for WrongResponseService {
         type Out = Result<CacheResponse<i32>, Error>;
 
-        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-            match input {
+        fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+            ready(match input {
                 // Returns Clear response for Insert requests (wrong type)
                 CacheOperation::Insert(_) => Ok(CacheResponse::Clear),
                 // Returns Insert response for Get/Invalidate requests (wrong type)
                 CacheOperation::Get(_) | CacheOperation::Invalidate(_) => Ok(CacheResponse::Insert(InsertOutcome::Accepted)),
                 // Returns Get response for Clear requests (wrong type)
                 CacheOperation::Clear => Ok(CacheResponse::Get(None)),
-            }
+            })
         }
     }
 

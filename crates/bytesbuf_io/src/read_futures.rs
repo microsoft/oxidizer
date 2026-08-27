@@ -137,6 +137,7 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::convert::Infallible;
+    use std::future::ready;
     use std::pin::pin;
     use std::task::Waker;
 
@@ -322,16 +323,16 @@ mod tests {
     impl crate::Read for ErroringRead {
         type Error = TestError;
 
-        async fn read_at_most_into(&mut self, _len: usize, _into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
-            Err(TestError("read_at_most_into error".to_string()))
+        fn read_at_most_into(&mut self, _len: usize, _into: BytesBuf) -> impl Future<Output = Result<(usize, BytesBuf), Self::Error>> {
+            ready(Err(TestError("read_at_most_into error".to_string())))
         }
 
-        async fn read_more_into(&mut self, _into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error> {
-            Err(TestError("read_more_into error".to_string()))
+        fn read_more_into(&mut self, _into: BytesBuf) -> impl Future<Output = Result<(usize, BytesBuf), Self::Error>> {
+            ready(Err(TestError("read_more_into error".to_string())))
         }
 
-        async fn read_any(&mut self) -> Result<BytesBuf, Self::Error> {
-            Err(TestError("read_any error".to_string()))
+        fn read_any(&mut self) -> impl Future<Output = Result<BytesBuf, Self::Error>> {
+            ready(Err(TestError("read_any error".to_string())))
         }
     }
 

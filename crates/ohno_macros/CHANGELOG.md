@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0] - 2026-08-27
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.1` of `ohno_macros_impl`
+
+- ⚠️ Breaking
+
+  - document pub(crate) constructors, reject #[no_constructors] under #[ohno::error] ([#653](https://github.com/microsoft/oxidizer/pull/653))
+
+- ✨ Features
+
+  - rewrite the crate from requirements and design ([#656](https://github.com/microsoft/oxidizer/pull/656))
+
+- 🐛 Bug Fixes
+
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
+- ♻️ Code Refactoring
+
+  - split the implementation into ohno_macros_impl ([#683](https://github.com/microsoft/oxidizer/pull/683))
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance
