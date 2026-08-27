@@ -300,19 +300,18 @@ async fn send_request_headers(
         });
         let mut send = std::pin::pin!(send);
         let mut deadline = std::pin::pin!(clock.delay(timeout));
-        let mut deadline_registered = false;
 
-        poll_fn(|cx| {
-            if !deadline_registered {
-                let _ = deadline.as_mut().poll(cx);
-                deadline_registered = true;
-            }
-
-            match send.as_mut().poll(cx) {
-                Poll::Ready(result) => Poll::Ready(Ok(result)),
-                Poll::Pending if deadline.as_mut().poll(cx).is_ready() => Poll::Ready(Err(send.as_ref().get_ref().cold_connect_state())),
+        // Poll the send future first. Only when it is still pending does the
+        // deadline need a waker, and it is polled at most once per wake. A
+        // separate bootstrap poll would return Ready for an already-elapsed
+        // timeout and then poll the same future again in the pending arm,
+        // which violates the Future contract.
+        poll_fn(|cx| match send.as_mut().poll(cx) {
+            Poll::Ready(result) => Poll::Ready(Ok(result)),
+            Poll::Pending => match deadline.as_mut().poll(cx) {
+                Poll::Ready(()) => Poll::Ready(Err(send.as_ref().get_ref().cold_connect_state())),
                 Poll::Pending => Poll::Pending,
-            }
+            },
         })
         .await
     };
@@ -441,14 +440,15 @@ fn apply_request_settings(request: &RequestHandle, settings: RequestSettings) ->
     let bindings = request.bindings();
     let raw = request.raw();
 
-    if settings.protocol.advanced_mask() != 0 {
-        set_dword(
-            bindings,
-            raw,
-            WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
-            settings.protocol.advanced_mask(),
-        )?;
-    }
+    // Always write the mask, including zero. HTTP/1.1-only must disable the
+    // advanced protocols WinHTTP would otherwise enable by default on some
+    // host contexts (app containers and system services).
+    set_dword(
+        bindings,
+        raw,
+        WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL,
+        settings.protocol.advanced_mask(),
+    )?;
     if settings.protocol.required() {
         set_dword(bindings, raw, WINHTTP_OPTION_HTTP_PROTOCOL_REQUIRED, 1)?;
     }
@@ -811,6 +811,7 @@ mod tests {
         assert_eq!(
             dword_options(&record),
             [
+                (WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, 0),
                 (WINHTTP_OPTION_REDIRECT_POLICY, 0),
                 (WINHTTP_OPTION_DISABLE_FEATURE, 5),
                 (WINHTTP_OPTION_DECOMPRESSION, 3),

@@ -47,13 +47,13 @@ mod windows {
 
     use all_the_time::Session as TimeSession;
     use alloc_tracker::Session as AllocSession;
-    use benchmarking::time_sample;
+    use benchmarking::time_sample_async;
     use bytesbuf::BytesView;
     use criterion::measurement::WallTime;
     use criterion::{BenchmarkGroup, Criterion};
     use fetch_winhttp::WinHttpTlsConfig;
     use fetch_winhttp_impl::testing::{Http3Server, ResponsePlan, TestClient, TestServer, client};
-    use futures::executor::block_on;
+    use futures::executor::{LocalPool, block_on};
     use http::{HeaderName, HeaderValue, Version};
     use http_extensions::HttpBodyOptions;
     use tick::Clock;
@@ -96,8 +96,8 @@ mod windows {
         let server = TestServer::http_repeating(ResponsePlan::ok(""));
         let url = server.url("/minimal");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
-        measure(&mut group, allocs, time, "get_minimal", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+        measure(&mut group, allocs, time, "get_minimal", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
         drop(server.finish());
 
@@ -121,8 +121,8 @@ mod windows {
         let server = TestServer::http_repeating(ResponsePlan::ok(""));
         let url = server.url("/h1");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
-        measure(&mut group, allocs, time, "h1_plaintext", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+        measure(&mut group, allocs, time, "h1_plaintext", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
         drop(server.finish());
 
@@ -134,14 +134,14 @@ mod windows {
 
         let url = server.url("/h1-tls");
         let test_client = warmed_client(&[Version::HTTP_11], tls.clone(), &url);
-        measure(&mut group, allocs, time, "h1_tls", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+        measure(&mut group, allocs, time, "h1_tls", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
 
         let url = server.url("/h2-tls");
         let test_client = warmed_client(&[Version::HTTP_2], tls, &url);
-        measure(&mut group, allocs, time, "h2_tls", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+        measure(&mut group, allocs, time, "h2_tls", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
         drop(server.finish());
 
@@ -152,8 +152,8 @@ mod windows {
             WinHttpTlsConfig::builder().accept_invalid_certs(true).build(),
             &url,
         );
-        measure(&mut group, allocs, time, "h3_quic", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+        measure(&mut group, allocs, time, "h3_quic", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
         drop(server.finish());
 
@@ -173,14 +173,14 @@ mod windows {
             })
             .collect::<Vec<_>>();
 
-        measure(group, allocs, time, name, || {
+        measure(group, allocs, time, name, |_| async {
             let mut request = test_client.client.get(url.as_str());
 
             for (name, value) in &headers {
                 request = request.header(name.clone(), value.clone());
             }
 
-            black_box(block_on(request.fetch_text_body()).unwrap());
+            black_box(request.fetch_text_body().await.unwrap());
         });
         drop(server.finish());
     }
@@ -190,9 +190,9 @@ mod windows {
         let url = server.url("/download");
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
 
-        measure(group, allocs, time, name, || {
-            let response = block_on(test_client.client.get(url.as_str()).fetch()).unwrap();
-            black_box(block_on(response.into_body().into_bytes()).unwrap());
+        measure(group, allocs, time, name, |_| async {
+            let response = test_client.client.get(url.as_str()).fetch().await.unwrap();
+            black_box(response.into_body().into_bytes().await.unwrap());
         });
         drop(server.finish());
     }
@@ -209,9 +209,9 @@ mod windows {
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
         let payload = "u".repeat(len);
 
-        measure(group, allocs, time, name, || {
+        measure(group, allocs, time, name, |_| async {
             let request = test_client.client.post(url.as_str()).text(&payload);
-            black_box(block_on(request.fetch_text_body()).unwrap());
+            black_box(request.fetch_text_body().await.unwrap());
         });
         drop(server.finish());
     }
@@ -235,14 +235,14 @@ mod windows {
         let test_client = warmed_client(&[Version::HTTP_11], WinHttpTlsConfig::default(), &url);
         let payload = vec![b's'; len];
 
-        measure(group, allocs, time, name, || {
+        measure(group, allocs, time, name, |_| async {
             let frame = BytesView::copied_from_slice(&payload, &test_client.body_builder);
             let body = test_client
                 .body_builder
                 .stream(futures::stream::iter([Ok(frame)]), &HttpBodyOptions::default());
 
             let request = test_client.client.post(url.as_str()).body(body);
-            black_box(block_on(request.fetch_text_body()).unwrap());
+            black_box(request.fetch_text_body().await.unwrap());
         });
         drop(server.finish());
     }
@@ -255,13 +255,16 @@ mod windows {
         test_client
     }
 
-    fn measure(
+    fn measure<F, Fut, R>(
         group: &mut BenchmarkGroup<'_, WallTime>,
         allocs: &AllocSession,
         time: &TimeSession,
         name: &'static str,
-        operation: impl Fn(),
-    ) {
+        operation: F,
+    ) where
+        F: Fn(u64) -> Fut + Copy,
+        Fut: Future<Output = R>,
+    {
         let allocs_operation = allocs.operation(name);
         let time_operation = time.operation(name);
 
@@ -270,7 +273,9 @@ mod windows {
                 let _allocs = allocs_operation.measure_thread().iterations(iters);
                 let _time = time_operation.measure_thread().iterations(iters);
 
-                time_sample(iters, &operation)
+                // One executor entry for the whole sample; each iteration only awaits the request.
+                let mut pool = LocalPool::new();
+                pool.run_until(time_sample_async(iters, operation))
             });
         });
     }

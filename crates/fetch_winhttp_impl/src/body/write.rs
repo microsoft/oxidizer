@@ -174,7 +174,7 @@ fn reconcile_content_length(
 }
 
 fn canonical_content_length(length: u64) -> HeaderValue {
-    HeaderValue::from_str(&length.to_string()).expect("a decimal u64 contains only ASCII digits and is always a valid HTTP header value")
+    HeaderValue::from(length)
 }
 
 fn parse_content_length(value: &HeaderValue) -> Option<u64> {

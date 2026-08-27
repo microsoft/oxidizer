@@ -59,7 +59,9 @@ Feature-dependent code is gated behind `cfg(any(test, feature = "foo"))` so that
 
 ## Publishing Private Test, Bench and Example Utils
 
-Shared fixtures that a crate's own tests, benchmarks and examples need - mock servers, scripted backends - must not become public API, and must not be hosted in a package that depends on the crate under test, because that is a dependency cycle. Host them in the crate's implementation package behind a `private-test-util` feature that the public facade enables through a dev-dependency. See [docs/private-test-utils.md](docs/private-test-utils.md).
+Shared fixtures that a crate's own tests, benchmarks and examples need - mock servers, scripted backends - must not become public API. When the fixtures themselves depend on the crate under test, they also must not live in a package that depends on that crate, because that is a dependency cycle; host them in the crate's implementation package behind a `private-test-util` feature that the public facade enables through a dev-dependency. When the fixtures do not need the crate under test, a `publish = false` fixture package remains the simpler answer.
+
+This pattern is an exception to "Optional Dependencies in Test Builds" above: the fixture module is gated on `feature = "private-test-util"` alone (not `cfg(any(test, feature = ...))`), and its optional dependencies are not mirrored as non-optional dev-dependencies of the implementation crate, because the implementation crate's own unit tests do not consume the fixtures. See [docs/private-test-utils.md](docs/private-test-utils.md).
 
 ## `no_std` Support
 

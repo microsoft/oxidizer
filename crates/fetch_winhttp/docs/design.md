@@ -101,7 +101,9 @@ The transport requires Windows 11 version 21H2 (build 22000) or later, or
 Windows Server 2025 (build 26100) or later. Windows Server 2022 (build 20348)
 is not supported: the WinHTTP response-header query capabilities the transport
 relies on are documented as introduced in build 22000, which Windows Server 2022
-predates.
+predates. The crate does not probe the OS build at session construction; on a
+below-floor host the client still builds and failures surface later as ordinary
+`request_winhttp` errors on the first request that needs the missing capability.
 
 ## 2. Connection management
 

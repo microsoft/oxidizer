@@ -76,6 +76,15 @@ and `cargo run --example` in this workspace get it with.
 
 - **Declare the fixture dependencies `optional = true`** and list them in the
   feature as `dep:name`. They must not be reachable when the feature is off.
+  This is an exception to the workspace "Optional Dependencies in Test Builds"
+  rule: the fixture module is gated on `feature = "private-test-util"` alone
+  (not `cfg(any(test, feature = ...))`), and those optional dependencies are
+  not mirrored as non-optional dev-dependencies of the implementation crate,
+  because the implementation crate's own unit tests do not consume the fixtures.
+
+- **Use this split only when the fixtures themselves need the crate under
+  test.** If they do not, a `publish = false` fixture package with no reverse
+  dependency remains the simpler answer.
 
 - **Exempt the fixture module from coverage and mutation testing.** It is
   scaffolding driven by the tests, not code under test. Mark the module

@@ -115,47 +115,57 @@ and relied on throughout §4 and §6:
 ### 1.1 Crate/module layout
 
 ```text
-crates/fetch_winhttp/
+crates/fetch_winhttp/                 // published facade
   src/
-    lib.rs               // #![cfg(windows)] gate + module declarations + re-exports + crate docs
-    builder.rs           // WinHttpDeps/WinHttpDepsBuilder and client-builder integration
-    transport.rs         // WinHttpTransport: per-(processor × pool-slot) RequestHandler (§3.2)
-    session.rs           // WinHttpSession: per-(processor × pool-slot) session handle (§3.2)
-    request.rs           // RequestDriver: drives one request/response lifecycle (§6.3)
-    context.rs           // RequestContext: pinned per-request state the callback reads
-    callback.rs          // extern "system" trampoline -> dispatch_completion
-    operation.rs         // ContextPool/ContextInstallation/RawContextOwner/RequestGuard/
-                         //   OperationFuture: context installation and per-operation
-                         //   handle ownership (§4.1, §4.3)
-    query.rs             // QueryError + the synchronous WinHttpQueryOption/QueryHeaders
-                         //   wrapper layer (§2.1)
-    response_headers.rs  // pure &[u8] status-line/header/trailer parser (no WinHTTP calls)
-    convert.rs           // ConversionError + numeric/duration/UTF-16/option-value
-                         //   conversions, the unlimited-timeout sentinel, keep-alive floors
-    body/
-      read.rs            // response reader over WinHttpReadData + http_body adapter
-      write.rs           // bytesbuf_io::Write over WinHttpWriteData + request framing
-      mod.rs             // module wiring only (no type definitions)
-    tls.rs               // WinHttpTlsConfig -> security flags
-    options.rs           // The validated ProtocolOptions
-    telemetry.rs         // observed::Sink metrics and log events (§12)
-    handle.rs            // RAII handle wrappers (Send/Sync assertions)
-    error.rs             // Win32 -> HttpError mapping + the shared error constructors
-    error_labels.rs      // ErrorLabel constants
-    testing.rs           // #[cfg(test)] mock-bindings harness shared by several modules
-    bindings/
-      abstractions.rs    // Bindings trait (OS entry-point contract)
-      facade.rs          // BindingsFacade enum (Real / Mock dispatch)
-      real.rs            // windows-crate impl (cfg(windows))
-      mod.rs             // module wiring + the SDK constant re-export hub
+    lib.rs               // crate docs + re-exports of the supported API
+    windows.rs           // per-platform coverage anchors (see §1.2)
+    linux.rs
   docs/design.md
   docs/implementation.md
+  tests/ ...             // integration tests
+  benches/ ...
+  examples/ ...
+
+crates/fetch_winhttp_impl/src/        // implementation
+  lib.rs                 // module declarations + re-exports for the facade
+  builder.rs             // WinHttpDeps/WinHttpDepsBuilder and client-builder integration
+  transport.rs           // WinHttpTransport: per-(processor × pool-slot) RequestHandler (§3.2)
+  session.rs             // WinHttpSession: per-(processor × pool-slot) session handle (§3.2)
+  request.rs             // RequestDriver: drives one request/response lifecycle (§6.3)
+  context.rs             // RequestContext: pinned per-request state the callback reads
+  callback.rs            // extern "system" trampoline -> dispatch_completion
+  operation.rs           // ContextPool/ContextInstallation/RawContextOwner/RequestGuard/
+                         //   OperationFuture: context installation and per-operation
+                         //   handle ownership (§4.1, §4.3)
+  query.rs               // QueryError + the synchronous WinHttpQueryOption/QueryHeaders
+                         //   wrapper layer (§2.1)
+  response_headers.rs    // pure &[u8] status-line/header/trailer parser (no WinHTTP calls)
+  convert.rs             // ConversionError + numeric/duration/UTF-16/option-value
+                         //   conversions, the unlimited-timeout sentinel, keep-alive floors
+  body/
+    read.rs              // response reader over WinHttpReadData + http_body adapter
+    write.rs             // bytesbuf_io::Write over WinHttpWriteData + request framing
+    mod.rs               // module wiring only (no type definitions)
+  tls.rs                 // WinHttpTlsConfig -> security flags
+  options.rs             // The validated ProtocolOptions
+  telemetry.rs           // observed::Sink metrics and log events (§12)
+  handle.rs              // RAII handle wrappers (Send/Sync assertions)
+  error.rs               // Win32 -> HttpError mapping + the shared error constructors
+  error_labels.rs        // ErrorLabel constants
+  mocks.rs               // #[cfg(test)] mock-backed request context for the unit tests
+  bindings/
+    abstractions.rs      // Bindings trait (OS entry-point contract)
+    facade.rs            // BindingsFacade enum (Real / Mock dispatch)
+    real.rs              // windows-crate impl (cfg(windows))
+    mod.rs               // module wiring + the SDK constant re-export hub
+  linux.rs               // non-Windows coverage anchor
+  testing/               // private-test-util fixtures (see §1.2)
 ```
 
-The crate root is gated by `#![cfg(windows)]`, so it compiles to an empty module
-on non-Windows targets. A non-Windows integration test keeps package-scoped test
-runs nonempty, while target-specific dependencies ensure those builds do not pull
-in the `windows` crate.
+Every transport module is gated per item with `#[cfg(windows)]` rather than a
+crate-root `#![cfg(windows)]`, so the package still compiles to an instrumented
+(if empty) library on other targets. Target-specific dependencies ensure those
+builds do not pull in the `windows` crate.
 
 `bindings/mod.rs` re-exports the WinHTTP flag, option, and query constants used
 across the crate, so an import path names the FFI boundary a value comes from; a

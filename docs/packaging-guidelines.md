@@ -38,9 +38,13 @@ build the library, plus the metadata crates.io renders.
   in via `include_str!`/`include_bytes!` (see `docs/**/*.md` below).
 - **Key metadata ships.** `Cargo.toml`, `README.md` (rendered on crates.io),
   and `LICENSE*`.
-- **Tests ship.** They are cheap, and shipping them lets a consumer verify a
-  vendored copy of the crate behaves as published. Fuzz targets are excluded
-  because they need a separate toolchain to build at all.
+- **Tests ship as source.** They are cheap to include in the tarball. They do
+  not guarantee a packaged crate is verifiable on its own: Cargo strips
+  path-only dev-dependencies from the published manifest, so any test that
+  needs an unpublished in-workspace helper (for example `testing_aids`, or a
+  `private-test-util` feature reached only through a path dev-dependency) will
+  not build from crates.io alone. Fuzz targets are excluded because they need a
+  separate toolchain to build at all.
 - **Examples and benchmarks do not ship.** They are development code. No
   dependent builds them, they routinely depend on unpublished in-workspace
   fixture crates, and shipping them enlarges the tarball and the LFS exposure

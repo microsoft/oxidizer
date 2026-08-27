@@ -43,12 +43,12 @@ mod windows {
 
     use all_the_time::Session as TimeSession;
     use alloc_tracker::Session as AllocSession;
-    use benchmarking::time_sample;
+    use benchmarking::{time_sample, time_sample_async};
     use criterion::measurement::WallTime;
     use criterion::{BenchmarkGroup, Criterion};
     use fetch_winhttp::WinHttpTlsConfig;
     use fetch_winhttp_impl::testing::{ResponsePlan, TestServer, client, client_builder};
-    use futures::executor::block_on;
+    use futures::executor::LocalPool;
     use http::Version;
     use tick::Clock;
 
@@ -65,25 +65,26 @@ mod windows {
     fn construction(c: &mut Criterion, allocs: &AllocSession, time: &TimeSession) {
         let mut group = c.benchmark_group("fw_client/construction");
 
-        measure(&mut group, allocs, time, "build", || {
+        measure_sync(&mut group, allocs, time, "build", || {
             let (builder, body_builder) = client_builder(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
             black_box((builder.build(), body_builder));
         });
 
         let template = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
-        measure(&mut group, allocs, time, "clone", || {
+        measure_sync(&mut group, allocs, time, "clone", || {
             black_box(template.client.clone());
         });
         drop(template);
 
-        // A client opens its WinHTTP session lazily, so the first request through a fresh client
-        // additionally pays session creation, callback registration and connection setup. The
-        // difference against `fw_request/roundtrip/get_minimal` is that whole cold path.
+        // Building a fresh client materializes the initial per-affinity transport (and
+        // its WinHTTP session) immediately; the first request then additionally pays
+        // connection setup. The difference against `fw_request/roundtrip/get_minimal`
+        // is that whole cold path.
         let server = TestServer::http_repeating(ResponsePlan::ok(""));
         let url = server.url("/first");
-        measure(&mut group, allocs, time, "first_request", || {
+        measure_async(&mut group, allocs, time, "first_request", |_| async {
             let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap());
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap());
         });
         drop(server.finish());
 
@@ -102,14 +103,14 @@ mod windows {
         let url = format!("http://127.0.0.1:{port}/refused");
 
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
-        measure(&mut group, allocs, time, "connect_refused", || {
-            black_box(block_on(test_client.client.get(url.as_str()).fetch_text_body()).unwrap_err());
+        measure_async(&mut group, allocs, time, "connect_refused", |_| async {
+            black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap_err());
         });
 
         group.finish();
     }
 
-    fn measure(
+    fn measure_sync(
         group: &mut BenchmarkGroup<'_, WallTime>,
         allocs: &AllocSession,
         time: &TimeSession,
@@ -125,6 +126,31 @@ mod windows {
                 let _time = time_operation.measure_thread().iterations(iters);
 
                 time_sample(iters, &operation)
+            });
+        });
+    }
+
+    fn measure_async<F, Fut, R>(
+        group: &mut BenchmarkGroup<'_, WallTime>,
+        allocs: &AllocSession,
+        time: &TimeSession,
+        name: &'static str,
+        operation: F,
+    ) where
+        F: Fn(u64) -> Fut + Copy,
+        Fut: Future<Output = R>,
+    {
+        let allocs_operation = allocs.operation(name);
+        let time_operation = time.operation(name);
+
+        group.bench_function(name, |bencher| {
+            bencher.iter_custom(|iters| {
+                let _allocs = allocs_operation.measure_thread().iterations(iters);
+                let _time = time_operation.measure_thread().iterations(iters);
+
+                // One executor entry for the whole sample; each iteration only awaits the request.
+                let mut pool = LocalPool::new();
+                pool.run_until(time_sample_async(iters, operation))
             });
         });
     }

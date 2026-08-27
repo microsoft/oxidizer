@@ -46,9 +46,8 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     # mutates unrelated packages and fails the gate on their pre-existing gaps.
     git diff "$base...HEAD" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # Platform-conditional exclusions. CLI `--exclude` replaces
-    # `.cargo/mutants.toml` `exclude_globs` rather than merging with them, so
-    # every static exclusion that must still apply has to be restated here.
+    # Platform-conditional exclusions, layered on top of the static
+    # `exclude_globs` in `.cargo/mutants.toml` (cargo-mutants merges the two).
     # cargo-mutants selects mutants by parsing source text, so it does not
     # honour `cfg` gating: code that the compiler strips on this platform still
     # yields mutants, and every one of them is unbuildable and therefore
@@ -68,21 +67,17 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     #
     # `fetch_winhttp_impl`'s integration tests live in the facade package, so
     # when the diff touches either package the facade must be listed as a test
-    # package or every mutant is scored against unit tests alone.
+    # package or every mutant is scored against unit tests alone. Match path
+    # headers in the unified diff (`+++ b/crates/...`) rather than any mention
+    # of the path in hunk text.
     $diff_text = [System.IO.File]::ReadAllText($diff_path)
     $test_packages = @()
-    if ($diff_text -match 'crates[/\\]fetch_winhttp(_impl)?[/\\]') {
+    if ($diff_text -match '(?m)^(\+\+\+|---) [ab]/crates[/\\]fetch_winhttp(_impl)?[/\\]') {
         $test_packages = @('--test-package', 'fetch_winhttp', '--test-package', 'fetch_winhttp_impl')
     }
     if ($IsWindows) {
         cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 `
             --exclude "**/*linux.rs" --exclude "linux" `
-            --exclude "crates/automation/**" `
-            --exclude "crates/fetch_winhttp_impl/src/testing/**" `
-            --exclude "crates/observed_testing/**" `
-            --exclude "crates/rest_over_grpc_examples/**" `
-            --exclude "crates/rest_over_grpc_tests/**" `
-            --exclude "crates/testing_aids/**" `
             @test_packages
     } else {
         # `fetch_winhttp` implements nothing outside Windows, so the whole crate
@@ -92,11 +87,6 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
             --exclude "**/*windows.rs" --exclude "windows" `
             --exclude "crates/fetch_winhttp/**" `
             --exclude "crates/fetch_winhttp_impl/**" `
-            --exclude "crates/automation/**" `
-            --exclude "crates/observed_testing/**" `
-            --exclude "crates/rest_over_grpc_examples/**" `
-            --exclude "crates/rest_over_grpc_tests/**" `
-            --exclude "crates/testing_aids/**" `
             @test_packages
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
