@@ -4,8 +4,13 @@
 //! Multi-tier cache with conditional promotion policies.
 //! Example: only promote "not found" results to avoid repeated backend queries.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::fmt;
-use std::future::ready;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,25 +37,25 @@ impl fmt::Display for UserData {
 struct Database(Mutex<u32>);
 
 impl CacheTier<String, UserData> for Arc<Database> {
-    fn get(&self, key: &String) -> impl Future<Output = Result<Option<CacheEntry<UserData>>, Error>> + Send {
+    async fn get(&self, key: &String) -> Result<Option<CacheEntry<UserData>>, Error> {
         *self.0.lock() += 1;
         let data = match key.as_str() {
             "user:1" => UserData::Found("Alice".to_string()),
             _ => UserData::NotFound,
         };
-        ready(Ok(Some(CacheEntry::new(data))))
+        Ok(Some(CacheEntry::new(data)))
     }
 
-    fn insert(&self, _: String, _: CacheEntry<UserData>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
-        ready(Ok(InsertOutcome::Accepted))
+    async fn insert(&self, _: String, _: CacheEntry<UserData>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
-    fn invalidate(&self, _: &String) -> impl Future<Output = Result<(), Error>> + Send {
-        ready(Ok(()))
+    async fn invalidate(&self, _: &String) -> Result<(), Error> {
+        Ok(())
     }
 
-    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
-        ready(Ok(()))
+    async fn clear(&self) -> Result<(), Error> {
+        Ok(())
     }
 }
 

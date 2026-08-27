@@ -4,7 +4,12 @@
 //! Time-to-refresh: return stale data immediately, refresh in background.
 //! Keeps cache warm and avoids latency spikes from cache misses.
 
-use std::future::ready;
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "examples are written for a human reader, and a plain `async fn` shows the shape of a tier impl better than `impl Future` plus `std::future::ready`"
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -26,16 +31,16 @@ impl CacheTier<String, String> for Database {
         Ok(Some(CacheEntry::new(format!("{key}_v{v}"))))
     }
 
-    fn insert(&self, _: String, _: CacheEntry<String>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
-        ready(Ok(InsertOutcome::Accepted))
+    async fn insert(&self, _: String, _: CacheEntry<String>) -> Result<InsertOutcome, Error> {
+        Ok(InsertOutcome::Accepted)
     }
 
-    fn invalidate(&self, _: &String) -> impl Future<Output = Result<(), Error>> + Send {
-        ready(Ok(()))
+    async fn invalidate(&self, _: &String) -> Result<(), Error> {
+        Ok(())
     }
 
-    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
-        ready(Ok(()))
+    async fn clear(&self) -> Result<(), Error> {
+        Ok(())
     }
 }
 
