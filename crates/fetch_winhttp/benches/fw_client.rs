@@ -39,7 +39,6 @@ fn entrypoint(c: &mut Criterion) {
 #[cfg(windows)]
 mod windows {
     use std::hint::black_box;
-    use std::net::{Ipv4Addr, TcpListener};
 
     use all_the_time::Session as TimeSession;
     use alloc_tracker::Session as AllocSession;
@@ -47,7 +46,7 @@ mod windows {
     use criterion::measurement::WallTime;
     use criterion::{BenchmarkGroup, Criterion};
     use fetch_winhttp::WinHttpTlsConfig;
-    use fetch_winhttp_impl::testing::{ResponsePlan, TestServer, client, client_builder};
+    use fetch_winhttp_impl::testing::{ResetServer, ResponsePlan, TestServer, client, client_builder};
     use futures::executor::LocalPool;
     use http::Version;
     use tick::Clock;
@@ -94,16 +93,13 @@ mod windows {
     fn error_path(c: &mut Criterion, allocs: &AllocSession, time: &TimeSession) {
         let mut group = c.benchmark_group("fw_client/error_path");
 
-        // Binding and immediately releasing a port yields an address nothing listens on. Loopback
-        // answers such a connection attempt with an immediate reset, so the request fails without
-        // waiting for any timer - no benchmark iteration depends on elapsed real time.
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let url = format!("http://127.0.0.1:{port}/refused");
+        // The fixture accepts the connection and resets it, so the request fails
+        // on a reset that is already in flight rather than on any timer.
+        let server = ResetServer::start();
+        let url = server.url("/reset");
 
         let test_client = client(&[Version::HTTP_11], WinHttpTlsConfig::default(), Clock::new_frozen());
-        measure_async(&mut group, allocs, time, "connect_refused", |_| async {
+        measure_async(&mut group, allocs, time, "connection_reset", |_| async {
             black_box(test_client.client.get(url.as_str()).fetch_text_body().await.unwrap_err());
         });
 

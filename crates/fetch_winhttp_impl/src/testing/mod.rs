@@ -5,9 +5,11 @@
 //!
 //! `TestServer` serves plaintext or TLS traffic over TCP, negotiating HTTP/1.1
 //! or HTTP/2; `Http3Server` serves HTTP/3 over QUIC. Both are scripted with
-//! `ResponsePlan` values and observed through a `ServerSnapshot`. No fixture
-//! depends on wall-clock time: a plan that must stay in flight stalls
-//! indefinitely and is aborted at shutdown.
+//! `ResponsePlan` values and observed through a `ServerSnapshot`. `ResetServer`
+//! serves nothing and resets every connection it accepts, which is how the
+//! transport's connection-failure path is reached. No fixture depends on
+//! wall-clock time: a plan that must stay in flight stalls indefinitely and is
+//! aborted at shutdown.
 //!
 //! The module is not part of any supported API. It is reached only through the
 //! `private-test-util` feature, which `fetch_winhttp` turns on in its own
@@ -25,6 +27,7 @@
 
 mod http3_server;
 mod recording;
+mod reset_server;
 mod server;
 
 use std::future::poll_fn;
@@ -39,6 +42,7 @@ use http_body::Body as _;
 pub use http3_server::Http3Server;
 use observed::Sink;
 pub use recording::{RecordedRequest, ResponseFrame, ResponsePlan, ResponseScript, ServerSnapshot};
+pub use reset_server::ResetServer;
 pub use server::TestServer;
 use tick::Clock;
 

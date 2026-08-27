@@ -11,12 +11,11 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use bytesbuf::{BytesBuf, BytesView};
 use events_once::{EmbeddedEvent, Event, RawReceiver, RawSender};
+use http_extensions::HttpError;
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE, WINHTTP_CALLBACK_STATUS_READ_COMPLETE,
     WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE, WINHTTP_CALLBACK_STATUS_WRITE_COMPLETE,
 };
-
-use http_extensions::HttpError;
 
 use crate::error::{WinHttpError, WinHttpOperation, callback_protocol_error};
 use crate::handle::ConnectHandle;
@@ -257,9 +256,7 @@ impl CompletionResult {
             Self::InvalidStatusInfo { status, len, .. } => callback_protocol_error(format!(
                 "WinHTTP returned invalid status information for callback 0x{status:08x} with {len} bytes"
             )),
-            unexpected => callback_protocol_error(format!(
-                "WinHTTP returned an unexpected completion for {operation}: {unexpected:?}"
-            )),
+            unexpected => callback_protocol_error(format!("WinHTTP returned an unexpected completion for {operation}: {unexpected:?}")),
         }
     }
 }
