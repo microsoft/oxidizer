@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.5.0` of `ohno`
+  - Now requires `0.4.1` of `templated_uri_macros`
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance

@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.16.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `anyspawn`
+  - Now requires `0.9.0` of `bytesbuf`
+  - Now requires `0.7.0` of `fetch_hyper`
+  - Now requires `0.4.0` of `fetch_tls`
+  - Now requires `0.10.0` of `http_extensions`
+  - Now requires `0.5.0` of `ohno`
+  - Now requires `0.8.0` of `seatbelt`
+  - Now requires `0.8.0` of `seatbelt_http`
+  - Now requires `0.5.0` of `templated_uri`
+  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.6.0` of `tick`
+
+- ✨ Features
+
+  - add socket tuning and HTTP/2 stream window options ([#637](https://github.com/microsoft/oxidizer/pull/637))
+
+- 🐛 Bug Fixes
+
+  - declare dependency features where the API is used ([#659](https://github.com/microsoft/oxidizer/pull/659))
+
 ## [0.15.0] - 2026-08-09
 
 - 🔧 Maintenance

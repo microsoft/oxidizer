@@ -1,11 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [0.25.0] - 2026-08-27
 
 ### Added
 
@@ -46,3 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a failure.
 - Fields written with raw identifiers are exported under their plain name, so
   `r#type` is recorded as `type` rather than `r#type`.
+
+- ⚠️ Breaking
+
+  - Now requires `0.5.0` of `ohno`
+  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.6.0` of `tick`
+
+- ✨ Features
+
+  - introduce the observed_utils crate ([#677](https://github.com/microsoft/oxidizer/pull/677))
+
+- ✔️ Tasks
+
+  - bump all_the_time to 0.6.2 ([#690](https://github.com/microsoft/oxidizer/pull/690))
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

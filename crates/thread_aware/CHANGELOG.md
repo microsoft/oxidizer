@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-08-27
+
+- 🐛 Bug Fixes
+
+  - bound phantom-only generics by Send ([#678](https://github.com/microsoft/oxidizer/pull/678))
+
 ## [0.9.0] - 2026-08-09
 
 ### ⚠ Breaking Changes

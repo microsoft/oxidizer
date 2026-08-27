@@ -4,7 +4,7 @@
 [package]
 name = "observed"
 description = "Structured telemetry events with enrichment, redaction, and per-field routing."
-version = "0.24.0"
+version = "0.25.0"
 readme = "README.md"
 keywords = ["observed", "telemetry", "tracing", "logging", "metrics"]
 categories = ["development-tools::debugging"]
