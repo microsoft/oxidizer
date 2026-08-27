@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #![expect(missing_docs, reason = "benchmark code")]
+use std::future::ready;
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
@@ -99,8 +100,8 @@ impl From<Input> for Output {
 struct EmptyExporter;
 
 impl PushMetricExporter for EmptyExporter {
-    async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
-        Ok(())
+    fn export(&self, _metrics: &ResourceMetrics) -> impl Future<Output = OTelSdkResult> + Send {
+        ready(Ok(()))
     }
 
     fn force_flush(&self) -> OTelSdkResult {

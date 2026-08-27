@@ -4,7 +4,7 @@
 [package]
 name = "arty_executor"
 description = "Single-threaded async task executor for the Arty runtime."
-version = "0.1.0"
+version = "0.1.1"
 edition = { workspace = true }
 rust-version = { workspace = true }
 authors = { workspace = true }

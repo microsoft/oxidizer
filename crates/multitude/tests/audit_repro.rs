@@ -156,7 +156,7 @@ fn arc_concurrent_assume_init_no_race() {
 ///
 /// We use a ZST with `#[repr(align(32768))]` so the type's alignment
 /// checks the cap without forcing a 32 KiB stack frame.
-#[cfg(not(utc_backend))]
+#[cfg(not(align_capped_backend))]
 #[test]
 fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
     #[repr(align(32768))]

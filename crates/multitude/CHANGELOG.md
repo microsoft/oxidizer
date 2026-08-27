@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - Now requires `0.9.0` of `bytesbuf`
+
+- 🧩 Miscellaneous
+
+  - Address leftover feedback from PR #673 ([#675](https://github.com/microsoft/oxidizer/pull/675))
+
 ## [0.8.0] - 2026-08-09
 
 - ⚠️ Breaking

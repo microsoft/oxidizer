@@ -65,7 +65,11 @@ impl FakeRead {
     ///
     /// This call never fails.
     #[cfg_attr(test, mutants::skip)] // Mutations easily lead to infinite loops, not worth the effort.
-    #[expect(clippy::unused_async, reason = "API compatibility between trait and inherent fn")]
+    #[expect(
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "API compatibility between trait and inherent fn"
+    )]
     pub async fn read_at_most_into(&mut self, len: usize, mut into: BytesBuf) -> Result<(usize, BytesBuf), Infallible> {
         let bytes_to_read = len
             .min(self.contents.len())

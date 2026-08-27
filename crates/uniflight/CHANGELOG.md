@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-08-27
+
+- ⚠️ Breaking
+
+  - partition relocation storage per affinity ([#681](https://github.com/microsoft/oxidizer/pull/681))
+  - Now requires `0.11.0` of `thread_aware`
+
 ## [0.4.0] - 2026-08-09
 
 - 🔧 Maintenance

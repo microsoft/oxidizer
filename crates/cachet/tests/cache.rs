@@ -9,6 +9,8 @@
 // tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
 testing_aids::init_tracing!();
 
+use std::future::ready;
+
 use cachet::{Cache, CacheEntry, Error, InsertOutcome, InsertPolicy};
 use cachet_tier::MockCache;
 use tick::Clock;
@@ -656,21 +658,21 @@ async fn stampede_protection_converts_panic_to_error() {
     }
 
     impl CacheTier<String, i32> for PanickingCache {
-        async fn get(&self, _key: &String) -> Result<Option<CacheEntry<i32>>, Error> {
+        fn get(&self, _key: &String) -> impl Future<Output = Result<Option<CacheEntry<i32>>, Error>> + Send {
             assert!(self.panicked.swap(true, Ordering::SeqCst), "simulated panic in cache tier");
-            Ok(None)
+            ready(Ok(None))
         }
 
-        async fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> Result<InsertOutcome, Error> {
-            Ok(InsertOutcome::Accepted)
+        fn insert(&self, _key: String, _entry: CacheEntry<i32>) -> impl Future<Output = Result<InsertOutcome, Error>> + Send {
+            ready(Ok(InsertOutcome::Accepted))
         }
 
-        async fn invalidate(&self, _key: &String) -> Result<(), Error> {
-            Ok(())
+        fn invalidate(&self, _key: &String) -> impl Future<Output = Result<(), Error>> + Send {
+            ready(Ok(()))
         }
 
-        async fn clear(&self) -> Result<(), Error> {
-            Ok(())
+        fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
+            ready(Ok(()))
         }
     }
 
@@ -871,8 +873,8 @@ mod service_tests {
     impl Service<CacheOperation<String, i32>> for InMemoryService {
         type Out = Result<CacheResponse<i32>, Error>;
 
-        async fn execute(&self, input: CacheOperation<String, i32>) -> Self::Out {
-            match input {
+        fn execute(&self, input: CacheOperation<String, i32>) -> impl Future<Output = Self::Out> + Send {
+            ready(match input {
                 CacheOperation::Get(req) => Ok(CacheResponse::Get(self.data.lock().get(&req.key).cloned())),
                 CacheOperation::Insert(req) => {
                     self.data.lock().insert(req.key, req.entry);
@@ -886,7 +888,7 @@ mod service_tests {
                     self.data.lock().clear();
                     Ok(CacheResponse::Clear)
                 }
-            }
+            })
         }
     }
 

@@ -4,6 +4,7 @@
 //! Integration tests for `ServiceAdapter`.
 
 use std::collections::HashMap;
+use std::future::ready;
 use std::sync::Mutex;
 
 use cachet_service::{CacheOperation, CacheResponse, GetRequest, InsertRequest, InvalidateRequest, ServiceAdapter};
@@ -31,8 +32,8 @@ where
 {
     type Out = Result<CacheResponse<V>, Error>;
 
-    async fn execute(&self, input: CacheOperation<K, V>) -> Self::Out {
-        match input {
+    fn execute(&self, input: CacheOperation<K, V>) -> impl Future<Output = Self::Out> + Send {
+        ready(match input {
             CacheOperation::Get(req) => {
                 let data = self.data.lock().expect("lock poisoned");
                 Ok(CacheResponse::Get(data.get(&req.key).cloned()))
@@ -52,7 +53,7 @@ where
                 data.clear();
                 Ok(CacheResponse::Clear)
             }
-        }
+        })
     }
 }
 

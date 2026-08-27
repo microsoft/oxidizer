@@ -9,6 +9,7 @@
 // Use foldhash::fast for high-performance hashing of cache keys.
 // The `fast` variant prioritizes speed over statistical quality, which is
 // ideal for hash table lookups where we only need good bucket distribution.
+use std::future::ready;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
@@ -208,13 +209,13 @@ where
         Ok(())
     }
 
-    async fn clear(&self) -> Result<(), Error> {
+    fn clear(&self) -> impl Future<Output = Result<(), Error>> + Send {
         self.inner.invalidate_all();
-        Ok(())
+        ready(Ok(()))
     }
 
-    async fn len(&self) -> Result<u64, SizeError> {
-        Ok(self.inner.entry_count())
+    fn len(&self) -> impl Future<Output = Result<u64, SizeError>> + Send {
+        ready(Ok(self.inner.entry_count()))
     }
 }
 
