@@ -134,6 +134,10 @@ pub(crate) fn query_raw_headers(bindings: &BindingsFacade, request: RawHandle) -
 pub(crate) fn query_raw_trailers(bindings: &BindingsFacade, request: RawHandle) -> Result<Option<Vec<u8>>, QueryError> {
     match query_header_bytes(bindings, request, raw_trailers_query_flags()) {
         Err(QueryError::WinHttp(error)) if error.code() == ERROR_WINHTTP_HEADER_NOT_FOUND => Ok(None),
+        // A successful zero-length block means no trailers were present; the
+        // trailer parser rejects an empty buffer, so treat it as absent rather
+        // than as a malformed trailer block after the body completed.
+        Ok(raw) if raw.is_empty() => Ok(None),
         result => result.map(Some),
     }
 }
@@ -449,6 +453,27 @@ mod tests {
             .returning(|_, _, _, _| Err(WinHttpError::new(ERROR_WINHTTP_HEADER_NOT_FOUND, WinHttpOperation::QueryHeaders)));
         let error = query_raw_headers(&BindingsFacade::mock(Arc::new(header_bindings)), raw_handle(2)).unwrap_err();
         assert!(matches!(error, QueryError::WinHttp(error) if error.code() == ERROR_WINHTTP_HEADER_NOT_FOUND));
+    }
+
+    #[test]
+    fn empty_trailer_block_is_treated_as_absent() {
+        let mut bindings = MockBindings::new();
+        bindings
+            .expect_query_headers()
+            .withf(|_, info_level, buffer, byte_len| {
+                *info_level == (WINHTTP_QUERY_RAW_HEADERS_CRLF | WINHTTP_QUERY_FLAG_TRAILERS | WINHTTP_QUERY_FLAG_WIRE_ENCODING)
+                    && buffer.is_none()
+                    && *byte_len == 0
+            })
+            .once()
+            .returning(|_, _, _, byte_len| {
+                *byte_len = 0;
+                Ok(())
+            });
+
+        let trailers = query_raw_trailers(&BindingsFacade::mock(Arc::new(bindings)), raw_handle(1)).unwrap();
+
+        assert_eq!(trailers, None);
     }
 
     #[test]

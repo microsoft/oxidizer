@@ -103,7 +103,9 @@ impl WinHttpDepsBuilder {
 /// relaxed TLS validation cannot reuse a connection a strict client
 /// established. Cloning a built client shares that client's transport
 /// resources, as the generic contract requires.
-pub trait HttpClientWinHttpExt {
+///
+/// The trait is sealed: only [`HttpClient`] implements it.
+pub trait HttpClientWinHttpExt: sealed::Sealed {
     /// Creates a WinHTTP-backed HTTP client builder.
     ///
     /// Independently built clients do not share connections.
@@ -114,6 +116,14 @@ impl HttpClientWinHttpExt for HttpClient {
     fn builder_winhttp(deps: impl Into<WinHttpDeps>) -> HttpClientBuilder {
         create_builder_with_bindings(deps.into(), BindingsFacade::real())
     }
+}
+
+pub(crate) mod sealed {
+    use fetch::HttpClient;
+
+    #[expect(unnameable_types, reason = "intentional, sealed trait pattern")]
+    pub trait Sealed {}
+    impl Sealed for HttpClient {}
 }
 
 fn create_builder_with_bindings(deps: WinHttpDeps, bindings: BindingsFacade) -> HttpClientBuilder {
