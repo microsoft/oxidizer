@@ -26,8 +26,12 @@ const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 // `cfg` gating: code the compiler strips on the running platform still yields
 // mutants, and every one of them is unbuildable and so reported as missed.
 // The two lists below name the code that must therefore be skipped per
-// platform. Keep them in sync with `justfiles/anvil/checks/mutants-diff.just`,
-// which applies the same policy to the pull request run.
+// platform.
+//
+// This policy applies to the merge-group run only. The Anvil-generated pull
+// request recipe (`justfiles/anvil/checks/mutants-diff.just`) has no hook for
+// expressing it and is deliberately left unmodified; AB#7802888 tracks adding
+// the capability at the Anvil level.
 
 /// Packages whose entire implementation is gated to a single platform.
 ///

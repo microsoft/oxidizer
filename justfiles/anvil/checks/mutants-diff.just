@@ -40,55 +40,9 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
     if (-not $tmp_dir) { $tmp_dir = $env:AGENT_TEMPDIRECTORY }
     if (-not $tmp_dir) { $tmp_dir = [System.IO.Path]::GetTempPath() }
     $diff_path = Join-Path $tmp_dir 'anvil-mutants-diff.diff'
-    # Three-dot form: only changes reachable from HEAD since it diverged from
-    # `$base`. Two-dot `$base..HEAD` on GitHub's merge ref also includes every
-    # commit that landed on the base branch after the PR opened, which falsely
-    # mutates unrelated packages and fails the gate on their pre-existing gaps.
-    git diff "$base...HEAD" --output=$diff_path
+    git diff "$base..HEAD" --output=$diff_path
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # Platform-conditional exclusions, layered on top of the static
-    # `exclude_globs` in `.cargo/mutants.toml` (cargo-mutants merges the two).
-    # cargo-mutants selects mutants by parsing source text, so it does not
-    # honour `cfg` gating: code that the compiler strips on this platform still
-    # yields mutants, and every one of them is unbuildable and therefore
-    # reported as missed. Exclude such code explicitly. Keep this in sync with
-    # `scripts/mutants.rs`, which applies the same policy to the merge-group run.
-    #
-    # Each glob must be written as a literal, quoted argument of the invocation.
-    # On Unix, PowerShell expands wildcards in native command arguments against
-    # the file system unless the argument is a quoted token, and it does so even
-    # for arguments supplied from a variable or a splatted array -- which would
-    # turn a directory glob into a list of paths cargo-mutants rejects.
-    #
-    # A bare name such as `linux` matches any path component, so a module
-    # directory holding platform-gated code is excluded by naming it. The file
-    # globs omit the separator before the platform name so that both `linux.rs`
-    # and `socket_linux.rs` match.
-    #
-    # `fetch_winhttp_impl`'s integration tests live in the facade package, so
-    # when the diff touches either package the facade must be listed as a test
-    # package or every mutant is scored against unit tests alone. Match path
-    # headers in the unified diff (`+++ b/crates/...`) rather than any mention
-    # of the path in hunk text.
-    $diff_text = [System.IO.File]::ReadAllText($diff_path)
-    $test_packages = @()
-    if ($diff_text -match '(?m)^(\+\+\+|---) [ab]/crates[/\\]fetch_winhttp(_impl)?[/\\]') {
-        $test_packages = @('--test-package', 'fetch_winhttp', '--test-package', 'fetch_winhttp_impl')
-    }
-    if ($IsWindows) {
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 `
-            --exclude "**/*linux.rs" --exclude "linux" `
-            @test_packages
-    } else {
-        # `fetch_winhttp` implements nothing outside Windows, so the whole crate
-        # goes rather than individual files, and so does the implementation crate
-        # behind it.
-        cargo mutants --in-diff $diff_path --no-shuffle --jobs 0 `
-            --exclude "**/*windows.rs" --exclude "windows" `
-            --exclude "crates/fetch_winhttp/**" `
-            --exclude "crates/fetch_winhttp_impl/**" `
-            @test_packages
-    }
+    cargo mutants --in-diff $diff_path --no-shuffle --jobs 0
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # --- pr-mutants members ---
