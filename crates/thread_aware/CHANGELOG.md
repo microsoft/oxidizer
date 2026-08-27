@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.7.6` of `thread_aware_macros`
+  - Now requires `0.11.0` of `thread_aware_macros`
 
 - ⚠️ Breaking
 

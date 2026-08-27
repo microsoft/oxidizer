@@ -4930,7 +4930,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.7.6"
+version = "0.11.0"
 dependencies = [
  "mutants",
  "syn 3.0.3",
@@ -4939,7 +4939,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.8.0"
+version = "0.11.0"
 dependencies = [
  "insta",
  "proc-macro2",

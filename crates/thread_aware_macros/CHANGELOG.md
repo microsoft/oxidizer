@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.7.6] - 2026-08-27
+## [0.11.0] - 2026-08-27
 
 - 🔧 Maintenance
 
-  - Now requires `0.8.0` of `thread_aware_macros_impl`
+  - Now requires `0.11.0` of `thread_aware_macros_impl`
+
+- ⚠️ Breaking
+
+  - establish the compatibility boundary for macros that derive `thread_aware` 0.11
 
 ## [0.7.5] - 2026-06-26
 
