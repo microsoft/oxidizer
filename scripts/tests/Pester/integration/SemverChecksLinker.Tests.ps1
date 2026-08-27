@@ -120,7 +120,10 @@ Describe 'relocated target directory' {
             while ($deep.Length -lt 240) {
                 $deep = Join-Path $deep 'nested-directory-segment'
             }
-            $null = New-Item -ItemType Directory -Path "\\?\$deep" -Force
+            # CreateDirectory rather than New-Item: the \\?\ prefix is what lets
+            # this exceed MAX_PATH, and `?` is a wildcard to PowerShell's -Path,
+            # for which New-Item offers no -LiteralPath counterpart.
+            $null = [System.IO.Directory]::CreateDirectory("\\?\$deep")
 
             # Named after the object that failed in the field, so the reproduction
             # keeps the same shape as the report.

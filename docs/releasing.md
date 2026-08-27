@@ -340,14 +340,51 @@ path is deterministic rather than unique so that consecutive runs reuse
 the baseline rustdoc they just built; concurrent runs are safe because
 cargo locks that directory exactly as it does `target/`.
 
-The observed worst case nests roughly 216 characters of
-cargo-semver-checks and `aws-lc-sys` build output beneath the target
-directory, which is why the repository path itself cannot be relied on
-to leave enough room.
+The observed worst case nests 216 characters of cargo-semver-checks and
+`aws-lc-sys` build output beneath the repository root, which is why the
+repository path itself cannot be relied on to leave enough room. The
+report in AB#7790786 breaks down as:
+
+| Segment | Chars |
+| --- | ---: |
+| `\target` | 7 |
+| `\semver-checks` | 14 |
+| `\git-<40-char commit sha>` | 45 |
+| `\local-fetch-0_15_0-x86_64_pc_windows_msvc-<16 hex>` | 59 |
+| `\target\debug\build` | 19 |
+| `\aws-lc-sys-<16 hex>` | 28 |
+| `\out` | 4 |
+| `\<16 hex>-jitterentropy-health.o` | 40 |
+| **Total below the repository root** | **216** |
+
+None of those segments are ours to shorten: the nesting is chosen by
+cargo-semver-checks, and the leaf by `aws-lc-sys` and the `cc` crate. In
+the field the repository root was 56 characters
+(`C:\Source\oxidizer.worktrees\release-threadaware-fallout`), for 272
+in total — past the 260-character limit. Replacing the root and its
+`\target` with an 18-character `C:\oxi-sc\<8 hex>` brings the same build
+to 227, leaving about 32 characters of headroom.
+
+That headroom is what the relocation buys, and it is worth noting how
+little of it there is by default. A GitHub-hosted runner checks out at
+`D:\a\oxidizer\oxidizer`, which is only 22 characters, so the same build
+lands at 238 and passes today with roughly 21 characters to spare — a
+longer crate name or a dependency version bump would be enough to
+consume it.
 
 As with the linker, an explicit `CARGO_TARGET_DIR` is respected rather
 than overridden. If the directory cannot be created the build proceeds
 in place with a warning, since a probe must never abort a release.
+
+The relocation is otherwise unconditional, and deliberately so: it
+applies even to a repository whose own path would have fitted. Skipping
+it there would mean predicting the 216 above, and that figure is not a
+constant anyone here controls — it moves with crate and target names,
+dependency versions and hash widths, so a threshold fitted to today's
+measurement would quietly stop covering the case it exists for. Applying
+it always also keeps one code path in use on every Windows release run,
+rather than reserving it for the deepest checkouts, which are the
+configurations least likely to be exercised before a release.
 
 Note that these artifacts live outside the repository, so `cargo clean`
 and `git clean` do not remove them; delete `<volume>\oxi-sc` to reclaim

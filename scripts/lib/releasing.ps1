@@ -1233,7 +1233,7 @@ function ConvertFrom-SemverChecksOutput {
     }
 
     $pathHint = if ($IsWindows) {
-        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts must sit about 216 characters below the target directory, so setting CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName), or moving the repository closer to the volume root, buys back the characters needed."
+        " If the output contains LNK1104, C1083 or a path-length error, a MAX_PATH-bound tool was reached. Build artifacts can nest over 200 characters below the target directory, so setting CARGO_TARGET_DIR to a short path (for example ${env:SystemDrive}\$script:SemverChecksTargetDirName), or moving the repository closer to the volume root, buys back the characters needed."
     } else {
         ''
     }

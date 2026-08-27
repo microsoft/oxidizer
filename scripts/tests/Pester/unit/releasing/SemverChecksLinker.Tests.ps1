@@ -85,7 +85,7 @@ Describe 'Get-SemverChecksTargetDirPath' {
     }
 
     It 'stays short enough to leave the MAX_PATH budget to the build itself' -Skip:(-not $IsWindows) {
-        # The observed worst case nests ~216 characters of cargo-semver-checks
+        # The observed worst case nests ~209 characters of cargo-semver-checks
         # and aws-lc-sys build output beneath the target directory, so the root
         # has to stay well clear of 260.
         $path = Get-SemverChecksTargetDirPath -RepoRoot 'C:\Source\oxidizer'
