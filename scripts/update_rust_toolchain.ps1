@@ -41,7 +41,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ToolchainChannelPattern = '(?m)^(channel[ \t]*=[ \t]*)"([^"]*)"'
+$ToolchainChannelPattern = '(?m)^([ \t]*channel[ \t]*=[ \t]*)"([^"]*)"'
 
 function Get-LatestStableRustVersion {
     <#
@@ -195,7 +195,12 @@ function Get-InternalToolchainMinorVersion {
         $channel = $value.Groups[1].Value
 
         if ($channel -notmatch '^ms-prod-(\d+\.\d+)(?:@[a-z0-9_-]+)?$') {
-            throw "Unsupported MSRUSTUP_TOOLCHAIN channel '$channel' in '$FilePath'"
+            throw (
+                "MSRUSTUP_TOOLCHAIN channel '$channel' in '$FilePath' has an invalid format. " +
+                "Choose a production short name such as 'ms-prod-1.95' by running " +
+                "'msrustup toolchain available'; append a required backend such as '@llvm' " +
+                "only after the short name, for example 'ms-prod-1.95@llvm'."
+            )
         }
 
         $versions += $Matches[1]

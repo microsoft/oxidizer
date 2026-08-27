@@ -244,6 +244,7 @@ the versions of everything to stay up to date using three scripts:
 
 - `scripts/update_rust_toolchain.ps1` which requires an internal `ox-sdk` checkout and updates the public
   Rust toolchain versions after the internal release toolchain has been selected.
+  Example: `.\scripts\update_rust_toolchain.ps1 -InternalToolchainFile ..\ox-sdk\.pipelines\variables\publish.yml`.
 - `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
 - `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
 
