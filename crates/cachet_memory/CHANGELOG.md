@@ -6,7 +6,7 @@
 
   - Now requires `0.5.0` of `cachet_tier`
   - Now requires `0.5.0` of `ohno`
-  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.11.0` of `thread_aware`
 
 ## [0.6.0] - 2026-08-09
 

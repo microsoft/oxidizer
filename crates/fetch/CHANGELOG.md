@@ -13,7 +13,7 @@
   - Now requires `0.8.0` of `seatbelt`
   - Now requires `0.8.0` of `seatbelt_http`
   - Now requires `0.5.0` of `templated_uri`
-  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.11.0` of `thread_aware`
   - Now requires `0.6.0` of `tick`
 
 - ✨ Features

@@ -5,7 +5,7 @@
 - ⚠️ Breaking
 
   - partition relocation storage per affinity ([#681](https://github.com/microsoft/oxidizer/pull/681))
-  - Now requires `0.10.0` of `thread_aware`
+  - Now requires `0.11.0` of `thread_aware`
 
 - ✨ Features
 

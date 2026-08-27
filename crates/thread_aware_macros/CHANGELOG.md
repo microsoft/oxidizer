@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.6] - 2026-08-27
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.5` of `thread_aware_macros_impl`
+
 ## [0.7.5] - 2026-06-26
 
 - 🔧 Maintenance
@@ -89,4 +95,3 @@
 - 🐛 Bug Fixes
 
   - Fix thread_aware cyclic dependency ([#75](https://github.com/microsoft/oxidizer/pull/75))
-

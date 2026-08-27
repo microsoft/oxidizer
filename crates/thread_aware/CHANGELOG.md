@@ -1,10 +1,20 @@
 # Changelog
 
-## [0.10.0] - 2026-08-27
+## [0.11.0] - 2026-08-27
 
-- 🐛 Bug Fixes
+- 🔧 Maintenance
 
-  - bound phantom-only generics by Send ([#678](https://github.com/microsoft/oxidizer/pull/678))
+  - Now requires `0.7.6` of `thread_aware_macros`
+
+- ⚠️ Breaking
+
+  - add `ThreadAware` for `PhantomData<T>` and correct derive bounds for phantom-only generic parameters ([#678](https://github.com/microsoft/oxidizer/pull/678))
+
+## [0.10.0] - 2026-08-25
+
+- ⚠️ Breaking
+
+  - partition relocation storage per affinity ([#681](https://github.com/microsoft/oxidizer/pull/681))
 
 ## [0.9.0] - 2026-08-09
 

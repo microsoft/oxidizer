@@ -291,7 +291,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWYwLjEwLjCCZHRpY2tlMC42LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbyb3-aFGC5KAbJcla10Ve5zcbhtxTPShzY-8bjBP3DyvGe3BhZIKCbHRocmVhZF9hd2FyZWYwLjExLjCCZHRpY2tlMC42LjA
  [__link0]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.6.0/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.6.0/tick/?search=Error
@@ -317,9 +317,9 @@ This crate was developed as part of <a href="https://github.com/microsoft/oxidiz
  [__link29]: https://crates.io/crates/chrono
  [__link3]: https://docs.rs/tick/0.6.0/tick/?search=SimpleClock
  [__link30]: https://crates.io/crates/time
- [__link31]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=ThreadAware
+ [__link31]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=ThreadAware
  [__link32]: https://docs.rs/tick/0.6.0/tick/?search=runtime::InactiveClock
- [__link33]: https://docs.rs/thread_aware/0.10.0/thread_aware/?search=ThreadAware::relocate
+ [__link33]: https://docs.rs/thread_aware/0.11.0/thread_aware/?search=ThreadAware::relocate
  [__link34]: https://docs.rs/tick/0.6.0/tick/?search=Clock
  [__link35]: https://docs.rs/tick/0.6.0/tick/?search=runtime::ClockDriver
  [__link36]: https://docs.rs/tick/0.6.0/tick/?search=ClockControl
