@@ -1,3 +1,3 @@
 [toolchain]
-# Keep workspace builds and diagnostics reproducible across users.
-channel = "1.95.0"
+# Must match RUST_LATEST in constants.env so local and CI diagnostics use the same compiler.
+channel = "1.96.1"
